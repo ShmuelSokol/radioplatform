@@ -57,6 +57,11 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<string>('all');
   const [librarySearch, setLibrarySearch] = useState('');
   const [bottomTab, setBottomTab] = useState<BottomTab>('library');
+  const [bottomHeight, setBottomHeight] = useState(() => {
+    try { const v = localStorage.getItem('radio_panel_h'); return v ? Math.max(120, Math.min(600, parseInt(v))) : 240; }
+    catch { return 240; }
+  });
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   const stations = stationsData?.stations ?? [];
   const stationId = stations[0]?.id ?? null;
@@ -105,6 +110,27 @@ export default function Dashboard() {
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // ── Bottom panel resize ──────────────────────────────────────
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startH: bottomHeight };
+    let lastH = bottomHeight;
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      const delta = dragRef.current.startY - ev.clientY;
+      lastH = Math.max(120, Math.min(600, dragRef.current.startH + delta));
+      setBottomHeight(lastH);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      try { localStorage.setItem('radio_panel_h', String(lastH)); } catch {}
+      dragRef.current = null;
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [bottomHeight]);
 
   const assets = assetsData?.assets ?? [];
   const queueEntries = queueData?.entries ?? [];
@@ -344,8 +370,13 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Bottom panel with tabs */}
-        <div className="h-[240px] flex flex-col shrink-0">
+        {/* Bottom panel with tabs — resizable */}
+        <div className="flex flex-col shrink-0" style={{ height: bottomHeight }}>
+          {/* Drag handle */}
+          <div onMouseDown={onResizeStart}
+            className="h-1.5 cursor-row-resize bg-[#1a1a4e] hover:bg-cyan-800 border-y border-[#2a2a5e] flex items-center justify-center shrink-0 group">
+            <div className="w-10 h-[2px] rounded bg-gray-600 group-hover:bg-cyan-400" />
+          </div>
           {/* Tab bar */}
           <div className="bg-[#12123a] flex items-center gap-0 border-b border-[#2a2a5e] shrink-0">
             {(['library', 'cart', 'log'] as BottomTab[]).map(t => (
