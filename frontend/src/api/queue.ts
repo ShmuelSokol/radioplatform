@@ -48,3 +48,13 @@ export const bulkAddToQueue = async (stationId: string, assetIds: string[]) => {
   const res = await apiClient.post(`/stations/${stationId}/queue/bulk-add`, { asset_ids: assetIds });
   return res.data;
 };
+
+export const getLastPlayed = async (stationId: string) => {
+  const res = await apiClient.get(`/stations/${stationId}/queue/last-played`);
+  return res.data;
+};
+
+export const previewWeather = async (stationId: string) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/preview-weather`);
+  return res.data as { time_url: string | null; weather_url: string | null; time_text: string | null; weather_text: string | null };
+};

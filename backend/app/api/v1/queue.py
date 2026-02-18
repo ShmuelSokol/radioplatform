@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi.responses import JSONResponse
+
 from app.config import settings
 from app.core.dependencies import get_current_user, require_manager
 from app.core.exceptions import NotFoundError
@@ -705,3 +707,46 @@ async def start_playback(
     next_entry.started_at = datetime.now(timezone.utc)
     await db.commit()
     return {"message": "Started", "now_playing": str(next_entry.asset_id)}
+
+
+@router.post("/preview-weather")
+async def preview_weather(
+    station_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Generate (or return cached) weather + time TTS for preview — does NOT insert into queue."""
+    if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
+        return JSONResponse({"error": "ElevenLabs or Supabase storage not configured"}, status_code=503)
+
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    now = datetime.now(timezone.utc)
+    eastern_now = now.astimezone(ZoneInfo("America/New_York"))
+    # Round down to nearest 15-min slot
+    rounded_minute = (eastern_now.minute // 15) * 15
+    slot_key = eastern_now.replace(minute=rounded_minute, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+
+    from app.services.weather_spot_service import get_or_create_weather_spot_assets, _build_time_text, _build_weather_text
+    from app.services.weather_service import get_current_weather
+
+    time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key)
+    await db.commit()
+
+    # Build text for display
+    time_text = _build_time_text(eastern_now)
+    try:
+        weather_data = await get_current_weather()
+        weather_text = _build_weather_text(weather_data)
+    except Exception:
+        weather_text = None
+
+    return {
+        "time_url": time_asset.file_path if time_asset else None,
+        "weather_url": weather_asset.file_path if weather_asset else None,
+        "time_text": time_text,
+        "weather_text": weather_text,
+    }

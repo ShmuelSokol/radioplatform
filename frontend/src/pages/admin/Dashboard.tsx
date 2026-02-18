@@ -4,7 +4,8 @@ import { useStations } from '../../hooks/useStations';
 import { useAssets } from '../../hooks/useAssets';
 import {
   useQueue, usePlayLog, useSkipCurrent, usePlayNext, useAddToQueue,
-  useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown,
+  useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown, useLastPlayed,
+  useWeatherPreview,
 } from '../../hooks/useQueue';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import type { AssetInfo } from '../../types';
@@ -26,6 +27,22 @@ function fmtDurMs(sec: number | null): string {
 
 function fmtClock(d: Date): string {
   return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function fmtRelative(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function fmtHMS(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
 const ASSET_TYPES = ['all', 'music', 'spot', 'shiur', 'jingle', 'zmanim'] as const;
@@ -68,6 +85,7 @@ export default function Dashboard() {
 
   const { data: queueData } = useQueue(stationId);
   const { data: logData } = usePlayLog(stationId);
+  const { data: lastPlayedData } = useLastPlayed(stationId);
   const skipMut = useSkipCurrent(stationId ?? '');
   const playNextMut = usePlayNext(stationId ?? '');
   const addQueueMut = useAddToQueue(stationId ?? '');
@@ -75,6 +93,9 @@ export default function Dashboard() {
   const startMut = useStartPlayback(stationId ?? '');
   const moveUpMut = useMoveUp(stationId ?? '');
   const moveDownMut = useMoveDown(stationId ?? '');
+  const weatherPreviewMut = useWeatherPreview(stationId ?? '');
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
 
   // ── Client-side real-time countdown ────────────────────────
   // Server sends started_at (ISO) + duration. We interpolate locally.
@@ -141,6 +162,9 @@ export default function Dashboard() {
   const duration = serverDuration || (nowAsset?.duration ?? 0);
   const progress = duration > 0 ? Math.min(100, (elapsed / duration) * 100) : 0;
 
+  const queueDuration = queueData?.queue_duration_seconds ?? 0;
+  const lastPlayed: Record<string, string> = lastPlayedData?.last_played ?? {};
+
   const nextEntry = queueEntries.find((e: any) => e.status === 'pending');
   const nextAsset = nextEntry?.asset ?? null;
   const playLog = logData?.logs ?? [];
@@ -171,6 +195,27 @@ export default function Dashboard() {
     assets.filter(a => a.asset_type === 'jingle' || a.asset_type === 'spot'),
   [assets]);
 
+  // ── Weather preview handler ─────────────────────────────────
+  const handlePreviewWeather = useCallback(async () => {
+    if (weatherPreviewMut.isPending || previewPlaying) return;
+    try {
+      const data = await weatherPreviewMut.mutateAsync();
+      const urls = [data.time_url, data.weather_url].filter(Boolean) as string[];
+      if (urls.length === 0) return;
+      setPreviewPlaying(true);
+      const audio = previewAudioRef.current!;
+      let idx = 0;
+      const playNext = () => {
+        if (idx >= urls.length) { setPreviewPlaying(false); return; }
+        audio.src = urls[idx++];
+        audio.play().catch(() => setPreviewPlaying(false));
+      };
+      audio.onended = playNext;
+      audio.onerror = () => setPreviewPlaying(false);
+      playNext();
+    } catch { setPreviewPlaying(false); }
+  }, [weatherPreviewMut, previewPlaying]);
+
   // ── Audio engine ───────────────────────────────────────────
   const audioAsset: AssetInfo | null = nowAsset ? {
     id: nowAsset.id,
@@ -196,6 +241,7 @@ export default function Dashboard() {
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] min-h-[calc(100vh-3rem)] flex flex-col select-none">
+      <audio ref={previewAudioRef} className="hidden" />
 
       {/* ═══ Status bar ═══ */}
       <div className="bg-[#0a0a28] border-b border-[#2a2a5e] px-3 py-1.5 flex items-center gap-3 flex-wrap shrink-0">
@@ -323,7 +369,7 @@ export default function Dashboard() {
         <div className="flex-1 flex flex-col min-h-0 border-b border-[#2a2a5e]">
           <div className="bg-[#16163e] px-2 py-0.5 text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-2 shrink-0 border-b border-[#2a2a5e]">
             <span className="font-bold text-gray-300">Queue</span>
-            <span>({queueEntries.length})</span>
+            <span>({queueEntries.length}){queueDuration > 0 ? ` — ${fmtHMS(queueDuration)}` : ''}</span>
             <span className="w-6"></span>
             <span className="w-[50px]">Len</span>
             <span className="flex-1">Title</span>
@@ -419,6 +465,7 @@ export default function Dashboard() {
                 <span className="flex-1">Title</span>
                 <span className="w-[60px]">Type</span>
                 <span className="w-[60px]">Cat</span>
+                <span className="w-[55px]">Last</span>
                 <span className="w-[70px]">Actions</span>
               </div>
               <div className="flex-1 overflow-y-auto bg-[#0a0a28]">
@@ -429,6 +476,7 @@ export default function Dashboard() {
                     <span className="flex-1 truncate text-[11px]">{asset.title}</span>
                     <span className={`w-[60px] text-[10px] ${TYPE_COLORS[asset.asset_type] ?? 'text-gray-500'}`}>{asset.asset_type}</span>
                     <span className={`w-[60px] text-[10px] ${CAT_COLORS[asset.category ?? ''] ?? 'text-gray-600'}`}>{asset.category ?? ''}</span>
+                    <span className="w-[55px] text-[10px] text-gray-500">{fmtRelative(lastPlayed[asset.id])}</span>
                     <span className="w-[70px] flex gap-2 opacity-0 group-hover:opacity-100">
                       <button onClick={() => stationId && addQueueMut.mutate(asset.id)}
                         className="text-green-400 hover:text-green-300 text-[10px]" title="Add to queue">+Q</button>
@@ -448,6 +496,20 @@ export default function Dashboard() {
           {bottomTab === 'cart' && (
             <div className="flex-1 overflow-y-auto bg-[#0a0a28] p-2">
               <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1.5">
+                {/* Preview Weather card */}
+                <button
+                  onClick={handlePreviewWeather}
+                  disabled={weatherPreviewMut.isPending || previewPlaying}
+                  className={`p-2 rounded text-left border transition-colors ${
+                    previewPlaying
+                      ? 'bg-blue-800/50 border-blue-500 text-blue-200 animate-pulse'
+                      : 'bg-blue-900/30 border-blue-800 hover:bg-blue-900/60 text-blue-300'
+                  } disabled:opacity-60`}>
+                  <div className="text-[10px] truncate font-bold">
+                    {weatherPreviewMut.isPending ? '⏳ Loading...' : previewPlaying ? '🔊 Playing...' : '🌤 Preview Weather'}
+                  </div>
+                  <div className="text-[9px] opacity-60">Time + Weather</div>
+                </button>
                 {cartItems.map((item) => {
                   const isJingle = item.asset_type === 'jingle';
                   return (

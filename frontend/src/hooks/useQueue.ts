@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getQueue, getPlayLog, addToQueue, playNext, skipCurrent, moveUp, moveDown, removeFromQueue, startPlayback } from '../api/queue';
+import { getQueue, getPlayLog, addToQueue, playNext, skipCurrent, moveUp, moveDown, removeFromQueue, startPlayback, getLastPlayed, previewWeather } from '../api/queue';
 
 export function useQueue(stationId: string | null) {
   return useQuery({
@@ -75,5 +75,20 @@ export function useStartPlayback(stationId: string) {
   return useMutation({
     mutationFn: () => startPlayback(stationId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['queue', stationId] }),
+  });
+}
+
+export function useWeatherPreview(stationId: string) {
+  return useMutation({
+    mutationFn: () => previewWeather(stationId),
+  });
+}
+
+export function useLastPlayed(stationId: string | null) {
+  return useQuery({
+    queryKey: ['last-played', stationId],
+    queryFn: () => getLastPlayed(stationId!),
+    enabled: !!stationId,
+    refetchInterval: 30000,
   });
 }
