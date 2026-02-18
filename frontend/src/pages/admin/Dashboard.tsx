@@ -203,16 +203,23 @@ export default function Dashboard() {
       const urls = [data.time_url, data.weather_url].filter(Boolean) as string[];
       if (urls.length === 0) return;
       setPreviewPlaying(true);
-      const audio = previewAudioRef.current!;
-      let idx = 0;
-      const playNext = () => {
-        if (idx >= urls.length) { setPreviewPlaying(false); return; }
-        audio.src = urls[idx++];
-        audio.play().catch(() => setPreviewPlaying(false));
+
+      // Play URLs sequentially using promises
+      const playUrl = (url: string): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          const a = new Audio(url);
+          a.onended = () => resolve();
+          a.onerror = () => reject();
+          a.play().catch(reject);
+        });
       };
-      audio.onended = playNext;
-      audio.onerror = () => setPreviewPlaying(false);
-      playNext();
+
+      (async () => {
+        try {
+          for (const url of urls) await playUrl(url);
+        } catch { /* audio error */ }
+        setPreviewPlaying(false);
+      })();
     } catch { setPreviewPlaying(false); }
   }, [weatherPreviewMut, previewPlaying]);
 
