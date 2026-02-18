@@ -27,7 +27,7 @@ def _build_time_text(eastern_now: datetime) -> str:
     hour = eastern_now.strftime("%I").lstrip("0")
     minute = eastern_now.strftime("%M")
     ampm = eastern_now.strftime("%p")
-    return f"The time is {hour}:{minute} {ampm} on Kol Bramah."
+    return f"The time is {hour}:{minute} {ampm} on Kohl Baramah."
 
 
 def _build_weather_text(weather: dict) -> str:
@@ -87,7 +87,7 @@ async def get_or_create_weather_spot_assets(
             time_asset = Asset(
                 id=uuid.uuid4(),
                 title=f"Time Announcement - {slot_key}",
-                artist="Kol Bramah",
+                artist="Kohl Baramah",
                 duration=time_duration,
                 file_path=time_url,
                 asset_type="jingle",
@@ -114,7 +114,7 @@ async def get_or_create_weather_spot_assets(
             weather_asset = Asset(
                 id=uuid.uuid4(),
                 title=f"Weather Report - {slot_key}",
-                artist="Kol Bramah",
+                artist="Kohl Baramah",
                 duration=weather_duration,
                 file_path=weather_url,
                 asset_type="spot",
