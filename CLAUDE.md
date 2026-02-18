@@ -79,8 +79,8 @@ radioplatform/
 - `VITE_API_URL` — Backend API base URL (https://studio-kolbramah-api.vercel.app/api/v1)
 
 ## Default Credentials
-- Admin: `admin@radioplatform.com` / `admin123`
-- Seed endpoint: `POST /api/v1/auth/seed` (only creates admin if none exists)
+- Admin: `admin` / `613Radio`
+- Seed endpoint: `POST /api/v1/auth/seed` (creates or updates admin user)
 
 ## Known Gotchas
 - **bcrypt**: Must pin `bcrypt==4.1.3` — passlib breaks with bcrypt 5.x

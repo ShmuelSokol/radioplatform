@@ -1,0 +1,92 @@
+import uuid
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.dependencies import require_admin
+from app.core.security import hash_password
+from app.core.exceptions import NotFoundError
+from app.db.session import get_db
+from app.models.user import User, UserRole
+from app.schemas.user_mgmt import UserCreate, UserListResponse, UserOut, UserUpdate
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("", response_model=UserListResponse)
+async def list_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    count_result = await db.execute(select(func.count()).select_from(User))
+    total = count_result.scalar() or 0
+    result = await db.execute(select(User).offset(skip).limit(limit).order_by(User.created_at))
+    users = result.scalars().all()
+    return UserListResponse(users=users, total=total)
+
+
+@router.post("", response_model=UserOut, status_code=201)
+async def create_user(
+    body: UserCreate,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    role = UserRole(body.role) if body.role in [r.value for r in UserRole] else UserRole.VIEWER
+    user = User(
+        id=uuid.uuid4(),
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        role=role,
+        display_name=body.display_name,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.put("/{user_id}", response_model=UserOut)
+async def update_user(
+    user_id: uuid.UUID,
+    body: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise NotFoundError("User not found")
+    if body.email is not None:
+        user.email = body.email
+    if body.password is not None:
+        user.hashed_password = hash_password(body.password)
+    if body.role is not None:
+        user.role = UserRole(body.role)
+    if body.display_name is not None:
+        user.display_name = body.display_name
+    if body.is_active is not None:
+        user.is_active = body.is_active
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.delete("/{user_id}", status_code=204)
+async def delete_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if user_id == admin.id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise NotFoundError("User not found")
+    await db.delete(user)
+    await db.commit()

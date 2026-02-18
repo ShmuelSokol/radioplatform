@@ -46,6 +46,8 @@ export interface Asset {
   album_art_path: string | null;
   metadata_extra: Record<string, unknown> | null;
   created_by: string | null;
+  asset_type: string;
+  category: string | null;
 }
 
 export interface NowPlaying {
@@ -71,5 +73,63 @@ export interface StationListResponse {
 
 export interface AssetListResponse {
   assets: Asset[];
+  total: number;
+}
+
+// Queue
+export interface QueueEntry {
+  id: string;
+  station_id: string;
+  asset_id: string;
+  position: number;
+  status: 'pending' | 'playing' | 'played' | 'skipped';
+  asset: Asset | null;
+}
+
+export interface QueueListResponse {
+  entries: QueueEntry[];
+  total: number;
+  now_playing: QueueEntry | null;
+}
+
+// Rules
+export interface ScheduleRule {
+  id: string;
+  name: string;
+  description: string | null;
+  rule_type: string;
+  asset_type: string;
+  category: string | null;
+  hour_start: number;
+  hour_end: number;
+  days_of_week: string;
+  interval_minutes: number | null;
+  songs_between: number | null;
+  priority: number;
+  is_active: boolean;
+  constraints: Record<string, unknown> | null;
+}
+
+export interface RuleListResponse {
+  rules: ScheduleRule[];
+  total: number;
+}
+
+export interface ScheduleSlot {
+  time: string;
+  asset_type: string;
+  category: string | null;
+  rule_name: string;
+  duration_minutes: number | null;
+}
+
+export interface SchedulePreview {
+  date: string;
+  slots: ScheduleSlot[];
+  total_hours: number;
+}
+
+export interface UserListResponse {
+  users: User[];
   total: number;
 }

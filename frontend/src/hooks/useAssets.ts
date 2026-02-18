@@ -1,10 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listAssets, uploadAsset, deleteAsset } from '../api/assets';
 
-export function useAssets() {
+export function useAssets(skip = 0, limit = 100) {
   return useQuery({
-    queryKey: ['assets'],
-    queryFn: () => listAssets(),
+    queryKey: ['assets', skip, limit],
+    queryFn: () => listAssets(skip, limit),
   });
 }
 

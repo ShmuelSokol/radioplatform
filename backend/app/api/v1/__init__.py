@@ -5,6 +5,9 @@ from app.api.v1.stations import router as stations_router
 from app.api.v1.assets import router as assets_router
 from app.api.v1.streams import router as streams_router
 from app.api.v1.controls import router as controls_router
+from app.api.v1.users import router as users_router
+from app.api.v1.queue import router as queue_router
+from app.api.v1.rules import router as rules_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -12,3 +15,6 @@ router.include_router(stations_router)
 router.include_router(assets_router)
 router.include_router(streams_router)
 router.include_router(controls_router)
+router.include_router(users_router)
+router.include_router(queue_router)
+router.include_router(rules_router)

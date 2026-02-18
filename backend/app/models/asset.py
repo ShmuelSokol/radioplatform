@@ -1,7 +1,8 @@
+import enum
 import uuid
 
 from sqlalchemy import Column, Float, ForeignKey, String, Table, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -12,6 +13,14 @@ asset_categories = Table(
     Column("asset_id", UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), primary_key=True),
     Column("category_id", UUID(as_uuid=True), ForeignKey("categories.id", ondelete="CASCADE"), primary_key=True),
 )
+
+
+class AssetType(str, enum.Enum):
+    MUSIC = "music"
+    SPOT = "spot"
+    SHIUR = "shiur"
+    JINGLE = "jingle"
+    ZMANIM = "zmanim"
 
 
 class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -27,6 +36,8 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    asset_type: Mapped[str] = mapped_column(String(50), default="music", nullable=False)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     created_by_user = relationship("User", back_populates="assets")
     categories = relationship("Category", secondary=asset_categories, back_populates="assets", lazy="selectin")

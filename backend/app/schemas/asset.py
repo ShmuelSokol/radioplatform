@@ -15,6 +15,8 @@ class AssetResponse(BaseModel):
     album_art_path: str | None = None
     metadata_extra: dict | None = None
     created_by: uuid.UUID | str | None = None
+    asset_type: str = "music"
+    category: str | None = None
 
 
 class AssetListResponse(BaseModel):
