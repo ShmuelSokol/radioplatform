@@ -1,0 +1,41 @@
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+
+from fastapi import FastAPI
+
+from app.config import settings
+from app.core.middleware import setup_middleware
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Startup
+    from app.db.engine import engine
+    yield
+    # Shutdown
+    await engine.dispose()
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="RadioPlatform API",
+        version="0.1.0",
+        description="Multi-channel radio streaming platform",
+        debug=settings.APP_DEBUG,
+        lifespan=lifespan,
+    )
+
+    setup_middleware(app)
+
+    @app.get("/health")
+    async def health_check():
+        return {"status": "ok"}
+
+    # Register API routers
+    from app.api.v1 import router as api_v1_router
+    app.include_router(api_v1_router, prefix="/api/v1")
+
+    return app
+
+
+app = create_app()
