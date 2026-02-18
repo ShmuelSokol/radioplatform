@@ -86,10 +86,26 @@ export interface QueueEntry {
   asset: Asset | null;
 }
 
+export interface QueueNowPlaying extends QueueEntry {
+  started_at: string;
+  elapsed_seconds: number;
+  remaining_seconds: number;
+}
+
 export interface QueueListResponse {
   entries: QueueEntry[];
   total: number;
-  now_playing: QueueEntry | null;
+  now_playing: QueueNowPlaying | null;
+}
+
+/** Minimal asset info needed by the synth engine */
+export interface AssetInfo {
+  id: string;
+  title: string;
+  artist: string | null;
+  asset_type: string;
+  category: string | null;
+  duration: number | null;
 }
 
 // Rules

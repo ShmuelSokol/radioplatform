@@ -6,6 +6,8 @@ import {
   useQueue, usePlayLog, useSkipCurrent, usePlayNext, useAddToQueue,
   useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown,
 } from '../../hooks/useQueue';
+import { useAudioEngine } from '../../hooks/useAudioEngine';
+import type { AssetInfo } from '../../types';
 
 function fmtDur(sec: number | null): string {
   if (!sec || sec <= 0) return '0:00';
@@ -143,9 +145,28 @@ export default function Dashboard() {
     assets.filter(a => a.asset_type === 'jingle' || a.asset_type === 'spot'),
   [assets]);
 
-  // VU meter animation level (driven by realElapsed for smooth animation)
-  const vuLevel = isPlaying ? 22 + Math.floor(Math.sin(realElapsed * 2) * 4) : 0;
-  const vuLevel2 = isPlaying ? 20 + Math.floor(Math.cos(realElapsed * 1.7) * 5) : 0;
+  // ── Audio engine ───────────────────────────────────────────
+  const audioAsset: AssetInfo | null = nowAsset ? {
+    id: nowAsset.id,
+    title: nowAsset.title,
+    artist: nowAsset.artist,
+    asset_type: nowAsset.asset_type,
+    category: nowAsset.category,
+    duration: nowAsset.duration,
+  } : null;
+
+  const {
+    volume, setVolume, muted, toggleMute,
+    vuLevels, audioReady, initAudio,
+  } = useAudioEngine(audioAsset, realElapsed, isPlaying);
+
+  // VU meter levels: use real audio data when available, else fallback
+  const vuLevel = audioReady && isPlaying
+    ? Math.round(vuLevels[0] * 30)
+    : (isPlaying ? 22 + Math.floor(Math.sin(realElapsed * 2) * 4) : 0);
+  const vuLevel2 = audioReady && isPlaying
+    ? Math.round(vuLevels[1] * 30)
+    : (isPlaying ? 20 + Math.floor(Math.cos(realElapsed * 1.7) * 5) : 0);
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] min-h-[calc(100vh-3rem)] flex flex-col select-none">
@@ -158,7 +179,7 @@ export default function Dashboard() {
             ON AIR
           </span>
         ) : (
-          <button onClick={() => stationId && startMut.mutate()}
+          <button onClick={() => { initAudio(); stationId && startMut.mutate(); }}
             className="bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 font-bold text-[11px] rounded-sm tracking-wide">
             ▶ START
           </button>
@@ -213,10 +234,28 @@ export default function Dashboard() {
         </div>
 
         {/* Skip */}
-        <button onClick={() => skipMut.mutate()} disabled={!isPlaying}
+        <button onClick={() => { initAudio(); skipMut.mutate(); }} disabled={!isPlaying}
           className="px-2 py-0.5 bg-[#2a2a5e] hover:bg-[#3a3a7e] text-yellow-300 text-[11px] rounded disabled:opacity-30">
           SKIP ⏭
         </button>
+
+        {/* Audio controls */}
+        {!audioReady && isPlaying ? (
+          <button onClick={() => initAudio()}
+            className="px-2 py-0.5 bg-cyan-800 hover:bg-cyan-700 text-cyan-100 text-[11px] rounded animate-pulse">
+            🔊 Enable Audio
+          </button>
+        ) : audioReady ? (
+          <div className="flex items-center gap-1.5">
+            <button onClick={toggleMute}
+              className="text-[13px] w-5 text-center text-gray-300 hover:text-white">
+              {muted ? '🔇' : volume > 0.5 ? '🔊' : volume > 0 ? '🔉' : '🔈'}
+            </button>
+            <input type="range" min="0" max="1" step="0.01" value={volume}
+              onChange={e => setVolume(parseFloat(e.target.value))}
+              className="w-20 h-1 accent-cyan-400 cursor-pointer" />
+          </div>
+        ) : null}
 
         {/* Clock */}
         <div className="flex items-baseline gap-1 ml-auto">
