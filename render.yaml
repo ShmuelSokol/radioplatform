@@ -1,35 +1,35 @@
 services:
   - type: web
-    name: radioplatform-api
+    name: studio-kolbramah-api
     runtime: python
     plan: free
+    region: ohio
     rootDir: backend
-    buildCommand: pip install -e ".[dev]"
+    buildCommand: pip install -e . && pip install bcrypt==4.1.3
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: studio-kolbramah-db
+          property: connectionURI
       - key: REDIS_URL
-        sync: false
+        value: ""
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: S3_ENDPOINT_URL
-        sync: false
-      - key: S3_ACCESS_KEY
-        sync: false
-      - key: S3_SECRET_KEY
-        sync: false
-      - key: S3_BUCKET_NAME
-        value: radioplatform
+        value: ""
       - key: CORS_ORIGINS
-        sync: false
+        value: '["https://studio-kolbramah-radio.vercel.app","http://localhost:3000"]'
       - key: APP_DEBUG
         value: "false"
       - key: APP_ENV
         value: production
+      - key: PYTHON_VERSION
+        value: "3.12.3"
 
 databases:
-  - name: radioplatform-db
+  - name: studio-kolbramah-db
     plan: free
-    databaseName: radioplatform
+    databaseName: kolbramah
     user: radio
+    region: ohio

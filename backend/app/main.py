@@ -9,8 +9,14 @@ from app.core.middleware import setup_middleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Startup
+    # Startup: auto-create tables
     from app.db.engine import engine
+    from app.db.base import Base
+    import app.models  # noqa: F401 — register all models
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     yield
     # Shutdown
     await engine.dispose()
@@ -18,7 +24,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="RadioPlatform API",
+        title="Studio Kol Bramah API",
         version="0.1.0",
         description="Multi-channel radio streaming platform",
         debug=settings.APP_DEBUG,
