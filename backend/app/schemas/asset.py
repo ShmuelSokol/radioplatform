@@ -1,10 +1,12 @@
-from pydantic import BaseModel
+import uuid
+
+from pydantic import BaseModel, ConfigDict
 
 
 class AssetResponse(BaseModel):
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
-    id: str
+    id: uuid.UUID | str
     title: str
     artist: str | None = None
     album: str | None = None
@@ -12,7 +14,7 @@ class AssetResponse(BaseModel):
     file_path: str
     album_art_path: str | None = None
     metadata_extra: dict | None = None
-    created_by: str | None = None
+    created_by: uuid.UUID | str | None = None
 
 
 class AssetListResponse(BaseModel):

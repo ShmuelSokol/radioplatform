@@ -5,20 +5,58 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.config import settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
 from app.models.user import User, UserRole
 
-# Use in-memory SQLite for tests or a test database
-TEST_DATABASE_URL = settings.DATABASE_URL
+# Use SQLite for testing (no PostgreSQL needed)
+TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+# SQLite compatibility: compile PostgreSQL types to SQLite equivalents
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB, ENUM as PG_ENUM
+from sqlalchemy import String, Text, TypeDecorator
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+# Monkey-patch the PostgreSQL-specific column types for SQLite
+import sqlalchemy.dialects.postgresql as pg_dialect
+
+_orig_uuid_compile = None
+_orig_jsonb_compile = None
+
+
+def _register_sqlite_compilers():
+    """Register SQLite-compatible compilers for PG types."""
+    from sqlalchemy.ext.compiler import compiles
+
+    @compiles(PG_UUID, "sqlite")
+    def compile_uuid(type_, compiler, **kw):
+        return "VARCHAR(36)"
+
+    @compiles(JSONB, "sqlite")
+    def compile_jsonb(type_, compiler, **kw):
+        return "TEXT"
+
+    @compiles(PG_ENUM, "sqlite")
+    def compile_enum(type_, compiler, **kw):
+        return "VARCHAR(50)"
+
+
+_register_sqlite_compilers()
 
 
 @pytest.fixture(scope="session")

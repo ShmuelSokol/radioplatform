@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+import uuid
+
+from pydantic import BaseModel, ConfigDict
 
 from app.models.station import StationType
 
@@ -29,9 +31,9 @@ class StationUpdate(BaseModel):
 
 
 class ChannelStreamResponse(BaseModel):
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
-    id: str
+    id: uuid.UUID | str
     channel_name: str
     bitrate: int
     codec: str
@@ -40,9 +42,9 @@ class ChannelStreamResponse(BaseModel):
 
 
 class StationResponse(BaseModel):
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
-    id: str
+    id: uuid.UUID | str
     name: str
     type: StationType
     timezone: str

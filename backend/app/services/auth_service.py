@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,7 +48,11 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> dict:
     if payload.get("type") != "refresh":
         raise UnauthorizedError("Invalid token type")
 
-    user_id = payload.get("sub")
+    user_id_str = payload.get("sub")
+    try:
+        user_id = uuid.UUID(user_id_str)
+    except (ValueError, TypeError):
+        raise UnauthorizedError("Invalid refresh token")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 

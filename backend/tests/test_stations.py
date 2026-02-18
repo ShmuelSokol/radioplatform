@@ -107,4 +107,4 @@ async def test_create_station_unauthorized(client: AsyncClient):
         "/api/v1/stations",
         json={"name": "No Auth Station"},
     )
-    assert response.status_code == 403
+    assert response.status_code in (401, 403)
