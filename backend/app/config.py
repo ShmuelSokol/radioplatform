@@ -70,5 +70,29 @@ class Settings(BaseSettings):
     # FFmpeg
     FFMPEG_PATH: str = "ffmpeg"
 
+    # ElevenLabs TTS (optional — set API key to empty to disable)
+    ELEVENLABS_API_KEY: str = ""
+    ELEVENLABS_VOICE_ID: str = ""
+
+    @property
+    def elevenlabs_enabled(self) -> bool:
+        return bool(self.ELEVENLABS_API_KEY and self.ELEVENLABS_VOICE_ID)
+
+    # OpenWeatherMap (optional — set API key to empty to disable)
+    OPENWEATHERMAP_API_KEY: str = ""
+
+    @property
+    def weather_enabled(self) -> bool:
+        return bool(self.OPENWEATHERMAP_API_KEY)
+
+    # Supabase Storage (optional — set URL to empty to disable)
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_KEY: str = ""
+    SUPABASE_STORAGE_BUCKET: str = "audio"
+
+    @property
+    def supabase_storage_enabled(self) -> bool:
+        return bool(self.SUPABASE_URL and self.SUPABASE_SERVICE_KEY)
+
 
 settings = Settings()

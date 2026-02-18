@@ -1,10 +1,12 @@
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.dependencies import get_current_user, require_manager
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
@@ -14,6 +16,11 @@ from app.models.queue_entry import QueueEntry
 from app.models.station import Station
 from app.models.user import User
 from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueEntryOut, QueueListResponse, QueueReorder
+
+logger = logging.getLogger(__name__)
+
+TARGET_QUEUE_SECONDS = 86400  # 24 hours
+DEFAULT_DURATION = 180  # 3 minutes fallback
 
 router = APIRouter(prefix="/stations/{station_id}/queue", tags=["queue"])
 
@@ -92,10 +99,193 @@ async def _maybe_insert_hourly_jingle(db: AsyncSession, station_id: uuid.UUID) -
     await db.flush()
 
 
+async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) -> None:
+    """Insert time announcement + weather spot at every 15-min boundary."""
+    if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
+        return
+
+    now = datetime.now(timezone.utc)
+    # Check if we're within 30s of a 15-min boundary
+    if now.minute % 15 != 0 or now.second > 30:
+        return
+
+    # Build slot key in Eastern time
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+    eastern_now = now.astimezone(ZoneInfo("America/New_York"))
+    slot_key = eastern_now.strftime("%Y-%m-%dT%H:%M")
+
+    # Dedup: check PlayLog for weather already played this slot
+    slot_start = now.replace(second=0, microsecond=0)
+    result = await db.execute(
+        select(PlayLog).join(Asset, PlayLog.asset_id == Asset.id)
+        .where(
+            PlayLog.station_id == station_id,
+            Asset.category.in_(["time_announcement", "weather_spot"]),
+            PlayLog.start_utc >= slot_start,
+        )
+        .limit(1)
+    )
+    if result.scalar_one_or_none():
+        return
+
+    # Dedup: check QueueEntry for weather already queued this slot
+    result = await db.execute(
+        select(QueueEntry).join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            Asset.category.in_(["time_announcement", "weather_spot"]),
+        )
+        .limit(1)
+    )
+    if result.scalar_one_or_none():
+        return
+
+    # Generate assets (TTS + weather fetch + upload)
+    try:
+        from app.services.weather_spot_service import get_or_create_weather_spot_assets
+
+        time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key)
+    except Exception:
+        logger.warning("Failed to create weather spot assets for slot %s", slot_key, exc_info=True)
+        return
+
+    if not time_asset and not weather_asset:
+        return
+
+    # Insert as play-next (time first, weather second)
+    # Bump all pending positions
+    assets_to_insert = [a for a in [time_asset, weather_asset] if a is not None]
+    if not assets_to_insert:
+        return
+
+    await db.execute(
+        update(QueueEntry)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .values(position=QueueEntry.position + len(assets_to_insert))
+    )
+
+    result = await db.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+    )
+    current = result.scalar_one_or_none()
+    next_pos = (current.position + 1) if current else 1
+
+    for i, asset in enumerate(assets_to_insert):
+        entry = QueueEntry(
+            id=uuid.uuid4(),
+            station_id=station_id,
+            asset_id=asset.id,
+            position=next_pos + i,
+            status="pending",
+        )
+        db.add(entry)
+
+    await db.flush()
+    logger.info("Inserted weather spot for slot %s (%d items)", slot_key, len(assets_to_insert))
+
+
+async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
+    """Auto-fill queue to ~24 hours of content with random music."""
+    # Sum durations of pending + playing entries
+    result = await db.execute(
+        select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
+        .select_from(QueueEntry)
+        .join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status.in_(["pending", "playing"]),
+        )
+    )
+    total_seconds = float(result.scalar() or 0)
+
+    if total_seconds >= TARGET_QUEUE_SECONDS:
+        return
+
+    shortfall = TARGET_QUEUE_SECONDS - total_seconds
+
+    # Get IDs already in the pending/playing queue
+    result = await db.execute(
+        select(QueueEntry.asset_id).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status.in_(["pending", "playing"]),
+        )
+    )
+    queued_ids = {row[0] for row in result.all()}
+
+    # Get asset IDs played in last 2 hours (avoid repeats)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    result = await db.execute(
+        select(PlayLog.asset_id).where(
+            PlayLog.station_id == station_id,
+            PlayLog.start_utc >= cutoff,
+            PlayLog.asset_id.isnot(None),
+        )
+    )
+    recent_ids = {row[0] for row in result.all()}
+    exclude_ids = queued_ids | recent_ids
+
+    # Select random music assets not in the exclusion set
+    query = (
+        select(Asset)
+        .where(Asset.asset_type == "music")
+        .order_by(func.random())
+    )
+    if exclude_ids:
+        query = query.where(Asset.id.notin_(exclude_ids))
+    result = await db.execute(query)
+    candidates = result.scalars().all()
+
+    if not candidates:
+        # If all music was excluded, allow repeats (skip only queued)
+        query = (
+            select(Asset)
+            .where(Asset.asset_type == "music")
+            .order_by(func.random())
+        )
+        if queued_ids:
+            query = query.where(Asset.id.notin_(queued_ids))
+        result = await db.execute(query)
+        candidates = result.scalars().all()
+
+    if not candidates:
+        return
+
+    # Get current max position
+    result = await db.execute(
+        select(func.coalesce(func.max(QueueEntry.position), 0))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+    )
+    max_pos = result.scalar() or 0
+
+    filled = 0.0
+    for asset in candidates:
+        if filled >= shortfall:
+            break
+        dur = asset.duration or DEFAULT_DURATION
+        max_pos += 1
+        entry = QueueEntry(
+            id=uuid.uuid4(),
+            station_id=station_id,
+            asset_id=asset.id,
+            position=max_pos,
+            status="pending",
+        )
+        db.add(entry)
+        filled += dur
+
+    await db.flush()
+
+
 async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry | None:
     """Core playback engine: check if current track is done and auto-advance."""
     # Check for hourly jingle insertion
     await _maybe_insert_hourly_jingle(db, station_id)
+    # Check for weather/time spot insertion every 15 min
+    await _maybe_insert_weather_spot(db, station_id)
 
     result = await db.execute(
         select(QueueEntry)
@@ -144,6 +334,7 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
+        await _replenish_queue(db, station_id)
         await db.commit()
         return next_entry
 
@@ -187,7 +378,10 @@ async def get_queue(
         }
 
     entries_data = []
+    queue_duration = 0.0
     for e in entries:
+        dur = (e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION)
+        queue_duration += dur
         d = {
             "id": str(e.id),
             "station_id": str(e.station_id),
@@ -214,6 +408,7 @@ async def get_queue(
         "entries": entries_data,
         "total": len(entries_data),
         "now_playing": np_data,
+        "queue_duration_seconds": round(queue_duration, 1),
     }
 
 
@@ -247,6 +442,27 @@ async def get_play_log(
             for log in logs
         ],
         "total": len(logs),
+    }
+
+
+@router.get("/last-played")
+async def get_last_played(
+    station_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Get the most recent play time for each asset."""
+    result = await db.execute(
+        select(PlayLog.asset_id, func.max(PlayLog.start_utc))
+        .where(PlayLog.station_id == station_id, PlayLog.asset_id.isnot(None))
+        .group_by(PlayLog.asset_id)
+    )
+    rows = result.all()
+    return {
+        "last_played": {
+            str(asset_id): ts.isoformat() if ts else None
+            for asset_id, ts in rows
+        }
     }
 
 
@@ -353,6 +569,7 @@ async def skip_current(
         .order_by(QueueEntry.position).limit(1)
     )
     next_entry = result.scalar_one_or_none()
+    await _replenish_queue(db, station_id)
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
@@ -450,6 +667,7 @@ async def remove_from_queue(
     if not entry:
         raise NotFoundError("Queue entry not found")
     await db.delete(entry)
+    await _replenish_queue(db, station_id)
     await db.commit()
 
 
@@ -470,6 +688,9 @@ async def start_playback(
             await db.commit()
         return {"message": "Already playing", "now_playing": str(current.asset_id)}
 
+    # Auto-fill queue before starting
+    await _replenish_queue(db, station_id)
+
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
@@ -477,7 +698,8 @@ async def start_playback(
     )
     next_entry = result.scalar_one_or_none()
     if not next_entry:
-        return {"message": "Queue empty", "now_playing": None}
+        await db.commit()
+        return {"message": "Queue empty — no music assets available", "now_playing": None}
 
     next_entry.status = "playing"
     next_entry.started_at = datetime.now(timezone.utc)
