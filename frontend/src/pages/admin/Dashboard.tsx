@@ -240,7 +240,7 @@ export default function Dashboard() {
     : (isPlaying ? 20 + Math.floor(Math.cos(realElapsed * 1.7) * 5) : 0);
 
   return (
-    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] min-h-[calc(100vh-3rem)] flex flex-col select-none">
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] h-[calc(100vh-3rem)] flex flex-col select-none overflow-hidden">
       <audio ref={previewAudioRef} className="hidden" />
 
       {/* ═══ Status bar ═══ */}
@@ -366,7 +366,7 @@ export default function Dashboard() {
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
         {/* Top: Queue */}
-        <div className="flex-1 flex flex-col min-h-0 border-b border-[#2a2a5e]">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden border-b border-[#2a2a5e]">
           <div className="bg-[#16163e] px-2 py-0.5 text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-2 shrink-0 border-b border-[#2a2a5e]">
             <span className="font-bold text-gray-300">Queue</span>
             <span>({queueEntries.length}){queueDuration > 0 ? ` — ${fmtHMS(queueDuration)}` : ''}</span>
