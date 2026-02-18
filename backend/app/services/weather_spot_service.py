@@ -31,10 +31,26 @@ def _build_time_text(eastern_now: datetime) -> str:
 
 
 def _build_weather_text(weather: dict) -> str:
-    return (
+    parts = [
         f"Currently in Lakewood: {weather['temp_f']} degrees and {weather['description']}, "
         f"winds from the {weather['wind_direction']} at {weather['wind_speed_mph']} miles per hour."
+    ]
+
+    forecast = weather.get("forecast", [])
+    if forecast:
+        parts.append("Looking ahead:")
+        for day in forecast:
+            parts.append(
+                f"{day['day']}: {day['description']}, "
+                f"with a high of {day['high']} and a low of {day['low']}."
+            )
+
+    parts.append(
+        "And have a great day, and stay safe, "
+        "from YOUR Kohl Baramah family... weather room."
     )
+
+    return " ".join(parts)
 
 
 async def get_or_create_weather_spot_assets(
