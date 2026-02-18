@@ -83,28 +83,7 @@ async def run_migrations(db: AsyncSession = Depends(get_db)):
 
 # ── Test data ──────────────────────────────────────────────────
 
-SAMPLE_MUSIC = [
-    {"title": "Lo Nafsik Lirkod", "artist": "Ari Goldwag", "album": "Soul 5", "duration": 258.0, "category": "med_fast"},
-    {"title": "Wine", "artist": "Purim Turnover", "album": None, "duration": 103.0, "category": "purim"},
-    {"title": "Im Omarti", "artist": "Shloime Taussig & 5 Kolos", "album": None, "duration": 184.0, "category": "med_fast"},
-    {"title": "Ashira Lashem", "artist": "Benny Friedman", "album": "Light", "duration": 246.0, "category": "relax"},
-    {"title": "B'ou", "artist": "Alumni", "album": None, "duration": 255.0, "category": "relax"},
-    {"title": "1 2", "artist": "Shwekey", "album": "Shabbas", "duration": 147.0, "category": "shabbos"},
-    {"title": "Hallelu - Short", "artist": "Purim Guys", "album": "Funny", "duration": 58.0, "category": "purim"},
-    {"title": "Toda Raba", "artist": "Yaakov Shwekey", "album": "Kolot", "duration": 234.0, "category": "med_fast"},
-    {"title": "Mama Rochel", "artist": "Avraham Fried", "album": "Classics", "duration": 275.0, "category": "slow"},
-    {"title": "Vehi Sheamda", "artist": "Yaakov Shwekey", "album": "Kolot", "duration": 310.0, "category": "slow"},
-    {"title": "Hashem Melech", "artist": "Gad Elbaz", "album": None, "duration": 198.0, "category": "lively"},
-    {"title": "Ribono Shel Olam", "artist": "MBD", "album": "Greatest Hits", "duration": 340.0, "category": "slow"},
-    {"title": "Yidden", "artist": "MBD", "album": "Greatest Hits", "duration": 285.0, "category": "lively"},
-    {"title": "Am Yisrael Chai", "artist": "Yaakov Shwekey", "album": "We Are A Miracle", "duration": 220.0, "category": "lively"},
-    {"title": "Rachem", "artist": "Avraham Fried", "album": "Classics", "duration": 295.0, "category": "slow"},
-    {"title": "Kol Berama", "artist": "Benny Friedman", "album": "Kulanu Nelech", "duration": 263.0, "category": "med_fast"},
-    {"title": "Ivri Anochi", "artist": "8th Day", "album": None, "duration": 230.0, "category": "lively"},
-    {"title": "Billionaire", "artist": "TYH Boys", "album": None, "duration": 267.0, "category": "med_fast"},
-    {"title": "Aneinu", "artist": "Ohad Moskowitz", "album": None, "duration": 240.0, "category": "med_fast"},
-    {"title": "Modeh Ani", "artist": "Beri Weber", "album": None, "duration": 215.0, "category": "lively"},
-]
+from app.data.jewish_songs import generate_songs
 
 SAMPLE_SPOTS = [
     {"title": "Weather Sponsors", "artist": None, "album": None, "duration": 30.0, "category": "weather"},
@@ -141,6 +120,13 @@ SAMPLE_JINGLES = [
     {"title": "Late Night Bumper", "artist": None, "album": "Bumpers", "duration": 5.0, "category": "bumper"},
 ]
 
+# Hourly jingles — station ID + time announcement for each hour
+HOURLY_JINGLES = [
+    {"title": f"Kol Bramah — {'12' if h % 12 == 0 else h % 12}:00 {'AM' if h < 12 else 'PM'} Station ID",
+     "artist": None, "album": "Hourly IDs", "duration": 10.0, "category": "hourly_id", "hour": h}
+    for h in range(24)
+]
+
 SAMPLE_ZMANIM = [
     {"title": "Netz HaChama Announcement", "artist": None, "album": "Zmanim", "duration": 15.0, "category": "netz"},
     {"title": "Zman Krias Shema", "artist": None, "album": "Zmanim", "duration": 15.0, "category": "shema"},
@@ -161,6 +147,8 @@ SAMPLE_RULES = [
      "asset_type": "spot", "songs_between": 3, "hour_start": 6, "hour_end": 22, "priority": 50},
     {"name": "Jingle Every 30 Min", "description": "Station ID every 30 minutes", "rule_type": "interval",
      "asset_type": "jingle", "interval_minutes": 30, "hour_start": 0, "hour_end": 24, "priority": 40},
+    {"name": "Hourly ID & Time", "description": "Station ID and time announcement on the hour, every hour", "rule_type": "interval",
+     "asset_type": "jingle", "category": "hourly_id", "interval_minutes": 60, "hour_start": 0, "hour_end": 24, "priority": 95},
     {"name": "Zmanim Announcements", "description": "Zmanim at fixed times", "rule_type": "fixed_time",
      "asset_type": "zmanim", "hour_start": 5, "hour_end": 22, "priority": 90},
     {"name": "Daf Yomi Slot", "description": "Daf Yomi shiur 11am-12pm daily", "rule_type": "daypart",
@@ -220,7 +208,8 @@ async def seed_all(db: AsyncSession = Depends(get_db)):
 
     # Seed assets by type
     all_assets = []
-    for item in SAMPLE_MUSIC:
+    music_songs = generate_songs()
+    for item in music_songs:
         a = Asset(id=uuid.uuid4(), title=item["title"], artist=item["artist"], album=item["album"],
                   duration=item["duration"], file_path=f"music/{item['title'].lower().replace(' ', '_')}.mp3",
                   asset_type="music", category=item.get("category"))
@@ -241,6 +230,12 @@ async def seed_all(db: AsyncSession = Depends(get_db)):
     for item in SAMPLE_JINGLES:
         a = Asset(id=uuid.uuid4(), title=item["title"], artist=item["artist"], album=item["album"],
                   duration=item["duration"], file_path=f"jingles/{item['title'].lower().replace(' ', '_')}.mp3",
+                  asset_type="jingle", category=item.get("category"))
+        db.add(a)
+        all_assets.append(a)
+    for item in HOURLY_JINGLES:
+        a = Asset(id=uuid.uuid4(), title=item["title"], artist=item["artist"], album=item["album"],
+                  duration=item["duration"], file_path=f"jingles/hourly/{item['hour']:02d}00.mp3",
                   asset_type="jingle", category=item.get("category"))
         db.add(a)
         all_assets.append(a)
@@ -276,10 +271,10 @@ async def seed_all(db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {
         "message": "Full seed complete",
-        "music": len(SAMPLE_MUSIC),
+        "music": len(music_songs),
         "spots": len(SAMPLE_SPOTS),
         "shiurim": len(SAMPLE_SHIURIM),
-        "jingles": len(SAMPLE_JINGLES),
+        "jingles": len(SAMPLE_JINGLES) + len(HOURLY_JINGLES),
         "zmanim": len(SAMPLE_ZMANIM),
         "rules": len(SAMPLE_RULES),
         "queue": min(15, len(music_assets)),

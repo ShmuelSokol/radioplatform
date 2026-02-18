@@ -18,8 +18,85 @@ from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueEntryOut, QueueListRe
 router = APIRouter(prefix="/stations/{station_id}/queue", tags=["queue"])
 
 
+async def _maybe_insert_hourly_jingle(db: AsyncSession, station_id: uuid.UUID) -> None:
+    """Insert hourly station ID jingle at the top of the hour (within first 30s)."""
+    now = datetime.now(timezone.utc)
+    if now.minute != 0 or now.second > 30:
+        return
+
+    current_hour = now.hour
+    # Check if we already played an hourly jingle recently (last 55 min)
+    cutoff = now.replace(minute=0, second=0, microsecond=0)
+    result = await db.execute(
+        select(PlayLog).join(Asset, PlayLog.asset_id == Asset.id)
+        .where(
+            PlayLog.station_id == station_id,
+            Asset.category == "hourly_id",
+            PlayLog.start_utc >= cutoff,
+        )
+        .limit(1)
+    )
+    if result.scalar_one_or_none():
+        return  # Already played this hour
+
+    # Also check if one is already queued
+    result = await db.execute(
+        select(QueueEntry).join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            Asset.category == "hourly_id",
+        )
+        .limit(1)
+    )
+    if result.scalar_one_or_none():
+        return  # Already queued
+
+    # Find the jingle for this hour
+    hour_label = f"{'12' if current_hour % 12 == 0 else current_hour % 12}:00 {'AM' if current_hour < 12 else 'PM'}"
+    result = await db.execute(
+        select(Asset).where(
+            Asset.asset_type == "jingle",
+            Asset.category == "hourly_id",
+            Asset.title.contains(hour_label),
+        ).limit(1)
+    )
+    jingle = result.scalar_one_or_none()
+    if not jingle:
+        # Fallback: any hourly jingle
+        result = await db.execute(
+            select(Asset).where(Asset.asset_type == "jingle", Asset.category == "hourly_id").limit(1)
+        )
+        jingle = result.scalar_one_or_none()
+    if not jingle:
+        return
+
+    # Insert as play-next: bump all pending positions and insert at position 1
+    await db.execute(
+        update(QueueEntry)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .values(position=QueueEntry.position + 1)
+    )
+    # Find current playing position
+    result = await db.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+    )
+    current = result.scalar_one_or_none()
+    next_pos = (current.position + 1) if current else 1
+
+    entry = QueueEntry(
+        id=uuid.uuid4(), station_id=station_id, asset_id=jingle.id,
+        position=next_pos, status="pending",
+    )
+    db.add(entry)
+    await db.flush()
+
+
 async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry | None:
     """Core playback engine: check if current track is done and auto-advance."""
+    # Check for hourly jingle insertion
+    await _maybe_insert_hourly_jingle(db, station_id)
+
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")

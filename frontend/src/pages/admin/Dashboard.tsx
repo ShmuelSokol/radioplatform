@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useStations } from '../../hooks/useStations';
 import { useAssets } from '../../hooks/useAssets';
@@ -12,6 +12,14 @@ function fmtDur(sec: number | null): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function fmtDurMs(sec: number | null): string {
+  if (!sec || sec <= 0) return '0:00.0';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  const ms = Math.floor((sec % 1) * 10);
+  return `${m}:${s.toString().padStart(2, '0')}.${ms}`;
 }
 
 function fmtClock(d: Date): string {
@@ -31,7 +39,7 @@ const CAT_COLORS: Record<string, string> = {
   shabbos: 'text-yellow-200', slow: 'text-blue-300', lively: 'text-red-300',
   daf_yomi: 'text-red-400', parsha: 'text-purple-300', halacha: 'text-blue-200',
   intro: 'text-yellow-300', outro: 'text-yellow-200', news: 'text-blue-300',
-  station_id: 'text-white', netz: 'text-yellow-400', shkia: 'text-red-400',
+  station_id: 'text-white', hourly_id: 'text-amber-300', netz: 'text-yellow-400', shkia: 'text-red-400',
   weather: 'text-blue-300', call_in: 'text-yellow-300', retail: 'text-green-200',
   community: 'text-red-200', service: 'text-cyan-200',
 };
@@ -42,7 +50,7 @@ type BottomTab = 'library' | 'cart' | 'log';
 export default function Dashboard() {
   const { user } = useAuth();
   const { data: stationsData } = useStations();
-  const { data: assetsData } = useAssets(0, 100);
+  const { data: assetsData } = useAssets(0, 2000);
   const [clock, setClock] = useState(new Date());
   const [activeTab, setActiveTab] = useState<string>('all');
   const [librarySearch, setLibrarySearch] = useState('');
@@ -61,6 +69,36 @@ export default function Dashboard() {
   const moveUpMut = useMoveUp(stationId ?? '');
   const moveDownMut = useMoveDown(stationId ?? '');
 
+  // ── Client-side real-time countdown ────────────────────────
+  // Server sends started_at (ISO) + duration. We interpolate locally.
+  const [realElapsed, setRealElapsed] = useState(0);
+  const [realRemaining, setRealRemaining] = useState(0);
+  const rafRef = useRef<number>(0);
+  const serverStartedAt = queueData?.now_playing?.started_at ?? null;
+  const serverDuration = queueData?.now_playing?.asset?.duration ?? 0;
+  const isPlaying = !!queueData?.now_playing;
+
+  const updateCountdown = useCallback(() => {
+    if (serverStartedAt && serverDuration > 0) {
+      const startMs = new Date(serverStartedAt).getTime();
+      const nowMs = Date.now();
+      const el = Math.max(0, (nowMs - startMs) / 1000);
+      const rem = Math.max(0, serverDuration - el);
+      setRealElapsed(el);
+      setRealRemaining(rem);
+    } else {
+      setRealElapsed(0);
+      setRealRemaining(0);
+    }
+    rafRef.current = requestAnimationFrame(updateCountdown);
+  }, [serverStartedAt, serverDuration]);
+
+  useEffect(() => {
+    rafRef.current = requestAnimationFrame(updateCountdown);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [updateCountdown]);
+
+  // Clock updates every second
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
@@ -70,10 +108,9 @@ export default function Dashboard() {
   const queueEntries = queueData?.entries ?? [];
   const nowPlaying = queueData?.now_playing ?? null;
   const nowAsset = nowPlaying?.asset ?? null;
-  const isPlaying = !!nowPlaying;
-  const remaining = nowPlaying?.remaining_seconds ?? 0;
-  const elapsed = nowPlaying?.elapsed_seconds ?? 0;
-  const duration = nowAsset?.duration ?? 0;
+  const remaining = realRemaining;
+  const elapsed = realElapsed;
+  const duration = serverDuration || (nowAsset?.duration ?? 0);
   const progress = duration > 0 ? Math.min(100, (elapsed / duration) * 100) : 0;
 
   const nextEntry = queueEntries.find((e: any) => e.status === 'pending');
@@ -106,9 +143,9 @@ export default function Dashboard() {
     assets.filter(a => a.asset_type === 'jingle' || a.asset_type === 'spot'),
   [assets]);
 
-  // VU meter animation level (based on remaining/playing state)
-  const vuLevel = isPlaying ? 22 + Math.floor(Math.sin(elapsed * 2) * 4) : 0;
-  const vuLevel2 = isPlaying ? 20 + Math.floor(Math.cos(elapsed * 1.7) * 5) : 0;
+  // VU meter animation level (driven by realElapsed for smooth animation)
+  const vuLevel = isPlaying ? 22 + Math.floor(Math.sin(realElapsed * 2) * 4) : 0;
+  const vuLevel2 = isPlaying ? 20 + Math.floor(Math.cos(realElapsed * 1.7) * 5) : 0;
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] min-h-[calc(100vh-3rem)] flex flex-col select-none">
@@ -130,19 +167,19 @@ export default function Dashboard() {
         {/* Remaining */}
         <div className="flex items-baseline gap-1">
           <span className="text-gray-500 text-[11px]">Remaining</span>
-          <span className="text-red-400 text-lg font-bold tabular-nums leading-none">{fmtDur(remaining)}</span>
+          <span className="text-red-400 text-lg font-bold tabular-nums leading-none">{fmtDurMs(remaining)}</span>
         </div>
 
         {/* Progress bar */}
         <div className="w-32 h-2 bg-[#111] rounded-sm overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-green-500 to-yellow-400 transition-all duration-1000"
+          <div className="h-full bg-gradient-to-r from-green-500 to-yellow-400"
             style={{ width: `${progress}%` }} />
         </div>
 
         {/* Elapsed / Duration */}
         <div className="flex items-baseline gap-1">
           <span className="text-gray-500 text-[11px]">Elapsed</span>
-          <span className="text-white text-sm tabular-nums">{fmtDur(elapsed)}</span>
+          <span className="text-white text-sm tabular-nums">{fmtDurMs(elapsed)}</span>
           <span className="text-gray-600">/</span>
           <span className="text-gray-400 text-sm tabular-nums">{fmtDur(duration)}</span>
         </div>

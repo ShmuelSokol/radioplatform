@@ -43,7 +43,7 @@ async def upload_asset(
 @router.get("", response_model=AssetListResponse)
 async def list_all(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
