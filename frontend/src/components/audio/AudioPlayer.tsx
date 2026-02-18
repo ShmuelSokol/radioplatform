@@ -3,7 +3,7 @@ import { useAudioPlayer } from '../../hooks/useAudioPlayer';
 import NowPlaying from './NowPlaying';
 
 export default function AudioPlayer() {
-  const { stationName, isPlaying, volume, stop, setVolume } = usePlayerStore();
+  const { stationName, volume, stop, setVolume } = usePlayerStore();
   const { audioRef } = useAudioPlayer();
   const { stationId } = usePlayerStore();
 

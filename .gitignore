@@ -45,7 +45,9 @@ media/
 *.flac
 *.ogg
 *.m3u8
-*.ts
+# HLS transport stream segments (not TypeScript .ts files)
+**/hls/**/*.ts
+**/segments/**/*.ts
 
 # Terraform
 *.tfstate

@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: radioplatform-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -e ".[dev]"
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET_NAME
+        value: radioplatform
+      - key: CORS_ORIGINS
+        sync: false
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_ENV
+        value: production
+
+databases:
+  - name: radioplatform-db
+    plan: free
+    databaseName: radioplatform
+    user: radio
