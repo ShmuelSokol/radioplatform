@@ -5,8 +5,9 @@ from app.config import settings
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.APP_DEBUG,
-    pool_size=20,
-    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0},
 )
 
 async_session_factory = async_sessionmaker(
