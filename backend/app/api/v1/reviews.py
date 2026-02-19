@@ -138,7 +138,7 @@ async def update_item(
     item.version += 1
 
     # Auto-create audit trail entry
-    if body.status in ("approved", "rejected", "flagged"):
+    if body.status in ("approved", "rejected", "flagged", "skipped"):
         from app.models.review_action import ReviewAction
         action = ReviewAction(
             review_item_id=item.id,
@@ -151,7 +151,7 @@ async def update_item(
         db.add(action)
 
     # Update queue progress
-    if body.status in ("approved", "rejected", "flagged"):
+    if body.status in ("approved", "rejected", "flagged", "skipped"):
         queue_result = await db.execute(select(ReviewQueue).where(ReviewQueue.id == item.queue_id))
         queue = queue_result.scalar_one_or_none()
         if queue:
@@ -160,7 +160,7 @@ async def update_item(
                 .select_from(ReviewItem)
                 .where(
                     ReviewItem.queue_id == queue.id,
-                    ReviewItem.status.in_(["approved", "rejected", "flagged"]),
+                    ReviewItem.status.in_(["approved", "rejected", "flagged", "skipped"]),
                 )
             )
             queue.reviewed_items = count_result.scalar() or 0
@@ -204,7 +204,7 @@ async def batch_update(
             .select_from(ReviewItem)
             .where(
                 ReviewItem.queue_id == queue.id,
-                ReviewItem.status.in_(["approved", "rejected", "flagged"]),
+                ReviewItem.status.in_(["approved", "rejected", "flagged", "skipped"]),
             )
         )
         queue.reviewed_items = count_result.scalar() or 0

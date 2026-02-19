@@ -18,6 +18,7 @@ const STATUS_COLORS: Record<string, string> = {
   approved: 'bg-green-100 text-green-700',
   rejected: 'bg-red-100 text-red-700',
   flagged: 'bg-orange-100 text-orange-700',
+  skipped: 'bg-blue-100 text-blue-700',
 };
 
 function formatDuration(seconds: number | null): string {
@@ -81,6 +82,9 @@ export default function ReviewFlow() {
           break;
         case 'f':
           handleAction('flagged');
+          break;
+        case 's':
+          handleAction('skipped');
           break;
         case ' ':
           e.preventDefault();
@@ -186,6 +190,13 @@ export default function ReviewFlow() {
                 className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2 rounded text-sm transition disabled:opacity-50"
               >
                 {updateMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Flag (F)'}
+              </button>
+              <button
+                onClick={() => handleAction('skipped')}
+                disabled={updateMutation.isPending}
+                className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded text-sm transition disabled:opacity-50"
+              >
+                {updateMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Skip (S)'}
               </button>
               <span className="text-xs text-gray-400 ml-auto">Space = Play/Pause</span>
             </div>
