@@ -7,7 +7,7 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, w
 
 ## Live URLs
 - **Frontend**: https://studio-kolbramah-radio.vercel.app
-- **Backend API**: Railway (URL TBD after first deploy — was https://studio-kolbramah-api.vercel.app)
+- **Backend API**: https://studio-kolbramah-api-production.up.railway.app
 - **GitHub**: https://github.com/ShmuelSokol/radioplatform
 
 ## Tech Stack
@@ -176,11 +176,23 @@ Claude Code accessible over Telegram for remote development.
 
 **Run locally**: `cd bot && uv run python main.py`
 
+## CRITICAL: Read Before You Write
+> **NEVER guess function names, class names, import paths, or field names.**
+> Before writing ANY code that imports from or references existing modules, you MUST first READ the actual source file to confirm the exact names. This applies to:
+> - Dependency functions (`app/core/dependencies.py` exports: `get_db`, `get_current_user`, `require_admin`, `require_manager`)
+> - Schema classes (`app/schemas/` — read the file before importing from it)
+> - Model fields (read the model file before referencing columns)
+> - Frontend types and hooks (read the type/hook file before using its exports)
+> - API client exports (`frontend/src/api/client.ts` is a **default** export, not named)
+>
+> **After writing code, always verify:** run `uv run python -c "import app.main"` for backend, `npx tsc --noEmit` for frontend.
+
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
-- **Auth**: JWT Bearer tokens. Roles: admin, manager, viewer. Admin/manager guards on write endpoints.
-- **Frontend**: All API calls through `src/api/client.ts` (auto JWT refresh). Zustand for global state, React Query for server state.
+- **Auth**: JWT Bearer tokens. Roles: admin, manager, viewer. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager).
+- **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
+- **DB Sessions**: Import `get_db` from `app.db.session` (not `get_async_session`).
 - **Tests**: pytest-asyncio with SQLite + type compilation hooks (PG_UUID→VARCHAR, JSONB→TEXT, ENUM→VARCHAR).
 - **Railway backend**: Uses lifespan events — tables created on startup, scheduler engine auto-starts. Middleware fallback still in place for local/Vercel compat. Statement cache disabled for Supabase pooler.
 - **TTS Pronunciation**: "Kol Bramah" is spelled "Kohl Baramah" in TTS text for correct pronunciation.
@@ -226,6 +238,11 @@ Claude Code accessible over Telegram for remote development.
 - **M3**: Sponsor insertion, holiday/timezone/sunset logic, multi-channel
 - **M4**: OTA broadcast (Icecast), reporting, monitoring
 - **M5**: Docs, load testing, Terraform deployment
+
+## MCP Servers
+- **Playwright** — Browser automation for testing and screenshots. Configured in `~/.claude.json` under project MCP servers.
+  - Command: `cmd /c npx -y @playwright/mcp@latest`
+  - Tools: browser_navigate, browser_screenshot, browser_click, browser_fill, browser_snapshot, etc.
 
 ## Commands
 ```bash
