@@ -5,6 +5,7 @@ extract duration metadata via ffprobe. Falls back to temp files for formats
 like MPEG-PS that require seeking (can't use stdin pipes for those).
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -171,8 +172,9 @@ def _convert_with_ffmpeg_tempfile(file_data: bytes, target_format: str, input_ex
 def _convert_with_ffmpeg(file_data: bytes, target_format: str = "mp3", input_ext: str = "") -> bytes | None:
     """Convert audio/video data to the target format using FFmpeg.
 
-    Tries stdin/stdout pipes first; falls back to temp files for seekable
-    formats like MPEG-PS (.mpg / .mpeg) that don't support pipe input.
+    For formats that require seeking (MPEG-PS, AVI, etc.), goes directly to
+    temp-file mode. For all others, tries stdin/stdout pipes first and falls
+    back to temp files if pipe mode fails.
 
     Returns converted bytes on success, or None if FFmpeg fails.
     """
@@ -180,6 +182,11 @@ def _convert_with_ffmpeg(file_data: bytes, target_format: str = "mp3", input_ext
     if not fmt_config:
         logger.warning("Unknown target format '%s' — falling back to mp3", target_format)
         fmt_config = CONVERT_FORMATS["mp3"]
+
+    # Seekable formats MUST use temp files — pipe mode produces wrong output
+    if input_ext.lower() in SEEKABLE_EXTENSIONS:
+        logger.info("Format '%s' requires seeking — using temp file conversion directly", input_ext)
+        return _convert_with_ffmpeg_tempfile(file_data, target_format, input_ext)
 
     try:
         result = subprocess.run(
@@ -242,6 +249,13 @@ def convert_audio(
     """
     ext = _get_extension(original_filename)
 
+    # Diagnostic: log input file fingerprint
+    input_hash = hashlib.md5(file_data[:4096]).hexdigest()
+    logger.info(
+        "convert_audio START: file='%s', ext='%s', target='%s', size=%d, hash_4k=%s",
+        original_filename, ext, target_format, len(file_data), input_hash,
+    )
+
     # "original" means no conversion
     if target_format == "original":
         logger.info("Keeping original format for '%s'", original_filename)
@@ -260,12 +274,14 @@ def convert_audio(
     converted = _convert_with_ffmpeg(file_data, target_format, ext)
 
     if converted is not None:
+        output_hash = hashlib.md5(converted[:4096]).hexdigest()
         logger.info(
-            "Conversion successful: %s -> %s (%.1f KB -> %.1f KB)",
+            "Conversion successful: %s -> %s (%.1f KB -> %.1f KB, out_hash_4k=%s)",
             original_filename,
             target_format,
             len(file_data) / 1024,
             len(converted) / 1024,
+            output_hash,
         )
         duration = _extract_duration(converted, fmt_config["ext"])
         return converted, duration, fmt_config["ext"]

@@ -1,3 +1,5 @@
+import hashlib
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
@@ -17,6 +19,8 @@ from app.schemas.asset import (
 )
 from app.services.asset_service import create_asset, delete_asset, get_asset, list_assets
 from app.workers.tasks.media_tasks import task_clip_audio, task_extract_metadata, task_transcode_audio
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
@@ -74,6 +78,11 @@ async def upload_asset(
 ):
     file_data = await file.read()
     original_filename = file.filename or "upload.mp3"
+    raw_hash = hashlib.md5(file_data[:4096]).hexdigest()
+    logger.info(
+        "UPLOAD endpoint: filename='%s', content_type='%s', size=%d, hash_4k=%s, format='%s'",
+        original_filename, file.content_type, len(file_data), raw_hash, format,
+    )
     asset = await create_asset(
         db,
         title=title,

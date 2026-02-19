@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import uuid
 
@@ -29,6 +30,13 @@ async def create_asset(
     # Use original_filename for conversion detection; fall back to filename
     source_name = original_filename or filename
 
+    # Diagnostic: log raw upload fingerprint
+    raw_hash = hashlib.md5(file_data[:4096]).hexdigest()
+    logger.info(
+        "create_asset: title='%s', source='%s', raw_size=%d, raw_hash_4k=%s, target=%s",
+        title, source_name, len(file_data), raw_hash, target_format,
+    )
+
     # Convert to target format and extract duration
     converted_data, duration, out_ext = convert_audio(file_data, source_name, target_format)
 
@@ -39,6 +47,13 @@ async def create_asset(
     # Determine MIME type
     fmt_config = CONVERT_FORMATS.get(target_format)
     mime = fmt_config["mime"] if fmt_config else content_type
+
+    # Diagnostic: log what we're about to upload
+    upload_hash = hashlib.md5(converted_data[:4096]).hexdigest()
+    logger.info(
+        "create_asset UPLOAD: key='%s', size=%d, upload_hash_4k=%s, duration=%s",
+        s3_key, len(converted_data), upload_hash, duration,
+    )
 
     await upload_file(converted_data, s3_key, mime)
 
