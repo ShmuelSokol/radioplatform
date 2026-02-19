@@ -136,7 +136,7 @@ async def ffmpeg_check(_user: User = Depends(require_manager)):
 async def upload_asset(
     file: UploadFile = File(...),
     title: str = Form(...),
-    format: str = Form("mp2"),
+    format: str = Form("mp3"),
     artist: str | None = Form(None),
     album: str | None = Form(None),
     asset_type: str = Form("music"),

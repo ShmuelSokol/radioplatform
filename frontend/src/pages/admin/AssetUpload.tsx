@@ -4,8 +4,8 @@ import { useUploadAsset } from '../../hooks/useAssets';
 import Spinner from '../../components/Spinner';
 
 const IMPORT_FORMATS = [
-  { value: 'mp2', label: 'MP2 (default)' },
-  { value: 'mp3', label: 'MP3' },
+  { value: 'mp3', label: 'MP3 (default)' },
+  { value: 'mp2', label: 'MP2' },
   { value: 'mp4', label: 'MP4 (AAC)' },
   { value: 'wav', label: 'WAV' },
   { value: 'flac', label: 'FLAC' },
@@ -43,7 +43,7 @@ export default function AssetUpload() {
   const [assetType, setAssetType] = useState('music');
   const [category, setCategory] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [format, setFormat] = useState('mp2');
+  const [format, setFormat] = useState('mp3');
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadAsset();

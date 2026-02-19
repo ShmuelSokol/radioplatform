@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { SynthEngine } from '../audio/synthEngine';
+import { getAssetAudioUrl } from '../api/assets';
 import type { AssetInfo } from '../types';
 
 const VOLUME_KEY = 'radio_volume';
@@ -32,7 +32,11 @@ export function useAudioEngine(
   elapsedSeconds: number,
   isPlaying: boolean,
 ): AudioEngineState {
-  const engineRef = useRef<SynthEngine | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const analyserDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
   const [volume, setVolumeState] = useState(loadVolume);
   const [muted, setMuted] = useState(loadMuted);
   const [vuLevels, setVuLevels] = useState<[number, number]>([0, 0]);
@@ -40,18 +44,39 @@ export function useAudioEngine(
   const lastAssetId = useRef<string | null>(null);
   const rafRef = useRef<number>(0);
 
-  // ── Init ──────────────────────────────────────────────────────
+  // ── Init audio context + element ──────────────────────────────
 
   const initAudio = useCallback(async () => {
-    if (engineRef.current?.ready) {
+    if (ctxRef.current && audioRef.current) {
+      if (ctxRef.current.state === 'suspended') await ctxRef.current.resume();
       setAudioReady(true);
       return;
     }
-    const engine = new SynthEngine();
-    await engine.init();
-    engine.setVolume(loadVolume());
-    engine.setMuted(loadMuted());
-    engineRef.current = engine;
+
+    const audio = new Audio();
+    audio.crossOrigin = 'anonymous';
+    audio.preload = 'auto';
+    audioRef.current = audio;
+
+    const ctx = new AudioContext();
+    if (ctx.state === 'suspended') await ctx.resume();
+    ctxRef.current = ctx;
+
+    const source = ctx.createMediaElementSource(audio);
+
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyserRef.current = analyser;
+    analyserDataRef.current = new Uint8Array(analyser.frequencyBinCount) as Uint8Array<ArrayBuffer>;
+
+    const gain = ctx.createGain();
+    gain.gain.value = loadMuted() ? 0 : loadVolume();
+    gainRef.current = gain;
+
+    source.connect(analyser);
+    analyser.connect(gain);
+    gain.connect(ctx.destination);
+
     setAudioReady(true);
   }, []);
 
@@ -60,30 +85,38 @@ export function useAudioEngine(
   useEffect(() => {
     return () => {
       cancelAnimationFrame(rafRef.current);
-      engineRef.current?.destroy();
-      engineRef.current = null;
+      audioRef.current?.pause();
+      audioRef.current = null;
+      ctxRef.current?.close().catch(() => {});
+      ctxRef.current = null;
     };
   }, []);
 
-  // ── Track changes → play/stop ─────────────────────────────────
+  // ── Track changes → play real audio ───────────────────────────
 
   useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine?.ready) return;
+    const audio = audioRef.current;
+    if (!audio || !audioReady) return;
 
     const assetId = nowPlayingAsset?.id ?? null;
 
     if (!isPlaying || !nowPlayingAsset) {
       if (lastAssetId.current !== null) {
-        engine.stop();
+        audio.pause();
         lastAssetId.current = null;
       }
       return;
     }
 
     if (assetId !== lastAssetId.current) {
-      engine.playTrack(nowPlayingAsset, elapsedSeconds);
       lastAssetId.current = assetId;
+      if (assetId) {
+        getAssetAudioUrl(assetId).then((url) => {
+          audio.src = url;
+          audio.currentTime = Math.max(0, elapsedSeconds);
+          audio.play().catch(() => {});
+        }).catch(() => {});
+      }
     }
   }, [nowPlayingAsset?.id, isPlaying, audioReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -92,14 +125,25 @@ export function useAudioEngine(
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolumeState(clamped);
-    engineRef.current?.setVolume(clamped);
+    const gain = gainRef.current;
+    const ctx = ctxRef.current;
+    if (gain && ctx) {
+      gain.gain.setTargetAtTime(clamped, ctx.currentTime, 0.02);
+    }
     try { localStorage.setItem(VOLUME_KEY, String(clamped)); } catch {}
   }, []);
 
   const toggleMute = useCallback(() => {
     setMuted(prev => {
       const next = !prev;
-      engineRef.current?.setMuted(next);
+      const gain = gainRef.current;
+      const ctx = ctxRef.current;
+      if (gain && ctx) {
+        gain.gain.setTargetAtTime(
+          next ? 0 : loadVolume(),
+          ctx.currentTime, 0.02
+        );
+      }
       try { localStorage.setItem(MUTE_KEY, String(next)); } catch {}
       return next;
     });
@@ -109,9 +153,18 @@ export function useAudioEngine(
 
   useEffect(() => {
     const poll = () => {
-      const engine = engineRef.current;
-      if (engine?.ready) {
-        setVuLevels(engine.getAnalyserLevels());
+      const analyser = analyserRef.current;
+      const data = analyserDataRef.current;
+      if (analyser && data) {
+        analyser.getByteFrequencyData(data);
+        const len = data.length;
+        const half = len >> 1;
+        let sumL = 0, sumR = 0;
+        for (let i = 0; i < half; i++) sumL += data[i];
+        for (let i = half; i < len; i++) sumR += data[i];
+        const l = sumL / (half * 255);
+        const r = sumR / (half * 255);
+        setVuLevels([Math.min(1, l * 2.5), Math.min(1, r * 2.5)]);
       }
       rafRef.current = requestAnimationFrame(poll);
     };
