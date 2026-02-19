@@ -114,11 +114,11 @@ def _extract_duration(file_data: bytes, input_ext: str = "") -> float | None:
 
 
 CONVERT_FORMATS = {
-    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "ext": ".mp3", "args": ["-ab", "192k", "-ac", "2", "-ar", "44100"]},
-    "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "ext": ".wav", "args": ["-ac", "2", "-ar", "44100"]},
-    "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "ext": ".flac", "args": ["-ac", "2", "-ar", "44100"]},
-    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "ext": ".ogg", "args": ["-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
-    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "ext": ".aac", "args": ["-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
+    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "ext": ".mp3", "args": ["-vn", "-ab", "192k", "-ac", "2", "-ar", "44100"]},
+    "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "ext": ".wav", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
+    "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "ext": ".flac", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
+    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "ext": ".ogg", "args": ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
+    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "ext": ".aac", "args": ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
 }
 
 

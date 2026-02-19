@@ -111,11 +111,11 @@ async def update_asset(
 
 
 EXPORT_FORMATS = {
-    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "args": ["-ab", "192k", "-ac", "2", "-ar", "44100"]},
-    "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "args": ["-ac", "2", "-ar", "44100"]},
-    "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "args": ["-ac", "2", "-ar", "44100"]},
-    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "args": ["-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
-    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "args": ["-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
+    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "args": ["-vn", "-ab", "192k", "-ac", "2", "-ar", "44100"]},
+    "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
+    "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
+    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "args": ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
+    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "args": ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
 }
 
 
