@@ -1,8 +1,8 @@
 """Audio conversion service — converts uploaded audio/video files using FFmpeg.
 
-Uses subprocess pipes (no temp files) to convert any supported format and
-extract duration metadata via ffprobe. Falls back to temp files for formats
-like MPEG-PS that require seeking (can't use stdin pipes for those).
+Always uses temp files for conversion to ensure reliable output across all
+formats. Pipe mode (stdin/stdout) is unreliable for many container formats
+and can produce garbage audio that "succeeds" with rc=0.
 """
 
 import hashlib
@@ -74,44 +74,11 @@ def _extract_duration_tempfile(file_data: bytes, input_ext: str = ".bin") -> flo
 def _extract_duration(file_data: bytes, input_ext: str = "") -> float | None:
     """Extract duration in seconds from audio data using ffprobe.
 
-    Tries stdin pipe first; falls back to a temp file for seekable formats.
+    Always uses temp files for reliable format detection.
     Returns None if ffprobe fails or is not available.
     """
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v", "quiet",
-                "-print_format", "json",
-                "-show_format",
-                "-i", "pipe:0",
-            ],
-            input=file_data,
-            capture_output=True,
-            timeout=60,
-        )
-        if result.returncode != 0:
-            logger.warning("ffprobe pipe failed (rc=%d) — trying temp file", result.returncode)
-            if input_ext:
-                return _extract_duration_tempfile(file_data, input_ext)
-            return None
-
-        data = json.loads(result.stdout)
-        duration_str = data.get("format", {}).get("duration")
-        if duration_str:
-            return float(duration_str)
-        # ffprobe succeeded but returned no duration — try temp file
-        if input_ext:
-            return _extract_duration_tempfile(file_data, input_ext)
-        return None
-    except FileNotFoundError:
-        logger.warning("ffprobe not found on system PATH — cannot extract duration")
-        return None
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, ValueError, OSError) as exc:
-        logger.warning("Duration extraction failed: %s", exc)
-        if input_ext:
-            return _extract_duration_tempfile(file_data, input_ext)
-        return None
+    ext = input_ext if input_ext else ".bin"
+    return _extract_duration_tempfile(file_data, ext)
 
 
 CONVERT_FORMATS = {
@@ -172,62 +139,13 @@ def _convert_with_ffmpeg_tempfile(file_data: bytes, target_format: str, input_ex
 def _convert_with_ffmpeg(file_data: bytes, target_format: str = "mp3", input_ext: str = "") -> bytes | None:
     """Convert audio/video data to the target format using FFmpeg.
 
-    For formats that require seeking (MPEG-PS, AVI, etc.), goes directly to
-    temp-file mode. For all others, tries stdin/stdout pipes first and falls
-    back to temp files if pipe mode fails.
+    Always uses temp files — pipe mode (stdin/stdout) is unreliable for many
+    container formats and can produce garbage audio even with rc=0.
 
     Returns converted bytes on success, or None if FFmpeg fails.
     """
-    fmt_config = CONVERT_FORMATS.get(target_format)
-    if not fmt_config:
-        logger.warning("Unknown target format '%s' — falling back to mp3", target_format)
-        fmt_config = CONVERT_FORMATS["mp3"]
-
-    # Seekable formats MUST use temp files — pipe mode produces wrong output
-    if input_ext.lower() in SEEKABLE_EXTENSIONS:
-        logger.info("Format '%s' requires seeking — using temp file conversion directly", input_ext)
-        return _convert_with_ffmpeg_tempfile(file_data, target_format, input_ext)
-
-    try:
-        result = subprocess.run(
-            [
-                settings.FFMPEG_PATH,
-                "-i", "pipe:0",
-                "-f", fmt_config["ffmpeg_fmt"],
-            ] + fmt_config["args"] + [
-                "-v", "warning",
-                "pipe:1",
-            ],
-            input=file_data,
-            capture_output=True,
-            timeout=300,
-        )
-        if result.returncode != 0:
-            logger.warning(
-                "FFmpeg pipe conversion failed (rc=%d) — trying temp file: %s",
-                result.returncode,
-                result.stderr[:300].decode(errors="replace"),
-            )
-            if input_ext:
-                return _convert_with_ffmpeg_tempfile(file_data, target_format, input_ext)
-            return None
-
-        out_data = result.stdout
-        if len(out_data) == 0:
-            logger.warning("FFmpeg produced empty output — trying temp file")
-            if input_ext:
-                return _convert_with_ffmpeg_tempfile(file_data, target_format, input_ext)
-            return None
-
-        return out_data
-    except FileNotFoundError:
-        logger.warning("FFmpeg not found at '%s' — storing original file as-is", settings.FFMPEG_PATH)
-        return None
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.warning("FFmpeg conversion error: %s", exc)
-        if input_ext:
-            return _convert_with_ffmpeg_tempfile(file_data, target_format, input_ext)
-        return None
+    ext = input_ext if input_ext else ".bin"
+    return _convert_with_ffmpeg_tempfile(file_data, target_format, ext)
 
 
 def convert_audio(
