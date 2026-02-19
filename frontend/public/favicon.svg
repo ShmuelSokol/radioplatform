@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#0a0a28"/>
+  <rect x="2" y="2" width="60" height="60" rx="10" fill="none" stroke="#2a2a5e" stroke-width="2"/>
+  <text x="32" y="42" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="24" fill="#67e8f9" letter-spacing="1">KBR</text>
+</svg>
