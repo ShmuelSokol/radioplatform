@@ -25,6 +25,7 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 async def upload_asset(
     file: UploadFile = File(...),
     title: str = Form(...),
+    format: str = Form("mp3"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_manager),
 ):
@@ -38,6 +39,7 @@ async def upload_asset(
         content_type=file.content_type or "audio/mpeg",
         user_id=user.id,
         original_filename=original_filename,
+        target_format=format,
     )
     # Dispatch metadata extraction task
     task_extract_metadata.delay(str(asset.id), asset.file_path)

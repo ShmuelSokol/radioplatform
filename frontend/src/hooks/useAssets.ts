@@ -11,7 +11,7 @@ export function useAssets(skip = 0, limit = 100) {
 export function useUploadAsset() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, title }: { file: File; title: string }) => uploadAsset(file, title),
+    mutationFn: ({ file, title, format }: { file: File; title: string; format?: string }) => uploadAsset(file, title, format),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
   });
 }

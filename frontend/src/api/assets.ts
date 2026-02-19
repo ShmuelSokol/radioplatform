@@ -11,10 +11,11 @@ export const getAsset = async (id: string): Promise<Asset> => {
   return res.data;
 };
 
-export const uploadAsset = async (file: File, title: string): Promise<Asset> => {
+export const uploadAsset = async (file: File, title: string, format = 'mp3'): Promise<Asset> => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('title', title);
+  formData.append('format', format);
   const res = await apiClient.post<Asset>('/assets/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });

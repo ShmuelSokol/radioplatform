@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.models.asset import Asset
-from app.services.audio_convert_service import convert_to_mp3
+from app.services.audio_convert_service import CONVERT_FORMATS, convert_audio
 from app.services.storage_service import generate_asset_key, upload_file
 
 logger = logging.getLogger(__name__)
@@ -20,18 +20,23 @@ async def create_asset(
     content_type: str,
     user_id: uuid.UUID | None = None,
     original_filename: str | None = None,
+    target_format: str = "mp3",
 ) -> Asset:
     # Use original_filename for conversion detection; fall back to filename
     source_name = original_filename or filename
 
-    # Convert to MP3 and extract duration
-    converted_data, duration = convert_to_mp3(file_data, source_name)
+    # Convert to target format and extract duration
+    converted_data, duration, out_ext = convert_audio(file_data, source_name, target_format)
 
-    # Always generate a .mp3 key regardless of original extension
-    mp3_filename = _force_mp3_extension(filename)
-    s3_key = generate_asset_key(mp3_filename)
+    # Generate storage key with the correct extension
+    store_filename = _force_extension(filename, out_ext)
+    s3_key = generate_asset_key(store_filename)
 
-    await upload_file(converted_data, s3_key, "audio/mpeg")
+    # Determine MIME type
+    fmt_config = CONVERT_FORMATS.get(target_format)
+    mime = fmt_config["mime"] if fmt_config else content_type
+
+    await upload_file(converted_data, s3_key, mime)
 
     asset = Asset(
         title=title,
@@ -51,12 +56,14 @@ async def create_asset(
     return asset
 
 
-def _force_mp3_extension(filename: str) -> str:
-    """Replace the file extension with .mp3."""
+def _force_extension(filename: str, ext: str) -> str:
+    """Replace the file extension."""
+    if not ext.startswith("."):
+        ext = f".{ext}"
     if "." in filename:
         base = filename.rsplit(".", 1)[0]
-        return f"{base}.mp3"
-    return f"{filename}.mp3"
+        return f"{base}{ext}"
+    return f"{filename}{ext}"
 
 
 async def get_asset(db: AsyncSession, asset_id: uuid.UUID) -> Asset:

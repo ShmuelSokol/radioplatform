@@ -1,6 +1,6 @@
-"""Audio conversion service — converts uploaded audio/video files to MP3 using FFmpeg.
+"""Audio conversion service — converts uploaded audio/video files using FFmpeg.
 
-Uses subprocess pipes (no temp files) to convert any supported format to MP3 and
+Uses subprocess pipes (no temp files) to convert any supported format and
 extract duration metadata via ffprobe.
 """
 
@@ -65,20 +65,32 @@ def _extract_duration(file_data: bytes) -> float | None:
         return None
 
 
-def _convert_with_ffmpeg(file_data: bytes) -> bytes | None:
-    """Convert audio/video data to MP3 using FFmpeg via stdin/stdout pipes.
+CONVERT_FORMATS = {
+    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "ext": ".mp3", "args": ["-ab", "192k", "-ac", "2", "-ar", "44100"]},
+    "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "ext": ".wav", "args": ["-ac", "2", "-ar", "44100"]},
+    "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "ext": ".flac", "args": ["-ac", "2", "-ar", "44100"]},
+    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "ext": ".ogg", "args": ["-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
+    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "ext": ".aac", "args": ["-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
+}
 
-    Returns MP3 bytes on success, or None if FFmpeg fails or is not available.
+
+def _convert_with_ffmpeg(file_data: bytes, target_format: str = "mp3") -> bytes | None:
+    """Convert audio/video data to the target format using FFmpeg via stdin/stdout pipes.
+
+    Returns converted bytes on success, or None if FFmpeg fails or is not available.
     """
+    fmt_config = CONVERT_FORMATS.get(target_format)
+    if not fmt_config:
+        logger.warning("Unknown target format '%s' — falling back to mp3", target_format)
+        fmt_config = CONVERT_FORMATS["mp3"]
+
     try:
         result = subprocess.run(
             [
                 settings.FFMPEG_PATH,
                 "-i", "pipe:0",
-                "-f", "mp3",
-                "-ab", "192k",
-                "-ac", "2",
-                "-ar", "44100",
+                "-f", fmt_config["ffmpeg_fmt"],
+            ] + fmt_config["args"] + [
                 "-v", "warning",
                 "pipe:1",
             ],
@@ -94,12 +106,12 @@ def _convert_with_ffmpeg(file_data: bytes) -> bytes | None:
             )
             return None
 
-        mp3_data = result.stdout
-        if len(mp3_data) == 0:
+        out_data = result.stdout
+        if len(out_data) == 0:
             logger.warning("FFmpeg produced empty output")
             return None
 
-        return mp3_data
+        return out_data
     except FileNotFoundError:
         logger.warning("FFmpeg not found at '%s' — storing original file as-is", settings.FFMPEG_PATH)
         return None
@@ -108,49 +120,60 @@ def _convert_with_ffmpeg(file_data: bytes) -> bytes | None:
         return None
 
 
-def convert_to_mp3(file_data: bytes, original_filename: str) -> tuple[bytes, float | None]:
-    """Convert an audio/video file to MP3 format and extract its duration.
+def convert_audio(
+    file_data: bytes,
+    original_filename: str,
+    target_format: str = "mp3",
+) -> tuple[bytes, float | None, str]:
+    """Convert an audio/video file to the requested format and extract its duration.
 
     Args:
         file_data: Raw bytes of the uploaded file.
         original_filename: Original filename (used to detect format).
+        target_format: Target format (mp3, wav, flac, ogg, aac, or original).
 
     Returns:
-        A tuple of (file_bytes, duration_seconds). If conversion fails or is
-        not needed, the original bytes are returned. Duration may be None if
-        extraction fails.
+        A tuple of (file_bytes, duration_seconds, file_extension).
+        If conversion fails, the original bytes are returned.
+        Duration may be None if extraction fails.
     """
     ext = _get_extension(original_filename)
 
-    # Already MP3 — just extract duration, no conversion needed
-    if ext in MP3_EXTENSIONS:
-        logger.info("File '%s' is already MP3 — skipping conversion", original_filename)
+    # "original" means no conversion
+    if target_format == "original":
+        logger.info("Keeping original format for '%s'", original_filename)
         duration = _extract_duration(file_data)
-        return file_data, duration
+        return file_data, duration, ext or ".bin"
 
-    # Not a recognized audio/video extension — still try to extract duration but skip conversion
-    if ext not in CONVERTIBLE_EXTENSIONS:
-        logger.info(
-            "File '%s' has unrecognized extension '%s' — attempting conversion anyway",
-            original_filename, ext,
-        )
+    # Already in the target format — just extract duration
+    fmt_config = CONVERT_FORMATS.get(target_format, CONVERT_FORMATS["mp3"])
+    if ext == fmt_config["ext"]:
+        logger.info("File '%s' is already %s — skipping conversion", original_filename, target_format)
+        duration = _extract_duration(file_data)
+        return file_data, duration, ext
 
     # Attempt conversion
-    logger.info("Converting '%s' (%s) to MP3...", original_filename, ext)
-    mp3_data = _convert_with_ffmpeg(file_data)
+    logger.info("Converting '%s' (%s) to %s...", original_filename, ext, target_format)
+    converted = _convert_with_ffmpeg(file_data, target_format)
 
-    if mp3_data is not None:
+    if converted is not None:
         logger.info(
-            "Conversion successful: %s -> MP3 (%.1f KB -> %.1f KB)",
+            "Conversion successful: %s -> %s (%.1f KB -> %.1f KB)",
             original_filename,
+            target_format,
             len(file_data) / 1024,
-            len(mp3_data) / 1024,
+            len(converted) / 1024,
         )
-        # Extract duration from the converted MP3
-        duration = _extract_duration(mp3_data)
-        return mp3_data, duration
+        duration = _extract_duration(converted)
+        return converted, duration, fmt_config["ext"]
 
     # Conversion failed — fall back to original file
     logger.warning("Conversion failed for '%s' — storing original file as-is", original_filename)
     duration = _extract_duration(file_data)
-    return file_data, duration
+    return file_data, duration, ext or ".bin"
+
+
+# Backwards-compatible alias
+def convert_to_mp3(file_data: bytes, original_filename: str) -> tuple[bytes, float | None]:
+    data, duration, _ext = convert_audio(file_data, original_filename, "mp3")
+    return data, duration

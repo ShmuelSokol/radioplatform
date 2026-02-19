@@ -2,9 +2,19 @@ import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUploadAsset } from '../../hooks/useAssets';
 
+const IMPORT_FORMATS = [
+  { value: 'mp3', label: 'MP3 (default)' },
+  { value: 'wav', label: 'WAV' },
+  { value: 'flac', label: 'FLAC' },
+  { value: 'ogg', label: 'OGG' },
+  { value: 'aac', label: 'AAC' },
+  { value: 'original', label: 'Keep Original' },
+] as const;
+
 export default function AssetUpload() {
   const [title, setTitle] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [format, setFormat] = useState('mp3');
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadAsset();
@@ -28,7 +38,7 @@ export default function AssetUpload() {
     }
     setError('');
     try {
-      await uploadMutation.mutateAsync({ file, title });
+      await uploadMutation.mutateAsync({ file, title, format });
       navigate('/admin/assets');
     } catch (err: any) {
       const msg = err?.response?.data?.detail ?? err?.message ?? 'Upload failed';
@@ -44,7 +54,7 @@ export default function AssetUpload() {
           <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>
         )}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Audio File</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Audio / Video File</label>
           <input
             ref={fileInputRef}
             type="file"
@@ -68,12 +78,27 @@ export default function AssetUpload() {
             required
           />
         </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Convert To</label>
+          <select
+            value={format}
+            onChange={(e) => setFormat(e.target.value)}
+            className="w-full border rounded px-3 py-2 bg-white"
+          >
+            {IMPORT_FORMATS.map((f) => (
+              <option key={f.value} value={f.value}>{f.label}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-400 mt-1">
+            File will be converted server-side via FFmpeg before storage
+          </p>
+        </div>
         <button
           type="submit"
           disabled={uploadMutation.isPending}
           className="w-full bg-brand-600 hover:bg-brand-700 text-white font-medium py-2 rounded transition disabled:opacity-50"
         >
-          {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
+          {uploadMutation.isPending ? 'Uploading & Converting...' : 'Upload'}
         </button>
       </form>
     </div>
