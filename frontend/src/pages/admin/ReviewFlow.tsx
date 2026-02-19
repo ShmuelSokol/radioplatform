@@ -40,7 +40,7 @@ export default function ReviewFlow() {
   const items = itemsData?.items ?? [];
   const currentItem = items[currentIndex];
   const currentAsset = currentItem?.asset;
-  const { data: audioUrl } = useAssetAudioUrl(currentAsset?.id);
+  const { data: audioUrl, isLoading: audioUrlLoading } = useAssetAudioUrl(currentAsset?.id);
 
   const advanceToNext = useCallback(() => {
     if (currentIndex < items.length - 1) {
@@ -148,15 +148,19 @@ export default function ReviewFlow() {
             </div>
 
             {/* Waveform */}
-            {audioUrl ? (
-              <ErrorBoundary key={currentAsset.id} fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-500">Waveform unavailable for this asset</div>}>
+            {audioUrlLoading ? (
+              <div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-400">
+                <Spinner className="mr-2" />Loading audio...
+              </div>
+            ) : audioUrl ? (
+              <ErrorBoundary key={currentAsset.id} fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-500">Waveform failed to load — try refreshing the page</div>}>
                 <Suspense fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-400">Loading waveform...</div>}>
                   <WaveformPlayer ref={waveformRef} url={audioUrl} />
                 </Suspense>
               </ErrorBoundary>
             ) : (
               <div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-amber-600 text-sm">
-                No audio file available for this asset (seed data — no file was uploaded)
+                No audio file available for this asset
               </div>
             )}
 

@@ -51,20 +51,28 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
       audio.crossOrigin = 'anonymous';
       audio.preload = 'auto';
 
-      const ws = WaveSurfer.create({
-        container: containerRef.current,
-        waveColor: '#4a90d9',
-        progressColor: '#1a5fb4',
-        cursorColor: '#e74c3c',
-        cursorWidth: 2,
-        height: 128,
-        barWidth: 2,
-        barGap: 1,
-        barRadius: 2,
-        normalize: true,
-        media: audio,
-        plugins: [regions],
-      });
+      let ws: WaveSurfer;
+      try {
+        ws = WaveSurfer.create({
+          container: containerRef.current,
+          waveColor: '#4a90d9',
+          progressColor: '#1a5fb4',
+          cursorColor: '#e74c3c',
+          cursorWidth: 2,
+          height: 128,
+          barWidth: 2,
+          barGap: 1,
+          barRadius: 2,
+          normalize: true,
+          media: audio,
+          plugins: [regions],
+        });
+      } catch (err) {
+        console.error('WaveSurfer.create() failed:', err);
+        setLoading(false);
+        setError('Failed to initialize waveform player');
+        return;
+      }
 
       ws.on('ready', () => {
         const dur = ws.getDuration();
@@ -100,7 +108,11 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
       wsRef.current = ws;
 
       return () => {
-        ws.destroy();
+        try {
+          ws.destroy();
+        } catch (err) {
+          console.warn('WaveSurfer.destroy() error (safe to ignore):', err);
+        }
         wsRef.current = null;
         regionsRef.current = null;
       };

@@ -81,14 +81,20 @@ def _extract_duration(file_data: bytes, input_ext: str = "") -> float | None:
     return _extract_duration_tempfile(file_data, ext)
 
 
+# EBU R128 loudness normalization filter — broadcast standard
+# -16 LUFS integrated loudness (internet/streaming standard)
+# -1.5 dBTP true peak limit (headroom for lossy codec inter-sample peaks)
+# 11 LU loudness range (preserves dynamics while ensuring consistency)
+LOUDNORM_FILTER = "loudnorm=I=-16:TP=-1.5:LRA=11"
+
 CONVERT_FORMATS = {
-    "mp2": {"ffmpeg_fmt": "mp2", "mime": "audio/mpeg", "ext": ".mp2", "args": ["-vn", "-c:a", "mp2", "-b:a", "192k", "-ac", "2", "-ar", "44100"]},
-    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "ext": ".mp3", "args": ["-vn", "-ab", "192k", "-ac", "2", "-ar", "44100"]},
-    "mp4": {"ffmpeg_fmt": "mp4", "mime": "audio/mp4", "ext": ".m4a", "args": ["-vn", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100", "-movflags", "+faststart"]},
-    "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "ext": ".wav", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
-    "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "ext": ".flac", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
-    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "ext": ".ogg", "args": ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
-    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "ext": ".aac", "args": ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
+    "mp2": {"ffmpeg_fmt": "mp2", "mime": "audio/mpeg", "ext": ".mp2", "args": ["-vn", "-af", LOUDNORM_FILTER, "-c:a", "mp2", "-b:a", "192k", "-ac", "2", "-ar", "44100"]},
+    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "ext": ".mp3", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ab", "192k", "-ac", "2", "-ar", "44100"]},
+    "mp4": {"ffmpeg_fmt": "mp4", "mime": "audio/mp4", "ext": ".m4a", "args": ["-vn", "-af", LOUDNORM_FILTER, "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100", "-movflags", "+faststart"]},
+    "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "ext": ".wav", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100"]},
+    "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "ext": ".flac", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100"]},
+    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "ext": ".ogg", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
+    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "ext": ".aac", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
 }
 
 
