@@ -249,7 +249,7 @@ Claude Code accessible over Telegram for remote development.
 - **Vercel IPv6**: Direct Supabase connection fails (IPv6 not supported). Use pooler URL.
 - **Password URL encoding**: `/` → `%2F`, `[` → `%5B`, `]` → `%5D` in DATABASE_URL
 - **Pydantic schemas**: ID fields use `uuid.UUID | str` for cross-DB compatibility (SQLite returns strings)
-- **Frontend Vercel deploy**: Git author `shmue@users.noreply.github.com` is blocked. Workaround: copy frontend to a temp non-git directory and deploy from there.
+- **Frontend Vercel deploy**: Repo-local git email is set to `shmuelsokol@yahoo.com` (matching the Vercel account). Deploy directly: `cd frontend && npx vercel --prod --yes`.
 - **Weather caching**: Weather TTS audio is cached per 15-min slot. Text changes don't take effect until the next slot.
 
 ## Milestones
@@ -272,8 +272,8 @@ cd backend && uv run pytest tests/ -v
 # Deploy backend to Vercel
 cd backend && npx vercel --prod --yes
 
-# Deploy frontend to Vercel (use temp dir workaround for git author issue)
-# Copy frontend files to temp dir, deploy from there, clean up
+# Deploy frontend to Vercel
+cd frontend && npx vercel --prod --yes
 
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://studio-kolbramah-api-production.up.railway.app
