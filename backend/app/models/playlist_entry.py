@@ -53,5 +53,5 @@ class PlaylistEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     playback_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
-    block: Mapped["ScheduleBlock"] = relationship("ScheduleBlock", back_populates="playlist_entries", lazy="selectin")
+    block: Mapped["ScheduleBlock"] = relationship("ScheduleBlock", back_populates="playlist_entries", lazy="noload")
     asset: Mapped["Asset"] = relationship("Asset", lazy="selectin")

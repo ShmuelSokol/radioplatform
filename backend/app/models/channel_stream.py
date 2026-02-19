@@ -26,4 +26,4 @@ class ChannelStream(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     station = relationship("Station", back_populates="channels")
-    schedule = relationship("Schedule", lazy="selectin")
+    schedule = relationship("Schedule", lazy="noload")

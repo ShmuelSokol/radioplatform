@@ -163,7 +163,7 @@ class SchedulerEngine:
             return
         
         # Get next asset from block
-        asset_id = await service.get_next_asset_for_block(block)
+        asset_id = await service.get_next_asset_for_block(block, station_id=station.id)
         if not asset_id:
             logger.warning(f"Station {station.id}: Block {block.id} has no assets")
             await service.clear_now_playing(station.id)
@@ -237,7 +237,7 @@ class SchedulerEngine:
         if not block:
             return
 
-        asset_id = await service.get_next_asset_for_block(block)
+        asset_id = await service.get_next_asset_for_block(block, station_id=station.id)
         if not asset_id:
             return
 

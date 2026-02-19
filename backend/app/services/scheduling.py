@@ -135,7 +135,9 @@ class SchedulingService:
 
         return False
 
-    async def get_next_asset_for_block(self, block: ScheduleBlock) -> Optional[UUID]:
+    async def get_next_asset_for_block(
+        self, block: ScheduleBlock, station_id: UUID | str | None = None
+    ) -> Optional[UUID]:
         """
         Get the next asset ID to play from a block's playlist.
         Respects playback_mode: sequential, shuffle, or weighted.
@@ -150,20 +152,21 @@ class SchedulingService:
         mode = getattr(block, 'playback_mode', PlaybackMode.SEQUENTIAL)
 
         if mode == PlaybackMode.SHUFFLE:
-            return await self._pick_shuffle(block, enabled_entries)
+            return await self._pick_shuffle(block, enabled_entries, station_id)
         elif mode == PlaybackMode.WEIGHTED:
             return await self._pick_weighted(block, enabled_entries)
         else:
-            return await self._pick_sequential(block, enabled_entries)
+            return await self._pick_sequential(block, enabled_entries, station_id)
 
     async def _pick_sequential(
-        self, block: ScheduleBlock, entries: list[PlaylistEntry]
+        self, block: ScheduleBlock, entries: list[PlaylistEntry],
+        station_id: UUID | str | None = None,
     ) -> Optional[UUID]:
         """Pick the next asset in position order, rotating through the list."""
         entries.sort(key=lambda e: e.position)
 
         # Find what was last played from this block
-        last_played_id = await self._get_last_played_asset_for_block(block)
+        last_played_id = await self._get_last_played_asset_for_block(block, station_id)
 
         if last_played_id is None:
             return entries[0].asset_id
@@ -178,12 +181,13 @@ class SchedulingService:
         return entries[0].asset_id
 
     async def _pick_shuffle(
-        self, block: ScheduleBlock, entries: list[PlaylistEntry]
+        self, block: ScheduleBlock, entries: list[PlaylistEntry],
+        station_id: UUID | str | None = None,
     ) -> Optional[UUID]:
         """Pick a random asset, avoiding recently played ones."""
         # Get recently played asset IDs for this block (last N plays)
         recent_ids = await self._get_recent_played_assets_for_block(
-            block, limit=max(1, len(entries) // 2)
+            block, station_id, limit=max(1, len(entries) // 2)
         )
 
         # Filter out recently played
@@ -204,12 +208,12 @@ class SchedulingService:
         chosen = random.choices(entries, weights=weights, k=1)[0]
         return chosen.asset_id
 
-    async def _get_last_played_asset_for_block(self, block: ScheduleBlock) -> Optional[str]:
+    async def _get_last_played_asset_for_block(
+        self, block: ScheduleBlock, station_id: UUID | str | None = None
+    ) -> Optional[str]:
         """Get the asset_id of the last thing played from this block's schedule."""
-        # Get the station_id via the block's schedule
-        station_id = block.schedule_id
-        if block.schedule:
-            station_id = block.schedule.station_id
+        if not station_id:
+            station_id = block.schedule_id
 
         # Get asset IDs in this block
         block_asset_ids = [e.asset_id for e in block.playlist_entries if e.is_enabled]
@@ -230,12 +234,11 @@ class SchedulingService:
         return str(row) if row else None
 
     async def _get_recent_played_assets_for_block(
-        self, block: ScheduleBlock, limit: int = 5
+        self, block: ScheduleBlock, station_id: UUID | str | None = None, limit: int = 5
     ) -> set[str]:
         """Get recently played asset IDs from this block's playlist."""
-        station_id = block.schedule_id
-        if block.schedule:
-            station_id = block.schedule.station_id
+        if not station_id:
+            station_id = block.schedule_id
 
         block_asset_ids = [e.asset_id for e in block.playlist_entries if e.is_enabled]
         if not block_asset_ids:

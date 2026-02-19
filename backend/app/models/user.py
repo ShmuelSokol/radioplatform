@@ -26,4 +26,4 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    assets = relationship("Asset", back_populates="created_by_user", lazy="selectin")
+    assets = relationship("Asset", back_populates="created_by_user", lazy="noload")

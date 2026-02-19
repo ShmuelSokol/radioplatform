@@ -29,7 +29,7 @@ class Schedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     priority: Mapped[int] = mapped_column(default=0, nullable=False)
 
     # Relationships
-    station: Mapped["Station"] = relationship("Station", back_populates="schedules", lazy="selectin")
+    station: Mapped["Station"] = relationship("Station", back_populates="schedules", lazy="noload")
     blocks: Mapped[list["ScheduleBlock"]] = relationship(
-        "ScheduleBlock", back_populates="schedule", cascade="all, delete-orphan", lazy="selectin"
+        "ScheduleBlock", back_populates="schedule", cascade="all, delete-orphan", lazy="noload"
     )

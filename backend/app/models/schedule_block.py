@@ -96,7 +96,7 @@ class ScheduleBlock(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     end_sun_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)  # minutes
 
     # Relationships
-    schedule: Mapped["Schedule"] = relationship("Schedule", back_populates="blocks", lazy="selectin")
+    schedule: Mapped["Schedule"] = relationship("Schedule", back_populates="blocks", lazy="noload")
     playlist_entries: Mapped[list["PlaylistEntry"]] = relationship(
-        "PlaylistEntry", back_populates="block", cascade="all, delete-orphan", lazy="selectin"
+        "PlaylistEntry", back_populates="block", cascade="all, delete-orphan", lazy="noload"
     )

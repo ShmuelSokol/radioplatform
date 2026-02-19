@@ -43,6 +43,6 @@ class NowPlaying(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     stream_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
-    station = relationship("Station", lazy="selectin")
+    station = relationship("Station", lazy="noload")
     asset = relationship("Asset", lazy="selectin")
-    block = relationship("ScheduleBlock", lazy="selectin")
+    block = relationship("ScheduleBlock", lazy="noload")
