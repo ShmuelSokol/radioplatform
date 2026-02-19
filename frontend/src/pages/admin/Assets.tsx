@@ -1,12 +1,58 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
 import { downloadAsset } from '../../api/assets';
+
+const EXPORT_FORMATS = ['original', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '—';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function DownloadButton({ assetId, title }: { assetId: string; title: string }) {
+  const [open, setOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = async (format: string) => {
+    setOpen(false);
+    setDownloading(true);
+    try {
+      await downloadAsset(assetId, title, format);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <span className="relative inline-block">
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={downloading}
+        className="text-blue-600 hover:text-blue-800 text-sm disabled:opacity-50"
+      >
+        {downloading ? 'Downloading...' : 'Download'}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-1 w-32 bg-white border border-gray-200 rounded shadow-lg py-1">
+            {EXPORT_FORMATS.map((fmt) => (
+              <button
+                key={fmt}
+                onClick={() => handleDownload(fmt)}
+                className="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                {fmt === 'original' ? 'Original' : fmt.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  );
 }
 
 export default function Assets() {
@@ -46,12 +92,7 @@ export default function Assets() {
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.album ?? '—'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right space-x-3">
-                  <button
-                    onClick={() => downloadAsset(asset.id, asset.title)}
-                    className="text-blue-600 hover:text-blue-800 text-sm"
-                  >
-                    Download
-                  </button>
+                  <DownloadButton assetId={asset.id} title={asset.title} />
                   <button
                     onClick={() => deleteMutation.mutate(asset.id)}
                     className="text-red-600 hover:text-red-800 text-sm"

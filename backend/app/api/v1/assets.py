@@ -79,29 +79,76 @@ async def update_asset(
     return asset
 
 
+EXPORT_FORMATS = {
+    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "args": ["-ab", "192k", "-ac", "2", "-ar", "44100"]},
+    "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "args": ["-ac", "2", "-ar", "44100"]},
+    "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "args": ["-ac", "2", "-ar", "44100"]},
+    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "args": ["-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
+    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "args": ["-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
+}
+
+
 @router.get("/{asset_id}/download")
 async def download_asset(
     asset_id: uuid.UUID,
+    format: str = Query("original", description="Export format: original, mp3, wav, flac, ogg, aac"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    import logging
+    import subprocess
     asset = await get_asset(db, asset_id)
     file_path = asset.file_path
+    safe_title = "".join(c for c in asset.title if c.isalnum() or c in " -_").strip() or "download"
 
-    # If file_path is already a full URL (e.g. Supabase public URL), redirect
+    # Get the raw file data
     if file_path.startswith("http://") or file_path.startswith("https://"):
-        return RedirectResponse(url=file_path)
+        if format == "original":
+            return RedirectResponse(url=file_path)
+        # Need to fetch the file for conversion
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(file_path, follow_redirects=True)
+            data = resp.content
+    else:
+        from app.services.storage_service import download_file
+        data = await download_file(file_path)
 
-    # Otherwise download from storage and stream
-    from app.services.storage_service import download_file
-    data = await download_file(file_path)
-    ext = file_path.rsplit(".", 1)[-1] if "." in file_path else "mp3"
-    safe_title = "".join(c for c in asset.title if c.isalnum() or c in " -_").strip()
-    filename = f"{safe_title}.{ext}"
+    # If original format requested, return as-is
+    if format == "original":
+        ext = file_path.rsplit(".", 1)[-1] if "." in file_path else "mp3"
+        return Response(
+            content=data,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": f'attachment; filename="{safe_title}.{ext}"'},
+        )
+
+    # Convert to requested format via FFmpeg
+    fmt_config = EXPORT_FORMATS.get(format)
+    if not fmt_config:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Unsupported format: {format}. Use: {', '.join(EXPORT_FORMATS.keys())}")
+
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", "pipe:0", "-f", fmt_config["ffmpeg_fmt"]] + fmt_config["args"] + ["pipe:1"],
+            input=data,
+            capture_output=True,
+            timeout=300,
+        )
+        if result.returncode != 0:
+            logging.getLogger(__name__).warning("FFmpeg conversion failed: %s", result.stderr[:500])
+            from fastapi import HTTPException
+            raise HTTPException(status_code=500, detail="Audio conversion failed")
+        converted = result.stdout
+    except FileNotFoundError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="FFmpeg not available on server")
+
     return Response(
-        content=data,
-        media_type="audio/mpeg",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        content=converted,
+        media_type=fmt_config["mime"],
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.{format}"'},
     )
 
 

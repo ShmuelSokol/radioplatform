@@ -31,12 +31,16 @@ export const clipAsset = async (id: string, start: number, duration: number) => 
   return res.data;
 };
 
-export const downloadAsset = async (id: string, title: string): Promise<void> => {
-  const res = await apiClient.get(`/assets/${id}/download`, { responseType: 'blob' });
+export const downloadAsset = async (id: string, title: string, format = 'original'): Promise<void> => {
+  const res = await apiClient.get(`/assets/${id}/download`, {
+    params: { format },
+    responseType: 'blob',
+  });
+  const ext = format === 'original' ? 'mp3' : format;
   const url = window.URL.createObjectURL(new Blob([res.data]));
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${title}.mp3`;
+  a.download = `${title}.${ext}`;
   document.body.appendChild(a);
   a.click();
   a.remove();
