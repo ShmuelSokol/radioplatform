@@ -21,6 +21,9 @@ const ScheduleBlocks = lazy(() => import('./pages/admin/ScheduleBlocks'));
 const Holidays = lazy(() => import('./pages/admin/Holidays'));
 const Sponsors = lazy(() => import('./pages/admin/Sponsors'));
 const Analytics = lazy(() => import('./pages/admin/Analytics'));
+const AssetDetail = lazy(() => import('./pages/admin/AssetDetail'));
+const ReviewQueues = lazy(() => import('./pages/admin/ReviewQueues'));
+const ReviewFlow = lazy(() => import('./pages/admin/ReviewFlow'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,6 +59,9 @@ export default function App() {
               <Route path="/admin/stations" element={<ProtectedRoute><Stations /></ProtectedRoute>} />
               <Route path="/admin/assets" element={<ProtectedRoute><Assets /></ProtectedRoute>} />
               <Route path="/admin/assets/upload" element={<ProtectedRoute><AssetUpload /></ProtectedRoute>} />
+              <Route path="/admin/assets/:assetId" element={<ProtectedRoute><AssetDetail /></ProtectedRoute>} />
+              <Route path="/admin/reviews" element={<ProtectedRoute><ReviewQueues /></ProtectedRoute>} />
+              <Route path="/admin/reviews/:queueId" element={<ProtectedRoute><ReviewFlow /></ProtectedRoute>} />
               <Route path="/admin/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
               <Route path="/admin/rules" element={<ProtectedRoute><Rules /></ProtectedRoute>} />
               <Route path="/admin/schedules" element={<ProtectedRoute><Schedules /></ProtectedRoute>} />

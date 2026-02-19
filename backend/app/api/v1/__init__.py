@@ -17,6 +17,7 @@ from app.api.v1.sponsors import router as sponsors_router
 from app.api.v1.channels import router as channels_router
 from app.api.v1.icecast import router as icecast_router
 from app.api.v1.analytics import router as analytics_router
+from app.api.v1.reviews import router as reviews_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -36,3 +37,4 @@ router.include_router(sponsors_router)
 router.include_router(channels_router)
 router.include_router(icecast_router)
 router.include_router(analytics_router)
+router.include_router(reviews_router)

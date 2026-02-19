@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_admin
+from app.core.dependencies import get_current_user, require_admin
 from app.core.security import hash_password
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.user import User, UserRole
+from app.models.user_preference import UserPreference
 from app.schemas.user_mgmt import UserCreate, UserListResponse, UserOut, UserUpdate
+from app.schemas.user_preference import UserPreferenceResponse, UserPreferenceUpdate
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -90,3 +92,33 @@ async def delete_user(
         raise NotFoundError("User not found")
     await db.delete(user)
     await db.commit()
+
+
+@router.get("/me/preferences", response_model=UserPreferenceResponse)
+async def get_my_preferences(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(UserPreference).where(UserPreference.user_id == user.id))
+    pref = result.scalar_one_or_none()
+    if not pref:
+        return UserPreferenceResponse()
+    return pref
+
+
+@router.patch("/me/preferences", response_model=UserPreferenceResponse)
+async def update_my_preferences(
+    body: UserPreferenceUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(UserPreference).where(UserPreference.user_id == user.id))
+    pref = result.scalar_one_or_none()
+    if not pref:
+        pref = UserPreference(user_id=user.id)
+        db.add(pref)
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(pref, key, value)
+    await db.commit()
+    await db.refresh(pref)
+    return pref

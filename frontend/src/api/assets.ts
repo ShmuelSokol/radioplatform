@@ -63,3 +63,30 @@ export const downloadAsset = async (id: string, title: string, format = 'origina
 export const deleteAsset = async (id: string): Promise<void> => {
   await apiClient.delete(`/assets/${id}`);
 };
+
+export const getAssetAudioUrl = async (id: string): Promise<string> => {
+  const res = await apiClient.get<{ url: string }>(`/assets/${id}/audio-url`);
+  return res.data.url;
+};
+
+export const detectSilence = async (
+  id: string,
+  thresholdDb = -30,
+  minDuration = 0.5,
+): Promise<{ silence_regions: Array<{ start: number; end: number; duration: number }> }> => {
+  const res = await apiClient.post(`/assets/${id}/detect-silence`, null, {
+    params: { threshold_db: thresholdDb, min_duration: minDuration },
+  });
+  return res.data;
+};
+
+export const trimAsset = async (
+  id: string,
+  trimStart: number,
+  trimEnd: number,
+): Promise<Asset> => {
+  const res = await apiClient.post<Asset>(`/assets/${id}/trim`, null, {
+    params: { trim_start: trimStart, trim_end: trimEnd },
+  });
+  return res.data;
+};

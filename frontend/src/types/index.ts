@@ -149,3 +149,68 @@ export interface UserListResponse {
   users: User[];
   total: number;
 }
+
+// Silence Detection & Trim
+export interface SilenceRegion {
+  start: number;
+  end: number;
+  duration: number;
+}
+
+// Review System
+export type ReviewStatus = 'pending' | 'in_review' | 'approved' | 'rejected' | 'flagged';
+
+export interface ReviewQueue {
+  id: string;
+  name: string;
+  description: string | null;
+  status: 'open' | 'in_progress' | 'completed' | 'cancelled';
+  created_by: string;
+  total_items: number;
+  reviewed_items: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewItem {
+  id: string;
+  queue_id: string;
+  asset_id: string;
+  position: number;
+  status: ReviewStatus;
+  assigned_to: string | null;
+  notes: string | null;
+  version: number;
+  asset: Asset | null;
+}
+
+export interface ReviewAction {
+  id: string;
+  review_item_id: string | null;
+  asset_id: string;
+  user_id: string;
+  action_type: string;
+  comment: string | null;
+  details: Record<string, unknown> | null;
+  created_at: string;
+  user_email?: string;
+}
+
+export interface ReviewQueueListResponse {
+  queues: ReviewQueue[];
+  total: number;
+}
+
+export interface ReviewItemListResponse {
+  items: ReviewItem[];
+  total: number;
+}
+
+// User Preferences
+export interface UserPreferences {
+  preview_start_seconds: number;
+  preview_end_seconds: number;
+  default_silence_threshold_db: number;
+  default_silence_min_duration: number;
+  extra_preferences: Record<string, unknown>;
+}

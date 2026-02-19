@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listAssets, uploadAsset, deleteAsset } from '../api/assets';
+import { listAssets, uploadAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset } from '../api/assets';
 
 export function useAssets(skip = 0, limit = 100) {
   return useQuery({
@@ -29,5 +29,40 @@ export function useDeleteAsset() {
   return useMutation({
     mutationFn: (id: string) => deleteAsset(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
+  });
+}
+
+export function useAssetDetail(assetId: string | undefined) {
+  return useQuery({
+    queryKey: ['asset', assetId],
+    queryFn: () => getAsset(assetId!),
+    enabled: !!assetId,
+  });
+}
+
+export function useAssetAudioUrl(assetId: string | undefined) {
+  return useQuery({
+    queryKey: ['asset-audio-url', assetId],
+    queryFn: () => getAssetAudioUrl(assetId!),
+    enabled: !!assetId,
+  });
+}
+
+export function useDetectSilence() {
+  return useMutation({
+    mutationFn: ({ id, thresholdDb, minDuration }: { id: string; thresholdDb?: number; minDuration?: number }) =>
+      detectSilence(id, thresholdDb, minDuration),
+  });
+}
+
+export function useTrimAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, trimStart, trimEnd }: { id: string; trimStart: number; trimEnd: number }) =>
+      trimAsset(id, trimStart, trimEnd),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset'] });
+    },
   });
 }

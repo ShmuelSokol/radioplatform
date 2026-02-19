@@ -14,6 +14,9 @@ from app.models.schedule import Schedule
 from app.models.schedule_block import ScheduleBlock, RecurrenceType, DayOfWeek
 from app.models.playlist_entry import PlaylistEntry, PlaybackMode
 from app.models.now_playing import NowPlaying
+from app.models.user_preference import UserPreference
+from app.models.review_queue import ReviewQueue, ReviewItem, ReviewQueueStatus, ReviewItemStatus
+from app.models.review_action import ReviewAction
 
 __all__ = [
     "User", "UserRole",
@@ -32,4 +35,7 @@ __all__ = [
     "ScheduleBlock", "RecurrenceType", "DayOfWeek",
     "PlaylistEntry", "PlaybackMode",
     "NowPlaying",
+    "UserPreference",
+    "ReviewQueue", "ReviewItem", "ReviewQueueStatus", "ReviewItemStatus",
+    "ReviewAction",
 ]
