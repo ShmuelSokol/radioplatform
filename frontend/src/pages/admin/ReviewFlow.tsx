@@ -2,9 +2,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useReviewQueue, useQueueItems, useUpdateReviewItem } from '../../hooks/useReviews';
 import { useAssetAudioUrl } from '../../hooks/useAssets';
-import WaveformPlayer, { type WaveformPlayerHandle } from '../../components/audio/WaveformPlayer';
+import ErrorBoundary from '../../components/ErrorBoundary';
 import AssetHistory from '../../components/review/AssetHistory';
 import CommentBox from '../../components/review/CommentBox';
+
+// Lazy-load WaveformPlayer to isolate wavesurfer.js errors
+import { lazy, Suspense } from 'react';
+const WaveformPlayer = lazy(() => import('../../components/audio/WaveformPlayer'));
+type WaveformPlayerHandle = import('../../components/audio/WaveformPlayer').WaveformPlayerHandle;
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-600',
@@ -138,7 +143,13 @@ export default function ReviewFlow() {
             </div>
 
             {/* Waveform */}
-            {audioUrl && <WaveformPlayer ref={waveformRef} url={audioUrl} />}
+            {audioUrl && (
+              <ErrorBoundary fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-500">Waveform unavailable</div>}>
+                <Suspense fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-400">Loading waveform...</div>}>
+                  <WaveformPlayer ref={waveformRef} url={audioUrl} />
+                </Suspense>
+              </ErrorBoundary>
+            )}
 
             {/* Notes */}
             <div className="bg-white border border-gray-200 rounded-lg p-4">

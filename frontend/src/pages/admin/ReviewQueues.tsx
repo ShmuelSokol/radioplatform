@@ -42,7 +42,7 @@ export default function ReviewQueues() {
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="font-semibold">{queue.name}</h3>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[queue.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                    {queue.status.replace('_', ' ')}
+                    {(queue.status ?? 'open').replace('_', ' ')}
                   </span>
                 </div>
                 {queue.description && (
