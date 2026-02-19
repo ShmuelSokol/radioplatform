@@ -90,3 +90,8 @@ export const trimAsset = async (
   });
   return res.data;
 };
+
+export const restoreOriginal = async (id: string): Promise<Asset> => {
+  const res = await apiClient.post<Asset>(`/assets/${id}/restore-original`);
+  return res.data;
+};

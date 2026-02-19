@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listAssets, uploadAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset } from '../api/assets';
+import { listAssets, uploadAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal } from '../api/assets';
 
 export function useAssets(skip = 0, limit = 100) {
   return useQuery({
@@ -63,6 +63,19 @@ export function useTrimAsset() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] });
       queryClient.invalidateQueries({ queryKey: ['asset'] });
+      queryClient.invalidateQueries({ queryKey: ['asset-audio-url'] });
+    },
+  });
+}
+
+export function useRestoreOriginal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => restoreOriginal(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset'] });
+      queryClient.invalidateQueries({ queryKey: ['asset-audio-url'] });
     },
   });
 }

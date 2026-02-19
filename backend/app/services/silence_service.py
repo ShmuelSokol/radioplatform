@@ -9,6 +9,21 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def get_audio_duration(file_data: bytes) -> float:
+    """Probe audio duration using FFmpeg."""
+    cmd = [
+        settings.FFMPEG_PATH, "-i", "pipe:0",
+        "-f", "null", "-",
+    ]
+    result = subprocess.run(cmd, input=file_data, capture_output=True, timeout=60)
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+)\.(\d+)", stderr)
+    if match:
+        h, m, s, cs = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+        return h * 3600 + m * 60 + s + cs / 100.0
+    return 0.0
+
+
 def detect_silence(
     file_data: bytes,
     threshold_db: float = -30,

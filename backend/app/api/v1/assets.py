@@ -432,6 +432,50 @@ async def trim_asset_endpoint(
     return asset
 
 
+@router.post("/{asset_id}/restore-original", response_model=AssetResponse)
+async def restore_original(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Restore asset to its original file before any trims."""
+    asset = await get_asset(db, asset_id)
+    extra = dict(asset.metadata_extra or {})
+    original = extra.get("original_file_path")
+    if not original:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="No original file to restore — asset has not been trimmed")
+
+    # Restore original file path
+    asset.file_path = original
+
+    # Recalculate duration from original file
+    try:
+        if original.startswith("http://") or original.startswith("https://"):
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(original, follow_redirects=True)
+                data = resp.content
+        else:
+            from app.services.storage_service import download_file
+            data = await download_file(original)
+
+        from app.services.silence_service import get_audio_duration
+        asset.duration = get_audio_duration(data)
+    except Exception:
+        pass  # Keep existing duration if we can't recalculate
+
+    # Clear trim metadata
+    extra.pop("original_file_path", None)
+    extra.pop("trim_history", None)
+    extra.pop("silence_regions", None)
+    asset.metadata_extra = extra
+
+    await db.flush()
+    await db.refresh(asset)
+    return asset
+
+
 @router.delete("/{asset_id}", status_code=204)
 async def delete(
     asset_id: uuid.UUID,

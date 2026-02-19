@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useReviewQueue, useQueueItems, useUpdateReviewItem } from '../../hooks/useReviews';
 import { useAssetAudioUrl } from '../../hooks/useAssets';
 import ErrorBoundary from '../../components/ErrorBoundary';
@@ -33,18 +34,42 @@ function formatDuration(seconds: number | null): string {
 
 export default function ReviewFlow() {
   const { queueId } = useParams<{ queueId: string }>();
+  const queryClient = useQueryClient();
   const { data: queue } = useReviewQueue(queueId);
   const { data: itemsData, refetch: refetchItems } = useQueueItems(queueId);
   const updateMutation = useUpdateReviewItem();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [notes, setNotes] = useState('');
   const [silenceRegions, setSilenceRegions] = useState<SilenceRegion[]>([]);
+  const [waveformKey, setWaveformKey] = useState(0);
   const waveformRef = useRef<WaveformPlayerHandle>(null);
 
   const items = itemsData?.items ?? [];
   const currentItem = items[currentIndex];
   const currentAsset = currentItem?.asset;
   const { data: audioUrl, isLoading: audioUrlLoading } = useAssetAudioUrl(currentAsset?.id);
+
+  // When a region is dragged/resized on the waveform, update our local state
+  const handleRegionUpdate = useCallback((updated: { start: number; end: number; id: string }) => {
+    const match = updated.id.match(/^silence-(\d+)$/);
+    if (!match) return;
+    const idx = parseInt(match[1], 10);
+    setSilenceRegions((prev) => {
+      const next = [...prev];
+      if (next[idx]) {
+        next[idx] = { start: updated.start, end: updated.end, duration: updated.end - updated.start };
+      }
+      return next;
+    });
+  }, []);
+
+  // After a trim or restore, refresh audio URL and reload waveform
+  const handleTrimComplete = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['asset-audio-url', currentAsset?.id] });
+    queryClient.invalidateQueries({ queryKey: ['asset', currentAsset?.id] });
+    // Bump key to force waveform remount with new audio
+    setWaveformKey((k) => k + 1);
+  }, [queryClient, currentAsset?.id]);
 
   const advanceToNext = useCallback(() => {
     if (currentIndex < items.length - 1) {
@@ -160,7 +185,7 @@ export default function ReviewFlow() {
             ) : audioUrl ? (
               <ErrorBoundary key={currentAsset.id} fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-500">Waveform failed to load — try refreshing the page</div>}>
                 <Suspense fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-400">Loading waveform...</div>}>
-                  <WaveformPlayer ref={waveformRef} url={audioUrl} silenceRegions={silenceRegions} />
+                  <WaveformPlayer key={waveformKey} ref={waveformRef} url={audioUrl} silenceRegions={silenceRegions} onRegionUpdate={handleRegionUpdate} />
                 </Suspense>
               </ErrorBoundary>
             ) : (
@@ -176,6 +201,7 @@ export default function ReviewFlow() {
                   assetId={currentAsset.id}
                   waveformRef={waveformRef}
                   onRegionsDetected={setSilenceRegions}
+                  onTrimComplete={handleTrimComplete}
                 />
                 <PreviewControls waveformRef={waveformRef} duration={currentAsset.duration} />
               </div>
