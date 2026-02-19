@@ -1,10 +1,49 @@
+import logging
 import os
 import uuid
 
+import httpx
+
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Local storage fallback directory
 LOCAL_STORAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
+
+
+async def _supabase_upload(file_data: bytes, key: str, content_type: str) -> None:
+    bucket = settings.SUPABASE_STORAGE_BUCKET
+    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{key}"
+    headers = {
+        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
+        "Content-Type": content_type,
+        "x-upsert": "true",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.put(url, content=file_data, headers=headers)
+        resp.raise_for_status()
+    logger.info("Uploaded %s to Supabase Storage (%d bytes)", key, len(file_data))
+
+
+async def _supabase_download(key: str) -> bytes:
+    bucket = settings.SUPABASE_STORAGE_BUCKET
+    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{key}"
+    headers = {"Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}"}
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        return resp.content
+
+
+async def _supabase_delete(key: str) -> None:
+    bucket = settings.SUPABASE_STORAGE_BUCKET
+    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{key}"
+    headers = {"Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}"}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.delete(url, headers=headers)
+        if resp.status_code not in (200, 404):
+            resp.raise_for_status()
 
 
 async def upload_file(
@@ -28,6 +67,8 @@ async def upload_file(
                 Body=file_data,
                 ContentType=content_type,
             )
+    elif settings.supabase_storage_enabled:
+        await _supabase_upload(file_data, key, content_type)
     else:
         path = os.path.join(LOCAL_STORAGE_DIR, key)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -50,6 +91,8 @@ async def download_file(key: str) -> bytes:
             response = await s3.get_object(Bucket=settings.S3_BUCKET_NAME, Key=key)
             data = await response["Body"].read()
             return data
+    elif settings.supabase_storage_enabled:
+        return await _supabase_download(key)
     else:
         path = os.path.join(LOCAL_STORAGE_DIR, key)
         with open(path, "rb") as f:
@@ -68,6 +111,8 @@ async def delete_file(key: str) -> None:
             region_name=settings.S3_REGION,
         ) as s3:
             await s3.delete_object(Bucket=settings.S3_BUCKET_NAME, Key=key)
+    elif settings.supabase_storage_enabled:
+        await _supabase_delete(key)
     else:
         path = os.path.join(LOCAL_STORAGE_DIR, key)
         if os.path.exists(path):
