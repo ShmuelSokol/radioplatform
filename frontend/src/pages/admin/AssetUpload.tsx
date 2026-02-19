@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUploadAsset } from '../../hooks/useAssets';
+import Spinner from '../../components/Spinner';
 
 const IMPORT_FORMATS = [
   { value: 'mp2', label: 'MP2 (default)' },
@@ -184,7 +185,7 @@ export default function AssetUpload() {
           disabled={uploadMutation.isPending}
           className="w-full bg-brand-600 hover:bg-brand-700 text-white font-medium py-2 rounded transition disabled:opacity-50"
         >
-          {uploadMutation.isPending ? 'Uploading & Converting...' : 'Upload'}
+          {uploadMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Upload'}
         </button>
       </form>
     </div>

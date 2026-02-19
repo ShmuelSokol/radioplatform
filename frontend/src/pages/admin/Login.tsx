@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login } from '../../api/auth';
 import { useAuthStore } from '../../stores/authStore';
+import Spinner from '../../components/Spinner';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -61,7 +62,7 @@ export default function Login() {
           disabled={loading}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded transition disabled:opacity-50"
         >
-          {loading ? 'Logging in...' : 'Login'}
+          {loading ? <><Spinner className="mr-2" />Processing...</> : 'Login'}
         </button>
       </form>
     </div>

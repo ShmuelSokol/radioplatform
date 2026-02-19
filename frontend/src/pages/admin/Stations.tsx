@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useStations, useCreateStation, useDeleteStation } from '../../hooks/useStations';
+import Spinner from '../../components/Spinner';
 
 export default function Stations() {
   const { data, isLoading } = useStations();
@@ -53,9 +54,9 @@ export default function Stations() {
           <button
             type="submit"
             disabled={createMutation.isPending}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition"
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition disabled:opacity-50"
           >
-            Create Station
+            {createMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Create Station'}
           </button>
         </form>
       )}

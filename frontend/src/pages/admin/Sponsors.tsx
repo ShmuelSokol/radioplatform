@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listSponsors, createSponsor, updateSponsor, deleteSponsor, Sponsor } from '../../api/sponsors';
+import Spinner from '../../components/Spinner';
 
 export default function Sponsors() {
   const queryClient = useQueryClient();
@@ -156,8 +157,11 @@ export default function Sponsors() {
                 className="w-full px-4 py-2 border rounded-lg" />
             </div>
           </div>
-          <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            {editing ? 'Update' : 'Create'}
+          <button type="submit" disabled={createMut.isPending || updateMut.isPending}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            {createMut.isPending || updateMut.isPending
+              ? <><Spinner className="mr-2" />Processing...</>
+              : editing ? 'Update' : 'Create'}
           </button>
         </form>
       )}

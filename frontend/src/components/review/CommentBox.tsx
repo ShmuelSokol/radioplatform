@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAddComment } from '../../hooks/useReviews';
+import Spinner from '../Spinner';
 
 interface CommentBoxProps {
   assetId: string;
@@ -32,7 +33,7 @@ export default function CommentBox({ assetId }: CommentBoxProps) {
         disabled={!comment.trim() || addComment.isPending}
         className="mt-1 bg-brand-600 hover:bg-brand-700 text-white px-3 py-1 rounded text-xs transition disabled:opacity-50"
       >
-        {addComment.isPending ? 'Posting...' : 'Post Comment'}
+        {addComment.isPending ? <><Spinner className="mr-1" />Processing...</> : 'Post Comment'}
       </button>
     </div>
   );

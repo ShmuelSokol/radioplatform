@@ -9,6 +9,7 @@ import {
   Schedule,
 } from '../../hooks/useSchedules';
 import { useStations } from '../../hooks/useStations';
+import Spinner from '../../components/Spinner';
 
 const Schedules: React.FC = () => {
   const navigate = useNavigate();
@@ -194,9 +195,12 @@ const Schedules: React.FC = () => {
             <div className="flex gap-2">
               <button
                 type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                disabled={createSchedule.isPending || updateSchedule.isPending}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                {editingSchedule ? 'Update' : 'Create'}
+                {createSchedule.isPending || updateSchedule.isPending
+                  ? <><Spinner className="mr-2" />Processing...</>
+                  : editingSchedule ? 'Update' : 'Create'}
               </button>
               <button
                 type="button"

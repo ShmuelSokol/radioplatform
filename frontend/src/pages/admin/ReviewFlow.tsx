@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useReviewQueue, useQueueItems, useUpdateReviewItem } from '../../hooks/useReviews';
 import { useAssetAudioUrl } from '../../hooks/useAssets';
 import ErrorBoundary from '../../components/ErrorBoundary';
+import Spinner from '../../components/Spinner';
 import AssetHistory from '../../components/review/AssetHistory';
 import CommentBox from '../../components/review/CommentBox';
 
@@ -170,21 +171,21 @@ export default function ReviewFlow() {
                 disabled={updateMutation.isPending}
                 className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded text-sm transition disabled:opacity-50"
               >
-                Approve (A)
+                {updateMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Approve (A)'}
               </button>
               <button
                 onClick={() => handleAction('rejected')}
                 disabled={updateMutation.isPending}
                 className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded text-sm transition disabled:opacity-50"
               >
-                Reject (R)
+                {updateMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Reject (R)'}
               </button>
               <button
                 onClick={() => handleAction('flagged')}
                 disabled={updateMutation.isPending}
                 className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2 rounded text-sm transition disabled:opacity-50"
               >
-                Flag (F)
+                {updateMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Flag (F)'}
               </button>
               <span className="text-xs text-gray-400 ml-auto">Space = Play/Pause</span>
             </div>

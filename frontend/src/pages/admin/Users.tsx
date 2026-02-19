@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '../../hooks/useUsers';
+import Spinner from '../../components/Spinner';
 
 export default function Users() {
   const { data, isLoading } = useUsers();
@@ -89,7 +90,7 @@ export default function Users() {
           <div className="col-span-2">
             <button type="submit" disabled={createMut.isPending || updateMut.isPending}
               className="px-4 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-sm disabled:opacity-50">
-              {editId ? 'Update User' : 'Create User'}
+              {(createMut.isPending || updateMut.isPending) ? <><Spinner className="mr-2" />Processing...</> : editId ? 'Update User' : 'Create User'}
             </button>
           </div>
         </form>

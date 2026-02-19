@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useSchedulePreview } from '../../hooks/useRules';
 import type { ScheduleRule } from '../../types';
+import Spinner from '../../components/Spinner';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const TYPE_COLORS: Record<string, string> = {
@@ -173,7 +174,9 @@ export default function Rules() {
           <div className="col-span-3 flex gap-2">
             <button type="submit" disabled={createMut.isPending || updateMut.isPending}
               className="px-4 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-sm disabled:opacity-50">
-              {editId ? 'Update Rule' : 'Create Rule'}
+              {createMut.isPending || updateMut.isPending
+                ? <><Spinner className="mr-2" />Processing...</>
+                : editId ? 'Update Rule' : 'Create Rule'}
             </button>
             <label className="flex items-center gap-1 text-[11px] text-gray-400">
               <input type="checkbox" checked={form.is_active ?? true}

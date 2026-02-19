@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { usePreferences, useUpdatePreferences } from '../../hooks/usePreferences';
+import Spinner from '../Spinner';
 import type { WaveformPlayerHandle } from './WaveformPlayer';
 
 interface PreviewControlsProps {
@@ -90,7 +91,7 @@ export default function PreviewControls({ waveformRef, duration }: PreviewContro
         disabled={updatePrefs.isPending}
         className="text-xs text-brand-600 hover:text-brand-800 disabled:opacity-50"
       >
-        {updatePrefs.isPending ? 'Saving...' : 'Save as Default'}
+        {updatePrefs.isPending ? <><Spinner className="mr-1" />Processing...</> : 'Save as Default'}
       </button>
     </div>
   );

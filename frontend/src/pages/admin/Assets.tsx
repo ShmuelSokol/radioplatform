@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
 import { downloadAsset, getAssetAudioUrl } from '../../api/assets';
+import Spinner from '../../components/Spinner';
 
 const EXPORT_FORMATS = ['original', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 
@@ -42,7 +43,7 @@ function DownloadButton({ assetId, title }: { assetId: string; title: string }) 
         disabled={downloading}
         className="text-blue-600 hover:text-blue-800 text-sm disabled:opacity-50"
       >
-        {downloading ? 'Downloading...' : 'Download'}
+        {downloading ? <><Spinner className="mr-1" />Processing...</> : 'Download'}
       </button>
       {open && (
         <>
@@ -304,7 +305,7 @@ export default function Assets() {
             disabled={createQueueMutation.isPending}
             className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-1.5 rounded text-sm transition disabled:opacity-50"
           >
-            {createQueueMutation.isPending ? 'Creating...' : 'Create Review Queue'}
+            {createQueueMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Create Review Queue'}
           </button>
         </div>
       )}

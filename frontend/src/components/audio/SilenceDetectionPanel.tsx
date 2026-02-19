@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useDetectSilence, useTrimAsset } from '../../hooks/useAssets';
+import Spinner from '../Spinner';
 import type { WaveformPlayerHandle } from './WaveformPlayer';
 import type { SilenceRegion } from '../../types';
 
@@ -101,7 +102,7 @@ export default function SilenceDetectionPanel({ assetId, waveformRef }: SilenceD
           disabled={detectMutation.isPending}
           className="bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5 rounded text-sm transition disabled:opacity-50"
         >
-          {detectMutation.isPending ? 'Detecting...' : 'Detect Silence'}
+          {detectMutation.isPending ? <><Spinner className="mr-1" />Processing...</> : 'Detect Silence'}
         </button>
         {regions.length > 0 && (
           <button
@@ -147,7 +148,7 @@ export default function SilenceDetectionPanel({ assetId, waveformRef }: SilenceD
                 disabled={trimMutation.isPending}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-50"
               >
-                {trimMutation.isPending ? 'Trimming...' : 'Trim'}
+                {trimMutation.isPending ? <><Spinner className="mr-1" />Processing...</> : 'Trim'}
               </button>
             </div>
           </div>
