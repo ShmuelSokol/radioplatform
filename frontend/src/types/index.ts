@@ -48,6 +48,7 @@ export interface Asset {
   created_by: string | null;
   asset_type: string;
   category: string | null;
+  created_at: string | null;
 }
 
 export interface NowPlaying {

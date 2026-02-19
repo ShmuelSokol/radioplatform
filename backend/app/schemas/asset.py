@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,6 +18,7 @@ class AssetResponse(BaseModel):
     created_by: uuid.UUID | str | None = None
     asset_type: str = "music"
     category: str | None = None
+    created_at: datetime | None = None
 
 
 class AssetListResponse(BaseModel):

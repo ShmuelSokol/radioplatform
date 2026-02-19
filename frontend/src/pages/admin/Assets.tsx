@@ -19,6 +19,11 @@ function formatDuration(seconds: number | null): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+function formatDate(iso: string | null): string {
+  if (!iso) return '--';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function DownloadButton({ assetId, title }: { assetId: string; title: string }) {
   const [open, setOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -338,6 +343,7 @@ export default function Assets() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date Added</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
           </thead>
@@ -367,6 +373,7 @@ export default function Assets() {
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.category ?? '--'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.asset_type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.created_at)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right space-x-3">
                   <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
                   <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-sm">View</Link>
@@ -388,7 +395,7 @@ export default function Assets() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-6 py-10 text-center text-gray-500">
+                <td colSpan={10} className="px-6 py-10 text-center text-gray-500">
                   {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>
