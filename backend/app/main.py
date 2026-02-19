@@ -41,6 +41,11 @@ async def _add_missing_columns(engine):
         "ALTER TABLE channel_streams ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
         "ALTER TABLE channel_streams ADD COLUMN IF NOT EXISTS schedule_id UUID REFERENCES schedules(id) ON DELETE SET NULL",
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS channel_id UUID REFERENCES channel_streams(id) ON DELETE SET NULL",
+        "ALTER TABLE now_playing ADD COLUMN IF NOT EXISTS channel_id UUID REFERENCES channel_streams(id) ON DELETE SET NULL",
+        "ALTER TABLE now_playing ADD COLUMN IF NOT EXISTS listener_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE now_playing ADD COLUMN IF NOT EXISTS stream_url TEXT",
+        "ALTER TABLE now_playing ADD COLUMN IF NOT EXISTS block_id UUID REFERENCES schedule_blocks(id) ON DELETE SET NULL",
+        "ALTER TABLE assets ADD COLUMN IF NOT EXISTS metadata_extra JSONB",
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS review_status VARCHAR(50) DEFAULT 'pending'",
     ]
     try:
@@ -88,19 +93,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check():
-        import shutil
-        import subprocess
-        ffmpeg_info = {}
-        ffmpeg_info["which"] = shutil.which("ffmpeg")
-        try:
-            proc = subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
-            ffmpeg_info["rc"] = proc.returncode
-            ffmpeg_info["version"] = proc.stdout[:120].decode(errors="replace")
-        except FileNotFoundError:
-            ffmpeg_info["error"] = "not found"
-        except Exception as e:
-            ffmpeg_info["error"] = str(e)
-        return {"status": "ok", "ffmpeg": ffmpeg_info}
+        return {"status": "ok"}
 
     @app.get("/api/v1/init")
     async def init_db():
