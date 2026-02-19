@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_admin_or_manager
+from app.core.dependencies import get_db, require_manager
 from app.models.user import User
 from app.schemas.schedule import NowPlaying, NowPlayingUpdate
 from app.services.scheduling import SchedulingService
@@ -55,7 +55,7 @@ async def update_now_playing(
     station_id: UUID | str,
     data: NowPlayingUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """
     Manually update now-playing state (e.g., for testing or manual control).
@@ -78,7 +78,7 @@ async def update_now_playing(
 async def clear_now_playing(
     station_id: UUID | str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Clear now-playing state for a station."""
     service = SchedulingService(db)

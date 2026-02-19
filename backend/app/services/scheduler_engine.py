@@ -11,7 +11,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_async_session
+from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.station import Station
 from app.services.scheduling import SchedulingService
@@ -58,7 +58,7 @@ class SchedulerEngine:
         """Main scheduler loop."""
         while self.running:
             try:
-                async for db in get_async_session():
+                async for db in get_db():
                     await self._check_all_stations(db)
                     break
             except Exception as e:

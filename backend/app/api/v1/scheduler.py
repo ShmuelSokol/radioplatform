@@ -3,7 +3,7 @@ Scheduler control endpoints — start/stop the automatic scheduling engine.
 """
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.core.dependencies import require_admin_or_manager
+from app.core.dependencies import require_manager
 from app.models.user import User
 from app.services.scheduler_engine import get_scheduler
 
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 
 
 @router.post("/start")
-async def start_scheduler(current_user: User = Depends(require_admin_or_manager)):
+async def start_scheduler(current_user: User = Depends(require_manager)):
     """Start the automatic scheduling engine."""
     scheduler = get_scheduler()
     if scheduler.running:
@@ -22,7 +22,7 @@ async def start_scheduler(current_user: User = Depends(require_admin_or_manager)
 
 
 @router.post("/stop")
-async def stop_scheduler(current_user: User = Depends(require_admin_or_manager)):
+async def stop_scheduler(current_user: User = Depends(require_manager)):
     """Stop the automatic scheduling engine."""
     scheduler = get_scheduler()
     if not scheduler.running:

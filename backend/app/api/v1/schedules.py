@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.dependencies import get_db, require_admin_or_manager
+from app.core.dependencies import get_db, require_manager
 from app.models.playlist_entry import PlaylistEntry as PlaylistEntryModel
 from app.models.schedule import Schedule as ScheduleModel
 from app.models.schedule_block import ScheduleBlock as ScheduleBlockModel
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/schedules", tags=["schedules"])
 async def create_schedule(
     data: ScheduleCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Create a new schedule for a station."""
     schedule = ScheduleModel(**data.model_dump())
@@ -82,7 +82,7 @@ async def update_schedule(
     schedule_id: UUID | str,
     data: ScheduleUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Update a schedule."""
     stmt = select(ScheduleModel).where(ScheduleModel.id == schedule_id)
@@ -103,7 +103,7 @@ async def update_schedule(
 async def delete_schedule(
     schedule_id: UUID | str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Delete a schedule."""
     stmt = select(ScheduleModel).where(ScheduleModel.id == schedule_id)
@@ -121,7 +121,7 @@ async def delete_schedule(
 async def create_schedule_block(
     data: ScheduleBlockCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Create a new schedule block."""
     block = ScheduleBlockModel(**data.model_dump())
@@ -174,7 +174,7 @@ async def update_schedule_block(
     block_id: UUID | str,
     data: ScheduleBlockUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Update a schedule block."""
     stmt = select(ScheduleBlockModel).where(ScheduleBlockModel.id == block_id)
@@ -195,7 +195,7 @@ async def update_schedule_block(
 async def delete_schedule_block(
     block_id: UUID | str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Delete a schedule block."""
     stmt = select(ScheduleBlockModel).where(ScheduleBlockModel.id == block_id)
@@ -213,7 +213,7 @@ async def delete_schedule_block(
 async def create_playlist_entry(
     data: PlaylistEntryCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Add an asset to a schedule block's playlist."""
     entry = PlaylistEntryModel(**data.model_dump())
@@ -257,7 +257,7 @@ async def update_playlist_entry(
     entry_id: UUID | str,
     data: PlaylistEntryUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Update a playlist entry."""
     stmt = select(PlaylistEntryModel).where(PlaylistEntryModel.id == entry_id)
@@ -278,7 +278,7 @@ async def update_playlist_entry(
 async def delete_playlist_entry(
     entry_id: UUID | str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(require_manager),
 ):
     """Delete a playlist entry."""
     stmt = select(PlaylistEntryModel).where(PlaylistEntryModel.id == entry_id)
