@@ -181,15 +181,51 @@ async def list_all(
     return AssetListResponse(assets=assets, total=total)
 
 
+# Formats that browsers can natively decode for waveform rendering
+BROWSER_AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".webm"}
+
+
 @router.get("/{asset_id}/audio-url")
 async def get_audio_url(
     asset_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Return a public URL for wavesurfer.js to fetch audio directly."""
+    """Return a public URL for wavesurfer.js to fetch audio directly.
+
+    For non-browser-friendly formats (e.g. MP2), auto-converts to MP3,
+    uploads the MP3 to Supabase, updates the asset record, and returns
+    the new public URL. This is a one-time conversion.
+    """
     asset = await get_asset(db, asset_id)
     file_path = asset.file_path
+
+    # Check if file extension is browser-friendly
+    ext = ("." + file_path.rsplit(".", 1)[-1].lower()) if "." in file_path else ""
+    if ext and ext not in BROWSER_AUDIO_EXTS:
+        # Non-browser format (e.g. .mp2) — auto-convert to MP3 and re-upload
+        try:
+            from app.config import settings as app_settings
+            if app_settings.supabase_storage_enabled:
+                from app.services.storage_service import download_file, upload_file
+                from app.services.audio_convert_service import convert_audio
+
+                data = await download_file(file_path)
+                converted, duration, new_ext = convert_audio(data, f"convert{ext}", "mp3")
+                # Upload MP3 alongside original
+                new_path = file_path.rsplit(".", 1)[0] + new_ext
+                await upload_file(converted, new_path, "audio/mpeg")
+                # Update asset record to point to the new MP3
+                asset.file_path = new_path
+                if duration:
+                    asset.duration = duration
+                await db.commit()
+                logger.info("Auto-converted %s -> %s for asset %s", ext, new_ext, asset_id)
+                file_path = new_path
+        except Exception as exc:
+            logger.error("Auto-conversion failed for asset %s: %s", asset_id, exc)
+            # Fall through to return original URL
+
     if file_path.startswith("http://") or file_path.startswith("https://"):
         return {"url": file_path}
     # Build Supabase public URL if configured
@@ -200,6 +236,7 @@ async def get_audio_url(
         return {"url": url}
     # Fallback: proxy through download endpoint
     return {"url": f"/api/v1/assets/{asset_id}/download"}
+
 
 
 @router.get("/{asset_id}", response_model=AssetResponse)

@@ -6,6 +6,9 @@ import ErrorBoundary from '../../components/ErrorBoundary';
 import Spinner from '../../components/Spinner';
 import AssetHistory from '../../components/review/AssetHistory';
 import CommentBox from '../../components/review/CommentBox';
+import SilenceDetectionPanel from '../../components/audio/SilenceDetectionPanel';
+import PreviewControls from '../../components/audio/PreviewControls';
+import type { SilenceRegion } from '../../types';
 
 // Lazy-load WaveformPlayer to isolate wavesurfer.js errors
 import { lazy, Suspense } from 'react';
@@ -35,6 +38,7 @@ export default function ReviewFlow() {
   const updateMutation = useUpdateReviewItem();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [notes, setNotes] = useState('');
+  const [silenceRegions, setSilenceRegions] = useState<SilenceRegion[]>([]);
   const waveformRef = useRef<WaveformPlayerHandle>(null);
 
   const items = itemsData?.items ?? [];
@@ -46,6 +50,7 @@ export default function ReviewFlow() {
     if (currentIndex < items.length - 1) {
       setCurrentIndex((i) => i + 1);
       setNotes('');
+      setSilenceRegions([]);
     }
   }, [currentIndex, items.length]);
 
@@ -155,12 +160,24 @@ export default function ReviewFlow() {
             ) : audioUrl ? (
               <ErrorBoundary key={currentAsset.id} fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-500">Waveform failed to load — try refreshing the page</div>}>
                 <Suspense fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-400">Loading waveform...</div>}>
-                  <WaveformPlayer ref={waveformRef} url={audioUrl} />
+                  <WaveformPlayer ref={waveformRef} url={audioUrl} silenceRegions={silenceRegions} />
                 </Suspense>
               </ErrorBoundary>
             ) : (
               <div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-amber-600 text-sm">
                 No audio file available for this asset
+              </div>
+            )}
+
+            {/* Silence Detection + Preview Controls */}
+            {audioUrl && currentAsset?.id && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <SilenceDetectionPanel
+                  assetId={currentAsset.id}
+                  waveformRef={waveformRef}
+                  onRegionsDetected={setSilenceRegions}
+                />
+                <PreviewControls waveformRef={waveformRef} duration={currentAsset.duration} />
               </div>
             )}
 
@@ -212,7 +229,7 @@ export default function ReviewFlow() {
             {/* Navigation */}
             <div className="flex items-center gap-3">
               <button
-                onClick={() => { setCurrentIndex((i) => Math.max(0, i - 1)); setNotes(''); }}
+                onClick={() => { setCurrentIndex((i) => Math.max(0, i - 1)); setNotes(''); setSilenceRegions([]); }}
                 disabled={currentIndex === 0}
                 className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-30"
               >
@@ -237,7 +254,7 @@ export default function ReviewFlow() {
               {items.map((item, i) => (
                 <button
                   key={item.id}
-                  onClick={() => { setCurrentIndex(i); setNotes(''); }}
+                  onClick={() => { setCurrentIndex(i); setNotes(''); setSilenceRegions([]); }}
                   className={`block w-full text-left px-2 py-1.5 text-sm rounded mb-0.5 ${
                     i === currentIndex ? 'bg-brand-100 text-brand-700' : 'hover:bg-gray-50'
                   }`}

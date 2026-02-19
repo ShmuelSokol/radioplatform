@@ -7,9 +7,10 @@ import type { SilenceRegion } from '../../types';
 interface SilenceDetectionPanelProps {
   assetId: string;
   waveformRef: React.RefObject<WaveformPlayerHandle | null>;
+  onRegionsDetected?: (regions: SilenceRegion[]) => void;
 }
 
-export default function SilenceDetectionPanel({ assetId, waveformRef }: SilenceDetectionPanelProps) {
+export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsDetected }: SilenceDetectionPanelProps) {
   const [thresholdDb, setThresholdDb] = useState(-30);
   const [minDuration, setMinDuration] = useState(0.5);
   const [regions, setRegions] = useState<SilenceRegion[]>([]);
@@ -24,11 +25,7 @@ export default function SilenceDetectionPanel({ assetId, waveformRef }: SilenceD
       {
         onSuccess: (data) => {
           setRegions(data.silence_regions);
-          // Push regions to waveform
-          const ws = waveformRef.current?.getWaveSurfer();
-          if (ws) {
-            // WaveformPlayer handles regions via props — we update parent state
-          }
+          onRegionsDetected?.(data.silence_regions);
         },
       }
     );
