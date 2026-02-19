@@ -12,6 +12,18 @@ export interface HolidayWindow {
   updated_at: string;
 }
 
+export interface AutoGenerateResponse {
+  created: number;
+  skipped: number;
+}
+
+export interface SilenceAssetResponse {
+  id: string;
+  title: string;
+  file_path: string;
+  already_existed: boolean;
+}
+
 export const listHolidays = async (): Promise<HolidayWindow[]> => {
   const res = await apiClient.get<HolidayWindow[]>('/holidays');
   return res.data;
@@ -29,4 +41,20 @@ export const updateHoliday = async (id: string, data: Partial<HolidayWindow>): P
 
 export const deleteHoliday = async (id: string): Promise<void> => {
   await apiClient.delete(`/holidays/${id}`);
+};
+
+export const autoGenerateBlackouts = async (
+  stationId: string,
+  monthsAhead: number = 12,
+): Promise<AutoGenerateResponse> => {
+  const res = await apiClient.post<AutoGenerateResponse>('/holidays/auto-generate', {
+    station_id: stationId,
+    months_ahead: monthsAhead,
+  });
+  return res.data;
+};
+
+export const ensureSilenceAsset = async (): Promise<SilenceAssetResponse> => {
+  const res = await apiClient.post<SilenceAssetResponse>('/holidays/ensure-silence-asset');
+  return res.data;
 };

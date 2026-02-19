@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listHolidays, createHoliday, updateHoliday, deleteHoliday, HolidayWindow } from '../../api/holidays';
+import {
+  listHolidays, createHoliday, updateHoliday, deleteHoliday,
+  autoGenerateBlackouts, ensureSilenceAsset,
+  HolidayWindow,
+} from '../../api/holidays';
 import { useStations } from '../../hooks/useStations';
 import Spinner from '../../components/Spinner';
 
@@ -10,6 +14,11 @@ export default function Holidays() {
   const { data: stations } = useStations();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<HolidayWindow | null>(null);
+
+  // Auto-generate state
+  const [autoGenStationId, setAutoGenStationId] = useState('');
+  const [autoGenResult, setAutoGenResult] = useState<{ created: number; skipped: number } | null>(null);
+  const [silenceResult, setSilenceResult] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -33,6 +42,21 @@ export default function Holidays() {
   const deleteMut = useMutation({
     mutationFn: deleteHoliday,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['holidays'] }),
+  });
+
+  const autoGenMut = useMutation({
+    mutationFn: (stationId: string) => autoGenerateBlackouts(stationId),
+    onSuccess: (data) => {
+      setAutoGenResult(data);
+      queryClient.invalidateQueries({ queryKey: ['holidays'] });
+    },
+  });
+
+  const silenceMut = useMutation({
+    mutationFn: ensureSilenceAsset,
+    onSuccess: (data) => {
+      setSilenceResult(data.already_existed ? 'Silence asset already exists.' : 'Silence asset created successfully.');
+    },
   });
 
   const resetForm = () => {
@@ -83,6 +107,8 @@ export default function Holidays() {
 
   if (isLoading) return <div className="p-8">Loading...</div>;
 
+  const stationList = stations?.stations || [];
+
   return (
     <div className="max-w-4xl mx-auto p-8">
       <div className="flex justify-between items-center mb-6">
@@ -93,6 +119,57 @@ export default function Holidays() {
         >
           {showForm ? 'Cancel' : 'New Blackout'}
         </button>
+      </div>
+
+      {/* Auto-Generate Section */}
+      <div className="bg-white p-6 rounded-lg shadow-md mb-6">
+        <h2 className="text-lg font-semibold mb-3">Auto-Generate Shabbos & Yom Tov</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Automatically creates blackout windows based on station location (18 min before sunset erev, 72 min after sunset motzei).
+        </p>
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-sm font-medium mb-1">Station</label>
+            <select
+              value={autoGenStationId}
+              onChange={e => { setAutoGenStationId(e.target.value); setAutoGenResult(null); }}
+              className="w-full px-4 py-2 border rounded-lg"
+            >
+              <option value="">Select a station...</option>
+              {stationList.map((s: any) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={() => autoGenStationId && autoGenMut.mutate(autoGenStationId)}
+            disabled={!autoGenStationId || autoGenMut.isPending}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+          >
+            {autoGenMut.isPending ? <><Spinner className="mr-2" />Generating...</> : 'Auto-Generate'}
+          </button>
+          <button
+            onClick={() => silenceMut.mutate()}
+            disabled={silenceMut.isPending}
+            className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
+          >
+            {silenceMut.isPending ? <><Spinner className="mr-2" />Creating...</> : 'Setup Silence Asset'}
+          </button>
+        </div>
+        {autoGenResult && (
+          <p className="mt-3 text-sm text-green-700 bg-green-50 px-3 py-2 rounded">
+            Created {autoGenResult.created} blackout window{autoGenResult.created !== 1 ? 's' : ''}
+            {autoGenResult.skipped > 0 && `, skipped ${autoGenResult.skipped} duplicate${autoGenResult.skipped !== 1 ? 's' : ''}`}.
+          </p>
+        )}
+        {autoGenMut.isError && (
+          <p className="mt-3 text-sm text-red-700 bg-red-50 px-3 py-2 rounded">
+            {(autoGenMut.error as any)?.response?.data?.detail || 'Failed to auto-generate. Make sure the station has lat/lon set.'}
+          </p>
+        )}
+        {silenceResult && (
+          <p className="mt-3 text-sm text-blue-700 bg-blue-50 px-3 py-2 rounded">{silenceResult}</p>
+        )}
       </div>
 
       {showForm && (
@@ -130,7 +207,7 @@ export default function Holidays() {
             <div>
               <label className="block text-sm font-medium mb-1">Affected Stations</label>
               <div className="flex flex-wrap gap-2">
-                {stations?.stations?.map((s: any) => (
+                {stationList.map((s: any) => (
                   <button key={s.id} type="button" onClick={() => toggleStation(s.id)}
                     className={`px-3 py-1 rounded-full text-sm ${form.affected_station_ids.includes(s.id)
                       ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>

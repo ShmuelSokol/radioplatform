@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HolidayWindowBase(BaseModel):
@@ -34,3 +34,13 @@ class HolidayWindowInDB(HolidayWindowBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AutoGenerateRequest(BaseModel):
+    station_id: UUID | str
+    months_ahead: int = Field(default=12, ge=1, le=24)
+
+
+class AutoGenerateResponse(BaseModel):
+    created: int
+    skipped: int

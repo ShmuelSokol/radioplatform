@@ -93,6 +93,12 @@ class SchedulerEngine:
             except Exception as e:
                 logger.error(f"Error checking station {station.id}: {e}", exc_info=True)
     
+    async def _get_silence_asset(self, db: AsyncSession) -> Asset | None:
+        """Get the silence asset for blackout playback, if one exists."""
+        stmt = select(Asset).where(Asset.asset_type == "silence").limit(1)
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def _is_station_blacked_out(self, db: AsyncSession, station: Station, now: datetime) -> bool:
         """Check if a station is in a blackout window (Sabbath/holiday)."""
         stmt = select(HolidayWindow).where(
@@ -121,21 +127,55 @@ class SchedulerEngine:
 
         # Check blackout windows first
         if await self._is_station_blacked_out(db, station, now):
+            silence = await self._get_silence_asset(db)
             now_playing = await service.get_now_playing(station.id)
-            if now_playing:
-                logger.info(f"Station {station.id}: Blackout active, clearing playback")
-                await service.clear_now_playing(station.id)
-                try:
-                    from app.api.v1.websocket import broadcast_now_playing_update
-                    await broadcast_now_playing_update(str(station.id), {
-                        "station_id": str(station.id),
-                        "asset_id": None,
-                        "started_at": now.isoformat(),
-                        "ends_at": None,
-                        "blackout": True,
-                    })
-                except Exception as e:
-                    logger.error(f"Failed to broadcast blackout update: {e}")
+
+            if silence:
+                # Play silence asset on loop during blackout
+                needs_silence = False
+                if not now_playing:
+                    needs_silence = True
+                elif now_playing.asset_id != silence.id:
+                    needs_silence = True
+                elif now_playing.ends_at and now_playing.ends_at <= now:
+                    needs_silence = True  # Silence track ended, re-set it
+
+                if needs_silence:
+                    duration = silence.duration or 300.0
+                    await service.update_now_playing(
+                        station_id=station.id,
+                        asset_id=silence.id,
+                        block_id=None,
+                        duration_seconds=duration,
+                    )
+                    logger.info(f"Station {station.id}: Blackout active, playing silence")
+                    try:
+                        from app.api.v1.websocket import broadcast_now_playing_update
+                        await broadcast_now_playing_update(str(station.id), {
+                            "station_id": str(station.id),
+                            "asset_id": str(silence.id),
+                            "started_at": now.isoformat(),
+                            "ends_at": (now + timedelta(seconds=duration)).isoformat(),
+                            "blackout": True,
+                        })
+                    except Exception as e:
+                        logger.error(f"Failed to broadcast blackout update: {e}")
+            else:
+                # No silence asset — fall back to clearing playback
+                if now_playing:
+                    logger.info(f"Station {station.id}: Blackout active, clearing playback")
+                    await service.clear_now_playing(station.id)
+                    try:
+                        from app.api.v1.websocket import broadcast_now_playing_update
+                        await broadcast_now_playing_update(str(station.id), {
+                            "station_id": str(station.id),
+                            "asset_id": None,
+                            "started_at": now.isoformat(),
+                            "ends_at": None,
+                            "blackout": True,
+                        })
+                    except Exception as e:
+                        logger.error(f"Failed to broadcast blackout update: {e}")
             return
 
         # Get current now-playing state
