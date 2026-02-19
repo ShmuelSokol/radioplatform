@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
+import { useCreateReviewQueue } from '../../hooks/useReviews';
 import { downloadAsset } from '../../api/assets';
 
 const EXPORT_FORMATS = ['original', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 
 function formatDuration(seconds: number | null): string {
-  if (!seconds) return '—';
+  if (!seconds) return '--';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
@@ -15,12 +16,17 @@ function formatDuration(seconds: number | null): string {
 function DownloadButton({ assetId, title }: { assetId: string; title: string }) {
   const [open, setOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleDownload = async (format: string) => {
     setOpen(false);
     setDownloading(true);
+    setError(null);
     try {
       await downloadAsset(assetId, title, format);
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail ?? err?.message ?? 'Download failed';
+      setError(typeof msg === 'string' ? msg : 'Download failed');
     } finally {
       setDownloading(false);
     }
@@ -28,8 +34,11 @@ function DownloadButton({ assetId, title }: { assetId: string; title: string }) 
 
   return (
     <span className="relative inline-block">
+      {error && (
+        <span className="text-red-500 text-xs mr-1" title={error}>Error</span>
+      )}
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => { setOpen(!open); setError(null); }}
         disabled={downloading}
         className="text-blue-600 hover:text-blue-800 text-sm disabled:opacity-50"
       >
@@ -78,7 +87,10 @@ const EMPTY_FILTERS: Filters = {
 export default function Assets() {
   const { data, isLoading } = useAssets();
   const deleteMutation = useDeleteAsset();
+  const createQueueMutation = useCreateReviewQueue();
+  const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const setFilter = (key: keyof Filters, value: string) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -100,6 +112,36 @@ export default function Assets() {
       return true;
     });
   }, [data, filters]);
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === filtered.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map((a) => a.id)));
+    }
+  };
+
+  const handleCreateQueue = () => {
+    const ids = Array.from(selected);
+    createQueueMutation.mutate(
+      { name: `Review Queue - ${new Date().toLocaleDateString()}`, assetIds: ids },
+      {
+        onSuccess: (queue) => {
+          setSelected(new Set());
+          navigate(`/admin/reviews/${queue.id}`);
+        },
+      }
+    );
+  };
 
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
 
@@ -186,7 +228,7 @@ export default function Assets() {
               min={0}
               value={filters.durationMax}
               onChange={(e) => setFilter('durationMax', e.target.value)}
-              placeholder="∞"
+              placeholder="..."
               className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
           </div>
@@ -204,10 +246,34 @@ export default function Assets() {
         )}
       </div>
 
+      {/* Batch action bar */}
+      {selected.size > 0 && (
+        <div className="bg-brand-50 border border-brand-200 rounded-lg p-3 mb-4 flex items-center justify-between">
+          <span className="text-sm font-medium text-brand-700">
+            {selected.size} selected
+          </span>
+          <button
+            onClick={handleCreateQueue}
+            disabled={createQueueMutation.isPending}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-1.5 rounded text-sm transition disabled:opacity-50"
+          >
+            {createQueueMutation.isPending ? 'Creating...' : 'Create Review Queue'}
+          </button>
+        </div>
+      )}
+
       <div className="bg-white shadow rounded-lg overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
+              <th className="px-3 py-3 text-left">
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && selected.size === filtered.length}
+                  onChange={toggleAll}
+                  className="rounded border-gray-300"
+                />
+              </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Artist</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Album</th>
@@ -219,14 +285,23 @@ export default function Assets() {
           </thead>
           <tbody className="divide-y divide-gray-200">
             {filtered.map((asset) => (
-              <tr key={asset.id}>
+              <tr key={asset.id} className={selected.has(asset.id) ? 'bg-brand-50' : ''}>
+                <td className="px-3 py-4">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(asset.id)}
+                    onChange={() => toggleSelect(asset.id)}
+                    className="rounded border-gray-300"
+                  />
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap font-medium">{asset.title}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.artist ?? '—'}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.album ?? '—'}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.category ?? '—'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.artist ?? '--'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.album ?? '--'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.category ?? '--'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.asset_type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right space-x-3">
+                  <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-sm">View</Link>
                   <DownloadButton assetId={asset.id} title={asset.title} />
                   <button
                     onClick={() => deleteMutation.mutate(asset.id)}
@@ -239,7 +314,7 @@ export default function Assets() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-6 py-10 text-center text-gray-500">
+                <td colSpan={8} className="px-6 py-10 text-center text-gray-500">
                   {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>

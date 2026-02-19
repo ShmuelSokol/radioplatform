@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, require_manager
@@ -65,6 +65,27 @@ async def list_all(
     return AssetListResponse(assets=assets, total=total)
 
 
+@router.get("/{asset_id}/audio-url")
+async def get_audio_url(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Return a public URL for wavesurfer.js to fetch audio directly."""
+    asset = await get_asset(db, asset_id)
+    file_path = asset.file_path
+    if file_path.startswith("http://") or file_path.startswith("https://"):
+        return {"url": file_path}
+    # Build Supabase public URL if configured
+    from app.config import settings
+    if settings.supabase_storage_enabled:
+        bucket = settings.SUPABASE_STORAGE_BUCKET
+        url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
+        return {"url": url}
+    # Fallback: proxy through download endpoint
+    return {"url": f"/api/v1/assets/{asset_id}/download"}
+
+
 @router.get("/{asset_id}", response_model=AssetResponse)
 async def get_one(
     asset_id: uuid.UUID,
@@ -105,26 +126,27 @@ async def download_asset(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    import logging
-    import subprocess
+    from fastapi import HTTPException
     asset = await get_asset(db, asset_id)
     file_path = asset.file_path
     safe_title = "".join(c for c in asset.title if c.isalnum() or c in " -_").strip() or "download"
 
-    # Get the raw file data
+    # Always fetch the raw bytes server-side.
+    # Never redirect to Supabase — the frontend Axios client forwards the JWT
+    # Authorization header on redirects, which triggers a CORS preflight that
+    # Supabase rejects.
     if file_path.startswith("http://") or file_path.startswith("https://"):
-        if format == "original":
-            return RedirectResponse(url=file_path)
-        # Need to fetch the file for conversion
         import httpx
         async with httpx.AsyncClient() as client:
             resp = await client.get(file_path, follow_redirects=True)
+            if resp.status_code >= 400:
+                raise HTTPException(status_code=502, detail="Failed to fetch file from storage")
             data = resp.content
     else:
         from app.services.storage_service import download_file
         data = await download_file(file_path)
 
-    # If original format requested, return as-is
+    # Return original format as-is
     if format == "original":
         ext = file_path.rsplit(".", 1)[-1] if "." in file_path else "mp3"
         return Response(
@@ -133,27 +155,14 @@ async def download_asset(
             headers={"Content-Disposition": f'attachment; filename="{safe_title}.{ext}"'},
         )
 
-    # Convert to requested format via FFmpeg
+    # Convert using the shared service (includes temp-file fallback for MPEG etc.)
     fmt_config = EXPORT_FORMATS.get(format)
     if not fmt_config:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"Unsupported format: {format}. Use: {', '.join(EXPORT_FORMATS.keys())}")
 
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-i", "pipe:0", "-f", fmt_config["ffmpeg_fmt"]] + fmt_config["args"] + ["pipe:1"],
-            input=data,
-            capture_output=True,
-            timeout=300,
-        )
-        if result.returncode != 0:
-            logging.getLogger(__name__).warning("FFmpeg conversion failed: %s", result.stderr[:500])
-            from fastapi import HTTPException
-            raise HTTPException(status_code=500, detail="Audio conversion failed")
-        converted = result.stdout
-    except FileNotFoundError:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=503, detail="FFmpeg not available on server")
+    from app.services.audio_convert_service import convert_audio
+    input_ext = "." + file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ".mp3"
+    converted, _duration, _ext = convert_audio(data, f"download{input_ext}", format)
 
     return Response(
         content=converted,
@@ -184,6 +193,88 @@ async def clip(
     asset = await get_asset(db, asset_id)
     result = task_clip_audio.delay(str(asset.id), asset.file_path, body.start, body.duration)
     return TaskStatusResponse(task_id=result.id, status="queued")
+
+
+@router.post("/{asset_id}/detect-silence")
+async def detect_silence_endpoint(
+    asset_id: uuid.UUID,
+    threshold_db: float = Query(-30),
+    min_duration: float = Query(0.5),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Detect silence regions in an asset's audio file."""
+    asset = await get_asset(db, asset_id)
+    file_path = asset.file_path
+
+    # Get file data
+    if file_path.startswith("http://") or file_path.startswith("https://"):
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(file_path, follow_redirects=True)
+            data = resp.content
+    else:
+        from app.services.storage_service import download_file
+        data = await download_file(file_path)
+
+    from app.services.silence_service import detect_silence
+    regions = detect_silence(data, threshold_db=threshold_db, min_duration=min_duration)
+
+    # Store in metadata_extra
+    extra = dict(asset.metadata_extra or {})
+    extra["silence_regions"] = regions
+    asset.metadata_extra = extra
+    await db.flush()
+    await db.refresh(asset)
+
+    return {"silence_regions": regions}
+
+
+@router.post("/{asset_id}/trim", response_model=AssetResponse)
+async def trim_asset_endpoint(
+    asset_id: uuid.UUID,
+    trim_start: float = Query(...),
+    trim_end: float = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Trim audio to [trim_start, trim_end]. Non-destructive: keeps original."""
+    asset = await get_asset(db, asset_id)
+    file_path = asset.file_path
+
+    # Get file data
+    if file_path.startswith("http://") or file_path.startswith("https://"):
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(file_path, follow_redirects=True)
+            data = resp.content
+    else:
+        from app.services.storage_service import download_file
+        data = await download_file(file_path)
+
+    from app.services.silence_service import trim_audio
+    trimmed_data, new_duration = trim_audio(data, trim_start, trim_end)
+
+    # Upload trimmed file
+    from app.services.storage_service import generate_asset_key, upload_file as upload_storage
+    new_key = generate_asset_key("trimmed.mp3")
+    await upload_storage(trimmed_data, new_key, "audio/mpeg")
+
+    # Update asset non-destructively
+    extra = dict(asset.metadata_extra or {})
+    if "original_file_path" not in extra:
+        extra["original_file_path"] = asset.file_path
+    trim_entry = {"from": asset.file_path, "to": new_key, "trim_start": trim_start, "trim_end": trim_end}
+    extra.setdefault("trim_history", []).append(trim_entry)
+    extra.pop("silence_regions", None)
+
+    asset.file_path = new_key
+    asset.duration = new_duration
+    asset.metadata_extra = extra
+    await db.flush()
+    await db.refresh(asset)
+
+    return asset
 
 
 @router.delete("/{asset_id}", status_code=204)
