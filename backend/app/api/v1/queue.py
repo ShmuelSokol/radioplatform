@@ -266,7 +266,11 @@ async def get_queue(
     _user: User = Depends(get_current_user),
 ):
     # Run the playback engine on every poll
-    now_playing_entry = await _check_advance(db, station_id)
+    try:
+        now_playing_entry = await _check_advance(db, station_id)
+    except Exception as exc:
+        logger.error("_check_advance failed: %s", exc, exc_info=True)
+        now_playing_entry = None
 
     result = await db.execute(
         select(QueueEntry)
@@ -594,34 +598,103 @@ async def start_playback(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    result = await db.execute(
-        select(QueueEntry)
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
-    )
-    current = result.scalar_one_or_none()
-    if current:
-        if not current.started_at:
-            current.started_at = datetime.now(timezone.utc)
+    import traceback
+    try:
+        result = await db.execute(
+            select(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        )
+        current = result.scalar_one_or_none()
+        if current:
+            if not current.started_at:
+                current.started_at = datetime.now(timezone.utc)
+                await db.commit()
+            return {"message": "Already playing", "now_playing": str(current.asset_id)}
+
+        # Auto-fill queue before starting
+        await _replenish_queue(db, station_id)
+
+        result = await db.execute(
+            select(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+            .order_by(QueueEntry.position).limit(1)
+        )
+        next_entry = result.scalar_one_or_none()
+        if not next_entry:
             await db.commit()
-        return {"message": "Already playing", "now_playing": str(current.asset_id)}
+            return {"message": "Queue empty — no music assets available", "now_playing": None}
 
-    # Auto-fill queue before starting
-    await _replenish_queue(db, station_id)
-
-    result = await db.execute(
-        select(QueueEntry)
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
-        .order_by(QueueEntry.position).limit(1)
-    )
-    next_entry = result.scalar_one_or_none()
-    if not next_entry:
+        next_entry.status = "playing"
+        next_entry.started_at = datetime.now(timezone.utc)
         await db.commit()
-        return {"message": "Queue empty — no music assets available", "now_playing": None}
+        return {"message": "Started", "now_playing": str(next_entry.asset_id)}
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error("start_playback error: %s\n%s", exc, tb)
+        return JSONResponse({"error": str(exc), "traceback": tb}, status_code=500)
 
-    next_entry.status = "playing"
-    next_entry.started_at = datetime.now(timezone.utc)
-    await db.commit()
-    return {"message": "Started", "now_playing": str(next_entry.asset_id)}
+
+@router.get("/debug")
+async def debug_queue(
+    station_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Debug endpoint to diagnose queue issues."""
+    import traceback
+    steps = []
+    try:
+        # Step 1: Count queue entries
+        result = await db.execute(
+            select(func.count(QueueEntry.id))
+            .where(QueueEntry.station_id == station_id)
+        )
+        total = result.scalar() or 0
+        steps.append(f"1. Total queue entries: {total}")
+
+        # Step 2: Count by status
+        for status in ["pending", "playing", "played", "skipped"]:
+            result = await db.execute(
+                select(func.count(QueueEntry.id))
+                .where(QueueEntry.station_id == station_id, QueueEntry.status == status)
+            )
+            count = result.scalar() or 0
+            steps.append(f"2. Status '{status}': {count}")
+
+        # Step 3: Count assets
+        result = await db.execute(select(func.count(Asset.id)))
+        asset_count = result.scalar() or 0
+        steps.append(f"3. Total assets: {asset_count}")
+
+        # Step 4: Count music assets
+        result = await db.execute(
+            select(func.count(Asset.id)).where(Asset.asset_type == "music")
+        )
+        music_count = result.scalar() or 0
+        steps.append(f"4. Music assets: {music_count}")
+
+        # Step 5: Test replenish
+        try:
+            from app.services.queue_replenish_service import QueueReplenishService
+            service = QueueReplenishService(db, station_id)
+            await service.replenish()
+            steps.append("5. Replenish: SUCCESS")
+        except Exception as e:
+            steps.append(f"5. Replenish FAILED: {e}")
+            steps.append(traceback.format_exc())
+
+        # Step 6: Count queue again
+        result = await db.execute(
+            select(func.count(QueueEntry.id))
+            .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
+        )
+        active_count = result.scalar() or 0
+        steps.append(f"6. Active queue entries after replenish: {active_count}")
+
+        await db.commit()
+        return {"steps": steps}
+    except Exception as e:
+        return JSONResponse({"error": str(e), "traceback": traceback.format_exc(), "steps": steps}, status_code=500)
 
 
 @router.post("/preview-weather")
