@@ -28,13 +28,15 @@ async def upload_asset(
     user: User = Depends(require_manager),
 ):
     file_data = await file.read()
+    original_filename = file.filename or "upload.mp3"
     asset = await create_asset(
         db,
         title=title,
-        filename=file.filename or "upload.mp3",
+        filename=original_filename,
         file_data=file_data,
         content_type=file.content_type or "audio/mpeg",
         user_id=user.id,
+        original_filename=original_filename,
     )
     # Dispatch metadata extraction task
     task_extract_metadata.delay(str(asset.id), asset.file_path)

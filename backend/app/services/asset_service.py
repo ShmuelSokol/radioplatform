@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy import func, select
@@ -5,7 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.models.asset import Asset
+from app.services.audio_convert_service import convert_to_mp3
 from app.services.storage_service import generate_asset_key, upload_file
+
+logger = logging.getLogger(__name__)
 
 
 async def create_asset(
@@ -15,19 +19,44 @@ async def create_asset(
     file_data: bytes,
     content_type: str,
     user_id: uuid.UUID | None = None,
+    original_filename: str | None = None,
 ) -> Asset:
-    s3_key = generate_asset_key(filename)
-    await upload_file(file_data, s3_key, content_type)
+    # Use original_filename for conversion detection; fall back to filename
+    source_name = original_filename or filename
+
+    # Convert to MP3 and extract duration
+    converted_data, duration = convert_to_mp3(file_data, source_name)
+
+    # Always generate a .mp3 key regardless of original extension
+    mp3_filename = _force_mp3_extension(filename)
+    s3_key = generate_asset_key(mp3_filename)
+
+    await upload_file(converted_data, s3_key, "audio/mpeg")
 
     asset = Asset(
         title=title,
         file_path=s3_key,
+        duration=duration,
         created_by=user_id,
     )
     db.add(asset)
     await db.flush()
     await db.refresh(asset)
+
+    if duration is not None:
+        logger.info("Asset '%s' created with duration=%.2fs", title, duration)
+    else:
+        logger.info("Asset '%s' created (duration unknown)", title)
+
     return asset
+
+
+def _force_mp3_extension(filename: str) -> str:
+    """Replace the file extension with .mp3."""
+    if "." in filename:
+        base = filename.rsplit(".", 1)[0]
+        return f"{base}.mp3"
+    return f"{filename}.mp3"
 
 
 async def get_asset(db: AsyncSession, asset_id: uuid.UUID) -> Asset:
