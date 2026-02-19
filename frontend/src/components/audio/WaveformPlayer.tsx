@@ -158,10 +158,12 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
       }
     }, [previewRegion]);
 
-    // Zoom
+    // Zoom — only after audio is loaded (zoom before ready throws "No audio loaded")
     useEffect(() => {
-      wsRef.current?.zoom(zoom);
-    }, [zoom]);
+      if (!loading && !error) {
+        wsRef.current?.zoom(zoom);
+      }
+    }, [zoom, loading, error]);
 
     useImperativeHandle(ref, () => ({
       playRegion(start: number, end: number) {
