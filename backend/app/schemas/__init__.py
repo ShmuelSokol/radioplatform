@@ -1,6 +1,6 @@
 # Schemas package
-from app.schemas.asset import Asset, AssetCreate, AssetUpdate
-from app.schemas.auth import Token, TokenData, UserCreate, UserLogin
+from app.schemas.asset import AssetResponse, AssetListResponse
+from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse, UserResponse
 from app.schemas.schedule import (
     NowPlaying,
     NowPlayingCreate,
@@ -15,29 +15,4 @@ from app.schemas.schedule import (
     ScheduleCreate,
     ScheduleUpdate,
 )
-from app.schemas.station import Station, StationCreate, StationUpdate
-
-__all__ = [
-    "Asset",
-    "AssetCreate",
-    "AssetUpdate",
-    "Token",
-    "TokenData",
-    "UserCreate",
-    "UserLogin",
-    "Station",
-    "StationCreate",
-    "StationUpdate",
-    "Schedule",
-    "ScheduleCreate",
-    "ScheduleUpdate",
-    "ScheduleBlock",
-    "ScheduleBlockCreate",
-    "ScheduleBlockUpdate",
-    "PlaylistEntry",
-    "PlaylistEntryCreate",
-    "PlaylistEntryUpdate",
-    "NowPlaying",
-    "NowPlayingCreate",
-    "NowPlayingUpdate",
-]
+from app.schemas.station import StationCreate, StationUpdate, StationResponse, StationListResponse
