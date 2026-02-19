@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStations, useCreateStation, useUpdateStation, useDeleteStation } from '../../hooks/useStations';
+import apiClient from '../../api/client';
 import Spinner from '../../components/Spinner';
 
 export default function Stations() {
@@ -102,7 +103,15 @@ export default function Stations() {
               </tr>
               {expandedStation === station.id && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-4 bg-gray-50">
+                  <td colSpan={5} className="px-6 py-4 bg-gray-50 space-y-6">
+                    <LocationConfig
+                      latitude={station.latitude}
+                      longitude={station.longitude}
+                      onSave={(lat, lon) => {
+                        updateMutation.mutate({ id: station.id, data: { latitude: lat, longitude: lon } });
+                      }}
+                      saving={updateMutation.isPending}
+                    />
                     <AutomationConfig
                       config={config}
                       onSave={(newConfig) => {
@@ -126,6 +135,124 @@ export default function Stations() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+interface GeoResult {
+  display_name: string;
+  latitude: number;
+  longitude: number;
+}
+
+function LocationConfig({ latitude, longitude, onSave, saving }: {
+  latitude: number | null;
+  longitude: number | null;
+  onSave: (lat: number, lon: number) => void;
+  saving: boolean;
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<GeoResult[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [selectedLat, setSelectedLat] = useState<number | null>(latitude);
+  const [selectedLon, setSelectedLon] = useState<number | null>(longitude);
+  const [selectedName, setSelectedName] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleSearch = (value: string) => {
+    setQuery(value);
+    setShowDropdown(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.length < 2) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await apiClient.get('/stations/geocode', { params: { q: value } });
+        setResults(res.data);
+      } catch {
+        setResults([]);
+      }
+      setSearching(false);
+    }, 350);
+  };
+
+  const handleSelect = (result: GeoResult) => {
+    setSelectedLat(result.latitude);
+    setSelectedLon(result.longitude);
+    setSelectedName(result.display_name);
+    setQuery(result.display_name);
+    setShowDropdown(false);
+  };
+
+  const handleSave = () => {
+    if (selectedLat != null && selectedLon != null) {
+      onSave(selectedLat, selectedLon);
+    }
+  };
+
+  return (
+    <div>
+      <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Location</h4>
+      {latitude != null && longitude != null && (
+        <p className="text-xs text-gray-500 mb-2">
+          Current: {latitude.toFixed(4)}, {longitude.toFixed(4)}
+        </p>
+      )}
+      {latitude == null && (
+        <p className="text-xs text-red-500 mb-2">
+          No location set — required for weather/time announcements and sun-relative scheduling
+        </p>
+      )}
+      <div ref={wrapperRef} className="relative max-w-md">
+        <input
+          type="text"
+          value={query}
+          onChange={e => handleSearch(e.target.value)}
+          placeholder="Search for a city..."
+          className="w-full px-3 py-2 border rounded text-sm"
+        />
+        {showDropdown && (query.length >= 2) && (
+          <div className="absolute z-10 w-full bg-white border rounded-b shadow-lg max-h-48 overflow-y-auto">
+            {searching && <div className="px-3 py-2 text-xs text-gray-400">Searching...</div>}
+            {!searching && results.length === 0 && query.length >= 2 && (
+              <div className="px-3 py-2 text-xs text-gray-400">No results found</div>
+            )}
+            {results.map((r, i) => (
+              <button key={i} type="button"
+                onClick={() => handleSelect(r)}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 border-b last:border-b-0">
+                <span className="font-medium">{r.display_name}</span>
+                <span className="text-xs text-gray-400 ml-2">({r.latitude.toFixed(2)}, {r.longitude.toFixed(2)})</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {selectedName && selectedLat != null && (
+        <p className="text-xs text-green-600 mt-1">
+          Selected: {selectedName} ({selectedLat.toFixed(4)}, {selectedLon!.toFixed(4)})
+        </p>
+      )}
+      <button onClick={handleSave} disabled={saving || selectedLat == null}
+        className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm disabled:opacity-50">
+        {saving ? 'Saving...' : 'Save Location'}
+      </button>
     </div>
   );
 }
