@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
 import { downloadAsset } from '../../api/assets';
@@ -55,9 +55,51 @@ function DownloadButton({ assetId, title }: { assetId: string; title: string }) 
   );
 }
 
+interface Filters {
+  title: string;
+  artist: string;
+  album: string;
+  category: string;
+  asset_type: string;
+  durationMin: string;
+  durationMax: string;
+}
+
+const EMPTY_FILTERS: Filters = {
+  title: '',
+  artist: '',
+  album: '',
+  category: '',
+  asset_type: '',
+  durationMin: '',
+  durationMax: '',
+};
+
 export default function Assets() {
   const { data, isLoading } = useAssets();
   const deleteMutation = useDeleteAsset();
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+
+  const setFilter = (key: keyof Filters, value: string) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
+
+  const hasFilters = Object.values(filters).some((v) => v !== '');
+
+  const filtered = useMemo(() => {
+    const assets = data?.assets ?? [];
+    return assets.filter((a) => {
+      if (filters.title && !a.title.toLowerCase().includes(filters.title.toLowerCase())) return false;
+      if (filters.artist && !(a.artist ?? '').toLowerCase().includes(filters.artist.toLowerCase())) return false;
+      if (filters.album && !(a.album ?? '').toLowerCase().includes(filters.album.toLowerCase())) return false;
+      if (filters.category && !(a.category ?? '').toLowerCase().includes(filters.category.toLowerCase())) return false;
+      if (filters.asset_type && !a.asset_type.toLowerCase().includes(filters.asset_type.toLowerCase())) return false;
+      const min = filters.durationMin !== '' ? Number(filters.durationMin) * 60 : null;
+      const max = filters.durationMax !== '' ? Number(filters.durationMax) * 60 : null;
+      if (min !== null && (a.duration ?? 0) < min) return false;
+      if (max !== null && (a.duration ?? 0) > max) return false;
+      return true;
+    });
+  }, [data, filters]);
 
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
 
@@ -73,6 +115,95 @@ export default function Assets() {
         </Link>
       </div>
 
+      {/* Filter bar */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Title</label>
+            <input
+              type="text"
+              value={filters.title}
+              onChange={(e) => setFilter('title', e.target.value)}
+              placeholder="Filter..."
+              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Artist</label>
+            <input
+              type="text"
+              value={filters.artist}
+              onChange={(e) => setFilter('artist', e.target.value)}
+              placeholder="Filter..."
+              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Album</label>
+            <input
+              type="text"
+              value={filters.album}
+              onChange={(e) => setFilter('album', e.target.value)}
+              placeholder="Filter..."
+              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Category</label>
+            <input
+              type="text"
+              value={filters.category}
+              onChange={(e) => setFilter('category', e.target.value)}
+              placeholder="Filter..."
+              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Type</label>
+            <input
+              type="text"
+              value={filters.asset_type}
+              onChange={(e) => setFilter('asset_type', e.target.value)}
+              placeholder="Filter..."
+              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Min (min)</label>
+            <input
+              type="number"
+              min={0}
+              value={filters.durationMin}
+              onChange={(e) => setFilter('durationMin', e.target.value)}
+              placeholder="0"
+              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Max (min)</label>
+            <input
+              type="number"
+              min={0}
+              value={filters.durationMax}
+              onChange={(e) => setFilter('durationMax', e.target.value)}
+              placeholder="∞"
+              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+        </div>
+        {hasFilters && (
+          <div className="mt-3 flex items-center gap-3">
+            <span className="text-xs text-gray-500">{filtered.length} of {data?.assets.length ?? 0} assets</span>
+            <button
+              onClick={() => setFilters(EMPTY_FILTERS)}
+              className="text-xs text-red-500 hover:text-red-700"
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="bg-white shadow rounded-lg overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
@@ -80,16 +211,20 @@ export default function Assets() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Artist</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Album</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {data?.assets.map((asset) => (
+            {filtered.map((asset) => (
               <tr key={asset.id}>
                 <td className="px-6 py-4 whitespace-nowrap font-medium">{asset.title}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.artist ?? '—'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.album ?? '—'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.category ?? '—'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.asset_type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right space-x-3">
                   <DownloadButton assetId={asset.id} title={asset.title} />
@@ -102,10 +237,10 @@ export default function Assets() {
                 </td>
               </tr>
             ))}
-            {data?.assets.length === 0 && (
+            {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-gray-500">
-                  No assets uploaded yet
+                <td colSpan={7} className="px-6 py-10 text-center text-gray-500">
+                  {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>
             )}
