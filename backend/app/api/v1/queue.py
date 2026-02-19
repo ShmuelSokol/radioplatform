@@ -17,7 +17,7 @@ from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.station import Station
 from app.models.user import User
-from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueEntryOut, QueueListResponse, QueueReorder
+from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueEntryOut, QueueListResponse, QueueReorder
 
 logger = logging.getLogger(__name__)
 
@@ -594,6 +594,167 @@ async def reorder_queue(
     entry.position = body.new_position
     await db.commit()
     return {"message": "Reordered"}
+
+
+async def _validate_queue_move(
+    db: AsyncSession,
+    station_id: uuid.UUID,
+    moved_entry: QueueEntry,
+    new_position: int,
+    pending_entries: list[QueueEntry],
+) -> list[str]:
+    """Check schedule rules and category transitions for a queue move.
+
+    Returns a list of human-readable warning strings (empty if no conflicts).
+    """
+    from app.models.category import Category
+    from app.models.schedule_rule import ScheduleRule
+
+    warnings: list[str] = []
+    moved_asset = moved_entry.asset
+    if not moved_asset:
+        return warnings
+
+    # Build ordered list after the move
+    ordered = [e for e in pending_entries if e.id != moved_entry.id]
+    insert_idx = 0
+    for i, e in enumerate(ordered):
+        if e.position >= new_position:
+            insert_idx = i
+            break
+    else:
+        insert_idx = len(ordered)
+    ordered.insert(insert_idx, moved_entry)
+
+    # ── 1. Category transition checks ──
+    prev_asset = ordered[insert_idx - 1].asset if insert_idx > 0 else None
+    next_asset = ordered[insert_idx + 1].asset if insert_idx < len(ordered) - 1 else None
+
+    if moved_asset.category:
+        # Load category record for allowed_transitions
+        result = await db.execute(
+            select(Category).where(Category.name == moved_asset.category)
+        )
+        cat_record = result.scalar_one_or_none()
+        if cat_record and cat_record.allowed_transitions:
+            allowed = cat_record.allowed_transitions  # e.g. {"after": ["relax","med_fast"], "before": ["lively"]}
+            if isinstance(allowed, dict):
+                allowed_after = allowed.get("after")  # categories that can precede this one
+                allowed_before = allowed.get("before")  # categories that can follow this one
+                if allowed_after and prev_asset and prev_asset.category:
+                    if prev_asset.category not in allowed_after:
+                        warnings.append(
+                            f"Category transition conflict: \"{moved_asset.category}\" should not follow \"{prev_asset.category}\""
+                        )
+                if allowed_before and next_asset and next_asset.category:
+                    if next_asset.category not in allowed_before:
+                        warnings.append(
+                            f"Category transition conflict: \"{next_asset.category}\" should not follow \"{moved_asset.category}\""
+                        )
+
+    # ── 2. Daypart / schedule rule checks ──
+    # Estimate when this entry will play based on position in queue
+    now = datetime.now(timezone.utc)
+    cumulative_duration = 0.0
+    for e in ordered:
+        if e.id == moved_entry.id:
+            break
+        dur = e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION
+        cumulative_duration += dur
+
+    estimated_play_time = now + timedelta(seconds=cumulative_duration)
+    est_hour = estimated_play_time.hour
+    est_day = estimated_play_time.weekday()
+
+    # Check active daypart rules
+    result = await db.execute(
+        select(ScheduleRule).where(
+            ScheduleRule.is_active == True,
+            ScheduleRule.rule_type == "daypart",
+            ScheduleRule.hour_start <= est_hour,
+            ScheduleRule.hour_end > est_hour,
+        ).order_by(ScheduleRule.priority.desc())
+    )
+    daypart_rules = result.scalars().all()
+    daypart_rules = [
+        r for r in daypart_rules
+        if str(est_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
+    ]
+
+    for rule in daypart_rules:
+        # Check asset type mismatch
+        if rule.asset_type and moved_asset.asset_type != rule.asset_type:
+            warnings.append(
+                f"Daypart rule \"{rule.name}\" expects {rule.asset_type} during {rule.hour_start}:00-{rule.hour_end}:00, "
+                f"but this asset is {moved_asset.asset_type}"
+            )
+        # Check category mismatch
+        if rule.category and moved_asset.category and moved_asset.category != rule.category:
+            warnings.append(
+                f"Daypart rule \"{rule.name}\" expects category \"{rule.category}\" during {rule.hour_start}:00-{rule.hour_end}:00, "
+                f"but this asset is \"{moved_asset.category}\""
+            )
+
+    # ── 3. Do-not-play check ──
+    if moved_asset.category == "do_not_play":
+        warnings.append("This asset is marked \"do_not_play\" and should not be in the queue")
+
+    return warnings
+
+
+@router.post("/reorder-dnd")
+async def reorder_dnd(
+    station_id: uuid.UUID,
+    body: QueueDndReorder,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Drag-and-drop reorder: move entry to new position with rule validation."""
+    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    entry = result.scalar_one_or_none()
+    if not entry or entry.status != "pending":
+        raise NotFoundError("Entry not found or not pending")
+
+    # Fetch all pending entries in order
+    result = await db.execute(
+        select(QueueEntry)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .order_by(QueueEntry.position)
+    )
+    pending = list(result.scalars().all())
+
+    # Validate the move against rules
+    warnings = await _validate_queue_move(db, station_id, entry, body.new_position, pending)
+
+    # Perform the move: remove entry from old position, shift others, insert at new
+    old_pos = entry.position
+    new_pos = body.new_position
+
+    if old_pos != new_pos:
+        if old_pos < new_pos:
+            # Moving down: shift entries between old+1..new up by 1
+            await db.execute(
+                update(QueueEntry).where(
+                    QueueEntry.station_id == station_id,
+                    QueueEntry.status == "pending",
+                    QueueEntry.position > old_pos,
+                    QueueEntry.position <= new_pos,
+                ).values(position=QueueEntry.position - 1)
+            )
+        else:
+            # Moving up: shift entries between new..old-1 down by 1
+            await db.execute(
+                update(QueueEntry).where(
+                    QueueEntry.station_id == station_id,
+                    QueueEntry.status == "pending",
+                    QueueEntry.position >= new_pos,
+                    QueueEntry.position < old_pos,
+                ).values(position=QueueEntry.position + 1)
+            )
+        entry.position = new_pos
+        await db.commit()
+
+    return {"message": "Reordered", "warnings": warnings}
 
 
 @router.delete("/{entry_id}", status_code=204)

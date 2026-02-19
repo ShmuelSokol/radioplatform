@@ -31,5 +31,10 @@ class QueueReorder(BaseModel):
     new_position: int
 
 
+class QueueDndReorder(BaseModel):
+    entry_id: uuid.UUID
+    new_position: int
+
+
 class QueueBulkAdd(BaseModel):
     asset_ids: list[uuid.UUID]

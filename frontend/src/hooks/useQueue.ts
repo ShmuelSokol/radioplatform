@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getQueue, getPlayLog, addToQueue, playNext, skipCurrent, moveUp, moveDown, removeFromQueue, startPlayback, getLastPlayed, previewWeather } from '../api/queue';
+import { getQueue, getPlayLog, addToQueue, playNext, skipCurrent, moveUp, moveDown, removeFromQueue, startPlayback, getLastPlayed, previewWeather, reorderDnd } from '../api/queue';
 
 export function useQueue(stationId: string | null) {
   return useQuery({
@@ -74,6 +74,15 @@ export function useStartPlayback(stationId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => startPlayback(stationId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['queue', stationId] }),
+  });
+}
+
+export function useReorderDnd(stationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ entryId, newPosition }: { entryId: string; newPosition: number }) =>
+      reorderDnd(stationId, entryId, newPosition),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['queue', stationId] }),
   });
 }

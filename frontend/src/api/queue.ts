@@ -49,6 +49,14 @@ export const bulkAddToQueue = async (stationId: string, assetIds: string[]) => {
   return res.data;
 };
 
+export const reorderDnd = async (stationId: string, entryId: string, newPosition: number) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/reorder-dnd`, {
+    entry_id: entryId,
+    new_position: newPosition,
+  });
+  return res.data as { message: string; warnings: string[] };
+};
+
 export const getLastPlayed = async (stationId: string) => {
   const res = await apiClient.get(`/stations/${stationId}/queue/last-played`);
   return res.data;

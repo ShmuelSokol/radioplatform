@@ -5,7 +5,7 @@ import { useAssets } from '../../hooks/useAssets';
 import {
   useQueue, usePlayLog, useSkipCurrent, usePlayNext, useAddToQueue,
   useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown, useLastPlayed,
-  useWeatherPreview,
+  useWeatherPreview, useReorderDnd,
 } from '../../hooks/useQueue';
 import { useTimelinePreview } from '../../hooks/useSchedules';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
@@ -85,8 +85,12 @@ export default function Dashboard() {
   const moveUpMut = useMoveUp(stationId ?? '');
   const moveDownMut = useMoveDown(stationId ?? '');
   const weatherPreviewMut = useWeatherPreview(stationId ?? '');
+  const reorderDndMut = useReorderDnd(stationId ?? '');
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [dragEntryId, setDragEntryId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'warn' | 'info' } | null>(null);
 
   // Timeline preview
   const [timelineTime, setTimelineTime] = useState('');
@@ -224,6 +228,56 @@ export default function Dashboard() {
     } catch { setPreviewPlaying(false); }
   }, [weatherPreviewMut, previewPlaying]);
 
+  // ── Drag-and-drop queue reorder ──────────────────────────────
+  const handleDragStart = useCallback((e: React.DragEvent, entryId: string) => {
+    setDragEntryId(entryId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', entryId);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, entryId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverId(entryId);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverId(null);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent, targetEntry: any) => {
+    e.preventDefault();
+    setDragOverId(null);
+    const sourceId = dragEntryId;
+    if (!sourceId || sourceId === targetEntry.id) {
+      setDragEntryId(null);
+      return;
+    }
+    reorderDndMut.mutate(
+      { entryId: sourceId, newPosition: targetEntry.position },
+      {
+        onSuccess: (data) => {
+          if (data.warnings && data.warnings.length > 0) {
+            setToastMessage({ text: data.warnings.join(' | '), type: 'warn' });
+          }
+        },
+      },
+    );
+    setDragEntryId(null);
+  }, [dragEntryId, reorderDndMut]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragEntryId(null);
+    setDragOverId(null);
+  }, []);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (!toastMessage) return;
+    const t = setTimeout(() => setToastMessage(null), 6000);
+    return () => clearTimeout(t);
+  }, [toastMessage]);
+
   // ── Audio engine ───────────────────────────────────────────
   const audioAsset: AssetInfo | null = nowAsset ? {
     id: nowAsset.id,
@@ -250,6 +304,21 @@ export default function Dashboard() {
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] h-[calc(100vh-3rem)] flex flex-col select-none overflow-hidden">
       <audio ref={previewAudioRef} className="hidden" />
+
+      {/* Toast notification for rule warnings */}
+      {toastMessage && (
+        <div className={`fixed top-14 left-1/2 -translate-x-1/2 z-50 max-w-lg px-4 py-2 rounded-lg shadow-lg text-[12px] animate-pulse ${
+          toastMessage.type === 'warn'
+            ? 'bg-amber-900/95 border border-amber-600 text-amber-200'
+            : 'bg-cyan-900/95 border border-cyan-600 text-cyan-200'
+        }`}>
+          <div className="flex items-start gap-2">
+            <span className="shrink-0 mt-0.5">{toastMessage.type === 'warn' ? '⚠' : 'ℹ'}</span>
+            <span>{toastMessage.text}</span>
+            <button onClick={() => setToastMessage(null)} className="shrink-0 ml-2 text-gray-400 hover:text-white">✕</button>
+          </div>
+        </div>
+      )}
 
       {/* ═══ Status bar ═══ */}
       <div className="bg-[#0a0a28] border-b border-[#2a2a5e] px-3 py-1.5 flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
@@ -418,10 +487,27 @@ export default function Dashboard() {
               queueEntries.map((entry: any) => {
                 const a = entry.asset;
                 const isCur = entry.status === 'playing';
+                const isDragging = dragEntryId === entry.id;
+                const isDragOver = dragOverId === entry.id && dragEntryId !== entry.id;
                 return (
-                  <div key={entry.id} className={`flex items-center px-2 py-[2px] border-b border-[#12122e] min-w-[500px]
-                    ${isCur ? 'bg-[#0000aa] text-yellow-300' : 'text-cyan-200 hover:bg-[#14143a]'}`}>
-                    <span className="w-6 text-[11px] shrink-0">{isCur ? '▶' : entry.position}</span>
+                  <div
+                    key={entry.id}
+                    draggable={!isCur}
+                    onDragStart={!isCur ? (e) => handleDragStart(e, entry.id) : undefined}
+                    onDragOver={!isCur ? (e) => handleDragOver(e, entry.id) : undefined}
+                    onDragLeave={!isCur ? handleDragLeave : undefined}
+                    onDrop={!isCur ? (e) => handleDrop(e, entry) : undefined}
+                    onDragEnd={handleDragEnd}
+                    className={`flex items-center px-2 py-[2px] border-b min-w-[500px] transition-colors
+                      ${isCur ? 'bg-[#0000aa] text-yellow-300 border-[#12122e]'
+                        : isDragOver ? 'bg-cyan-900/40 border-cyan-500 border-t-2'
+                        : isDragging ? 'opacity-40 border-[#12122e]'
+                        : 'text-cyan-200 hover:bg-[#14143a] border-[#12122e]'}
+                      ${!isCur ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                  >
+                    <span className="w-6 text-[11px] shrink-0">
+                      {isCur ? '▶' : !isCur ? <span className="text-gray-600 text-[10px]">⠿</span> : entry.position}
+                    </span>
                     <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
                     <span className="flex-1 truncate text-[12px] min-w-0">
                       {a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
