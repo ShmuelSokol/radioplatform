@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -21,8 +22,8 @@ class ReviewQueueResponse(BaseModel):
     created_by: uuid.UUID | str | None = None
     total_items: int
     reviewed_items: int
-    created_at: str | None = None
-    updated_at: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ReviewQueueListResponse(BaseModel):
