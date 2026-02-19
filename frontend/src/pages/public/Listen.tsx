@@ -1,8 +1,22 @@
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getStation, getStreamInfo } from '../../api/stations';
-import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
-import { usePlayerStore } from '../../stores/playerStore';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { getStation } from '../../api/stations';
+import apiClient from '../../api/client';
+
+interface LiveAudioData {
+  playing: boolean;
+  asset_id?: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  duration?: number;
+  elapsed?: number;
+  started_at?: string;
+  audio_url?: string;
+}
+
+const POLL_INTERVAL = 4000;
 
 export default function Listen() {
   const { stationId } = useParams<{ stationId: string }>();
@@ -11,20 +25,97 @@ export default function Listen() {
     queryFn: () => getStation(stationId!),
     enabled: !!stationId,
   });
-  const { nowPlaying, isConnected } = useNowPlayingWS(stationId ?? '');
-  const { play, stationId: currentStationId, isPlaying, stop } = usePlayerStore();
 
-  const isThisPlaying = currentStationId === stationId && isPlaying;
+  const [liveData, setLiveData] = useState<LiveAudioData | null>(null);
+  const [userStarted, setUserStarted] = useState(false);
+  const [volume, setVolume] = useState(0.7);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentAssetRef = useRef<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const handlePlay = async () => {
-    if (!stationId || !station) return;
+  // Fetch live-audio data
+  const fetchLiveAudio = useCallback(async () => {
+    if (!stationId) return;
     try {
-      const streamInfo = await getStreamInfo(stationId);
-      play(stationId, station.name, streamInfo.hls_url);
+      const res = await apiClient.get<LiveAudioData>(`/stations/${stationId}/live-audio`);
+      setLiveData(res.data);
     } catch {
-      // Stream not available
+      // Silently fail — station may be offline
+    }
+  }, [stationId]);
+
+  // Poll for live-audio data
+  useEffect(() => {
+    if (!stationId) return;
+    fetchLiveAudio();
+    pollRef.current = setInterval(fetchLiveAudio, POLL_INTERVAL);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [stationId, fetchLiveAudio]);
+
+  // Play/switch audio when live data changes
+  useEffect(() => {
+    if (!userStarted || !liveData?.playing || !liveData.audio_url) return;
+
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // New track — load and seek
+    if (liveData.asset_id !== currentAssetRef.current) {
+      currentAssetRef.current = liveData.asset_id ?? null;
+      audio.src = liveData.audio_url;
+      audio.currentTime = Math.max(0, liveData.elapsed ?? 0);
+      audio.play().catch(() => {});
+    }
+  }, [liveData?.asset_id, liveData?.playing, liveData?.audio_url, liveData?.elapsed, userStarted]);
+
+  // Stop audio when nothing is playing
+  useEffect(() => {
+    if (userStarted && liveData && !liveData.playing) {
+      const audio = audioRef.current;
+      if (audio && !audio.paused) {
+        audio.pause();
+        currentAssetRef.current = null;
+      }
+    }
+  }, [liveData?.playing, userStarted]);
+
+  // Volume sync
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
+
+  const handlePlay = () => {
+    if (!audioRef.current) {
+      const audio = new Audio();
+      audio.crossOrigin = 'anonymous';
+      audio.volume = volume;
+      audioRef.current = audio;
+    }
+    setUserStarted(true);
+    currentAssetRef.current = null; // Force reload on next effect
+    fetchLiveAudio();
+  };
+
+  const handleStop = () => {
+    setUserStarted(false);
+    currentAssetRef.current = null;
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.src = '';
     }
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
   if (!station) return <div className="text-center py-10">Station not found</div>;
@@ -43,10 +134,10 @@ export default function Listen() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 mb-8">
-          {isThisPlaying ? (
+        <div className="flex items-center gap-4 mb-6">
+          {userStarted ? (
             <button
-              onClick={stop}
+              onClick={handleStop}
               className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-full text-lg font-medium transition"
             >
               Stop
@@ -60,35 +151,52 @@ export default function Listen() {
             </button>
           )}
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-            station.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+            liveData?.playing ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
           }`}>
-            {station.is_active ? 'On Air' : 'Offline'}
+            {liveData?.playing ? 'On Air' : 'Offline'}
           </span>
         </div>
 
-        {nowPlaying && (
+        {/* Volume control */}
+        {userStarted && (
+          <div className="flex items-center gap-3 mb-6">
+            <span className="text-gray-400 text-sm">Vol</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={volume}
+              onChange={(e) => setVolume(Number(e.target.value))}
+              className="flex-1 max-w-48"
+            />
+            <span className="text-gray-400 text-sm w-10 text-right">{Math.round(volume * 100)}%</span>
+          </div>
+        )}
+
+        {liveData?.playing && liveData.title && (
           <div className="border-t pt-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-gray-500 uppercase">Now Playing</h3>
-              <span className={`text-xs px-2 py-1 rounded ${isConnected ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
-                {isConnected ? '● Live' : '○ Offline'}
-              </span>
-            </div>
-            {nowPlaying.asset?.title ? (
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center text-2xl">
-                  &#9835;
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium">{nowPlaying.asset.title}</p>
-                  {nowPlaying.asset.artist && (
-                    <p className="text-sm text-gray-500">{nowPlaying.asset.artist}</p>
-                  )}
-                </div>
+            <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Now Playing</h3>
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center text-2xl">
+                &#9835;
               </div>
-            ) : (
-              <p className="text-gray-400">Nothing playing right now</p>
-            )}
+              <div className="flex-1">
+                <p className="font-medium">{liveData.title}</p>
+                {liveData.artist && (
+                  <p className="text-sm text-gray-500">{liveData.artist}</p>
+                )}
+                {liveData.album && (
+                  <p className="text-xs text-gray-400">{liveData.album}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {liveData && !liveData.playing && (
+          <div className="border-t pt-6">
+            <p className="text-gray-400">Nothing playing right now</p>
           </div>
         )}
       </div>

@@ -4,6 +4,8 @@ import type { AssetInfo } from '../types';
 
 const VOLUME_KEY = 'radio_volume';
 const MUTE_KEY = 'radio_muted';
+const SYNC_INTERVAL = 5000; // Sync audio position every 5 seconds
+const SYNC_THRESHOLD = 2; // Only correct if drift > 2 seconds
 
 function loadVolume(): number {
   try {
@@ -43,6 +45,13 @@ export function useAudioEngine(
   const [audioReady, setAudioReady] = useState(false);
   const lastAssetId = useRef<string | null>(null);
   const rafRef = useRef<number>(0);
+  const syncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const elapsedRef = useRef(elapsedSeconds);
+
+  // Keep elapsed ref in sync for use in interval callback
+  useEffect(() => {
+    elapsedRef.current = elapsedSeconds;
+  }, [elapsedSeconds]);
 
   // ── Init audio context + element ──────────────────────────────
 
@@ -80,15 +89,27 @@ export function useAudioEngine(
     setAudioReady(true);
   }, []);
 
+  // ── Auto-init when playback is active ───────────────────────────
+  // If the user returns to the page while playback is running, auto-init audio
+  useEffect(() => {
+    if (isPlaying && !audioReady) {
+      initAudio().catch(() => {});
+    }
+  }, [isPlaying, audioReady, initAudio]);
+
   // ── Cleanup on unmount ────────────────────────────────────────
 
   useEffect(() => {
     return () => {
       cancelAnimationFrame(rafRef.current);
+      if (syncTimerRef.current) clearInterval(syncTimerRef.current);
       audioRef.current?.pause();
       audioRef.current = null;
       ctxRef.current?.close().catch(() => {});
       ctxRef.current = null;
+      analyserRef.current = null;
+      gainRef.current = null;
+      setAudioReady(false);
     };
   }, []);
 
@@ -113,12 +134,37 @@ export function useAudioEngine(
       if (assetId) {
         getAssetAudioUrl(assetId).then((url) => {
           audio.src = url;
-          audio.currentTime = Math.max(0, elapsedSeconds);
+          audio.currentTime = Math.max(0, elapsedRef.current);
           audio.play().catch(() => {});
         }).catch(() => {});
       }
     }
   }, [nowPlayingAsset?.id, isPlaying, audioReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Periodic time sync ──────────────────────────────────────────
+  // Correct audio.currentTime if it drifts more than SYNC_THRESHOLD from server time
+
+  useEffect(() => {
+    if (syncTimerRef.current) clearInterval(syncTimerRef.current);
+
+    if (!audioReady || !isPlaying) return;
+
+    syncTimerRef.current = setInterval(() => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused || !isFinite(audio.currentTime)) return;
+
+      const serverElapsed = elapsedRef.current;
+      const drift = Math.abs(audio.currentTime - serverElapsed);
+
+      if (drift > SYNC_THRESHOLD && serverElapsed > 0) {
+        audio.currentTime = serverElapsed;
+      }
+    }, SYNC_INTERVAL);
+
+    return () => {
+      if (syncTimerRef.current) clearInterval(syncTimerRef.current);
+    };
+  }, [audioReady, isPlaying]);
 
   // ── Volume sync ───────────────────────────────────────────────
 
