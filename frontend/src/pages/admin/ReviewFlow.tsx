@@ -145,7 +145,7 @@ export default function ReviewFlow() {
 
             {/* Waveform */}
             {audioUrl && (
-              <ErrorBoundary fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-500">Waveform unavailable</div>}>
+              <ErrorBoundary key={currentAsset.id} fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-500">Waveform unavailable for this asset</div>}>
                 <Suspense fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-400">Loading waveform...</div>}>
                   <WaveformPlayer ref={waveformRef} url={audioUrl} />
                 </Suspense>

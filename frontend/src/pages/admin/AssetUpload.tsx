@@ -22,6 +22,15 @@ const ASSET_TYPES = [
   { value: 'zmanim', label: 'Zmanim' },
 ] as const;
 
+const CATEGORIES = [
+  { value: '', label: 'None' },
+  { value: 'Children Stories', label: 'Children Stories' },
+  { value: 'Music', label: 'Music' },
+  { value: 'Torah', label: 'Torah' },
+  { value: 'News', label: 'News' },
+  { value: 'Other', label: 'Other' },
+] as const;
+
 function getFileExtension(filename: string): string {
   const dot = filename.lastIndexOf('.');
   return dot >= 0 ? filename.slice(dot).toLowerCase() : '';
@@ -154,12 +163,15 @@ export default function AssetUpload() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-            <input
+            <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              placeholder="Optional"
-              className="w-full border rounded px-3 py-2"
-            />
+              className="w-full border rounded px-3 py-2 bg-white"
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
           </div>
         </div>
 

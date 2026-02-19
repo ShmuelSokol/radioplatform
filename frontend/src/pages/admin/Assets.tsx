@@ -133,6 +133,7 @@ const EMPTY_FILTERS: Filters = {
 export default function Assets() {
   const { data, isLoading } = useAssets();
   const deleteMutation = useDeleteAsset();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const createQueueMutation = useCreateReviewQueue();
   const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -354,10 +355,16 @@ export default function Assets() {
                   <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-sm">View</Link>
                   <DownloadButton assetId={asset.id} title={asset.title} />
                   <button
-                    onClick={() => deleteMutation.mutate(asset.id)}
-                    className="text-red-600 hover:text-red-800 text-sm"
+                    onClick={() => {
+                      setDeletingId(asset.id);
+                      deleteMutation.mutate(asset.id, {
+                        onSettled: () => setDeletingId(null),
+                      });
+                    }}
+                    disabled={deletingId === asset.id}
+                    className="text-red-600 hover:text-red-800 text-sm disabled:opacity-50"
                   >
-                    Delete
+                    {deletingId === asset.id ? <><Spinner className="mr-1" />Processing...</> : 'Delete'}
                   </button>
                 </td>
               </tr>

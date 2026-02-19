@@ -33,13 +33,23 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
     const [duration, setDuration] = useState(0);
     const [zoom, setZoom] = useState(1);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     // Initialize wavesurfer
     useEffect(() => {
       if (!containerRef.current || !url) return;
 
+      setLoading(true);
+      setError(null);
+
       const regions = RegionsPlugin.create();
       regionsRef.current = regions;
+
+      // Create an <audio> element for broader codec support (MP2, etc.)
+      // wavesurfer v7+ uses Web Audio API by default which can't decode MP2
+      const audio = new Audio();
+      audio.crossOrigin = 'anonymous';
+      audio.preload = 'auto';
 
       const ws = WaveSurfer.create({
         container: containerRef.current,
@@ -52,6 +62,7 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
         barGap: 1,
         barRadius: 2,
         normalize: true,
+        media: audio,
         plugins: [regions],
       });
 
@@ -60,6 +71,12 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
         setDuration(dur);
         setLoading(false);
         onReady?.(dur);
+      });
+
+      ws.on('error', (err) => {
+        console.error('WaveSurfer error:', err);
+        setLoading(false);
+        setError(typeof err === 'string' ? err : 'Failed to load audio — the file may be in an unsupported format');
       });
 
       ws.on('timeupdate', (time) => {
@@ -168,12 +185,17 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
 
     return (
       <div className="bg-white border border-gray-200 rounded-lg p-4">
-        {loading && (
+        {loading && !error && (
           <div className="flex items-center justify-center h-32 text-gray-400">
             Loading waveform...
           </div>
         )}
-        <div ref={containerRef} className={loading ? 'hidden' : ''} />
+        {error && (
+          <div className="flex items-center justify-center h-32 text-red-500 text-sm">
+            {error}
+          </div>
+        )}
+        <div ref={containerRef} className={loading || error ? 'hidden' : ''} />
 
         {/* Controls */}
         <div className="flex items-center gap-4 mt-3">
