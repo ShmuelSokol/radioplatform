@@ -11,7 +11,7 @@ export default function Listen() {
     queryFn: () => getStation(stationId!),
     enabled: !!stationId,
   });
-  const { nowPlaying, isConnected } = useNowPlayingWS(stationId);
+  const { nowPlaying, isConnected } = useNowPlayingWS(stationId ?? '');
   const { play, stationId: currentStationId, isPlaying, stop } = usePlayerStore();
 
   const isThisPlaying = currentStationId === stationId && isPlaying;
@@ -74,21 +74,16 @@ export default function Listen() {
                 {isConnected ? '● Live' : '○ Offline'}
               </span>
             </div>
-            {nowPlaying.asset_title && nowPlaying.state === 'playing' ? (
+            {nowPlaying.asset?.title ? (
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center text-2xl">
                   &#9835;
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium">{nowPlaying.asset_title}</p>
-                  <div className="flex items-center gap-3 text-sm text-gray-500">
-                    <span>{nowPlaying.state}</span>
-                    {nowPlaying.elapsed_seconds !== undefined && nowPlaying.duration_seconds && (
-                      <span>
-                        {Math.floor(nowPlaying.elapsed_seconds / 60)}:{String(Math.floor(nowPlaying.elapsed_seconds % 60)).padStart(2, '0')} / {Math.floor(nowPlaying.duration_seconds / 60)}:{String(Math.floor(nowPlaying.duration_seconds % 60)).padStart(2, '0')}
-                      </span>
-                    )}
-                  </div>
+                  <p className="font-medium">{nowPlaying.asset.title}</p>
+                  {nowPlaying.asset.artist && (
+                    <p className="text-sm text-gray-500">{nowPlaying.asset.artist}</p>
+                  )}
                 </div>
               </div>
             ) : (

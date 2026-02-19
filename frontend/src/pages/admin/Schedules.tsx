@@ -118,7 +118,7 @@ const Schedules: React.FC = () => {
           className="w-full px-4 py-2 border rounded-lg"
         >
           <option value="">All Stations</option>
-          {stations?.map((station) => (
+          {stations?.stations?.map((station: any) => (
             <option key={station.id} value={station.id}>
               {station.name}
             </option>
@@ -144,7 +144,7 @@ const Schedules: React.FC = () => {
                   disabled={!!editingSchedule}
                 >
                   <option value="">Select Station</option>
-                  {stations?.map((station) => (
+                  {stations?.stations?.map((station: any) => (
                     <option key={station.id} value={station.id}>
                       {station.name}
                     </option>
@@ -231,7 +231,7 @@ const Schedules: React.FC = () => {
               <div>
                 <h3 className="text-xl font-bold">{schedule.name}</h3>
                 <p className="text-sm text-gray-600">
-                  Station: {stations?.find((s) => s.id === schedule.station_id)?.name}
+                  Station: {stations?.stations?.find((s: any) => s.id === schedule.station_id)?.name}
                 </p>
                 {schedule.description && (
                   <p className="text-sm text-gray-600 mt-1">{schedule.description}</p>
