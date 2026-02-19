@@ -1,12 +1,18 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useUpdateAsset } from '../hooks/useAssets';
+import { useCategories } from '../hooks/useCategories';
 
-const CATEGORIES = [
-  { value: 'lively', label: 'Lively', color: 'bg-red-100 text-red-700', darkColor: 'text-red-300' },
-  { value: 'med_fast', label: 'Medium', color: 'bg-cyan-100 text-cyan-700', darkColor: 'text-cyan-300' },
-  { value: 'relax', label: 'Relax', color: 'bg-green-100 text-green-700', darkColor: 'text-green-300' },
-  { value: 'do_not_play', label: 'Do Not Play', color: 'bg-gray-800 text-red-400', darkColor: 'text-red-500' },
+const PALETTE = [
+  { color: 'bg-red-100 text-red-700', darkColor: 'text-red-300' },
+  { color: 'bg-cyan-100 text-cyan-700', darkColor: 'text-cyan-300' },
+  { color: 'bg-green-100 text-green-700', darkColor: 'text-green-300' },
+  { color: 'bg-purple-100 text-purple-700', darkColor: 'text-purple-300' },
+  { color: 'bg-yellow-100 text-yellow-700', darkColor: 'text-yellow-300' },
+  { color: 'bg-blue-100 text-blue-700', darkColor: 'text-blue-300' },
+  { color: 'bg-orange-100 text-orange-700', darkColor: 'text-orange-300' },
 ];
+
+const DNP_STYLE = { color: 'bg-gray-800 text-red-400', darkColor: 'text-red-500' };
 
 interface Props {
   assetId: string;
@@ -21,6 +27,16 @@ export default function AssetCategoryBadge({ assetId, category, dark, compact }:
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const updateAsset = useUpdateAsset();
+  const { data: dynamicCategories } = useCategories();
+
+  // Build styled categories from dynamic list
+  const CATEGORIES = useMemo(() => {
+    if (!dynamicCategories) return [];
+    return dynamicCategories.map((cat, i) => {
+      const style = cat.name === 'do_not_play' ? DNP_STYLE : PALETTE[i % PALETTE.length];
+      return { value: cat.name, label: cat.name, ...style };
+    });
+  }, [dynamicCategories]);
 
   // Close on outside click
   useEffect(() => {

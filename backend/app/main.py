@@ -58,10 +58,32 @@ async def _add_missing_columns(engine):
             logger.warning(f"Migration skipped ({sql[:50]}...): {e}")
 
 
+async def _seed_default_categories():
+    """Insert default categories if the categories table is empty."""
+    try:
+        from app.db.engine import engine
+        from sqlalchemy import text
+
+        defaults = ["lively", "med_fast", "relax", "do_not_play"]
+        async with engine.begin() as conn:
+            result = await conn.execute(text("SELECT COUNT(*) FROM categories"))
+            count = result.scalar()
+            if count == 0:
+                for name in defaults:
+                    await conn.execute(
+                        text("INSERT INTO categories (id, name, created_at, updated_at) VALUES (gen_random_uuid(), :name, NOW(), NOW())"),
+                        {"name": name},
+                    )
+                logger.info("Seeded %d default categories", len(defaults))
+    except Exception as e:
+        logger.warning("Category seeding skipped: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup — create tables and start the scheduler engine
     await ensure_tables()
+    await _seed_default_categories()
 
     try:
         from app.services.scheduler_engine import start_scheduler

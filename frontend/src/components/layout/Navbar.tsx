@@ -16,7 +16,8 @@ export default function Navbar() {
     { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },
     { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
     { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
-    { to: '/admin/assets', label: 'Assets', color: 'hover:text-cyan-300' },
+    { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },
+    { to: '/admin/categories', label: 'Categories', color: 'hover:text-teal-300' },
     { to: '/admin/reviews', label: 'Reviews', color: 'hover:text-emerald-300' },
     { to: '/admin/stations', label: 'Manage Stations', color: 'hover:text-cyan-300' },
   ] : [

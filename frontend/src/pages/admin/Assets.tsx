@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
+import { useCategories } from '../../hooks/useCategories';
 import { downloadAsset, getAssetAudioUrl } from '../../api/assets';
 import Spinner from '../../components/Spinner';
 
@@ -143,6 +144,7 @@ const EMPTY_FILTERS: Filters = {
 
 export default function Assets() {
   const { data, isLoading } = useAssets();
+  const { data: categories } = useCategories();
   const deleteMutation = useDeleteAsset();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const createQueueMutation = useCreateReviewQueue();
@@ -210,7 +212,7 @@ export default function Assets() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Assets</h1>
+        <h1 className="text-2xl font-bold">Library</h1>
         <Link
           to="/admin/assets/upload"
           className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded transition"
@@ -254,13 +256,16 @@ export default function Assets() {
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Category</label>
-            <input
-              type="text"
+            <select
               value={filters.category}
               onChange={(e) => setFilter('category', e.target.value)}
-              placeholder="Filter..."
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
+              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
+            >
+              <option value="">All</option>
+              {categories?.map((cat) => (
+                <option key={cat.id} value={cat.name}>{cat.name}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Type</label>

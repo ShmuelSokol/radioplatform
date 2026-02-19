@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useReviewQueue, useQueueItems, useUpdateReviewItem } from '../../hooks/useReviews';
 import { useAssetAudioUrl, useUpdateAsset } from '../../hooks/useAssets';
+import { useCategories } from '../../hooks/useCategories';
 import ErrorBoundary from '../../components/ErrorBoundary';
 import Spinner from '../../components/Spinner';
 import AssetHistory from '../../components/review/AssetHistory';
@@ -39,6 +40,7 @@ export default function ReviewFlow() {
   const { data: itemsData, refetch: refetchItems } = useQueueItems(queueId);
   const updateMutation = useUpdateReviewItem();
   const updateAssetMutation = useUpdateAsset();
+  const { data: categories } = useCategories();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [notes, setNotes] = useState('');
   const [silenceRegions, setSilenceRegions] = useState<SilenceRegion[]>([]);
@@ -201,10 +203,9 @@ export default function ReviewFlow() {
                       className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                     >
                       <option value="">Uncategorized</option>
-                      <option value="lively">Lively (Fast)</option>
-                      <option value="med_fast">Medium</option>
-                      <option value="relax">Relax (Slow)</option>
-                      <option value="do_not_play">Do Not Play</option>
+                      {categories?.map((cat) => (
+                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                      ))}
                     </select>
                     {updateAssetMutation.isPending && (
                       <span className="text-xs text-gray-400">Saving...</span>

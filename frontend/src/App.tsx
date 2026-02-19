@@ -26,6 +26,7 @@ const AssetDetail = lazy(() => import('./pages/admin/AssetDetail'));
 const ReviewQueues = lazy(() => import('./pages/admin/ReviewQueues'));
 const ReviewFlow = lazy(() => import('./pages/admin/ReviewFlow'));
 const Playlists = lazy(() => import('./pages/admin/Playlists'));
+const Categories = lazy(() => import('./pages/admin/Categories'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -72,6 +73,7 @@ export default function App() {
               <Route path="/admin/holidays" element={<ProtectedRoute><Holidays /></ProtectedRoute>} />
               <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
               <Route path="/admin/playlists" element={<ProtectedRoute><Playlists /></ProtectedRoute>} />
+              <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
             </Route>
           </Routes>
