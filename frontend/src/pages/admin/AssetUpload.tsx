@@ -30,8 +30,9 @@ export default function AssetUpload() {
     try {
       await uploadMutation.mutateAsync({ file, title });
       navigate('/admin/assets');
-    } catch {
-      setError('Upload failed');
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail ?? err?.message ?? 'Upload failed';
+      setError(typeof msg === 'string' ? msg : 'Upload failed');
     }
   };
 
@@ -47,7 +48,7 @@ export default function AssetUpload() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="audio/*"
+            accept="audio/*,video/*,.mpg,.mpeg,.mp4,.mkv,.avi,.mov,.webm,.flac,.ogg,.opus,.wma,.aac,.m4a,.wv,.ape,.aiff,.aif"
             onChange={handleFileChange}
             className="w-full border rounded px-3 py-2"
             required
