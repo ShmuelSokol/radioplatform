@@ -46,7 +46,7 @@ radioplatform/
 │       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer, NowPlaying)
 │       ├── pages/admin/          # Dashboard, Stations, Assets, AssetUpload, Schedules, Rules, Users, Login
 │       ├── pages/public/         # StationList, Listen
-│       ├── hooks/                # 11 custom hooks
+│       ├── hooks/                # 12 custom hooks
 │       ├── stores/               # Zustand: authStore, playerStore
 │       └── types/                # TypeScript interfaces
 ├── bot/
@@ -80,6 +80,8 @@ radioplatform/
 | ChannelStream | channel_stream.py | Stream configuration |
 | Sponsor | sponsor.py | Sponsor/ad management |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
+| PlaylistTemplate | playlist_template.py | Rotation pattern templates |
+| TemplateSlot | playlist_template.py | Slots within a template |
 
 ### API Routes (`backend/app/api/v1/`)
 | Router | File | Prefix |
@@ -101,6 +103,7 @@ radioplatform/
 | channels | channels.py | /channels |
 | icecast | icecast.py | /icecast |
 | analytics | analytics.py | /analytics |
+| playlists | playlists.py | /playlists |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
@@ -137,13 +140,14 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsor/ad management
+- Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
 - Listen.tsx — Listen to a station
 
-### Hooks (`frontend/src/hooks/`) — 11 hooks
+### Hooks (`frontend/src/hooks/`) — 12 hooks
 | Hook | Description |
 |------|-------------|
 | useAuth.ts | Authentication state + mutations |
@@ -157,9 +161,10 @@ radioplatform/
 | useAudioEngine.ts | Audio engine integration |
 | useNowPlaying.ts | Now-playing polling |
 | useNowPlayingWS.ts | Now-playing WebSocket (with polling fallback) |
+| usePlaylists.ts | Playlist template CRUD + asset type combos |
 
-### API Clients (`frontend/src/api/`) — 7 modules
-auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, client.ts (Axios + JWT interceptor)
+### API Clients (`frontend/src/api/`) — 8 modules
+auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, client.ts (Axios + JWT interceptor)
 
 ### Routes (`frontend/src/App.tsx`)
 - `/` → redirect to `/stations`
@@ -176,6 +181,7 @@ auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, client.ts (Axios 
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
+- `/admin/playlists` → Playlists (protected)
 - `/admin/analytics` → Analytics (protected)
 
 ## Telegram Bot (`bot/`)
