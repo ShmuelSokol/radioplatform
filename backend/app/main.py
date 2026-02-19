@@ -88,7 +88,19 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check():
-        return {"status": "ok"}
+        import shutil
+        import subprocess
+        ffmpeg_info = {}
+        ffmpeg_info["which"] = shutil.which("ffmpeg")
+        try:
+            proc = subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
+            ffmpeg_info["rc"] = proc.returncode
+            ffmpeg_info["version"] = proc.stdout[:120].decode(errors="replace")
+        except FileNotFoundError:
+            ffmpeg_info["error"] = "not found"
+        except Exception as e:
+            ffmpeg_info["error"] = str(e)
+        return {"status": "ok", "ffmpeg": ffmpeg_info}
 
     @app.get("/api/v1/init")
     async def init_db():
