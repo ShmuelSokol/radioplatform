@@ -262,3 +262,42 @@ export const useDeletePlaylistEntry = () => {
     },
   });
 };
+
+// ==================== Timeline Preview ====================
+export interface TimelinePreview {
+  station_id: string;
+  at_time: string;
+  is_blacked_out: boolean;
+  active_block: {
+    id: string;
+    name: string;
+    schedule_name: string | null;
+    start_time: string;
+    end_time: string;
+    playback_mode: string;
+  } | null;
+  current_blackout: {
+    name: string;
+    start_datetime: string;
+    end_datetime: string;
+  } | null;
+  next_blackout: {
+    name: string;
+    start_datetime: string;
+    end_datetime: string;
+  } | null;
+}
+
+export const useTimelinePreview = (stationId: string | null, atTime: string | null) => {
+  return useQuery<TimelinePreview>({
+    queryKey: ['timeline-preview', stationId, atTime],
+    queryFn: async () => {
+      const params: Record<string, string> = { station_id: stationId! };
+      if (atTime) params.at_time = atTime;
+      const response = await apiClient.get('/schedules/timeline-preview', { params });
+      return response.data;
+    },
+    enabled: !!stationId,
+    staleTime: 30_000,
+  });
+};

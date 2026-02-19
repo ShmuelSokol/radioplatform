@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listHolidays, createHoliday, updateHoliday, deleteHoliday,
-  autoGenerateBlackouts, ensureSilenceAsset,
-  HolidayWindow,
+  autoGenerateBlackouts, ensureSilenceAsset, previewBlackouts,
+  HolidayWindow, PreviewResponse,
 } from '../../api/holidays';
 import { useStations } from '../../hooks/useStations';
 import Spinner from '../../components/Spinner';
@@ -19,6 +19,7 @@ export default function Holidays() {
   const [autoGenStationId, setAutoGenStationId] = useState('');
   const [autoGenResult, setAutoGenResult] = useState<{ created: number; skipped: number } | null>(null);
   const [silenceResult, setSilenceResult] = useState<string | null>(null);
+  const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -44,10 +45,16 @@ export default function Holidays() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['holidays'] }),
   });
 
+  const previewMut = useMutation({
+    mutationFn: (stationId: string) => previewBlackouts(stationId),
+    onSuccess: (data) => setPreviewData(data),
+  });
+
   const autoGenMut = useMutation({
     mutationFn: (stationId: string) => autoGenerateBlackouts(stationId),
     onSuccess: (data) => {
       setAutoGenResult(data);
+      setPreviewData(null);
       queryClient.invalidateQueries({ queryKey: ['holidays'] });
     },
   });
@@ -132,7 +139,7 @@ export default function Holidays() {
             <label className="block text-sm font-medium mb-1">Station</label>
             <select
               value={autoGenStationId}
-              onChange={e => { setAutoGenStationId(e.target.value); setAutoGenResult(null); }}
+              onChange={e => { setAutoGenStationId(e.target.value); setAutoGenResult(null); setPreviewData(null); }}
               className="w-full px-4 py-2 border rounded-lg"
             >
               <option value="">Select a station...</option>
@@ -141,6 +148,13 @@ export default function Holidays() {
               ))}
             </select>
           </div>
+          <button
+            onClick={() => autoGenStationId && previewMut.mutate(autoGenStationId)}
+            disabled={!autoGenStationId || previewMut.isPending}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {previewMut.isPending ? <><Spinner className="mr-2" />Previewing...</> : 'Preview'}
+          </button>
           <button
             onClick={() => autoGenStationId && autoGenMut.mutate(autoGenStationId)}
             disabled={!autoGenStationId || autoGenMut.isPending}
@@ -169,6 +183,40 @@ export default function Holidays() {
         )}
         {silenceResult && (
           <p className="mt-3 text-sm text-blue-700 bg-blue-50 px-3 py-2 rounded">{silenceResult}</p>
+        )}
+        {previewMut.isError && (
+          <p className="mt-3 text-sm text-red-700 bg-red-50 px-3 py-2 rounded">
+            {(previewMut.error as any)?.response?.data?.detail || 'Failed to preview. Make sure the station has lat/lon set.'}
+          </p>
+        )}
+        {previewData && (
+          <div className="mt-4">
+            <p className="text-sm font-medium text-gray-700 mb-2">
+              Preview: {previewData.total} windows ({previewData.shabbos_count} Shabbos, {previewData.yom_tov_count} Yom Tov)
+            </p>
+            <div className="max-h-64 overflow-y-auto border rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Name</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">Start</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-600">End</th>
+                    <th className="text-right px-3 py-2 font-medium text-gray-600">Duration (hrs)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {previewData.windows.map((w, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-1.5">{w.name}</td>
+                      <td className="px-3 py-1.5 text-gray-600">{new Date(w.start_datetime).toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-gray-600">{new Date(w.end_datetime).toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-600">{w.duration_hours}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
 

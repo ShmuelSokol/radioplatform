@@ -54,6 +54,31 @@ export const autoGenerateBlackouts = async (
   return res.data;
 };
 
+export interface PreviewWindowItem {
+  name: string;
+  start_datetime: string;
+  end_datetime: string;
+  duration_hours: number;
+}
+
+export interface PreviewResponse {
+  total: number;
+  shabbos_count: number;
+  yom_tov_count: number;
+  windows: PreviewWindowItem[];
+}
+
+export const previewBlackouts = async (
+  stationId: string,
+  monthsAhead: number = 12,
+): Promise<PreviewResponse> => {
+  const res = await apiClient.post<PreviewResponse>('/holidays/preview', {
+    station_id: stationId,
+    months_ahead: monthsAhead,
+  });
+  return res.data;
+};
+
 export const ensureSilenceAsset = async (): Promise<SilenceAssetResponse> => {
   const res = await apiClient.post<SilenceAssetResponse>('/holidays/ensure-silence-asset');
   return res.data;

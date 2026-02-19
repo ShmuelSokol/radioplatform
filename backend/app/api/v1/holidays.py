@@ -93,6 +93,68 @@ async def delete_holiday(
     await db.commit()
 
 
+@router.post("/preview")
+async def preview_blackouts(
+    data: AutoGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_manager),
+):
+    """Preview auto-generated blackout windows without saving to DB."""
+    from app.services.shabbos_service import (
+        generate_shabbos_windows,
+        generate_yom_tov_windows,
+        merge_overlapping_windows,
+    )
+
+    stmt = select(Station).where(Station.id == str(data.station_id))
+    result = await db.execute(stmt)
+    station = result.scalar_one_or_none()
+    if not station:
+        raise HTTPException(status_code=404, detail="Station not found")
+
+    if not station.latitude or not station.longitude:
+        raise HTTPException(
+            status_code=400,
+            detail="Station must have latitude and longitude set for auto-generation",
+        )
+
+    start_date = date.today()
+    end_date = start_date + timedelta(days=data.months_ahead * 30)
+    station_ids = [str(station.id)]
+
+    shabbos = generate_shabbos_windows(
+        station.latitude, station.longitude, station.timezone,
+        start_date, end_date, station_ids,
+    )
+    yom_tov = generate_yom_tov_windows(
+        station.latitude, station.longitude, station.timezone,
+        start_date, end_date, station_ids,
+    )
+    all_windows = merge_overlapping_windows(shabbos + yom_tov)
+
+    shabbos_count = sum(1 for w in all_windows if "shabbos" in w["name"].lower() or "shabbat" in w["name"].lower())
+    yom_tov_count = len(all_windows) - shabbos_count
+
+    windows = []
+    for w in all_windows:
+        start_dt = datetime.fromisoformat(w["start_datetime"])
+        end_dt = datetime.fromisoformat(w["end_datetime"])
+        duration_hours = round((end_dt - start_dt).total_seconds() / 3600, 2)
+        windows.append({
+            "name": w["name"],
+            "start_datetime": w["start_datetime"],
+            "end_datetime": w["end_datetime"],
+            "duration_hours": duration_hours,
+        })
+
+    return {
+        "total": len(all_windows),
+        "shabbos_count": shabbos_count,
+        "yom_tov_count": yom_tov_count,
+        "windows": windows,
+    }
+
+
 @router.post("/auto-generate", response_model=AutoGenerateResponse)
 async def auto_generate_blackouts(
     data: AutoGenerateRequest,

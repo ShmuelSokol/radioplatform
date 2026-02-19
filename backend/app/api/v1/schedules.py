@@ -1,10 +1,11 @@
 """
 Schedule management endpoints — CRUD for schedules, blocks, and playlist entries.
 """
-from typing import List
+from datetime import datetime
+from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -232,6 +233,112 @@ async def delete_playlist_entry(
 
     await db.delete(entry)
     await db.commit()
+
+
+# ==================== Timeline Preview ====================
+@router.get("/timeline-preview")
+async def timeline_preview(
+    station_id: UUID = Query(...),
+    at_time: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview what block is active and blackout status at a given time."""
+    from app.models.holiday_window import HolidayWindow
+    from app.models.station import Station
+    from app.services.scheduling import SchedulingService
+
+    now = datetime.utcnow()
+    check_time = now
+    if at_time:
+        try:
+            check_time = datetime.fromisoformat(at_time)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid at_time format. Use ISO 8601.")
+
+    # Validate station exists
+    stmt = select(Station).where(Station.id == station_id)
+    result = await db.execute(stmt)
+    station = result.scalar_one_or_none()
+    if not station:
+        raise HTTPException(status_code=404, detail="Station not found")
+
+    # Get active block
+    svc = SchedulingService(db)
+    block = await svc.get_active_block_for_station(station_id, at_time=check_time)
+    active_block = None
+    if block:
+        # Get the schedule name
+        sched_stmt = select(ScheduleModel).where(ScheduleModel.id == block.schedule_id)
+        sched_result = await db.execute(sched_stmt)
+        sched = sched_result.scalar_one_or_none()
+        active_block = {
+            "id": str(block.id),
+            "name": block.name,
+            "schedule_name": sched.name if sched else None,
+            "start_time": block.start_time,
+            "end_time": block.end_time,
+            "playback_mode": block.playback_mode,
+        }
+
+    # Check blackout status (same pattern as scheduler_engine._is_station_blacked_out)
+    is_blacked_out = False
+    current_blackout = None
+    blackout_stmt = select(HolidayWindow).where(
+        HolidayWindow.is_blackout == True,
+        HolidayWindow.start_datetime <= check_time,
+        HolidayWindow.end_datetime > check_time,
+    )
+    blackout_result = await db.execute(blackout_stmt)
+    for window in blackout_result.scalars().all():
+        if window.affected_stations is None:
+            is_blacked_out = True
+            current_blackout = {
+                "name": window.name,
+                "start_datetime": window.start_datetime.isoformat(),
+                "end_datetime": window.end_datetime.isoformat(),
+            }
+            break
+        station_ids = window.affected_stations.get("station_ids", [])
+        if str(station_id) in [str(sid) for sid in station_ids]:
+            is_blacked_out = True
+            current_blackout = {
+                "name": window.name,
+                "start_datetime": window.start_datetime.isoformat(),
+                "end_datetime": window.end_datetime.isoformat(),
+            }
+            break
+
+    # Find next upcoming blackout
+    next_blackout = None
+    next_stmt = (
+        select(HolidayWindow)
+        .where(
+            HolidayWindow.is_blackout == True,
+            HolidayWindow.start_datetime > check_time,
+        )
+        .order_by(HolidayWindow.start_datetime)
+        .limit(10)
+    )
+    next_result = await db.execute(next_stmt)
+    for window in next_result.scalars().all():
+        if window.affected_stations is None or str(station_id) in [
+            str(sid) for sid in (window.affected_stations or {}).get("station_ids", [])
+        ]:
+            next_blackout = {
+                "name": window.name,
+                "start_datetime": window.start_datetime.isoformat(),
+                "end_datetime": window.end_datetime.isoformat(),
+            }
+            break
+
+    return {
+        "station_id": str(station_id),
+        "at_time": check_time.isoformat(),
+        "is_blacked_out": is_blacked_out,
+        "active_block": active_block,
+        "current_blackout": current_blackout,
+        "next_blackout": next_blackout,
+    }
 
 
 # ==================== Schedule by ID (after literal routes) ====================

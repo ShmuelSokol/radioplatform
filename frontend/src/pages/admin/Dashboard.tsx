@@ -7,6 +7,7 @@ import {
   useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown, useLastPlayed,
   useWeatherPreview,
 } from '../../hooks/useQueue';
+import { useTimelinePreview } from '../../hooks/useSchedules';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import type { AssetInfo } from '../../types';
 
@@ -55,7 +56,7 @@ const CAT_COLORS: Record<string, string> = {
 };
 
 // Bottom panel tabs
-type BottomTab = 'library' | 'cart' | 'log';
+type BottomTab = 'library' | 'cart' | 'log' | 'timeline';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -95,6 +96,13 @@ export default function Dashboard() {
   const weatherPreviewMut = useWeatherPreview(stationId ?? '');
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [previewPlaying, setPreviewPlaying] = useState(false);
+
+  // Timeline preview
+  const [timelineTime, setTimelineTime] = useState('');
+  const { data: timelineData, isLoading: timelineLoading } = useTimelinePreview(
+    stationId ?? null,
+    timelineTime || null,
+  );
 
   // ── Client-side real-time countdown ────────────────────────
   // Server sends started_at (ISO) + duration. We interpolate locally.
@@ -458,14 +466,14 @@ export default function Dashboard() {
           </div>
           {/* Tab bar */}
           <div className="bg-[#12123a] flex items-center gap-0 border-b border-[#2a2a5e] shrink-0 overflow-x-auto">
-            {(['library', 'cart', 'log'] as BottomTab[]).map(t => (
+            {(['library', 'cart', 'log', 'timeline'] as BottomTab[]).map(t => (
               <button key={t} onClick={() => setBottomTab(t)}
                 className={`px-3 md:px-4 py-1 text-[11px] border-b-2 transition-colors uppercase tracking-wider whitespace-nowrap ${
                   bottomTab === t
                     ? 'border-cyan-400 text-cyan-300 bg-[#1a1a4e]'
                     : 'border-transparent text-gray-500 hover:text-gray-300'
                 }`}>
-                {t === 'library' ? 'Library' : t === 'cart' ? 'Cart' : 'Log'}
+                {t === 'library' ? 'Library' : t === 'cart' ? 'Cart' : t === 'log' ? 'Log' : 'Timeline'}
               </button>
             ))}
             {/* Type filter tabs (only for library) */}
@@ -591,6 +599,90 @@ export default function Dashboard() {
                   <div className="text-center text-gray-600 py-6 text-[11px]">No play history yet. Start playback to begin logging.</div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Timeline Preview */}
+          {bottomTab === 'timeline' && (
+            <div className="flex-1 overflow-y-auto bg-[#0a0a28] p-3">
+              <div className="flex items-center gap-3 mb-3">
+                <input
+                  type="datetime-local"
+                  value={timelineTime}
+                  onChange={e => setTimelineTime(e.target.value)}
+                  className="bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-200 text-[11px] px-2 py-1 rounded-sm focus:outline-none focus:border-cyan-600"
+                />
+                <button
+                  onClick={() => setTimelineTime('')}
+                  className="px-2 py-1 bg-[#2a2a5e] hover:bg-[#3a3a7e] text-cyan-300 text-[11px] rounded-sm"
+                >
+                  Now
+                </button>
+                {timelineLoading && <span className="text-cyan-400 text-[11px] animate-pulse">Loading...</span>}
+              </div>
+
+              {timelineData && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Blackout Status */}
+                  <div className={`rounded-lg border p-3 ${
+                    timelineData.is_blacked_out
+                      ? 'bg-red-900/30 border-red-700'
+                      : 'bg-green-900/20 border-green-800'
+                  }`}>
+                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Blackout Status</div>
+                    <div className={`text-sm font-bold ${timelineData.is_blacked_out ? 'text-red-400' : 'text-green-400'}`}>
+                      {timelineData.is_blacked_out ? 'BLACKED OUT' : 'CLEAR'}
+                    </div>
+                    {timelineData.current_blackout && (
+                      <div className="mt-1 text-[11px] text-red-300">
+                        {timelineData.current_blackout.name}
+                        <div className="text-[10px] text-red-400/70">
+                          {new Date(timelineData.current_blackout.start_datetime).toLocaleString()} — {new Date(timelineData.current_blackout.end_datetime).toLocaleString()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Active Block */}
+                  <div className="rounded-lg border bg-[#1a1a4e]/50 border-[#3a3a7e] p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Active Block</div>
+                    {timelineData.active_block ? (
+                      <>
+                        <div className="text-sm font-bold text-cyan-300">{timelineData.active_block.name}</div>
+                        <div className="text-[11px] text-gray-400 mt-1">
+                          Schedule: {timelineData.active_block.schedule_name ?? '—'}
+                        </div>
+                        <div className="text-[10px] text-gray-500">
+                          {timelineData.active_block.start_time} — {timelineData.active_block.end_time} | {timelineData.active_block.playback_mode}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">No active block</div>
+                    )}
+                  </div>
+
+                  {/* Next Blackout */}
+                  <div className="rounded-lg border bg-yellow-900/20 border-yellow-800/50 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Next Blackout</div>
+                    {timelineData.next_blackout ? (
+                      <>
+                        <div className="text-sm font-bold text-yellow-300">{timelineData.next_blackout.name}</div>
+                        <div className="text-[10px] text-yellow-400/70 mt-1">
+                          {new Date(timelineData.next_blackout.start_datetime).toLocaleString()} — {new Date(timelineData.next_blackout.end_datetime).toLocaleString()}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-500">None scheduled</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {!timelineData && !timelineLoading && (
+                <div className="text-center text-gray-600 py-6 text-[11px]">
+                  Select a station to view timeline information.
+                </div>
+              )}
             </div>
           )}
         </div>
