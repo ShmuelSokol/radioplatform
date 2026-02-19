@@ -92,7 +92,11 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
         onRegionUpdate?.({ start: region.start, end: region.end, id: region.id });
       });
 
-      ws.load(url);
+      ws.load(url).catch((err: unknown) => {
+        console.error('WaveSurfer load failed:', err);
+        setLoading(false);
+        setError('Failed to load audio — the file may not exist or is in an unsupported format');
+      });
       wsRef.current = ws;
 
       return () => {

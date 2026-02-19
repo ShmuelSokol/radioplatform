@@ -148,12 +148,16 @@ export default function ReviewFlow() {
             </div>
 
             {/* Waveform */}
-            {audioUrl && (
+            {audioUrl ? (
               <ErrorBoundary key={currentAsset.id} fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-500">Waveform unavailable for this asset</div>}>
                 <Suspense fallback={<div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-gray-400">Loading waveform...</div>}>
                   <WaveformPlayer ref={waveformRef} url={audioUrl} />
                 </Suspense>
               </ErrorBoundary>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-lg p-4 text-center text-amber-600 text-sm">
+                No audio file available for this asset (seed data — no file was uploaded)
+              </div>
             )}
 
             {/* Notes */}

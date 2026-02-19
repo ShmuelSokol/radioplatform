@@ -7,6 +7,11 @@ import Spinner from '../../components/Spinner';
 
 const EXPORT_FORMATS = ['original', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 
+/** Real uploads have file_path starting with "assets/"; seed data uses music/, spots/, etc. */
+function hasRealAudio(filePath: string): boolean {
+  return filePath.startsWith('assets/') || filePath.startsWith('http');
+}
+
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '--';
   const m = Math.floor(seconds / 60);
@@ -171,11 +176,13 @@ export default function Assets() {
     });
   };
 
+  const realAssets = useMemo(() => filtered.filter((a) => hasRealAudio(a.file_path)), [filtered]);
+
   const toggleAll = () => {
-    if (selected.size === filtered.length) {
+    if (selected.size === realAssets.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(filtered.map((a) => a.id)));
+      setSelected(new Set(realAssets.map((a) => a.id)));
     }
   };
 
@@ -319,11 +326,12 @@ export default function Assets() {
               <th className="px-3 py-3 text-left">
                 <input
                   type="checkbox"
-                  checked={filtered.length > 0 && selected.size === filtered.length}
+                  checked={realAssets.length > 0 && selected.size === realAssets.length}
                   onChange={toggleAll}
                   className="rounded border-gray-300"
                 />
               </th>
+              <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Audio</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Artist</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Album</th>
@@ -341,8 +349,17 @@ export default function Assets() {
                     type="checkbox"
                     checked={selected.has(asset.id)}
                     onChange={() => toggleSelect(asset.id)}
-                    className="rounded border-gray-300"
+                    disabled={!hasRealAudio(asset.file_path)}
+                    className="rounded border-gray-300 disabled:opacity-30"
+                    title={hasRealAudio(asset.file_path) ? '' : 'No audio file — cannot add to review queue'}
                   />
+                </td>
+                <td className="px-3 py-4 text-center">
+                  {hasRealAudio(asset.file_path) ? (
+                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" title="Has audio file" />
+                  ) : (
+                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-300" title="No audio file (seed data)" />
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap font-medium">{asset.title}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.artist ?? '--'}</td>
@@ -371,7 +388,7 @@ export default function Assets() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-6 py-10 text-center text-gray-500">
+                <td colSpan={9} className="px-6 py-10 text-center text-gray-500">
                   {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>
