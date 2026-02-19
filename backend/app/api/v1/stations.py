@@ -1,9 +1,6 @@
-import logging
-import traceback
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, require_manager
@@ -17,8 +14,6 @@ from app.services.station_service import (
     list_stations,
     update_station,
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stations", tags=["stations"])
 
@@ -40,12 +35,8 @@ async def list_all(
     active_only: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
-    try:
-        stations, total = await list_stations(db, skip=skip, limit=limit, active_only=active_only)
-        return StationListResponse(stations=stations, total=total)
-    except Exception as e:
-        logger.error(f"Station list error: {e}\n{traceback.format_exc()}")
-        return JSONResponse(status_code=500, content={"detail": str(e), "type": type(e).__name__})
+    stations, total = await list_stations(db, skip=skip, limit=limit, active_only=active_only)
+    return StationListResponse(stations=stations, total=total)
 
 
 @router.get("/{station_id}", response_model=StationResponse)

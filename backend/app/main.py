@@ -13,7 +13,7 @@ _tables_created = False
 
 
 async def ensure_tables():
-    """Create DB tables if they haven't been created yet."""
+    """Create DB tables if they haven't been created yet, and add missing columns."""
     global _tables_created
     if _tables_created:
         return
@@ -24,9 +24,30 @@ async def ensure_tables():
 
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+        # Add missing columns to existing tables (create_all doesn't ALTER)
+        await _add_missing_columns(engine)
+
         _tables_created = True
     except Exception as e:
         logging.warning(f"Table creation skipped: {e}")
+
+
+async def _add_missing_columns(engine):
+    """Add columns that were added to models but missing from existing DB tables."""
+    from sqlalchemy import text
+
+    migrations = [
+        "ALTER TABLE channel_streams ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE channel_streams ADD COLUMN IF NOT EXISTS schedule_id UUID REFERENCES schedules(id) ON DELETE SET NULL",
+    ]
+    try:
+        async with engine.begin() as conn:
+            for sql in migrations:
+                await conn.execute(text(sql))
+        logger.info("Column migrations applied successfully")
+    except Exception as e:
+        logger.warning(f"Column migration skipped: {e}")
 
 
 @asynccontextmanager
