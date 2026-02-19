@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
-import { downloadAsset } from '../../api/assets';
+import { downloadAsset, getAssetAudioUrl } from '../../api/assets';
 
 const EXPORT_FORMATS = ['original', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 
@@ -64,6 +64,51 @@ function DownloadButton({ assetId, title }: { assetId: string; title: string }) 
   );
 }
 
+function PlayButton({ assetId, title, audioRef, playingId, setPlayingId }: {
+  assetId: string;
+  title: string;
+  audioRef: React.RefObject<HTMLAudioElement | null>;
+  playingId: string | null;
+  setPlayingId: (id: string | null) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const isPlaying = playingId === assetId;
+
+  const handlePlay = async () => {
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      setPlayingId(null);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const url = await getAssetAudioUrl(assetId);
+      audioRef.current.src = url;
+      audioRef.current.onended = () => setPlayingId(null);
+      await audioRef.current.play();
+      setPlayingId(assetId);
+    } catch {
+      setPlayingId(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handlePlay}
+      disabled={loading}
+      className={`text-sm ${isPlaying ? 'text-green-600 hover:text-green-800 font-medium' : 'text-emerald-600 hover:text-emerald-800'} disabled:opacity-50`}
+      title={isPlaying ? `Stop ${title}` : `Play ${title}`}
+    >
+      {loading ? '...' : isPlaying ? 'Stop' : 'Play'}
+    </button>
+  );
+}
+
 interface Filters {
   title: string;
   artist: string;
@@ -91,6 +136,8 @@ export default function Assets() {
   const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const setFilter = (key: keyof Filters, value: string) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -262,6 +309,7 @@ export default function Assets() {
         </div>
       )}
 
+      <audio ref={audioRef} hidden />
       <div className="bg-white shadow rounded-lg overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
@@ -301,6 +349,7 @@ export default function Assets() {
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.asset_type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right space-x-3">
+                  <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
                   <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-sm">View</Link>
                   <DownloadButton assetId={asset.id} title={asset.title} />
                   <button
