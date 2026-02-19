@@ -65,6 +65,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<string>('all');
   const [librarySearch, setLibrarySearch] = useState('');
   const [bottomTab, setBottomTab] = useState<BottomTab>('library');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [bottomHeight, setBottomHeight] = useState(() => {
     try { const v = localStorage.getItem('radio_panel_h'); return v ? Math.max(120, Math.min(600, parseInt(v))) : 240; }
     catch { return 240; }
@@ -72,7 +73,14 @@ export default function Dashboard() {
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   const stations = stationsData?.stations ?? [];
-  const stationId = stations[0]?.id ?? null;
+  const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
+  // Auto-select first station when stations load
+  useEffect(() => {
+    if (stations.length > 0 && !selectedStationId) {
+      setSelectedStationId(stations[0].id);
+    }
+  }, [stations, selectedStationId]);
+  const stationId = selectedStationId;
 
   const { data: queueData } = useQueue(stationId);
   const { data: logData } = usePlayLog(stationId);
@@ -96,6 +104,11 @@ export default function Dashboard() {
   const serverStartedAt = queueData?.now_playing?.started_at ?? null;
   const serverDuration = queueData?.now_playing?.asset?.duration ?? 0;
   const isPlaying = !!queueData?.now_playing;
+
+  // Clear status message when playback starts
+  useEffect(() => {
+    if (isPlaying) setStatusMessage(null);
+  }, [isPlaying]);
 
   const updateCountdown = useCallback(() => {
     if (serverStartedAt && serverDuration > 0) {
@@ -241,16 +254,46 @@ export default function Dashboard() {
 
       {/* ═══ Status bar ═══ */}
       <div className="bg-[#0a0a28] border-b border-[#2a2a5e] px-3 py-1.5 flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
+        {/* Station selector */}
+        {stations.length > 0 && (
+          <select
+            value={selectedStationId ?? ''}
+            onChange={(e) => setSelectedStationId(e.target.value || null)}
+            className="bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-200 text-[11px] px-1.5 py-0.5 rounded-sm focus:outline-none focus:border-cyan-600"
+          >
+            {stations.map((s: any) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        )}
         {/* Play / Stop */}
         {isPlaying ? (
           <span className="bg-green-600 text-white px-2 py-0.5 font-bold text-[11px] rounded-sm tracking-wide animate-pulse">
             ON AIR
           </span>
         ) : (
-          <button onClick={() => { initAudio(); stationId && startMut.mutate(); }}
-            className="bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 font-bold text-[11px] rounded-sm tracking-wide">
-            ▶ START
+          <button onClick={() => {
+            if (!stationId) { setStatusMessage('No station available'); return; }
+            setStatusMessage(null);
+            initAudio();
+            startMut.mutate(undefined, {
+              onSuccess: (data: any) => {
+                if (data?.now_playing === null || data?.now_playing === undefined) {
+                  setStatusMessage(data?.message || 'Queue is empty — add assets from the library first');
+                }
+              },
+              onError: () => setStatusMessage('Failed to start playback'),
+            });
+          }}
+            disabled={startMut.isPending}
+            className="bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 font-bold text-[11px] rounded-sm tracking-wide disabled:opacity-50">
+            {startMut.isPending ? '⏳ STARTING...' : '▶ START'}
           </button>
+        )}
+
+        {/* Status message */}
+        {statusMessage && !isPlaying && (
+          <span className="text-amber-400 text-[11px] animate-pulse">{statusMessage}</span>
         )}
 
         {/* Remaining */}
@@ -556,7 +599,7 @@ export default function Dashboard() {
       {/* ═══ Footer ═══ */}
       <div className="bg-[#12123a] border-t border-[#2a2a5e] px-3 py-0.5 flex items-center justify-between text-[10px] text-gray-500 shrink-0">
         <span>Assets: {assets.length} | Queue: {queueEntries.length}</span>
-        <span>{stations[0]?.name ?? ''} | {stations[0]?.timezone ?? ''}</span>
+        <span>{stations.find((s: any) => s.id === stationId)?.name ?? ''} | {stations.find((s: any) => s.id === stationId)?.timezone ?? ''}</span>
         <span>{user?.email ?? ''} ({user?.role ?? ''})</span>
       </div>
     </div>
