@@ -25,7 +25,7 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 async def upload_asset(
     file: UploadFile = File(...),
     title: str = Form(...),
-    format: str = Form("mp3"),
+    format: str = Form("mp2"),
     artist: str | None = Form(None),
     album: str | None = Form(None),
     asset_type: str = Form("music"),
@@ -111,7 +111,9 @@ async def update_asset(
 
 
 EXPORT_FORMATS = {
+    "mp2": {"ffmpeg_fmt": "mp2", "mime": "audio/mpeg", "args": ["-vn", "-c:a", "mp2", "-b:a", "192k", "-ac", "2", "-ar", "44100"]},
     "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "args": ["-vn", "-ab", "192k", "-ac", "2", "-ar", "44100"]},
+    "mp4": {"ffmpeg_fmt": "mp4", "mime": "audio/mp4", "args": ["-vn", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100", "-movflags", "+faststart"]},
     "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
     "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
     "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "args": ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},

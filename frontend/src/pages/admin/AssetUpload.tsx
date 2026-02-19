@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useUploadAsset } from '../../hooks/useAssets';
 
 const IMPORT_FORMATS = [
-  { value: 'mp3', label: 'MP3 (default)' },
+  { value: 'mp2', label: 'MP2 (default)' },
+  { value: 'mp3', label: 'MP3' },
+  { value: 'mp4', label: 'MP4 (AAC)' },
   { value: 'wav', label: 'WAV' },
   { value: 'flac', label: 'FLAC' },
   { value: 'ogg', label: 'OGG' },
@@ -19,6 +21,11 @@ const ASSET_TYPES = [
   { value: 'zmanim', label: 'Zmanim' },
 ] as const;
 
+function getFileExtension(filename: string): string {
+  const dot = filename.lastIndexOf('.');
+  return dot >= 0 ? filename.slice(dot).toLowerCase() : '';
+}
+
 export default function AssetUpload() {
   const [title, setTitle] = useState('');
   const [artist, setArtist] = useState('');
@@ -26,11 +33,13 @@ export default function AssetUpload() {
   const [assetType, setAssetType] = useState('music');
   const [category, setCategory] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [format, setFormat] = useState('mp3');
+  const [format, setFormat] = useState('mp2');
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadAsset();
   const navigate = useNavigate();
+
+  const fileExt = file ? getFileExtension(file.name) : '';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
@@ -80,7 +89,7 @@ export default function AssetUpload() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="audio/*,video/*,.mpg,.mpeg,.mp4,.mkv,.avi,.mov,.webm,.flac,.ogg,.opus,.wma,.aac,.m4a,.wv,.ape,.aiff,.aif"
+            accept="audio/*,video/*,.mp2,.mpg,.mpeg,.mp4,.mkv,.avi,.mov,.webm,.flac,.ogg,.opus,.wma,.aac,.m4a,.wv,.ape,.aiff,.aif"
             onChange={handleFileChange}
             className="w-full border rounded px-3 py-2"
             required
@@ -88,6 +97,9 @@ export default function AssetUpload() {
           {file && (
             <p className="text-sm text-gray-500 mt-1">
               {file.name} ({(file.size / 1024 / 1024).toFixed(1)} MB)
+              <span className="ml-2 inline-block bg-gray-100 text-gray-600 text-xs font-mono px-1.5 py-0.5 rounded">
+                {fileExt || 'unknown'}
+              </span>
             </p>
           )}
         </div>

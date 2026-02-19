@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 # Extensions that are already MP3 (skip conversion, still extract duration)
 MP3_EXTENSIONS = {".mp3"}
 
-# Extensions that should be converted to MP3
+# Extensions that should be converted
 CONVERTIBLE_EXTENSIONS = {
-    ".mpg", ".mpeg", ".wav", ".flac", ".ogg", ".m4a", ".wma",
+    ".mp2", ".mpg", ".mpeg", ".wav", ".flac", ".ogg", ".m4a", ".wma",
     ".aac", ".opus", ".webm", ".mp4", ".avi", ".mkv", ".mov",
     ".wv", ".ape", ".alac", ".aiff", ".aif",
 }
@@ -114,7 +114,9 @@ def _extract_duration(file_data: bytes, input_ext: str = "") -> float | None:
 
 
 CONVERT_FORMATS = {
+    "mp2": {"ffmpeg_fmt": "mp2", "mime": "audio/mpeg", "ext": ".mp2", "args": ["-vn", "-c:a", "mp2", "-b:a", "192k", "-ac", "2", "-ar", "44100"]},
     "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "ext": ".mp3", "args": ["-vn", "-ab", "192k", "-ac", "2", "-ar", "44100"]},
+    "mp4": {"ffmpeg_fmt": "mp4", "mime": "audio/mp4", "ext": ".m4a", "args": ["-vn", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100", "-movflags", "+faststart"]},
     "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "ext": ".wav", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
     "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "ext": ".flac", "args": ["-vn", "-ac", "2", "-ar", "44100"]},
     "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "ext": ".ogg", "args": ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
