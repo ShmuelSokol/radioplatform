@@ -353,29 +353,37 @@ async def get_play_log(
     _user: User = Depends(get_current_user),
 ):
     """Get recent play history."""
-    result = await db.execute(
-        select(PlayLog)
-        .where(PlayLog.station_id == station_id)
-        .order_by(PlayLog.start_utc.desc())
-        .limit(limit)
-    )
-    logs = result.scalars().all()
-    return {
-        "logs": [
-            {
-                "id": str(log.id),
-                "asset_id": str(log.asset_id) if log.asset_id else None,
-                "title": log.asset.title if log.asset else "Unknown",
-                "artist": log.asset.artist if log.asset else None,
-                "asset_type": log.asset.asset_type if log.asset else None,
-                "start_utc": log.start_utc.isoformat(),
-                "end_utc": log.end_utc.isoformat() if log.end_utc else None,
-                "source": log.source.value if hasattr(log.source, 'value') else str(log.source),
-            }
-            for log in logs
-        ],
-        "total": len(logs),
-    }
+    import traceback
+    try:
+        from sqlalchemy.orm import selectinload
+        result = await db.execute(
+            select(PlayLog)
+            .options(selectinload(PlayLog.asset))
+            .where(PlayLog.station_id == station_id)
+            .order_by(PlayLog.start_utc.desc())
+            .limit(limit)
+        )
+        logs = result.scalars().all()
+        return {
+            "logs": [
+                {
+                    "id": str(log.id),
+                    "asset_id": str(log.asset_id) if log.asset_id else None,
+                    "title": log.asset.title if log.asset else "Unknown",
+                    "artist": log.asset.artist if log.asset else None,
+                    "asset_type": log.asset.asset_type if log.asset else None,
+                    "start_utc": log.start_utc.isoformat(),
+                    "end_utc": log.end_utc.isoformat() if log.end_utc else None,
+                    "source": log.source.value if hasattr(log.source, 'value') else str(log.source),
+                }
+                for log in logs
+            ],
+            "total": len(logs),
+        }
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error("get_play_log error: %s\n%s", exc, tb)
+        return JSONResponse({"error": str(exc), "traceback": tb}, status_code=500)
 
 
 @router.get("/last-played")
