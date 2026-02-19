@@ -10,6 +10,8 @@ from app.api.v1.queue import router as queue_router
 from app.api.v1.rules import router as rules_router
 from app.api.v1.schedules import router as new_schedules_router
 from app.api.v1.now_playing import router as now_playing_router
+from app.api.v1.websocket import router as websocket_router
+from app.api.v1.scheduler import router as scheduler_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -22,3 +24,5 @@ router.include_router(queue_router)
 router.include_router(rules_router)
 router.include_router(new_schedules_router)
 router.include_router(now_playing_router)
+router.include_router(websocket_router)
+router.include_router(scheduler_router)

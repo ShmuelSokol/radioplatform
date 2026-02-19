@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getStation, getStreamInfo } from '../../api/stations';
-import { useNowPlaying } from '../../hooks/useNowPlaying';
+import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { usePlayerStore } from '../../stores/playerStore';
 
 export default function Listen() {
@@ -11,7 +11,7 @@ export default function Listen() {
     queryFn: () => getStation(stationId!),
     enabled: !!stationId,
   });
-  const { data: nowPlaying } = useNowPlaying(stationId ?? null);
+  const { nowPlaying, isConnected } = useNowPlayingWS(stationId);
   const { play, stationId: currentStationId, isPlaying, stop } = usePlayerStore();
 
   const isThisPlaying = currentStationId === stationId && isPlaying;
@@ -68,33 +68,31 @@ export default function Listen() {
 
         {nowPlaying && (
           <div className="border-t pt-6">
-            <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Now Playing</h3>
-            {nowPlaying.now_playing ? (
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-gray-500 uppercase">Now Playing</h3>
+              <span className={`text-xs px-2 py-1 rounded ${isConnected ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>
+                {isConnected ? '● Live' : '○ Offline'}
+              </span>
+            </div>
+            {nowPlaying.asset_title && nowPlaying.state === 'playing' ? (
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center text-2xl">
                   &#9835;
                 </div>
-                <div>
-                  <p className="font-medium">{nowPlaying.now_playing.title}</p>
-                  <p className="text-sm text-gray-500">{nowPlaying.state}</p>
+                <div className="flex-1">
+                  <p className="font-medium">{nowPlaying.asset_title}</p>
+                  <div className="flex items-center gap-3 text-sm text-gray-500">
+                    <span>{nowPlaying.state}</span>
+                    {nowPlaying.elapsed_seconds !== undefined && nowPlaying.duration_seconds && (
+                      <span>
+                        {Math.floor(nowPlaying.elapsed_seconds / 60)}:{String(Math.floor(nowPlaying.elapsed_seconds % 60)).padStart(2, '0')} / {Math.floor(nowPlaying.duration_seconds / 60)}:{String(Math.floor(nowPlaying.duration_seconds % 60)).padStart(2, '0')}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
               <p className="text-gray-400">Nothing playing right now</p>
-            )}
-
-            {nowPlaying.upcoming.length > 0 && (
-              <div className="mt-6">
-                <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Up Next</h3>
-                <ul className="space-y-2">
-                  {nowPlaying.upcoming.map((item, i) => (
-                    <li key={i} className="flex items-center gap-3 text-sm text-gray-600">
-                      <span className="text-gray-400">{i + 1}.</span>
-                      {item.title}
-                    </li>
-                  ))}
-                </ul>
-              </div>
             )}
           </div>
         )}

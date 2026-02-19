@@ -1,7 +1,9 @@
 # Studio Kol Bramah — Project Guide
 
+> **IMPORTANT**: Keep this file current. Whenever you add models, routes, services, hooks, pages, or env vars — update this file to reflect the change. This is the single source of truth for the project.
+
 ## What is this?
-Multi-channel radio streaming platform with playlist automation, ad insertion, silence trimming, timezone-aware scheduling (Sabbath/holiday blackouts, sunset/sunrise rules), and admin + public listener UIs.
+Multi-channel radio streaming platform with playlist automation, ad insertion, weather/time announcements (ElevenLabs TTS), silence trimming, timezone-aware scheduling (Sabbath/holiday blackouts, sunset/sunrise rules), and admin + public listener UIs. Includes a Telegram bot for remote development via Claude.
 
 ## Live URLs
 - **Frontend**: https://studio-kolbramah-radio.vercel.app
@@ -13,39 +15,166 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, s
 - **Backend**: Python 3.12 + FastAPI (async) + SQLAlchemy 2.0 (asyncpg)
 - **Database**: Supabase PostgreSQL (transaction pooler on port 6543)
 - **Hosting**: Vercel (both frontend and backend serverless)
+- **TTS**: ElevenLabs API for weather/time announcements
+- **Weather**: OpenWeatherMap API (current + 3-day forecast)
+- **Storage**: Supabase Storage for audio files (bucket: `audio`)
+- **Bot**: Telegram bot with Claude API + OpenAI Whisper for voice transcription
 - **Workers**: Celery + Redis (not yet deployed — needed for media processing)
-- **Storage**: S3-compatible (not yet configured — needed for audio uploads)
 - **Media**: FFmpeg for transcoding, clipping, HLS generation
 
 ## Project Structure
 ```
 radioplatform/
 ├── backend/
-│   ├── api/index.py          # Vercel serverless entry point
-│   ├── app/main.py           # FastAPI app factory
-│   ├── app/config.py         # Pydantic BaseSettings (env vars, auto-fixes DB URL)
-│   ├── app/core/             # security (JWT), dependencies (auth guards), exceptions, middleware
-│   ├── app/db/               # async engine (statement_cache_size=0 for Supabase pooler), Base, session
-│   ├── app/models/           # 10 SQLAlchemy models (User, Station, Asset, etc.)
-│   ├── app/schemas/          # Pydantic v2 request/response schemas (uuid.UUID | str for IDs)
-│   ├── app/api/v1/           # Route handlers (auth, stations, assets, streams, controls)
-│   ├── app/services/         # Business logic (auth, station, asset, media, storage, playback)
-│   ├── app/workers/tasks/    # Celery tasks (media processing)
-│   ├── app/streaming/        # HLS generator, playlist engine
-│   ├── tests/                # pytest async tests (19 tests, all passing with SQLite)
-│   ├── vercel.json           # Rewrites all routes to api/index
-│   └── pyproject.toml        # bcrypt==4.1.3 pinned for passlib compat
+│   ├── api/index.py              # Vercel serverless entry point
+│   ├── app/main.py               # FastAPI app factory
+│   ├── app/config.py             # Pydantic BaseSettings (all env vars)
+│   ├── app/core/                 # security (JWT), dependencies (auth guards), exceptions, middleware
+│   ├── app/db/                   # async engine (statement_cache_size=0), Base, session
+│   ├── app/models/               # 18 SQLAlchemy models
+│   ├── app/schemas/              # Pydantic v2 request/response schemas
+│   ├── app/api/v1/               # 12 route handlers
+│   ├── app/services/             # 14 business logic services
+│   ├── app/workers/tasks/        # Celery tasks (media processing)
+│   ├── app/streaming/            # HLS generator, playlist engine
+│   ├── tests/                    # pytest async tests
+│   ├── vercel.json               # Rewrites all routes to api/index
+│   └── pyproject.toml            # bcrypt==4.1.3 pinned for passlib compat
 ├── frontend/
 │   └── src/
-│       ├── api/client.ts     # Axios client with JWT interceptor, uses VITE_API_URL
-│       ├── components/       # layout (Navbar, Layout), audio (AudioPlayer, NowPlaying)
-│       ├── pages/            # admin/ (Login, Dashboard, Stations, Assets, Upload)
-│       │                       public/ (StationList, Listen)
-│       ├── hooks/            # useAuth, useStations, useAssets, useNowPlaying, useAudioPlayer
-│       ├── stores/           # Zustand: authStore, playerStore
-│       └── types/            # TypeScript interfaces
-└── docker/                   # Dockerfiles, nginx.conf (for Docker-based dev)
+│       ├── api/                  # 7 API client modules + Axios client with JWT interceptor
+│       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer, NowPlaying)
+│       ├── pages/admin/          # Dashboard, Stations, Assets, AssetUpload, Schedules, Rules, Users, Login
+│       ├── pages/public/         # StationList, Listen
+│       ├── hooks/                # 11 custom hooks
+│       ├── stores/               # Zustand: authStore, playerStore
+│       └── types/                # TypeScript interfaces
+├── bot/
+│   ├── main.py                   # Telegram bot — Claude Code over Telegram
+│   ├── pyproject.toml            # Bot dependencies
+│   ├── .env                      # Bot secrets (not committed)
+│   └── .env.example              # Template
+├── docker/                       # Dockerfiles, nginx.conf
+└── infra/                        # Infrastructure configs
 ```
+
+## Backend Details
+
+### Models (`backend/app/models/`) — 18 models
+| Model | File | Description |
+|-------|------|-------------|
+| User | user.py | Admin/manager/viewer with JWT auth |
+| Station | station.py | Radio station config |
+| Asset | asset.py | Audio file metadata |
+| Category | category.py | Asset categorization |
+| QueueEntry | queue_entry.py | Playback queue items |
+| Schedule | schedule.py | Scheduling blocks |
+| ScheduleBlock | schedule_block.py | Time blocks within schedules |
+| ScheduleEntry | schedule_entry.py | Entries within schedule blocks |
+| PlaylistEntry | playlist_entry.py | Playlist items |
+| NowPlaying | now_playing.py | Current playback state |
+| PlayLog | play_log.py | Playback history |
+| RuleSet | rule_set.py | Scheduling rules |
+| HolidayWindow | holiday_window.py | Sabbath/holiday blackouts |
+| ChannelStream | channel_stream.py | Stream configuration |
+| Sponsor | sponsor.py | Sponsor/ad management |
+| ScheduleRule | schedule_rule.py | Schedule-specific rules |
+
+### API Routes (`backend/app/api/v1/`) — 12 routers
+| Router | File | Prefix |
+|--------|------|--------|
+| auth | auth.py | /auth |
+| stations | stations.py | /stations |
+| assets | assets.py | /assets |
+| streams | streams.py | /streams |
+| controls | controls.py | /controls |
+| users | users.py | /users |
+| queue | queue.py | /stations/{id}/queue |
+| rules | rules.py | /rules |
+| schedules | schedules.py | /schedules |
+| now_playing | now_playing.py | /now-playing |
+| websocket | websocket.py | /ws |
+| scheduler | scheduler.py | /scheduler |
+
+### Services (`backend/app/services/`) — 14 services
+| Service | Description |
+|---------|-------------|
+| auth_service.py | User authentication, JWT tokens |
+| station_service.py | Station CRUD |
+| asset_service.py | Asset management |
+| media_service.py | FFmpeg transcoding |
+| storage_service.py | File storage abstraction |
+| supabase_storage_service.py | Supabase Storage integration |
+| playback_service.py | Playback state management |
+| schedule_service.py | Schedule CRUD operations |
+| scheduling.py | Schedule resolution logic |
+| scheduler_engine.py | Background scheduling engine |
+| queue_replenish_service.py | Auto-replenish playback queue |
+| tts_service.py | ElevenLabs TTS generation |
+| weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
+| weather_spot_service.py | Weather/time announcement generation + caching |
+
+## Frontend Details
+
+### Pages
+**Admin** (`frontend/src/pages/admin/`):
+- Dashboard.tsx — Main control panel with queue, library, cart machine, weather preview
+- Stations.tsx — Station management
+- Assets.tsx — Audio asset management
+- AssetUpload.tsx — File upload
+- Schedules.tsx — Schedule management (create/edit/delete)
+- Rules.tsx — Scheduling rules
+- Users.tsx — User management
+- Login.tsx — Authentication
+
+**Public** (`frontend/src/pages/public/`):
+- StationList.tsx — Browse stations
+- Listen.tsx — Listen to a station
+
+### Hooks (`frontend/src/hooks/`) — 11 hooks
+| Hook | Description |
+|------|-------------|
+| useAuth.ts | Authentication state + mutations |
+| useStations.ts | Station CRUD queries/mutations |
+| useAssets.ts | Asset queries/mutations |
+| useQueue.ts | Queue management + useWeatherPreview |
+| useSchedules.ts | Schedule/block/playlist entry hooks |
+| useRules.ts | Scheduling rules |
+| useUsers.ts | User management |
+| useAudioPlayer.ts | Audio playback controls |
+| useAudioEngine.ts | Audio engine integration |
+| useNowPlaying.ts | Now-playing polling |
+| useNowPlayingWS.ts | Now-playing WebSocket (with polling fallback) |
+
+### API Clients (`frontend/src/api/`) — 7 modules
+auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, client.ts (Axios + JWT interceptor)
+
+### Routes (`frontend/src/App.tsx`)
+- `/` → redirect to `/stations`
+- `/stations` → StationList
+- `/listen/:stationId` → Listen
+- `/admin/login` → Login
+- `/admin/dashboard` → Dashboard (protected)
+- `/admin/stations` → Stations (protected)
+- `/admin/assets` → Assets (protected)
+- `/admin/assets/upload` → AssetUpload (protected)
+- `/admin/users` → Users (protected)
+- `/admin/rules` → Rules (protected)
+- `/admin/schedules` → Schedules (protected)
+
+## Telegram Bot (`bot/`)
+Claude Code accessible over Telegram for remote development.
+
+**Capabilities**: Read/write/edit files, run bash, git, deploy to Vercel, voice notes (Whisper transcription)
+
+**Tools**: read_file, write_file, edit_file, run_bash, list_files
+
+**Config** (in `bot/.env`):
+- `TELEGRAM_BOT_TOKEN` — from @BotFather
+- `ANTHROPIC_API_KEY` — Claude API key
+- `OPENAI_API_KEY` — for Whisper voice transcription (optional)
+
+**Run locally**: `cd bot && uv run python main.py`
 
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
@@ -54,26 +183,26 @@ radioplatform/
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
 - **Tests**: pytest-asyncio with SQLite + type compilation hooks (PG_UUID→VARCHAR, JSONB→TEXT, ENUM→VARCHAR).
 - **Serverless**: No lifespan events. Tables created lazily via middleware on first request. Statement cache disabled for Supabase pooler.
-
-## Important Files
-- `backend/app/config.py` — All env var config. Auto-converts `postgres://` → `postgresql+asyncpg://`. Redis/S3 optional.
-- `backend/app/db/engine.py` — Async engine with `statement_cache_size=0` for Supabase transaction pooler
-- `backend/app/core/dependencies.py` — Auth dependency injection (get_current_user, require_admin)
-- `backend/app/api/v1/__init__.py` — Router registration (add new routers here)
-- `backend/api/index.py` — Vercel serverless entry point (adds backend root to sys.path)
-- `frontend/src/api/client.ts` — Axios instance with JWT interceptor, `VITE_API_URL` env var
-- `frontend/src/App.tsx` — All routes defined here
+- **TTS Pronunciation**: "Kol Bramah" is spelled "Kohl Baramah" in TTS text for correct pronunciation.
 
 ## Environment Variables
 
 ### Backend (Vercel)
-- `DATABASE_URL` — Supabase PostgreSQL pooler URI (URL-encode special chars in password)
-- `JWT_SECRET_KEY` — Secret for JWT signing
-- `CORS_ORIGINS` — JSON array of allowed origins
-- `REDIS_URL` — Empty string to disable (Redis not needed for basic CRUD)
-- `S3_ENDPOINT_URL` — Empty string to disable (falls back to local storage)
-- `APP_DEBUG` — "false" in production
-- `APP_ENV` — "production"
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `DATABASE_URL` | Supabase PostgreSQL pooler URI | Yes |
+| `JWT_SECRET_KEY` | Secret for JWT signing | Yes |
+| `CORS_ORIGINS` | JSON array of allowed origins | Yes |
+| `APP_ENV` | "production" | Yes |
+| `APP_DEBUG` | "false" in production | No |
+| `REDIS_URL` | Empty string to disable | No |
+| `S3_ENDPOINT_URL` | Empty string to disable | No |
+| `ELEVENLABS_API_KEY` | ElevenLabs TTS API key | For weather/time |
+| `ELEVENLABS_VOICE_ID` | ElevenLabs voice ID | For weather/time |
+| `OPENWEATHERMAP_API_KEY` | OpenWeatherMap API key | For weather |
+| `SUPABASE_URL` | Supabase project URL | For storage |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key | For storage |
+| `SUPABASE_STORAGE_BUCKET` | Storage bucket name (default: "audio") | For storage |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://studio-kolbramah-api.vercel.app/api/v1)
@@ -88,10 +217,12 @@ radioplatform/
 - **Vercel IPv6**: Direct Supabase connection fails (IPv6 not supported). Use pooler URL.
 - **Password URL encoding**: `/` → `%2F`, `[` → `%5B`, `]` → `%5D` in DATABASE_URL
 - **Pydantic schemas**: ID fields use `uuid.UUID | str` for cross-DB compatibility (SQLite returns strings)
+- **Frontend Vercel deploy**: Git author `shmue@users.noreply.github.com` is blocked. Workaround: copy frontend to a temp non-git directory and deploy from there.
+- **Weather caching**: Weather TTS audio is cached per 15-min slot. Text changes don't take effect until the next slot.
 
 ## Milestones
-- **M1** (current): Backend skeleton, auth, station CRUD, asset upload, React frontend — DEPLOYED
-- **M2**: Scheduling engine, admin schedule UI, now-playing websocket
+- **M1** (complete): Backend skeleton, auth, station CRUD, asset upload, React frontend — DEPLOYED
+- **M2** (in progress): Scheduling engine, admin schedule UI, now-playing websocket, queue system, weather/time announcements
 - **M3**: Sponsor insertion, holiday/timezone/sunset logic, multi-channel
 - **M4**: OTA broadcast (Icecast), reporting, monitoring
 - **M5**: Docs, load testing, Terraform deployment
@@ -104,8 +235,11 @@ cd backend && uv run pytest tests/ -v
 # Deploy backend to Vercel
 cd backend && npx vercel --prod --yes
 
-# Deploy frontend to Vercel
-cd frontend && npx vercel --prod --yes
+# Deploy frontend to Vercel (use temp dir workaround for git author issue)
+# Copy frontend files to temp dir, deploy from there, clean up
+
+# Run Telegram bot locally
+cd bot && uv run python main.py
 
 # Node.js path (not in system PATH)
 export PATH="/c/Users/shmue/.node/node-v20.19.2-win-x64:$PATH"

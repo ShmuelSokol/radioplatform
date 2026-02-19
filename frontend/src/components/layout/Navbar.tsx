@@ -20,6 +20,9 @@ export default function Navbar() {
                 <Link to="/admin/dashboard" className="text-gray-400 hover:text-yellow-300 transition">
                   Dashboard
                 </Link>
+                <Link to="/admin/schedules" className="text-gray-400 hover:text-orange-300 transition">
+                  Schedules
+                </Link>
                 <Link to="/admin/rules" className="text-gray-400 hover:text-purple-300 transition">
                   Rules
                 </Link>

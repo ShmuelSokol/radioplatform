@@ -10,6 +10,7 @@ import Assets from './pages/admin/Assets';
 import AssetUpload from './pages/admin/AssetUpload';
 import Users from './pages/admin/Users';
 import Rules from './pages/admin/Rules';
+import Schedules from './pages/admin/Schedules';
 import { useAuthStore } from './stores/authStore';
 
 const queryClient = new QueryClient({
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/admin/assets/upload" element={<ProtectedRoute><AssetUpload /></ProtectedRoute>} />
             <Route path="/admin/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
             <Route path="/admin/rules" element={<ProtectedRoute><Rules /></ProtectedRoute>} />
+            <Route path="/admin/schedules" element={<ProtectedRoute><Schedules /></ProtectedRoute>} />
           </Route>
         </Routes>
       </BrowserRouter>

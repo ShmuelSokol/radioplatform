@@ -56,3 +56,5 @@ media/
 
 # MinIO data
 minio-data/
+*.db
+bot/uv.lock
