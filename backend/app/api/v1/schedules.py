@@ -46,7 +46,7 @@ async def create_schedule(
 
 @router.get("/", response_model=List[Schedule])
 async def list_schedules(
-    station_id: UUID | str | None = None,
+    station_id: UUID | None = None,
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
@@ -59,64 +59,7 @@ async def list_schedules(
     return result.scalars().all()
 
 
-@router.get("/{schedule_id}", response_model=Schedule)
-async def get_schedule(
-    schedule_id: UUID | str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Get a single schedule by ID."""
-    stmt = (
-        select(ScheduleModel)
-        .where(ScheduleModel.id == schedule_id)
-        .options(selectinload(ScheduleModel.blocks).selectinload(ScheduleBlockModel.playlist_entries))
-    )
-    result = await db.execute(stmt)
-    schedule = result.scalar_one_or_none()
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    return schedule
-
-
-@router.patch("/{schedule_id}", response_model=Schedule)
-async def update_schedule(
-    schedule_id: UUID | str,
-    data: ScheduleUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_manager),
-):
-    """Update a schedule."""
-    stmt = select(ScheduleModel).where(ScheduleModel.id == schedule_id)
-    result = await db.execute(stmt)
-    schedule = result.scalar_one_or_none()
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-
-    for key, value in data.model_dump(exclude_unset=True).items():
-        setattr(schedule, key, value)
-
-    await db.commit()
-    await db.refresh(schedule)
-    return schedule
-
-
-@router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_schedule(
-    schedule_id: UUID | str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_manager),
-):
-    """Delete a schedule."""
-    stmt = select(ScheduleModel).where(ScheduleModel.id == schedule_id)
-    result = await db.execute(stmt)
-    schedule = result.scalar_one_or_none()
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-
-    await db.delete(schedule)
-    await db.commit()
-
-
-# ==================== Schedule Blocks ====================
+# ==================== Schedule Blocks (before /{schedule_id} to avoid route conflict) ====================
 @router.post("/blocks", response_model=ScheduleBlock, status_code=status.HTTP_201_CREATED)
 async def create_schedule_block(
     data: ScheduleBlockCreate,
@@ -133,7 +76,7 @@ async def create_schedule_block(
 
 @router.get("/blocks", response_model=List[ScheduleBlock])
 async def list_schedule_blocks(
-    schedule_id: UUID | str | None = None,
+    schedule_id: UUID | None = None,
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
@@ -153,7 +96,7 @@ async def list_schedule_blocks(
 
 @router.get("/blocks/{block_id}", response_model=ScheduleBlock)
 async def get_schedule_block(
-    block_id: UUID | str,
+    block_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single schedule block by ID."""
@@ -171,7 +114,7 @@ async def get_schedule_block(
 
 @router.patch("/blocks/{block_id}", response_model=ScheduleBlock)
 async def update_schedule_block(
-    block_id: UUID | str,
+    block_id: UUID,
     data: ScheduleBlockUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_manager),
@@ -193,7 +136,7 @@ async def update_schedule_block(
 
 @router.delete("/blocks/{block_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_schedule_block(
-    block_id: UUID | str,
+    block_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_manager),
 ):
@@ -208,7 +151,7 @@ async def delete_schedule_block(
     await db.commit()
 
 
-# ==================== Playlist Entries ====================
+# ==================== Playlist Entries (before /{schedule_id}) ====================
 @router.post("/playlist-entries", response_model=PlaylistEntry, status_code=status.HTTP_201_CREATED)
 async def create_playlist_entry(
     data: PlaylistEntryCreate,
@@ -225,7 +168,7 @@ async def create_playlist_entry(
 
 @router.get("/playlist-entries", response_model=List[PlaylistEntry])
 async def list_playlist_entries(
-    block_id: UUID | str | None = None,
+    block_id: UUID | None = None,
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
@@ -240,7 +183,7 @@ async def list_playlist_entries(
 
 @router.get("/playlist-entries/{entry_id}", response_model=PlaylistEntry)
 async def get_playlist_entry(
-    entry_id: UUID | str,
+    entry_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single playlist entry by ID."""
@@ -254,7 +197,7 @@ async def get_playlist_entry(
 
 @router.patch("/playlist-entries/{entry_id}", response_model=PlaylistEntry)
 async def update_playlist_entry(
-    entry_id: UUID | str,
+    entry_id: UUID,
     data: PlaylistEntryUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_manager),
@@ -276,7 +219,7 @@ async def update_playlist_entry(
 
 @router.delete("/playlist-entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_playlist_entry(
-    entry_id: UUID | str,
+    entry_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_manager),
 ):
@@ -288,4 +231,62 @@ async def delete_playlist_entry(
         raise HTTPException(status_code=404, detail="Playlist entry not found")
 
     await db.delete(entry)
+    await db.commit()
+
+
+# ==================== Schedule by ID (after literal routes) ====================
+@router.get("/{schedule_id}", response_model=Schedule)
+async def get_schedule(
+    schedule_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single schedule by ID."""
+    stmt = (
+        select(ScheduleModel)
+        .where(ScheduleModel.id == schedule_id)
+        .options(selectinload(ScheduleModel.blocks).selectinload(ScheduleBlockModel.playlist_entries))
+    )
+    result = await db.execute(stmt)
+    schedule = result.scalar_one_or_none()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return schedule
+
+
+@router.patch("/{schedule_id}", response_model=Schedule)
+async def update_schedule(
+    schedule_id: UUID,
+    data: ScheduleUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_manager),
+):
+    """Update a schedule."""
+    stmt = select(ScheduleModel).where(ScheduleModel.id == schedule_id)
+    result = await db.execute(stmt)
+    schedule = result.scalar_one_or_none()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(schedule, key, value)
+
+    await db.commit()
+    await db.refresh(schedule)
+    return schedule
+
+
+@router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_schedule(
+    schedule_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_manager),
+):
+    """Delete a schedule."""
+    stmt = select(ScheduleModel).where(ScheduleModel.id == schedule_id)
+    result = await db.execute(stmt)
+    schedule = result.scalar_one_or_none()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    await db.delete(schedule)
     await db.commit()

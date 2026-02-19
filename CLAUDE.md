@@ -54,8 +54,9 @@ radioplatform/
 │   ├── pyproject.toml            # Bot dependencies
 │   ├── .env                      # Bot secrets (not committed)
 │   └── .env.example              # Template
+├── docs/                         # API reference documentation
 ├── docker/                       # Dockerfiles, nginx.conf
-└── infra/                        # Infrastructure configs
+└── infra/terraform/              # Terraform IaC (Vercel frontend provisioning)
 ```
 
 ## Backend Details
@@ -130,6 +131,7 @@ radioplatform/
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
 - Schedules.tsx — Schedule management (create/edit/delete)
+- ScheduleBlocks.tsx — Manage blocks & playlist entries within a schedule
 - Rules.tsx — Scheduling rules
 - Users.tsx — User management
 - Login.tsx — Authentication
@@ -171,6 +173,7 @@ auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, client.ts (Axios 
 - `/admin/users` → Users (protected)
 - `/admin/rules` → Rules (protected)
 - `/admin/schedules` → Schedules (protected)
+- `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
 - `/admin/analytics` → Analytics (protected)
@@ -254,7 +257,7 @@ Claude Code accessible over Telegram for remote development.
 - **M2** (complete): Scheduling engine, admin schedule UI, now-playing WebSocket, queue system, weather/time announcements
 - **M3** (complete): Sponsor insertion, holiday/Sabbath blackouts, sunset/sunrise scheduling, multi-channel broadcast, shuffle/weighted playback, one-time schedule blocks
 - **M4** (complete): OTA broadcast (Icecast service), analytics & reporting dashboard, Celery/Redis worker infrastructure
-- **M5**: Docs, load testing, Terraform deployment
+- **M5** (complete): API documentation (`docs/API.md`), load testing (Locust — `backend/loadtests/`), Terraform IaC (`infra/terraform/`), schedule blocks admin UI, WebSocket real-time NowPlaying, code splitting
 
 ## MCP Servers
 - **Playwright** — Browser automation for testing and screenshots. Configured in `~/.claude.json` under project MCP servers.
@@ -271,6 +274,9 @@ cd backend && npx vercel --prod --yes
 
 # Deploy frontend to Vercel (use temp dir workaround for git author issue)
 # Copy frontend files to temp dir, deploy from there, clean up
+
+# Run load tests (install locust first: pip install locust)
+cd backend && locust -f loadtests/locustfile.py --host https://studio-kolbramah-api-production.up.railway.app
 
 # Run Telegram bot locally
 cd bot && uv run python main.py

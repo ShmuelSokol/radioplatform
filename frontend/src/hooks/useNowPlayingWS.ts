@@ -67,11 +67,15 @@ export const useNowPlayingWS = (stationId: string) => {
   const connectWebSocket = useCallback(() => {
     if (!stationId) return;
 
-    // Derive WS URL from the API URL
+    // Use dedicated WS URL if set, otherwise derive from API URL
+    const wsBase = import.meta.env.VITE_WS_URL;
     const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
     let wsUrl: string;
 
-    if (apiUrl.startsWith('http')) {
+    if (wsBase) {
+      // Dedicated WS URL (e.g., Railway backend with WebSocket support)
+      wsUrl = `${wsBase}/api/v1/ws/now-playing/${stationId}`;
+    } else if (apiUrl.startsWith('http')) {
       // Absolute URL — convert http(s) to ws(s)
       wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/now-playing/' + stationId;
     } else {

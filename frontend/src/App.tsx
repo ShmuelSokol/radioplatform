@@ -1,20 +1,26 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/layout/Layout';
+import { useAuthStore } from './stores/authStore';
+
+// Public pages (eager - fast initial load)
 import StationList from './pages/public/StationList';
 import Listen from './pages/public/Listen';
 import Login from './pages/admin/Login';
-import Dashboard from './pages/admin/Dashboard';
-import Stations from './pages/admin/Stations';
-import Assets from './pages/admin/Assets';
-import AssetUpload from './pages/admin/AssetUpload';
-import Users from './pages/admin/Users';
-import Rules from './pages/admin/Rules';
-import Schedules from './pages/admin/Schedules';
-import Holidays from './pages/admin/Holidays';
-import Sponsors from './pages/admin/Sponsors';
-import Analytics from './pages/admin/Analytics';
-import { useAuthStore } from './stores/authStore';
+
+// Admin pages (lazy-loaded - code split)
+const Dashboard = lazy(() => import('./pages/admin/Dashboard'));
+const Stations = lazy(() => import('./pages/admin/Stations'));
+const Assets = lazy(() => import('./pages/admin/Assets'));
+const AssetUpload = lazy(() => import('./pages/admin/AssetUpload'));
+const Users = lazy(() => import('./pages/admin/Users'));
+const Rules = lazy(() => import('./pages/admin/Rules'));
+const Schedules = lazy(() => import('./pages/admin/Schedules'));
+const ScheduleBlocks = lazy(() => import('./pages/admin/ScheduleBlocks'));
+const Holidays = lazy(() => import('./pages/admin/Holidays'));
+const Sponsors = lazy(() => import('./pages/admin/Sponsors'));
+const Analytics = lazy(() => import('./pages/admin/Analytics'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,33 +34,38 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+const Loading = () => <div className="text-center py-10 text-gray-400">Loading...</div>;
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            {/* Public */}
-            <Route path="/" element={<Navigate to="/stations" replace />} />
-            <Route path="/stations" element={<StationList />} />
-            <Route path="/listen/:stationId" element={<Listen />} />
+        <Suspense fallback={<Loading />}>
+          <Routes>
+            <Route element={<Layout />}>
+              {/* Public */}
+              <Route path="/" element={<Navigate to="/stations" replace />} />
+              <Route path="/stations" element={<StationList />} />
+              <Route path="/listen/:stationId" element={<Listen />} />
 
-            {/* Auth */}
-            <Route path="/admin/login" element={<Login />} />
+              {/* Auth */}
+              <Route path="/admin/login" element={<Login />} />
 
-            {/* Admin (protected) */}
-            <Route path="/admin/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/admin/stations" element={<ProtectedRoute><Stations /></ProtectedRoute>} />
-            <Route path="/admin/assets" element={<ProtectedRoute><Assets /></ProtectedRoute>} />
-            <Route path="/admin/assets/upload" element={<ProtectedRoute><AssetUpload /></ProtectedRoute>} />
-            <Route path="/admin/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
-            <Route path="/admin/rules" element={<ProtectedRoute><Rules /></ProtectedRoute>} />
-            <Route path="/admin/schedules" element={<ProtectedRoute><Schedules /></ProtectedRoute>} />
-            <Route path="/admin/holidays" element={<ProtectedRoute><Holidays /></ProtectedRoute>} />
-            <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
-            <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
-          </Route>
-        </Routes>
+              {/* Admin (protected, lazy-loaded) */}
+              <Route path="/admin/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/admin/stations" element={<ProtectedRoute><Stations /></ProtectedRoute>} />
+              <Route path="/admin/assets" element={<ProtectedRoute><Assets /></ProtectedRoute>} />
+              <Route path="/admin/assets/upload" element={<ProtectedRoute><AssetUpload /></ProtectedRoute>} />
+              <Route path="/admin/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
+              <Route path="/admin/rules" element={<ProtectedRoute><Rules /></ProtectedRoute>} />
+              <Route path="/admin/schedules" element={<ProtectedRoute><Schedules /></ProtectedRoute>} />
+              <Route path="/admin/schedules/:scheduleId/blocks" element={<ProtectedRoute><ScheduleBlocks /></ProtectedRoute>} />
+              <Route path="/admin/holidays" element={<ProtectedRoute><Holidays /></ProtectedRoute>} />
+              <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
+              <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            </Route>
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </QueryClientProvider>
   );

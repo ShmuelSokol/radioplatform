@@ -1,13 +1,13 @@
-import { useNowPlaying } from '../../hooks/useNowPlaying';
+import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 
 interface Props {
   stationId: string;
 }
 
 export default function NowPlaying({ stationId }: Props) {
-  const { data } = useNowPlaying(stationId);
+  const { nowPlaying, isConnected } = useNowPlayingWS(stationId);
 
-  if (!data?.now_playing) {
+  if (!nowPlaying?.asset) {
     return <span className="text-sm text-gray-400">Nothing playing</span>;
   }
 
@@ -17,9 +17,9 @@ export default function NowPlaying({ stationId }: Props) {
         &#9835;
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium truncate">{data.now_playing.title}</p>
+        <p className="text-sm font-medium truncate">{nowPlaying.asset.title}</p>
         <p className="text-xs text-gray-400">
-          {data.state === 'playing' ? 'Now Playing' : data.state}
+          {nowPlaying.asset.artist || (isConnected ? 'Now Playing' : 'Connecting...')}
         </p>
       </div>
     </div>

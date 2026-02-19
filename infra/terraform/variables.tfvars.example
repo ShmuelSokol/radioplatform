@@ -1,0 +1,6 @@
+# Copy this file to terraform.tfvars and fill in your values
+vercel_api_token = ""
+vercel_team_id   = ""  # Optional — leave empty for personal account
+github_repo      = "ShmuelSokol/radioplatform"
+api_url          = "https://studio-kolbramah-api-production.up.railway.app/api/v1"
+ws_url           = "wss://studio-kolbramah-api-production.up.railway.app"

@@ -20,7 +20,7 @@ class ScheduleBase(BaseModel):
 
 
 class ScheduleCreate(ScheduleBase):
-    station_id: UUID | str
+    station_id: UUID
 
 
 class ScheduleUpdate(BaseModel):
@@ -63,7 +63,7 @@ class ScheduleBlockBase(BaseModel):
 
 
 class ScheduleBlockCreate(ScheduleBlockBase):
-    schedule_id: UUID | str
+    schedule_id: UUID
 
 
 class ScheduleBlockUpdate(BaseModel):
@@ -108,7 +108,7 @@ class PlaylistEntryBase(BaseModel):
 
 
 class PlaylistEntryCreate(PlaylistEntryBase):
-    block_id: UUID | str
+    block_id: UUID
 
 
 class PlaylistEntryUpdate(BaseModel):
