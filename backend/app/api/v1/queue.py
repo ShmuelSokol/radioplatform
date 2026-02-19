@@ -21,7 +21,6 @@ from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueEntryOut, QueueListRe
 
 logger = logging.getLogger(__name__)
 
-TARGET_QUEUE_SECONDS = 86400  # 24 hours
 DEFAULT_DURATION = 180  # 3 minutes fallback
 
 router = APIRouter(prefix="/stations/{station_id}/queue", tags=["queue"])
@@ -191,95 +190,11 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
 
 
 async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
-    """Auto-fill queue to ~24 hours of content with random music."""
-    # Sum durations of pending + playing entries
-    result = await db.execute(
-        select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
-        .select_from(QueueEntry)
-        .join(Asset, QueueEntry.asset_id == Asset.id)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status.in_(["pending", "playing"]),
-        )
-    )
-    total_seconds = float(result.scalar() or 0)
-
-    if total_seconds >= TARGET_QUEUE_SECONDS:
-        return
-
-    shortfall = TARGET_QUEUE_SECONDS - total_seconds
-
-    # Get IDs already in the pending/playing queue
-    result = await db.execute(
-        select(QueueEntry.asset_id).where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status.in_(["pending", "playing"]),
-        )
-    )
-    queued_ids = {row[0] for row in result.all()}
-
-    # Get asset IDs played in last 2 hours (avoid repeats)
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
-    result = await db.execute(
-        select(PlayLog.asset_id).where(
-            PlayLog.station_id == station_id,
-            PlayLog.start_utc >= cutoff,
-            PlayLog.asset_id.isnot(None),
-        )
-    )
-    recent_ids = {row[0] for row in result.all()}
-    exclude_ids = queued_ids | recent_ids
-
-    # Select random music assets not in the exclusion set
-    query = (
-        select(Asset)
-        .where(Asset.asset_type == "music")
-        .order_by(func.random())
-    )
-    if exclude_ids:
-        query = query.where(Asset.id.notin_(exclude_ids))
-    result = await db.execute(query)
-    candidates = result.scalars().all()
-
-    if not candidates:
-        # If all music was excluded, allow repeats (skip only queued)
-        query = (
-            select(Asset)
-            .where(Asset.asset_type == "music")
-            .order_by(func.random())
-        )
-        if queued_ids:
-            query = query.where(Asset.id.notin_(queued_ids))
-        result = await db.execute(query)
-        candidates = result.scalars().all()
-
-    if not candidates:
-        return
-
-    # Get current max position
-    result = await db.execute(
-        select(func.coalesce(func.max(QueueEntry.position), 0))
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
-    )
-    max_pos = result.scalar() or 0
-
-    filled = 0.0
-    for asset in candidates:
-        if filled >= shortfall:
-            break
-        dur = asset.duration or DEFAULT_DURATION
-        max_pos += 1
-        entry = QueueEntry(
-            id=uuid.uuid4(),
-            station_id=station_id,
-            asset_id=asset.id,
-            position=max_pos,
-            status="pending",
-        )
-        db.add(entry)
-        filled += dur
-
-    await db.flush()
+    """Auto-fill queue to ~24 hours of content using schedule rules."""
+    from app.services.queue_replenish_service import QueueReplenishService
+    
+    service = QueueReplenishService(db, station_id)
+    await service.replenish()
 
 
 async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry | None:

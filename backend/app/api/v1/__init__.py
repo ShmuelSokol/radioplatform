@@ -8,6 +8,8 @@ from app.api.v1.controls import router as controls_router
 from app.api.v1.users import router as users_router
 from app.api.v1.queue import router as queue_router
 from app.api.v1.rules import router as rules_router
+from app.api.v1.schedules import router as new_schedules_router
+from app.api.v1.now_playing import router as now_playing_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -18,3 +20,5 @@ router.include_router(controls_router)
 router.include_router(users_router)
 router.include_router(queue_router)
 router.include_router(rules_router)
+router.include_router(new_schedules_router)
+router.include_router(now_playing_router)

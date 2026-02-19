@@ -10,6 +10,10 @@ from app.models.holiday_window import HolidayWindow
 from app.models.play_log import PlayLog, PlaySource
 from app.models.queue_entry import QueueEntry, QueueStatus
 from app.models.schedule_rule import ScheduleRule
+from app.models.schedule import Schedule
+from app.models.schedule_block import ScheduleBlock, RecurrenceType, DayOfWeek
+from app.models.playlist_entry import PlaylistEntry, PlaybackMode
+from app.models.now_playing import NowPlaying
 
 __all__ = [
     "User", "UserRole",
@@ -24,4 +28,8 @@ __all__ = [
     "PlayLog", "PlaySource",
     "QueueEntry", "QueueStatus",
     "ScheduleRule",
+    "Schedule",
+    "ScheduleBlock", "RecurrenceType", "DayOfWeek",
+    "PlaylistEntry", "PlaybackMode",
+    "NowPlaying",
 ]

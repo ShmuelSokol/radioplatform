@@ -34,3 +34,5 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     channels = relationship("ChannelStream", back_populates="station", lazy="selectin")
     schedule_entries = relationship("ScheduleEntry", back_populates="station", lazy="selectin")
     play_logs = relationship("PlayLog", back_populates="station", lazy="selectin")
+    schedules = relationship("Schedule", back_populates="station", lazy="selectin")
+    now_playing = relationship("NowPlaying", back_populates="station", uselist=False, lazy="selectin")
