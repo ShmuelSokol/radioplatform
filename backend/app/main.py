@@ -48,13 +48,12 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS metadata_extra JSONB",
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS review_status VARCHAR(50) DEFAULT 'pending'",
     ]
-    try:
-        async with engine.begin() as conn:
-            for sql in migrations:
+    for sql in migrations:
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(sql))
-        logger.info("Column migrations applied successfully")
-    except Exception as e:
-        logger.warning(f"Column migration skipped: {e}")
+        except Exception as e:
+            logger.warning(f"Migration skipped ({sql[:50]}...): {e}")
 
 
 @asynccontextmanager
