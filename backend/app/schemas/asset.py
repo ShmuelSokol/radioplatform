@@ -24,6 +24,15 @@ class AssetListResponse(BaseModel):
     total: int
 
 
+class AssetUpdate(BaseModel):
+    title: str | None = None
+    artist: str | None = None
+    album: str | None = None
+    duration: float | None = None
+    asset_type: str | None = None
+    category: str | None = None
+
+
 class TranscodeRequest(BaseModel):
     codec: str = "aac"
     bitrate: str = "128k"

@@ -9,6 +9,7 @@ from app.models.user import User
 from app.schemas.asset import (
     AssetListResponse,
     AssetResponse,
+    AssetUpdate,
     ClipRequest,
     TaskStatusResponse,
     TranscodeRequest,
@@ -58,6 +59,21 @@ async def get_one(
     _user: User = Depends(get_current_user),
 ):
     return await get_asset(db, asset_id)
+
+
+@router.patch("/{asset_id}", response_model=AssetResponse)
+async def update_asset(
+    asset_id: uuid.UUID,
+    body: AssetUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    asset = await get_asset(db, asset_id)
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(asset, key, value)
+    await db.flush()
+    await db.refresh(asset)
+    return asset
 
 
 @router.post("/{asset_id}/transcode", response_model=TaskStatusResponse)
