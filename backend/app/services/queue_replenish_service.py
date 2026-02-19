@@ -11,6 +11,7 @@ from app.models.asset import Asset
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
+from app.models.sponsor import Sponsor
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,9 @@ class QueueReplenishService:
                 await self._apply_daypart_rule(rule, shortfall)
             elif rule.rule_type == "fixed_time":
                 await self._apply_fixed_time_rule(rule, shortfall)
+
+        # Insert sponsors based on their policies
+        await self._insert_sponsors(shortfall)
 
         # Fill remaining gaps with music
         current_duration = await self._calculate_queue_duration()
@@ -281,6 +285,75 @@ class QueueReplenishService:
         self.queued_ids.add(asset.id)
         self.max_pos = max(self.max_pos, position)
         logger.debug("Enqueued %s '%s' at position %d", asset.asset_type, asset.title, position)
+
+    async def _insert_sponsors(self, shortfall: float) -> None:
+        """Insert sponsor spots based on their insertion policies and target rules."""
+        now = datetime.now(timezone.utc)
+        current_hour = now.hour
+
+        result = await self.db.execute(
+            select(Sponsor).order_by(Sponsor.priority.desc())
+        )
+        sponsors = result.scalars().all()
+
+        for sponsor in sponsors:
+            rules = sponsor.target_rules or {}
+            hour_start = rules.get("hour_start", 0)
+            hour_end = rules.get("hour_end", 24)
+            max_per_hour = rules.get("max_per_hour", 4)
+            songs_between = rules.get("songs_between", 6)
+
+            # Check if current hour is in target range
+            if not (hour_start <= current_hour < hour_end):
+                continue
+
+            if sponsor.insertion_policy == "every_n_songs":
+                # Insert after every N songs
+                estimated_songs = shortfall / DEFAULT_DURATION
+                insertions = min(int(estimated_songs / max(songs_between, 1)), max_per_hour)
+                for i in range(insertions):
+                    self.max_pos += songs_between
+                    entry = QueueEntry(
+                        id=uuid.uuid4(),
+                        station_id=self.station_id,
+                        asset_id=None,  # Sponsor uses audio_file_path directly
+                        position=self.max_pos,
+                        status="pending",
+                    )
+                    self.db.add(entry)
+                    logger.info("Inserted sponsor '%s' at position %d", sponsor.name, self.max_pos)
+
+            elif sponsor.insertion_policy == "fixed_interval":
+                interval_min = rules.get("interval_minutes", 15)
+                interval_sec = interval_min * 60
+                insertions = min(int(shortfall / interval_sec), max_per_hour)
+                for i in range(insertions):
+                    pos = self.max_pos + int(((i + 1) * interval_sec) / DEFAULT_DURATION)
+                    entry = QueueEntry(
+                        id=uuid.uuid4(),
+                        station_id=self.station_id,
+                        asset_id=None,
+                        position=pos,
+                        status="pending",
+                    )
+                    self.db.add(entry)
+                    self.max_pos = max(self.max_pos, pos)
+                    logger.info("Inserted sponsor '%s' at position %d", sponsor.name, pos)
+
+            else:
+                # Default: between_tracks — insert at regular intervals
+                insertions = min(int(shortfall / (DEFAULT_DURATION * max(songs_between, 1))), max_per_hour)
+                for i in range(insertions):
+                    self.max_pos += songs_between
+                    entry = QueueEntry(
+                        id=uuid.uuid4(),
+                        station_id=self.station_id,
+                        asset_id=None,
+                        position=self.max_pos,
+                        status="pending",
+                    )
+                    self.db.add(entry)
+                    logger.info("Inserted sponsor '%s' at position %d", sponsor.name, self.max_pos)
 
     async def _fill_random_music(self, shortfall: float) -> None:
         """Fill remaining queue with random music, respecting daypart category constraints."""

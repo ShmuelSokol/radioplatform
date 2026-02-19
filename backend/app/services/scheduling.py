@@ -3,18 +3,20 @@ Scheduling service — resolves what should play at any given time.
 Handles time-based rules, recurrence, priority resolution, and now-playing state.
 """
 import logging
+import random
 from datetime import datetime, time, timedelta
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.now_playing import NowPlaying
-from app.models.playlist_entry import PlaylistEntry
+from app.models.play_log import PlayLog
+from app.models.playlist_entry import PlaybackMode, PlaylistEntry
 from app.models.schedule import Schedule
-from app.models.schedule_block import DayOfWeek, RecurrenceType, ScheduleBlock
+from app.models.schedule_block import DayOfWeek, RecurrenceType, ScheduleBlock, SunEvent
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,12 @@ class SchedulingService:
         if at_time is None:
             at_time = datetime.utcnow()
 
+        # Get station for sun calculations
+        from app.models.station import Station
+        stmt_station = select(Station).where(Station.id == station_id)
+        station_result = await self.db.execute(stmt_station)
+        station = station_result.scalar_one_or_none()
+
         # Get all active schedules for this station
         stmt = (
             select(Schedule)
@@ -49,7 +57,7 @@ class SchedulingService:
         matching_blocks = []
         for schedule in schedules:
             for block in schedule.blocks:
-                if self._block_matches_time(block, at_time):
+                if self._block_matches_time(block, at_time, station):
                     matching_blocks.append((schedule.priority, block.priority, block))
 
         if not matching_blocks:
@@ -59,20 +67,50 @@ class SchedulingService:
         matching_blocks.sort(key=lambda x: (x[0], x[1]), reverse=True)
         return matching_blocks[0][2]
 
-    def _block_matches_time(self, block: ScheduleBlock, at_time: datetime) -> bool:
+    def _resolve_sun_time(self, sun_event: SunEvent, offset_minutes: int, station, at_date) -> time:
+        """Resolve a sun-relative time to a concrete time value."""
+        from app.services.sun_service import get_sun_times, offset_sun_time
+
+        lat = station.latitude if station else None
+        lon = station.longitude if station else None
+        tz = station.timezone if station else "UTC"
+
+        if lat is None or lon is None:
+            # Default to Jerusalem if no coords
+            lat, lon = 31.7683, 35.2137
+
+        times = get_sun_times(lat, lon, tz, at_date)
+        base_time = times.get(sun_event.value, times["sunset"]).time()
+        return offset_sun_time(base_time, offset_minutes or 0)
+
+    def _block_matches_time(
+        self, block: ScheduleBlock, at_time: datetime, station=None
+    ) -> bool:
         """Check if a schedule block is active at the given time."""
         current_time = at_time.time()
-        current_weekday = at_time.strftime("%A").lower()  # "monday", "tuesday", etc.
+        current_weekday = at_time.strftime("%A").lower()
         current_day_of_month = at_time.day
+        current_date = at_time.date()
+
+        # Resolve start/end times (may be sun-relative)
+        effective_start = block.start_time
+        effective_end = block.end_time
+
+        if block.start_sun_event and station:
+            effective_start = self._resolve_sun_time(
+                block.start_sun_event, block.start_sun_offset or 0, station, current_date
+            )
+        if block.end_sun_event and station:
+            effective_end = self._resolve_sun_time(
+                block.end_sun_event, block.end_sun_offset or 0, station, current_date
+            )
 
         # Check time range (handle overnight blocks)
-        if block.start_time <= block.end_time:
-            # Normal range (e.g., 08:00 - 17:00)
-            if not (block.start_time <= current_time < block.end_time):
+        if effective_start <= effective_end:
+            if not (effective_start <= current_time < effective_end):
                 return False
         else:
-            # Overnight range (e.g., 22:00 - 02:00)
-            if not (current_time >= block.start_time or current_time < block.end_time):
+            if not (current_time >= effective_start or current_time < effective_end):
                 return False
 
         # Check recurrence
@@ -87,8 +125,12 @@ class SchedulingService:
                 return current_day_of_month in block.recurrence_pattern
             return True
         elif block.recurrence_type == RecurrenceType.ONE_TIME:
-            # For one-time events, would need start_date/end_date fields
-            # For now, treat as daily
+            # Check date range if provided
+            if block.start_date and block.end_date:
+                return block.start_date <= current_date <= block.end_date
+            elif block.start_date:
+                return current_date == block.start_date
+            # No dates specified — treat as always active (backwards compat)
             return True
 
         return False
@@ -96,8 +138,7 @@ class SchedulingService:
     async def get_next_asset_for_block(self, block: ScheduleBlock) -> Optional[UUID]:
         """
         Get the next asset ID to play from a block's playlist.
-        For now, returns the first enabled entry (sequential mode).
-        TODO: Implement shuffle, weighted random, rotation tracking.
+        Respects playback_mode: sequential, shuffle, or weighted.
         """
         if not block.playlist_entries:
             return None
@@ -106,9 +147,111 @@ class SchedulingService:
         if not enabled_entries:
             return None
 
-        # Sort by position
-        enabled_entries.sort(key=lambda e: e.position)
-        return enabled_entries[0].asset_id
+        mode = getattr(block, 'playback_mode', PlaybackMode.SEQUENTIAL)
+
+        if mode == PlaybackMode.SHUFFLE:
+            return await self._pick_shuffle(block, enabled_entries)
+        elif mode == PlaybackMode.WEIGHTED:
+            return await self._pick_weighted(block, enabled_entries)
+        else:
+            return await self._pick_sequential(block, enabled_entries)
+
+    async def _pick_sequential(
+        self, block: ScheduleBlock, entries: list[PlaylistEntry]
+    ) -> Optional[UUID]:
+        """Pick the next asset in position order, rotating through the list."""
+        entries.sort(key=lambda e: e.position)
+
+        # Find what was last played from this block
+        last_played_id = await self._get_last_played_asset_for_block(block)
+
+        if last_played_id is None:
+            return entries[0].asset_id
+
+        # Find the last played entry's position and pick the next one
+        for i, entry in enumerate(entries):
+            if str(entry.asset_id) == str(last_played_id):
+                next_idx = (i + 1) % len(entries)
+                return entries[next_idx].asset_id
+
+        # Last played asset not in current entries — start from beginning
+        return entries[0].asset_id
+
+    async def _pick_shuffle(
+        self, block: ScheduleBlock, entries: list[PlaylistEntry]
+    ) -> Optional[UUID]:
+        """Pick a random asset, avoiding recently played ones."""
+        # Get recently played asset IDs for this block (last N plays)
+        recent_ids = await self._get_recent_played_assets_for_block(
+            block, limit=max(1, len(entries) // 2)
+        )
+
+        # Filter out recently played
+        candidates = [e for e in entries if str(e.asset_id) not in recent_ids]
+
+        # If all have been played recently, allow any entry
+        if not candidates:
+            candidates = entries
+
+        chosen = random.choice(candidates)
+        return chosen.asset_id
+
+    async def _pick_weighted(
+        self, block: ScheduleBlock, entries: list[PlaylistEntry]
+    ) -> Optional[UUID]:
+        """Pick an asset based on weight values (higher weight = more likely)."""
+        weights = [max(e.weight, 1) for e in entries]
+        chosen = random.choices(entries, weights=weights, k=1)[0]
+        return chosen.asset_id
+
+    async def _get_last_played_asset_for_block(self, block: ScheduleBlock) -> Optional[str]:
+        """Get the asset_id of the last thing played from this block's schedule."""
+        # Get the station_id via the block's schedule
+        station_id = block.schedule_id
+        if block.schedule:
+            station_id = block.schedule.station_id
+
+        # Get asset IDs in this block
+        block_asset_ids = [e.asset_id for e in block.playlist_entries if e.is_enabled]
+        if not block_asset_ids:
+            return None
+
+        stmt = (
+            select(PlayLog.asset_id)
+            .where(
+                PlayLog.station_id == station_id,
+                PlayLog.asset_id.in_(block_asset_ids),
+            )
+            .order_by(desc(PlayLog.start_utc))
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        row = result.scalar_one_or_none()
+        return str(row) if row else None
+
+    async def _get_recent_played_assets_for_block(
+        self, block: ScheduleBlock, limit: int = 5
+    ) -> set[str]:
+        """Get recently played asset IDs from this block's playlist."""
+        station_id = block.schedule_id
+        if block.schedule:
+            station_id = block.schedule.station_id
+
+        block_asset_ids = [e.asset_id for e in block.playlist_entries if e.is_enabled]
+        if not block_asset_ids:
+            return set()
+
+        stmt = (
+            select(PlayLog.asset_id)
+            .where(
+                PlayLog.station_id == station_id,
+                PlayLog.asset_id.in_(block_asset_ids),
+            )
+            .order_by(desc(PlayLog.start_utc))
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        return {str(row) for row in result.scalars().all()}
 
     async def update_now_playing(
         self,

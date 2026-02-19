@@ -23,6 +23,13 @@ export interface ScheduleBlock {
   recurrence_type: 'daily' | 'weekly' | 'monthly' | 'one_time';
   recurrence_pattern?: any[];
   priority: number;
+  playback_mode: 'sequential' | 'shuffle' | 'weighted';
+  start_date?: string | null;
+  end_date?: string | null;
+  start_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
+  start_sun_offset?: number | null;
+  end_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
+  end_sun_offset?: number | null;
   created_at: string;
   updated_at: string;
   playlist_entries?: PlaylistEntry[];
@@ -65,6 +72,13 @@ export interface CreateScheduleBlockData {
   recurrence_type?: 'daily' | 'weekly' | 'monthly' | 'one_time';
   recurrence_pattern?: any[];
   priority?: number;
+  playback_mode?: 'sequential' | 'shuffle' | 'weighted';
+  start_date?: string | null;
+  end_date?: string | null;
+  start_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
+  start_sun_offset?: number | null;
+  end_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
+  end_sun_offset?: number | null;
 }
 
 export interface UpdateScheduleBlockData {
@@ -75,6 +89,13 @@ export interface UpdateScheduleBlockData {
   recurrence_type?: 'daily' | 'weekly' | 'monthly' | 'one_time';
   recurrence_pattern?: any[];
   priority?: number;
+  playback_mode?: 'sequential' | 'shuffle' | 'weighted';
+  start_date?: string | null;
+  end_date?: string | null;
+  start_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
+  start_sun_offset?: number | null;
+  end_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
+  end_sun_offset?: number | null;
 }
 
 export interface CreatePlaylistEntryData {

@@ -16,7 +16,7 @@ class NowPlaying(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "now_playing"
 
     station_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("stations.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+        UUID(as_uuid=True), ForeignKey("stations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     asset_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("assets.id", ondelete="SET NULL"), nullable=True, index=True
@@ -29,6 +29,11 @@ class NowPlaying(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Optional: reference to schedule block that triggered this
     block_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("schedule_blocks.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Optional: channel within a station
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_streams.id", ondelete="SET NULL"), nullable=True
     )
 
     # Optional: listener count (can be updated by stream server)

@@ -22,6 +22,7 @@ dependencies = [
     "httpx>=0.28.0",
     "mutagen>=1.47.0",
     "pillow>=11.0.0",
+    "astral>=3.2",
 ]
 
 [project.optional-dependencies]

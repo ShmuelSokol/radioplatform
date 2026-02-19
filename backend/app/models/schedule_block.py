@@ -9,11 +9,13 @@ import enum
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text, Time
+from sqlalchemy import ForeignKey, Integer, String, Text, Time, Date
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+from app.models.playlist_entry import PlaybackMode
 
 if TYPE_CHECKING:
     from app.models.schedule import Schedule
@@ -25,6 +27,13 @@ class RecurrenceType(str, enum.Enum):
     WEEKLY = "weekly"
     MONTHLY = "monthly"
     ONE_TIME = "one_time"
+
+
+class SunEvent(str, enum.Enum):
+    SUNRISE = "sunrise"
+    SUNSET = "sunset"
+    DAWN = "dawn"
+    DUSK = "dusk"
 
 
 class DayOfWeek(str, enum.Enum):
@@ -62,6 +71,29 @@ class ScheduleBlock(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Priority for conflict resolution within a schedule
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Playback mode for this block's playlist
+    playback_mode: Mapped[PlaybackMode] = mapped_column(
+        ENUM(PlaybackMode, name="playback_mode", create_type=True),
+        default=PlaybackMode.SEQUENTIAL,
+        nullable=False,
+        server_default="sequential",
+    )
+
+    # For ONE_TIME recurrence: date range when this block is active
+    start_date: Mapped[str | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[str | None] = mapped_column(Date, nullable=True)
+
+    # Sun-relative time overrides (e.g., "sunset" with offset -30 = 30 min before sunset)
+    # When set, these override start_time/end_time with computed values
+    start_sun_event: Mapped[SunEvent | None] = mapped_column(
+        ENUM(SunEvent, name="sun_event", create_type=True), nullable=True
+    )
+    start_sun_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)  # minutes
+    end_sun_event: Mapped[SunEvent | None] = mapped_column(
+        ENUM(SunEvent, name="sun_event", create_type=True), nullable=True
+    )
+    end_sun_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)  # minutes
 
     # Relationships
     schedule: Mapped["Schedule"] = relationship("Schedule", back_populates="blocks", lazy="selectin")

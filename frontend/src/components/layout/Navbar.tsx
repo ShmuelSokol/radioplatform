@@ -29,6 +29,15 @@ export default function Navbar() {
                 <Link to="/admin/users" className="text-gray-400 hover:text-green-300 transition">
                   Users
                 </Link>
+                <Link to="/admin/holidays" className="text-gray-400 hover:text-red-300 transition">
+                  Blackouts
+                </Link>
+                <Link to="/admin/sponsors" className="text-gray-400 hover:text-yellow-300 transition">
+                  Sponsors
+                </Link>
+                <Link to="/admin/analytics" className="text-gray-400 hover:text-pink-300 transition">
+                  Analytics
+                </Link>
                 <Link to="/admin/assets" className="text-gray-400 hover:text-cyan-300 transition">
                   Assets
                 </Link>

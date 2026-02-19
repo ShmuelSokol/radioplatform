@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,5 +18,12 @@ class ChannelStream(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     codec: Mapped[str] = mapped_column(String(50), default="aac", nullable=False)
     hls_manifest_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     listeners_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
+
+    # Optional: dedicated schedule for this channel (if null, uses station default)
+    schedule_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schedules.id", ondelete="SET NULL"), nullable=True
+    )
 
     station = relationship("Station", back_populates="channels")
+    schedule = relationship("Schedule", lazy="selectin")

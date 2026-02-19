@@ -1,14 +1,14 @@
 """
 Pydantic schemas for Schedule, ScheduleBlock, PlaylistEntry, NowPlaying.
 """
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.playlist_entry import PlaybackMode
-from app.models.schedule_block import DayOfWeek, RecurrenceType
+from app.models.schedule_block import DayOfWeek, RecurrenceType, SunEvent
 
 
 # ==================== Schedule ====================
@@ -53,6 +53,13 @@ class ScheduleBlockBase(BaseModel):
     recurrence_type: RecurrenceType = RecurrenceType.DAILY
     recurrence_pattern: list[Any] | None = None  # List of days or day numbers
     priority: int = 0
+    playback_mode: PlaybackMode = PlaybackMode.SEQUENTIAL
+    start_date: date | None = None  # For ONE_TIME recurrence
+    end_date: date | None = None  # For ONE_TIME recurrence
+    start_sun_event: SunEvent | None = None
+    start_sun_offset: int | None = None  # minutes offset from sun event
+    end_sun_event: SunEvent | None = None
+    end_sun_offset: int | None = None
 
 
 class ScheduleBlockCreate(ScheduleBlockBase):
@@ -67,6 +74,13 @@ class ScheduleBlockUpdate(BaseModel):
     recurrence_type: RecurrenceType | None = None
     recurrence_pattern: list[Any] | None = None
     priority: int | None = None
+    playback_mode: PlaybackMode | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    start_sun_event: SunEvent | None = None
+    start_sun_offset: int | None = None
+    end_sun_event: SunEvent | None = None
+    end_sun_offset: int | None = None
 
 
 class ScheduleBlockInDB(ScheduleBlockBase):

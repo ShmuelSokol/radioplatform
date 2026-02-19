@@ -11,6 +11,9 @@ import AssetUpload from './pages/admin/AssetUpload';
 import Users from './pages/admin/Users';
 import Rules from './pages/admin/Rules';
 import Schedules from './pages/admin/Schedules';
+import Holidays from './pages/admin/Holidays';
+import Sponsors from './pages/admin/Sponsors';
+import Analytics from './pages/admin/Analytics';
 import { useAuthStore } from './stores/authStore';
 
 const queryClient = new QueryClient({
@@ -47,6 +50,9 @@ export default function App() {
             <Route path="/admin/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
             <Route path="/admin/rules" element={<ProtectedRoute><Rules /></ProtectedRoute>} />
             <Route path="/admin/schedules" element={<ProtectedRoute><Schedules /></ProtectedRoute>} />
+            <Route path="/admin/holidays" element={<ProtectedRoute><Holidays /></ProtectedRoute>} />
+            <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
+            <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
           </Route>
         </Routes>
       </BrowserRouter>

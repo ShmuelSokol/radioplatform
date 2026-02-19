@@ -63,9 +63,25 @@ class Settings(BaseSettings):
                 return [origin.strip() for origin in v.split(",")]
         return v
 
-    # Celery
-    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    # Celery (derived from REDIS_URL if set)
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
+
+    @field_validator("CELERY_BROKER_URL", mode="before")
+    @classmethod
+    def derive_celery_broker(cls, v: str, info: Any) -> str:
+        if v:
+            return v
+        redis = info.data.get("REDIS_URL", "")
+        return f"{redis}/1" if redis else ""
+
+    @field_validator("CELERY_RESULT_BACKEND", mode="before")
+    @classmethod
+    def derive_celery_backend(cls, v: str, info: Any) -> str:
+        if v:
+            return v
+        redis = info.data.get("REDIS_URL", "")
+        return f"{redis}/2" if redis else ""
 
     # FFmpeg
     FFMPEG_PATH: str = "ffmpeg"
@@ -84,6 +100,18 @@ class Settings(BaseSettings):
     @property
     def weather_enabled(self) -> bool:
         return bool(self.OPENWEATHERMAP_API_KEY)
+
+    # Icecast (optional — set host to empty to disable)
+    ICECAST_HOST: str = ""
+    ICECAST_PORT: int = 8000
+    ICECAST_SOURCE_PASSWORD: str = "hackme"
+    ICECAST_MOUNT: str = "/live"
+    ICECAST_BITRATE: int = 128
+    ICECAST_FORMAT: str = "mp3"  # "mp3" or "ogg"
+
+    @property
+    def icecast_enabled(self) -> bool:
+        return bool(self.ICECAST_HOST)
 
     # Supabase Storage (optional — set URL to empty to disable)
     SUPABASE_URL: str = ""

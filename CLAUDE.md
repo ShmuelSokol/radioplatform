@@ -60,7 +60,7 @@ radioplatform/
 
 ## Backend Details
 
-### Models (`backend/app/models/`) — 18 models
+### Models (`backend/app/models/`)
 | Model | File | Description |
 |-------|------|-------------|
 | User | user.py | Admin/manager/viewer with JWT auth |
@@ -80,7 +80,7 @@ radioplatform/
 | Sponsor | sponsor.py | Sponsor/ad management |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
 
-### API Routes (`backend/app/api/v1/`) — 12 routers
+### API Routes (`backend/app/api/v1/`)
 | Router | File | Prefix |
 |--------|------|--------|
 | auth | auth.py | /auth |
@@ -95,8 +95,13 @@ radioplatform/
 | now_playing | now_playing.py | /now-playing |
 | websocket | websocket.py | /ws |
 | scheduler | scheduler.py | /scheduler |
+| holidays | holidays.py | /holidays |
+| sponsors | sponsors.py | /sponsors |
+| channels | channels.py | /channels |
+| icecast | icecast.py | /icecast |
+| analytics | analytics.py | /analytics |
 
-### Services (`backend/app/services/`) — 14 services
+### Services (`backend/app/services/`)
 | Service | Description |
 |---------|-------------|
 | auth_service.py | User authentication, JWT tokens |
@@ -113,6 +118,8 @@ radioplatform/
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching |
+| sun_service.py | Sunrise/sunset calculations (astral) |
+| icecast_service.py | Icecast OTA broadcast source client |
 
 ## Frontend Details
 
@@ -126,6 +133,9 @@ radioplatform/
 - Rules.tsx — Scheduling rules
 - Users.tsx — User management
 - Login.tsx — Authentication
+- Holidays.tsx — Sabbath/holiday blackout management
+- Sponsors.tsx — Sponsor/ad management
+- Analytics.tsx — Analytics & reporting dashboard
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
@@ -161,6 +171,9 @@ auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, client.ts (Axios 
 - `/admin/users` → Users (protected)
 - `/admin/rules` → Rules (protected)
 - `/admin/schedules` → Schedules (protected)
+- `/admin/holidays` → Holidays (protected)
+- `/admin/sponsors` → Sponsors (protected)
+- `/admin/analytics` → Analytics (protected)
 
 ## Telegram Bot (`bot/`)
 Claude Code accessible over Telegram for remote development.
@@ -215,6 +228,10 @@ Claude Code accessible over Telegram for remote development.
 | `SUPABASE_URL` | Supabase project URL | For storage |
 | `SUPABASE_SERVICE_KEY` | Supabase service role key | For storage |
 | `SUPABASE_STORAGE_BUCKET` | Storage bucket name (default: "audio") | For storage |
+| `ICECAST_HOST` | Icecast server hostname (empty to disable) | For OTA |
+| `ICECAST_PORT` | Icecast server port (default: 8000) | For OTA |
+| `ICECAST_SOURCE_PASSWORD` | Icecast source password | For OTA |
+| `ICECAST_MOUNT` | Icecast mount point (default: /live) | For OTA |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://studio-kolbramah-api.vercel.app/api/v1)
@@ -234,9 +251,9 @@ Claude Code accessible over Telegram for remote development.
 
 ## Milestones
 - **M1** (complete): Backend skeleton, auth, station CRUD, asset upload, React frontend — DEPLOYED
-- **M2** (in progress): Scheduling engine, admin schedule UI, now-playing websocket, queue system, weather/time announcements
-- **M3**: Sponsor insertion, holiday/timezone/sunset logic, multi-channel
-- **M4**: OTA broadcast (Icecast), reporting, monitoring
+- **M2** (complete): Scheduling engine, admin schedule UI, now-playing WebSocket, queue system, weather/time announcements
+- **M3** (complete): Sponsor insertion, holiday/Sabbath blackouts, sunset/sunrise scheduling, multi-channel broadcast, shuffle/weighted playback, one-time schedule blocks
+- **M4** (complete): OTA broadcast (Icecast service), analytics & reporting dashboard, Celery/Redis worker infrastructure
 - **M5**: Docs, load testing, Terraform deployment
 
 ## MCP Servers

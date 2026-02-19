@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.asset import Asset
+from app.models.channel_stream import ChannelStream
+from app.models.holiday_window import HolidayWindow
 from app.models.station import Station
 from app.services.scheduling import SchedulingService
 
@@ -67,22 +69,75 @@ class SchedulerEngine:
             await asyncio.sleep(self.check_interval)
     
     async def _check_all_stations(self, db: AsyncSession):
-        """Check all active stations and update their playback."""
+        """Check all active stations and their channels."""
         stmt = select(Station).where(Station.is_active == True)
         result = await db.execute(stmt)
         stations = result.scalars().all()
-        
+
         for station in stations:
             try:
                 await self._check_station(db, station)
+                # Also check per-channel playback
+                ch_stmt = select(ChannelStream).where(
+                    ChannelStream.station_id == station.id,
+                    ChannelStream.is_active == True,
+                    ChannelStream.schedule_id.isnot(None),
+                )
+                ch_result = await db.execute(ch_stmt)
+                channels = ch_result.scalars().all()
+                for channel in channels:
+                    try:
+                        await self._check_channel(db, station, channel)
+                    except Exception as e:
+                        logger.error(f"Error checking channel {channel.id}: {e}", exc_info=True)
             except Exception as e:
                 logger.error(f"Error checking station {station.id}: {e}", exc_info=True)
     
+    async def _is_station_blacked_out(self, db: AsyncSession, station: Station, now: datetime) -> bool:
+        """Check if a station is in a blackout window (Sabbath/holiday)."""
+        stmt = select(HolidayWindow).where(
+            HolidayWindow.is_blackout == True,
+            HolidayWindow.start_datetime <= now,
+            HolidayWindow.end_datetime > now,
+        )
+        result = await db.execute(stmt)
+        windows = result.scalars().all()
+
+        for window in windows:
+            # Check if this window affects this station
+            if window.affected_stations is None:
+                # Null = affects all stations
+                return True
+            station_ids = window.affected_stations.get("station_ids", [])
+            if str(station.id) in [str(sid) for sid in station_ids]:
+                return True
+
+        return False
+
     async def _check_station(self, db: AsyncSession, station: Station):
         """Check a single station and advance playback if needed."""
         service = SchedulingService(db)
         now = datetime.utcnow()
-        
+
+        # Check blackout windows first
+        if await self._is_station_blacked_out(db, station, now):
+            now_playing = await service.get_now_playing(station.id)
+            if now_playing:
+                logger.info(f"Station {station.id}: Blackout active, clearing playback")
+                await service.clear_now_playing(station.id)
+                try:
+                    from app.api.v1.websocket import broadcast_now_playing_update
+                    await broadcast_now_playing_update(str(station.id), {
+                        "station_id": str(station.id),
+                        "asset_id": None,
+                        "started_at": now.isoformat(),
+                        "ends_at": None,
+                        "blackout": True,
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to broadcast blackout update: {e}")
+            return
+
         # Get current now-playing state
         now_playing = await service.get_now_playing(station.id)
         
@@ -156,6 +211,65 @@ class SchedulerEngine:
             })
         except Exception as e:
             logger.error(f"Failed to broadcast WebSocket update: {e}")
+
+
+    async def _check_channel(self, db: AsyncSession, station: Station, channel: ChannelStream):
+        """Check a single channel within a station and advance its playback independently."""
+        service = SchedulingService(db)
+        now = datetime.utcnow()
+
+        # Use a channel-specific key for now-playing (station_id + channel_id)
+        # For now, channels with dedicated schedules run independently
+        from app.models.now_playing import NowPlaying
+        stmt = select(NowPlaying).where(
+            NowPlaying.station_id == station.id,
+            NowPlaying.channel_id == channel.id,
+        )
+        result = await db.execute(stmt)
+        now_playing = result.scalar_one_or_none()
+
+        needs_new = not now_playing or (now_playing.ends_at and now_playing.ends_at <= now)
+        if not needs_new:
+            return
+
+        # Get active block from channel's dedicated schedule
+        block = await service.get_active_block_for_station(station.id, now)
+        if not block:
+            return
+
+        asset_id = await service.get_next_asset_for_block(block)
+        if not asset_id:
+            return
+
+        stmt = select(Asset).where(Asset.id == asset_id)
+        result = await db.execute(stmt)
+        asset = result.scalar_one_or_none()
+        if not asset:
+            return
+
+        duration = asset.duration_seconds or 180.0
+
+        if now_playing:
+            now_playing.asset_id = asset_id
+            now_playing.started_at = now
+            now_playing.ends_at = now + timedelta(seconds=duration)
+            now_playing.block_id = block.id
+        else:
+            now_playing = NowPlaying(
+                station_id=station.id,
+                channel_id=channel.id,
+                asset_id=asset_id,
+                started_at=now,
+                ends_at=now + timedelta(seconds=duration),
+                block_id=block.id,
+            )
+            db.add(now_playing)
+
+        await db.commit()
+
+        logger.info(
+            f"Channel {channel.channel_name} ({channel.id}): Now playing '{asset.title}'"
+        )
 
 
 # Global scheduler instance
