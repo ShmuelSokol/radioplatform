@@ -57,13 +57,19 @@ async def list_queues(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    count_result = await db.execute(select(func.count()).select_from(ReviewQueue))
-    total = count_result.scalar() or 0
-    result = await db.execute(
-        select(ReviewQueue).offset(skip).limit(limit).order_by(ReviewQueue.created_at.desc())
-    )
-    queues = result.scalars().all()
-    return ReviewQueueListResponse(queues=queues, total=total)
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        count_result = await db.execute(select(func.count()).select_from(ReviewQueue))
+        total = count_result.scalar() or 0
+        result = await db.execute(
+            select(ReviewQueue).offset(skip).limit(limit).order_by(ReviewQueue.created_at.desc())
+        )
+        queues = result.scalars().all()
+        return ReviewQueueListResponse(queues=queues, total=total)
+    except Exception as e:
+        logger.error(f"Reviews list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/queues/{queue_id}", response_model=ReviewQueueResponse)
