@@ -30,6 +30,7 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    automation_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     channels = relationship("ChannelStream", back_populates="station", lazy="selectin")
     schedule_entries = relationship("ScheduleEntry", back_populates="station", lazy="noload")

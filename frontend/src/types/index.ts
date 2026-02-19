@@ -24,6 +24,7 @@ export interface Station {
   is_active: boolean;
   description: string | null;
   logo_url: string | null;
+  automation_config: Record<string, any> | null;
   channels: ChannelStream[];
 }
 

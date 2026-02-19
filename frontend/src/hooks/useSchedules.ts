@@ -30,6 +30,7 @@ export interface ScheduleBlock {
   start_sun_offset?: number | null;
   end_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
   end_sun_offset?: number | null;
+  playlist_template_id?: string | null;
   created_at: string;
   updated_at: string;
   playlist_entries?: PlaylistEntry[];
@@ -79,6 +80,7 @@ export interface CreateScheduleBlockData {
   start_sun_offset?: number | null;
   end_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
   end_sun_offset?: number | null;
+  playlist_template_id?: string | null;
 }
 
 export interface UpdateScheduleBlockData {
@@ -96,6 +98,7 @@ export interface UpdateScheduleBlockData {
   start_sun_offset?: number | null;
   end_sun_event?: 'sunrise' | 'sunset' | 'dawn' | 'dusk' | null;
   end_sun_offset?: number | null;
+  playlist_template_id?: string | null;
 }
 
 export interface CreatePlaylistEntryData {

@@ -20,6 +20,7 @@ from app.models.playlist_entry import PlaybackMode
 if TYPE_CHECKING:
     from app.models.schedule import Schedule
     from app.models.playlist_entry import PlaylistEntry
+    from app.models.playlist_template import PlaylistTemplate
 
 
 class RecurrenceType(str, enum.Enum):
@@ -95,8 +96,16 @@ class ScheduleBlock(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     end_sun_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)  # minutes
 
+    # Optional playlist template (rotation mode)
+    playlist_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("playlist_templates.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Relationships
     schedule: Mapped["Schedule"] = relationship("Schedule", back_populates="blocks", lazy="noload")
     playlist_entries: Mapped[list["PlaylistEntry"]] = relationship(
         "PlaylistEntry", back_populates="block", cascade="all, delete-orphan", lazy="noload"
+    )
+    playlist_template: Mapped["PlaylistTemplate | None"] = relationship(
+        "PlaylistTemplate", lazy="selectin"
     )

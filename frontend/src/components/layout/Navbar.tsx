@@ -10,6 +10,7 @@ export default function Navbar() {
     { to: '/stations', label: 'Stations', color: 'hover:text-white' },
     { to: '/admin/dashboard', label: 'Dashboard', color: 'hover:text-yellow-300' },
     { to: '/admin/schedules', label: 'Schedules', color: 'hover:text-orange-300' },
+    { to: '/admin/playlists', label: 'Playlists', color: 'hover:text-indigo-300' },
     { to: '/admin/rules', label: 'Rules', color: 'hover:text-purple-300' },
     { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
     { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },

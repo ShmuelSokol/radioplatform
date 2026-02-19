@@ -1,14 +1,16 @@
-import { useState } from 'react';
-import { useStations, useCreateStation, useDeleteStation } from '../../hooks/useStations';
+import React, { useState } from 'react';
+import { useStations, useCreateStation, useUpdateStation, useDeleteStation } from '../../hooks/useStations';
 import Spinner from '../../components/Spinner';
 
 export default function Stations() {
   const { data, isLoading } = useStations();
   const createMutation = useCreateStation();
+  const updateMutation = useUpdateStation();
   const deleteMutation = useDeleteStation();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [timezone, setTimezone] = useState('UTC');
+  const [expandedStation, setExpandedStation] = useState<string | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,8 +75,12 @@ export default function Stations() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {data?.stations.map((station) => (
-              <tr key={station.id}>
+            {data?.stations.map((station) => {
+              const config = (station as any).automation_config || {};
+              return (
+              <React.Fragment key={station.id}>
+              <tr className="cursor-pointer hover:bg-gray-50"
+                onClick={() => setExpandedStation(expandedStation === station.id ? null : station.id)}>
                 <td className="px-6 py-4 whitespace-nowrap font-medium">{station.name}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{station.type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{station.timezone}</td>
@@ -87,14 +93,29 @@ export default function Stations() {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right">
                   <button
-                    onClick={() => deleteMutation.mutate(station.id)}
+                    onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(station.id); }}
                     className="text-red-600 hover:text-red-800 text-sm"
                   >
                     Delete
                   </button>
                 </td>
               </tr>
-            ))}
+              {expandedStation === station.id && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-4 bg-gray-50">
+                    <AutomationConfig
+                      config={config}
+                      onSave={(newConfig) => {
+                        updateMutation.mutate({ id: station.id, data: { automation_config: newConfig } });
+                      }}
+                      saving={updateMutation.isPending}
+                    />
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
+              );
+            })}
             {data?.stations.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-6 py-10 text-center text-gray-500">
@@ -105,6 +126,56 @@ export default function Stations() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function AutomationConfig({ config, onSave, saving }: {
+  config: Record<string, any>;
+  onSave: (cfg: Record<string, any>) => void;
+  saving: boolean;
+}) {
+  const [hourlyId, setHourlyId] = useState(config.hourly_station_id ?? false);
+  const [hourlyTime, setHourlyTime] = useState(config.hourly_time_announcement ?? false);
+  const [weatherOn, setWeatherOn] = useState(config.weather_enabled ?? false);
+  const [weatherInterval, setWeatherInterval] = useState(config.weather_interval_minutes ?? 30);
+
+  const handleSave = () => {
+    onSave({
+      hourly_station_id: hourlyId,
+      hourly_time_announcement: hourlyTime,
+      weather_enabled: weatherOn,
+      weather_interval_minutes: weatherInterval,
+    });
+  };
+
+  return (
+    <div>
+      <h4 className="text-sm font-bold text-gray-700 uppercase mb-3">Automation Config</h4>
+      <div className="grid grid-cols-2 gap-4 max-w-lg">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={hourlyId} onChange={e => setHourlyId(e.target.checked)} />
+          Hourly Station ID Jingle
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={hourlyTime} onChange={e => setHourlyTime(e.target.checked)} />
+          Hourly Time Announcement
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={weatherOn} onChange={e => setWeatherOn(e.target.checked)} />
+          Weather Spots
+        </label>
+        <div className="flex items-center gap-2 text-sm">
+          <label>Interval (min):</label>
+          <input type="number" value={weatherInterval} min={5} max={120}
+            onChange={e => setWeatherInterval(parseInt(e.target.value) || 30)}
+            className="w-20 px-2 py-1 border rounded" disabled={!weatherOn} />
+        </div>
+      </div>
+      <button onClick={handleSave} disabled={saving}
+        className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm disabled:opacity-50">
+        {saving ? 'Saving...' : 'Save Automation Config'}
+      </button>
     </div>
   );
 }

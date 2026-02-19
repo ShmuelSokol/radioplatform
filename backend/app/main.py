@@ -47,6 +47,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE now_playing ADD COLUMN IF NOT EXISTS block_id UUID REFERENCES schedule_blocks(id) ON DELETE SET NULL",
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS metadata_extra JSONB",
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS review_status VARCHAR(50) DEFAULT 'pending'",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS playlist_template_id UUID REFERENCES playlist_templates(id) ON DELETE SET NULL",
+        "ALTER TABLE stations ADD COLUMN IF NOT EXISTS automation_config JSONB",
     ]
     for sql in migrations:
         try:

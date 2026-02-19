@@ -8,13 +8,15 @@ from datetime import datetime, time, timedelta
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.asset import Asset
 from app.models.now_playing import NowPlaying
 from app.models.play_log import PlayLog
 from app.models.playlist_entry import PlaybackMode, PlaylistEntry
+from app.models.playlist_template import PlaylistTemplate, TemplateSlot
 from app.models.schedule import Schedule
 from app.models.schedule_block import DayOfWeek, RecurrenceType, ScheduleBlock, SunEvent
 
@@ -47,7 +49,10 @@ class SchedulingService:
         stmt = (
             select(Schedule)
             .where(Schedule.station_id == station_id, Schedule.is_active == True)
-            .options(selectinload(Schedule.blocks).selectinload(ScheduleBlock.playlist_entries))
+            .options(
+                selectinload(Schedule.blocks).selectinload(ScheduleBlock.playlist_entries),
+                selectinload(Schedule.blocks).selectinload(ScheduleBlock.playlist_template).selectinload(PlaylistTemplate.slots),
+            )
             .order_by(Schedule.priority.desc())
         )
         result = await self.db.execute(stmt)
@@ -140,8 +145,13 @@ class SchedulingService:
     ) -> Optional[UUID]:
         """
         Get the next asset ID to play from a block's playlist.
+        If the block has a playlist_template_id, use template rotation instead.
         Respects playback_mode: sequential, shuffle, or weighted.
         """
+        # Template rotation mode
+        if block.playlist_template_id and block.playlist_template:
+            return await self._resolve_template_asset(block, station_id)
+
         if not block.playlist_entries:
             return None
 
@@ -255,6 +265,155 @@ class SchedulingService:
         )
         result = await self.db.execute(stmt)
         return {str(row) for row in result.scalars().all()}
+
+    # ==================== Template Resolution ====================
+
+    async def _resolve_template_asset(
+        self, block: ScheduleBlock, station_id: UUID | str | None
+    ) -> Optional[UUID]:
+        """Resolve the next asset from a playlist template's rotation."""
+        template = block.playlist_template
+        slots = template.slots
+        if not slots:
+            return None
+
+        # Check automation insertions first
+        if station_id:
+            insertion = await self._check_automation_insertions(station_id)
+            if insertion:
+                return insertion
+
+        # Determine current slot by counting total plays for this station modulo slot count
+        stmt = (
+            select(func.count(PlayLog.id))
+            .where(PlayLog.station_id == station_id)
+        )
+        result = await self.db.execute(stmt)
+        total_plays = result.scalar() or 0
+
+        slot_index = total_plays % len(slots)
+        current_slot = slots[slot_index]
+
+        return await self._pick_asset_for_slot(
+            current_slot.asset_type, current_slot.category, station_id
+        )
+
+    async def _check_automation_insertions(
+        self, station_id: UUID | str
+    ) -> Optional[UUID]:
+        """Check if an automation insertion (station ID jingle, time, weather) is due."""
+        from app.models.station import Station
+
+        stmt = select(Station).where(Station.id == station_id)
+        result = await self.db.execute(stmt)
+        station = result.scalar_one_or_none()
+        if not station or not station.automation_config:
+            return None
+
+        config = station.automation_config
+        now = datetime.utcnow()
+        current_minute = now.minute
+
+        # Hourly station ID jingle
+        if config.get("hourly_station_id") and current_minute < 2:
+            # Check if we already played an hourly_id this hour
+            hour_start = now.replace(minute=0, second=0, microsecond=0)
+            stmt = (
+                select(func.count(PlayLog.id))
+                .join(Asset, PlayLog.asset_id == Asset.id)
+                .where(
+                    PlayLog.station_id == station_id,
+                    PlayLog.start_utc >= hour_start,
+                    Asset.asset_type == "jingle",
+                    Asset.category == "hourly_id",
+                )
+            )
+            result = await self.db.execute(stmt)
+            if (result.scalar() or 0) == 0:
+                asset = await self._pick_asset_for_slot("jingle", "hourly_id", station_id)
+                if asset:
+                    return asset
+
+        # Hourly time announcement
+        if config.get("hourly_time_announcement") and current_minute < 2:
+            hour_start = now.replace(minute=0, second=0, microsecond=0)
+            stmt = (
+                select(func.count(PlayLog.id))
+                .join(Asset, PlayLog.asset_id == Asset.id)
+                .where(
+                    PlayLog.station_id == station_id,
+                    PlayLog.start_utc >= hour_start,
+                    Asset.asset_type == "jingle",
+                    Asset.category == "time_announcement",
+                )
+            )
+            result = await self.db.execute(stmt)
+            if (result.scalar() or 0) == 0:
+                from app.services.weather_spot_service import get_or_create_weather_spot_assets
+                slot_key = now.strftime("%Y-%m-%dT%H:%M")[:14] + "00"
+                time_asset, _ = await get_or_create_weather_spot_assets(self.db, slot_key)
+                if time_asset:
+                    return time_asset.id
+
+        # Weather spot
+        weather_interval = config.get("weather_interval_minutes", 30)
+        if config.get("weather_enabled") and weather_interval > 0:
+            if current_minute % weather_interval < 2:
+                since = now - timedelta(minutes=weather_interval - 1)
+                stmt = (
+                    select(func.count(PlayLog.id))
+                    .join(Asset, PlayLog.asset_id == Asset.id)
+                    .where(
+                        PlayLog.station_id == station_id,
+                        PlayLog.start_utc >= since,
+                        Asset.asset_type == "spot",
+                        Asset.category == "weather_spot",
+                    )
+                )
+                result = await self.db.execute(stmt)
+                if (result.scalar() or 0) == 0:
+                    from app.services.weather_spot_service import get_or_create_weather_spot_assets
+                    slot_key = now.strftime("%Y-%m-%dT%H:%M")[:14] + "00"
+                    _, weather_asset = await get_or_create_weather_spot_assets(self.db, slot_key)
+                    if weather_asset:
+                        return weather_asset.id
+
+        return None
+
+    async def _pick_asset_for_slot(
+        self, asset_type: str, category: str | None, station_id: UUID | str | None
+    ) -> Optional[UUID]:
+        """Pick a random asset matching asset_type+category, avoiding recently played."""
+        stmt = select(Asset).where(Asset.asset_type == asset_type)
+        if category:
+            stmt = stmt.where(Asset.category == category)
+        result = await self.db.execute(stmt)
+        candidates = list(result.scalars().all())
+
+        if not candidates:
+            return None
+
+        # Exclude recently played (last 1/3 of candidates)
+        if station_id and len(candidates) > 1:
+            exclude_count = max(1, len(candidates) // 3)
+            recent_stmt = (
+                select(PlayLog.asset_id)
+                .where(
+                    PlayLog.station_id == station_id,
+                    PlayLog.asset_id.in_([c.id for c in candidates]),
+                )
+                .order_by(desc(PlayLog.start_utc))
+                .limit(exclude_count)
+            )
+            recent_result = await self.db.execute(recent_stmt)
+            recent_ids = {str(r) for r in recent_result.scalars().all()}
+
+            filtered = [c for c in candidates if str(c.id) not in recent_ids]
+            if filtered:
+                candidates = filtered
+
+        chosen = random.choice(candidates)
+        return chosen.id
 
     async def update_now_playing(
         self,

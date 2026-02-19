@@ -60,6 +60,7 @@ class ScheduleBlockBase(BaseModel):
     start_sun_offset: int | None = None  # minutes offset from sun event
     end_sun_event: SunEvent | None = None
     end_sun_offset: int | None = None
+    playlist_template_id: UUID | str | None = None
 
 
 class ScheduleBlockCreate(ScheduleBlockBase):
@@ -81,11 +82,13 @@ class ScheduleBlockUpdate(BaseModel):
     start_sun_offset: int | None = None
     end_sun_event: SunEvent | None = None
     end_sun_offset: int | None = None
+    playlist_template_id: UUID | str | None = None
 
 
 class ScheduleBlockInDB(ScheduleBlockBase):
     id: UUID | str
     schedule_id: UUID | str
+    playlist_template_id: UUID | str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -5,6 +5,7 @@ import apiClient from '../../api/client';
 import { useAssets } from '../../hooks/useAssets';
 import type { ScheduleBlock, CreateScheduleBlockData } from '../../hooks/useSchedules';
 import { useCreateScheduleBlock, useDeleteScheduleBlock, useCreatePlaylistEntry, useDeletePlaylistEntry } from '../../hooks/useSchedules';
+import { usePlaylistTemplates } from '../../hooks/usePlaylists';
 
 export default function ScheduleBlocks() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
@@ -26,6 +27,7 @@ export default function ScheduleBlocks() {
   const { data: assetsData } = useAssets();
   const assets = assetsData?.assets || [];
 
+  const { data: playlistTemplates } = usePlaylistTemplates();
   const createBlock = useCreateScheduleBlock();
   const deleteBlock = useDeleteScheduleBlock();
   const createEntry = useCreatePlaylistEntry();
@@ -153,6 +155,17 @@ export default function ScheduleBlocks() {
               </select>
             </div>
           </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Playlist Template (optional — overrides specific assets)</label>
+            <select value={blockForm.playlist_template_id || ''}
+              onChange={e => setBlockForm({ ...blockForm, playlist_template_id: e.target.value || null })}
+              className="w-full px-3 py-2 border rounded-lg">
+              <option value="">Use specific assets</option>
+              {playlistTemplates?.map(t => (
+                <option key={t.id} value={t.id}>{t.name} ({t.slots.length} slots)</option>
+              ))}
+            </select>
+          </div>
           <div className="grid grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Start Sun Event</label>
@@ -218,6 +231,10 @@ export default function ScheduleBlocks() {
                   {' '}&middot; Priority {block.priority}
                   {block.start_sun_event && ` · Start: ${block.start_sun_event}${block.start_sun_offset ? ` (${block.start_sun_offset > 0 ? '+' : ''}${block.start_sun_offset}min)` : ''}`}
                   {block.end_sun_event && ` · End: ${block.end_sun_event}${block.end_sun_offset ? ` (${block.end_sun_offset > 0 ? '+' : ''}${block.end_sun_offset}min)` : ''}`}
+                  {block.playlist_template_id && (() => {
+                    const tpl = playlistTemplates?.find(t => t.id === block.playlist_template_id);
+                    return tpl ? ` · Template: ${tpl.name}` : ' · Template assigned';
+                  })()}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -230,6 +247,28 @@ export default function ScheduleBlocks() {
 
             {expandedBlock === block.id && (
               <div className="border-t p-4 bg-gray-50">
+                {block.playlist_template_id ? (() => {
+                  const tpl = playlistTemplates?.find(t => t.id === block.playlist_template_id);
+                  return (
+                    <div className="mb-3">
+                      <h4 className="text-sm font-bold text-gray-700 uppercase mb-2">Template: {tpl?.name || 'Unknown'}</h4>
+                      {tpl && tpl.slots.length > 0 && (
+                        <div className="space-y-1">
+                          {tpl.slots.sort((a, b) => a.position - b.position).map((slot, idx) => (
+                            <div key={slot.id} className="flex items-center gap-3 bg-white p-2 rounded border">
+                              <span className="text-xs text-gray-400 w-6 text-right">{idx + 1}</span>
+                              <span className="text-sm font-medium">{slot.asset_type}</span>
+                              {slot.category && <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">{slot.category}</span>}
+                              {!slot.category && <span className="text-xs text-gray-400">(any)</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(!tpl || tpl.slots.length === 0) && <p className="text-gray-400 text-sm">Template has no slots</p>}
+                    </div>
+                  );
+                })() : (
+                <>
                 <div className="flex justify-between items-center mb-3">
                   <h4 className="text-sm font-bold text-gray-700 uppercase">Playlist Entries</h4>
                   <button onClick={() => setAddingEntryTo(addingEntryTo === block.id ? null : block.id)}
@@ -284,6 +323,8 @@ export default function ScheduleBlocks() {
                         );
                       })}
                   </div>
+                )}
+                </>
                 )}
               </div>
             )}

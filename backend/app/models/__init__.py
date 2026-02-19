@@ -17,6 +17,7 @@ from app.models.now_playing import NowPlaying
 from app.models.user_preference import UserPreference
 from app.models.review_queue import ReviewQueue, ReviewItem, ReviewQueueStatus, ReviewItemStatus
 from app.models.review_action import ReviewAction
+from app.models.playlist_template import PlaylistTemplate, TemplateSlot
 
 __all__ = [
     "User", "UserRole",
@@ -38,4 +39,5 @@ __all__ = [
     "UserPreference",
     "ReviewQueue", "ReviewItem", "ReviewQueueStatus", "ReviewItemStatus",
     "ReviewAction",
+    "PlaylistTemplate", "TemplateSlot",
 ]
