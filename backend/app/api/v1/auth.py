@@ -69,6 +69,7 @@ async def run_migrations(db: AsyncSession = Depends(get_db)):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS asset_type VARCHAR(50) DEFAULT 'music'",
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS category VARCHAR(100)",
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ",
+        "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS channel_id UUID REFERENCES channel_streams(id) ON DELETE SET NULL",
     ]
     results = []
     for sql in migrations:
