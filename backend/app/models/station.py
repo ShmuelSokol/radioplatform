@@ -32,7 +32,7 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     channels = relationship("ChannelStream", back_populates="station", lazy="selectin")
-    schedule_entries = relationship("ScheduleEntry", back_populates="station", lazy="selectin")
-    play_logs = relationship("PlayLog", back_populates="station", lazy="selectin")
-    schedules = relationship("Schedule", back_populates="station", lazy="selectin")
-    now_playing = relationship("NowPlaying", back_populates="station", uselist=False, lazy="selectin")
+    schedule_entries = relationship("ScheduleEntry", back_populates="station", lazy="noload")
+    play_logs = relationship("PlayLog", back_populates="station", lazy="noload")
+    schedules = relationship("Schedule", back_populates="station", lazy="noload")
+    now_playing = relationship("NowPlaying", back_populates="station", uselist=False, lazy="noload")
