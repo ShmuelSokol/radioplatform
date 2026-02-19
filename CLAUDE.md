@@ -7,14 +7,14 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, w
 
 ## Live URLs
 - **Frontend**: https://studio-kolbramah-radio.vercel.app
-- **Backend API**: https://studio-kolbramah-api.vercel.app
+- **Backend API**: Railway (URL TBD after first deploy — was https://studio-kolbramah-api.vercel.app)
 - **GitHub**: https://github.com/ShmuelSokol/radioplatform
 
 ## Tech Stack
 - **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + hls.js + Zustand + React Query
 - **Backend**: Python 3.12 + FastAPI (async) + SQLAlchemy 2.0 (asyncpg)
 - **Database**: Supabase PostgreSQL (transaction pooler on port 6543)
-- **Hosting**: Vercel (both frontend and backend serverless)
+- **Hosting**: Frontend on Vercel, Backend on Railway (persistent process — enables real WebSockets + scheduler)
 - **TTS**: ElevenLabs API for weather/time announcements
 - **Weather**: OpenWeatherMap API (current + 3-day forecast)
 - **Storage**: Supabase Storage for audio files (bucket: `audio`)
@@ -182,12 +182,12 @@ Claude Code accessible over Telegram for remote development.
 - **Frontend**: All API calls through `src/api/client.ts` (auto JWT refresh). Zustand for global state, React Query for server state.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
 - **Tests**: pytest-asyncio with SQLite + type compilation hooks (PG_UUID→VARCHAR, JSONB→TEXT, ENUM→VARCHAR).
-- **Serverless**: No lifespan events. Tables created lazily via middleware on first request. Statement cache disabled for Supabase pooler.
+- **Railway backend**: Uses lifespan events — tables created on startup, scheduler engine auto-starts. Middleware fallback still in place for local/Vercel compat. Statement cache disabled for Supabase pooler.
 - **TTS Pronunciation**: "Kol Bramah" is spelled "Kohl Baramah" in TTS text for correct pronunciation.
 
 ## Environment Variables
 
-### Backend (Vercel)
+### Backend (Railway)
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `DATABASE_URL` | Supabase PostgreSQL pooler URI | Yes |
