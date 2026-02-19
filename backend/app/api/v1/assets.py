@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, require_manager
@@ -76,6 +77,32 @@ async def update_asset(
     await db.flush()
     await db.refresh(asset)
     return asset
+
+
+@router.get("/{asset_id}/download")
+async def download_asset(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    asset = await get_asset(db, asset_id)
+    file_path = asset.file_path
+
+    # If file_path is already a full URL (e.g. Supabase public URL), redirect
+    if file_path.startswith("http://") or file_path.startswith("https://"):
+        return RedirectResponse(url=file_path)
+
+    # Otherwise download from storage and stream
+    from app.services.storage_service import download_file
+    data = await download_file(file_path)
+    ext = file_path.rsplit(".", 1)[-1] if "." in file_path else "mp3"
+    safe_title = "".join(c for c in asset.title if c.isalnum() or c in " -_").strip()
+    filename = f"{safe_title}.{ext}"
+    return Response(
+        content=data,
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/{asset_id}/transcode", response_model=TaskStatusResponse)

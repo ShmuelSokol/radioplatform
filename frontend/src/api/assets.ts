@@ -31,6 +31,18 @@ export const clipAsset = async (id: string, start: number, duration: number) => 
   return res.data;
 };
 
+export const downloadAsset = async (id: string, title: string): Promise<void> => {
+  const res = await apiClient.get(`/assets/${id}/download`, { responseType: 'blob' });
+  const url = window.URL.createObjectURL(new Blob([res.data]));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${title}.mp3`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 export const deleteAsset = async (id: string): Promise<void> => {
   await apiClient.delete(`/assets/${id}`);
 };
