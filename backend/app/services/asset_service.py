@@ -21,6 +21,10 @@ async def create_asset(
     user_id: uuid.UUID | None = None,
     original_filename: str | None = None,
     target_format: str = "mp3",
+    artist: str | None = None,
+    album: str | None = None,
+    asset_type: str = "music",
+    category: str | None = None,
 ) -> Asset:
     # Use original_filename for conversion detection; fall back to filename
     source_name = original_filename or filename
@@ -43,6 +47,10 @@ async def create_asset(
         file_path=s3_key,
         duration=duration,
         created_by=user_id,
+        artist=artist,
+        album=album,
+        asset_type=asset_type,
+        category=category,
     )
     db.add(asset)
     await db.flush()

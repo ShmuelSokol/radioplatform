@@ -11,11 +11,23 @@ export const getAsset = async (id: string): Promise<Asset> => {
   return res.data;
 };
 
-export const uploadAsset = async (file: File, title: string, format = 'mp3'): Promise<Asset> => {
+export const uploadAsset = async (
+  file: File,
+  title: string,
+  format = 'mp3',
+  artist?: string,
+  album?: string,
+  asset_type = 'music',
+  category?: string,
+): Promise<Asset> => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('title', title);
   formData.append('format', format);
+  if (artist) formData.append('artist', artist);
+  if (album) formData.append('album', album);
+  formData.append('asset_type', asset_type);
+  if (category) formData.append('category', category);
   const res = await apiClient.post<Asset>('/assets/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });

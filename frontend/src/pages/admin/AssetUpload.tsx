@@ -11,8 +11,20 @@ const IMPORT_FORMATS = [
   { value: 'original', label: 'Keep Original' },
 ] as const;
 
+const ASSET_TYPES = [
+  { value: 'music', label: 'Music' },
+  { value: 'spot', label: 'Spot' },
+  { value: 'shiur', label: 'Shiur' },
+  { value: 'jingle', label: 'Jingle' },
+  { value: 'zmanim', label: 'Zmanim' },
+] as const;
+
 export default function AssetUpload() {
   const [title, setTitle] = useState('');
+  const [artist, setArtist] = useState('');
+  const [album, setAlbum] = useState('');
+  const [assetType, setAssetType] = useState('music');
+  const [category, setCategory] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [format, setFormat] = useState('mp3');
   const [error, setError] = useState('');
@@ -38,7 +50,15 @@ export default function AssetUpload() {
     }
     setError('');
     try {
-      await uploadMutation.mutateAsync({ file, title, format });
+      await uploadMutation.mutateAsync({
+        file,
+        title,
+        format,
+        artist: artist || undefined,
+        album: album || undefined,
+        asset_type: assetType,
+        category: category || undefined,
+      });
       navigate('/admin/assets');
     } catch (err: any) {
       const msg = err?.response?.data?.detail ?? err?.message ?? 'Upload failed';
@@ -53,6 +73,8 @@ export default function AssetUpload() {
         {error && (
           <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>
         )}
+
+        {/* File */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Audio / Video File</label>
           <input
@@ -69,8 +91,10 @@ export default function AssetUpload() {
             </p>
           )}
         </div>
+
+        {/* Title */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Title <span className="text-red-500">*</span></label>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -78,6 +102,55 @@ export default function AssetUpload() {
             required
           />
         </div>
+
+        {/* Artist */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Artist</label>
+          <input
+            value={artist}
+            onChange={(e) => setArtist(e.target.value)}
+            placeholder="Optional"
+            className="w-full border rounded px-3 py-2"
+          />
+        </div>
+
+        {/* Album */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Album</label>
+          <input
+            value={album}
+            onChange={(e) => setAlbum(e.target.value)}
+            placeholder="Optional"
+            className="w-full border rounded px-3 py-2"
+          />
+        </div>
+
+        {/* Type + Category side by side */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+            <select
+              value={assetType}
+              onChange={(e) => setAssetType(e.target.value)}
+              className="w-full border rounded px-3 py-2 bg-white"
+            >
+              {ASSET_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+            <input
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="Optional"
+              className="w-full border rounded px-3 py-2"
+            />
+          </div>
+        </div>
+
+        {/* Format */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Convert To</label>
           <select
@@ -93,6 +166,7 @@ export default function AssetUpload() {
             File will be converted server-side via FFmpeg before storage
           </p>
         </div>
+
         <button
           type="submit"
           disabled={uploadMutation.isPending}

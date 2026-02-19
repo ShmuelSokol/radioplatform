@@ -26,6 +26,10 @@ async def upload_asset(
     file: UploadFile = File(...),
     title: str = Form(...),
     format: str = Form("mp3"),
+    artist: str | None = Form(None),
+    album: str | None = Form(None),
+    asset_type: str = Form("music"),
+    category: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_manager),
 ):
@@ -40,6 +44,10 @@ async def upload_asset(
         user_id=user.id,
         original_filename=original_filename,
         target_format=format,
+        artist=artist or None,
+        album=album or None,
+        asset_type=asset_type,
+        category=category or None,
     )
     # Dispatch metadata extraction task
     task_extract_metadata.delay(str(asset.id), asset.file_path)
