@@ -27,10 +27,12 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 
 @router.get("/ffmpeg-check")
 async def ffmpeg_check(_user: User = Depends(require_manager)):
-    """Diagnostic: check if FFmpeg is available and working."""
+    """Diagnostic: check FFmpeg, run conversion test, and do full roundtrip."""
     import shutil
     import subprocess
     from app.config import settings
+    from app.services.audio_convert_service import convert_audio
+    from app.services.storage_service import upload_file as upload_storage, download_file, generate_asset_key, delete_file
 
     result = {"ffmpeg_path": settings.FFMPEG_PATH}
     result["which_ffmpeg"] = shutil.which("ffmpeg")
@@ -45,128 +47,17 @@ async def ffmpeg_check(_user: User = Depends(require_manager)):
         result["ffmpeg_rc"] = proc.returncode
     except FileNotFoundError:
         result["ffmpeg_error"] = "FileNotFoundError — ffmpeg not in PATH"
+        return result
     except Exception as e:
         result["ffmpeg_error"] = str(e)
+        return result
 
-    # Quick conversion test: generate 0.5s silence and convert to mp2
-    try:
-        proc = subprocess.run(
-            [settings.FFMPEG_PATH, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.5",
-             "-c:a", "mp2", "-b:a", "128k", "-f", "mp2", "pipe:1"],
-            capture_output=True, timeout=10,
-        )
-        result["mp2_test_rc"] = proc.returncode
-        result["mp2_test_output_bytes"] = len(proc.stdout)
-        result["mp2_test_stderr"] = proc.stderr[:300].decode(errors="replace")
-    except Exception as e:
-        result["mp2_test_error"] = str(e)
-
-    return result
-
-
-@router.post("/conversion-test")
-async def conversion_test(
-    file: UploadFile = File(...),
-    format: str = Form("mp2"),
-    _user: User = Depends(require_manager),
-):
-    """Diagnostic: upload a file, convert it, and return detailed info about the conversion.
-
-    Does NOT store anything — just tests the conversion pipeline.
-    """
-    import subprocess
-    from app.config import settings
-    from app.services.audio_convert_service import convert_audio
-
-    file_data = await file.read()
-    original_filename = file.filename or "test.bin"
-    input_hash = hashlib.md5(file_data).hexdigest()
-
-    result = {
-        "input_filename": original_filename,
-        "input_size": len(file_data),
-        "input_md5": input_hash,
-        "input_first_16_hex": file_data[:16].hex(),
-        "target_format": format,
-    }
-
-    # ffprobe the input
-    try:
-        proc = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
-             "-show_format", "-show_streams", "-i", "pipe:0"],
-            input=file_data, capture_output=True, timeout=30,
-        )
-        import json as _json
-        if proc.returncode == 0:
-            probe = _json.loads(proc.stdout)
-            result["input_probe"] = {
-                "format": probe.get("format", {}).get("format_name"),
-                "duration": probe.get("format", {}).get("duration"),
-                "streams": [
-                    {"type": s.get("codec_type"), "codec": s.get("codec_name"),
-                     "sample_rate": s.get("sample_rate"), "channels": s.get("channels")}
-                    for s in probe.get("streams", [])
-                ],
-            }
-        else:
-            result["input_probe_error"] = proc.stderr[:500].decode(errors="replace")
-    except Exception as e:
-        result["input_probe_error"] = str(e)
-
-    # Convert
-    converted_data, duration, out_ext = convert_audio(file_data, original_filename, format)
-    output_hash = hashlib.md5(converted_data).hexdigest()
-
-    result["output_size"] = len(converted_data)
-    result["output_md5"] = output_hash
-    result["output_ext"] = out_ext
-    result["output_duration"] = duration
-    result["output_first_16_hex"] = converted_data[:16].hex()
-    result["same_as_input"] = (input_hash == output_hash)
-
-    # ffprobe the output
-    try:
-        proc = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
-             "-show_format", "-show_streams", "-i", "pipe:0"],
-            input=converted_data, capture_output=True, timeout=30,
-        )
-        import json as _json
-        if proc.returncode == 0:
-            probe = _json.loads(proc.stdout)
-            result["output_probe"] = {
-                "format": probe.get("format", {}).get("format_name"),
-                "duration": probe.get("format", {}).get("duration"),
-                "streams": [
-                    {"type": s.get("codec_type"), "codec": s.get("codec_name"),
-                     "sample_rate": s.get("sample_rate"), "channels": s.get("channels")}
-                    for s in probe.get("streams", [])
-                ],
-            }
-        else:
-            result["output_probe_error"] = proc.stderr[:500].decode(errors="replace")
-    except Exception as e:
-        result["output_probe_error"] = str(e)
-
-    return result
-
-
-@router.get("/roundtrip-test")
-async def roundtrip_test(_user: User = Depends(require_manager)):
-    """Server-side round-trip: generate two different tones, convert to MP2,
-    upload to Supabase, download back, and verify they differ."""
-    import subprocess
-    from app.config import settings
-    from app.services.audio_convert_service import convert_audio
-    from app.services.storage_service import upload_file as upload_storage, download_file, generate_asset_key
-
-    results = {}
-
-    # Generate 440Hz and 880Hz tones as WAV using FFmpeg
+    # Round-trip test: generate two different tones, convert to MP2, upload, download, compare
+    roundtrip = {}
     for freq, label in [(440, "440Hz"), (880, "880Hz")]:
         step = {}
         try:
+            # Generate tone as WAV
             proc = subprocess.run(
                 [settings.FFMPEG_PATH, "-f", "lavfi", "-i",
                  f"sine=frequency={freq}:duration=2:sample_rate=44100",
@@ -177,13 +68,31 @@ async def roundtrip_test(_user: User = Depends(require_manager)):
             step["wav_size"] = len(wav_data)
             step["wav_md5"] = hashlib.md5(wav_data).hexdigest()
 
-            # Convert to MP2
+            # Convert WAV to MP2
             converted, duration, ext = convert_audio(wav_data, f"test_{label}.wav", "mp2")
             step["mp2_size"] = len(converted)
             step["mp2_md5"] = hashlib.md5(converted).hexdigest()
             step["mp2_duration"] = duration
 
-            # Upload to Supabase
+            # Also test MPG (MPEG-PS) container conversion
+            # Generate MPEG-PS with audio
+            proc_mpg = subprocess.run(
+                [settings.FFMPEG_PATH, "-f", "lavfi", "-i",
+                 f"sine=frequency={freq}:duration=2:sample_rate=44100",
+                 "-ac", "1", "-f", "mpeg", "pipe:1"],
+                capture_output=True, timeout=10,
+            )
+            mpg_data = proc_mpg.stdout
+            step["mpg_size"] = len(mpg_data)
+
+            # Convert MPG to MP2 (this is the path the user's .mpg files take)
+            mpg_converted, mpg_dur, mpg_ext = convert_audio(mpg_data, f"test_{label}.mpg", "mp2")
+            step["mpg_to_mp2_size"] = len(mpg_converted)
+            step["mpg_to_mp2_md5"] = hashlib.md5(mpg_converted).hexdigest()
+            step["mpg_to_mp2_duration"] = mpg_dur
+            step["mpg_to_mp2_ext"] = mpg_ext
+
+            # Upload MP2 to Supabase
             key = generate_asset_key(f"roundtrip_{label}.mp2")
             await upload_storage(converted, key, "audio/mpeg")
             step["storage_key"] = key
@@ -192,29 +101,35 @@ async def roundtrip_test(_user: User = Depends(require_manager)):
             downloaded = await download_file(key)
             step["downloaded_size"] = len(downloaded)
             step["downloaded_md5"] = hashlib.md5(downloaded).hexdigest()
-            step["roundtrip_match"] = (hashlib.md5(converted).hexdigest() == hashlib.md5(downloaded).hexdigest())
+            step["roundtrip_match"] = step["mp2_md5"] == step["downloaded_md5"]
 
             # Clean up
-            from app.services.storage_service import delete_file
             await delete_file(key)
-            step["cleaned_up"] = True
 
         except Exception as e:
             step["error"] = str(e)
 
-        results[label] = step
+        roundtrip[label] = step
 
-    # Compare: the two tones MUST produce different output
-    md5_440 = results.get("440Hz", {}).get("mp2_md5", "")
-    md5_880 = results.get("880Hz", {}).get("mp2_md5", "")
-    results["tones_differ"] = (md5_440 != md5_880 and md5_440 != "" and md5_880 != "")
-    results["PASS"] = (
-        results["tones_differ"]
-        and results.get("440Hz", {}).get("roundtrip_match", False)
-        and results.get("880Hz", {}).get("roundtrip_match", False)
+    # Verify: tones must differ
+    md5_440 = roundtrip.get("440Hz", {}).get("mp2_md5", "")
+    md5_880 = roundtrip.get("880Hz", {}).get("mp2_md5", "")
+    mpg_440 = roundtrip.get("440Hz", {}).get("mpg_to_mp2_md5", "")
+    mpg_880 = roundtrip.get("880Hz", {}).get("mpg_to_mp2_md5", "")
+
+    result["roundtrip"] = roundtrip
+    result["wav_tones_differ"] = (md5_440 != md5_880 and md5_440 != "" and md5_880 != "")
+    result["mpg_tones_differ"] = (mpg_440 != mpg_880 and mpg_440 != "" and mpg_880 != "")
+    result["roundtrip_440_ok"] = roundtrip.get("440Hz", {}).get("roundtrip_match", False)
+    result["roundtrip_880_ok"] = roundtrip.get("880Hz", {}).get("roundtrip_match", False)
+    result["PASS"] = (
+        result["wav_tones_differ"]
+        and result["mpg_tones_differ"]
+        and result["roundtrip_440_ok"]
+        and result["roundtrip_880_ok"]
     )
 
-    return results
+    return result
 
 
 @router.post("/upload", response_model=AssetResponse, status_code=201)
