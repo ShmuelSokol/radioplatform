@@ -88,6 +88,7 @@ async def _maybe_insert_hourly_jingle(db: AsyncSession, station_id: uuid.UUID) -
     # Find current playing position
     result = await db.execute(
         select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
     )
     current = result.scalar_one_or_none()
     next_pos = (current.position + 1) if current else 1
@@ -171,6 +172,7 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
 
     result = await db.execute(
         select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
     )
     current = result.scalar_one_or_none()
     next_pos = (current.position + 1) if current else 1
@@ -207,8 +209,18 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
     )
-    current = result.scalar_one_or_none()
+    playing_entries = result.scalars().all()
+    current = playing_entries[0] if playing_entries else None
+
+    # Clean up duplicate "playing" entries — keep only the most recent
+    if len(playing_entries) > 1:
+        for extra in playing_entries[1:]:
+            extra.status = "played"
+        await db.flush()
+        logger.warning("_check_advance: cleaned up %d duplicate playing entries", len(playing_entries) - 1)
+
     if not current:
         return None
 
@@ -449,6 +461,7 @@ async def play_next(
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
     )
     current = result.scalar_one_or_none()
     next_pos = (current.position + 1) if current else 1
@@ -470,8 +483,13 @@ async def skip_current(
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
     )
-    current = result.scalar_one_or_none()
+    playing_entries = result.scalars().all()
+    current = playing_entries[0] if playing_entries else None
+    # Clean up extras
+    for extra in playing_entries[1:]:
+        extra.status = "skipped"
     if current:
         # Log the skip
         if current.started_at:
@@ -603,8 +621,18 @@ async def start_playback(
         result = await db.execute(
             select(QueueEntry)
             .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+            .order_by(QueueEntry.started_at.desc().nullslast())
         )
-        current = result.scalar_one_or_none()
+        playing_entries = result.scalars().all()
+        current = playing_entries[0] if playing_entries else None
+
+        # Clean up duplicate "playing" entries — keep only the most recent
+        if len(playing_entries) > 1:
+            for extra in playing_entries[1:]:
+                extra.status = "played"
+            await db.flush()
+            logger.warning("Cleaned up %d duplicate playing entries", len(playing_entries) - 1)
+
         if current:
             if not current.started_at:
                 current.started_at = datetime.now(timezone.utc)
