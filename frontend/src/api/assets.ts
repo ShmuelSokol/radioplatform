@@ -60,6 +60,11 @@ export const downloadAsset = async (id: string, title: string, format = 'origina
   window.URL.revokeObjectURL(url);
 };
 
+export const updateAsset = async (id: string, data: Partial<Asset>): Promise<Asset> => {
+  const res = await apiClient.patch<Asset>(`/assets/${id}`, data);
+  return res.data;
+};
+
 export const deleteAsset = async (id: string): Promise<void> => {
   await apiClient.delete(`/assets/${id}`);
 };

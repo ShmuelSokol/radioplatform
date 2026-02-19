@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useReviewQueue, useQueueItems, useUpdateReviewItem } from '../../hooks/useReviews';
-import { useAssetAudioUrl } from '../../hooks/useAssets';
+import { useAssetAudioUrl, useUpdateAsset } from '../../hooks/useAssets';
 import ErrorBoundary from '../../components/ErrorBoundary';
 import Spinner from '../../components/Spinner';
 import AssetHistory from '../../components/review/AssetHistory';
@@ -38,6 +38,7 @@ export default function ReviewFlow() {
   const { data: queue } = useReviewQueue(queueId);
   const { data: itemsData, refetch: refetchItems } = useQueueItems(queueId);
   const updateMutation = useUpdateReviewItem();
+  const updateAssetMutation = useUpdateAsset();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [notes, setNotes] = useState('');
   const [silenceRegions, setSilenceRegions] = useState<SilenceRegion[]>([]);
@@ -175,6 +176,41 @@ export default function ReviewFlow() {
                   </span>
                 </div>
               </div>
+              {/* BPM + Tempo Category */}
+              {currentAsset.asset_type === 'music' && (
+                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-4">
+                  <div className="text-sm">
+                    <span className="text-gray-500">BPM: </span>
+                    <span className="font-medium">
+                      {(currentAsset.metadata_extra as any)?.bpm
+                        ? `${(currentAsset.metadata_extra as any).bpm}`
+                        : 'Not detected'}
+                    </span>
+                  </div>
+                  <div className="text-sm flex items-center gap-2">
+                    <span className="text-gray-500">Tempo:</span>
+                    <select
+                      value={currentAsset.category ?? ''}
+                      onChange={(e) => {
+                        const newCategory = e.target.value || null;
+                        updateAssetMutation.mutate(
+                          { id: currentAsset.id, data: { category: newCategory } },
+                          { onSuccess: () => refetchItems() }
+                        );
+                      }}
+                      className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      <option value="">Uncategorized</option>
+                      <option value="lively">Lively (Fast)</option>
+                      <option value="med_fast">Medium</option>
+                      <option value="relax">Relax (Slow)</option>
+                    </select>
+                    {updateAssetMutation.isPending && (
+                      <span className="text-xs text-gray-400">Saving...</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Waveform */}

@@ -57,6 +57,19 @@ async def create_asset(
 
     await upload_file(converted_data, s3_key, mime)
 
+    # Auto-detect BPM and tempo category for music assets
+    metadata_extra = None
+    if asset_type == "music" and not category:
+        try:
+            from app.services.bpm_service import detect_bpm
+            bpm, tempo_category = detect_bpm(converted_data, source_name)
+            if bpm is not None:
+                category = tempo_category
+                metadata_extra = {"bpm": bpm}
+                logger.info("Auto-categorized '%s': BPM=%.1f → %s", title, bpm, category)
+        except Exception:
+            logger.warning("BPM detection failed for '%s'", title, exc_info=True)
+
     asset = Asset(
         title=title,
         file_path=s3_key,
@@ -66,6 +79,7 @@ async def create_asset(
         album=album,
         asset_type=asset_type,
         category=category,
+        metadata_extra=metadata_extra,
     )
     db.add(asset)
     await db.flush()

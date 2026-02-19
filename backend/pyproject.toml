@@ -24,6 +24,7 @@ dependencies = [
     "pillow>=11.0.0",
     "astral>=3.2",
     "pyluach>=2.2.0",
+    "numpy>=1.26.0",
 ]
 
 [project.optional-dependencies]
