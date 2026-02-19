@@ -640,7 +640,10 @@ async def start_playback(
         return {"message": "Already playing", "now_playing": str(current.asset_id)}
 
     # Auto-fill queue before starting
-    await _replenish_queue(db, station_id)
+    try:
+        await _replenish_queue(db, station_id)
+    except Exception as exc:
+        logger.error("_replenish_queue failed during start: %s", exc, exc_info=True)
 
     result = await db.execute(
         select(QueueEntry)

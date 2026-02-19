@@ -287,7 +287,11 @@ class QueueReplenishService:
         logger.debug("Enqueued %s '%s' at position %d", asset.asset_type, asset.title, position)
 
     async def _insert_sponsors(self, shortfall: float) -> None:
-        """Insert sponsor spots based on their insertion policies and target rules."""
+        """Insert sponsor spots based on their insertion policies and target rules.
+
+        Sponsors must have a linked asset_id to be queued (queue_entries.asset_id is NOT NULL).
+        Sponsors without a matching Asset record are skipped.
+        """
         now = datetime.now(timezone.utc)
         current_hour = now.hour
 
@@ -297,6 +301,18 @@ class QueueReplenishService:
         sponsors = result.scalars().all()
 
         for sponsor in sponsors:
+            # Find an Asset record matching the sponsor's audio file
+            sponsor_asset = None
+            if sponsor.audio_file_path:
+                result = await self.db.execute(
+                    select(Asset).where(Asset.file_path == sponsor.audio_file_path).limit(1)
+                )
+                sponsor_asset = result.scalar_one_or_none()
+
+            if not sponsor_asset:
+                logger.debug("Skipping sponsor '%s' — no matching Asset record", sponsor.name)
+                continue
+
             rules = sponsor.target_rules or {}
             hour_start = rules.get("hour_start", 0)
             hour_end = rules.get("hour_end", 24)
@@ -308,19 +324,11 @@ class QueueReplenishService:
                 continue
 
             if sponsor.insertion_policy == "every_n_songs":
-                # Insert after every N songs
                 estimated_songs = shortfall / DEFAULT_DURATION
                 insertions = min(int(estimated_songs / max(songs_between, 1)), max_per_hour)
                 for i in range(insertions):
                     self.max_pos += songs_between
-                    entry = QueueEntry(
-                        id=uuid.uuid4(),
-                        station_id=self.station_id,
-                        asset_id=None,  # Sponsor uses audio_file_path directly
-                        position=self.max_pos,
-                        status="pending",
-                    )
-                    self.db.add(entry)
+                    await self._enqueue_asset(sponsor_asset, self.max_pos)
                     logger.info("Inserted sponsor '%s' at position %d", sponsor.name, self.max_pos)
 
             elif sponsor.insertion_policy == "fixed_interval":
@@ -329,30 +337,14 @@ class QueueReplenishService:
                 insertions = min(int(shortfall / interval_sec), max_per_hour)
                 for i in range(insertions):
                     pos = self.max_pos + int(((i + 1) * interval_sec) / DEFAULT_DURATION)
-                    entry = QueueEntry(
-                        id=uuid.uuid4(),
-                        station_id=self.station_id,
-                        asset_id=None,
-                        position=pos,
-                        status="pending",
-                    )
-                    self.db.add(entry)
-                    self.max_pos = max(self.max_pos, pos)
+                    await self._enqueue_asset(sponsor_asset, pos)
                     logger.info("Inserted sponsor '%s' at position %d", sponsor.name, pos)
 
             else:
-                # Default: between_tracks — insert at regular intervals
                 insertions = min(int(shortfall / (DEFAULT_DURATION * max(songs_between, 1))), max_per_hour)
                 for i in range(insertions):
                     self.max_pos += songs_between
-                    entry = QueueEntry(
-                        id=uuid.uuid4(),
-                        station_id=self.station_id,
-                        asset_id=None,
-                        position=self.max_pos,
-                        status="pending",
-                    )
-                    self.db.add(entry)
+                    await self._enqueue_asset(sponsor_asset, self.max_pos)
                     logger.info("Inserted sponsor '%s' at position %d", sponsor.name, self.max_pos)
 
     async def _fill_random_music(self, shortfall: float) -> None:
