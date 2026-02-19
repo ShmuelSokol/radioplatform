@@ -21,6 +21,45 @@ from app.workers.tasks.media_tasks import task_clip_audio, task_extract_metadata
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 
+@router.get("/ffmpeg-check")
+async def ffmpeg_check(_user: User = Depends(require_manager)):
+    """Diagnostic: check if FFmpeg is available and working."""
+    import shutil
+    import subprocess
+    from app.config import settings
+
+    result = {"ffmpeg_path": settings.FFMPEG_PATH}
+    result["which_ffmpeg"] = shutil.which("ffmpeg")
+    result["which_ffprobe"] = shutil.which("ffprobe")
+
+    try:
+        proc = subprocess.run(
+            [settings.FFMPEG_PATH, "-version"],
+            capture_output=True, timeout=10,
+        )
+        result["ffmpeg_version"] = proc.stdout[:200].decode(errors="replace")
+        result["ffmpeg_rc"] = proc.returncode
+    except FileNotFoundError:
+        result["ffmpeg_error"] = "FileNotFoundError — ffmpeg not in PATH"
+    except Exception as e:
+        result["ffmpeg_error"] = str(e)
+
+    # Quick conversion test: generate 0.5s silence and convert to mp2
+    try:
+        proc = subprocess.run(
+            [settings.FFMPEG_PATH, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.5",
+             "-c:a", "mp2", "-b:a", "128k", "-f", "mp2", "pipe:1"],
+            capture_output=True, timeout=10,
+        )
+        result["mp2_test_rc"] = proc.returncode
+        result["mp2_test_output_bytes"] = len(proc.stdout)
+        result["mp2_test_stderr"] = proc.stderr[:300].decode(errors="replace")
+    except Exception as e:
+        result["mp2_test_error"] = str(e)
+
+    return result
+
+
 @router.post("/upload", response_model=AssetResponse, status_code=201)
 async def upload_asset(
     file: UploadFile = File(...),
