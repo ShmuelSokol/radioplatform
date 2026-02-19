@@ -10,6 +10,7 @@ import {
 import { useTimelinePreview } from '../../hooks/useSchedules';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import type { AssetInfo } from '../../types';
+import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 
 function fmtDur(sec: number | null): string {
   if (!sec || sec <= 0) return '0:00';
@@ -45,16 +46,6 @@ const TYPE_COLORS: Record<string, string> = {
   music: 'text-cyan-300', spot: 'text-orange-400', shiur: 'text-purple-300',
   jingle: 'text-yellow-200', zmanim: 'text-green-300',
 };
-const CAT_COLORS: Record<string, string> = {
-  med_fast: 'text-cyan-300', purim: 'text-orange-400', relax: 'text-green-300',
-  shabbos: 'text-yellow-200', slow: 'text-blue-300', lively: 'text-red-300',
-  daf_yomi: 'text-red-400', parsha: 'text-purple-300', halacha: 'text-blue-200',
-  intro: 'text-yellow-300', outro: 'text-yellow-200', news: 'text-blue-300',
-  station_id: 'text-white', hourly_id: 'text-amber-300', netz: 'text-yellow-400', shkia: 'text-red-400',
-  weather: 'text-blue-300', call_in: 'text-yellow-300', retail: 'text-green-200',
-  community: 'text-red-200', service: 'text-cyan-200',
-};
-
 // Bottom panel tabs
 type BottomTab = 'library' | 'cart' | 'log' | 'timeline';
 
@@ -438,8 +429,8 @@ export default function Dashboard() {
                     <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[a?.asset_type] ?? 'text-gray-500'}`}>
                       {a?.asset_type ?? ''}
                     </span>
-                    <span className={`w-[50px] text-[10px] shrink-0 ${CAT_COLORS[a?.category] ?? 'text-gray-600'}`}>
-                      {a?.category ?? ''}
+                    <span className="w-[60px] text-[10px] shrink-0">
+                      {a?.id ? <AssetCategoryBadge assetId={a.id} category={a?.category ?? null} dark compact /> : ''}
                     </span>
                     <span className="w-[60px] flex gap-1 text-[10px] shrink-0">
                       {!isCur && (
@@ -515,7 +506,9 @@ export default function Dashboard() {
                     <span className="w-[120px] truncate text-[11px] font-bold shrink-0">{asset.artist ?? '—'}</span>
                     <span className="flex-1 truncate text-[11px] min-w-0">{asset.title}</span>
                     <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[asset.asset_type] ?? 'text-gray-500'}`}>{asset.asset_type}</span>
-                    <span className={`w-[50px] text-[10px] shrink-0 ${CAT_COLORS[asset.category ?? ''] ?? 'text-gray-600'}`}>{asset.category ?? ''}</span>
+                    <span className="w-[60px] text-[10px] shrink-0">
+                      <AssetCategoryBadge assetId={asset.id} category={asset.category} dark compact />
+                    </span>
                     <span className="w-[70px] flex gap-2 shrink-0 md:opacity-0 md:group-hover:opacity-100">
                       <button onClick={() => stationId && addQueueMut.mutate(asset.id)}
                         className="text-green-400 hover:text-green-300 text-[10px] p-1" title="Add to queue">+Q</button>

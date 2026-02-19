@@ -204,6 +204,7 @@ export default function ReviewFlow() {
                       <option value="lively">Lively (Fast)</option>
                       <option value="med_fast">Medium</option>
                       <option value="relax">Relax (Slow)</option>
+                      <option value="do_not_play">Do Not Play</option>
                     </select>
                     {updateAssetMutation.isPending && (
                       <span className="text-xs text-gray-400">Saving...</span>

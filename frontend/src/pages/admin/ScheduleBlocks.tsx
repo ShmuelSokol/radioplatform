@@ -6,6 +6,7 @@ import { useAssets } from '../../hooks/useAssets';
 import type { ScheduleBlock, CreateScheduleBlockData } from '../../hooks/useSchedules';
 import { useCreateScheduleBlock, useDeleteScheduleBlock, useCreatePlaylistEntry, useDeletePlaylistEntry } from '../../hooks/useSchedules';
 import { usePlaylistTemplates } from '../../hooks/usePlaylists';
+import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 
 export default function ScheduleBlocks() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
@@ -306,9 +307,10 @@ export default function ScheduleBlocks() {
                           <div key={entry.id} className="flex items-center justify-between bg-white p-2 rounded border">
                             <div className="flex items-center gap-3">
                               <span className="text-xs text-gray-400 w-6 text-right">{idx + 1}</span>
-                              <div>
+                              <div className="flex items-center gap-2">
                                 <span className="text-sm font-medium">{asset?.title || entry.asset_id}</span>
-                                {asset?.artist && <span className="text-xs text-gray-400 ml-2">{asset.artist}</span>}
+                                {asset?.artist && <span className="text-xs text-gray-400">{asset.artist}</span>}
+                                {asset && <AssetCategoryBadge assetId={asset.id} category={asset.category} compact />}
                               </div>
                             </div>
                             <div className="flex items-center gap-2">

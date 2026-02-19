@@ -383,8 +383,10 @@ class SchedulingService:
     async def _pick_asset_for_slot(
         self, asset_type: str, category: str | None, station_id: UUID | str | None
     ) -> Optional[UUID]:
-        """Pick a random asset matching asset_type+category, avoiding recently played."""
+        """Pick a random asset matching asset_type+category, avoiding recently played and do_not_play."""
         stmt = select(Asset).where(Asset.asset_type == asset_type)
+        # Always exclude "do_not_play" assets
+        stmt = stmt.where((Asset.category != "do_not_play") | (Asset.category.is_(None)))
         if category:
             stmt = stmt.where(Asset.category == category)
         result = await self.db.execute(stmt)

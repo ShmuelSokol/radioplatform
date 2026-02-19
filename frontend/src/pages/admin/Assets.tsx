@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
+import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
 import { downloadAsset, getAssetAudioUrl } from '../../api/assets';
 import Spinner from '../../components/Spinner';
@@ -370,7 +371,9 @@ export default function Assets() {
                 <td className="px-6 py-4 whitespace-nowrap font-medium">{asset.title}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.artist ?? '--'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.album ?? '--'}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.category ?? '--'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                  <AssetCategoryBadge assetId={asset.id} category={asset.category} />
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.asset_type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.created_at)}</td>
