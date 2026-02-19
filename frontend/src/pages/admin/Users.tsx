@@ -98,7 +98,7 @@ export default function Users() {
       {isLoading ? (
         <div className="text-gray-500 text-center py-8">Loading users...</div>
       ) : (
-        <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-hidden">
+        <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">

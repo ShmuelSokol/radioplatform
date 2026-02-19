@@ -29,15 +29,6 @@ function fmtClock(d: Date): string {
   return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function fmtRelative(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
-
 function fmtHMS(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
@@ -85,7 +76,7 @@ export default function Dashboard() {
 
   const { data: queueData } = useQueue(stationId);
   const { data: logData } = usePlayLog(stationId);
-  const { data: lastPlayedData } = useLastPlayed(stationId);
+  useLastPlayed(stationId);
   const skipMut = useSkipCurrent(stationId ?? '');
   const playNextMut = usePlayNext(stationId ?? '');
   const addQueueMut = useAddToQueue(stationId ?? '');
@@ -163,8 +154,6 @@ export default function Dashboard() {
   const progress = duration > 0 ? Math.min(100, (elapsed / duration) * 100) : 0;
 
   const queueDuration = queueData?.queue_duration_seconds ?? 0;
-  const lastPlayed: Record<string, string> = lastPlayedData?.last_played ?? {};
-
   const nextEntry = queueEntries.find((e: any) => e.status === 'pending');
   const nextAsset = nextEntry?.asset ?? null;
   const playLog = logData?.logs ?? [];
@@ -251,7 +240,7 @@ export default function Dashboard() {
       <audio ref={previewAudioRef} className="hidden" />
 
       {/* ═══ Status bar ═══ */}
-      <div className="bg-[#0a0a28] border-b border-[#2a2a5e] px-3 py-1.5 flex items-center gap-3 flex-wrap shrink-0">
+      <div className="bg-[#0a0a28] border-b border-[#2a2a5e] px-3 py-1.5 flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
         {/* Play / Stop */}
         {isPlaying ? (
           <span className="bg-green-600 text-white px-2 py-0.5 font-bold text-[11px] rounded-sm tracking-wide animate-pulse">
@@ -266,26 +255,50 @@ export default function Dashboard() {
 
         {/* Remaining */}
         <div className="flex items-baseline gap-1">
-          <span className="text-gray-500 text-[11px]">Remaining</span>
-          <span className="text-red-400 text-lg font-bold tabular-nums leading-none">{fmtDurMs(remaining)}</span>
+          <span className="text-gray-500 text-[11px] hidden sm:inline">Remaining</span>
+          <span className="text-red-400 text-base md:text-lg font-bold tabular-nums leading-none">{fmtDurMs(remaining)}</span>
         </div>
 
         {/* Progress bar */}
-        <div className="w-32 h-2 bg-[#111] rounded-sm overflow-hidden">
+        <div className="w-20 md:w-32 h-2 bg-[#111] rounded-sm overflow-hidden">
           <div className="h-full bg-gradient-to-r from-green-500 to-yellow-400"
             style={{ width: `${progress}%` }} />
         </div>
 
         {/* Elapsed / Duration */}
         <div className="flex items-baseline gap-1">
-          <span className="text-gray-500 text-[11px]">Elapsed</span>
+          <span className="text-gray-500 text-[11px] hidden sm:inline">Elapsed</span>
           <span className="text-white text-sm tabular-nums">{fmtDurMs(elapsed)}</span>
           <span className="text-gray-600">/</span>
           <span className="text-gray-400 text-sm tabular-nums">{fmtDur(duration)}</span>
         </div>
 
-        {/* VU Meters */}
-        <div className="flex-1 min-w-[140px] max-w-[300px] flex flex-col gap-0.5 mx-1">
+        {/* Skip */}
+        <button onClick={() => { initAudio(); skipMut.mutate(); }} disabled={!isPlaying}
+          className="px-2 py-0.5 bg-[#2a2a5e] hover:bg-[#3a3a7e] text-yellow-300 text-[11px] rounded disabled:opacity-30">
+          SKIP ⏭
+        </button>
+
+        {/* Audio controls */}
+        {!audioReady && isPlaying ? (
+          <button onClick={() => initAudio()}
+            className="px-2 py-0.5 bg-cyan-800 hover:bg-cyan-700 text-cyan-100 text-[11px] rounded animate-pulse">
+            🔊 Enable Audio
+          </button>
+        ) : audioReady ? (
+          <div className="flex items-center gap-1.5">
+            <button onClick={toggleMute}
+              className="text-[13px] w-5 text-center text-gray-300 hover:text-white">
+              {muted ? '🔇' : volume > 0.5 ? '🔊' : volume > 0 ? '🔉' : '🔈'}
+            </button>
+            <input type="range" min="0" max="1" step="0.01" value={volume}
+              onChange={e => setVolume(parseFloat(e.target.value))}
+              className="w-16 md:w-20 h-1 accent-cyan-400 cursor-pointer" />
+          </div>
+        ) : null}
+
+        {/* VU Meters - hidden on small screens */}
+        <div className="hidden md:flex flex-1 min-w-[140px] max-w-[300px] flex-col gap-0.5 mx-1">
           <div className="flex items-center gap-1">
             <span className="text-yellow-400 text-[8px] w-5 text-right">L</span>
             <div className="flex-1 h-[5px] bg-[#111] rounded-sm overflow-hidden flex">
@@ -312,33 +325,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Skip */}
-        <button onClick={() => { initAudio(); skipMut.mutate(); }} disabled={!isPlaying}
-          className="px-2 py-0.5 bg-[#2a2a5e] hover:bg-[#3a3a7e] text-yellow-300 text-[11px] rounded disabled:opacity-30">
-          SKIP ⏭
-        </button>
-
-        {/* Audio controls */}
-        {!audioReady && isPlaying ? (
-          <button onClick={() => initAudio()}
-            className="px-2 py-0.5 bg-cyan-800 hover:bg-cyan-700 text-cyan-100 text-[11px] rounded animate-pulse">
-            🔊 Enable Audio
-          </button>
-        ) : audioReady ? (
-          <div className="flex items-center gap-1.5">
-            <button onClick={toggleMute}
-              className="text-[13px] w-5 text-center text-gray-300 hover:text-white">
-              {muted ? '🔇' : volume > 0.5 ? '🔊' : volume > 0 ? '🔉' : '🔈'}
-            </button>
-            <input type="range" min="0" max="1" step="0.01" value={volume}
-              onChange={e => setVolume(parseFloat(e.target.value))}
-              className="w-20 h-1 accent-cyan-400 cursor-pointer" />
-          </div>
-        ) : null}
-
         {/* Clock */}
         <div className="flex items-baseline gap-1 ml-auto">
-          <span className="text-red-400 text-xl font-bold tabular-nums leading-none">{fmtClock(clock)}</span>
+          <span className="text-red-400 text-lg md:text-xl font-bold tabular-nums leading-none">{fmtClock(clock)}</span>
         </div>
       </div>
 
@@ -377,14 +366,8 @@ export default function Dashboard() {
           <div className="bg-[#16163e] px-2 py-0.5 text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-2 shrink-0 border-b border-[#2a2a5e]">
             <span className="font-bold text-gray-300">Queue</span>
             <span>({queueEntries.length}){queueDuration > 0 ? ` — ${fmtHMS(queueDuration)}` : ''}</span>
-            <span className="w-6"></span>
-            <span className="w-[50px]">Len</span>
-            <span className="flex-1">Title</span>
-            <span className="w-[60px]">Type</span>
-            <span className="w-[60px]">Cat</span>
-            <span className="w-[60px]">Actions</span>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto overflow-x-auto">
             {queueEntries.length === 0 ? (
               <div className="text-center text-gray-600 py-6 text-[12px]">
                 Queue empty — add assets from the library below, or press START
@@ -394,25 +377,25 @@ export default function Dashboard() {
                 const a = entry.asset;
                 const isCur = entry.status === 'playing';
                 return (
-                  <div key={entry.id} className={`flex items-center px-2 py-[2px] border-b border-[#12122e]
+                  <div key={entry.id} className={`flex items-center px-2 py-[2px] border-b border-[#12122e] min-w-[500px]
                     ${isCur ? 'bg-[#0000aa] text-yellow-300' : 'text-cyan-200 hover:bg-[#14143a]'}`}>
-                    <span className="w-6 text-[11px]">{isCur ? '▶' : entry.position}</span>
-                    <span className="w-[50px] tabular-nums text-[11px]">{fmtDur(a?.duration)}</span>
-                    <span className="flex-1 truncate text-[12px]">
+                    <span className="w-6 text-[11px] shrink-0">{isCur ? '▶' : entry.position}</span>
+                    <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
+                    <span className="flex-1 truncate text-[12px] min-w-0">
                       {a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
                     </span>
-                    <span className={`w-[60px] text-[10px] ${TYPE_COLORS[a?.asset_type] ?? 'text-gray-500'}`}>
+                    <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[a?.asset_type] ?? 'text-gray-500'}`}>
                       {a?.asset_type ?? ''}
                     </span>
-                    <span className={`w-[60px] text-[10px] ${CAT_COLORS[a?.category] ?? 'text-gray-600'}`}>
+                    <span className={`w-[50px] text-[10px] shrink-0 ${CAT_COLORS[a?.category] ?? 'text-gray-600'}`}>
                       {a?.category ?? ''}
                     </span>
-                    <span className="w-[60px] flex gap-1 text-[10px]">
+                    <span className="w-[60px] flex gap-1 text-[10px] shrink-0">
                       {!isCur && (
                         <>
-                          <button onClick={() => moveUpMut.mutate(entry.id)} className="text-gray-400 hover:text-white" title="Move up">▲</button>
-                          <button onClick={() => moveDownMut.mutate(entry.id)} className="text-gray-400 hover:text-white" title="Move down">▼</button>
-                          <button onClick={() => removeMut.mutate(entry.id)} className="text-red-400 hover:text-red-300" title="Remove">✕</button>
+                          <button onClick={() => moveUpMut.mutate(entry.id)} className="text-gray-400 hover:text-white p-1" title="Move up">▲</button>
+                          <button onClick={() => moveDownMut.mutate(entry.id)} className="text-gray-400 hover:text-white p-1" title="Move down">▼</button>
+                          <button onClick={() => removeMut.mutate(entry.id)} className="text-red-400 hover:text-red-300 p-1" title="Remove">✕</button>
                         </>
                       )}
                     </span>
@@ -431,33 +414,33 @@ export default function Dashboard() {
             <div className="w-10 h-[2px] rounded bg-gray-600 group-hover:bg-cyan-400" />
           </div>
           {/* Tab bar */}
-          <div className="bg-[#12123a] flex items-center gap-0 border-b border-[#2a2a5e] shrink-0">
+          <div className="bg-[#12123a] flex items-center gap-0 border-b border-[#2a2a5e] shrink-0 overflow-x-auto">
             {(['library', 'cart', 'log'] as BottomTab[]).map(t => (
               <button key={t} onClick={() => setBottomTab(t)}
-                className={`px-4 py-1 text-[11px] border-b-2 transition-colors uppercase tracking-wider ${
+                className={`px-3 md:px-4 py-1 text-[11px] border-b-2 transition-colors uppercase tracking-wider whitespace-nowrap ${
                   bottomTab === t
                     ? 'border-cyan-400 text-cyan-300 bg-[#1a1a4e]'
                     : 'border-transparent text-gray-500 hover:text-gray-300'
                 }`}>
-                {t === 'library' ? 'Library' : t === 'cart' ? 'Cart Machine' : 'Play Log'}
+                {t === 'library' ? 'Library' : t === 'cart' ? 'Cart' : 'Log'}
               </button>
             ))}
             {/* Type filter tabs (only for library) */}
             {bottomTab === 'library' && (
               <>
-                <span className="text-gray-600 mx-2">|</span>
+                <span className="text-gray-600 mx-1 md:mx-2">|</span>
                 {ASSET_TYPES.map(t => (
                   <button key={t} onClick={() => setActiveTab(t)}
-                    className={`px-2 py-1 text-[10px] transition-colors ${
+                    className={`px-1.5 md:px-2 py-1 text-[10px] transition-colors whitespace-nowrap ${
                       activeTab === t ? 'text-cyan-300' : 'text-gray-600 hover:text-gray-400'
                     }`}>
                     {TYPE_LABELS[t]}({typeCounts[t] ?? 0})
                   </button>
                 ))}
-                <div className="ml-auto mr-2">
+                <div className="ml-auto mr-2 shrink-0">
                   <input type="text" placeholder="Search..." value={librarySearch}
                     onChange={(e) => setLibrarySearch(e.target.value)}
-                    className="bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 text-[10px] px-2 py-0.5 rounded-sm w-36 placeholder-gray-600 focus:outline-none focus:border-cyan-700" />
+                    className="bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 text-[10px] px-2 py-0.5 rounded-sm w-24 md:w-36 placeholder-gray-600 focus:outline-none focus:border-cyan-700" />
                 </div>
               </>
             )}
@@ -465,30 +448,28 @@ export default function Dashboard() {
 
           {/* Library panel */}
           {bottomTab === 'library' && (
-            <>
-              <div className="bg-[#16163e] flex text-[10px] text-gray-500 uppercase border-b border-[#2a2a5e] px-2 py-0.5 shrink-0">
-                <span className="w-[50px]">Len</span>
-                <span className="w-[140px]">Artist</span>
-                <span className="flex-1">Title</span>
-                <span className="w-[60px]">Type</span>
-                <span className="w-[60px]">Cat</span>
-                <span className="w-[55px]">Last</span>
-                <span className="w-[70px]">Actions</span>
-              </div>
-              <div className="flex-1 overflow-y-auto bg-[#0a0a28]">
+            <div className="flex-1 overflow-y-auto overflow-x-auto bg-[#0a0a28]">
+              <div className="min-w-[550px]">
+                <div className="bg-[#16163e] flex text-[10px] text-gray-500 uppercase border-b border-[#2a2a5e] px-2 py-0.5 sticky top-0">
+                  <span className="w-[50px] shrink-0">Len</span>
+                  <span className="w-[120px] shrink-0">Artist</span>
+                  <span className="flex-1">Title</span>
+                  <span className="w-[50px] shrink-0">Type</span>
+                  <span className="w-[50px] shrink-0">Cat</span>
+                  <span className="w-[70px] shrink-0">Actions</span>
+                </div>
                 {filteredAssets.map(asset => (
                   <div key={asset.id} className="flex items-center px-2 py-[2px] border-b border-[#12122e] text-gray-300 hover:bg-[#14143a] hover:text-white group">
-                    <span className="w-[50px] tabular-nums text-[11px]">{fmtDur(asset.duration)}</span>
-                    <span className="w-[140px] truncate text-[11px] font-bold">{asset.artist ?? '—'}</span>
-                    <span className="flex-1 truncate text-[11px]">{asset.title}</span>
-                    <span className={`w-[60px] text-[10px] ${TYPE_COLORS[asset.asset_type] ?? 'text-gray-500'}`}>{asset.asset_type}</span>
-                    <span className={`w-[60px] text-[10px] ${CAT_COLORS[asset.category ?? ''] ?? 'text-gray-600'}`}>{asset.category ?? ''}</span>
-                    <span className="w-[55px] text-[10px] text-gray-500">{fmtRelative(lastPlayed[asset.id])}</span>
-                    <span className="w-[70px] flex gap-2 opacity-0 group-hover:opacity-100">
+                    <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(asset.duration)}</span>
+                    <span className="w-[120px] truncate text-[11px] font-bold shrink-0">{asset.artist ?? '—'}</span>
+                    <span className="flex-1 truncate text-[11px] min-w-0">{asset.title}</span>
+                    <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[asset.asset_type] ?? 'text-gray-500'}`}>{asset.asset_type}</span>
+                    <span className={`w-[50px] text-[10px] shrink-0 ${CAT_COLORS[asset.category ?? ''] ?? 'text-gray-600'}`}>{asset.category ?? ''}</span>
+                    <span className="w-[70px] flex gap-2 shrink-0 md:opacity-0 md:group-hover:opacity-100">
                       <button onClick={() => stationId && addQueueMut.mutate(asset.id)}
-                        className="text-green-400 hover:text-green-300 text-[10px]" title="Add to queue">+Q</button>
+                        className="text-green-400 hover:text-green-300 text-[10px] p-1" title="Add to queue">+Q</button>
                       <button onClick={() => stationId && playNextMut.mutate(asset.id)}
-                        className="text-yellow-400 hover:text-yellow-300 text-[10px]" title="Play next">Next</button>
+                        className="text-yellow-400 hover:text-yellow-300 text-[10px] p-1" title="Play next">Next</button>
                     </span>
                   </div>
                 ))}
@@ -496,13 +477,13 @@ export default function Dashboard() {
                   <div className="text-center text-gray-600 py-4 text-[11px]">No assets found.</div>
                 )}
               </div>
-            </>
+            </div>
           )}
 
           {/* Cart Machine */}
           {bottomTab === 'cart' && (
             <div className="flex-1 overflow-y-auto bg-[#0a0a28] p-2">
-              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-1.5">
                 {/* Preview Weather card */}
                 <button
                   onClick={handlePreviewWeather}
@@ -541,33 +522,33 @@ export default function Dashboard() {
 
           {/* Play Log */}
           {bottomTab === 'log' && (
-            <>
-              <div className="bg-[#16163e] flex text-[10px] text-gray-500 uppercase border-b border-[#2a2a5e] px-2 py-0.5 shrink-0">
-                <span className="w-[70px]">Time</span>
-                <span className="w-[60px]">Type</span>
-                <span className="flex-1">Title</span>
-                <span className="w-[100px]">Artist</span>
-                <span className="w-[60px]">Source</span>
-              </div>
-              <div className="flex-1 overflow-y-auto bg-[#0a0a28]">
+            <div className="flex-1 overflow-y-auto overflow-x-auto bg-[#0a0a28]">
+              <div className="min-w-[450px]">
+                <div className="bg-[#16163e] flex text-[10px] text-gray-500 uppercase border-b border-[#2a2a5e] px-2 py-0.5 sticky top-0">
+                  <span className="w-[60px] shrink-0">Time</span>
+                  <span className="w-[50px] shrink-0">Type</span>
+                  <span className="flex-1">Title</span>
+                  <span className="w-[80px] shrink-0">Artist</span>
+                  <span className="w-[50px] shrink-0">Source</span>
+                </div>
                 {playLog.map((log: any) => (
                   <div key={log.id} className="flex items-center px-2 py-[2px] border-b border-[#12122e] text-gray-400">
-                    <span className="w-[70px] tabular-nums text-[11px]">
+                    <span className="w-[60px] tabular-nums text-[11px] shrink-0">
                       {new Date(log.start_utc).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
                     </span>
-                    <span className={`w-[60px] text-[10px] ${TYPE_COLORS[log.asset_type] ?? 'text-gray-500'}`}>
+                    <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[log.asset_type] ?? 'text-gray-500'}`}>
                       {log.asset_type ?? ''}
                     </span>
-                    <span className="flex-1 truncate text-[11px] text-gray-300">{log.title ?? 'Unknown'}</span>
-                    <span className="w-[100px] truncate text-[11px]">{log.artist ?? '—'}</span>
-                    <span className="w-[60px] text-[10px]">{log.source}</span>
+                    <span className="flex-1 truncate text-[11px] text-gray-300 min-w-0">{log.title ?? 'Unknown'}</span>
+                    <span className="w-[80px] truncate text-[11px] shrink-0">{log.artist ?? '—'}</span>
+                    <span className="w-[50px] text-[10px] shrink-0">{log.source}</span>
                   </div>
                 ))}
                 {playLog.length === 0 && (
                   <div className="text-center text-gray-600 py-6 text-[11px]">No play history yet. Start playback to begin logging.</div>
                 )}
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>

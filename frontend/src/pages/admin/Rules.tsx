@@ -188,7 +188,7 @@ export default function Rules() {
       {isLoading ? (
         <div className="text-gray-500 text-center py-8">Loading rules...</div>
       ) : (
-        <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-hidden mb-4">
+        <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-x-auto mb-4">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">
