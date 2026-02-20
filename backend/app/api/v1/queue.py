@@ -282,16 +282,16 @@ async def get_queue(
     _user: User = Depends(get_current_user),
 ):
     # Pure read-only — advancement is handled by the background scheduler.
-    # Single query: fetch playing + pending entries with limit
-    from sqlalchemy.orm import selectinload
+    # Single JOIN query: QueueEntry + Asset in one DB roundtrip
+    from sqlalchemy.orm import joinedload
     result = await db.execute(
         select(QueueEntry)
-        .options(selectinload(QueueEntry.asset))
+        .options(joinedload(QueueEntry.asset))
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
         .order_by(QueueEntry.position)
         .limit(limit)
     )
-    entries = result.scalars().all()
+    entries = result.unique().scalars().all()
 
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
