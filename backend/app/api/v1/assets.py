@@ -247,6 +247,31 @@ async def get_audio_url(
     return {"url": f"/api/v1/assets/{asset_id}/download"}
 
 
+@router.patch("/{asset_id}/request-settings")
+async def update_request_settings(
+    asset_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Update auto_approve_requests and max_requests_per_day in metadata_extra."""
+    asset = await get_asset(db, asset_id)
+    extra = dict(asset.metadata_extra or {})
+
+    if "auto_approve_requests" in body:
+        extra["auto_approve_requests"] = bool(body["auto_approve_requests"])
+    if "max_requests_per_day" in body:
+        extra["max_requests_per_day"] = int(body["max_requests_per_day"])
+
+    asset.metadata_extra = extra
+    await db.flush()
+    await db.refresh(asset)
+    return {
+        "id": str(asset.id),
+        "auto_approve_requests": extra.get("auto_approve_requests", False),
+        "max_requests_per_day": extra.get("max_requests_per_day", 3),
+    }
+
 
 @router.get("/{asset_id}", response_model=AssetResponse)
 async def get_one(

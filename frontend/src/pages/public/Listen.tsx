@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { getStation } from '../../api/stations';
 import apiClient from '../../api/client';
-import { submitSongRequest } from '../../api/songRequests';
+import { submitSongRequest, SongRequestSubmitResponse } from '../../api/songRequests';
 
 interface LiveAudioData {
   playing: boolean;
@@ -54,7 +54,7 @@ export default function Listen() {
   const [reqArtist, setReqArtist] = useState('');
   const [reqMessage, setReqMessage] = useState('');
   const [reqSubmitting, setReqSubmitting] = useState(false);
-  const [reqSuccess, setReqSuccess] = useState(false);
+  const [reqResult, setReqResult] = useState<SongRequestSubmitResponse | null>(null);
   const [reqError, setReqError] = useState('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentAssetRef = useRef<string | null>(null);
@@ -304,7 +304,7 @@ export default function Listen() {
         {/* Song Request Section */}
         <div className="border-t mt-6 pt-6">
           <button
-            onClick={() => { setRequestOpen(!requestOpen); setReqSuccess(false); setReqError(''); }}
+            onClick={() => { setRequestOpen(!requestOpen); setReqResult(null); setReqError(''); }}
             className="flex items-center gap-2 text-brand-600 hover:text-brand-700 font-medium transition"
           >
             <svg className={`w-4 h-4 transition-transform ${requestOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -315,9 +315,25 @@ export default function Listen() {
 
           {requestOpen && (
             <div className="mt-4 space-y-3">
-              {reqSuccess && (
+              {reqResult && (
                 <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
-                  Your song request has been submitted! The station manager will review it.
+                  {reqResult.auto_approved ? (
+                    <>
+                      Your song has been added to the queue! Playing: <strong>{reqResult.matched_asset_title}</strong>
+                      {reqResult.matched_asset_artist && <> by {reqResult.matched_asset_artist}</>}.
+                      {reqResult.songs_ahead != null && reqResult.estimated_wait_minutes != null && (
+                        <> Will play in ~{reqResult.songs_ahead} song{reqResult.songs_ahead !== 1 ? 's' : ''} (~{reqResult.estimated_wait_minutes} min).</>
+                      )}
+                    </>
+                  ) : reqResult.matched_asset_title ? (
+                    <>
+                      We found: <strong>{reqResult.matched_asset_title}</strong>
+                      {reqResult.matched_asset_artist && <> by {reqResult.matched_asset_artist}</>}.
+                      The station manager will review it shortly.
+                    </>
+                  ) : (
+                    <>Your request has been submitted for review.</>
+                  )}
                 </div>
               )}
               {reqError && (
@@ -375,14 +391,14 @@ export default function Listen() {
                   setReqSubmitting(true);
                   setReqError('');
                   try {
-                    await submitSongRequest({
+                    const result = await submitSongRequest({
                       station_id: stationId!,
                       requester_name: reqName.trim(),
                       song_title: reqSong.trim(),
                       song_artist: reqArtist.trim() || undefined,
                       requester_message: reqMessage.trim() || undefined,
                     });
-                    setReqSuccess(true);
+                    setReqResult(result);
                     setReqName('');
                     setReqSong('');
                     setReqArtist('');

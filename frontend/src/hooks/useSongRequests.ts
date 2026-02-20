@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getSongRequests, submitSongRequest, updateSongRequest, deleteSongRequest, getSongRequestCount } from '../api/songRequests';
+import { getSongRequests, submitSongRequest, updateSongRequest, deleteSongRequest, getSongRequestCount, getTopRequested } from '../api/songRequests';
 
 export function useSongRequests(params?: { station_id?: string; status?: string }) {
   return useQuery({
@@ -47,5 +47,13 @@ export function useDeleteSongRequest() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['song-requests'] });
     },
+  });
+}
+
+export function useTopRequested(params?: { station_id?: string; limit?: number }) {
+  return useQuery({
+    queryKey: ['song-requests-top', params],
+    queryFn: () => getTopRequested(params),
+    refetchInterval: 60000,
   });
 }

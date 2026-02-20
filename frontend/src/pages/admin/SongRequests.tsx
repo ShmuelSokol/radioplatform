@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSongRequests, useUpdateSongRequest, useDeleteSongRequest } from '../../hooks/useSongRequests';
+import { useSongRequests, useUpdateSongRequest, useDeleteSongRequest, useTopRequested } from '../../hooks/useSongRequests';
 import Spinner from '../../components/Spinner';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -22,6 +22,7 @@ const TABS = [
   { key: '', label: 'All' },
   { key: 'pending', label: 'Pending' },
   { key: 'approved', label: 'Approved' },
+  { key: 'queued', label: 'Queued' },
   { key: 'rejected', label: 'Rejected' },
 ];
 
@@ -36,17 +37,24 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
+function isAutoApproved(req: { status: string; reviewed_by: string | null }): boolean {
+  return (req.status === 'queued' || req.status === 'approved') && req.reviewed_by === null;
+}
+
 export default function SongRequests() {
   const [statusFilter, setStatusFilter] = useState('');
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
 
   const { data, isLoading } = useSongRequests({
     status: statusFilter || undefined,
   });
   const updateMut = useUpdateSongRequest();
   const deleteMut = useDeleteSongRequest();
+  const { data: topData, isLoading: topLoading } = useTopRequested();
 
   const requests = data?.requests ?? [];
   const total = data?.total ?? 0;
+  const topRequested = topData?.top_requested ?? [];
 
   const handleApprove = (id: string) => {
     updateMut.mutate({ id, data: { status: 'approved' } });
@@ -73,6 +81,47 @@ export default function SongRequests() {
             </span>
           )}
         </h1>
+      </div>
+
+      {/* Most Requested Analytics Panel */}
+      <div className="mb-4">
+        <button
+          onClick={() => setAnalyticsOpen(!analyticsOpen)}
+          className="flex items-center gap-2 text-sm text-cyan-400 hover:text-cyan-300 transition"
+        >
+          <svg className={`w-3 h-3 transition-transform ${analyticsOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          Most Requested Songs
+        </button>
+        {analyticsOpen && (
+          <div className="mt-2 bg-[#0a0a28] border border-[#2a2a5e] rounded p-3">
+            {topLoading ? (
+              <div className="text-gray-500 text-center py-3 flex items-center justify-center gap-2">
+                <Spinner /> Loading...
+              </div>
+            ) : topRequested.length === 0 ? (
+              <p className="text-gray-500 text-center py-2">No matched requests yet</p>
+            ) : (
+              <div className="space-y-1">
+                {topRequested.map((item, i) => (
+                  <div key={item.asset_id} className="flex items-center gap-3 py-1 border-b border-[#1a1a3e] last:border-0">
+                    <span className="text-gray-500 w-5 text-right text-[11px]">#{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-white font-medium truncate">{item.library_title || item.requested_title}</span>
+                      {(item.library_artist || item.requested_artist) && (
+                        <span className="text-gray-400 ml-2">{item.library_artist || item.requested_artist}</span>
+                      )}
+                    </div>
+                    <span className="px-2 py-0.5 bg-cyan-900 text-cyan-200 text-[11px] rounded-full font-bold">
+                      {item.request_count} req{item.request_count !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Tab filters */}
@@ -115,6 +164,7 @@ export default function SongRequests() {
                   <th className="text-left px-3 py-2">Requester</th>
                   <th className="text-left px-3 py-2">Song</th>
                   <th className="text-left px-3 py-2">Artist</th>
+                  <th className="text-left px-3 py-2">Matched Asset</th>
                   <th className="text-left px-3 py-2 hidden lg:table-cell">Message</th>
                   <th className="text-left px-3 py-2">Status</th>
                   <th className="text-left px-3 py-2">Time</th>
@@ -130,12 +180,25 @@ export default function SongRequests() {
                     <td className="px-3 py-1.5 text-cyan-300 max-w-[140px] truncate">{req.requester_name}</td>
                     <td className="px-3 py-1.5 text-white max-w-[200px] truncate font-medium">{req.song_title}</td>
                     <td className="px-3 py-1.5 text-gray-400 max-w-[140px] truncate">{req.song_artist || '--'}</td>
+                    <td className="px-3 py-1.5 max-w-[180px] truncate">
+                      {req.matched_asset_title ? (
+                        <span className="text-green-400 text-[11px]">
+                          {req.matched_asset_title}
+                          {req.matched_asset_artist && <span className="text-gray-500"> - {req.matched_asset_artist}</span>}
+                        </span>
+                      ) : (
+                        <span className="text-gray-600 text-[11px]">--</span>
+                      )}
+                    </td>
                     <td className="px-3 py-1.5 text-gray-500 text-[11px] max-w-[200px] truncate hidden lg:table-cell">
                       {req.requester_message || '--'}
                     </td>
                     <td className="px-3 py-1.5">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_COLORS[req.status] ?? 'bg-gray-800 text-gray-400'}`}>
                         {req.status.toUpperCase()}
+                        {isAutoApproved(req) && (
+                          <span className="ml-1 opacity-70">AUTO</span>
+                        )}
                       </span>
                     </td>
                     <td className="px-3 py-1.5 text-gray-500 text-[11px] whitespace-nowrap">{timeAgo(req.created_at)}</td>
@@ -187,9 +250,16 @@ export default function SongRequests() {
                     {req.song_artist && (
                       <p className="text-gray-400 text-[11px] ml-4">{req.song_artist}</p>
                     )}
+                    {req.matched_asset_title && (
+                      <p className="text-green-400 text-[11px] ml-4 mt-0.5">
+                        Matched: {req.matched_asset_title}
+                        {req.matched_asset_artist && ` - ${req.matched_asset_artist}`}
+                      </p>
+                    )}
                   </div>
                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0 ml-2 ${STATUS_COLORS[req.status] ?? 'bg-gray-800 text-gray-400'}`}>
                     {req.status.toUpperCase()}
+                    {isAutoApproved(req) && <span className="ml-1 opacity-70">AUTO</span>}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
