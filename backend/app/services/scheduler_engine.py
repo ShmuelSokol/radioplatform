@@ -84,6 +84,8 @@ class SchedulerEngine:
 
         for station in stations:
             try:
+                # Run queue-based playback advancement
+                await self._advance_queue(db, station.id)
                 await self._check_station(db, station)
                 # Also check per-channel playback
                 ch_stmt = select(ChannelStream).where(
@@ -329,6 +331,14 @@ class SchedulerEngine:
             station.id, block.name,
         )
         return None
+
+    async def _advance_queue(self, db: AsyncSession, station_id):
+        """Advance queue-based playback: check if current track ended and move to next."""
+        try:
+            from app.api.v1.queue import _check_advance
+            await _check_advance(db, station_id)
+        except Exception as e:
+            logger.error("Queue advance failed for station %s: %s", station_id, e, exc_info=True)
 
     async def _check_station(self, db: AsyncSession, station: Station):
         """Check a single station and advance playback if needed."""

@@ -281,41 +281,20 @@ async def get_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    # Throttle _check_advance to avoid heavy DB work on every poll
-    station_key = str(station_id)
-    now_ts = time.monotonic()
-    now_playing_entry = None
-    if (now_ts - _last_advance.get(station_key, 0)) >= ADVANCE_THROTTLE:
-        try:
-            now_playing_entry = await _check_advance(db, station_id)
-            _last_advance[station_key] = now_ts
-        except Exception as exc:
-            logger.error("_check_advance failed: %s", exc, exc_info=True)
-    else:
-        # Lightweight: just fetch current playing entry
-        result = await db.execute(
-            select(QueueEntry)
-            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
-            .order_by(QueueEntry.started_at.desc().nullslast())
-            .limit(1)
-        )
-        now_playing_entry = result.scalar_one_or_none()
-
-    # Get total count (lightweight)
-    count_result = await db.execute(
-        select(func.count(QueueEntry.id))
-        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
-    )
-    total_count = count_result.scalar() or 0
-
-    # Fetch limited entries
+    # Pure read-only — advancement is handled by the background scheduler.
+    # Single query: fetch playing + pending entries with limit
+    from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(QueueEntry)
+        .options(selectinload(QueueEntry.asset))
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
         .order_by(QueueEntry.position)
         .limit(limit)
     )
     entries = result.scalars().all()
+
+    # Find now-playing from the fetched entries (no extra query)
+    now_playing_entry = next((e for e in entries if e.status == "playing"), None)
 
     # Calculate elapsed/remaining for now playing
     np_data = None
@@ -360,7 +339,7 @@ async def get_queue(
 
     return {
         "entries": entries_data,
-        "total": total_count,
+        "total": len(entries_data),
         "now_playing": np_data,
         "queue_duration_seconds": round(queue_duration, 1),
     }
