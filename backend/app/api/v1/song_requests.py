@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -26,11 +26,16 @@ from app.services.song_request_service import (
     get_queue_position_info,
 )
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+
 router = APIRouter(prefix="/song-requests", tags=["song-requests"])
 
 
 @router.post("", response_model=SongRequestSubmitResponse, status_code=201)
-async def submit_request(body: SongRequestCreate, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSession = Depends(get_db)):
     """Public: submit a song request with fuzzy matching and auto-approval."""
     req = SongRequest(
         station_id=body.station_id,

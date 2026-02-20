@@ -30,6 +30,7 @@ from app.models.listener_session import ListenerSession
 from app.models.crm_member import CrmMember
 from app.models.song_rating import SongRating
 from app.models.raffle import Raffle, RaffleEntry
+from app.models.audit_log import AuditLog
 
 __all__ = [
     "User", "UserRole",
@@ -64,4 +65,5 @@ __all__ = [
     "CrmMember",
     "SongRating",
     "Raffle", "RaffleEntry",
+    "AuditLog",
 ]

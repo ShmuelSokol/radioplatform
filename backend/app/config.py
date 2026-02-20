@@ -150,6 +150,13 @@ class Settings(BaseSettings):
     def anthropic_enabled(self) -> bool:
         return bool(self.ANTHROPIC_API_KEY)
 
+    # Sentry (optional — set DSN to enable error tracking)
+    SENTRY_DSN: str = ""
+
+    @property
+    def sentry_enabled(self) -> bool:
+        return bool(self.SENTRY_DSN)
+
     # Twilio (optional — for SMS/WhatsApp alert notifications)
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""

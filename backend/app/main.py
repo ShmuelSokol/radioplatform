@@ -9,6 +9,21 @@ from app.core.middleware import setup_middleware
 
 logger = logging.getLogger(__name__)
 
+# Initialize Sentry error tracking (if DSN configured)
+if settings.sentry_enabled:
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            traces_sample_rate=0.1,
+            profiles_sample_rate=0.1,
+            environment=settings.APP_ENV,
+            send_default_pii=False,
+        )
+        logger.info("Sentry error tracking initialized")
+    except Exception as e:
+        logger.warning("Sentry init failed: %s", e)
+
 _tables_created = False
 
 
@@ -139,6 +154,24 @@ async def _add_missing_columns(engine):
         # User activity tracking
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_action VARCHAR(255)",
+        # Audit log table
+        """CREATE TABLE IF NOT EXISTS audit_logs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            user_email VARCHAR(255),
+            action VARCHAR(50) NOT NULL,
+            resource_type VARCHAR(100) NOT NULL,
+            resource_id VARCHAR(100),
+            detail TEXT,
+            changes JSONB,
+            ip_address VARCHAR(50),
+            request_id VARCHAR(50),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_audit_logs_user ON audit_logs (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_audit_logs_resource ON audit_logs (resource_type, resource_id)",
         # CRM indexes
         "CREATE INDEX IF NOT EXISTS ix_song_ratings_member ON song_ratings (member_id)",
         "CREATE INDEX IF NOT EXISTS ix_song_ratings_asset ON song_ratings (asset_id)",

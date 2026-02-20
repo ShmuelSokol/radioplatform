@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,6 +58,7 @@ async def list_users(
 @router.post("", response_model=UserOut, status_code=201)
 async def create_user(
     body: UserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
@@ -80,6 +81,13 @@ async def create_user(
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    from app.services.audit_service import log_action
+    await log_action(
+        db, user_id=_admin.id, user_email=_admin.email, action="create",
+        resource_type="user", resource_id=str(user.id),
+        detail=f"Created user '{user.email}' with role '{role.value}'",
+        request_id=getattr(request.state, "request_id", None),
+    )
     return user
 
 
@@ -126,6 +134,7 @@ async def update_user(
 @router.delete("/{user_id}", status_code=204)
 async def delete_user(
     user_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -136,8 +145,53 @@ async def delete_user(
     user = result.scalar_one_or_none()
     if not user:
         raise NotFoundError("User not found")
+    from app.services.audit_service import log_action
+    await log_action(
+        db, user_id=admin.id, user_email=admin.email, action="delete",
+        resource_type="user", resource_id=str(user_id),
+        detail=f"Deleted user '{user.email}'",
+        request_id=getattr(request.state, "request_id", None),
+    )
     await db.delete(user)
     await db.commit()
+
+
+@router.get("/audit-log")
+async def list_audit_logs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    resource_type: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Admin: view persistent audit log of all write actions."""
+    from app.models.audit_log import AuditLog
+    query = select(AuditLog).order_by(AuditLog.created_at.desc())
+    if resource_type:
+        query = query.where(AuditLog.resource_type == resource_type)
+    count_q = select(func.count()).select_from(AuditLog)
+    if resource_type:
+        count_q = count_q.where(AuditLog.resource_type == resource_type)
+    total = (await db.execute(count_q)).scalar() or 0
+    result = await db.execute(query.offset(skip).limit(limit))
+    logs = result.scalars().all()
+    return {
+        "total": total,
+        "logs": [
+            {
+                "id": str(l.id),
+                "user_email": l.user_email,
+                "action": l.action,
+                "resource_type": l.resource_type,
+                "resource_id": l.resource_id,
+                "detail": l.detail,
+                "changes": l.changes,
+                "request_id": l.request_id,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in logs
+        ],
+    }
 
 
 @router.get("/me/preferences", response_model=UserPreferenceResponse)
