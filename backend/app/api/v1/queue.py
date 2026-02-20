@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.core.dependencies import get_current_user, require_manager
+from app.core.dependencies import get_current_user, require_dj_or_manager, require_manager
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset
@@ -438,7 +438,7 @@ async def add_to_queue(
     station_id: uuid.UUID,
     body: QueueAdd,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     result = await db.execute(
         select(func.max(QueueEntry.position))
@@ -460,7 +460,7 @@ async def bulk_add_to_queue(
     station_id: uuid.UUID,
     body: QueueBulkAdd,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     result = await db.execute(
         select(func.max(QueueEntry.position))
@@ -485,7 +485,7 @@ async def play_next(
     station_id: uuid.UUID,
     body: QueueAdd,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     await db.execute(
         update(QueueEntry)
@@ -512,7 +512,7 @@ async def play_next(
 async def skip_current(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     result = await db.execute(
         select(QueueEntry)
@@ -558,7 +558,7 @@ async def move_up(
     station_id: uuid.UUID,
     body: QueueReorder,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """Move a queue entry up (lower position number)."""
     result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
@@ -588,7 +588,7 @@ async def move_down(
     station_id: uuid.UUID,
     body: QueueReorder,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """Move a queue entry down (higher position number)."""
     result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
@@ -617,7 +617,7 @@ async def reorder_queue(
     station_id: uuid.UUID,
     body: QueueReorder,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
     entry = result.scalar_one_or_none()
@@ -739,7 +739,7 @@ async def reorder_dnd(
     station_id: uuid.UUID,
     body: QueueDndReorder,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """Drag-and-drop reorder: move entry to new position with rule validation."""
     result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
@@ -794,7 +794,7 @@ async def remove_from_queue(
     station_id: uuid.UUID,
     entry_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     result = await db.execute(select(QueueEntry).where(QueueEntry.id == entry_id))
     entry = result.scalar_one_or_none()
@@ -809,7 +809,7 @@ async def remove_from_queue(
 async def start_playback(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     result = await db.execute(
         select(QueueEntry)

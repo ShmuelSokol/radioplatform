@@ -14,7 +14,7 @@ export interface SocialLinks {
 export interface User {
   id: string;
   email: string;
-  role: 'admin' | 'manager' | 'viewer' | 'sponsor';
+  role: 'admin' | 'manager' | 'dj' | 'viewer' | 'sponsor';
   is_active: boolean;
   display_name: string | null;
   phone_number: string | null;

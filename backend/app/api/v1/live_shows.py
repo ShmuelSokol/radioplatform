@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_admin, require_manager
+from app.core.dependencies import get_db, require_admin, require_dj_or_manager, require_manager
 from app.core.exceptions import NotFoundError, ConflictError, BadRequestError
 from app.models.live_show import LiveShow, LiveShowStatus
 from app.models.call_in_request import CallInRequest, CallStatus
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/live-shows", tags=["live-shows"])
 async def create_show(
     body: LiveShowCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager),
+    user: User = Depends(require_dj_or_manager),
 ):
     """Create a new live show."""
     show = await live_show_service.create_show(db, body, host_user_id=user.id)
@@ -52,7 +52,7 @@ async def list_shows(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """List live shows with optional filters."""
     shows, total = await live_show_service.list_shows(
@@ -65,7 +65,7 @@ async def list_shows(
 async def get_show(
     show_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """Get a live show by ID."""
     show = await live_show_service.get_show(db, show_id)
@@ -79,7 +79,7 @@ async def update_show(
     show_id: uuid.UUID,
     body: LiveShowUpdate,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """Update a live show."""
     show = await live_show_service.update_show(db, show_id, body)
@@ -106,7 +106,7 @@ async def delete_show(
 async def start_show(
     show_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager),
+    user: User = Depends(require_dj_or_manager),
 ):
     """Start a live show (go live)."""
     show = await live_show_service.start_show(db, show_id, host_user_id=user.id)
@@ -127,7 +127,7 @@ async def start_show(
 async def end_show(
     show_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """End a live show."""
     show = await live_show_service.end_show(db, show_id)
@@ -148,7 +148,7 @@ async def end_show(
 async def time_remaining(
     show_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """Get seconds until hard stop."""
     show = await live_show_service.get_show(db, show_id)
@@ -164,7 +164,7 @@ async def time_remaining(
 async def list_calls(
     show_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """List all callers for a show."""
     calls = await live_show_service.get_show_calls(db, show_id)
@@ -176,7 +176,7 @@ async def approve_call(
     show_id: uuid.UUID,
     call_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager),
+    user: User = Depends(require_dj_or_manager),
 ):
     """Approve a caller."""
     call = await live_show_service.approve_call(db, call_id, screened_by=user.id)
@@ -199,7 +199,7 @@ async def reject_call(
     show_id: uuid.UUID,
     call_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager),
+    user: User = Depends(require_dj_or_manager),
 ):
     """Reject a caller."""
     call = await live_show_service.reject_call(db, call_id, screened_by=user.id)
@@ -222,7 +222,7 @@ async def put_on_air(
     show_id: uuid.UUID,
     call_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted)."""
     call = await live_show_service.put_caller_on_air(db, show_id, call_id)
@@ -245,7 +245,7 @@ async def end_active_call(
     show_id: uuid.UUID,
     call_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """End an active call."""
     call = await live_show_service.end_call(db, call_id)
@@ -269,7 +269,7 @@ async def update_call_info(
     call_id: uuid.UUID,
     body: ScreenerAction,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     """Update caller name/notes."""
     call = await live_show_service.update_call_info(

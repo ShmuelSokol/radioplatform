@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_manager
+from app.core.dependencies import require_dj_or_manager
 from app.db.session import get_db
 from app.models.user import User
 from app.services.asset_service import get_asset
@@ -27,7 +27,7 @@ class PlayNowRequest(BaseModel):
 async def play(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     await get_station(db, station_id)
     return await start_playback(str(station_id))
@@ -37,7 +37,7 @@ async def play(
 async def pause(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     await get_station(db, station_id)
     return await pause_playback(str(station_id))
@@ -47,7 +47,7 @@ async def pause(
 async def stop(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     await get_station(db, station_id)
     await stop_current(str(station_id))
@@ -59,7 +59,7 @@ async def play_now_endpoint(
     station_id: uuid.UUID,
     body: PlayNowRequest,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     await get_station(db, station_id)
     asset = await get_asset(db, uuid.UUID(body.asset_id))
@@ -77,7 +77,7 @@ async def enqueue(
     station_id: uuid.UUID,
     body: EnqueueRequest,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_manager),
+    _user: User = Depends(require_dj_or_manager),
 ):
     await get_station(db, station_id)
     asset = await get_asset(db, uuid.UUID(body.asset_id))

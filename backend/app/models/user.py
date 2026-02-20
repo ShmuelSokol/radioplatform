@@ -11,6 +11,7 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
     MANAGER = "manager"
+    DJ = "dj"
     VIEWER = "viewer"
     SPONSOR = "sponsor"
 

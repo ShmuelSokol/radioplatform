@@ -170,6 +170,7 @@ export default function Users() {
               className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700">
               <option value="admin">Admin</option>
               <option value="manager">Manager</option>
+              <option value="dj">DJ / Host</option>
               <option value="viewer">Viewer</option>
               <option value="sponsor">Sponsor</option>
             </select>
@@ -216,7 +217,8 @@ export default function Users() {
             </div>
           </div>
 
-          {/* DJ / Host Profile */}
+          {/* DJ / Host Profile — only shown when role is DJ */}
+          {role === 'dj' && (
           <div className="col-span-2 border-t border-[#2a2a5e] pt-3 mt-1">
             <label className="block text-[11px] text-gray-400 mb-2 uppercase font-bold">DJ / Host Profile</label>
             <div className="grid grid-cols-2 gap-3">
@@ -261,6 +263,7 @@ export default function Users() {
               </div>
             </div>
           </div>
+          )}
 
           <div className="col-span-2">
             {errorMsg && (
@@ -304,9 +307,10 @@ export default function Users() {
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                       u.role === 'admin' ? 'bg-red-900 text-red-300' :
                       u.role === 'manager' ? 'bg-blue-900 text-blue-300' :
+                      u.role === 'dj' ? 'bg-emerald-900 text-emerald-300' :
                       u.role === 'sponsor' ? 'bg-indigo-900 text-indigo-300' :
                       'bg-gray-800 text-gray-400'
-                    }`}>{u.role.toUpperCase()}</span>
+                    }`}>{u.role === 'dj' ? 'DJ / HOST' : u.role.toUpperCase()}</span>
                   </td>
                   <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.phone_number ?? '\u2014'}</td>
                   <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.title ?? '\u2014'}</td>

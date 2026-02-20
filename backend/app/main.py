@@ -151,6 +151,8 @@ async def _add_missing_columns(engine):
         # Listener sessions index for fast heartbeat lookups
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_heartbeat ON listener_sessions (last_heartbeat)",
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_started ON listener_sessions (started_at)",
+        # DJ role enum value
+        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'dj'",
         # User activity tracking
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_action VARCHAR(255)",
