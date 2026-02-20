@@ -6,8 +6,8 @@
 Multi-channel radio streaming platform with playlist automation, ad insertion, weather/time announcements (ElevenLabs TTS), silence trimming, timezone-aware scheduling (Sabbath/holiday blackouts, sunset/sunrise rules), and admin + public listener UIs. Includes a Telegram bot for remote development via Claude.
 
 ## Live URLs
-- **Frontend**: https://studio-kolbramah-radio.vercel.app
-- **Backend API**: https://studio-kolbramah-api-production.up.railway.app
+- **Frontend**: https://kbrlive.com (alias: https://studio-kolbramah-radio.vercel.app)
+- **Backend API**: https://api.kbrlive.com (alias: https://studio-kolbramah-api-production.up.railway.app)
 - **GitHub**: https://github.com/ShmuelSokol/radioplatform
 
 ## Tech Stack
@@ -321,14 +321,14 @@ Claude Code accessible over Telegram for remote development.
 | `SILENCE_DETECTION_SECONDS` | Seconds of silence before alert (default: 30) | For silence detection |
 
 ### Frontend (Vercel)
-- `VITE_API_URL` — Backend API base URL (https://studio-kolbramah-api.vercel.app/api/v1)
+- `VITE_API_URL` — Backend API base URL (https://api.kbrlive.com/api/v1)
 
 ## Default Credentials
 - Admin: `admin` / `613Radio`
 - Seed endpoint: `POST /api/v1/auth/seed` (creates or updates admin user)
 
 ## Known Gotchas
-- **ALWAYS verify live site after deploy**: After deploying, test the live URLs (frontend + backend health + key API endpoints) to confirm the site works. Don't assume deploys succeed — check `curl https://studio-kolbramah-api-production.up.railway.app/health` and try loading key frontend pages.
+- **ALWAYS verify live site after deploy**: After deploying, test the live URLs (frontend + backend health + key API endpoints) to confirm the site works. Don't assume deploys succeed — check `curl https://api.kbrlive.com/health` and try loading key frontend pages.
 - **Railway deploys from GitHub**: Auto-deploy is enabled on `main` branch with root directory `/backend`. If deploys fail, check Railway dashboard → service → Deployments tab for build logs.
 - **nixpacks.toml**: Must use `["...", "ffmpeg"]` (with spread operator) to keep default Python packages. Using `["ffmpeg"]` alone removes Python and breaks the build.
 - **requirements.txt must stay in sync**: Railway installs from `requirements.txt`, not `pyproject.toml`. When adding dependencies to pyproject.toml, also add them to requirements.txt.
@@ -366,7 +366,7 @@ cd backend && npx vercel --prod --yes
 cd frontend && npx vercel --prod --yes
 
 # Run load tests (install locust first: pip install locust)
-cd backend && locust -f loadtests/locustfile.py --host https://studio-kolbramah-api-production.up.railway.app
+cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com
 
 # Run Telegram bot locally
 cd bot && uv run python main.py
