@@ -50,7 +50,10 @@ class Settings(BaseSettings):
         return bool(self.S3_ENDPOINT_URL)
 
     # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:80"]
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:80", "https://kbrlive.com", "https://www.kbrlive.com"]
+
+    # Frontend URL (used in emails)
+    FRONTEND_URL: str = "https://kbrlive.com"
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
