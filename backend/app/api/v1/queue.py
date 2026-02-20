@@ -447,7 +447,7 @@ async def add_to_queue(
     max_pos = result.scalar() or 0
     entry = QueueEntry(
         id=uuid.uuid4(), station_id=station_id, asset_id=body.asset_id,
-        position=max_pos + 1, status="pending",
+        position=max_pos + 1, status="pending", source="manual",
     )
     db.add(entry)
     await db.commit()
@@ -472,7 +472,7 @@ async def bulk_add_to_queue(
         max_pos += 1
         entry = QueueEntry(
             id=uuid.uuid4(), station_id=station_id, asset_id=asset_id,
-            position=max_pos, status="pending",
+            position=max_pos, status="pending", source="manual",
         )
         db.add(entry)
         count += 1
@@ -501,7 +501,7 @@ async def play_next(
     next_pos = (current.position + 1) if current else 1
     entry = QueueEntry(
         id=uuid.uuid4(), station_id=station_id, asset_id=body.asset_id,
-        position=next_pos, status="pending",
+        position=next_pos, status="pending", source="manual",
     )
     db.add(entry)
     await db.commit()

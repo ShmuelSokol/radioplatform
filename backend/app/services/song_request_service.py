@@ -132,20 +132,48 @@ async def add_to_queue(
     asset_id: str,
     station_id: str,
 ) -> int:
-    """Insert asset at end of pending queue. Returns the position number."""
+    """Insert request after the last request-sourced entry in the queue.
+
+    If no request entries exist, insert at position 1 (right after now-playing).
+    Bumps positions of entries that come after the insertion point.
+    Returns the new entry's position.
+    """
+    from sqlalchemy import update
+
+    # Find the highest position among request-sourced pending entries
     result = await db.execute(
         select(func.max(QueueEntry.position)).where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
+            QueueEntry.source == "request",
         )
     )
-    max_pos = result.scalar() or 0
+    last_request_pos = result.scalar()
+
+    if last_request_pos is not None:
+        insert_pos = last_request_pos + 1
+    else:
+        # No request entries — insert at position 1 (right after now-playing)
+        insert_pos = 1
+
+    # Bump positions of all pending entries at or after insert_pos
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.position >= insert_pos,
+        )
+        .values(position=QueueEntry.position + 1)
+    )
+
     entry = QueueEntry(
         id=uuid.uuid4(),
         station_id=station_id,
         asset_id=asset_id,
-        position=max_pos + 1,
+        position=insert_pos,
         status="pending",
+        source="request",
     )
     db.add(entry)
     await db.flush()

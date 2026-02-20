@@ -30,6 +30,7 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    source: Mapped[str] = mapped_column(String(20), default="auto", nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     preempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

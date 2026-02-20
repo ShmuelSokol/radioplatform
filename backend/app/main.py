@@ -128,6 +128,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS release_date DATE",
         # Preempt mechanism for exact-time playback (time announcements)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
+        # Source tracking: 'request', 'manual', 'auto' (replenish)
+        "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'auto'",
         # Schedule block columns that may be missing from early table creation
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS playback_mode VARCHAR(20) NOT NULL DEFAULT 'sequential'",
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS start_date DATE",
