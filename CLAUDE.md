@@ -31,9 +31,9 @@ radioplatform/
 │   ├── app/config.py             # Pydantic BaseSettings (all env vars)
 │   ├── app/core/                 # security (JWT), dependencies (auth guards), exceptions, middleware
 │   ├── app/db/                   # async engine (statement_cache_size=0), Base, session
-│   ├── app/models/               # 20 SQLAlchemy models
+│   ├── app/models/               # 22 SQLAlchemy models
 │   ├── app/schemas/              # Pydantic v2 request/response schemas
-│   ├── app/api/v1/               # 12 route handlers
+│   ├── app/api/v1/               # 14 route handlers
 │   ├── app/services/             # 17 business logic services
 │   ├── app/workers/tasks/        # Celery tasks (media processing)
 │   ├── app/streaming/            # HLS generator, playlist engine
@@ -42,11 +42,11 @@ radioplatform/
 │   └── pyproject.toml            # bcrypt==4.1.3 pinned for passlib compat
 ├── frontend/
 │   └── src/
-│       ├── api/                  # 8 API client modules + Axios client with JWT interceptor
+│       ├── api/                  # 14 API client modules + Axios client with JWT interceptor
 │       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer, NowPlaying)
-│       ├── pages/admin/          # Dashboard, Stations, Assets, AssetUpload, Schedules, Rules, Users, Login
-│       ├── pages/public/         # StationList, Listen
-│       ├── hooks/                # 16 custom hooks
+│       ├── pages/admin/          # Dashboard, Stations, Assets, AssetUpload, Schedules, Rules, Users, Login, SongRequests, Archives
+│       ├── pages/public/         # StationList, Listen, ProgramGuide, Hosts, Archives
+│       ├── hooks/                # 22 custom hooks
 │       ├── stores/               # Zustand: authStore, playerStore
 │       └── types/                # TypeScript interfaces
 ├── bot/
@@ -89,6 +89,8 @@ radioplatform/
 | Alert | alert.py | System alerts with severity, type, and resolution tracking |
 | LiveShow | live_show.py | Live broadcast shows with scheduling + Twilio call-in |
 | CallInRequest | call_in_request.py | Caller queue entries for live shows |
+| SongRequest | song_request.py | Public song request queue with admin review |
+| ShowArchive | show_archive.py | Archived show recordings with podcast RSS feed |
 
 ### API Routes (`backend/app/api/v1/`)
 | Router | File | Prefix |
@@ -118,6 +120,8 @@ radioplatform/
 | alerts | alerts.py | /alerts |
 | live_shows | live_shows.py | /live-shows |
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket) |
+| song_requests | song_requests.py | /song-requests |
+| archives | archives.py | /archives |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
@@ -167,10 +171,15 @@ radioplatform/
 - LiveShows.tsx — Live show management (create, list, start, delete)
 - HostConsole.tsx — Full-screen host broadcasting console with countdown, mic controls, caller queue
 - CallScreener.tsx — Two-column call screener (waiting/approved/on-air management)
+- SongRequests.tsx — Song request management (approve/reject/delete)
+- Archives.tsx — Show archive management (CRUD, publish/unpublish)
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
-- Listen.tsx — Listen to a station
+- Listen.tsx — Listen to a station (with song request form)
+- ProgramGuide.tsx — Public EPG with station/date picker and timeline
+- Hosts.tsx — Public DJ/host profile cards
+- Archives.tsx — Public show archive browser with playback
 
 **Sponsor Portal** (`frontend/src/pages/sponsor/`):
 - Login.tsx — Sponsor login (separate from admin, indigo-themed)
@@ -179,7 +188,7 @@ radioplatform/
 - CampaignDetail.tsx — Campaign detail with drafts + comments thread
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
 
-### Hooks (`frontend/src/hooks/`) — 19 hooks
+### Hooks (`frontend/src/hooks/`) — 22 hooks
 | Hook | Description |
 |------|-------------|
 | useAuth.ts | Authentication state + mutations |
@@ -201,9 +210,11 @@ radioplatform/
 | useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
 | useLiveShowWS.ts | Live show WebSocket (real-time callers, countdown, with polling fallback) |
 | useHostAudio.ts | Browser mic capture, MediaRecorder, binary WS streaming, VU meter |
+| useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
+| useArchives.ts | Show archive CRUD queries/mutations |
 
-### API Clients (`frontend/src/api/`) — 12 modules
-auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, client.ts (Axios + JWT interceptor)
+### API Clients (`frontend/src/api/`) — 14 modules
+auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
 
 ### Routes (`frontend/src/App.tsx`)
 - `/` → redirect to `/stations`
@@ -226,6 +237,11 @@ auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, spo
 - `/admin/live` → LiveShows (protected)
 - `/admin/live/:showId/host` → HostConsole (protected)
 - `/admin/live/:showId/screen` → CallScreener (protected)
+- `/admin/requests` → SongRequests (protected)
+- `/admin/archives` → AdminArchives (protected)
+- `/guide` → ProgramGuide
+- `/hosts` → Hosts
+- `/archives` → Archives
 - `/sponsor/login` → SponsorLogin
 - `/sponsor/dashboard` → SponsorDashboard (sponsor-protected, SponsorLayout)
 - `/sponsor/campaigns` → SponsorCampaigns (sponsor-protected)
@@ -301,6 +317,8 @@ Claude Code accessible over Telegram for remote development.
 | `TWILIO_VOICE_NUMBER` | Dedicated voice number for live call-ins | For live shows |
 | `LIVE_SHOW_HOLD_MUSIC_URL` | Public URL to hold music MP3 | For live shows |
 | `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks | For live shows |
+| `EMERGENCY_FALLBACK_CATEGORY` | Asset category for emergency fallback (default: "emergency") | For silence detection |
+| `SILENCE_DETECTION_SECONDS` | Seconds of silence before alert (default: 30) | For silence detection |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://studio-kolbramah-api.vercel.app/api/v1)
