@@ -37,6 +37,18 @@ async def _add_missing_columns(engine):
     """Add columns that were added to models but missing from existing DB tables."""
     from sqlalchemy import text
 
+    # ALTER TYPE ADD VALUE cannot run inside a transaction — use autocommit
+    enum_migrations = [
+        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'sponsor'",
+    ]
+    for sql in enum_migrations:
+        try:
+            async with engine.connect() as conn:
+                await conn.execution_options(isolation_level="AUTOCOMMIT")
+                await conn.execute(text(sql))
+        except Exception as e:
+            logger.warning(f"Enum migration skipped ({sql[:50]}...): {e}")
+
     migrations = [
         "ALTER TABLE channel_streams ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
         "ALTER TABLE channel_streams ADD COLUMN IF NOT EXISTS schedule_id UUID REFERENCES schedules(id) ON DELETE SET NULL",
@@ -50,7 +62,6 @@ async def _add_missing_columns(engine):
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS playlist_template_id UUID REFERENCES playlist_templates(id) ON DELETE SET NULL",
         "ALTER TABLE stations ADD COLUMN IF NOT EXISTS automation_config JSONB",
         # Sponsor portal columns
-        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'sponsor'",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(50)",

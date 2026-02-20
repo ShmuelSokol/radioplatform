@@ -6,7 +6,7 @@ export function useQueue(stationId: string | null) {
     queryKey: ['queue', stationId],
     queryFn: () => getQueue(stationId!),
     enabled: !!stationId,
-    refetchInterval: 3000,
+    refetchInterval: 5000,
   });
 }
 

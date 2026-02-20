@@ -19,15 +19,21 @@ export default function Users() {
   const [whatsappEnabled, setWhatsappEnabled] = useState(false);
   const [minSeverity, setMinSeverity] = useState('warning');
   const [editId, setEditId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const users = data?.users ?? [];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg(null);
     const alertPrefs = {
       sms_enabled: smsEnabled,
       whatsapp_enabled: whatsappEnabled,
       min_severity: minSeverity,
+    };
+    const onError = (err: any) => {
+      const msg = err?.response?.data?.detail || err?.message || 'Operation failed';
+      setErrorMsg(typeof msg === 'string' ? msg : JSON.stringify(msg));
     };
     if (editId) {
       updateMut.mutate({ id: editId, data: {
@@ -38,14 +44,14 @@ export default function Users() {
         phone_number: phoneNumber || undefined,
         title: jobTitle || undefined,
         alert_preferences: alertPrefs,
-      }}, { onSuccess: () => resetForm() });
+      }}, { onSuccess: () => resetForm(), onError });
     } else {
       createMut.mutate({ email, password, role,
         display_name: displayName || undefined,
         phone_number: phoneNumber || undefined,
         title: jobTitle || undefined,
         alert_preferences: alertPrefs,
-      }, { onSuccess: () => resetForm() });
+      }, { onSuccess: () => resetForm(), onError });
     }
   };
 
@@ -151,6 +157,11 @@ export default function Users() {
             </div>
           </div>
           <div className="col-span-2">
+            {errorMsg && (
+              <div className="mb-2 px-3 py-1.5 bg-red-900/60 border border-red-700 text-red-300 rounded text-[12px]">
+                {errorMsg}
+              </div>
+            )}
             <button type="submit" disabled={createMut.isPending || updateMut.isPending}
               className="px-4 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-sm disabled:opacity-50">
               {(createMut.isPending || updateMut.isPending) ? <><Spinner className="mr-2" />Processing...</> : editId ? 'Update User' : 'Create User'}

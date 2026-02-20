@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +23,8 @@ from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueEntr
 logger = logging.getLogger(__name__)
 
 DEFAULT_DURATION = 180  # 3 minutes fallback
+_last_advance: dict[str, float] = {}
+ADVANCE_THROTTLE = 5.0  # seconds between _check_advance calls per station
 
 router = APIRouter(prefix="/stations/{station_id}/queue", tags=["queue"])
 
@@ -277,12 +280,25 @@ async def get_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    # Run the playback engine on every poll
-    try:
-        now_playing_entry = await _check_advance(db, station_id)
-    except Exception as exc:
-        logger.error("_check_advance failed: %s", exc, exc_info=True)
-        now_playing_entry = None
+    # Throttle _check_advance to avoid heavy DB work on every poll
+    station_key = str(station_id)
+    now_ts = time.monotonic()
+    now_playing_entry = None
+    if (now_ts - _last_advance.get(station_key, 0)) >= ADVANCE_THROTTLE:
+        try:
+            now_playing_entry = await _check_advance(db, station_id)
+            _last_advance[station_key] = now_ts
+        except Exception as exc:
+            logger.error("_check_advance failed: %s", exc, exc_info=True)
+    else:
+        # Lightweight: just fetch current playing entry
+        result = await db.execute(
+            select(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+            .order_by(QueueEntry.started_at.desc().nullslast())
+            .limit(1)
+        )
+        now_playing_entry = result.scalar_one_or_none()
 
     result = await db.execute(
         select(QueueEntry)
