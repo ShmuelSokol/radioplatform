@@ -255,11 +255,13 @@ class QueueReplenishService:
         sponsors = result.scalars().all()
         for sponsor in sponsors:
             sponsor_asset = None
-            if sponsor.audio_file_path:
-                result = await self.db.execute(
-                    select(Asset).where(Asset.file_path == sponsor.audio_file_path).limit(1)
-                )
-                sponsor_asset = result.scalar_one_or_none()
+            # Look up by sponsor_id FK first, fall back to audio_file_path match
+            result = await self.db.execute(
+                select(Asset).where(
+                    (Asset.sponsor_id == sponsor.id) | (Asset.file_path == sponsor.audio_file_path)
+                ).limit(1)
+            )
+            sponsor_asset = result.scalar_one_or_none()
             if not sponsor_asset:
                 continue
             rules = sponsor.target_rules or {}

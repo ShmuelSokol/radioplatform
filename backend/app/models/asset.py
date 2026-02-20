@@ -39,6 +39,10 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     asset_type: Mapped[str] = mapped_column(String(50), default="music", nullable=False)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     review_status: Mapped[str | None] = mapped_column(String(50), default="pending", nullable=True)
+    sponsor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sponsors.id", ondelete="SET NULL"), nullable=True
+    )
 
     created_by_user = relationship("User", back_populates="assets")
     categories = relationship("Category", secondary=asset_categories, back_populates="assets", lazy="selectin")
+    sponsor = relationship("Sponsor", lazy="noload")

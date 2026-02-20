@@ -256,7 +256,11 @@ async def update_asset(
     _user: User = Depends(require_manager),
 ):
     asset = await get_asset(db, asset_id)
-    for key, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+    # Auto-clear sponsor_id when type changes away from "spot"
+    if "asset_type" in updates and updates["asset_type"] != "spot" and "sponsor_id" not in updates:
+        updates["sponsor_id"] = None
+    for key, value in updates.items():
         setattr(asset, key, value)
     await db.flush()
     await db.refresh(asset)

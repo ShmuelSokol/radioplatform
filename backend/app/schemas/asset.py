@@ -20,6 +20,8 @@ class AssetResponse(BaseModel):
     category: str | None = None
     created_at: datetime | None = None
     last_played_at: datetime | None = None
+    sponsor_id: uuid.UUID | str | None = None
+    sponsor_name: str | None = None
 
 
 class AssetListResponse(BaseModel):
@@ -35,6 +37,7 @@ class AssetUpdate(BaseModel):
     asset_type: str | None = None
     category: str | None = None
     file_path: str | None = None
+    sponsor_id: uuid.UUID | str | None = None
 
 
 class TranscodeRequest(BaseModel):

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.models.asset import Asset
 from app.models.play_log import PlayLog
+from app.models.sponsor import Sponsor
 from app.services.audio_convert_service import CONVERT_FORMATS, convert_audio
 from app.services.storage_service import generate_asset_key, upload_file
 
@@ -128,7 +129,8 @@ async def list_assets(
     )
 
     result = await db.execute(
-        select(Asset, last_played_sq)
+        select(Asset, last_played_sq, Sponsor.name.label("sponsor_name"))
+        .outerjoin(Sponsor, Asset.sponsor_id == Sponsor.id)
         .offset(skip)
         .limit(limit)
         .order_by(Asset.created_at.desc())
@@ -138,6 +140,7 @@ async def list_assets(
     for row in rows:
         asset = row[0]
         asset.last_played_at = row[1]
+        asset.sponsor_name = row[2]
         assets.append(asset)
     return assets, total
 

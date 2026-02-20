@@ -2,6 +2,7 @@ import { useState, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
+import AssetSponsorBadge from '../../components/AssetSponsorBadge';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
 import { useCategories } from '../../hooks/useCategories';
 import { downloadAsset, getAssetAudioUrl } from '../../api/assets';
@@ -380,7 +381,14 @@ export default function Assets() {
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   <AssetCategoryBadge assetId={asset.id} category={asset.category} />
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.asset_type}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {asset.asset_type}
+                  {asset.asset_type === 'spot' && (
+                    <span className="ml-1.5">
+                      <AssetSponsorBadge assetId={asset.id} sponsorId={asset.sponsor_id} sponsorName={asset.sponsor_name} />
+                    </span>
+                  )}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.created_at)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.last_played_at)}</td>
