@@ -19,6 +19,7 @@ class AssetResponse(BaseModel):
     asset_type: str = "music"
     category: str | None = None
     created_at: datetime | None = None
+    last_played_at: datetime | None = None
 
 
 class AssetListResponse(BaseModel):

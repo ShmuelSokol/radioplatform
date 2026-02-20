@@ -83,6 +83,7 @@ export interface Asset {
   asset_type: string;
   category: string | null;
   created_at: string | null;
+  last_played_at: string | null;
 }
 
 export interface NowPlaying {

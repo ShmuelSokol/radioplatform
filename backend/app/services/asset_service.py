@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.models.asset import Asset
+from app.models.play_log import PlayLog
 from app.services.audio_convert_service import CONVERT_FORMATS, convert_audio
 from app.services.storage_service import generate_asset_key, upload_file
 
@@ -113,14 +114,31 @@ async def get_asset(db: AsyncSession, asset_id: uuid.UUID) -> Asset:
 
 async def list_assets(
     db: AsyncSession, skip: int = 0, limit: int = 50
-) -> tuple[list[Asset], int]:
+) -> tuple[list[dict], int]:
     count_result = await db.execute(select(func.count(Asset.id)))
     total = count_result.scalar() or 0
 
-    result = await db.execute(
-        select(Asset).offset(skip).limit(limit).order_by(Asset.created_at.desc())
+    # Subquery for last played time
+    last_played_sq = (
+        select(func.max(PlayLog.start_utc))
+        .where(PlayLog.asset_id == Asset.id)
+        .correlate(Asset)
+        .scalar_subquery()
+        .label("last_played_at")
     )
-    assets = list(result.scalars().all())
+
+    result = await db.execute(
+        select(Asset, last_played_sq)
+        .offset(skip)
+        .limit(limit)
+        .order_by(Asset.created_at.desc())
+    )
+    rows = result.all()
+    assets = []
+    for row in rows:
+        asset = row[0]
+        asset.last_played_at = row[1]
+        assets.append(asset)
     return assets, total
 
 
