@@ -127,11 +127,17 @@ async def list_schedules(
     db: AsyncSession = Depends(get_db),
 ):
     """List all schedules, optionally filtered by station."""
-    stmt = select(ScheduleModel).options(selectinload(ScheduleModel.blocks)).offset(skip).limit(limit)
-    if station_id:
-        stmt = stmt.where(ScheduleModel.station_id == station_id)
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        stmt = select(ScheduleModel).options(selectinload(ScheduleModel.blocks)).offset(skip).limit(limit)
+        if station_id:
+            stmt = stmt.where(ScheduleModel.station_id == station_id)
+        result = await db.execute(stmt)
+        return result.scalars().all()
+    except Exception as e:
+        logger.exception("list_schedules error")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== Schedule Blocks (before /{schedule_id} to avoid route conflict) ====================
@@ -142,20 +148,26 @@ async def create_schedule_block(
     current_user: User = Depends(require_manager),
 ):
     """Create a new schedule block."""
-    block = ScheduleBlockModel(**data.model_dump())
-    db.add(block)
-    await db.commit()
-    await db.refresh(block)
-
-    # Check for scheduling conflicts
+    import logging
+    logger = logging.getLogger(__name__)
     try:
-        from app.services.alert_service import detect_schedule_conflicts
-        await detect_schedule_conflicts(db, block.schedule_id, block.id)
+        block = ScheduleBlockModel(**data.model_dump())
+        db.add(block)
         await db.commit()
-    except Exception:
-        pass  # Don't fail block creation if conflict detection errors
+        await db.refresh(block)
 
-    return block
+        # Check for scheduling conflicts
+        try:
+            from app.services.alert_service import detect_schedule_conflicts
+            await detect_schedule_conflicts(db, block.schedule_id, block.id)
+            await db.commit()
+        except Exception:
+            pass  # Don't fail block creation if conflict detection errors
+
+        return block
+    except Exception as e:
+        logger.exception("create_schedule_block error")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/blocks", response_model=List[ScheduleBlock])
