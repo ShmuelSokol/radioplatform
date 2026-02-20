@@ -131,6 +131,9 @@ async def _add_missing_columns(engine):
             WHEN name ILIKE '%shabbos%' OR name ILIKE '%shabbat%' THEN 'Shabbos'
             ELSE 'Manual'
         END WHERE reason IS NULL""",
+        # Listener sessions index for fast heartbeat lookups
+        "CREATE INDEX IF NOT EXISTS ix_listener_sessions_heartbeat ON listener_sessions (last_heartbeat)",
+        "CREATE INDEX IF NOT EXISTS ix_listener_sessions_started ON listener_sessions (started_at)",
     ]
     for sql in migrations:
         try:

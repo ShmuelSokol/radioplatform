@@ -37,6 +37,7 @@ export default function Navbar() {
     { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
     { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
     { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
+    { to: '/admin/listeners', label: 'Listeners', color: 'hover:text-green-300' },
     { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },
     { to: '/admin/categories', label: 'Categories', color: 'hover:text-teal-300' },
     { to: '/admin/reviews', label: 'Reviews', color: 'hover:text-emerald-300' },

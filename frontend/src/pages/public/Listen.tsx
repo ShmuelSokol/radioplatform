@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { getStation } from '../../api/stations';
 import apiClient from '../../api/client';
 import { submitSongRequest, SongRequestSubmitResponse } from '../../api/songRequests';
+import { useListenerHeartbeat } from '../../hooks/useListeners';
 
 interface LiveAudioData {
   playing: boolean;
@@ -59,6 +60,9 @@ export default function Listen() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentAssetRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Track listener session (heartbeat every 30s while listening)
+  useListenerHeartbeat(stationId, userStarted);
 
   // Fetch live-audio data
   const fetchLiveAudio = useCallback(async () => {

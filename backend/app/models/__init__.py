@@ -26,6 +26,7 @@ from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.song_request import SongRequest, RequestStatus
 from app.models.show_archive import ShowArchive
 from app.models.weather_readout import WeatherReadout
+from app.models.listener_session import ListenerSession
 
 __all__ = [
     "User", "UserRole",
@@ -56,4 +57,5 @@ __all__ = [
     "SongRequest", "RequestStatus",
     "ShowArchive",
     "WeatherReadout",
+    "ListenerSession",
 ]
