@@ -39,14 +39,15 @@ async def _add_missing_columns(engine):
 
     # ALTER TYPE ADD VALUE cannot run inside a transaction — use autocommit
     enum_migrations = [
-        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'sponsor'",
-        "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'live_show'",
-        "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'silence'",
+        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'SPONSOR'",
+        "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'LIVE_SHOW'",
+        "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'SILENCE'",
         # Live show enum types (created by create_all, but safe to re-run)
-        "DO $$ BEGIN CREATE TYPE live_show_status AS ENUM ('scheduled','live','ended','cancelled'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
-        "DO $$ BEGIN CREATE TYPE broadcast_mode AS ENUM ('webrtc','icecast'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
-        "DO $$ BEGIN CREATE TYPE call_status AS ENUM ('waiting','screening','approved','on_air','completed','rejected','abandoned'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
-        "DO $$ BEGIN CREATE TYPE request_status AS ENUM ('pending','approved','queued','played','rejected'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        # SQLAlchemy uses enum member NAMES (uppercase) for PostgreSQL enum values
+        "DO $$ BEGIN CREATE TYPE live_show_status AS ENUM ('SCHEDULED','LIVE','ENDED','CANCELLED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        "DO $$ BEGIN CREATE TYPE broadcast_mode AS ENUM ('WEBRTC','ICECAST'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        "DO $$ BEGIN CREATE TYPE call_status AS ENUM ('WAITING','SCREENING','APPROVED','ON_AIR','COMPLETED','REJECTED','ABANDONED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        "DO $$ BEGIN CREATE TYPE request_status AS ENUM ('PENDING','APPROVED','QUEUED','PLAYED','REJECTED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
     ]
     # asyncpg is autocommit by default — bypasses SQLAlchemy transaction wrapping
     # which is required for ALTER TYPE ADD VALUE (cannot run inside a transaction)

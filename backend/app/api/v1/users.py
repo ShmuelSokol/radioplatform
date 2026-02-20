@@ -78,14 +78,7 @@ async def create_user(
         is_active=True,
     )
     db.add(user)
-    try:
-        await db.commit()
-    except Exception as e:
-        await db.rollback()
-        import logging
-        logging.getLogger(__name__).error("User creation failed: %s", e, exc_info=True)
-        from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=f"User creation failed: {e}")
+    await db.commit()
     await db.refresh(user)
     return user
 
