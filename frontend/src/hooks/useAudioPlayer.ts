@@ -1,13 +1,15 @@
 import { useEffect, useRef, useCallback } from 'react';
-import Hls from 'hls.js';
+import type Hls from 'hls.js';
 import { usePlayerStore } from '../stores/playerStore';
+
+const loadHls = () => import('hls.js').then(m => m.default);
 
 export function useAudioPlayer() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const { hlsUrl, isPlaying, volume, stop } = usePlayerStore();
 
-  const attachHls = useCallback((url: string) => {
+  const attachHls = useCallback(async (url: string) => {
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -15,14 +17,16 @@ export function useAudioPlayer() {
       hlsRef.current.destroy();
     }
 
-    if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
+    const HlsClass = await loadHls();
+
+    if (HlsClass.isSupported()) {
+      const hls = new HlsClass({ enableWorker: true });
       hls.loadSource(url);
       hls.attachMedia(audio);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hls.on(HlsClass.Events.MANIFEST_PARSED, () => {
         audio.play().catch(() => {});
       });
-      hls.on(Hls.Events.ERROR, (_event, data) => {
+      hls.on(HlsClass.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           stop();
         }

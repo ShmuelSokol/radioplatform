@@ -4,7 +4,7 @@ import { useStations } from '../../hooks/useStations';
 import { useAssets } from '../../hooks/useAssets';
 import {
   useQueue, usePlayLog, useSkipCurrent, usePlayNext, useAddToQueue,
-  useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown, useLastPlayed,
+  useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown,
   useWeatherPreview, useReorderDnd,
 } from '../../hooks/useQueue';
 import { useTimelinePreview } from '../../hooks/useSchedules';
@@ -52,7 +52,7 @@ type BottomTab = 'library' | 'cart' | 'log' | 'timeline';
 export default function Dashboard() {
   const { user } = useAuth();
   const { data: stationsData } = useStations();
-  const { data: assetsData } = useAssets(0, 500);
+  const { data: assetsData } = useAssets(0, 100);
   const [clock, setClock] = useState(new Date());
   const [activeTab, setActiveTab] = useState<string>('all');
   const [librarySearch, setLibrarySearch] = useState('');
@@ -65,18 +65,25 @@ export default function Dashboard() {
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   const stations = stationsData?.stations ?? [];
-  const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
+  const [selectedStationId, setSelectedStationId] = useState<string | null>(() => {
+    try { return localStorage.getItem('radio_last_station') || null; } catch { return null; }
+  });
   // Auto-select first station when stations load
   useEffect(() => {
     if (stations.length > 0 && !selectedStationId) {
       setSelectedStationId(stations[0].id);
     }
   }, [stations, selectedStationId]);
+  // Persist selected station
+  useEffect(() => {
+    if (selectedStationId) {
+      try { localStorage.setItem('radio_last_station', selectedStationId); } catch {}
+    }
+  }, [selectedStationId]);
   const stationId = selectedStationId;
 
   const { data: queueData } = useQueue(stationId);
-  const { data: logData } = usePlayLog(stationId);
-  useLastPlayed(stationId);
+  const { data: logData } = usePlayLog(stationId, bottomTab === 'log');
   const skipMut = useSkipCurrent(stationId ?? '');
   const playNextMut = usePlayNext(stationId ?? '');
   const addQueueMut = useAddToQueue(stationId ?? '');
@@ -92,10 +99,10 @@ export default function Dashboard() {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'warn' | 'info' } | null>(null);
 
-  // Timeline preview
+  // Timeline preview — deferred until tab is active
   const [timelineTime, setTimelineTime] = useState('');
   const { data: timelineData, isLoading: timelineLoading } = useTimelinePreview(
-    stationId ?? null,
+    bottomTab === 'timeline' ? (stationId ?? null) : null,
     timelineTime || null,
   );
 

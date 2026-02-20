@@ -7,18 +7,21 @@ export function useAlerts(filters?: {
   severity?: string;
   alert_type?: string;
   is_resolved?: boolean;
-}) {
+} | null) {
   return useQuery({
     queryKey: ['alerts', filters],
-    queryFn: () => getAlerts(filters),
+    queryFn: () => getAlerts(filters!),
+    enabled: !!filters,
+    staleTime: 60_000,
   });
 }
 
-export function useUnresolvedCount() {
+export function useUnresolvedCount(enabled = true) {
   return useQuery({
     queryKey: ['alerts', 'unresolved-count'],
     queryFn: () => getUnresolvedCount(),
     refetchInterval: 30_000,
+    enabled,
   });
 }
 

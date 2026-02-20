@@ -6,16 +6,16 @@ export function useQueue(stationId: string | null) {
     queryKey: ['queue', stationId],
     queryFn: () => getQueue(stationId!),
     enabled: !!stationId,
-    refetchInterval: 5000,
+    refetchInterval: 10_000,
   });
 }
 
-export function usePlayLog(stationId: string | null) {
+export function usePlayLog(stationId: string | null, enabled = true) {
   return useQuery({
     queryKey: ['play-log', stationId],
     queryFn: () => getPlayLog(stationId!, 30),
-    enabled: !!stationId,
-    refetchInterval: 10000,
+    enabled: !!stationId && enabled,
+    refetchInterval: 15_000,
   });
 }
 

@@ -277,6 +277,7 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
 @router.get("")
 async def get_queue(
     station_id: uuid.UUID,
+    limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -300,10 +301,19 @@ async def get_queue(
         )
         now_playing_entry = result.scalar_one_or_none()
 
+    # Get total count (lightweight)
+    count_result = await db.execute(
+        select(func.count(QueueEntry.id))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
+    )
+    total_count = count_result.scalar() or 0
+
+    # Fetch limited entries
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
         .order_by(QueueEntry.position)
+        .limit(limit)
     )
     entries = result.scalars().all()
 
@@ -341,12 +351,7 @@ async def get_queue(
                 "id": str(e.asset.id),
                 "title": e.asset.title,
                 "artist": e.asset.artist,
-                "album": e.asset.album,
                 "duration": e.asset.duration,
-                "file_path": e.asset.file_path,
-                "album_art_path": e.asset.album_art_path,
-                "metadata_extra": e.asset.metadata_extra,
-                "created_by": str(e.asset.created_by) if e.asset.created_by else None,
                 "asset_type": e.asset.asset_type,
                 "category": e.asset.category,
             } if e.asset else None,
@@ -355,7 +360,7 @@ async def get_queue(
 
     return {
         "entries": entries_data,
-        "total": len(entries_data),
+        "total": total_count,
         "now_playing": np_data,
         "queue_duration_seconds": round(queue_duration, 1),
     }

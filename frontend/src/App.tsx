@@ -6,11 +6,13 @@ import SponsorLayout from './components/layout/SponsorLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useAuthStore } from './stores/authStore';
 
-// Public pages (eager - fast initial load)
-import StationList from './pages/public/StationList';
-import Listen from './pages/public/Listen';
+// Auth pages (eager - fast initial load)
 import Login from './pages/admin/Login';
 import SponsorLogin from './pages/sponsor/Login';
+
+// Public pages (lazy-loaded)
+const StationList = lazy(() => import('./pages/public/StationList'));
+const Listen = lazy(() => import('./pages/public/Listen'));
 
 // Admin pages (lazy-loaded - code split)
 const Dashboard = lazy(() => import('./pages/admin/Dashboard'));
@@ -49,7 +51,7 @@ const SponsorBilling = lazy(() => import('./pages/sponsor/Billing'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 30_000, retry: 1 },
+    queries: { staleTime: 60_000, retry: 1, refetchOnWindowFocus: false },
   },
 });
 

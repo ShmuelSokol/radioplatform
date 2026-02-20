@@ -10,8 +10,8 @@ export default function Navbar() {
   const bellRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  const { data: unresolvedCount } = useUnresolvedCount();
-  const { data: recentAlerts } = useAlerts({ limit: 5, is_resolved: false });
+  const { data: unresolvedCount } = useUnresolvedCount(isAuthenticated);
+  const { data: recentAlerts } = useAlerts(isAuthenticated ? { limit: 5, is_resolved: false } : null);
 
   // Close bell dropdown on click outside
   useEffect(() => {
