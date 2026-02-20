@@ -150,10 +150,17 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_PHONE_NUMBER: str = ""
+    TWILIO_VOICE_NUMBER: str = ""  # dedicated voice number for live call-ins
+    LIVE_SHOW_HOLD_MUSIC_URL: str = ""  # public URL to hold music MP3
+    BACKEND_PUBLIC_URL: str = ""  # for Twilio callbacks
 
     @property
     def twilio_enabled(self) -> bool:
         return bool(self.TWILIO_ACCOUNT_SID)
+
+    @property
+    def twilio_voice_enabled(self) -> bool:
+        return bool(self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN)
 
 
 settings = Settings()

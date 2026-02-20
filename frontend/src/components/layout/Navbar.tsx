@@ -33,6 +33,7 @@ export default function Navbar() {
     { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
     { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },
     { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
+    { to: '/admin/live', label: 'Live Shows', color: 'hover:text-red-400' },
     { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
     { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
     { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },

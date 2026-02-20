@@ -40,6 +40,7 @@ async def _add_missing_columns(engine):
     # ALTER TYPE ADD VALUE cannot run inside a transaction — use autocommit
     enum_migrations = [
         "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'sponsor'",
+        "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'live_show'",
     ]
     for sql in enum_migrations:
         try:
@@ -70,6 +71,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS title VARCHAR(100)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS alert_preferences JSONB",
+        # Station-specific rules
+        "ALTER TABLE schedule_rules ADD COLUMN IF NOT EXISTS station_id UUID REFERENCES stations(id) ON DELETE CASCADE",
     ]
     for sql in migrations:
         try:

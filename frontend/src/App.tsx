@@ -30,6 +30,9 @@ const ReviewFlow = lazy(() => import('./pages/admin/ReviewFlow'));
 const Playlists = lazy(() => import('./pages/admin/Playlists'));
 const Categories = lazy(() => import('./pages/admin/Categories'));
 const Alerts = lazy(() => import('./pages/admin/Alerts'));
+const LiveShows = lazy(() => import('./pages/admin/LiveShows'));
+const HostConsole = lazy(() => import('./pages/admin/HostConsole'));
+const CallScreener = lazy(() => import('./pages/admin/CallScreener'));
 
 // Sponsor pages (lazy-loaded)
 const SponsorDashboard = lazy(() => import('./pages/sponsor/Dashboard'));
@@ -91,6 +94,9 @@ export default function App() {
               <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
               <Route path="/admin/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+              <Route path="/admin/live" element={<ProtectedRoute><LiveShows /></ProtectedRoute>} />
+              <Route path="/admin/live/:showId/host" element={<ProtectedRoute><HostConsole /></ProtectedRoute>} />
+              <Route path="/admin/live/:showId/screen" element={<ProtectedRoute><CallScreener /></ProtectedRoute>} />
             </Route>
 
             {/* Sponsor portal login (no layout) */}

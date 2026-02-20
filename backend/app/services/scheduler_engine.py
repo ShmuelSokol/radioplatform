@@ -133,10 +133,46 @@ class SchedulerEngine:
 
         return False
 
+    async def _check_live_show_hard_stop(self, db: AsyncSession, station: Station, live_show_id: str, now: datetime):
+        """Check if a live show has reached its hard stop time."""
+        from app.models.live_show import LiveShow, LiveShowStatus
+
+        result = await db.execute(select(LiveShow).where(LiveShow.id == live_show_id))
+        show = result.scalar_one_or_none()
+
+        if not show or show.status != LiveShowStatus.LIVE:
+            # Stale reference — clear it
+            config = dict(station.automation_config or {})
+            config.pop("live_show_id", None)
+            station.automation_config = config
+            logger.info("Cleared stale live_show_id from station %s", station.id)
+            return
+
+        if show.scheduled_end and show.scheduled_end <= now:
+            # Hard stop
+            from app.services.live_show_service import hard_stop_show
+            await hard_stop_show(db, live_show_id)
+            logger.warning("Hard stopped live show %s on station %s", live_show_id, station.id)
+
+            # Broadcast WS event
+            try:
+                from app.api.v1.live_shows_ws import broadcast_show_event
+                await broadcast_show_event(str(live_show_id), "show_hard_stopped", {
+                    "show_id": str(live_show_id),
+                })
+            except Exception:
+                pass
+
     async def _check_station(self, db: AsyncSession, station: Station):
         """Check a single station and advance playback if needed."""
         service = SchedulingService(db)
         now = datetime.utcnow()
+
+        # Check if station is in live show mode — skip normal scheduler
+        live_show_id = station.automation_config.get("live_show_id") if station.automation_config else None
+        if live_show_id:
+            await self._check_live_show_hard_stop(db, station, live_show_id, now)
+            return  # Skip normal scheduler logic
 
         # Check blackout windows first
         if await self._is_station_blacked_out(db, station, now):

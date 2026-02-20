@@ -21,6 +21,8 @@ from app.models.playlist_template import PlaylistTemplate, TemplateSlot
 from app.models.ad_campaign import AdCampaign, AdDraft, AdComment, CampaignStatus
 from app.models.alert import Alert, AlertSeverity, AlertType
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.live_show import LiveShow, LiveShowStatus, BroadcastMode
+from app.models.call_in_request import CallInRequest, CallStatus
 
 __all__ = [
     "User", "UserRole",
@@ -46,4 +48,6 @@ __all__ = [
     "AdCampaign", "AdDraft", "AdComment", "CampaignStatus",
     "Invoice", "InvoiceStatus",
     "Alert", "AlertSeverity", "AlertType",
+    "LiveShow", "LiveShowStatus", "BroadcastMode",
+    "CallInRequest", "CallStatus",
 ]

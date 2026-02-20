@@ -31,10 +31,10 @@ radioplatform/
 │   ├── app/config.py             # Pydantic BaseSettings (all env vars)
 │   ├── app/core/                 # security (JWT), dependencies (auth guards), exceptions, middleware
 │   ├── app/db/                   # async engine (statement_cache_size=0), Base, session
-│   ├── app/models/               # 18 SQLAlchemy models
+│   ├── app/models/               # 20 SQLAlchemy models
 │   ├── app/schemas/              # Pydantic v2 request/response schemas
 │   ├── app/api/v1/               # 12 route handlers
-│   ├── app/services/             # 14 business logic services
+│   ├── app/services/             # 17 business logic services
 │   ├── app/workers/tasks/        # Celery tasks (media processing)
 │   ├── app/streaming/            # HLS generator, playlist engine
 │   ├── tests/                    # pytest async tests
@@ -42,11 +42,11 @@ radioplatform/
 │   └── pyproject.toml            # bcrypt==4.1.3 pinned for passlib compat
 ├── frontend/
 │   └── src/
-│       ├── api/                  # 7 API client modules + Axios client with JWT interceptor
+│       ├── api/                  # 8 API client modules + Axios client with JWT interceptor
 │       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer, NowPlaying)
 │       ├── pages/admin/          # Dashboard, Stations, Assets, AssetUpload, Schedules, Rules, Users, Login
 │       ├── pages/public/         # StationList, Listen
-│       ├── hooks/                # 12 custom hooks
+│       ├── hooks/                # 16 custom hooks
 │       ├── stores/               # Zustand: authStore, playerStore
 │       └── types/                # TypeScript interfaces
 ├── bot/
@@ -87,6 +87,8 @@ radioplatform/
 | AdComment | ad_campaign.py | Campaign collaboration comments |
 | Invoice | invoice.py | Billing invoices with Stripe integration |
 | Alert | alert.py | System alerts with severity, type, and resolution tracking |
+| LiveShow | live_show.py | Live broadcast shows with scheduling + Twilio call-in |
+| CallInRequest | call_in_request.py | Caller queue entries for live shows |
 
 ### API Routes (`backend/app/api/v1/`)
 | Router | File | Prefix |
@@ -114,6 +116,8 @@ radioplatform/
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts |
+| live_shows | live_shows.py | /live-shows |
+| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket) |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
@@ -138,6 +142,9 @@ radioplatform/
 | ai_email_service.py | Claude API-powered email drafting for manager outreach |
 | alert_service.py | Alert creation, resolution, conflict detection, user notification dispatch |
 | sms_service.py | Twilio SMS and WhatsApp notification delivery |
+| live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
+| twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
+| live_audio_mixer.py | Audio mixer stub (future ffmpeg host+caller mixing) |
 
 ## Frontend Details
 
@@ -157,6 +164,9 @@ radioplatform/
 - Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
 - Alerts.tsx — Alerts management (filter, resolve, reopen, delete)
+- LiveShows.tsx — Live show management (create, list, start, delete)
+- HostConsole.tsx — Full-screen host broadcasting console with countdown, mic controls, caller queue
+- CallScreener.tsx — Two-column call screener (waiting/approved/on-air management)
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
@@ -169,7 +179,7 @@ radioplatform/
 - CampaignDetail.tsx — Campaign detail with drafts + comments thread
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
 
-### Hooks (`frontend/src/hooks/`) — 15 hooks
+### Hooks (`frontend/src/hooks/`) — 19 hooks
 | Hook | Description |
 |------|-------------|
 | useAuth.ts | Authentication state + mutations |
@@ -188,9 +198,12 @@ radioplatform/
 | useCampaigns.ts | Campaign CRUD, drafts, comments |
 | useBilling.ts | Invoice list + billing summary |
 | useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
+| useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
+| useLiveShowWS.ts | Live show WebSocket (real-time callers, countdown, with polling fallback) |
+| useHostAudio.ts | Browser mic capture, MediaRecorder, binary WS streaming, VU meter |
 
-### API Clients (`frontend/src/api/`) — 11 modules
-auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, client.ts (Axios + JWT interceptor)
+### API Clients (`frontend/src/api/`) — 12 modules
+auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, client.ts (Axios + JWT interceptor)
 
 ### Routes (`frontend/src/App.tsx`)
 - `/` → redirect to `/stations`
@@ -210,6 +223,9 @@ auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, spo
 - `/admin/playlists` → Playlists (protected)
 - `/admin/alerts` → Alerts (protected)
 - `/admin/analytics` → Analytics (protected)
+- `/admin/live` → LiveShows (protected)
+- `/admin/live/:showId/host` → HostConsole (protected)
+- `/admin/live/:showId/screen` → CallScreener (protected)
 - `/sponsor/login` → SponsorLogin
 - `/sponsor/dashboard` → SponsorDashboard (sponsor-protected, SponsorLayout)
 - `/sponsor/campaigns` → SponsorCampaigns (sponsor-protected)
@@ -282,6 +298,9 @@ Claude Code accessible over Telegram for remote development.
 | `TWILIO_ACCOUNT_SID` | Twilio account SID (empty to disable) | For SMS/WhatsApp alerts |
 | `TWILIO_AUTH_TOKEN` | Twilio auth token | For SMS/WhatsApp alerts |
 | `TWILIO_PHONE_NUMBER` | Twilio phone number | For SMS/WhatsApp alerts |
+| `TWILIO_VOICE_NUMBER` | Dedicated voice number for live call-ins | For live shows |
+| `LIVE_SHOW_HOLD_MUSIC_URL` | Public URL to hold music MP3 | For live shows |
+| `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks | For live shows |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://studio-kolbramah-api.vercel.app/api/v1)
