@@ -245,8 +245,12 @@ class SchedulerEngine:
 
         for station in stations:
             try:
-                # Run queue-based playback advancement
-                await self._advance_queue(db, station.id)
+                # Check blackout BEFORE advancing queue — don't start new songs during blackout
+                now = datetime.now(timezone.utc)
+                is_blacked_out = await self._is_station_blacked_out(db, station, now)
+                if not is_blacked_out:
+                    # Run queue-based playback advancement only when NOT blacked out
+                    await self._advance_queue(db, station.id)
                 await self._check_station(db, station)
                 # Also check per-channel playback
                 ch_stmt = select(ChannelStream).where(
@@ -515,6 +519,18 @@ class SchedulerEngine:
         # Check blackout windows first
         is_blacked_out = await self._is_station_blacked_out(db, station, now)
         if is_blacked_out:
+            # Stop any currently playing queue entry
+            from app.models.queue_entry import QueueEntry
+            playing_q = await db.execute(
+                select(QueueEntry).where(
+                    QueueEntry.station_id == station.id,
+                    QueueEntry.status == "playing",
+                )
+            )
+            for entry in playing_q.scalars().all():
+                entry.status = "played"
+            await db.flush()
+
             silence = await self._get_silence_asset(db)
             now_playing = await service.get_now_playing(station.id)
 
