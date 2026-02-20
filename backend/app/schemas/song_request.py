@@ -21,6 +21,7 @@ class SongRequestInDB(BaseModel):
 
     id: uuid.UUID | str
     station_id: uuid.UUID | str
+    station_name: str | None = None
     requester_name: str
     song_title: str
     song_artist: str | None = None

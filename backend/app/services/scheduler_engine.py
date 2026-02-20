@@ -34,7 +34,7 @@ class SchedulerEngine:
     4. Broadcasts updates via WebSocket
     """
     
-    def __init__(self, check_interval: int = 10):
+    def __init__(self, check_interval: int = 3):
         self.check_interval = check_interval  # seconds
         self.running = False
         self._task: Optional[asyncio.Task] = None

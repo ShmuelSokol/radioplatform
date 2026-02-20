@@ -179,7 +179,10 @@ async def list_requests(
     _user: User = Depends(require_manager),
 ):
     """Admin: list song requests with optional filters."""
-    q = select(SongRequest).options(joinedload(SongRequest.asset))
+    q = select(SongRequest).options(
+        joinedload(SongRequest.asset),
+        joinedload(SongRequest.station),
+    )
     count_q = select(func.count(SongRequest.id))
     if station_id:
         q = q.where(SongRequest.station_id == station_id)
@@ -193,13 +196,15 @@ async def list_requests(
     requests = result.unique().scalars().all()
     total = (await db.execute(count_q)).scalar() or 0
 
-    # Build response with matched asset info
+    # Build response with matched asset + station info
     request_dicts = []
     for req in requests:
         d = SongRequestInDB.model_validate(req)
         if req.asset:
             d.matched_asset_title = req.asset.title
             d.matched_asset_artist = req.asset.artist
+        if req.station:
+            d.station_name = req.station.name
         request_dicts.append(d)
 
     return SongRequestListResponse(requests=request_dicts, total=total)
@@ -228,11 +233,12 @@ async def update_request(
         req.reviewed_at = datetime.now(timezone.utc)
 
         # When approving a matched request, add the asset to the queue
-        if body.status in (RequestStatus.APPROVED, RequestStatus.QUEUED) and req.asset_id:
+        if body.status in (RequestStatus.APPROVED.value, RequestStatus.QUEUED.value,
+                           RequestStatus.APPROVED, RequestStatus.QUEUED) and req.asset_id:
             req.status = RequestStatus.QUEUED
             await add_to_queue(db, str(req.asset_id), str(req.station_id))
 
-    await db.flush()
+    await db.commit()
     await db.refresh(req)
     return req
 

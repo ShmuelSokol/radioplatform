@@ -161,6 +161,7 @@ export default function SongRequests() {
               <thead>
                 <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">
                   <th className="text-left px-3 py-2 w-8"></th>
+                  <th className="text-left px-3 py-2">Station</th>
                   <th className="text-left px-3 py-2">Requester</th>
                   <th className="text-left px-3 py-2">Song</th>
                   <th className="text-left px-3 py-2">Artist</th>
@@ -177,6 +178,7 @@ export default function SongRequests() {
                     <td className="px-3 py-1.5">
                       <span className={`inline-block w-2 h-2 rounded-full ${STATUS_DOT[req.status] ?? 'bg-gray-400'}`} />
                     </td>
+                    <td className="px-3 py-1.5 text-purple-300 text-[11px] max-w-[120px] truncate">{(req as any).station_name || '—'}</td>
                     <td className="px-3 py-1.5 text-cyan-300 max-w-[140px] truncate">{req.requester_name}</td>
                     <td className="px-3 py-1.5 text-white max-w-[200px] truncate font-medium">{req.song_title}</td>
                     <td className="px-3 py-1.5 text-gray-400 max-w-[140px] truncate">{req.song_artist || '--'}</td>

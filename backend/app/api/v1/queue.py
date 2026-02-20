@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DURATION = 180  # 3 minutes fallback
 _last_advance: dict[str, float] = {}
-ADVANCE_THROTTLE = 5.0  # seconds between _check_advance calls per station
+ADVANCE_THROTTLE = 1.0  # seconds between _check_advance calls per station
 
 router = APIRouter(prefix="/stations/{station_id}/queue", tags=["queue"])
 
@@ -298,8 +298,12 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
-        await _replenish_queue(db, station_id)
         await db.commit()
+        # Replenish AFTER commit so the next song starts immediately
+        try:
+            await _replenish_queue(db, station_id)
+        except Exception as e:
+            logger.warning("Queue replenish failed (non-critical): %s", e)
         return next_entry
 
     await db.commit()
