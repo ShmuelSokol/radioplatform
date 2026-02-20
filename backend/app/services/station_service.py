@@ -25,8 +25,10 @@ async def auto_generate_holidays_for_station(db: AsyncSession, station: Station,
     if not station.latitude or not station.longitude:
         return 0
 
-    start_date = date.today()
-    end_date = start_date + timedelta(days=months_ahead * 30)
+    # Use 7-day lookback to ensure current-week Shabbat is always included
+    # (e.g., if regeneration runs on Saturday, this Friday's window still gets created)
+    start_date = date.today() - timedelta(days=7)
+    end_date = date.today() + timedelta(days=months_ahead * 30)
     station_ids = [str(station.id)]
 
     shabbos = generate_shabbos_windows(

@@ -202,8 +202,8 @@ async def preview_blackouts(
             detail="Station must have latitude and longitude set for auto-generation",
         )
 
-    start_date = date.today()
-    end_date = start_date + timedelta(days=data.months_ahead * 30)
+    start_date = date.today() - timedelta(days=7)
+    end_date = date.today() + timedelta(days=data.months_ahead * 30)
     station_ids = [str(station.id)]
 
     shabbos = generate_shabbos_windows(
@@ -265,8 +265,8 @@ async def auto_generate_blackouts(
             detail="Station must have latitude and longitude set for auto-generation",
         )
 
-    start_date = date.today()
-    end_date = start_date + timedelta(days=data.months_ahead * 30)
+    start_date = date.today() - timedelta(days=7)
+    end_date = date.today() + timedelta(days=data.months_ahead * 30)
     station_ids = [str(station.id)]
 
     # Generate windows

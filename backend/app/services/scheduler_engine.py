@@ -111,8 +111,18 @@ class SchedulerEngine:
                     max_result = await db.execute(max_stmt)
                     max_end = max_result.scalar()
 
-                    # If coverage is less than 365 days out, extend
-                    if not max_end or (max_end.replace(tzinfo=timezone.utc) - now).days < 365:
+                    # Also check for a gap: if no window exists in the next 7 days, regenerate
+                    next_week = now + timedelta(days=7)
+                    gap_stmt = select(sa_func.count(HolidayWindow.id)).where(
+                        HolidayWindow.is_blackout == True,
+                        HolidayWindow.start_datetime <= next_week,
+                        HolidayWindow.end_datetime >= now,
+                    )
+                    gap_result = await db.execute(gap_stmt)
+                    near_term_count = gap_result.scalar() or 0
+
+                    # Extend if coverage < 365 days OR no near-term windows exist
+                    if not max_end or (max_end.replace(tzinfo=timezone.utc) - now).days < 365 or near_term_count == 0:
                         count = await auto_generate_holidays_for_station(db, station)
                         if count > 0:
                             await db.commit()
