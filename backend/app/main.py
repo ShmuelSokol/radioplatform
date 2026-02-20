@@ -48,13 +48,22 @@ async def _add_missing_columns(engine):
         "DO $$ BEGIN CREATE TYPE call_status AS ENUM ('waiting','screening','approved','on_air','completed','rejected','abandoned'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
         "DO $$ BEGIN CREATE TYPE request_status AS ENUM ('pending','approved','queued','played','rejected'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
     ]
-    for sql in enum_migrations:
+    # asyncpg is autocommit by default — bypasses SQLAlchemy transaction wrapping
+    # which is required for ALTER TYPE ADD VALUE (cannot run inside a transaction)
+    import asyncpg
+    dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    try:
+        raw_conn = await asyncpg.connect(dsn, statement_cache_size=0)
         try:
-            async with engine.connect() as conn:
-                auto_conn = conn.execution_options(isolation_level="AUTOCOMMIT")
-                await auto_conn.execute(text(sql))
-        except Exception as e:
-            logger.warning(f"Enum migration skipped ({sql[:50]}...): {e}")
+            for sql in enum_migrations:
+                try:
+                    await raw_conn.execute(sql)
+                except Exception as e:
+                    logger.warning(f"Enum migration skipped ({sql[:50]}...): {e}")
+        finally:
+            await raw_conn.close()
+    except Exception as e:
+        logger.warning(f"Could not connect for enum migrations: {e}")
 
     migrations = [
         "ALTER TABLE channel_streams ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true",
