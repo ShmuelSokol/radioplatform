@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +13,48 @@ from app.models.user import User, UserRole
 
 bearer_scheme = HTTPBearer()
 
+# Map request paths to human-readable actions
+_ACTION_MAP = [
+    ("GET", "/assets", "Browsed library"),
+    ("POST", "/assets/upload", "Uploaded asset"),
+    ("POST", "/assets/backfill", "Ran backfill"),
+    ("GET", "/assets/", "Viewed asset"),
+    ("PATCH", "/assets/", "Edited asset"),
+    ("DELETE", "/assets/", "Deleted asset"),
+    ("GET", "/stations", "Viewed stations"),
+    ("GET", "/queue", "Viewed queue"),
+    ("POST", "/queue", "Modified queue"),
+    ("GET", "/rules", "Viewed rules"),
+    ("GET", "/schedules", "Viewed schedules"),
+    ("GET", "/users", "Viewed users"),
+    ("GET", "/sponsors", "Viewed sponsors"),
+    ("GET", "/alerts", "Viewed alerts"),
+    ("GET", "/analytics", "Viewed analytics"),
+    ("GET", "/now-playing", "Checked now playing"),
+    ("GET", "/song-requests", "Viewed requests"),
+    ("POST", "/song-requests", "Managed request"),
+    ("GET", "/live-shows", "Viewed live shows"),
+    ("GET", "/archives", "Viewed archives"),
+    ("GET", "/holidays", "Viewed holidays"),
+    ("GET", "/playlists", "Viewed playlists"),
+    ("GET", "/listeners", "Viewed listeners"),
+]
+
+
+def _classify_action(method: str, path: str) -> str:
+    """Classify a request into a human-readable action."""
+    for m, prefix, label in _ACTION_MAP:
+        if method == m and prefix in path:
+            return label
+    if method == "GET":
+        return "Browsed dashboard"
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        return "Made changes"
+    return "Active"
+
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -34,6 +75,21 @@ async def get_current_user(
 
     if not user or not user.is_active:
         raise UnauthorizedError("User not found or inactive")
+
+    # Track activity — throttle to avoid DB write on every request (max once per 5s)
+    now = datetime.now(timezone.utc)
+    should_update = (
+        user.last_seen_at is None
+        or (now - user.last_seen_at).total_seconds() > 5
+    )
+    if should_update:
+        action = _classify_action(request.method, request.url.path)
+        user.last_seen_at = now
+        user.last_action = action
+        try:
+            await db.flush()
+        except Exception:
+            pass  # Don't fail requests over activity tracking
 
     return user
 

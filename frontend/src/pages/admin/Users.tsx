@@ -1,9 +1,28 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '../../hooks/useUsers';
 import Spinner from '../../components/Spinner';
 
+function useForceUpdate() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 5000);
+    return () => clearInterval(id);
+  }, []);
+}
+
+function formatLastSeen(iso: string | null): { text: string; isOnline: boolean } {
+  if (!iso) return { text: 'Never', isOnline: false };
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 12) return { text: 'Online', isOnline: true };
+  if (diff < 60) return { text: `${Math.floor(diff)}s ago`, isOnline: false };
+  if (diff < 3600) return { text: `${Math.floor(diff / 60)}m ago`, isOnline: false };
+  if (diff < 86400) return { text: `${Math.floor(diff / 3600)}h ago`, isOnline: false };
+  return { text: `${Math.floor(diff / 86400)}d ago`, isOnline: false };
+}
+
 export default function Users() {
   const { data, isLoading } = useUsers();
+  useForceUpdate(); // re-render every 5s so "Xs ago" stays fresh
   const createMut = useCreateUser();
   const updateMut = useUpdateUser();
   const deleteMut = useDeleteUser();
@@ -270,6 +289,8 @@ export default function Users() {
                 <th className="text-left px-3 py-2 hidden lg:table-cell">Phone</th>
                 <th className="text-left px-3 py-2 hidden lg:table-cell">Title</th>
                 <th className="text-left px-3 py-2 hidden lg:table-cell">Profile</th>
+                <th className="text-left px-3 py-2">Last Online</th>
+                <th className="text-left px-3 py-2 hidden lg:table-cell">Last Action</th>
                 <th className="text-left px-3 py-2">Status</th>
                 <th className="text-left px-3 py-2">Actions</th>
               </tr>
@@ -295,6 +316,20 @@ export default function Users() {
                     ) : (
                       <span className="text-[11px] text-gray-600">Private</span>
                     )}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    {(() => {
+                      const { text, isOnline } = formatLastSeen(u.last_seen_at);
+                      return (
+                        <span className="flex items-center gap-1.5 text-[11px]">
+                          <span className={`inline-block w-2 h-2 rounded-full ${isOnline ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+                          <span className={isOnline ? 'text-green-400 font-bold' : 'text-gray-400'}>{text}</span>
+                        </span>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">
+                    {u.last_action ?? '\u2014'}
                   </td>
                   <td className="px-3 py-1.5">
                     <span className={`text-[11px] ${u.is_active ? 'text-green-400' : 'text-red-400'}`}>

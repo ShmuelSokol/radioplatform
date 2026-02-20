@@ -136,6 +136,9 @@ async def _add_missing_columns(engine):
         # Listener sessions index for fast heartbeat lookups
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_heartbeat ON listener_sessions (last_heartbeat)",
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_started ON listener_sessions (started_at)",
+        # User activity tracking
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_action VARCHAR(255)",
         # CRM indexes
         "CREATE INDEX IF NOT EXISTS ix_song_ratings_member ON song_ratings (member_id)",
         "CREATE INDEX IF NOT EXISTS ix_song_ratings_asset ON song_ratings (asset_id)",
@@ -410,6 +413,29 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check():
+        """Health check for Railway zero-downtime deploys.
+
+        Returns 200 only when tables are created and DB is reachable.
+        Railway keeps the old instance running until this returns 200.
+        """
+        if not _tables_created:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=503,
+                content={"status": "starting", "detail": "Tables not yet created"},
+            )
+        # Verify DB connectivity
+        try:
+            from sqlalchemy import text
+            from app.db.engine import engine
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+        except Exception as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unhealthy", "detail": f"DB unreachable: {e}"},
+            )
         return {"status": "ok"}
 
     @app.get("/api/v1/init")

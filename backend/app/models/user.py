@@ -1,6 +1,7 @@
 import enum
+from datetime import datetime
 
-from sqlalchemy import Boolean, String, Text
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,5 +34,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     social_links: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_action: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     assets = relationship("Asset", back_populates="created_by_user", lazy="noload")

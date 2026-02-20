@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -47,6 +48,8 @@ class UserOut(BaseModel):
     photo_url: str | None = None
     is_public: bool = False
     social_links: dict | None = None
+    last_seen_at: datetime | None = None
+    last_action: str | None = None
 
 
 class UserListResponse(BaseModel):

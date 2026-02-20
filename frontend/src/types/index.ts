@@ -24,6 +24,8 @@ export interface User {
   photo_url: string | null;
   is_public: boolean;
   social_links: SocialLinks | null;
+  last_seen_at: string | null;
+  last_action: string | null;
 }
 
 export interface PublicHost {
