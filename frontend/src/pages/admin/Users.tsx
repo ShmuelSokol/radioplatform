@@ -80,6 +80,7 @@ export default function Users() {
               <option value="admin">Admin</option>
               <option value="manager">Manager</option>
               <option value="viewer">Viewer</option>
+              <option value="sponsor">Sponsor</option>
             </select>
           </div>
           <div>
@@ -119,6 +120,7 @@ export default function Users() {
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                       u.role === 'admin' ? 'bg-red-900 text-red-300' :
                       u.role === 'manager' ? 'bg-blue-900 text-blue-300' :
+                      u.role === 'sponsor' ? 'bg-indigo-900 text-indigo-300' :
                       'bg-gray-800 text-gray-400'
                     }`}>{u.role.toUpperCase()}</span>
                   </td>
