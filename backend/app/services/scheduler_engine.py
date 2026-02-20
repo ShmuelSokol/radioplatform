@@ -44,6 +44,8 @@ class SchedulerEngine:
         self._last_block: dict[str, str | None] = {}
         # Daily holiday extension check
         self._last_holiday_check: Optional[datetime] = None
+        # Weather readout daily generation check: station_id → date string
+        self._last_readout_check: dict[str, str] = {}
     
     async def start(self):
         """Start the scheduler engine."""
@@ -73,6 +75,8 @@ class SchedulerEngine:
                 async for db in get_db():
                     await self._check_all_stations(db)
                     await self._maybe_extend_holidays(db)
+                    await self._maybe_generate_weather_readouts(db)
+                    await self._maybe_queue_weather_readouts(db)
                     break
             except Exception as e:
                 logger.error(f"Scheduler error: {e}", exc_info=True)
@@ -117,6 +121,111 @@ class SchedulerEngine:
                     logger.warning("Holiday extension failed for station %s: %s", station.name, e)
         except Exception as e:
             logger.error("Holiday extension check failed: %s", e, exc_info=True)
+
+    async def _maybe_generate_weather_readouts(self, db: AsyncSession):
+        """Generate weather readouts for stations that have it enabled, once per day."""
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+
+        try:
+            stmt = select(Station).where(Station.is_active == True)
+            result = await db.execute(stmt)
+            stations = result.scalars().all()
+
+            for station in stations:
+                config = (station.automation_config or {}).get("weather_readout", {})
+                if not config.get("enabled"):
+                    continue
+
+                station_key = str(station.id)
+                tz_name = station.timezone or "America/New_York"
+                try:
+                    local_now = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+                except Exception:
+                    local_now = datetime.now(timezone.utc)
+
+                today_str = local_now.strftime("%Y-%m-%d")
+
+                # Skip if already checked today
+                if self._last_readout_check.get(station_key) == today_str:
+                    continue
+
+                # Skip if local time < generate_time
+                gen_time_str = config.get("generate_time", "06:00")
+                try:
+                    parts = gen_time_str.split(":")
+                    gen_hour, gen_min = int(parts[0]), int(parts[1])
+                except (ValueError, IndexError):
+                    gen_hour, gen_min = 6, 0
+
+                if local_now.hour < gen_hour or (local_now.hour == gen_hour and local_now.minute < gen_min):
+                    continue
+
+                try:
+                    from app.services.weather_readout_service import generate_readout_for_station
+                    readout = await generate_readout_for_station(db, station, local_now.date())
+                    if readout:
+                        await db.commit()
+                        logger.info("Auto-generated weather readout for station %s", station.name)
+                except Exception as e:
+                    logger.warning("Weather readout generation failed for station %s: %s", station.name, e)
+
+                self._last_readout_check[station_key] = today_str
+
+        except Exception as e:
+            logger.error("Weather readout generation check failed: %s", e, exc_info=True)
+
+    async def _maybe_queue_weather_readouts(self, db: AsyncSession):
+        """Auto-queue recorded weather readouts when their queue_time arrives."""
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+
+        try:
+            from app.models.weather_readout import WeatherReadout
+            from app.models.queue_entry import QueueEntry
+
+            stmt = select(WeatherReadout).where(
+                WeatherReadout.status == "recorded",
+                WeatherReadout.asset_id.isnot(None),
+                WeatherReadout.queue_time.isnot(None),
+            )
+            result = await db.execute(stmt)
+            readouts = result.scalars().all()
+
+            for readout in readouts:
+                station = await db.get(Station, readout.station_id)
+                if not station:
+                    continue
+
+                config = (station.automation_config or {}).get("weather_readout", {})
+                if not config.get("auto_queue"):
+                    continue
+
+                tz_name = station.timezone or "America/New_York"
+                try:
+                    local_now = datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name))
+                except Exception:
+                    local_now = datetime.now(timezone.utc)
+
+                local_time = local_now.time()
+                if local_time >= readout.queue_time:
+                    entry = QueueEntry(
+                        station_id=readout.station_id,
+                        asset_id=readout.asset_id,
+                        position=0,
+                        status="pending",
+                    )
+                    db.add(entry)
+                    readout.status = "queued"
+                    await db.commit()
+                    logger.info("Auto-queued weather readout %s for station %s", readout.id, station.name)
+
+        except Exception as e:
+            logger.error("Weather readout auto-queue check failed: %s", e, exc_info=True)
 
     async def _check_all_stations(self, db: AsyncSession):
         """Check all active stations and their channels."""

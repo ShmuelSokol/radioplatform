@@ -48,6 +48,7 @@ async def _add_missing_columns(engine):
         "DO $$ BEGIN CREATE TYPE broadcast_mode AS ENUM ('WEBRTC','ICECAST'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
         "DO $$ BEGIN CREATE TYPE call_status AS ENUM ('WAITING','SCREENING','APPROVED','ON_AIR','COMPLETED','REJECTED','ABANDONED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
         "DO $$ BEGIN CREATE TYPE request_status AS ENUM ('PENDING','APPROVED','QUEUED','PLAYED','REJECTED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        "DO $$ BEGIN CREATE TYPE readout_status AS ENUM ('pending','recorded','queued','skipped'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
     ]
     # asyncpg is autocommit by default — bypasses SQLAlchemy transaction wrapping
     # which is required for ALTER TYPE ADD VALUE (cannot run inside a transaction)

@@ -37,6 +37,7 @@ const HostConsole = lazy(() => import('./pages/admin/HostConsole'));
 const CallScreener = lazy(() => import('./pages/admin/CallScreener'));
 const SongRequests = lazy(() => import('./pages/admin/SongRequests'));
 const AdminArchives = lazy(() => import('./pages/admin/Archives'));
+const RecordingStudio = lazy(() => import('./pages/admin/RecordingStudio'));
 
 // Public pages (lazy-loaded)
 const ProgramGuide = lazy(() => import('./pages/public/ProgramGuide'));
@@ -111,6 +112,7 @@ export default function App() {
               <Route path="/admin/live/:showId/screen" element={<ProtectedRoute><CallScreener /></ProtectedRoute>} />
               <Route path="/admin/requests" element={<ProtectedRoute><SongRequests /></ProtectedRoute>} />
               <Route path="/admin/archives" element={<ProtectedRoute><AdminArchives /></ProtectedRoute>} />
+              <Route path="/admin/studio" element={<ProtectedRoute><RecordingStudio /></ProtectedRoute>} />
             </Route>
 
             {/* Sponsor portal login (no layout) */}

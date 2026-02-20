@@ -29,6 +29,7 @@ from app.api.v1.live_shows import router as live_shows_router
 from app.api.v1.live_shows_ws import router as live_shows_ws_router
 from app.api.v1.song_requests import router as song_requests_router
 from app.api.v1.archives import router as archives_router
+from app.api.v1.weather_readouts import router as weather_readouts_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -60,3 +61,4 @@ router.include_router(live_shows_router)
 router.include_router(live_shows_ws_router)
 router.include_router(song_requests_router)
 router.include_router(archives_router)
+router.include_router(weather_readouts_router)

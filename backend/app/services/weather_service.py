@@ -20,19 +20,22 @@ def _deg_to_cardinal(deg: float) -> str:
     return WIND_DIRECTIONS[idx]
 
 
-async def get_current_weather() -> dict:
-    """Fetch current weather + 3-day forecast for Lakewood, NJ from OpenWeatherMap.
+async def get_current_weather(
+    lat: float = 40.0968,
+    lon: float = -74.2179,
+    timezone_name: str = "America/New_York",
+) -> dict:
+    """Fetch current weather + 3-day forecast from OpenWeatherMap.
 
     Returns dict with keys: temp_f, description, wind_speed_mph,
     wind_direction, humidity, forecast (list of day dicts).
     """
-    lat, lon = "40.0968", "-74.2179"
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Current weather
         resp = await client.get(
             "https://api.openweathermap.org/data/2.5/weather",
-            params={"lat": lat, "lon": lon, "units": "imperial", "appid": settings.OPENWEATHERMAP_API_KEY},
+            params={"lat": str(lat), "lon": str(lon), "units": "imperial", "appid": settings.OPENWEATHERMAP_API_KEY},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -40,7 +43,7 @@ async def get_current_weather() -> dict:
         # 5-day/3-hour forecast (we'll extract daily summaries)
         forecast_resp = await client.get(
             "https://api.openweathermap.org/data/2.5/forecast",
-            params={"lat": lat, "lon": lon, "units": "imperial", "appid": settings.OPENWEATHERMAP_API_KEY},
+            params={"lat": str(lat), "lon": str(lon), "units": "imperial", "appid": settings.OPENWEATHERMAP_API_KEY},
         )
         forecast_resp.raise_for_status()
         forecast_data = forecast_resp.json()
@@ -55,7 +58,7 @@ async def get_current_weather() -> dict:
     except ImportError:
         from backports.zoneinfo import ZoneInfo
 
-    eastern = ZoneInfo("America/New_York")
+    eastern = ZoneInfo(timezone_name)
     today = datetime.now(timezone.utc).astimezone(eastern).date()
     days: dict[str, dict] = {}
 

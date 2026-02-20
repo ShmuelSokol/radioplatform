@@ -23,16 +23,16 @@ def _utc_to_eastern(utc_dt: datetime) -> datetime:
     return utc_dt.astimezone(ZoneInfo("America/New_York"))
 
 
-def _build_time_text(eastern_now: datetime) -> str:
+def _build_time_text(eastern_now: datetime, brand_name: str = "Kohl Baramah") -> str:
     hour = eastern_now.strftime("%I").lstrip("0")
     minute = eastern_now.strftime("%M")
     ampm = eastern_now.strftime("%p")
-    return f"The time is {hour}:{minute} {ampm} on Kohl Baramah."
+    return f"The time is {hour}:{minute} {ampm} on {brand_name}."
 
 
-def _build_weather_text(weather: dict) -> str:
+def _build_weather_text(weather: dict, city_name: str = "Lakewood", brand_name: str = "Kohl Baramah") -> str:
     parts = [
-        f"Currently in Lakewood: {weather['temp_f']} degrees and {weather['description']}, "
+        f"Currently in {city_name}: {weather['temp_f']} degrees and {weather['description']}, "
         f"winds from the {weather['wind_direction']} at {weather['wind_speed_mph']} miles per hour."
     ]
 
@@ -47,7 +47,7 @@ def _build_weather_text(weather: dict) -> str:
 
     parts.append(
         "And have a great day, and stay safe, "
-        "from YOUR Kohl Baramah family... weather room."
+        f"from YOUR {brand_name} family... weather room."
     )
 
     return " ".join(parts)
