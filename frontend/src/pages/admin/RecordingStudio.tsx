@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import AudioMixer from './AudioMixer';
 import { useStations } from '../../hooks/useStations';
 import {
   useWeatherReadouts,
@@ -465,6 +466,15 @@ export default function RecordingStudio() {
           Record any audio and save it directly to the library. Captures 48kHz 16-bit WAV (broadcast quality).
         </p>
         <GeneralRecorder />
+      </section>
+
+      {/* ── Section 3: Audio Mixer ──────────────────────────────────── */}
+      <section className="bg-[#12123a] border border-[#2a2a5e] rounded-xl p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-amber-300">Audio Mixer</h2>
+        <p className="text-xs text-gray-500">
+          Select a backtrack and overlay, configure volume and fades, then mix into a new asset.
+        </p>
+        <AudioMixer />
       </section>
     </div>
   );

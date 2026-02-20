@@ -100,3 +100,26 @@ export const restoreOriginal = async (id: string): Promise<Asset> => {
   const res = await apiClient.post<Asset>(`/assets/${id}/restore-original`);
   return res.data;
 };
+
+export interface MixRequest {
+  backtrack_asset_id: string;
+  overlay_asset_id: string;
+  output_title: string;
+  output_asset_type?: string;
+  bt_trim_start?: number;
+  bt_trim_end?: number;
+  bt_target_dur?: number;
+  bt_volume?: number;
+  ov_volume?: number;
+  bt_fade_in?: number;
+  bt_fade_out?: number;
+  bt_fade_out_start?: number;
+  ov_fade_in?: number;
+  ov_fade_out?: number;
+  ov_fade_out_start?: number;
+}
+
+export const mixTracks = async (body: MixRequest): Promise<Asset> => {
+  const res = await apiClient.post<Asset>('/studio/mix', body);
+  return res.data;
+};
