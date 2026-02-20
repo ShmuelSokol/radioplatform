@@ -33,6 +33,7 @@ class AssetUpdate(BaseModel):
     duration: float | None = None
     asset_type: str | None = None
     category: str | None = None
+    file_path: str | None = None
 
 
 class TranscodeRequest(BaseModel):
