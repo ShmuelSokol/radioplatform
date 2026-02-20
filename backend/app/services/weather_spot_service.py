@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -12,6 +13,32 @@ from app.services.tts_service import generate_tts
 from app.services.weather_service import get_current_weather
 
 logger = logging.getLogger(__name__)
+
+# ── Customizable sign-in / sign-out texts ──
+# Only these should be edited for branding. The weather body is automated.
+WEATHER_SIGN_IN = "Here's your Kohl Baramah weather update."
+WEATHER_SIGN_OUT = (
+    "And have a great day, and stay safe, "
+    "from YOUR Kohl Baramah family... weather room."
+)
+
+# ── Word replacements ──
+# Applied to ALL generated TTS text (time + weather).
+# Longer phrases MUST come before shorter ones (e.g. "Saturday night" before "Saturday").
+WORD_REPLACEMENTS: list[tuple[str, str]] = [
+    ("Saturday night", "Motzie Shabbos"),
+    ("Saturday",       "Shabbos"),
+    ("Sunday",         "Sunday"),          # no change — placeholder for easy editing
+]
+
+
+def _apply_word_replacements(text: str) -> str:
+    """Apply word replacements to TTS text (case-insensitive, preserves flow)."""
+    for original, replacement in WORD_REPLACEMENTS:
+        # Case-insensitive replace, keeping surrounding context
+        pattern = re.compile(re.escape(original), re.IGNORECASE)
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def _utc_to_eastern(utc_dt: datetime) -> datetime:
@@ -27,15 +54,26 @@ def _build_time_text(eastern_now: datetime, brand_name: str = "Kohl Baramah") ->
     hour = eastern_now.strftime("%I").lstrip("0")
     minute = eastern_now.strftime("%M")
     ampm = eastern_now.strftime("%p")
-    return f"The time is {hour}:{minute} {ampm} on {brand_name}."
+    text = f"The time is {hour}:{minute} {ampm} on {brand_name}."
+    return _apply_word_replacements(text)
 
 
-def _build_weather_text(weather: dict, city_name: str = "Lakewood", brand_name: str = "Kohl Baramah") -> str:
-    parts = [
+def _build_weather_text(weather: dict, city_name: str = "Lakewood") -> str:
+    """Build weather readout: sign-in + automated body + sign-out.
+
+    The body is fully automated from weather data.
+    Only WEATHER_SIGN_IN and WEATHER_SIGN_OUT should be customized.
+    Word replacements are applied to the entire text.
+    """
+    parts = [WEATHER_SIGN_IN]
+
+    # Automated body — current conditions
+    parts.append(
         f"Currently in {city_name}: {weather['temp_f']} degrees and {weather['description']}, "
         f"winds from the {weather['wind_direction']} at {weather['wind_speed_mph']} miles per hour."
-    ]
+    )
 
+    # Automated body — forecast
     forecast = weather.get("forecast", [])
     if forecast:
         parts.append("Looking ahead:")
@@ -45,12 +83,10 @@ def _build_weather_text(weather: dict, city_name: str = "Lakewood", brand_name: 
                 f"with a high of {day['high']} and a low of {day['low']}."
             )
 
-    parts.append(
-        "And have a great day, and stay safe, "
-        f"from YOUR {brand_name} family... weather room."
-    )
+    parts.append(WEATHER_SIGN_OUT)
 
-    return " ".join(parts)
+    text = " ".join(parts)
+    return _apply_word_replacements(text)
 
 
 async def get_or_create_weather_spot_assets(
