@@ -220,12 +220,17 @@ async def update_request(
     if not req:
         raise NotFoundError("Song request not found")
 
+    if body.asset_id is not None:
+        req.asset_id = body.asset_id
     if body.status:
         req.status = body.status
         req.reviewed_by = user.id
         req.reviewed_at = datetime.now(timezone.utc)
-    if body.asset_id is not None:
-        req.asset_id = body.asset_id
+
+        # When approving a matched request, add the asset to the queue
+        if body.status in (RequestStatus.APPROVED, RequestStatus.QUEUED) and req.asset_id:
+            req.status = RequestStatus.QUEUED
+            await add_to_queue(db, str(req.asset_id), str(req.station_id))
 
     await db.flush()
     await db.refresh(req)
