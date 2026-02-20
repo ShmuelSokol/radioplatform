@@ -51,8 +51,8 @@ async def _add_missing_columns(engine):
     for sql in enum_migrations:
         try:
             async with engine.connect() as conn:
-                await conn.execution_options(isolation_level="AUTOCOMMIT")
-                await conn.execute(text(sql))
+                auto_conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                await auto_conn.execute(text(sql))
         except Exception as e:
             logger.warning(f"Enum migration skipped ({sql[:50]}...): {e}")
 
