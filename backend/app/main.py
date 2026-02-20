@@ -110,6 +110,14 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS sponsor_id UUID REFERENCES sponsors(id) ON DELETE SET NULL",
         # Preempt mechanism for exact-time playback (time announcements)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
+        # Schedule block columns that may be missing from early table creation
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS playback_mode VARCHAR(20) NOT NULL DEFAULT 'sequential'",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS start_date DATE",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS end_date DATE",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS start_sun_event VARCHAR(20)",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS start_sun_offset INTEGER",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS end_sun_event VARCHAR(20)",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS end_sun_offset INTEGER",
     ]
     for sql in migrations:
         try:
