@@ -27,6 +27,9 @@ from app.models.song_request import SongRequest, RequestStatus
 from app.models.show_archive import ShowArchive
 from app.models.weather_readout import WeatherReadout
 from app.models.listener_session import ListenerSession
+from app.models.crm_member import CrmMember
+from app.models.song_rating import SongRating
+from app.models.raffle import Raffle, RaffleEntry
 
 __all__ = [
     "User", "UserRole",
@@ -58,4 +61,7 @@ __all__ = [
     "ShowArchive",
     "WeatherReadout",
     "ListenerSession",
+    "CrmMember",
+    "SongRating",
+    "Raffle", "RaffleEntry",
 ]

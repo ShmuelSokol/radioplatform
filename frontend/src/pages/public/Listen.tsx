@@ -5,6 +5,7 @@ import { getStation } from '../../api/stations';
 import apiClient from '../../api/client';
 import { submitSongRequest, SongRequestSubmitResponse } from '../../api/songRequests';
 import { useListenerHeartbeat } from '../../hooks/useListeners';
+import { useCrmAuth, useRateSong, useActiveRaffles, useEnterRaffle } from '../../hooks/useCrm';
 
 interface LiveAudioData {
   playing: boolean;
@@ -60,6 +61,23 @@ export default function Listen() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentAssetRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // CRM state
+  const crm = useCrmAuth();
+  const rateMutation = useRateSong();
+  const { data: activeRaffles } = useActiveRaffles();
+  const enterRaffleMutation = useEnterRaffle();
+  const [crmPinInput, setCrmPinInput] = useState('');
+  const [crmRegOpen, setCrmRegOpen] = useState(false);
+  const [crmRegName, setCrmRegName] = useState('');
+  const [crmRegPhone, setCrmRegPhone] = useState('');
+  const [crmRegEmail, setCrmRegEmail] = useState('');
+  const [crmRegResult, setCrmRegResult] = useState<string | null>(null);
+  const [crmLoginError, setCrmLoginError] = useState('');
+  const [crmRegError, setCrmRegError] = useState('');
+  const [myRating, setMyRating] = useState(0);
+  const [myFavorite, setMyFavorite] = useState(false);
+  const [enteredRaffles, setEnteredRaffles] = useState<Set<string>>(new Set());
 
   // Track listener session (heartbeat every 30s while listening)
   useListenerHeartbeat(stationId, userStarted);
@@ -318,7 +336,7 @@ export default function Listen() {
           </button>
 
           {requestOpen && (
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-3" id="song-request-form">
               {reqResult && (
                 <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
                   {reqResult.auto_approved ? (
@@ -418,6 +436,179 @@ export default function Listen() {
               >
                 {reqSubmitting ? 'Submitting...' : 'Submit Request'}
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* ── CRM Panel ──────────────────────────────────── */}
+        <div className="border-t mt-6 pt-6">
+          <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">My Radio Profile</h3>
+
+          {!crm.isLoggedIn ? (
+            <div className="space-y-3">
+              {/* Login row */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={crmPinInput}
+                  onChange={e => { setCrmPinInput(e.target.value.replace(/\D/g, '')); setCrmLoginError(''); }}
+                  placeholder="Enter 6-digit PIN"
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+                <button
+                  onClick={async () => {
+                    if (crmPinInput.length !== 6) { setCrmLoginError('PIN must be 6 digits'); return; }
+                    try { await crm.login(crmPinInput); setCrmPinInput(''); setCrmLoginError(''); }
+                    catch { setCrmLoginError('Invalid PIN'); }
+                  }}
+                  className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+                >
+                  Login
+                </button>
+                <span className="text-gray-400 text-sm">or</span>
+                <button
+                  onClick={() => setCrmRegOpen(!crmRegOpen)}
+                  className="text-brand-600 hover:text-brand-700 text-sm font-medium transition"
+                >
+                  Register
+                </button>
+              </div>
+              {crmLoginError && <p className="text-red-600 text-sm">{crmLoginError}</p>}
+
+              {/* Registration form */}
+              {crmRegOpen && (
+                <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                  {crmRegResult && (
+                    <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
+                      Registered! Your PIN is: <strong className="text-lg">{crmRegResult}</strong>
+                      <br /><span className="text-xs">Save this PIN — you'll need it to log in.</span>
+                    </div>
+                  )}
+                  {crmRegError && <p className="text-red-600 text-sm">{crmRegError}</p>}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input type="text" value={crmRegName} onChange={e => setCrmRegName(e.target.value)}
+                      placeholder="Your name" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Phone (optional)</label>
+                      <input type="text" value={crmRegPhone} onChange={e => setCrmRegPhone(e.target.value)}
+                        placeholder="Phone" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
+                      <input type="email" value={crmRegEmail} onChange={e => setCrmRegEmail(e.target.value)}
+                        placeholder="Email" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!crmRegName.trim()) { setCrmRegError('Name is required'); return; }
+                      try {
+                        const res = await crm.register({
+                          name: crmRegName.trim(),
+                          phone: crmRegPhone.trim() || undefined,
+                          email: crmRegEmail.trim() || undefined,
+                        });
+                        setCrmRegResult(res.pin);
+                        setCrmRegName(''); setCrmRegPhone(''); setCrmRegEmail(''); setCrmRegError('');
+                      } catch { setCrmRegError('Registration failed. Please try again.'); }
+                    }}
+                    className="bg-brand-600 hover:bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition"
+                  >
+                    Register
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Profile card */}
+              <div className="bg-brand-50 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-lg">Welcome, {crm.profile?.name}!</p>
+                    <p className="text-brand-700 font-bold">&ldquo;{crm.profile?.taste_profile.label}&rdquo;</p>
+                    <p className="text-sm text-brand-600">{crm.profile?.taste_profile.description}</p>
+                  </div>
+                  <button onClick={crm.logout} className="text-xs text-gray-400 hover:text-red-500 transition">Logout</button>
+                </div>
+                <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
+                  <span>{crm.profile?.ratings_count} songs rated</span>
+                  <span>{crm.profile?.favorites_count} favorites</span>
+                </div>
+              </div>
+
+              {/* Rating widget — only when a song is playing */}
+              {liveData?.playing && liveData.asset_id && (
+                <div className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
+                  <span className="text-sm text-gray-600 flex-shrink-0">Rate this song:</span>
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map(star => (
+                      <button key={star}
+                        onClick={() => {
+                          setMyRating(star);
+                          rateMutation.mutate(
+                            { asset_id: liveData.asset_id!, rating: star, is_favorite: myFavorite },
+                            { onSuccess: () => crm.refreshProfile() }
+                          );
+                        }}
+                        className={`text-xl transition ${star <= myRating ? 'text-yellow-400' : 'text-gray-300 hover:text-yellow-300'}`}
+                      >
+                        &#9733;
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newFav = !myFavorite;
+                      setMyFavorite(newFav);
+                      rateMutation.mutate(
+                        { asset_id: liveData.asset_id!, rating: myRating || 5, is_favorite: newFav },
+                        { onSuccess: () => crm.refreshProfile() }
+                      );
+                    }}
+                    className={`text-xl transition ${myFavorite ? 'text-red-500' : 'text-gray-300 hover:text-red-400'}`}
+                    title={myFavorite ? 'Unfavorite' : 'Favorite'}
+                  >
+                    &#9829;
+                  </button>
+                  {rateMutation.isPending && <span className="text-xs text-gray-400">Saving...</span>}
+                </div>
+              )}
+
+              {/* Active raffles */}
+              {activeRaffles && activeRaffles.length > 0 && (
+                <div className="space-y-2">
+                  {activeRaffles.map(raffle => (
+                    <div key={raffle.id} className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-yellow-800">{raffle.title}</p>
+                        {raffle.prize && <p className="text-sm text-yellow-600">Prize: {raffle.prize}</p>}
+                        <p className="text-xs text-yellow-500">{raffle.entry_count} entries</p>
+                      </div>
+                      {enteredRaffles.has(raffle.id) ? (
+                        <span className="text-green-600 text-sm font-medium">Entered!</span>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            enterRaffleMutation.mutate(raffle.id, {
+                              onSuccess: () => setEnteredRaffles(prev => new Set(prev).add(raffle.id)),
+                              onError: () => setEnteredRaffles(prev => new Set(prev).add(raffle.id)),
+                            });
+                          }}
+                          disabled={enterRaffleMutation.isPending}
+                          className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                        >
+                          Enter Raffle
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

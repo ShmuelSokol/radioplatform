@@ -134,6 +134,11 @@ async def _add_missing_columns(engine):
         # Listener sessions index for fast heartbeat lookups
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_heartbeat ON listener_sessions (last_heartbeat)",
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_started ON listener_sessions (started_at)",
+        # CRM indexes
+        "CREATE INDEX IF NOT EXISTS ix_song_ratings_member ON song_ratings (member_id)",
+        "CREATE INDEX IF NOT EXISTS ix_song_ratings_asset ON song_ratings (asset_id)",
+        "CREATE INDEX IF NOT EXISTS ix_raffle_entries_raffle ON raffle_entries (raffle_id)",
+        "CREATE INDEX IF NOT EXISTS ix_raffle_entries_member ON raffle_entries (member_id)",
     ]
     for sql in migrations:
         try:

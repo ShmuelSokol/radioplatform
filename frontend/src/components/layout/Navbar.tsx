@@ -46,6 +46,7 @@ export default function Navbar() {
     { to: '/admin/studio', label: 'Studio', color: 'hover:text-rose-300' },
     { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
     { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
+    { to: '/admin/crm', label: 'CRM', color: 'hover:text-pink-300' },
   ] : [
     { to: '/stations', label: 'Stations', color: 'hover:text-white' },
     { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },

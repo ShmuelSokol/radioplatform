@@ -32,6 +32,7 @@ from app.api.v1.archives import router as archives_router
 from app.api.v1.weather_readouts import router as weather_readouts_router
 from app.api.v1.mixer import router as mixer_router
 from app.api.v1.listeners import router as listeners_router
+from app.api.v1.crm import router as crm_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -66,3 +67,4 @@ router.include_router(archives_router)
 router.include_router(weather_readouts_router)
 router.include_router(mixer_router)
 router.include_router(listeners_router)
+router.include_router(crm_router)
