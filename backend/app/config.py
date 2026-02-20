@@ -146,5 +146,14 @@ class Settings(BaseSettings):
     def anthropic_enabled(self) -> bool:
         return bool(self.ANTHROPIC_API_KEY)
 
+    # Twilio (optional — for SMS/WhatsApp alert notifications)
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_PHONE_NUMBER: str = ""
+
+    @property
+    def twilio_enabled(self) -> bool:
+        return bool(self.TWILIO_ACCOUNT_SID)
+
 
 settings = Settings()

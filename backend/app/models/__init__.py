@@ -19,6 +19,7 @@ from app.models.review_queue import ReviewQueue, ReviewItem, ReviewQueueStatus, 
 from app.models.review_action import ReviewAction
 from app.models.playlist_template import PlaylistTemplate, TemplateSlot
 from app.models.ad_campaign import AdCampaign, AdDraft, AdComment, CampaignStatus
+from app.models.alert import Alert, AlertSeverity, AlertType
 from app.models.invoice import Invoice, InvoiceStatus
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "PlaylistTemplate", "TemplateSlot",
     "AdCampaign", "AdDraft", "AdComment", "CampaignStatus",
     "Invoice", "InvoiceStatus",
+    "Alert", "AlertSeverity", "AlertType",
 ]

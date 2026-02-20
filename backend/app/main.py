@@ -55,6 +55,10 @@ async def _add_missing_columns(engine):
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(50)",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS company_name VARCHAR(255)",
+        # User notification fields
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS title VARCHAR(100)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS alert_preferences JSONB",
     ]
     for sql in migrations:
         try:
@@ -173,8 +177,32 @@ async def _resume_playback_on_startup():
                         )
                     else:
                         logger.warning("Station %s: no pending entries after replenish", station.name)
+                        try:
+                            from app.services.alert_service import create_alert
+                            await create_alert(
+                                db, alert_type="queue_empty", severity="warning",
+                                title=f"Queue empty after restart: {station.name}",
+                                message=f"Station '{station.name}' has no pending entries after queue replenish on startup",
+                                station_id=station.id,
+                            )
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.error("Failed to resume station %s: %s", station.name, e, exc_info=True)
+
+            # Create system restart alert
+            total_recovered = stale_count + stale_playing_count
+            if total_recovered > 0:
+                try:
+                    from app.services.alert_service import create_alert
+                    await create_alert(
+                        db, alert_type="system", severity="info",
+                        title="Server restarted",
+                        message=f"Server restarted. Recovered {total_recovered} stale entries ({stale_count} play logs, {stale_playing_count} queue entries).",
+                    )
+                    await db.commit()
+                except Exception:
+                    pass
 
     except Exception as e:
         logger.error("Playback resume on startup failed: %s", e, exc_info=True)

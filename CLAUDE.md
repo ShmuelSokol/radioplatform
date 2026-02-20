@@ -86,6 +86,7 @@ radioplatform/
 | AdDraft | ad_campaign.py | Versioned ad creative drafts |
 | AdComment | ad_campaign.py | Campaign collaboration comments |
 | Invoice | invoice.py | Billing invoices with Stripe integration |
+| Alert | alert.py | System alerts with severity, type, and resolution tracking |
 
 ### API Routes (`backend/app/api/v1/`)
 | Router | File | Prefix |
@@ -112,6 +113,7 @@ radioplatform/
 | campaigns | campaigns.py | /campaigns |
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
+| alerts | alerts.py | /alerts |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
@@ -134,6 +136,8 @@ radioplatform/
 | icecast_service.py | Icecast OTA broadcast source client |
 | email_service.py | Resend transactional email (campaign updates, invoices, payments) |
 | ai_email_service.py | Claude API-powered email drafting for manager outreach |
+| alert_service.py | Alert creation, resolution, conflict detection, user notification dispatch |
+| sms_service.py | Twilio SMS and WhatsApp notification delivery |
 
 ## Frontend Details
 
@@ -152,6 +156,7 @@ radioplatform/
 - Sponsors.tsx — Sponsor/ad management
 - Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
+- Alerts.tsx — Alerts management (filter, resolve, reopen, delete)
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
@@ -182,9 +187,10 @@ radioplatform/
 | useSponsorPortal.ts | Sponsor play history, stats, upcoming schedule |
 | useCampaigns.ts | Campaign CRUD, drafts, comments |
 | useBilling.ts | Invoice list + billing summary |
+| useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
 
 ### API Clients (`frontend/src/api/`) — 11 modules
-auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, client.ts (Axios + JWT interceptor)
+auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, client.ts (Axios + JWT interceptor)
 
 ### Routes (`frontend/src/App.tsx`)
 - `/` → redirect to `/stations`
@@ -202,6 +208,7 @@ auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, spo
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
 - `/admin/playlists` → Playlists (protected)
+- `/admin/alerts` → Alerts (protected)
 - `/admin/analytics` → Analytics (protected)
 - `/sponsor/login` → SponsorLogin
 - `/sponsor/dashboard` → SponsorDashboard (sponsor-protected, SponsorLayout)
@@ -272,6 +279,9 @@ Claude Code accessible over Telegram for remote development.
 | `RESEND_API_KEY` | Resend API key (empty to disable) | For emails |
 | `RESEND_FROM_EMAIL` | Sender email (default: noreply@kolbramah.com) | For emails |
 | `ANTHROPIC_API_KEY` | Claude API key for AI email drafting | For AI emails |
+| `TWILIO_ACCOUNT_SID` | Twilio account SID (empty to disable) | For SMS/WhatsApp alerts |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token | For SMS/WhatsApp alerts |
+| `TWILIO_PHONE_NUMBER` | Twilio phone number | For SMS/WhatsApp alerts |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://studio-kolbramah-api.vercel.app/api/v1)

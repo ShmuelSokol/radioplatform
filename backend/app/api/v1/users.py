@@ -43,6 +43,9 @@ async def create_user(
         hashed_password=hash_password(body.password),
         role=role,
         display_name=body.display_name,
+        phone_number=body.phone_number,
+        title=body.title,
+        alert_preferences=body.alert_preferences,
         is_active=True,
     )
     db.add(user)
@@ -72,6 +75,12 @@ async def update_user(
         user.display_name = body.display_name
     if body.is_active is not None:
         user.is_active = body.is_active
+    if body.phone_number is not None:
+        user.phone_number = body.phone_number
+    if body.title is not None:
+        user.title = body.title
+    if body.alert_preferences is not None:
+        user.alert_preferences = body.alert_preferences
     await db.commit()
     await db.refresh(user)
     return user

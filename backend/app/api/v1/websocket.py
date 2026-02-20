@@ -58,6 +58,60 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Separate manager for admin alert connections
+class AlertConnectionManager:
+    def __init__(self):
+        self.connections: Set[WebSocket] = set()
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.connections.add(websocket)
+        logger.info(f"Alert WebSocket connected (total: {len(self.connections)})")
+
+    def disconnect(self, websocket: WebSocket):
+        self.connections.discard(websocket)
+        logger.info("Alert WebSocket disconnected")
+
+    async def broadcast(self, message: dict):
+        if not self.connections:
+            return
+        dead = set()
+        message_str = json.dumps(message)
+        for ws in self.connections:
+            try:
+                await ws.send_text(message_str)
+            except Exception:
+                dead.add(ws)
+        for ws in dead:
+            self.connections.discard(ws)
+
+alert_manager = AlertConnectionManager()
+
+
+@router.websocket("/ws/alerts")
+async def websocket_alerts(websocket: WebSocket):
+    """WebSocket endpoint for real-time alert notifications to admin clients."""
+    await alert_manager.connect(websocket)
+    try:
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                await websocket.send_json({"type": "pong", "data": data})
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        alert_manager.disconnect(websocket)
+    except Exception:
+        alert_manager.disconnect(websocket)
+
+
+async def broadcast_alert(alert_data: dict):
+    """Broadcast an alert to all connected admin WebSocket clients."""
+    await alert_manager.broadcast({
+        "type": "alert",
+        "data": alert_data,
+    })
+
 
 @router.websocket("/ws/now-playing/{station_id}")
 async def websocket_now_playing(websocket: WebSocket, station_id: str):

@@ -93,6 +93,18 @@ class SchedulerEngine:
                         logger.error(f"Error checking channel {channel.id}: {e}", exc_info=True)
             except Exception as e:
                 logger.error(f"Error checking station {station.id}: {e}", exc_info=True)
+                try:
+                    from app.services.alert_service import create_alert
+                    await create_alert(
+                        db,
+                        alert_type="system",
+                        severity="critical",
+                        title=f"Station check failed: {station.name}",
+                        message=str(e),
+                        station_id=station.id,
+                    )
+                except Exception:
+                    pass
     
     async def _get_silence_asset(self, db: AsyncSession) -> Asset | None:
         """Get the silence asset for blackout playback, if one exists."""
@@ -211,22 +223,54 @@ class SchedulerEngine:
         block = await service.get_active_block_for_station(station.id, now)
         if not block:
             logger.warning(f"Station {station.id}: No active block found for current time")
+            try:
+                from app.services.alert_service import create_alert
+                await create_alert(
+                    db, alert_type="playback_gap", severity="warning",
+                    title=f"No active block: {station.name}",
+                    message=f"No schedule block found for station '{station.name}' at {now.isoformat()}",
+                    station_id=station.id,
+                )
+            except Exception:
+                pass
             await service.clear_now_playing(station.id)
             return
-        
+
         # Get next asset from block
         asset_id = await service.get_next_asset_for_block(block, station_id=station.id)
         if not asset_id:
             logger.warning(f"Station {station.id}: Block {block.id} has no assets")
+            try:
+                from app.services.alert_service import create_alert
+                await create_alert(
+                    db, alert_type="queue_empty", severity="warning",
+                    title=f"Empty block: {block.name}",
+                    message=f"Block '{block.name}' on station '{station.name}' has no assets to play",
+                    station_id=station.id,
+                    context={"block_id": str(block.id)},
+                )
+            except Exception:
+                pass
             await service.clear_now_playing(station.id)
             return
-        
+
         # Get asset duration
         stmt = select(Asset).where(Asset.id == asset_id)
         result = await db.execute(stmt)
         asset = result.scalar_one_or_none()
         if not asset:
             logger.error(f"Asset {asset_id} not found")
+            try:
+                from app.services.alert_service import create_alert
+                await create_alert(
+                    db, alert_type="asset_missing", severity="critical",
+                    title=f"Asset not found: {asset_id}",
+                    message=f"Asset {asset_id} referenced in block '{block.name}' does not exist",
+                    station_id=station.id,
+                    context={"asset_id": str(asset_id), "block_id": str(block.id)},
+                )
+            except Exception:
+                pass
             return
         
         duration = asset.duration or 180.0  # default 3 minutes if unknown

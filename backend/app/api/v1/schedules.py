@@ -72,6 +72,15 @@ async def create_schedule_block(
     db.add(block)
     await db.commit()
     await db.refresh(block)
+
+    # Check for scheduling conflicts
+    try:
+        from app.services.alert_service import detect_schedule_conflicts
+        await detect_schedule_conflicts(db, block.schedule_id, block.id)
+        await db.commit()
+    except Exception:
+        pass  # Don't fail block creation if conflict detection errors
+
     return block
 
 
@@ -132,6 +141,15 @@ async def update_schedule_block(
 
     await db.commit()
     await db.refresh(block)
+
+    # Check for scheduling conflicts after update
+    try:
+        from app.services.alert_service import detect_schedule_conflicts
+        await detect_schedule_conflicts(db, block.schedule_id, block.id)
+        await db.commit()
+    except Exception:
+        pass
+
     return block
 
 

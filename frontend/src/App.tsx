@@ -29,6 +29,7 @@ const ReviewQueues = lazy(() => import('./pages/admin/ReviewQueues'));
 const ReviewFlow = lazy(() => import('./pages/admin/ReviewFlow'));
 const Playlists = lazy(() => import('./pages/admin/Playlists'));
 const Categories = lazy(() => import('./pages/admin/Categories'));
+const Alerts = lazy(() => import('./pages/admin/Alerts'));
 
 // Sponsor pages (lazy-loaded)
 const SponsorDashboard = lazy(() => import('./pages/sponsor/Dashboard'));
@@ -88,6 +89,7 @@ export default function App() {
               <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
               <Route path="/admin/playlists" element={<ProtectedRoute><Playlists /></ProtectedRoute>} />
               <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
+              <Route path="/admin/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
             </Route>
 

@@ -13,22 +13,39 @@ export default function Users() {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('viewer');
   const [displayName, setDisplayName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [smsEnabled, setSmsEnabled] = useState(false);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(false);
+  const [minSeverity, setMinSeverity] = useState('warning');
   const [editId, setEditId] = useState<string | null>(null);
 
   const users = data?.users ?? [];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const alertPrefs = {
+      sms_enabled: smsEnabled,
+      whatsapp_enabled: whatsappEnabled,
+      min_severity: minSeverity,
+    };
     if (editId) {
       updateMut.mutate({ id: editId, data: {
         email: email || undefined,
         password: password || undefined,
         role,
         display_name: displayName || undefined,
+        phone_number: phoneNumber || undefined,
+        title: jobTitle || undefined,
+        alert_preferences: alertPrefs,
       }}, { onSuccess: () => resetForm() });
     } else {
-      createMut.mutate({ email, password, role, display_name: displayName || undefined },
-        { onSuccess: () => resetForm() });
+      createMut.mutate({ email, password, role,
+        display_name: displayName || undefined,
+        phone_number: phoneNumber || undefined,
+        title: jobTitle || undefined,
+        alert_preferences: alertPrefs,
+      }, { onSuccess: () => resetForm() });
     }
   };
 
@@ -39,6 +56,11 @@ export default function Users() {
     setPassword('');
     setRole('viewer');
     setDisplayName('');
+    setPhoneNumber('');
+    setJobTitle('');
+    setSmsEnabled(false);
+    setWhatsappEnabled(false);
+    setMinSeverity('warning');
   };
 
   const startEdit = (u: typeof users[0]) => {
@@ -47,6 +69,12 @@ export default function Users() {
     setPassword('');
     setRole(u.role);
     setDisplayName(u.display_name ?? '');
+    setPhoneNumber(u.phone_number ?? '');
+    setJobTitle(u.title ?? '');
+    const prefs = u.alert_preferences;
+    setSmsEnabled(prefs?.sms_enabled ?? false);
+    setWhatsappEnabled(prefs?.whatsapp_enabled ?? false);
+    setMinSeverity(prefs?.min_severity ?? 'warning');
     setShowForm(true);
   };
 
@@ -88,6 +116,40 @@ export default function Users() {
             <input value={displayName} onChange={e => setDisplayName(e.target.value)}
               className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
           </div>
+          <div>
+            <label className="block text-[11px] text-gray-400 mb-1">Phone Number</label>
+            <input value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)}
+              placeholder="+1234567890"
+              className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
+          </div>
+          <div>
+            <label className="block text-[11px] text-gray-400 mb-1">Job Title</label>
+            <input value={jobTitle} onChange={e => setJobTitle(e.target.value)}
+              placeholder="e.g. Program Director"
+              className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
+          </div>
+          <div className="col-span-2 border-t border-[#2a2a5e] pt-3 mt-1">
+            <label className="block text-[11px] text-gray-400 mb-2 uppercase font-bold">Alert Preferences</label>
+            <div className="flex flex-wrap gap-4 items-center">
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input type="checkbox" checked={smsEnabled} onChange={e => setSmsEnabled(e.target.checked)} />
+                SMS Notifications
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input type="checkbox" checked={whatsappEnabled} onChange={e => setWhatsappEnabled(e.target.checked)} />
+                WhatsApp Notifications
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-gray-400">Min Severity:</span>
+                <select value={minSeverity} onChange={e => setMinSeverity(e.target.value)}
+                  className="bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700">
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </div>
+            </div>
+          </div>
           <div className="col-span-2">
             <button type="submit" disabled={createMut.isPending || updateMut.isPending}
               className="px-4 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-sm disabled:opacity-50">
@@ -107,6 +169,8 @@ export default function Users() {
                 <th className="text-left px-3 py-2">Username</th>
                 <th className="text-left px-3 py-2">Display Name</th>
                 <th className="text-left px-3 py-2">Role</th>
+                <th className="text-left px-3 py-2 hidden lg:table-cell">Phone</th>
+                <th className="text-left px-3 py-2 hidden lg:table-cell">Title</th>
                 <th className="text-left px-3 py-2">Status</th>
                 <th className="text-left px-3 py-2">Actions</th>
               </tr>
@@ -116,6 +180,8 @@ export default function Users() {
                 <tr key={u.id} className="border-t border-[#1a1a3e] hover:bg-[#14143a]">
                   <td className="px-3 py-1.5 text-cyan-300">{u.email}</td>
                   <td className="px-3 py-1.5 text-gray-300">{u.display_name ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.phone_number ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.title ?? '—'}</td>
                   <td className="px-3 py-1.5">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                       u.role === 'admin' ? 'bg-red-900 text-red-300' :

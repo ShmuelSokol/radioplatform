@@ -8,7 +8,7 @@ export function useUsers() {
 export function useCreateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { email: string; password: string; role: string; display_name?: string }) => createUser(data),
+    mutationFn: (data: Parameters<typeof createUser>[0]) => createUser(data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 }

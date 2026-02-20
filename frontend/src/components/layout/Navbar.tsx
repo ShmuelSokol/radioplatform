@@ -1,10 +1,28 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useRef, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
+import { useUnresolvedCount, useAlerts } from '../../hooks/useAlerts';
 
 export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuthStore();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
+  const bellRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+
+  const { data: unresolvedCount } = useUnresolvedCount();
+  const { data: recentAlerts } = useAlerts({ limit: 5, is_resolved: false });
+
+  // Close bell dropdown on click outside
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setBellOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
 
   const navLinks = isAuthenticated ? [
     { to: '/stations', label: 'Stations', color: 'hover:text-white' },
@@ -15,6 +33,7 @@ export default function Navbar() {
     { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
     { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },
     { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
+    { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
     { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
     { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },
     { to: '/admin/categories', label: 'Categories', color: 'hover:text-teal-300' },
@@ -47,6 +66,67 @@ export default function Navbar() {
           <div className="flex items-center gap-3">
             {isAuthenticated ? (
               <>
+                {/* Alert Bell */}
+                <div className="relative" ref={bellRef}>
+                  <button onClick={() => setBellOpen(!bellOpen)}
+                    className="relative text-gray-400 hover:text-white p-1 transition">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                    {(unresolvedCount ?? 0) > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
+                        {unresolvedCount! > 9 ? '9+' : unresolvedCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {bellOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-80 bg-[#12123a] border border-[#2a2a5e] rounded-lg shadow-xl z-50 overflow-hidden">
+                      <div className="px-3 py-2 border-b border-[#2a2a5e] flex items-center justify-between">
+                        <span className="text-[11px] text-gray-400 font-bold uppercase">Alerts</span>
+                        {(unresolvedCount ?? 0) > 0 && (
+                          <span className="text-[10px] bg-red-700 text-white px-1.5 py-0.5 rounded-full">{unresolvedCount} unresolved</span>
+                        )}
+                      </div>
+                      {(recentAlerts?.alerts?.length ?? 0) === 0 ? (
+                        <div className="px-3 py-4 text-center text-gray-600 text-[11px]">No unresolved alerts</div>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto">
+                          {recentAlerts?.alerts?.map(alert => (
+                            <button key={alert.id}
+                              onClick={() => { setBellOpen(false); navigate('/admin/alerts'); }}
+                              className="w-full text-left px-3 py-2 hover:bg-[#1a1a4e] border-b border-[#1a1a3e] last:border-0 transition">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                  alert.severity === 'critical' ? 'bg-red-400' :
+                                  alert.severity === 'warning' ? 'bg-amber-400' : 'bg-blue-400'
+                                }`} />
+                                <span className="text-[12px] text-cyan-300 truncate flex-1">{alert.title}</span>
+                                <span className="text-[10px] text-gray-600 flex-shrink-0">
+                                  {(() => {
+                                    const d = Date.now() - new Date(alert.created_at).getTime();
+                                    const m = Math.floor(d / 60000);
+                                    if (m < 1) return 'now';
+                                    if (m < 60) return `${m}m`;
+                                    const h = Math.floor(m / 60);
+                                    if (h < 24) return `${h}h`;
+                                    return `${Math.floor(h / 24)}d`;
+                                  })()}
+                                </span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <button onClick={() => { setBellOpen(false); navigate('/admin/alerts'); }}
+                        className="w-full px-3 py-2 text-center text-[11px] text-cyan-400 hover:bg-[#1a1a4e] border-t border-[#2a2a5e] transition">
+                        View All Alerts
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <span className="text-[11px] text-gray-500 hidden sm:inline">{user?.email}</span>
                 <button onClick={logout}
                   className="text-[11px] bg-red-900 hover:bg-red-800 text-red-300 px-2 py-0.5 rounded transition hidden md:inline-block">

@@ -1,9 +1,18 @@
+export interface AlertPreferences {
+  sms_enabled?: boolean;
+  whatsapp_enabled?: boolean;
+  min_severity?: string;
+}
+
 export interface User {
   id: string;
   email: string;
   role: 'admin' | 'manager' | 'viewer' | 'sponsor';
   is_active: boolean;
   display_name: string | null;
+  phone_number: string | null;
+  title: string | null;
+  alert_preferences: AlertPreferences | null;
 }
 
 export interface TokenResponse {
