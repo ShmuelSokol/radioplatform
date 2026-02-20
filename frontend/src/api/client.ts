@@ -34,7 +34,9 @@ apiClient.interceptors.response.use(
         } catch {
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
-          window.location.href = '/admin/login';
+          // Redirect to appropriate login based on current path
+          const isSponsor = window.location.pathname.startsWith('/sponsor');
+          window.location.href = isSponsor ? '/sponsor/login' : '/admin/login';
         }
       }
     }

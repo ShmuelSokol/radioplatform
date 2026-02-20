@@ -11,6 +11,7 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"
     MANAGER = "manager"
     VIEWER = "viewer"
+    SPONSOR = "sponsor"
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -16,7 +16,10 @@ class SponsorBase(BaseModel):
 
 
 class SponsorCreate(SponsorBase):
-    pass
+    user_id: UUID | str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    company_name: str | None = None
 
 
 class SponsorUpdate(BaseModel):
@@ -26,11 +29,19 @@ class SponsorUpdate(BaseModel):
     audio_file_path: str | None = None
     target_rules: dict[str, Any] | None = None
     insertion_policy: str | None = None
+    user_id: UUID | str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    company_name: str | None = None
 
 
 class SponsorInDB(SponsorBase):
     id: UUID | str
     created_at: datetime
     updated_at: datetime
+    user_id: UUID | str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    company_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

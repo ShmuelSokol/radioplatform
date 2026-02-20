@@ -18,6 +18,8 @@ from app.models.user_preference import UserPreference
 from app.models.review_queue import ReviewQueue, ReviewItem, ReviewQueueStatus, ReviewItemStatus
 from app.models.review_action import ReviewAction
 from app.models.playlist_template import PlaylistTemplate, TemplateSlot
+from app.models.ad_campaign import AdCampaign, AdDraft, AdComment, CampaignStatus
+from app.models.invoice import Invoice, InvoiceStatus
 
 __all__ = [
     "User", "UserRole",
@@ -40,4 +42,6 @@ __all__ = [
     "ReviewQueue", "ReviewItem", "ReviewQueueStatus", "ReviewItemStatus",
     "ReviewAction",
     "PlaylistTemplate", "TemplateSlot",
+    "AdCampaign", "AdDraft", "AdComment", "CampaignStatus",
+    "Invoice", "InvoiceStatus",
 ]

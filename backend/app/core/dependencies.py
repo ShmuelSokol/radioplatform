@@ -48,3 +48,15 @@ async def require_manager(user: User = Depends(get_current_user)) -> User:
     if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise ForbiddenError("Manager access required")
     return user
+
+
+async def require_sponsor(user: User = Depends(get_current_user)) -> User:
+    if user.role != UserRole.SPONSOR:
+        raise ForbiddenError("Sponsor access required")
+    return user
+
+
+async def require_sponsor_or_manager(user: User = Depends(get_current_user)) -> User:
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER, UserRole.SPONSOR):
+        raise ForbiddenError("Sponsor or manager access required")
+    return user

@@ -122,5 +122,29 @@ class Settings(BaseSettings):
     def supabase_storage_enabled(self) -> bool:
         return bool(self.SUPABASE_URL and self.SUPABASE_SERVICE_KEY)
 
+    # Stripe (optional — set secret key to empty to disable)
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_ID: str = ""
+
+    @property
+    def stripe_enabled(self) -> bool:
+        return bool(self.STRIPE_SECRET_KEY)
+
+    # Resend (optional — set API key to empty to disable)
+    RESEND_API_KEY: str = ""
+    RESEND_FROM_EMAIL: str = "noreply@kolbramah.com"
+
+    @property
+    def resend_enabled(self) -> bool:
+        return bool(self.RESEND_API_KEY)
+
+    # Anthropic / Claude API (optional — for AI email drafting)
+    ANTHROPIC_API_KEY: str = ""
+
+    @property
+    def anthropic_enabled(self) -> bool:
+        return bool(self.ANTHROPIC_API_KEY)
+
 
 settings = Settings()

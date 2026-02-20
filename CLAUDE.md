@@ -64,7 +64,7 @@ radioplatform/
 ### Models (`backend/app/models/`)
 | Model | File | Description |
 |-------|------|-------------|
-| User | user.py | Admin/manager/viewer with JWT auth |
+| User | user.py | Admin/manager/viewer/sponsor with JWT auth |
 | Station | station.py | Radio station config |
 | Asset | asset.py | Audio file metadata |
 | Category | category.py | Asset categorization |
@@ -78,10 +78,14 @@ radioplatform/
 | RuleSet | rule_set.py | Scheduling rules |
 | HolidayWindow | holiday_window.py | Sabbath/holiday blackouts |
 | ChannelStream | channel_stream.py | Stream configuration |
-| Sponsor | sponsor.py | Sponsor/ad management |
+| Sponsor | sponsor.py | Sponsor/ad management (linked to User via user_id) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
 | PlaylistTemplate | playlist_template.py | Rotation pattern templates |
 | TemplateSlot | playlist_template.py | Slots within a template |
+| AdCampaign | ad_campaign.py | Sponsor ad campaigns with status workflow |
+| AdDraft | ad_campaign.py | Versioned ad creative drafts |
+| AdComment | ad_campaign.py | Campaign collaboration comments |
+| Invoice | invoice.py | Billing invoices with Stripe integration |
 
 ### API Routes (`backend/app/api/v1/`)
 | Router | File | Prefix |
@@ -104,6 +108,10 @@ radioplatform/
 | icecast | icecast.py | /icecast |
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists |
+| sponsor_portal | sponsor_portal.py | /sponsor-portal |
+| campaigns | campaigns.py | /campaigns |
+| billing | billing.py | /billing |
+| ai_emails | ai_emails.py | /ai-emails |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
@@ -124,6 +132,8 @@ radioplatform/
 | weather_spot_service.py | Weather/time announcement generation + caching |
 | sun_service.py | Sunrise/sunset calculations (astral) |
 | icecast_service.py | Icecast OTA broadcast source client |
+| email_service.py | Resend transactional email (campaign updates, invoices, payments) |
+| ai_email_service.py | Claude API-powered email drafting for manager outreach |
 
 ## Frontend Details
 
@@ -147,7 +157,14 @@ radioplatform/
 - StationList.tsx — Browse stations
 - Listen.tsx — Listen to a station
 
-### Hooks (`frontend/src/hooks/`) — 12 hooks
+**Sponsor Portal** (`frontend/src/pages/sponsor/`):
+- Login.tsx — Sponsor login (separate from admin, indigo-themed)
+- Dashboard.tsx — Play history stats + table + upcoming schedule
+- Campaigns.tsx — Campaign list with create form
+- CampaignDetail.tsx — Campaign detail with drafts + comments thread
+- Billing.tsx — Invoice table with Stripe checkout + billing summary
+
+### Hooks (`frontend/src/hooks/`) — 15 hooks
 | Hook | Description |
 |------|-------------|
 | useAuth.ts | Authentication state + mutations |
@@ -162,9 +179,12 @@ radioplatform/
 | useNowPlaying.ts | Now-playing polling |
 | useNowPlayingWS.ts | Now-playing WebSocket (with polling fallback) |
 | usePlaylists.ts | Playlist template CRUD + asset type combos |
+| useSponsorPortal.ts | Sponsor play history, stats, upcoming schedule |
+| useCampaigns.ts | Campaign CRUD, drafts, comments |
+| useBilling.ts | Invoice list + billing summary |
 
-### API Clients (`frontend/src/api/`) — 8 modules
-auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, client.ts (Axios + JWT interceptor)
+### API Clients (`frontend/src/api/`) — 11 modules
+auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, client.ts (Axios + JWT interceptor)
 
 ### Routes (`frontend/src/App.tsx`)
 - `/` → redirect to `/stations`
@@ -183,6 +203,11 @@ auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, cli
 - `/admin/sponsors` → Sponsors (protected)
 - `/admin/playlists` → Playlists (protected)
 - `/admin/analytics` → Analytics (protected)
+- `/sponsor/login` → SponsorLogin
+- `/sponsor/dashboard` → SponsorDashboard (sponsor-protected, SponsorLayout)
+- `/sponsor/campaigns` → SponsorCampaigns (sponsor-protected)
+- `/sponsor/campaigns/:id` → CampaignDetail (sponsor-protected)
+- `/sponsor/billing` → SponsorBilling (sponsor-protected)
 
 ## Telegram Bot (`bot/`)
 Claude Code accessible over Telegram for remote development.
@@ -211,7 +236,7 @@ Claude Code accessible over Telegram for remote development.
 
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
-- **Auth**: JWT Bearer tokens. Roles: admin, manager, viewer. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager).
+- **Auth**: JWT Bearer tokens. Roles: admin, manager, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor).
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
 - **DB Sessions**: Import `get_db` from `app.db.session` (not `get_async_session`).
@@ -241,6 +266,12 @@ Claude Code accessible over Telegram for remote development.
 | `ICECAST_PORT` | Icecast server port (default: 8000) | For OTA |
 | `ICECAST_SOURCE_PASSWORD` | Icecast source password | For OTA |
 | `ICECAST_MOUNT` | Icecast mount point (default: /live) | For OTA |
+| `STRIPE_SECRET_KEY` | Stripe secret key (empty to disable) | For billing |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | For billing |
+| `STRIPE_PRICE_ID` | Stripe price ID | For billing |
+| `RESEND_API_KEY` | Resend API key (empty to disable) | For emails |
+| `RESEND_FROM_EMAIL` | Sender email (default: noreply@kolbramah.com) | For emails |
+| `ANTHROPIC_API_KEY` | Claude API key for AI email drafting | For AI emails |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://studio-kolbramah-api.vercel.app/api/v1)
@@ -269,6 +300,7 @@ Claude Code accessible over Telegram for remote development.
 - **M3** (complete): Sponsor insertion, holiday/Sabbath blackouts, sunset/sunrise scheduling, multi-channel broadcast, shuffle/weighted playback, one-time schedule blocks
 - **M4** (complete): OTA broadcast (Icecast service), analytics & reporting dashboard, Celery/Redis worker infrastructure
 - **M5** (complete): API documentation (`docs/API.md`), load testing (Locust — `backend/loadtests/`), Terraform IaC (`infra/terraform/`), schedule blocks admin UI, WebSocket real-time NowPlaying, code splitting
+- **M6** (complete): Sponsor Client Portal — self-service portal with play history, campaign management (drafts + comments), Stripe billing, Resend email notifications, Claude AI email drafting
 
 ## MCP Servers
 - **Playwright** — Browser automation for testing and screenshots. Configured in `~/.claude.json` under project MCP servers.

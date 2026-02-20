@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/layout/Layout';
+import SponsorLayout from './components/layout/SponsorLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useAuthStore } from './stores/authStore';
 
@@ -9,6 +10,7 @@ import { useAuthStore } from './stores/authStore';
 import StationList from './pages/public/StationList';
 import Listen from './pages/public/Listen';
 import Login from './pages/admin/Login';
+import SponsorLogin from './pages/sponsor/Login';
 
 // Admin pages (lazy-loaded - code split)
 const Dashboard = lazy(() => import('./pages/admin/Dashboard'));
@@ -28,6 +30,12 @@ const ReviewFlow = lazy(() => import('./pages/admin/ReviewFlow'));
 const Playlists = lazy(() => import('./pages/admin/Playlists'));
 const Categories = lazy(() => import('./pages/admin/Categories'));
 
+// Sponsor pages (lazy-loaded)
+const SponsorDashboard = lazy(() => import('./pages/sponsor/Dashboard'));
+const SponsorCampaigns = lazy(() => import('./pages/sponsor/Campaigns'));
+const SponsorCampaignDetail = lazy(() => import('./pages/sponsor/CampaignDetail'));
+const SponsorBilling = lazy(() => import('./pages/sponsor/Billing'));
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { staleTime: 30_000, retry: 1 },
@@ -37,6 +45,12 @@ const queryClient = new QueryClient({
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
+  return <>{children}</>;
+}
+
+function SponsorProtectedRoute({ children }: { children: React.ReactNode }) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  if (!isAuthenticated) return <Navigate to="/sponsor/login" replace />;
   return <>{children}</>;
 }
 
@@ -75,6 +89,17 @@ export default function App() {
               <Route path="/admin/playlists" element={<ProtectedRoute><Playlists /></ProtectedRoute>} />
               <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            </Route>
+
+            {/* Sponsor portal login (no layout) */}
+            <Route path="/sponsor/login" element={<SponsorLogin />} />
+
+            {/* Sponsor portal (own layout, protected) */}
+            <Route element={<SponsorProtectedRoute><SponsorLayout /></SponsorProtectedRoute>}>
+              <Route path="/sponsor/dashboard" element={<SponsorDashboard />} />
+              <Route path="/sponsor/campaigns" element={<SponsorCampaigns />} />
+              <Route path="/sponsor/campaigns/:id" element={<SponsorCampaignDetail />} />
+              <Route path="/sponsor/billing" element={<SponsorBilling />} />
             </Route>
           </Routes>
         </Suspense>
