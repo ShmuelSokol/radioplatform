@@ -350,6 +350,7 @@ export default function Assets() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Release</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date Added</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Played</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -390,6 +391,7 @@ export default function Assets() {
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.release_date)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.created_at)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.last_played_at)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right space-x-3">
@@ -413,7 +415,7 @@ export default function Assets() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-6 py-10 text-center text-gray-500">
+                <td colSpan={12} className="px-6 py-10 text-center text-gray-500">
                   {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>

@@ -132,6 +132,53 @@ async def ffmpeg_check(_user: User = Depends(require_manager)):
     return result
 
 
+@router.post("/refresh-requested-category")
+async def refresh_requested_category_endpoint(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Manually refresh the dynamic 'requested' category."""
+    from app.services.requested_category_service import refresh_requested_category
+    count = await refresh_requested_category(db)
+    return {"tagged": count}
+
+
+@router.post("/backfill-release-dates")
+async def backfill_release_dates(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Batch-lookup release dates for music assets missing them."""
+    from sqlalchemy import select as sa_select
+    from app.models.asset import Asset as AssetModel
+    from app.services.musicbrainz_service import lookup_release_date
+
+    result = await db.execute(
+        sa_select(AssetModel).where(
+            AssetModel.asset_type == "music",
+            AssetModel.artist.isnot(None),
+            AssetModel.release_date.is_(None),
+        )
+    )
+    assets = result.scalars().all()
+    total = len(assets)
+    updated = 0
+
+    for asset in assets:
+        try:
+            rd = await lookup_release_date(asset.title, asset.artist)
+            if rd:
+                asset.release_date = rd
+                updated += 1
+                logger.info("Backfill: '%s' by %s → %s", asset.title, asset.artist, rd)
+        except Exception as e:
+            logger.warning("Backfill failed for '%s': %s", asset.title, e)
+        # MusicBrainz rate limit is handled internally (1 req/sec)
+
+    await db.flush()
+    return {"updated": updated, "total": total}
+
+
 @router.post("/upload", response_model=AssetResponse, status_code=201)
 async def upload_asset(
     file: UploadFile = File(...),
@@ -289,11 +336,16 @@ async def update_asset(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
+    from datetime import date as date_type
     asset = await get_asset(db, asset_id)
     updates = body.model_dump(exclude_unset=True)
     # Auto-clear sponsor_id when type changes away from "spot"
     if "asset_type" in updates and updates["asset_type"] != "spot" and "sponsor_id" not in updates:
         updates["sponsor_id"] = None
+    # Convert release_date string to date object
+    if "release_date" in updates:
+        rd = updates["release_date"]
+        updates["release_date"] = date_type.fromisoformat(rd) if rd else None
     for key, value in updates.items():
         setattr(asset, key, value)
     await db.flush()

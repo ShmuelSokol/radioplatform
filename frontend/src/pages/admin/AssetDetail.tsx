@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAssetDetail, useAssetAudioUrl } from '../../hooks/useAssets';
+import { useAssetDetail, useAssetAudioUrl, useUpdateAsset } from '../../hooks/useAssets';
 import WaveformPlayer, { type WaveformPlayerHandle } from '../../components/audio/WaveformPlayer';
 import SilenceDetectionPanel from '../../components/audio/SilenceDetectionPanel';
 import PreviewControls from '../../components/audio/PreviewControls';
@@ -21,6 +21,7 @@ export default function AssetDetail() {
   const queryClient = useQueryClient();
   const { data: asset, isLoading } = useAssetDetail(assetId);
   const { data: audioUrl } = useAssetAudioUrl(assetId);
+  const updateMutation = useUpdateAsset();
   const waveformRef = useRef<WaveformPlayerHandle>(null);
   const [silenceRegions, setSilenceRegions] = useState<SilenceRegion[]>([]);
   const [waveformKey, setWaveformKey] = useState(0);
@@ -76,6 +77,18 @@ export default function AssetDetail() {
           <div>
             <span className="text-gray-500">Category</span>
             <p className="font-medium">{asset.category ?? '--'}</p>
+          </div>
+          <div>
+            <span className="text-gray-500">Release Date</span>
+            <input
+              type="date"
+              value={asset.release_date ?? ''}
+              onChange={(e) => {
+                if (!assetId) return;
+                updateMutation.mutate({ id: assetId, data: { release_date: e.target.value || null } });
+              }}
+              className="block w-full border border-gray-300 rounded px-2 py-1 text-sm mt-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
           </div>
           <div>
             <span className="text-gray-500">ID</span>

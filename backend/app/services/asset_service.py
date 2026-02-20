@@ -87,6 +87,18 @@ async def create_asset(
     await db.flush()
     await db.refresh(asset)
 
+    # Auto-detect release date from MusicBrainz for music assets
+    if asset_type == "music" and artist:
+        try:
+            from app.services.musicbrainz_service import lookup_release_date
+            rd = await lookup_release_date(title, artist)
+            if rd:
+                asset.release_date = rd
+                await db.flush()
+                logger.info("Auto-detected release_date for '%s': %s", title, rd)
+        except Exception:
+            logger.warning("Release date auto-detection failed for '%s'", title, exc_info=True)
+
     if duration is not None:
         logger.info("Asset '%s' created with duration=%.2fs", title, duration)
     else:

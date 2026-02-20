@@ -109,6 +109,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS live_show_id UUID REFERENCES live_shows(id) ON DELETE SET NULL",
         # Link library assets to sponsors
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS sponsor_id UUID REFERENCES sponsors(id) ON DELETE SET NULL",
+        # Release date for music assets (MusicBrainz auto-detection)
+        "ALTER TABLE assets ADD COLUMN IF NOT EXISTS release_date DATE",
         # Preempt mechanism for exact-time playback (time announcements)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
         # Schedule block columns that may be missing from early table creation
@@ -154,7 +156,7 @@ async def _seed_default_categories():
         from app.db.engine import engine
         from sqlalchemy import text
 
-        defaults = ["lively", "med_fast", "relax", "do_not_play"]
+        defaults = ["lively", "med_fast", "relax", "do_not_play", "requested"]
         async with engine.begin() as conn:
             result = await conn.execute(text("SELECT COUNT(*) FROM categories"))
             count = result.scalar()
@@ -167,6 +169,80 @@ async def _seed_default_categories():
                 logger.info("Seeded %d default categories", len(defaults))
     except Exception as e:
         logger.warning("Category seeding skipped: %s", e)
+
+
+async def _seed_stations():
+    """Seed the three special stations if they don't exist."""
+    try:
+        from app.db.engine import engine
+        from sqlalchemy import text
+        import json
+
+        stations = [
+            {
+                "name": "Nothing New",
+                "timezone": "America/New_York",
+                "description": "Only the classics — songs from 10+ years ago",
+                "automation_config": json.dumps({"oldies_only": True, "oldies_min_years": 10}),
+            },
+            {
+                "name": "Kol Bramah Yerushalayim",
+                "timezone": "Asia/Jerusalem",
+                "description": "Broadcasting from Yerushalayim",
+                "latitude": 31.7683,
+                "longitude": 35.2137,
+                "automation_config": None,
+            },
+            {
+                "name": "Requests Only",
+                "timezone": "America/New_York",
+                "description": "You pick the music — listener requests only",
+                "automation_config": json.dumps({"requests_only": True, "popular_request_threshold": 3}),
+            },
+        ]
+
+        async with engine.begin() as conn:
+            for s in stations:
+                exists = await conn.execute(
+                    text("SELECT 1 FROM stations WHERE name = :name"),
+                    {"name": s["name"]},
+                )
+                if exists.scalar_one_or_none():
+                    continue
+                await conn.execute(
+                    text("""
+                        INSERT INTO stations (id, name, type, timezone, latitude, longitude,
+                                              description, automation_config, is_active,
+                                              created_at, updated_at)
+                        VALUES (gen_random_uuid(), :name, 'internet', :timezone,
+                                :latitude, :longitude, :description,
+                                :automation_config::jsonb, true, NOW(), NOW())
+                    """),
+                    {
+                        "name": s["name"],
+                        "timezone": s["timezone"],
+                        "description": s["description"],
+                        "latitude": s.get("latitude"),
+                        "longitude": s.get("longitude"),
+                        "automation_config": s.get("automation_config"),
+                    },
+                )
+                logger.info("Seeded station: %s", s["name"])
+    except Exception as e:
+        logger.warning("Station seeding skipped: %s", e)
+
+
+async def _refresh_requested_category():
+    """Refresh the dynamic 'requested' category on startup."""
+    try:
+        from app.db.engine import async_session_factory
+        from app.services.requested_category_service import refresh_requested_category
+        async with async_session_factory() as db:
+            count = await refresh_requested_category(db)
+            await db.commit()
+            logger.info("Requested category refreshed: %d assets tagged", count)
+    except Exception as e:
+        logger.warning("Requested category refresh skipped: %s", e)
 
 
 async def _resume_playback_on_startup():
@@ -293,6 +369,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup — create tables and start the scheduler engine
     await ensure_tables()
     await _seed_default_categories()
+    await _seed_stations()
+    await _refresh_requested_category()
 
     # Resume playback for all stations (close stale entries, fill queues, start playing)
     try:

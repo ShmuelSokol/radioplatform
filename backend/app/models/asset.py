@@ -1,9 +1,11 @@
 import enum
 import uuid
 
-from sqlalchemy import Column, Float, ForeignKey, String, Table, Text
+from sqlalchemy import Column, Date, Float, ForeignKey, String, Table, Text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from datetime import date
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -39,6 +41,7 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     asset_type: Mapped[str] = mapped_column(String(50), default="music", nullable=False)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     review_status: Mapped[str | None] = mapped_column(String(50), default="pending", nullable=True)
+    release_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     sponsor_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sponsors.id", ondelete="SET NULL"), nullable=True
     )

@@ -13,11 +13,15 @@ from typing import Sequence
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datetime import date
+
 from app.models.asset import Asset
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
+from app.models.song_request import SongRequest
 from app.models.sponsor import Sponsor
+from app.models.station import Station
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,14 @@ class QueueReplenishService:
     def __init__(self, db: AsyncSession, station_id: uuid.UUID):
         self.db = db
         self.station_id = station_id
+        self.automation_config: dict = {}
+
+    async def _load_automation_config(self) -> None:
+        """Load the station's automation_config JSONB."""
+        result = await self.db.execute(
+            select(Station.automation_config).where(Station.id == self.station_id)
+        )
+        self.automation_config = result.scalar() or {}
 
     async def replenish(self) -> None:
         """
@@ -39,7 +51,18 @@ class QueueReplenishService:
         Station-specific rules override global rules entirely — a station with
         its own rules (e.g. stories-only) won't receive global music/spots.
         Gap fill uses the primary daypart rule's asset_type, not hardcoded music.
+
+        Special modes (via station.automation_config):
+        - requests_only: fill queue from approved song requests + popular requests
+        - oldies_only: only queue songs with release_date 10+ years ago
         """
+        await self._load_automation_config()
+
+        # Requests-only mode: entirely different fill strategy
+        if self.automation_config.get("requests_only"):
+            await self._replenish_requests_only()
+            return
+
         result = await self.db.execute(
             select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
             .select_from(QueueEntry)
@@ -225,12 +248,21 @@ class QueueReplenishService:
     async def _apply_fixed_time_rule(self, rule: ScheduleRule, shortfall: float) -> None:
         logger.debug("Fixed-time rule '%s': skipping (real-time engine)", rule.name)
 
+    def _apply_oldies_filter(self, query):
+        """If station has oldies_only config, restrict to old release dates."""
+        if self.automation_config.get("oldies_only"):
+            min_years = self.automation_config.get("oldies_min_years", 10)
+            cutoff = date.today() - timedelta(days=min_years * 365)
+            query = query.where(Asset.release_date.isnot(None), Asset.release_date <= cutoff)
+        return query
+
     async def _find_assets_for_rule(self, rule: ScheduleRule) -> Sequence[Asset]:
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
         if rule.category:
             query = query.where(Asset.category == rule.category)
         if self.exclude_ids:
             query = query.where(Asset.id.notin_(self.exclude_ids))
+        query = self._apply_oldies_filter(query)
         query = query.order_by(func.random()).limit(50)
         result = await self.db.execute(query)
         return result.scalars().all()
@@ -301,6 +333,7 @@ class QueueReplenishService:
             query = query.where(Asset.category == category)
         if self.exclude_ids:
             query = query.where(Asset.id.notin_(self.exclude_ids))
+        query = self._apply_oldies_filter(query)
         query = query.order_by(func.random())
         result = await self.db.execute(query)
         candidates = result.scalars().all()
@@ -312,6 +345,7 @@ class QueueReplenishService:
                 query = query.where(Asset.category == category)
             if self.queued_ids:
                 query = query.where(Asset.id.notin_(self.queued_ids))
+            query = self._apply_oldies_filter(query)
             query = query.order_by(func.random())
             result = await self.db.execute(query)
             candidates = result.scalars().all()
@@ -330,6 +364,102 @@ class QueueReplenishService:
             filled += dur
 
         logger.info("Filled %.1fs of %s content", filled, asset_type)
+
+    async def _replenish_requests_only(self) -> None:
+        """Fill queue exclusively from song requests (approved/queued) + popular requests."""
+        result = await self.db.execute(
+            select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
+            .select_from(QueueEntry)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status.in_(["pending", "playing"]),
+            )
+        )
+        total_seconds = float(result.scalar() or 0)
+        if total_seconds >= TARGET_QUEUE_SECONDS:
+            return
+
+        shortfall = TARGET_QUEUE_SECONDS - total_seconds
+
+        result = await self.db.execute(
+            select(func.coalesce(func.max(QueueEntry.position), 0))
+            .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "pending")
+        )
+        self.max_pos = result.scalar() or 0
+
+        result = await self.db.execute(
+            select(QueueEntry.asset_id).where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status.in_(["pending", "playing"]),
+            )
+        )
+        self.queued_ids = {row[0] for row in result.all()}
+        self.exclude_ids = set(self.queued_ids)
+
+        filled = 0.0
+
+        # 1. Approved/queued song requests with matched assets
+        result = await self.db.execute(
+            select(SongRequest)
+            .where(
+                SongRequest.station_id == self.station_id,
+                SongRequest.status.in_(["APPROVED", "QUEUED"]),
+                SongRequest.asset_id.isnot(None),
+            )
+            .order_by(SongRequest.created_at)
+        )
+        requests = result.scalars().all()
+        for req in requests:
+            if filled >= shortfall:
+                break
+            if req.asset_id in self.queued_ids:
+                continue
+            asset_result = await self.db.execute(
+                select(Asset).where(Asset.id == req.asset_id)
+            )
+            asset = asset_result.scalar_one_or_none()
+            if not asset:
+                continue
+            self.max_pos += 1
+            await self._enqueue_asset(asset, self.max_pos)
+            filled += asset.duration or DEFAULT_DURATION
+            # Mark request as queued
+            req.status = "QUEUED"
+
+        # 2. If still short, auto-fill from popular requests (3+ in last 30 days)
+        if filled < shortfall:
+            threshold = self.automation_config.get("popular_request_threshold", 3)
+            cutoff_30d = datetime.now(timezone.utc) - timedelta(days=30)
+            popular_result = await self.db.execute(
+                select(SongRequest.asset_id, func.count(SongRequest.id).label("cnt"))
+                .where(
+                    SongRequest.asset_id.isnot(None),
+                    SongRequest.created_at >= cutoff_30d,
+                )
+                .group_by(SongRequest.asset_id)
+                .having(func.count(SongRequest.id) >= threshold)
+                .order_by(func.random())
+            )
+            popular_rows = popular_result.all()
+            for row in popular_rows:
+                if filled >= shortfall:
+                    break
+                asset_id = row[0]
+                if asset_id in self.queued_ids:
+                    continue
+                asset_result = await self.db.execute(
+                    select(Asset).where(Asset.id == asset_id)
+                )
+                asset = asset_result.scalar_one_or_none()
+                if not asset:
+                    continue
+                self.max_pos += 1
+                await self._enqueue_asset(asset, self.max_pos)
+                filled += asset.duration or DEFAULT_DURATION
+
+        await self.db.flush()
+        logger.info("Requests-only replenish: filled %.1fs", filled)
 
     # Backwards-compat alias
     async def _fill_random_music(self, shortfall: float) -> None:
