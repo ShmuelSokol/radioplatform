@@ -85,11 +85,113 @@ async def _seed_default_categories():
         logger.warning("Category seeding skipped: %s", e)
 
 
+async def _resume_playback_on_startup():
+    """
+    Resume station playback after a server restart.
+
+    1. Close stale PlayLog entries (end_utc=NULL → set to now, indicating downtime)
+    2. Mark stale "playing" queue entries as "played" and log them
+    3. Replenish queues for all active stations
+    4. Start playback by advancing to next pending entry per station
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select, update
+
+    from app.db.engine import async_session_factory
+    from app.models.play_log import PlayLog
+    from app.models.queue_entry import QueueEntry
+    from app.models.station import Station
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        async with async_session_factory() as db:
+            # 1. Close any open PlayLog entries (leftover from pre-restart)
+            stale_logs = await db.execute(
+                select(PlayLog).where(PlayLog.end_utc.is_(None))
+            )
+            stale_count = 0
+            for log in stale_logs.scalars().all():
+                log.end_utc = now
+                stale_count += 1
+            if stale_count:
+                logger.info("Closed %d stale play log entries from before restart", stale_count)
+
+            # 2. Mark stale "playing" queue entries as "played" and log them
+            stale_playing = await db.execute(
+                select(QueueEntry).where(QueueEntry.status == "playing")
+            )
+            stale_playing_count = 0
+            for entry in stale_playing.scalars().all():
+                # Log the play that was interrupted
+                play_log = PlayLog(
+                    station_id=entry.station_id,
+                    asset_id=entry.asset_id,
+                    start_utc=entry.started_at or now,
+                    end_utc=now,
+                    source="scheduler",
+                )
+                db.add(play_log)
+                entry.status = "played"
+                stale_playing_count += 1
+            if stale_playing_count:
+                logger.info("Closed %d stale playing queue entries", stale_playing_count)
+
+            await db.commit()
+
+            # 3. Get all active stations
+            result = await db.execute(select(Station).where(Station.is_active.is_(True)))
+            stations = result.scalars().all()
+
+            for station in stations:
+                try:
+                    # 4a. Replenish queue
+                    from app.services.queue_replenish_service import QueueReplenishService
+                    replenish_svc = QueueReplenishService(db, station.id)
+                    await replenish_svc.replenish()
+                    await db.commit()
+
+                    # 4b. Start playback — find next pending entry
+                    next_result = await db.execute(
+                        select(QueueEntry)
+                        .where(
+                            QueueEntry.station_id == station.id,
+                            QueueEntry.status == "pending",
+                        )
+                        .order_by(QueueEntry.position)
+                        .limit(1)
+                    )
+                    next_entry = next_result.scalar_one_or_none()
+                    if next_entry:
+                        next_entry.status = "playing"
+                        next_entry.started_at = now
+                        await db.commit()
+                        logger.info(
+                            "Station %s (%s): resumed playback with asset %s",
+                            station.name, station.id, next_entry.asset_id,
+                        )
+                    else:
+                        logger.warning("Station %s: no pending entries after replenish", station.name)
+                except Exception as e:
+                    logger.error("Failed to resume station %s: %s", station.name, e, exc_info=True)
+
+    except Exception as e:
+        logger.error("Playback resume on startup failed: %s", e, exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup — create tables and start the scheduler engine
     await ensure_tables()
     await _seed_default_categories()
+
+    # Resume playback for all stations (close stale entries, fill queues, start playing)
+    try:
+        await _resume_playback_on_startup()
+        logger.info("Playback resumed for all active stations")
+    except Exception as e:
+        logger.warning(f"Playback resume failed: {e}")
 
     try:
         from app.services.scheduler_engine import start_scheduler

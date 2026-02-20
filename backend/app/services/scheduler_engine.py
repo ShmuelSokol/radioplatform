@@ -15,6 +15,7 @@ from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.channel_stream import ChannelStream
 from app.models.holiday_window import HolidayWindow
+from app.models.play_log import PlayLog, PlaySource
 from app.models.station import Station
 from app.services.scheduling import SchedulingService
 
@@ -186,6 +187,17 @@ class SchedulerEngine:
         if now_playing:
             if now_playing.ends_at and now_playing.ends_at <= now:
                 needs_new_asset = True
+                # Log the completed play
+                if now_playing.asset_id:
+                    play_log = PlayLog(
+                        station_id=station.id,
+                        asset_id=now_playing.asset_id,
+                        start_utc=now_playing.started_at,
+                        end_utc=now,
+                        source=PlaySource.SCHEDULER,
+                    )
+                    db.add(play_log)
+                    await db.flush()
                 logger.info(f"Station {station.id}: Current asset ended, need new one")
         else:
             # No playback active, start one
@@ -217,7 +229,7 @@ class SchedulerEngine:
             logger.error(f"Asset {asset_id} not found")
             return
         
-        duration = asset.duration_seconds or 180.0  # default 3 minutes if unknown
+        duration = asset.duration or 180.0  # default 3 minutes if unknown
         
         # Update now-playing
         now_playing = await service.update_now_playing(
@@ -287,7 +299,7 @@ class SchedulerEngine:
         if not asset:
             return
 
-        duration = asset.duration_seconds or 180.0
+        duration = asset.duration or 180.0
 
         if now_playing:
             now_playing.asset_id = asset_id
