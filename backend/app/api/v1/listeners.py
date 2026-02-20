@@ -222,22 +222,24 @@ async def get_today_stats(
     )
     active_count = active_result.scalar() or 0
 
-    # Peak listeners today (approximate: max concurrent sessions by minute)
-    # Use a simpler approach: count sessions active at each hour boundary
+    # Peak listeners today — sweep algorithm over session start/end events
+    # Fetch all sessions that overlap with today, then walk events to find max concurrent
     peak = active_count
-    for hour_offset in range(int((now - today_start).total_seconds() // 3600) + 1):
-        check_time = today_start + timedelta(hours=hour_offset)
-        check_end = check_time + timedelta(seconds=ACTIVE_THRESHOLD_SECONDS)
-        peak_result = await db.execute(
-            select(func.count(ListenerSession.id))
-            .where(
-                ListenerSession.started_at <= check_time,
-                ListenerSession.last_heartbeat >= check_time,
-            )
-        )
-        count = peak_result.scalar() or 0
-        if count > peak:
-            peak = count
+    sessions_result = await db.execute(
+        select(ListenerSession.started_at, ListenerSession.last_heartbeat)
+        .where(ListenerSession.last_heartbeat >= today_start)
+    )
+    events: list[tuple[datetime, int]] = []
+    for s in sessions_result.all():
+        events.append((s.started_at, 1))   # session starts
+        events.append((s.last_heartbeat, -1))  # session ends
+    if events:
+        events.sort(key=lambda e: (e[0], e[1]))  # sort by time, ends before starts at same time
+        concurrent = 0
+        for _, delta in events:
+            concurrent += delta
+            if concurrent > peak:
+                peak = concurrent
 
     return {
         "date": now.strftime("%Y-%m-%d"),
