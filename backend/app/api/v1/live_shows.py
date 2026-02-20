@@ -291,6 +291,38 @@ async def update_call_info(
     return call
 
 
+# --- Public endpoint (no auth) ---
+
+@router.get("/station/{station_id}/active")
+async def get_active_show_for_station(
+    station_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public endpoint: get the active live show for a station (if any)."""
+    result = await db.execute(
+        select(LiveShow).where(
+            LiveShow.station_id == station_id,
+            LiveShow.status == LiveShowStatus.LIVE,
+        ).limit(1)
+    )
+    show = result.scalar_one_or_none()
+    if not show:
+        return {"active": False, "show": None}
+    return {
+        "active": True,
+        "show": {
+            "id": str(show.id),
+            "title": show.title,
+            "description": show.description,
+            "broadcast_mode": show.broadcast_mode.value if hasattr(show.broadcast_mode, 'value') else show.broadcast_mode,
+            "icecast_mount": show.icecast_mount,
+            "actual_start": show.actual_start.isoformat() if show.actual_start else None,
+            "scheduled_end": show.scheduled_end.isoformat() if show.scheduled_end else None,
+            "calls_enabled": show.calls_enabled,
+        },
+    }
+
+
 # --- Twilio webhooks (no auth — validated by Twilio signature) ---
 
 @router.post("/twilio/inbound")

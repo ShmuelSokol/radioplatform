@@ -4,6 +4,7 @@ import { useStations } from '../../hooks/useStations';
 import {
   useLiveShows,
   useCreateLiveShow,
+  useUpdateLiveShow,
   useDeleteLiveShow,
   useStartLiveShow,
 } from '../../hooks/useLiveShows';
@@ -21,9 +22,11 @@ const TABS = ['all', 'scheduled', 'live', 'ended'] as const;
 export default function LiveShows() {
   const [activeTab, setActiveTab] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);
+  const [editingShow, setEditingShow] = useState<LiveShow | null>(null);
 
   // Form state
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [stationId, setStationId] = useState('');
   const [broadcastMode, setBroadcastMode] = useState('webrtc');
   const [scheduledStart, setScheduledStart] = useState('');
@@ -38,30 +41,66 @@ export default function LiveShows() {
   const shows = data?.shows ?? [];
 
   const createMut = useCreateLiveShow();
+  const updateMut = useUpdateLiveShow();
   const deleteMut = useDeleteLiveShow();
   const startMut = useStartLiveShow();
 
-  const handleCreate = () => {
+  const resetForm = () => {
+    setTitle('');
+    setDescription('');
+    setStationId('');
+    setBroadcastMode('webrtc');
+    setScheduledStart('');
+    setScheduledEnd('');
+    setCallsEnabled(true);
+    setEditingShow(null);
+  };
+
+  const openEditModal = (show: LiveShow) => {
+    setEditingShow(show);
+    setTitle(show.title);
+    setDescription(show.description || '');
+    setStationId(show.station_id);
+    setBroadcastMode(show.broadcast_mode);
+    setScheduledStart(show.scheduled_start ? show.scheduled_start.slice(0, 16) : '');
+    setScheduledEnd(show.scheduled_end ? show.scheduled_end.slice(0, 16) : '');
+    setCallsEnabled(show.calls_enabled);
+    setShowModal(true);
+  };
+
+  const handleSave = () => {
     if (!title || !stationId) return;
+
+    if (editingShow) {
+      updateMut.mutate(
+        {
+          id: editingShow.id,
+          data: {
+            title,
+            description: description || undefined,
+            broadcast_mode: broadcastMode as 'webrtc' | 'icecast',
+            scheduled_start: scheduledStart || undefined,
+            scheduled_end: scheduledEnd || undefined,
+            calls_enabled: callsEnabled,
+          },
+        },
+        { onSuccess: () => { setShowModal(false); resetForm(); } },
+      );
+      return;
+    }
+
     createMut.mutate(
       {
         station_id: stationId,
         title,
+        description: description || undefined,
         broadcast_mode: broadcastMode,
         scheduled_start: scheduledStart || undefined,
         scheduled_end: scheduledEnd || undefined,
         calls_enabled: callsEnabled,
       },
       {
-        onSuccess: () => {
-          setShowModal(false);
-          setTitle('');
-          setStationId('');
-          setBroadcastMode('webrtc');
-          setScheduledStart('');
-          setScheduledEnd('');
-          setCallsEnabled(true);
-        },
+        onSuccess: () => { setShowModal(false); resetForm(); },
       },
     );
   };
@@ -78,7 +117,7 @@ export default function LiveShows() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-cyan-300">Live Shows</h1>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={() => { resetForm(); setShowModal(true); }}
           className="bg-cyan-700 hover:bg-cyan-600 text-white text-sm px-4 py-2 rounded transition"
         >
           + New Show
@@ -112,7 +151,7 @@ export default function LiveShows() {
           {shows.map((show: LiveShow) => (
             <div
               key={show.id}
-              className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4 flex items-center justify-between"
+              className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
@@ -130,14 +169,22 @@ export default function LiveShows() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+              <div className="flex items-center gap-2 sm:ml-4 flex-shrink-0 flex-wrap">
                 {show.status === 'scheduled' && (
-                  <button
-                    onClick={() => startMut.mutate(show.id)}
-                    className="text-[11px] bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1 rounded transition"
-                  >
-                    Go Live
-                  </button>
+                  <>
+                    <button
+                      onClick={() => startMut.mutate(show.id)}
+                      className="text-[11px] bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1 rounded transition"
+                    >
+                      Go Live
+                    </button>
+                    <button
+                      onClick={() => openEditModal(show)}
+                      className="text-[11px] bg-[#2a2a5e] hover:bg-[#3a3a7e] text-cyan-300 px-3 py-1 rounded transition"
+                    >
+                      Edit
+                    </button>
+                  </>
                 )}
                 {show.status === 'live' && (
                   <>
@@ -171,11 +218,13 @@ export default function LiveShows() {
         </div>
       )}
 
-      {/* Create Modal */}
+      {/* Create/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-lg font-bold text-cyan-300 mb-4">Create Live Show</h2>
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-bold text-cyan-300 mb-4">
+              {editingShow ? 'Edit Live Show' : 'Create Live Show'}
+            </h2>
 
             <div className="space-y-3">
               <div>
@@ -190,11 +239,22 @@ export default function LiveShows() {
               </div>
 
               <div>
+                <label className="block text-[11px] text-gray-400 mb-1">Description</label>
+                <textarea
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  className="w-full bg-[#0a0a28] border border-[#2a2a5e] rounded px-3 py-2 text-sm text-white h-20 resize-none"
+                  placeholder="Optional description"
+                />
+              </div>
+
+              <div>
                 <label className="block text-[11px] text-gray-400 mb-1">Station</label>
                 <select
                   value={stationId}
                   onChange={e => setStationId(e.target.value)}
                   className="w-full bg-[#0a0a28] border border-[#2a2a5e] rounded px-3 py-2 text-sm text-white"
+                  disabled={!!editingShow}
                 >
                   <option value="">Select station...</option>
                   {stations.map(s => (
@@ -249,17 +309,19 @@ export default function LiveShows() {
 
             <div className="flex justify-end gap-2 mt-6">
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); resetForm(); }}
                 className="text-sm text-gray-400 hover:text-white px-4 py-2 transition"
               >
                 Cancel
               </button>
               <button
-                onClick={handleCreate}
-                disabled={createMut.isPending || !title || !stationId}
+                onClick={handleSave}
+                disabled={(createMut.isPending || updateMut.isPending) || !title || !stationId}
                 className="text-sm bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded transition disabled:opacity-50"
               >
-                {createMut.isPending ? 'Creating...' : 'Create'}
+                {(createMut.isPending || updateMut.isPending)
+                  ? (editingShow ? 'Saving...' : 'Creating...')
+                  : (editingShow ? 'Save' : 'Create')}
               </button>
             </div>
           </div>

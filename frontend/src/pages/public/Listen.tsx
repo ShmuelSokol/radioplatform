@@ -16,6 +16,20 @@ interface LiveAudioData {
   audio_url?: string;
 }
 
+interface ActiveShowData {
+  active: boolean;
+  show: {
+    id: string;
+    title: string;
+    description: string | null;
+    broadcast_mode: string;
+    icecast_mount: string | null;
+    actual_start: string | null;
+    scheduled_end: string | null;
+    calls_enabled: boolean;
+  } | null;
+}
+
 const POLL_INTERVAL = 4000;
 
 export default function Listen() {
@@ -27,6 +41,7 @@ export default function Listen() {
   });
 
   const [liveData, setLiveData] = useState<LiveAudioData | null>(null);
+  const [activeShow, setActiveShow] = useState<ActiveShowData | null>(null);
   const [userStarted, setUserStarted] = useState(false);
   const [volume, setVolume] = useState(0.7);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -44,15 +59,30 @@ export default function Listen() {
     }
   }, [stationId]);
 
-  // Poll for live-audio data
+  // Fetch active live show status
+  const fetchActiveShow = useCallback(async () => {
+    if (!stationId) return;
+    try {
+      const res = await apiClient.get<ActiveShowData>(`/live-shows/station/${stationId}/active`);
+      setActiveShow(res.data);
+    } catch {
+      // Endpoint may not exist yet
+    }
+  }, [stationId]);
+
+  // Poll for live-audio data and live show status
   useEffect(() => {
     if (!stationId) return;
     fetchLiveAudio();
-    pollRef.current = setInterval(fetchLiveAudio, POLL_INTERVAL);
+    fetchActiveShow();
+    pollRef.current = setInterval(() => {
+      fetchLiveAudio();
+      fetchActiveShow();
+    }, POLL_INTERVAL);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [stationId, fetchLiveAudio]);
+  }, [stationId, fetchLiveAudio, fetchActiveShow]);
 
   // Play/switch audio when live data changes
   useEffect(() => {
@@ -133,6 +163,22 @@ export default function Listen() {
             {station.description && <p className="text-gray-400 mt-1">{station.description}</p>}
           </div>
         </div>
+
+        {/* Live Show Banner */}
+        {activeShow?.active && activeShow.show && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center gap-3">
+            <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse flex-shrink-0" />
+            <div className="flex-1">
+              <div className="font-bold text-red-800">LIVE: {activeShow.show.title}</div>
+              {activeShow.show.description && (
+                <p className="text-sm text-red-600 mt-0.5">{activeShow.show.description}</p>
+              )}
+              {activeShow.show.calls_enabled && (
+                <p className="text-xs text-red-500 mt-1">Call-ins are open!</p>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center gap-4 mb-6">
           {userStarted ? (

@@ -41,6 +41,10 @@ async def _add_missing_columns(engine):
     enum_migrations = [
         "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'sponsor'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'live_show'",
+        # Live show enum types (created by create_all, but safe to re-run)
+        "DO $$ BEGIN CREATE TYPE live_show_status AS ENUM ('scheduled','live','ended','cancelled'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        "DO $$ BEGIN CREATE TYPE broadcast_mode AS ENUM ('webrtc','icecast'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        "DO $$ BEGIN CREATE TYPE call_status AS ENUM ('waiting','screening','approved','on_air','completed','rejected','abandoned'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
     ]
     for sql in enum_migrations:
         try:

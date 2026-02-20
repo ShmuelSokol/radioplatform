@@ -99,11 +99,11 @@ export default function HostConsole() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-4">
+    <div className="min-h-screen bg-black text-white p-3 sm:p-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-bold text-cyan-300">{currentShow?.title || 'Host Console'}</h1>
+      <div className="flex items-center justify-between mb-4 sm:mb-6">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-lg sm:text-xl font-bold text-cyan-300 truncate">{currentShow?.title || 'Host Console'}</h1>
           <div className="flex items-center gap-2 mt-1">
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-500'}`} />
             <span className="text-[11px] text-gray-500">
@@ -118,7 +118,7 @@ export default function HostConsole() {
         </div>
         <button
           onClick={handleEndShow}
-          className="bg-red-800 hover:bg-red-700 text-red-200 px-4 py-2 rounded text-sm font-bold transition"
+          className="bg-red-800 hover:bg-red-700 text-red-200 px-3 sm:px-4 py-2 rounded text-sm font-bold transition flex-shrink-0 ml-2"
         >
           End Show
         </button>
@@ -132,7 +132,7 @@ export default function HostConsole() {
             isUrgent ? 'bg-red-950 border-red-700' : 'bg-[#12123a] border-[#2a2a5e]'
           }`}>
             <div className="text-[11px] text-gray-400 uppercase mb-2">Time Remaining</div>
-            <div className={`text-5xl font-mono font-bold ${isUrgent ? 'text-red-400' : 'text-white'}`}>
+            <div className={`text-4xl sm:text-5xl font-mono font-bold ${isUrgent ? 'text-red-400' : 'text-white'}`}>
               {formatTime(localSeconds)}
             </div>
             {isUrgent && localSeconds !== null && localSeconds > 0 && (
