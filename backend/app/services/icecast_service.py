@@ -151,3 +151,33 @@ async def stop_icecast_stream(station_id: str):
     if station_id in _icecast_clients:
         await _icecast_clients[station_id].stop()
         del _icecast_clients[station_id]
+
+
+async def update_icecast_metadata(mount: str, title: str, artist: str | None = None):
+    """Push now-playing metadata to Icecast admin API."""
+    if not settings.icecast_enabled:
+        return
+
+    song = f"{artist} - {title}" if artist else title
+    params = {
+        "mount": mount,
+        "mode": "updinfo",
+        "song": song,
+    }
+
+    url = f"http://{settings.ICECAST_HOST}:{settings.ICECAST_PORT}/admin/metadata"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                params=params,
+                auth=("admin", settings.ICECAST_SOURCE_PASSWORD),
+                timeout=5.0,
+            )
+            if resp.status_code != 200:
+                logger.warning("Icecast metadata update failed: %s", resp.text)
+            else:
+                logger.debug("Icecast metadata updated: %s", song)
+    except Exception as e:
+        logger.warning("Failed to update Icecast metadata: %s", e)

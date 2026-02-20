@@ -33,6 +33,13 @@ const Alerts = lazy(() => import('./pages/admin/Alerts'));
 const LiveShows = lazy(() => import('./pages/admin/LiveShows'));
 const HostConsole = lazy(() => import('./pages/admin/HostConsole'));
 const CallScreener = lazy(() => import('./pages/admin/CallScreener'));
+const SongRequests = lazy(() => import('./pages/admin/SongRequests'));
+const AdminArchives = lazy(() => import('./pages/admin/Archives'));
+
+// Public pages (lazy-loaded)
+const ProgramGuide = lazy(() => import('./pages/public/ProgramGuide'));
+const Hosts = lazy(() => import('./pages/public/Hosts'));
+const Archives = lazy(() => import('./pages/public/Archives'));
 
 // Sponsor pages (lazy-loaded)
 const SponsorDashboard = lazy(() => import('./pages/sponsor/Dashboard'));
@@ -72,6 +79,9 @@ export default function App() {
               <Route path="/" element={<Navigate to="/stations" replace />} />
               <Route path="/stations" element={<StationList />} />
               <Route path="/listen/:stationId" element={<Listen />} />
+              <Route path="/guide" element={<ProgramGuide />} />
+              <Route path="/hosts" element={<Hosts />} />
+              <Route path="/archives" element={<Archives />} />
 
               {/* Auth */}
               <Route path="/admin/login" element={<Login />} />
@@ -97,6 +107,8 @@ export default function App() {
               <Route path="/admin/live" element={<ProtectedRoute><LiveShows /></ProtectedRoute>} />
               <Route path="/admin/live/:showId/host" element={<ProtectedRoute><HostConsole /></ProtectedRoute>} />
               <Route path="/admin/live/:showId/screen" element={<ProtectedRoute><CallScreener /></ProtectedRoute>} />
+              <Route path="/admin/requests" element={<ProtectedRoute><SongRequests /></ProtectedRoute>} />
+              <Route path="/admin/archives" element={<ProtectedRoute><AdminArchives /></ProtectedRoute>} />
             </Route>
 
             {/* Sponsor portal login (no layout) */}

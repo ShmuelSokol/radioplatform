@@ -17,6 +17,7 @@ class RuleCreate(BaseModel):
     priority: int = 10
     is_active: bool = True
     constraints: dict | None = None
+    station_id: uuid.UUID | str | None = None
 
 
 class RuleUpdate(BaseModel):
@@ -33,6 +34,7 @@ class RuleUpdate(BaseModel):
     priority: int | None = None
     is_active: bool | None = None
     constraints: dict | None = None
+    station_id: uuid.UUID | str | None = None
 
 
 class RuleOut(BaseModel):
@@ -52,6 +54,7 @@ class RuleOut(BaseModel):
     priority: int
     is_active: bool
     constraints: dict | None = None
+    station_id: uuid.UUID | str | None = None
 
 
 class RuleListResponse(BaseModel):

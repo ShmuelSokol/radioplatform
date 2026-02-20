@@ -18,10 +18,26 @@ export default function Users() {
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [whatsappEnabled, setWhatsappEnabled] = useState(false);
   const [minSeverity, setMinSeverity] = useState('warning');
+  // DJ Profile fields
+  const [bio, setBio] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [isPublic, setIsPublic] = useState(false);
+  const [socialTwitter, setSocialTwitter] = useState('');
+  const [socialInstagram, setSocialInstagram] = useState('');
+  const [socialWebsite, setSocialWebsite] = useState('');
+
   const [editId, setEditId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const users = data?.users ?? [];
+
+  const buildSocialLinks = () => {
+    const links: Record<string, string> = {};
+    if (socialTwitter.trim()) links.twitter = socialTwitter.trim();
+    if (socialInstagram.trim()) links.instagram = socialInstagram.trim();
+    if (socialWebsite.trim()) links.website = socialWebsite.trim();
+    return Object.keys(links).length > 0 ? links : undefined;
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +47,7 @@ export default function Users() {
       whatsapp_enabled: whatsappEnabled,
       min_severity: minSeverity,
     };
+    const socialLinks = buildSocialLinks();
     const onError = (err: any) => {
       const msg = err?.response?.data?.detail || err?.message || 'Operation failed';
       setErrorMsg(typeof msg === 'string' ? msg : JSON.stringify(msg));
@@ -44,6 +61,10 @@ export default function Users() {
         phone_number: phoneNumber || undefined,
         title: jobTitle || undefined,
         alert_preferences: alertPrefs,
+        bio: bio || undefined,
+        photo_url: photoUrl || undefined,
+        is_public: isPublic,
+        social_links: socialLinks,
       }}, { onSuccess: () => resetForm(), onError });
     } else {
       createMut.mutate({ email, password, role,
@@ -51,6 +72,10 @@ export default function Users() {
         phone_number: phoneNumber || undefined,
         title: jobTitle || undefined,
         alert_preferences: alertPrefs,
+        bio: bio || undefined,
+        photo_url: photoUrl || undefined,
+        is_public: isPublic,
+        social_links: socialLinks,
       }, { onSuccess: () => resetForm(), onError });
     }
   };
@@ -67,6 +92,12 @@ export default function Users() {
     setSmsEnabled(false);
     setWhatsappEnabled(false);
     setMinSeverity('warning');
+    setBio('');
+    setPhotoUrl('');
+    setIsPublic(false);
+    setSocialTwitter('');
+    setSocialInstagram('');
+    setSocialWebsite('');
   };
 
   const startEdit = (u: typeof users[0]) => {
@@ -81,6 +112,13 @@ export default function Users() {
     setSmsEnabled(prefs?.sms_enabled ?? false);
     setWhatsappEnabled(prefs?.whatsapp_enabled ?? false);
     setMinSeverity(prefs?.min_severity ?? 'warning');
+    setBio(u.bio ?? '');
+    setPhotoUrl(u.photo_url ?? '');
+    setIsPublic(u.is_public ?? false);
+    const social = u.social_links;
+    setSocialTwitter(social?.twitter ?? '');
+    setSocialInstagram(social?.instagram ?? '');
+    setSocialWebsite(social?.website ?? '');
     setShowForm(true);
   };
 
@@ -134,6 +172,8 @@ export default function Users() {
               placeholder="e.g. Program Director"
               className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
           </div>
+
+          {/* Alert Preferences */}
           <div className="col-span-2 border-t border-[#2a2a5e] pt-3 mt-1">
             <label className="block text-[11px] text-gray-400 mb-2 uppercase font-bold">Alert Preferences</label>
             <div className="flex flex-wrap gap-4 items-center">
@@ -156,6 +196,53 @@ export default function Users() {
               </div>
             </div>
           </div>
+
+          {/* DJ / Host Profile */}
+          <div className="col-span-2 border-t border-[#2a2a5e] pt-3 mt-1">
+            <label className="block text-[11px] text-gray-400 mb-2 uppercase font-bold">DJ / Host Profile</label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-[11px] text-gray-400 mb-1">Bio</label>
+                <textarea value={bio} onChange={e => setBio(e.target.value)}
+                  rows={3}
+                  placeholder="A short bio about this DJ/host..."
+                  className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700 resize-y" />
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-400 mb-1">Photo URL</label>
+                <input value={photoUrl} onChange={e => setPhotoUrl(e.target.value)}
+                  placeholder="https://example.com/photo.jpg"
+                  className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-sm text-gray-300 pb-1">
+                  <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)}
+                    className="accent-purple-500" />
+                  <span>Public Profile</span>
+                  <span className="text-[10px] text-gray-500">(visible on /hosts page)</span>
+                </label>
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-400 mb-1">Twitter / X</label>
+                <input value={socialTwitter} onChange={e => setSocialTwitter(e.target.value)}
+                  placeholder="@handle or full URL"
+                  className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-400 mb-1">Instagram</label>
+                <input value={socialInstagram} onChange={e => setSocialInstagram(e.target.value)}
+                  placeholder="@handle or full URL"
+                  className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[11px] text-gray-400 mb-1">Website</label>
+                <input value={socialWebsite} onChange={e => setSocialWebsite(e.target.value)}
+                  placeholder="https://example.com"
+                  className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
+              </div>
+            </div>
+          </div>
+
           <div className="col-span-2">
             {errorMsg && (
               <div className="mb-2 px-3 py-1.5 bg-red-900/60 border border-red-700 text-red-300 rounded text-[12px]">
@@ -182,6 +269,7 @@ export default function Users() {
                 <th className="text-left px-3 py-2">Role</th>
                 <th className="text-left px-3 py-2 hidden lg:table-cell">Phone</th>
                 <th className="text-left px-3 py-2 hidden lg:table-cell">Title</th>
+                <th className="text-left px-3 py-2 hidden lg:table-cell">Profile</th>
                 <th className="text-left px-3 py-2">Status</th>
                 <th className="text-left px-3 py-2">Actions</th>
               </tr>
@@ -190,9 +278,7 @@ export default function Users() {
               {users.map(u => (
                 <tr key={u.id} className="border-t border-[#1a1a3e] hover:bg-[#14143a]">
                   <td className="px-3 py-1.5 text-cyan-300">{u.email}</td>
-                  <td className="px-3 py-1.5 text-gray-300">{u.display_name ?? '—'}</td>
-                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.phone_number ?? '—'}</td>
-                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.title ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-gray-300">{u.display_name ?? '\u2014'}</td>
                   <td className="px-3 py-1.5">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                       u.role === 'admin' ? 'bg-red-900 text-red-300' :
@@ -200,6 +286,15 @@ export default function Users() {
                       u.role === 'sponsor' ? 'bg-indigo-900 text-indigo-300' :
                       'bg-gray-800 text-gray-400'
                     }`}>{u.role.toUpperCase()}</span>
+                  </td>
+                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.phone_number ?? '\u2014'}</td>
+                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.title ?? '\u2014'}</td>
+                  <td className="px-3 py-1.5 hidden lg:table-cell">
+                    {u.is_public ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-900 text-purple-300">PUBLIC</span>
+                    ) : (
+                      <span className="text-[11px] text-gray-600">Private</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5">
                     <span className={`text-[11px] ${u.is_active ? 'text-green-400' : 'text-red-400'}`}>

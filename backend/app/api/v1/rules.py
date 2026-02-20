@@ -23,14 +23,17 @@ router = APIRouter(prefix="/rules", tags=["rules"])
 async def list_rules(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    station_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    count_result = await db.execute(select(func.count()).select_from(ScheduleRule))
+    from sqlalchemy import or_
+    q = select(ScheduleRule)
+    if station_id is not None:
+        q = q.where(or_(ScheduleRule.station_id == station_id, ScheduleRule.station_id.is_(None)))
+    count_result = await db.execute(select(func.count()).select_from(q.subquery()))
     total = count_result.scalar() or 0
-    result = await db.execute(
-        select(ScheduleRule).offset(skip).limit(limit).order_by(ScheduleRule.priority.desc())
-    )
+    result = await db.execute(q.offset(skip).limit(limit).order_by(ScheduleRule.priority.desc()))
     rules = result.scalars().all()
     return RuleListResponse(rules=rules, total=total)
 
@@ -56,6 +59,7 @@ async def create_rule(
         priority=body.priority,
         is_active=body.is_active,
         constraints=body.constraints,
+        station_id=body.station_id,
     )
     db.add(rule)
     await db.commit()

@@ -11,6 +11,10 @@ class UserCreate(BaseModel):
     phone_number: str | None = None
     title: str | None = None
     alert_preferences: dict | None = None
+    bio: str | None = None
+    photo_url: str | None = None
+    is_public: bool = False
+    social_links: dict | None = None
 
 
 class UserUpdate(BaseModel):
@@ -22,6 +26,10 @@ class UserUpdate(BaseModel):
     phone_number: str | None = None
     title: str | None = None
     alert_preferences: dict | None = None
+    bio: str | None = None
+    photo_url: str | None = None
+    is_public: bool | None = None
+    social_links: dict | None = None
 
 
 class UserOut(BaseModel):
@@ -35,6 +43,10 @@ class UserOut(BaseModel):
     phone_number: str | None = None
     title: str | None = None
     alert_preferences: dict | None = None
+    bio: str | None = None
+    photo_url: str | None = None
+    is_public: bool = False
+    social_links: dict | None = None
 
 
 class UserListResponse(BaseModel):

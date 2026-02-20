@@ -4,6 +4,13 @@ export interface AlertPreferences {
   min_severity?: string;
 }
 
+export interface SocialLinks {
+  twitter?: string;
+  instagram?: string;
+  website?: string;
+  [key: string]: string | undefined;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -13,6 +20,23 @@ export interface User {
   phone_number: string | null;
   title: string | null;
   alert_preferences: AlertPreferences | null;
+  bio: string | null;
+  photo_url: string | null;
+  is_public: boolean;
+  social_links: SocialLinks | null;
+}
+
+export interface PublicHost {
+  id: string;
+  display_name: string;
+  title: string | null;
+  bio: string | null;
+  photo_url: string | null;
+  social_links: SocialLinks | null;
+}
+
+export interface PublicHostsResponse {
+  hosts: PublicHost[];
 }
 
 export interface TokenResponse {
@@ -135,6 +159,7 @@ export interface ScheduleRule {
   priority: number;
   is_active: boolean;
   constraints: Record<string, unknown> | null;
+  station_id?: string | null;
 }
 
 export interface RuleListResponse {

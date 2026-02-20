@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { getStation } from '../../api/stations';
 import apiClient from '../../api/client';
+import { submitSongRequest } from '../../api/songRequests';
 
 interface LiveAudioData {
   playing: boolean;
@@ -44,6 +45,16 @@ export default function Listen() {
   const [activeShow, setActiveShow] = useState<ActiveShowData | null>(null);
   const [userStarted, setUserStarted] = useState(false);
   const [volume, setVolume] = useState(0.7);
+
+  // Song request form state
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [reqName, setReqName] = useState('');
+  const [reqSong, setReqSong] = useState('');
+  const [reqArtist, setReqArtist] = useState('');
+  const [reqMessage, setReqMessage] = useState('');
+  const [reqSubmitting, setReqSubmitting] = useState(false);
+  const [reqSuccess, setReqSuccess] = useState(false);
+  const [reqError, setReqError] = useState('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentAssetRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -245,6 +256,107 @@ export default function Listen() {
             <p className="text-gray-400">Nothing playing right now</p>
           </div>
         )}
+
+        {/* Song Request Section */}
+        <div className="border-t mt-6 pt-6">
+          <button
+            onClick={() => { setRequestOpen(!requestOpen); setReqSuccess(false); setReqError(''); }}
+            className="flex items-center gap-2 text-brand-600 hover:text-brand-700 font-medium transition"
+          >
+            <svg className={`w-4 h-4 transition-transform ${requestOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            Request a Song
+          </button>
+
+          {requestOpen && (
+            <div className="mt-4 space-y-3">
+              {reqSuccess && (
+                <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
+                  Your song request has been submitted! The station manager will review it.
+                </div>
+              )}
+              {reqError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+                  {reqError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Your Name *</label>
+                <input
+                  type="text"
+                  value={reqName}
+                  onChange={e => setReqName(e.target.value)}
+                  placeholder="Enter your name"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Song Title *</label>
+                <input
+                  type="text"
+                  value={reqSong}
+                  onChange={e => setReqSong(e.target.value)}
+                  placeholder="What song would you like to hear?"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Artist (optional)</label>
+                <input
+                  type="text"
+                  value={reqArtist}
+                  onChange={e => setReqArtist(e.target.value)}
+                  placeholder="Artist name"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Message (optional)</label>
+                <textarea
+                  value={reqMessage}
+                  onChange={e => setReqMessage(e.target.value)}
+                  placeholder="Dedication or message..."
+                  rows={2}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-none"
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  if (!reqName.trim() || !reqSong.trim()) {
+                    setReqError('Name and song title are required.');
+                    return;
+                  }
+                  setReqSubmitting(true);
+                  setReqError('');
+                  try {
+                    await submitSongRequest({
+                      station_id: stationId!,
+                      requester_name: reqName.trim(),
+                      song_title: reqSong.trim(),
+                      song_artist: reqArtist.trim() || undefined,
+                      requester_message: reqMessage.trim() || undefined,
+                    });
+                    setReqSuccess(true);
+                    setReqName('');
+                    setReqSong('');
+                    setReqArtist('');
+                    setReqMessage('');
+                  } catch {
+                    setReqError('Failed to submit request. Please try again.');
+                  } finally {
+                    setReqSubmitting(false);
+                  }
+                }}
+                disabled={reqSubmitting}
+                className="bg-brand-600 hover:bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+              >
+                {reqSubmitting ? 'Submitting...' : 'Submit Request'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

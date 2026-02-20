@@ -34,14 +34,21 @@ export default function Navbar() {
     { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },
     { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
     { to: '/admin/live', label: 'Live Shows', color: 'hover:text-red-400' },
+    { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
     { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
     { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
     { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },
     { to: '/admin/categories', label: 'Categories', color: 'hover:text-teal-300' },
     { to: '/admin/reviews', label: 'Reviews', color: 'hover:text-emerald-300' },
     { to: '/admin/stations', label: 'Manage Stations', color: 'hover:text-cyan-300' },
+    { to: '/admin/requests', label: 'Requests', color: 'hover:text-lime-300' },
+    { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
+    { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
   ] : [
     { to: '/stations', label: 'Stations', color: 'hover:text-white' },
+    { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
+    { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
+    { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
   ];
 
   return (

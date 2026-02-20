@@ -4,13 +4,16 @@ This runs continuously and updates now-playing state when blocks change or asset
 """
 import asyncio
 import logging
+import random
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func as sql_func
 
+from app.config import settings
 from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.channel_stream import ChannelStream
@@ -35,6 +38,10 @@ class SchedulerEngine:
         self.check_interval = check_interval  # seconds
         self.running = False
         self._task: Optional[asyncio.Task] = None
+        # Silence detection: station_id → datetime when silence first detected
+        self._silence_start: dict[str, datetime] = {}
+        # Block transition tracking: station_id → last active block ID
+        self._last_block: dict[str, str | None] = {}
     
     async def start(self):
         """Start the scheduler engine."""
@@ -163,6 +170,166 @@ class SchedulerEngine:
             except Exception:
                 pass
 
+    async def _check_silence_detection(self, db: AsyncSession, station: Station, has_playing_asset: bool, is_blacked_out: bool):
+        """
+        Detect dead air (no audio playing) and trigger emergency fallback.
+
+        If a station has no playing asset for longer than the configured threshold,
+        a critical alert is raised and an emergency fallback asset is played.
+        """
+        station_key = str(station.id)
+        now = datetime.utcnow()
+
+        # If there IS a playing asset, clear the silence timer
+        if has_playing_asset:
+            self._silence_start.pop(station_key, None)
+            return
+
+        # If station is in blackout, don't treat as silence
+        if is_blacked_out:
+            self._silence_start.pop(station_key, None)
+            return
+
+        # Start or check silence timer
+        if station_key not in self._silence_start:
+            self._silence_start[station_key] = now
+            return
+
+        silence_started = self._silence_start[station_key]
+        elapsed_seconds = (now - silence_started).total_seconds()
+
+        # Get threshold from per-station config or global default
+        auto_config = station.automation_config or {}
+        threshold = auto_config.get("silence_threshold_seconds", settings.SILENCE_DETECTION_SECONDS)
+
+        if elapsed_seconds < threshold:
+            return
+
+        # --- Silence threshold exceeded: dead air detected ---
+        logger.critical(
+            "Station %s (%s): Dead air detected — no audio for %.0f seconds",
+            station.name, station.id, elapsed_seconds,
+        )
+
+        # Create critical alert
+        try:
+            from app.services.alert_service import create_alert
+            await create_alert(
+                db,
+                alert_type="silence",
+                severity="critical",
+                title=f"Dead air detected: {station.name}",
+                message=f"Station '{station.name}' has had no audio for {int(elapsed_seconds)}s",
+                station_id=station.id,
+            )
+        except Exception as e:
+            logger.error("Failed to create silence alert for station %s: %s", station.id, e)
+
+        # Try emergency fallback: look for assets with category "emergency" or asset_type "jingle"
+        emergency_category = settings.EMERGENCY_FALLBACK_CATEGORY
+        try:
+            stmt = select(Asset).where(
+                (Asset.category == emergency_category) | (Asset.asset_type == "jingle")
+            )
+            result = await db.execute(stmt)
+            fallback_assets = result.scalars().all()
+
+            if fallback_assets:
+                fallback = random.choice(fallback_assets)
+                duration = fallback.duration or 60.0
+
+                service = SchedulingService(db)
+                await service.update_now_playing(
+                    station_id=station.id,
+                    asset_id=fallback.id,
+                    block_id=None,
+                    duration_seconds=duration,
+                )
+
+                # Reset silence timer since we started playing something
+                self._silence_start.pop(station_key, None)
+
+                logger.warning(
+                    "Station %s: Emergency fallback activated — playing '%s' (id=%s)",
+                    station.id, fallback.title, fallback.id,
+                )
+
+                # Broadcast emergency playback via WebSocket
+                try:
+                    from app.api.v1.websocket import broadcast_now_playing_update
+                    await broadcast_now_playing_update(str(station.id), {
+                        "station_id": str(station.id),
+                        "asset_id": str(fallback.id),
+                        "started_at": now.isoformat(),
+                        "ends_at": (now + timedelta(seconds=duration)).isoformat(),
+                        "emergency_fallback": True,
+                        "asset": {
+                            "title": fallback.title,
+                            "artist": fallback.artist,
+                            "album": fallback.album,
+                            "album_art_path": fallback.album_art_path,
+                        },
+                    })
+                except Exception as e:
+                    logger.error("Failed to broadcast emergency fallback update: %s", e)
+            else:
+                logger.error(
+                    "Station %s: No emergency fallback assets found (category='%s' or type='jingle')",
+                    station.id, emergency_category,
+                )
+        except Exception as e:
+            logger.error("Station %s: Emergency fallback failed: %s", station.id, e, exc_info=True)
+
+    async def _check_block_transition(self, db: AsyncSession, station: Station, block) -> Asset | None:
+        """
+        Detect schedule block transitions and play an intro jingle if available.
+
+        When the active block changes from the previous check, look for a jingle
+        asset matching the new block name (e.g., category "morning_intro") and
+        return it for playback before normal block content.
+        """
+        station_key = str(station.id)
+        current_block_id = str(block.id) if block else None
+        last_block_id = self._last_block.get(station_key)
+
+        # Update tracking
+        self._last_block[station_key] = current_block_id
+
+        # No transition if same block or no new block
+        if current_block_id is None or current_block_id == last_block_id:
+            return None
+
+        # First time seeing this station — don't trigger intro
+        if last_block_id is None:
+            return None
+
+        # Block changed — look for intro jingle matching block name
+        block_name = block.name.lower().replace(" ", "_") if block.name else ""
+        intro_patterns = [
+            f"{block_name}_intro",
+            block_name,
+        ]
+
+        for pattern in intro_patterns:
+            stmt = select(Asset).where(
+                Asset.asset_type == "jingle",
+                Asset.category == pattern,
+            ).limit(1)
+            result = await db.execute(stmt)
+            jingle = result.scalar_one_or_none()
+            if jingle:
+                logger.info(
+                    "Station %s: Block transition -> playing intro jingle '%s' for block '%s'",
+                    station.id, jingle.title, block.name,
+                )
+                return jingle
+
+        logger.debug(
+            "Station %s: Block transition to '%s' but no matching intro jingle found",
+            station.id, block.name,
+        )
+        return None
+
     async def _check_station(self, db: AsyncSession, station: Station):
         """Check a single station and advance playback if needed."""
         service = SchedulingService(db)
@@ -175,7 +342,8 @@ class SchedulerEngine:
             return  # Skip normal scheduler logic
 
         # Check blackout windows first
-        if await self._is_station_blacked_out(db, station, now):
+        is_blacked_out = await self._is_station_blacked_out(db, station, now)
+        if is_blacked_out:
             silence = await self._get_silence_asset(db)
             now_playing = await service.get_now_playing(station.id)
 
@@ -225,11 +393,13 @@ class SchedulerEngine:
                         })
                     except Exception as e:
                         logger.error(f"Failed to broadcast blackout update: {e}")
+            # Run silence detection (will be a no-op during blackout)
+            await self._check_silence_detection(db, station, has_playing_asset=bool(silence), is_blacked_out=True)
             return
 
         # Get current now-playing state
         now_playing = await service.get_now_playing(station.id)
-        
+
         # Check if current playback has ended
         needs_new_asset = False
         if now_playing:
@@ -251,10 +421,12 @@ class SchedulerEngine:
             # No playback active, start one
             needs_new_asset = True
             logger.info(f"Station {station.id}: No active playback, starting")
-        
+
         if not needs_new_asset:
+            # Asset is still playing — clear silence timer and return
+            await self._check_silence_detection(db, station, has_playing_asset=True, is_blacked_out=False)
             return
-        
+
         # Get the active block for current time
         block = await service.get_active_block_for_station(station.id, now)
         if not block:
@@ -270,6 +442,43 @@ class SchedulerEngine:
             except Exception:
                 pass
             await service.clear_now_playing(station.id)
+            # No block -> no playing asset -> check silence
+            await self._check_silence_detection(db, station, has_playing_asset=False, is_blacked_out=False)
+            return
+
+        # Check for block transition — play intro jingle if available
+        intro_jingle = await self._check_block_transition(db, station, block)
+        if intro_jingle:
+            duration = intro_jingle.duration or 10.0
+            now_playing = await service.update_now_playing(
+                station_id=station.id,
+                asset_id=intro_jingle.id,
+                block_id=block.id,
+                duration_seconds=duration,
+            )
+            logger.info(
+                f"Station {station.id}: Playing intro jingle '{intro_jingle.title}' "
+                f"for block '{block.name}'"
+            )
+            try:
+                from app.api.v1.websocket import broadcast_now_playing_update
+                await broadcast_now_playing_update(str(station.id), {
+                    "station_id": str(station.id),
+                    "asset_id": str(intro_jingle.id),
+                    "started_at": now_playing.started_at.isoformat(),
+                    "ends_at": now_playing.ends_at.isoformat() if now_playing.ends_at else None,
+                    "block_transition": True,
+                    "asset": {
+                        "title": intro_jingle.title,
+                        "artist": intro_jingle.artist,
+                        "album": intro_jingle.album,
+                        "album_art_path": intro_jingle.album_art_path,
+                    },
+                })
+            except Exception as e:
+                logger.error(f"Failed to broadcast intro jingle update: {e}")
+            # Jingle is now playing — silence cleared
+            await self._check_silence_detection(db, station, has_playing_asset=True, is_blacked_out=False)
             return
 
         # Get next asset from block
@@ -288,6 +497,8 @@ class SchedulerEngine:
             except Exception:
                 pass
             await service.clear_now_playing(station.id)
+            # No asset available -> check silence
+            await self._check_silence_detection(db, station, has_playing_asset=False, is_blacked_out=False)
             return
 
         # Get asset duration
@@ -307,10 +518,12 @@ class SchedulerEngine:
                 )
             except Exception:
                 pass
+            # Asset missing -> check silence
+            await self._check_silence_detection(db, station, has_playing_asset=False, is_blacked_out=False)
             return
-        
+
         duration = asset.duration or 180.0  # default 3 minutes if unknown
-        
+
         # Update now-playing
         now_playing = await service.update_now_playing(
             station_id=station.id,
@@ -318,12 +531,20 @@ class SchedulerEngine:
             block_id=block.id,
             duration_seconds=duration,
         )
-        
+
         logger.info(
             f"Station {station.id}: Now playing asset {asset_id} "
             f"('{asset.title}') from block {block.id} ('{block.name}')"
         )
-        
+
+        # Push metadata to Icecast so listeners see song info
+        try:
+            from app.services.icecast_service import update_icecast_metadata
+            mount = station.broadcast_config.get("icecast_mount", settings.ICECAST_MOUNT) if station.broadcast_config else settings.ICECAST_MOUNT
+            await update_icecast_metadata(mount, title=asset.title, artist=asset.artist)
+        except Exception as e:
+            logger.warning("Icecast metadata push failed: %s", e)
+
         # Broadcast update via WebSocket
         try:
             from app.api.v1.websocket import broadcast_now_playing_update
@@ -343,6 +564,9 @@ class SchedulerEngine:
             })
         except Exception as e:
             logger.error(f"Failed to broadcast WebSocket update: {e}")
+
+        # Asset started playing — clear silence timer
+        await self._check_silence_detection(db, station, has_playing_asset=True, is_blacked_out=False)
 
 
     async def _check_channel(self, db: AsyncSession, station: Station, channel: ChannelStream):

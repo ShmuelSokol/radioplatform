@@ -23,6 +23,8 @@ from app.models.alert import Alert, AlertSeverity, AlertType
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.live_show import LiveShow, LiveShowStatus, BroadcastMode
 from app.models.call_in_request import CallInRequest, CallStatus
+from app.models.song_request import SongRequest, RequestStatus
+from app.models.show_archive import ShowArchive
 
 __all__ = [
     "User", "UserRole",
@@ -50,4 +52,6 @@ __all__ = [
     "Alert", "AlertSeverity", "AlertType",
     "LiveShow", "LiveShowStatus", "BroadcastMode",
     "CallInRequest", "CallStatus",
+    "SongRequest", "RequestStatus",
+    "ShowArchive",
 ]

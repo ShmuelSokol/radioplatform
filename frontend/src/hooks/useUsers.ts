@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listUsers, createUser, updateUser, deleteUser } from '../api/users';
+import { listUsers, createUser, updateUser, deleteUser, listPublicHosts } from '../api/users';
 
 export function useUsers() {
   return useQuery({ queryKey: ['users'], queryFn: () => listUsers() });
@@ -26,5 +26,12 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: (id: string) => deleteUser(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
+export function usePublicHosts() {
+  return useQuery({
+    queryKey: ['public-hosts'],
+    queryFn: () => listPublicHosts(),
   });
 }

@@ -16,6 +16,31 @@ from app.schemas.user_preference import UserPreferenceResponse, UserPreferenceUp
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+@router.get("/public/hosts")
+async def list_public_hosts(db: AsyncSession = Depends(get_db)):
+    """Public: list all hosts/DJs with public profiles."""
+    result = await db.execute(
+        select(User).where(
+            User.is_public == True,
+            User.is_active == True,
+        ).order_by(User.display_name)
+    )
+    hosts = result.scalars().all()
+    return {
+        "hosts": [
+            {
+                "id": str(h.id),
+                "display_name": h.display_name or h.email.split("@")[0],
+                "title": h.title,
+                "bio": h.bio if hasattr(h, 'bio') else None,
+                "photo_url": h.photo_url if hasattr(h, 'photo_url') else None,
+                "social_links": h.social_links if hasattr(h, 'social_links') else None,
+            }
+            for h in hosts
+        ]
+    }
+
+
 @router.get("", response_model=UserListResponse)
 async def list_users(
     skip: int = Query(0, ge=0),
@@ -46,6 +71,10 @@ async def create_user(
         phone_number=body.phone_number,
         title=body.title,
         alert_preferences=body.alert_preferences,
+        bio=body.bio,
+        photo_url=body.photo_url,
+        is_public=body.is_public,
+        social_links=body.social_links,
         is_active=True,
     )
     db.add(user)
@@ -81,6 +110,14 @@ async def update_user(
         user.title = body.title
     if body.alert_preferences is not None:
         user.alert_preferences = body.alert_preferences
+    if body.bio is not None:
+        user.bio = body.bio
+    if body.photo_url is not None:
+        user.photo_url = body.photo_url
+    if body.is_public is not None:
+        user.is_public = body.is_public
+    if body.social_links is not None:
+        user.social_links = body.social_links
     await db.commit()
     await db.refresh(user)
     return user

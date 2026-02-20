@@ -24,6 +24,7 @@ class AlertType(str, enum.Enum):
     BLACKOUT_END = "blackout_end"
     SYSTEM = "system"
     LIVE_SHOW = "live_show"
+    SILENCE = "silence"
 
 
 class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -1,7 +1,7 @@
 import uuid
 
-from sqlalchemy import Boolean, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -9,6 +9,12 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 class ScheduleRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "schedule_rules"
+
+    # Optional: if set, this rule applies only to this station.
+    # NULL = global rule applied to all stations (unless the station has its own rules).
+    station_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("stations.id", ondelete="CASCADE"), nullable=True
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -41,10 +41,12 @@ async def _add_missing_columns(engine):
     enum_migrations = [
         "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'sponsor'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'live_show'",
+        "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'silence'",
         # Live show enum types (created by create_all, but safe to re-run)
         "DO $$ BEGIN CREATE TYPE live_show_status AS ENUM ('scheduled','live','ended','cancelled'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
         "DO $$ BEGIN CREATE TYPE broadcast_mode AS ENUM ('webrtc','icecast'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
         "DO $$ BEGIN CREATE TYPE call_status AS ENUM ('waiting','screening','approved','on_air','completed','rejected','abandoned'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
+        "DO $$ BEGIN CREATE TYPE request_status AS ENUM ('pending','approved','queued','played','rejected'); EXCEPTION WHEN duplicate_object THEN NULL; END $$",
     ]
     for sql in enum_migrations:
         try:
@@ -77,6 +79,23 @@ async def _add_missing_columns(engine):
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS alert_preferences JSONB",
         # Station-specific rules
         "ALTER TABLE schedule_rules ADD COLUMN IF NOT EXISTS station_id UUID REFERENCES stations(id) ON DELETE CASCADE",
+        # DJ/Host profile fields
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS social_links JSONB",
+        # Show archives table columns
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS station_id UUID REFERENCES stations(id) ON DELETE CASCADE",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS title VARCHAR(500) NOT NULL DEFAULT ''",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS description TEXT",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS host_name VARCHAR(255)",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMPTZ",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS duration_seconds INTEGER",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS audio_url TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS cover_image_url TEXT",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS is_published BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS download_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS live_show_id UUID REFERENCES live_shows(id) ON DELETE SET NULL",
     ]
     for sql in migrations:
         try:

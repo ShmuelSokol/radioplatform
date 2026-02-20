@@ -1,4 +1,10 @@
-"""Smart queue replenishment service using ScheduleRule logic."""
+"""Smart queue replenishment service using ScheduleRule logic.
+
+Station-specific rules (station_id = this station) take full priority over
+global rules (station_id IS NULL).  If a station has ANY station-specific
+rules, global rules are completely ignored for that station — allowing
+dedicated content streams like "stories only" without affecting other stations.
+"""
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -29,18 +35,11 @@ class QueueReplenishService:
     async def replenish(self) -> None:
         """
         Auto-fill queue to ~24 hours of content using active schedule rules.
-        
-        Strategy:
-        1. Calculate current queue duration
-        2. If below 24h, fetch active rules sorted by priority (desc)
-        3. Apply each rule type:
-           - rotation: Insert spot/jingle every N songs
-           - interval: Insert spot every N minutes
-           - daypart: Fill time blocks with category-specific content
-           - fixed_time: Schedule specific assets at exact times
-        4. Fill remaining gaps with music (respecting category constraints)
+
+        Station-specific rules override global rules entirely — a station with
+        its own rules (e.g. stories-only) won't receive global music/spots.
+        Gap fill uses the primary daypart rule's asset_type, not hardcoded music.
         """
-        # Sum durations of pending + playing entries
         result = await self.db.execute(
             select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
             .select_from(QueueEntry)
@@ -59,14 +58,12 @@ class QueueReplenishService:
         shortfall = TARGET_QUEUE_SECONDS - total_seconds
         logger.info("Queue shortfall: %.1fs, replenishing...", shortfall)
 
-        # Get current max position
         result = await self.db.execute(
             select(func.coalesce(func.max(QueueEntry.position), 0))
             .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "pending")
         )
         self.max_pos = result.scalar() or 0
 
-        # Get IDs already in queue
         result = await self.db.execute(
             select(QueueEntry.asset_id).where(
                 QueueEntry.station_id == self.station_id,
@@ -75,7 +72,6 @@ class QueueReplenishService:
         )
         self.queued_ids = {row[0] for row in result.all()}
 
-        # Get asset IDs played in last 2 hours (avoid repeats)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
         result = await self.db.execute(
             select(PlayLog.asset_id).where(
@@ -87,37 +83,17 @@ class QueueReplenishService:
         recent_ids = {row[0] for row in result.all()}
         self.exclude_ids = self.queued_ids | recent_ids
 
-        # Fetch active rules sorted by priority
-        now = datetime.now(timezone.utc)
-        current_hour = now.hour
-        current_day = now.weekday()  # 0=Mon, 6=Sun
-
-        result = await self.db.execute(
-            select(ScheduleRule)
-            .where(
-                ScheduleRule.is_active == True,
-                ScheduleRule.hour_start <= current_hour,
-                ScheduleRule.hour_end >= current_hour,
-            )
-            .order_by(ScheduleRule.priority.desc())
-        )
-        rules = result.scalars().all()
-
-        # Filter by day of week
-        rules = [
-            r for r in rules
-            if str(current_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
-        ]
+        rules = await self._load_rules()
+        station_specific = any(r.station_id is not None for r in rules)
 
         if not rules:
             logger.info("No active rules found, falling back to random music fill")
-            await self._fill_random_music(shortfall)
+            await self._fill_content(shortfall, asset_type="music", category=None)
             await self.db.flush()
             return
 
-        logger.info("Found %d active rules for replenishment", len(rules))
+        logger.info("Found %d active rules for replenishment (station_specific=%s)", len(rules), station_specific)
 
-        # Apply each rule type
         for rule in rules:
             if rule.rule_type == "rotation":
                 await self._apply_rotation_rule(rule, shortfall)
@@ -128,20 +104,74 @@ class QueueReplenishService:
             elif rule.rule_type == "fixed_time":
                 await self._apply_fixed_time_rule(rule, shortfall)
 
-        # Insert sponsors based on their policies
-        await self._insert_sponsors(shortfall)
+        # Only insert global sponsors for stations using global rules
+        if not station_specific:
+            await self._insert_sponsors(shortfall)
 
-        # Fill remaining gaps with music
         current_duration = await self._calculate_queue_duration()
         remaining_shortfall = TARGET_QUEUE_SECONDS - current_duration
         if remaining_shortfall > 0:
-            await self._fill_random_music(remaining_shortfall)
+            fill_type, fill_cat = self._get_fill_spec(rules)
+            await self._fill_content(remaining_shortfall, asset_type=fill_type, category=fill_cat)
 
         await self.db.flush()
         logger.info("Queue replenishment complete")
 
+    async def _load_rules(self) -> list[ScheduleRule]:
+        """Load active rules for this station.
+
+        Station-specific rules take priority. If ANY exist for this station,
+        global rules (station_id IS NULL) are ignored entirely.
+        """
+        now = datetime.now(timezone.utc)
+        current_hour = now.hour
+        current_day = now.weekday()
+
+        result = await self.db.execute(
+            select(ScheduleRule)
+            .where(
+                ScheduleRule.is_active == True,
+                ScheduleRule.station_id == self.station_id,
+                ScheduleRule.hour_start <= current_hour,
+                ScheduleRule.hour_end >= current_hour,
+            )
+            .order_by(ScheduleRule.priority.desc())
+        )
+        station_rules = [
+            r for r in result.scalars().all()
+            if str(current_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
+        ]
+
+        if station_rules:
+            logger.info(
+                "Station %s: using %d station-specific rule(s), ignoring global rules",
+                self.station_id, len(station_rules),
+            )
+            return station_rules
+
+        result = await self.db.execute(
+            select(ScheduleRule)
+            .where(
+                ScheduleRule.is_active == True,
+                ScheduleRule.station_id.is_(None),
+                ScheduleRule.hour_start <= current_hour,
+                ScheduleRule.hour_end >= current_hour,
+            )
+            .order_by(ScheduleRule.priority.desc())
+        )
+        return [
+            r for r in result.scalars().all()
+            if str(current_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
+        ]
+
+    def _get_fill_spec(self, rules: list[ScheduleRule]) -> tuple[str, str | None]:
+        """Return (asset_type, category) for gap-filling from the top daypart rule."""
+        for rule in rules:
+            if rule.rule_type == "daypart":
+                return rule.asset_type, rule.category
+        return "music", None
+
     async def _calculate_queue_duration(self) -> float:
-        """Calculate total duration of pending + playing queue entries."""
         result = await self.db.execute(
             select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
             .select_from(QueueEntry)
@@ -154,126 +184,58 @@ class QueueReplenishService:
         return float(result.scalar() or 0)
 
     async def _apply_rotation_rule(self, rule: ScheduleRule, shortfall: float) -> None:
-        """
-        Apply rotation rule: Insert spot/jingle every N songs.
-        Example: "Play hourly jingle every 12 songs"
-        """
         if not rule.songs_between or rule.songs_between <= 0:
             return
-
-        # Count music tracks already in queue
-        result = await self.db.execute(
-            select(func.count(QueueEntry.id))
-            .join(Asset, QueueEntry.asset_id == Asset.id)
-            .where(
-                QueueEntry.station_id == self.station_id,
-                QueueEntry.status.in_(["pending", "playing"]),
-                Asset.asset_type == "music",
-            )
-        )
-        music_count = result.scalar() or 0
-
-        # How many times should we insert in the upcoming shortfall?
-        # Estimate: shortfall / avg_song_duration * (1 / songs_between)
-        avg_song_duration = 180  # 3 min
+        avg_song_duration = 180
         estimated_songs = shortfall / avg_song_duration
         insertions_needed = int(estimated_songs / rule.songs_between)
-
         if insertions_needed <= 0:
             return
-
-        logger.info(
-            "Rotation rule '%s': inserting %d x %s (every %d songs)",
-            rule.name, insertions_needed, rule.asset_type, rule.songs_between
-        )
-
-        # Find candidate assets
+        logger.info("Rotation rule '%s': inserting %d x %s", rule.name, insertions_needed, rule.asset_type)
         assets = await self._find_assets_for_rule(rule)
         if not assets:
-            logger.warning("No assets found for rotation rule '%s'", rule.name)
             return
-
-        # Insert at intervals of N songs
         for i in range(insertions_needed):
-            asset = assets[i % len(assets)]  # Rotate through available assets
-            # Calculate position: current queue position + (i+1) * songs_between
+            asset = assets[i % len(assets)]
             insert_pos = self.max_pos + (i + 1) * rule.songs_between
             await self._enqueue_asset(asset, insert_pos)
 
     async def _apply_interval_rule(self, rule: ScheduleRule, shortfall: float) -> None:
-        """
-        Apply interval rule: Insert spot every N minutes.
-        Example: "Weather spot every 15 minutes"
-        """
         if not rule.interval_minutes or rule.interval_minutes <= 0:
             return
-
-        # How many times in the shortfall?
         interval_seconds = rule.interval_minutes * 60
         insertions_needed = int(shortfall / interval_seconds)
-
         if insertions_needed <= 0:
             return
-
-        logger.info(
-            "Interval rule '%s': inserting %d x %s (every %d min)",
-            rule.name, insertions_needed, rule.asset_type, rule.interval_minutes
-        )
-
+        logger.info("Interval rule '%s': inserting %d x %s (every %d min)",
+                    rule.name, insertions_needed, rule.asset_type, rule.interval_minutes)
         assets = await self._find_assets_for_rule(rule)
         if not assets:
-            logger.warning("No assets found for interval rule '%s'", rule.name)
             return
-
-        # Insert at time-based intervals
-        current_duration = await self._calculate_queue_duration()
         for i in range(insertions_needed):
             asset = assets[i % len(assets)]
-            # Calculate position based on time offset
             time_offset = (i + 1) * interval_seconds
             insert_pos = self.max_pos + int((time_offset / DEFAULT_DURATION))
             await self._enqueue_asset(asset, insert_pos)
 
     async def _apply_daypart_rule(self, rule: ScheduleRule, shortfall: float) -> None:
-        """
-        Apply daypart rule: Fill specific hours with category-specific music.
-        Example: "Play shiurim from 8am-10am"
-        """
-        # For simplicity, daypart rules just constrain what music gets added
-        # This is more of a filter than an insertion — we'll handle in _fill_random_music
-        logger.debug(
-            "Daypart rule '%s': filtering music by category '%s' during %d-%d",
-            rule.name, rule.category, rule.hour_start, rule.hour_end
-        )
-        # Daypart logic is passive — it affects _fill_random_music category selection
+        """Passive — defines fill spec via _get_fill_spec."""
+        logger.debug("Daypart rule '%s': asset_type=%s category=%s", rule.name, rule.asset_type, rule.category)
 
     async def _apply_fixed_time_rule(self, rule: ScheduleRule, shortfall: float) -> None:
-        """
-        Apply fixed_time rule: Schedule specific asset at exact time.
-        Example: "News at top of hour"
-        
-        Note: This is best handled by hourly jingle insertion (_maybe_insert_hourly_jingle)
-        For now, we'll skip implementation since it requires real-time scheduling.
-        """
-        logger.debug("Fixed-time rule '%s': skipping (handled by real-time engine)", rule.name)
+        logger.debug("Fixed-time rule '%s': skipping (real-time engine)", rule.name)
 
     async def _find_assets_for_rule(self, rule: ScheduleRule) -> Sequence[Asset]:
-        """Find assets matching a rule's asset_type and category."""
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
-
         if rule.category:
             query = query.where(Asset.category == rule.category)
-
-        # Exclude already queued/recent
         if self.exclude_ids:
             query = query.where(Asset.id.notin_(self.exclude_ids))
-
-        query = query.order_by(func.random()).limit(50)  # Get pool of candidates
+        query = query.order_by(func.random()).limit(50)
         result = await self.db.execute(query)
         return result.scalars().all()
 
     async def _enqueue_asset(self, asset: Asset, position: int) -> None:
-        """Add an asset to the queue at a specific position."""
         entry = QueueEntry(
             id=uuid.uuid4(),
             station_id=self.station_id,
@@ -287,114 +249,65 @@ class QueueReplenishService:
         logger.debug("Enqueued %s '%s' at position %d", asset.asset_type, asset.title, position)
 
     async def _insert_sponsors(self, shortfall: float) -> None:
-        """Insert sponsor spots based on their insertion policies and target rules.
-
-        Sponsors must have a linked asset_id to be queued (queue_entries.asset_id is NOT NULL).
-        Sponsors without a matching Asset record are skipped.
-        """
         now = datetime.now(timezone.utc)
         current_hour = now.hour
-
-        result = await self.db.execute(
-            select(Sponsor).order_by(Sponsor.priority.desc())
-        )
+        result = await self.db.execute(select(Sponsor).order_by(Sponsor.priority.desc()))
         sponsors = result.scalars().all()
-
         for sponsor in sponsors:
-            # Find an Asset record matching the sponsor's audio file
             sponsor_asset = None
             if sponsor.audio_file_path:
                 result = await self.db.execute(
                     select(Asset).where(Asset.file_path == sponsor.audio_file_path).limit(1)
                 )
                 sponsor_asset = result.scalar_one_or_none()
-
             if not sponsor_asset:
-                logger.debug("Skipping sponsor '%s' — no matching Asset record", sponsor.name)
                 continue
-
             rules = sponsor.target_rules or {}
             hour_start = rules.get("hour_start", 0)
             hour_end = rules.get("hour_end", 24)
             max_per_hour = rules.get("max_per_hour", 4)
             songs_between = rules.get("songs_between", 6)
-
-            # Check if current hour is in target range
             if not (hour_start <= current_hour < hour_end):
                 continue
-
             if sponsor.insertion_policy == "every_n_songs":
-                estimated_songs = shortfall / DEFAULT_DURATION
-                insertions = min(int(estimated_songs / max(songs_between, 1)), max_per_hour)
+                insertions = min(int((shortfall / DEFAULT_DURATION) / max(songs_between, 1)), max_per_hour)
                 for i in range(insertions):
                     self.max_pos += songs_between
                     await self._enqueue_asset(sponsor_asset, self.max_pos)
-                    logger.info("Inserted sponsor '%s' at position %d", sponsor.name, self.max_pos)
-
             elif sponsor.insertion_policy == "fixed_interval":
-                interval_min = rules.get("interval_minutes", 15)
-                interval_sec = interval_min * 60
+                interval_sec = rules.get("interval_minutes", 15) * 60
                 insertions = min(int(shortfall / interval_sec), max_per_hour)
                 for i in range(insertions):
                     pos = self.max_pos + int(((i + 1) * interval_sec) / DEFAULT_DURATION)
                     await self._enqueue_asset(sponsor_asset, pos)
-                    logger.info("Inserted sponsor '%s' at position %d", sponsor.name, pos)
-
             else:
                 insertions = min(int(shortfall / (DEFAULT_DURATION * max(songs_between, 1))), max_per_hour)
                 for i in range(insertions):
                     self.max_pos += songs_between
                     await self._enqueue_asset(sponsor_asset, self.max_pos)
-                    logger.info("Inserted sponsor '%s' at position %d", sponsor.name, self.max_pos)
 
-    async def _fill_random_music(self, shortfall: float) -> None:
-        """Fill remaining queue with random music, respecting daypart category constraints."""
-        # Check for active daypart rules to filter category
-        now = datetime.now(timezone.utc)
-        current_hour = now.hour
-        current_day = now.weekday()
-
-        result = await self.db.execute(
-            select(ScheduleRule)
-            .where(
-                ScheduleRule.is_active == True,
-                ScheduleRule.rule_type == "daypart",
-                ScheduleRule.hour_start <= current_hour,
-                ScheduleRule.hour_end >= current_hour,
-            )
-            .order_by(ScheduleRule.priority.desc())
-        )
-        daypart_rules = result.scalars().all()
-        daypart_rules = [
-            r for r in daypart_rules
-            if str(current_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
-        ]
-
-        category_filter = None
-        if daypart_rules:
-            # Use highest priority daypart rule's category
-            category_filter = daypart_rules[0].category
-            logger.info("Filling music with category filter: %s", category_filter)
-
-        # Select random music
-        query = select(Asset).where(Asset.asset_type == "music")
-
-        if category_filter:
-            query = query.where(Asset.category == category_filter)
-
+    async def _fill_content(
+        self,
+        shortfall: float,
+        asset_type: str = "music",
+        category: str | None = None,
+    ) -> None:
+        """Fill remaining queue with random content of the given type/category."""
+        logger.info("Filling %.1fs: type=%s category=%s", shortfall, asset_type, category)
+        query = select(Asset).where(Asset.asset_type == asset_type)
+        if category:
+            query = query.where(Asset.category == category)
         if self.exclude_ids:
             query = query.where(Asset.id.notin_(self.exclude_ids))
-
         query = query.order_by(func.random())
         result = await self.db.execute(query)
         candidates = result.scalars().all()
 
         if not candidates:
-            # If all excluded, try again without recent exclusion (only skip queued)
-            logger.warning("No music candidates found, retrying with relaxed constraints")
-            query = select(Asset).where(Asset.asset_type == "music")
-            if category_filter:
-                query = query.where(Asset.category == category_filter)
+            logger.warning("No %s/%s candidates, retrying without recent exclusion", asset_type, category)
+            query = select(Asset).where(Asset.asset_type == asset_type)
+            if category:
+                query = query.where(Asset.category == category)
             if self.queued_ids:
                 query = query.where(Asset.id.notin_(self.queued_ids))
             query = query.order_by(func.random())
@@ -402,7 +315,7 @@ class QueueReplenishService:
             candidates = result.scalars().all()
 
         if not candidates:
-            logger.warning("No music assets available for queue fill")
+            logger.warning("No %s assets available", asset_type)
             return
 
         filled = 0.0
@@ -414,4 +327,8 @@ class QueueReplenishService:
             await self._enqueue_asset(asset, self.max_pos)
             filled += dur
 
-        logger.info("Filled %.1fs of music (%.1f%% of shortfall)", filled, (filled / shortfall) * 100)
+        logger.info("Filled %.1fs of %s content", filled, asset_type)
+
+    # Backwards-compat alias
+    async def _fill_random_music(self, shortfall: float) -> None:
+        await self._fill_content(shortfall, asset_type="music", category=None)

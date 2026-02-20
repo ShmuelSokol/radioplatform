@@ -30,6 +30,80 @@ from app.schemas.schedule import (
 router = APIRouter(prefix="/schedules", tags=["schedules"])
 
 
+# ==================== Public EPG ====================
+@router.get("/epg/{station_id}")
+async def get_epg(
+    station_id: str,
+    date: str | None = Query(None),  # YYYY-MM-DD, defaults to today
+    db: AsyncSession = Depends(get_db),
+):
+    """Public EPG: returns all schedule blocks for a station on a given day, sorted by start_time."""
+    from datetime import date as date_type
+
+    target_date = date_type.fromisoformat(date) if date else datetime.now().date()
+    day_name = target_date.strftime("%A").lower()  # "monday", etc.
+
+    # Get active schedules for station
+    result = await db.execute(
+        select(ScheduleModel).where(
+            ScheduleModel.station_id == station_id,
+            ScheduleModel.is_active == True,
+        )
+    )
+    schedules = result.scalars().all()
+    schedule_ids = [s.id for s in schedules]
+    if not schedule_ids:
+        return {"station_id": station_id, "date": target_date.isoformat(), "blocks": []}
+
+    # Get blocks for these schedules
+    result = await db.execute(
+        select(ScheduleBlockModel).where(ScheduleBlockModel.schedule_id.in_(schedule_ids))
+    )
+    blocks = result.scalars().all()
+
+    # Filter to blocks active on target_date
+    epg_blocks = []
+    for block in blocks:
+        matches = False
+        rec = block.recurrence_type.value if hasattr(block.recurrence_type, 'value') else str(block.recurrence_type)
+
+        if rec == "daily":
+            matches = True
+        elif rec == "weekly":
+            pattern = block.recurrence_pattern or []
+            matches = day_name in [p.lower() for p in pattern]
+        elif rec == "monthly":
+            pattern = block.recurrence_pattern or []
+            matches = target_date.day in pattern
+        elif rec == "one_time":
+            if block.start_date and block.end_date:
+                matches = block.start_date <= target_date <= block.end_date
+            elif block.start_date:
+                matches = target_date == block.start_date
+
+        if matches:
+            # Find parent schedule name
+            schedule = next((s for s in schedules if s.id == block.schedule_id), None)
+            epg_blocks.append({
+                "id": str(block.id),
+                "name": block.name,
+                "description": block.description,
+                "start_time": block.start_time.strftime("%H:%M") if block.start_time else None,
+                "end_time": block.end_time.strftime("%H:%M") if block.end_time else None,
+                "playback_mode": block.playback_mode.value if hasattr(block.playback_mode, 'value') else str(block.playback_mode),
+                "schedule_name": schedule.name if schedule else None,
+            })
+
+    # Sort by start_time
+    epg_blocks.sort(key=lambda b: b["start_time"] or "00:00")
+
+    return {
+        "station_id": station_id,
+        "date": target_date.isoformat(),
+        "blocks": epg_blocks,
+    }
+
+
 # ==================== Schedules ====================
 @router.post("/", response_model=Schedule, status_code=status.HTTP_201_CREATED)
 async def create_schedule(
@@ -168,6 +242,43 @@ async def delete_schedule_block(
 
     await db.delete(block)
     await db.commit()
+
+
+@router.post("/blocks/{block_id}/set-prerecorded", status_code=200)
+async def set_prerecorded_show(
+    block_id: UUID,
+    body: dict,  # {"asset_id": "uuid-string"}
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Set a block to play a single pre-recorded show asset."""
+    from app.core.exceptions import NotFoundError
+
+    result = await db.execute(
+        select(ScheduleBlockModel).where(ScheduleBlockModel.id == block_id)
+    )
+    block = result.scalar_one_or_none()
+    if not block:
+        raise NotFoundError("Block not found")
+
+    # Clear existing entries
+    existing = (await db.execute(
+        select(PlaylistEntryModel).where(PlaylistEntryModel.block_id == block_id)
+    )).scalars().all()
+    for entry in existing:
+        await db.delete(entry)
+
+    # Add single asset
+    entry = PlaylistEntryModel(
+        block_id=block_id,
+        asset_id=body["asset_id"],
+        position=0,
+        is_enabled=True,
+    )
+    db.add(entry)
+    await db.flush()
+
+    return {"status": "ok", "block_id": str(block_id), "asset_id": body["asset_id"]}
 
 
 # ==================== Playlist Entries (before /{schedule_id}) ====================

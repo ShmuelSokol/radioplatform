@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useSchedulePreview } from '../../hooks/useRules';
+import { useStations } from '../../hooks/useStations';
 import type { ScheduleRule } from '../../types';
 import Spinner from '../../components/Spinner';
 
@@ -12,6 +13,8 @@ const TYPE_COLORS: Record<string, string> = {
 
 export default function Rules() {
   const { data, isLoading } = useRules();
+  const { data: stationsData } = useStations();
+  const stations = stationsData?.stations ?? [];
   const createMut = useCreateRule();
   const updateMut = useUpdateRule();
   const deleteMut = useDeleteRule();
@@ -22,6 +25,7 @@ export default function Rules() {
     name: '', description: '', rule_type: 'rotation', asset_type: 'music',
     category: '', hour_start: 0, hour_end: 24, days_of_week: '0,1,2,3,4,5,6',
     interval_minutes: undefined, songs_between: undefined, priority: 10, is_active: true,
+    station_id: null,
   });
 
   // Schedule preview
@@ -54,6 +58,7 @@ export default function Rules() {
       name: '', description: '', rule_type: 'rotation', asset_type: 'music',
       category: '', hour_start: 0, hour_end: 24, days_of_week: '0,1,2,3,4,5,6',
       interval_minutes: undefined, songs_between: undefined, priority: 10, is_active: true,
+      station_id: null,
     });
   };
 
@@ -171,6 +176,16 @@ export default function Rules() {
             <input value={form.description ?? ''} onChange={e => setForm({ ...form, description: e.target.value })}
               className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
           </div>
+          <div>
+            <label className="block text-[11px] text-gray-400 mb-1">Station (blank = global)</label>
+            <select value={form.station_id ?? ''} onChange={e => setForm({ ...form, station_id: e.target.value || null })}
+              className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700">
+              <option value="">Global (all stations)</option>
+              {stations.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="col-span-3 flex gap-2">
             <button type="submit" disabled={createMut.isPending || updateMut.isPending}
               className="px-4 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-sm disabled:opacity-50">
@@ -196,6 +211,7 @@ export default function Rules() {
             <thead>
               <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">
                 <th className="text-left px-3 py-2">Name</th>
+                <th className="text-left px-3 py-2">Station</th>
                 <th className="text-left px-3 py-2">Type</th>
                 <th className="text-left px-3 py-2">Content</th>
                 <th className="text-left px-3 py-2">Hours</th>
@@ -209,6 +225,14 @@ export default function Rules() {
               {rules.map(r => (
                 <tr key={r.id} className={`border-t border-[#1a1a3e] hover:bg-[#14143a] ${!r.is_active ? 'opacity-40' : ''}`}>
                   <td className="px-3 py-1.5 text-cyan-300">{r.name}</td>
+                  <td className="px-3 py-1.5 text-[10px]">
+                    {r.station_id
+                      ? <span className="px-1.5 py-0.5 bg-indigo-900 text-indigo-300 rounded">
+                          {stations.find(s => s.id === r.station_id)?.name ?? 'Station'}
+                        </span>
+                      : <span className="text-gray-600">global</span>
+                    }
+                  </td>
                   <td className="px-3 py-1.5 text-gray-400 text-[11px]">{r.rule_type}</td>
                   <td className="px-3 py-1.5">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${TYPE_COLORS[r.asset_type] ?? 'bg-gray-800 text-gray-300'}`}>

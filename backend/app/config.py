@@ -83,6 +83,10 @@ class Settings(BaseSettings):
         redis = info.data.get("REDIS_URL", "")
         return f"{redis}/2" if redis else ""
 
+    # Emergency fallback / silence detection
+    EMERGENCY_FALLBACK_CATEGORY: str = "emergency"
+    SILENCE_DETECTION_SECONDS: int = 30
+
     # FFmpeg
     FFMPEG_PATH: str = "ffmpeg"
 
