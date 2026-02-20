@@ -106,17 +106,26 @@ def _force_extension(filename: str, ext: str) -> str:
 
 
 async def get_asset(db: AsyncSession, asset_id: uuid.UUID) -> Asset:
-    result = await db.execute(select(Asset).where(Asset.id == asset_id))
-    asset = result.scalar_one_or_none()
-    if not asset:
+    result = await db.execute(
+        select(Asset, Sponsor.name.label("sponsor_name"))
+        .outerjoin(Sponsor, Asset.sponsor_id == Sponsor.id)
+        .where(Asset.id == asset_id)
+    )
+    row = result.one_or_none()
+    if not row:
         raise NotFoundError(f"Asset {asset_id} not found")
+    asset = row[0]
+    asset.sponsor_name = row[1]
     return asset
 
 
 async def list_assets(
-    db: AsyncSession, skip: int = 0, limit: int = 50
+    db: AsyncSession, skip: int = 0, limit: int = 50, asset_type: str | None = None
 ) -> tuple[list[dict], int]:
-    count_result = await db.execute(select(func.count(Asset.id)))
+    count_q = select(func.count(Asset.id))
+    if asset_type:
+        count_q = count_q.where(Asset.asset_type == asset_type)
+    count_result = await db.execute(count_q)
     total = count_result.scalar() or 0
 
     # Subquery for last played time
@@ -128,12 +137,14 @@ async def list_assets(
         .label("last_played_at")
     )
 
-    result = await db.execute(
+    q = (
         select(Asset, last_played_sq, Sponsor.name.label("sponsor_name"))
         .outerjoin(Sponsor, Asset.sponsor_id == Sponsor.id)
-        .offset(skip)
-        .limit(limit)
-        .order_by(Asset.created_at.desc())
+    )
+    if asset_type:
+        q = q.where(Asset.asset_type == asset_type)
+    result = await db.execute(
+        q.offset(skip).limit(limit).order_by(Asset.created_at.desc())
     )
     rows = result.all()
     assets = []

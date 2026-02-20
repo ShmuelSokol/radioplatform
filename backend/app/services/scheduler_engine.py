@@ -5,7 +5,7 @@ This runs continuously and updates now-playing state when blocks change or asset
 import asyncio
 import logging
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -180,7 +180,7 @@ class SchedulerEngine:
         a critical alert is raised and an emergency fallback asset is played.
         """
         station_key = str(station.id)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # If there IS a playing asset, clear the silence timer
         if has_playing_asset:
@@ -343,7 +343,7 @@ class SchedulerEngine:
     async def _check_station(self, db: AsyncSession, station: Station):
         """Check a single station and advance playback if needed."""
         service = SchedulingService(db)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Check if station is in live show mode — skip normal scheduler
         live_show_id = station.automation_config.get("live_show_id") if station.automation_config else None
@@ -582,7 +582,7 @@ class SchedulerEngine:
     async def _check_channel(self, db: AsyncSession, station: Station, channel: ChannelStream):
         """Check a single channel within a station and advance its playback independently."""
         service = SchedulingService(db)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Use a channel-specific key for now-playing (station_id + channel_id)
         # For now, channels with dedicated schedules run independently

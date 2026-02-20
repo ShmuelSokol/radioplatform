@@ -88,13 +88,13 @@ def _extract_duration(file_data: bytes, input_ext: str = "") -> float | None:
 LOUDNORM_FILTER = "loudnorm=I=-16:TP=-1.5:LRA=11"
 
 CONVERT_FORMATS = {
-    "mp2": {"ffmpeg_fmt": "mp2", "mime": "audio/mpeg", "ext": ".mp2", "args": ["-vn", "-af", LOUDNORM_FILTER, "-c:a", "mp2", "-b:a", "192k", "-ac", "2", "-ar", "44100"]},
-    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "ext": ".mp3", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ab", "192k", "-ac", "2", "-ar", "44100"]},
-    "mp4": {"ffmpeg_fmt": "mp4", "mime": "audio/mp4", "ext": ".m4a", "args": ["-vn", "-af", LOUDNORM_FILTER, "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "44100", "-movflags", "+faststart"]},
+    "mp2": {"ffmpeg_fmt": "mp2", "mime": "audio/mpeg", "ext": ".mp2", "args": ["-vn", "-af", LOUDNORM_FILTER, "-c:a", "mp2", "-b:a", "256k", "-ac", "2", "-ar", "44100"]},
+    "mp3": {"ffmpeg_fmt": "mp3", "mime": "audio/mpeg", "ext": ".mp3", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ab", "256k", "-ac", "2", "-ar", "44100"]},
+    "mp4": {"ffmpeg_fmt": "mp4", "mime": "audio/mp4", "ext": ".m4a", "args": ["-vn", "-af", LOUDNORM_FILTER, "-c:a", "aac", "-b:a", "256k", "-ac", "2", "-ar", "44100", "-movflags", "+faststart"]},
     "wav": {"ffmpeg_fmt": "wav", "mime": "audio/wav", "ext": ".wav", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100"]},
     "flac": {"ffmpeg_fmt": "flac", "mime": "audio/flac", "ext": ".flac", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100"]},
-    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "ext": ".ogg", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "5"]},
-    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "ext": ".aac", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k"]},
+    "ogg": {"ffmpeg_fmt": "ogg", "mime": "audio/ogg", "ext": ".ogg", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100", "-c:a", "libvorbis", "-q:a", "7"]},
+    "aac": {"ffmpeg_fmt": "adts", "mime": "audio/aac", "ext": ".aac", "args": ["-vn", "-af", LOUDNORM_FILTER, "-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "256k"]},
 }
 
 

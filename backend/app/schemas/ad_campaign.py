@@ -33,6 +33,7 @@ class CampaignStatusUpdate(BaseModel):
 class CampaignInDB(BaseModel):
     id: UUID | str
     sponsor_id: UUID | str
+    sponsor_name: str | None = None
     name: str
     description: str | None = None
     status: str

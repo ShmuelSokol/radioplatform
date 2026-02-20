@@ -147,9 +147,17 @@ async def upload_asset(
     file_data = await file.read()
     original_filename = file.filename or "upload.mp3"
     raw_hash = hashlib.md5(file_data[:4096]).hexdigest()
+
+    # Auto-detect MP2/MPG files: keep as MP2 to preserve quality (browser playback auto-converts)
+    target = format
+    ext_lower = original_filename.rsplit(".", 1)[-1].lower() if "." in original_filename else ""
+    if target == "mp3" and ext_lower in ("mp2", "mpg", "mpeg"):
+        target = "mp2"
+        logger.info("Auto-selected mp2 target for MP2/MPG source file '%s'", original_filename)
+
     logger.info(
         "UPLOAD endpoint: filename='%s', content_type='%s', size=%d, hash_4k=%s, format='%s'",
-        original_filename, file.content_type, len(file_data), raw_hash, format,
+        original_filename, file.content_type, len(file_data), raw_hash, target,
     )
     asset = await create_asset(
         db,
@@ -159,7 +167,7 @@ async def upload_asset(
         content_type=file.content_type or "audio/mpeg",
         user_id=user.id,
         original_filename=original_filename,
-        target_format=format,
+        target_format=target,
         artist=artist or None,
         album=album or None,
         asset_type=asset_type,
@@ -174,10 +182,11 @@ async def upload_asset(
 async def list_all(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=2000),
+    asset_type: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    assets, total = await list_assets(db, skip=skip, limit=limit)
+    assets, total = await list_assets(db, skip=skip, limit=limit, asset_type=asset_type)
     return AssetListResponse(assets=assets, total=total)
 
 

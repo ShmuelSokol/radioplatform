@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -106,7 +106,7 @@ async def preview_schedule(
     _user: User = Depends(get_current_user),
 ):
     """Generate a preview of what the schedule would look like for a given date."""
-    target_date = datetime.strptime(date, "%Y-%m-%d") if date else datetime.utcnow()
+    target_date = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now(timezone.utc)
     day_of_week = target_date.weekday()  # 0=Mon
 
     # Fetch active rules for this day

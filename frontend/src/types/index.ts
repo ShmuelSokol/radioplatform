@@ -134,6 +134,7 @@ export interface QueueListResponse {
   entries: QueueEntry[];
   total: number;
   now_playing: QueueNowPlaying | null;
+  queue_duration_seconds: number;
 }
 
 /** Minimal asset info needed by the synth engine */

@@ -108,6 +108,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS live_show_id UUID REFERENCES live_shows(id) ON DELETE SET NULL",
         # Link library assets to sponsors
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS sponsor_id UUID REFERENCES sponsors(id) ON DELETE SET NULL",
+        # Preempt mechanism for exact-time playback (time announcements)
+        "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
     ]
     for sql in migrations:
         try:

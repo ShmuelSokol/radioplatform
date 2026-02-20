@@ -110,7 +110,7 @@ class Settings(BaseSettings):
     ICECAST_PORT: int = 8000
     ICECAST_SOURCE_PASSWORD: str = "hackme"
     ICECAST_MOUNT: str = "/live"
-    ICECAST_BITRATE: int = 128
+    ICECAST_BITRATE: int = 192
     ICECAST_FORMAT: str = "mp3"  # "mp3" or "ogg"
 
     @property

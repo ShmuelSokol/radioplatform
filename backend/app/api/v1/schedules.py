@@ -1,7 +1,7 @@
 """
 Schedule management endpoints — CRUD for schedules, blocks, and playlist entries.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
@@ -376,7 +376,7 @@ async def timeline_preview(
     from app.models.station import Station
     from app.services.scheduling import SchedulingService
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     check_time = now
     if at_time:
         try:

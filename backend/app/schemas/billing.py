@@ -17,7 +17,9 @@ class InvoiceCreate(BaseModel):
 class InvoiceInDB(BaseModel):
     id: UUID | str
     sponsor_id: UUID | str
+    sponsor_name: str | None = None
     campaign_id: UUID | str | None = None
+    campaign_name: str | None = None
     amount_cents: int
     currency: str
     status: str

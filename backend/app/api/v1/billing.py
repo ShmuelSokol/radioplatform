@@ -34,7 +34,14 @@ async def list_invoices(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_sponsor_or_manager),
 ):
-    stmt = select(Invoice).order_by(Invoice.created_at.desc()).offset(skip).limit(limit)
+    from app.models.ad_campaign import AdCampaign
+
+    stmt = (
+        select(Invoice, Sponsor.name.label("sponsor_name"), AdCampaign.name.label("campaign_name"))
+        .outerjoin(Sponsor, Invoice.sponsor_id == Sponsor.id)
+        .outerjoin(AdCampaign, Invoice.campaign_id == AdCampaign.id)
+        .order_by(Invoice.created_at.desc()).offset(skip).limit(limit)
+    )
 
     if user.role == UserRole.SPONSOR:
         sponsor = await _get_sponsor_for_user(db, user)
@@ -43,7 +50,13 @@ async def list_invoices(
         stmt = stmt.where(Invoice.sponsor_id == sponsor.id)
 
     result = await db.execute(stmt)
-    return result.scalars().all()
+    invoices = []
+    for row in result.all():
+        invoice = row[0]
+        invoice.sponsor_name = row[1]
+        invoice.campaign_name = row[2]
+        invoices.append(invoice)
+    return invoices
 
 
 @router.post("/invoices", response_model=InvoiceInDB, status_code=201)

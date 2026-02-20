@@ -180,6 +180,8 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
     current = result.scalar_one_or_none()
     next_pos = (current.position + 1) if current else 1
 
+    # Use the exact 15-min boundary as preempt time so time announcements play on time
+    boundary = now.replace(second=0, microsecond=0)
     for i, asset in enumerate(assets_to_insert):
         entry = QueueEntry(
             id=uuid.uuid4(),
@@ -187,11 +189,12 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
             asset_id=asset.id,
             position=next_pos + i,
             status="pending",
+            preempt_at=boundary if i == 0 else None,  # preempt for time announcement only
         )
         db.add(entry)
 
     await db.flush()
-    logger.info("Inserted weather spot for slot %s (%d items)", slot_key, len(assets_to_insert))
+    logger.info("Inserted weather spot for slot %s (%d items, preempt_at=%s)", slot_key, len(assets_to_insert), boundary.isoformat())
 
 
 async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
@@ -233,13 +236,42 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
         await db.commit()
         return current
 
+    # Check if a pending entry needs to preempt the current track (exact-time playback)
+    now_utc = datetime.now(timezone.utc)
+    preempt_result = await db.execute(
+        select(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at <= now_utc,
+        )
+        .order_by(QueueEntry.preempt_at)
+        .limit(1)
+    )
+    preempt_entry = preempt_result.scalar_one_or_none()
+    if preempt_entry:
+        # Stop current track and start the preempt entry immediately
+        if current.started_at:
+            log = PlayLog(
+                id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
+                start_utc=current.started_at, end_utc=now_utc, source="scheduler",
+            )
+            db.add(log)
+        current.status = "played"
+        preempt_entry.status = "playing"
+        preempt_entry.started_at = now_utc
+        await db.commit()
+        logger.info("Preempted current track for time-critical entry %s", preempt_entry.id)
+        return preempt_entry
+
     # Check if track duration has elapsed
     asset = current.asset
     duration = asset.duration if asset else 0
     if not duration:
         duration = 180  # default 3 min
 
-    elapsed = (datetime.now(timezone.utc) - current.started_at).total_seconds()
+    elapsed = (now_utc - current.started_at).total_seconds()
     if elapsed < duration:
         return current  # still playing
 

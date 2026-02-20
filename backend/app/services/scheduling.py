@@ -4,7 +4,7 @@ Handles time-based rules, recurrence, priority resolution, and now-playing state
 """
 import logging
 import random
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -37,7 +37,7 @@ class SchedulingService:
         Returns None if no matching block found.
         """
         if at_time is None:
-            at_time = datetime.utcnow()
+            at_time = datetime.now(timezone.utc)
 
         # Get station for sun calculations
         from app.models.station import Station
@@ -311,7 +311,7 @@ class SchedulingService:
             return None
 
         config = station.automation_config
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         current_minute = now.minute
 
         # Hourly station ID jingle
@@ -427,7 +427,7 @@ class SchedulingService:
         """
         Update or create the now-playing record for a station.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         ends_at = now + timedelta(seconds=duration_seconds) if duration_seconds else None
 
         # Check if record exists

@@ -55,7 +55,13 @@ async def list_campaigns(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_sponsor_or_manager),
 ):
-    stmt = select(AdCampaign).order_by(AdCampaign.created_at.desc()).offset(skip).limit(limit)
+    from app.models.sponsor import Sponsor
+
+    stmt = (
+        select(AdCampaign, Sponsor.name.label("sponsor_name"))
+        .outerjoin(Sponsor, AdCampaign.sponsor_id == Sponsor.id)
+        .order_by(AdCampaign.created_at.desc()).offset(skip).limit(limit)
+    )
 
     if user.role == UserRole.SPONSOR:
         sponsor = await _get_sponsor_for_user(db, user)
@@ -64,7 +70,12 @@ async def list_campaigns(
         stmt = stmt.where(AdCampaign.sponsor_id == sponsor.id)
 
     result = await db.execute(stmt)
-    return result.scalars().all()
+    campaigns = []
+    for row in result.all():
+        campaign = row[0]
+        campaign.sponsor_name = row[1]
+        campaigns.append(campaign)
+    return campaigns
 
 
 @router.post("", response_model=CampaignInDB, status_code=201)
