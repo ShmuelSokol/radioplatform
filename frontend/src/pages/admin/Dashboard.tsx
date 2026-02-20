@@ -3,7 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useStations } from '../../hooks/useStations';
 import { useAssets } from '../../hooks/useAssets';
 import {
-  useQueue, usePlayLog, useSkipCurrent, usePlayNext, useAddToQueue,
+  useQueue, usePlayLog, useLastPlayed, useSkipCurrent, usePlayNext, useAddToQueue,
   useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown,
   useWeatherPreview, useReorderDnd,
 } from '../../hooks/useQueue';
@@ -36,6 +36,15 @@ function fmtHMS(sec: number): string {
   const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
   return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function fmtLastPlayed(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
 }
 
 const ASSET_TYPES = ['all', 'music', 'spot', 'shiur', 'jingle', 'zmanim'] as const;
@@ -83,6 +92,7 @@ export default function Dashboard() {
   const stationId = selectedStationId;
 
   const { data: queueData } = useQueue(stationId);
+  const { data: lastPlayedMap } = useLastPlayed(stationId);
   const { data: logData } = usePlayLog(stationId, bottomTab === 'log');
   const skipMut = useSkipCurrent(stationId ?? '');
   const playNextMut = usePlayNext(stationId ?? '');
@@ -524,6 +534,9 @@ export default function Dashboard() {
                     </span>
                     <span className="w-[60px] text-[10px] shrink-0">
                       {a?.id ? <AssetCategoryBadge assetId={a.id} category={a?.category ?? null} dark compact /> : ''}
+                    </span>
+                    <span className="w-[55px] text-[10px] text-gray-500 shrink-0 tabular-nums" title={a?.id && lastPlayedMap?.last_played?.[a.id] ? new Date(lastPlayedMap.last_played[a.id]).toLocaleString() : ''}>
+                      {fmtLastPlayed(a?.id ? lastPlayedMap?.last_played?.[a.id] : null)}
                     </span>
                     <span className="w-[60px] flex gap-1 text-[10px] shrink-0">
                       {!isCur && (
