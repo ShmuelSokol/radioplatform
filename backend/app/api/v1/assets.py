@@ -476,6 +476,43 @@ async def restore_original(
     return asset
 
 
+@router.post("/bulk-create", status_code=201)
+async def bulk_create_assets(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_manager),
+):
+    """Create asset records for files already uploaded to Supabase Storage."""
+    from app.models.asset import Asset
+
+    assets_data = body.get("assets", [])
+    if not assets_data:
+        return {"created": 0}
+
+    created = []
+    for item in assets_data:
+        asset = Asset(
+            title=item["title"],
+            artist=item.get("artist"),
+            album=item.get("album"),
+            duration=item.get("duration"),
+            file_path=item["file_path"],
+            asset_type=item.get("asset_type", "music"),
+            category=item.get("category"),
+            review_status=item.get("review_status", "approved"),
+            created_by=user.id,
+        )
+        db.add(asset)
+        created.append(asset)
+
+    await db.flush()
+    for a in created:
+        await db.refresh(a)
+    await db.commit()
+
+    return {"created": len(created), "ids": [str(a.id) for a in created]}
+
+
 @router.delete("/{asset_id}", status_code=204)
 async def delete(
     asset_id: uuid.UUID,
