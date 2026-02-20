@@ -42,6 +42,8 @@ class SchedulerEngine:
         self._silence_start: dict[str, datetime] = {}
         # Block transition tracking: station_id → last active block ID
         self._last_block: dict[str, str | None] = {}
+        # Daily holiday extension check
+        self._last_holiday_check: Optional[datetime] = None
     
     async def start(self):
         """Start the scheduler engine."""
@@ -70,12 +72,52 @@ class SchedulerEngine:
             try:
                 async for db in get_db():
                     await self._check_all_stations(db)
+                    await self._maybe_extend_holidays(db)
                     break
             except Exception as e:
                 logger.error(f"Scheduler error: {e}", exc_info=True)
-            
+
             await asyncio.sleep(self.check_interval)
     
+    async def _maybe_extend_holidays(self, db: AsyncSession):
+        """Once daily, check if holiday coverage needs extending for each station."""
+        now = datetime.now(timezone.utc)
+        if self._last_holiday_check and (now - self._last_holiday_check).total_seconds() < 86400:
+            return
+
+        self._last_holiday_check = now
+        try:
+            from sqlalchemy import func as sa_func
+            from app.services.station_service import auto_generate_holidays_for_station
+
+            stmt = select(Station).where(
+                Station.is_active == True,
+                Station.latitude.isnot(None),
+                Station.longitude.isnot(None),
+            )
+            result = await db.execute(stmt)
+            stations = result.scalars().all()
+
+            for station in stations:
+                try:
+                    # Find the furthest-out blackout window for this station
+                    max_stmt = select(sa_func.max(HolidayWindow.end_datetime)).where(
+                        HolidayWindow.is_blackout == True,
+                    )
+                    max_result = await db.execute(max_stmt)
+                    max_end = max_result.scalar()
+
+                    # If coverage is less than 365 days out, extend
+                    if not max_end or (max_end.replace(tzinfo=timezone.utc) - now).days < 365:
+                        count = await auto_generate_holidays_for_station(db, station)
+                        if count > 0:
+                            await db.commit()
+                            logger.info("Extended holidays for station %s: %d new windows", station.name, count)
+                except Exception as e:
+                    logger.warning("Holiday extension failed for station %s: %s", station.name, e)
+        except Exception as e:
+            logger.error("Holiday extension check failed: %s", e, exc_info=True)
+
     async def _check_all_stations(self, db: AsyncSession):
         """Check all active stations and their channels."""
         stmt = select(Station).where(Station.is_active == True)

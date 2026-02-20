@@ -13,6 +13,7 @@ class HolidayWindowBase(BaseModel):
     is_blackout: bool = True
     affected_stations: dict[str, Any] | None = None  # {"station_ids": [...]} or null for all
     replacement_content: str | None = None
+    reason: str | None = None
 
 
 class HolidayWindowCreate(HolidayWindowBase):
@@ -26,6 +27,7 @@ class HolidayWindowUpdate(BaseModel):
     is_blackout: bool | None = None
     affected_stations: dict[str, Any] | None = None
     replacement_content: str | None = None
+    reason: str | None = None
 
 
 class HolidayWindowInDB(HolidayWindowBase):
@@ -34,6 +36,11 @@ class HolidayWindowInDB(HolidayWindowBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class HolidayListResponse(BaseModel):
+    holidays: list[HolidayWindowInDB]
+    total: int
 
 
 class AutoGenerateRequest(BaseModel):

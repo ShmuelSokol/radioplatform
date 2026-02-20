@@ -19,6 +19,7 @@ from app.models.station import Station
 from app.schemas.holiday import (
     AutoGenerateRequest,
     AutoGenerateResponse,
+    HolidayListResponse,
     HolidayWindowCreate,
     HolidayWindowInDB,
     HolidayWindowUpdate,
@@ -29,16 +30,96 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/holidays", tags=["holidays"])
 
 
-@router.get("", response_model=list[HolidayWindowInDB])
+@router.get("", response_model=HolidayListResponse)
 async def list_holidays(
     skip: int = 0,
-    limit: int = 50,
+    limit: int = 200,
+    reason: str | None = None,
+    status: str | None = None,
+    station_id: str | None = None,
+    start_after: str | None = None,
+    start_before: str | None = None,
     db: AsyncSession = Depends(get_db),
     _=Depends(require_manager),
 ):
-    stmt = select(HolidayWindow).offset(skip).limit(limit).order_by(HolidayWindow.start_datetime)
+    from sqlalchemy import func
+
+    limit = min(limit, 500)
+    stmt = select(HolidayWindow)
+    count_stmt = select(func.count(HolidayWindow.id))
+
+    # Filter by reason
+    if reason:
+        stmt = stmt.where(HolidayWindow.reason == reason)
+        count_stmt = count_stmt.where(HolidayWindow.reason == reason)
+
+    # Filter by status (upcoming/active/past)
+    now = datetime.utcnow()
+    if status == "upcoming":
+        stmt = stmt.where(HolidayWindow.start_datetime > now)
+        count_stmt = count_stmt.where(HolidayWindow.start_datetime > now)
+    elif status == "active":
+        stmt = stmt.where(HolidayWindow.start_datetime <= now, HolidayWindow.end_datetime > now)
+        count_stmt = count_stmt.where(HolidayWindow.start_datetime <= now, HolidayWindow.end_datetime > now)
+    elif status == "past":
+        stmt = stmt.where(HolidayWindow.end_datetime <= now)
+        count_stmt = count_stmt.where(HolidayWindow.end_datetime <= now)
+
+    # Filter by station_id (check JSONB or NULL = all stations)
+    if station_id:
+        from sqlalchemy import or_, cast, String
+        from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+        stmt = stmt.where(
+            or_(
+                HolidayWindow.affected_stations.is_(None),
+                HolidayWindow.affected_stations["station_ids"].astext.contains(station_id),
+            )
+        )
+        count_stmt = count_stmt.where(
+            or_(
+                HolidayWindow.affected_stations.is_(None),
+                HolidayWindow.affected_stations["station_ids"].astext.contains(station_id),
+            )
+        )
+
+    # Filter by date range
+    if start_after:
+        start_after_dt = datetime.fromisoformat(start_after)
+        stmt = stmt.where(HolidayWindow.start_datetime >= start_after_dt)
+        count_stmt = count_stmt.where(HolidayWindow.start_datetime >= start_after_dt)
+    if start_before:
+        start_before_dt = datetime.fromisoformat(start_before)
+        stmt = stmt.where(HolidayWindow.start_datetime <= start_before_dt)
+        count_stmt = count_stmt.where(HolidayWindow.start_datetime <= start_before_dt)
+
+    total_result = await db.execute(count_stmt)
+    total = total_result.scalar() or 0
+
+    stmt = stmt.order_by(HolidayWindow.start_datetime).offset(skip).limit(limit)
     result = await db.execute(stmt)
-    return result.scalars().all()
+    holidays = result.scalars().all()
+
+    return HolidayListResponse(holidays=holidays, total=total)
+
+
+def _infer_reason(name: str) -> str:
+    """Infer reason from holiday name."""
+    lower = name.lower()
+    if "yom kippur" in lower:
+        return "Yom Kippur"
+    if "rosh hashanah" in lower:
+        return "Rosh Hashanah"
+    if "sukkot" in lower:
+        return "Sukkot"
+    if "shemini" in lower or "simchat" in lower:
+        return "Shemini Atzeret"
+    if "pesach" in lower:
+        return "Pesach"
+    if "shavuot" in lower:
+        return "Shavuot"
+    if "shabbos" in lower or "shabbat" in lower:
+        return "Shabbos"
+    return "Manual"
 
 
 @router.post("", response_model=HolidayWindowInDB, status_code=201)
@@ -47,7 +128,10 @@ async def create_holiday(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_manager),
 ):
-    record = HolidayWindow(**data.model_dump())
+    dump = data.model_dump()
+    if not dump.get("reason"):
+        dump["reason"] = _infer_reason(dump["name"])
+    record = HolidayWindow(**dump)
     db.add(record)
     await db.commit()
     await db.refresh(record)
@@ -219,6 +303,7 @@ async def auto_generate_blackouts(
             end_datetime=datetime.fromisoformat(w["end_datetime"]),
             is_blackout=w["is_blackout"],
             affected_stations=w.get("affected_stations"),
+            reason=w.get("reason") or _infer_reason(w["name"]),
         )
         db.add(record)
         created += 1

@@ -118,6 +118,18 @@ async def _add_missing_columns(engine):
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS start_sun_offset INTEGER",
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS end_sun_event VARCHAR(20)",
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS end_sun_offset INTEGER",
+        # Holiday reason column + backfill
+        "ALTER TABLE holiday_windows ADD COLUMN IF NOT EXISTS reason VARCHAR(100)",
+        """UPDATE holiday_windows SET reason = CASE
+            WHEN name ILIKE '%yom kippur%' THEN 'Yom Kippur'
+            WHEN name ILIKE '%rosh hashanah%' THEN 'Rosh Hashanah'
+            WHEN name ILIKE '%sukkot%' THEN 'Sukkot'
+            WHEN name ILIKE '%shemini%' OR name ILIKE '%simchat%' THEN 'Shemini Atzeret'
+            WHEN name ILIKE '%pesach%' THEN 'Pesach'
+            WHEN name ILIKE '%shavuot%' THEN 'Shavuot'
+            WHEN name ILIKE '%shabbos%' OR name ILIKE '%shabbat%' THEN 'Shabbos'
+            ELSE 'Manual'
+        END WHERE reason IS NULL""",
     ]
     for sql in migrations:
         try:

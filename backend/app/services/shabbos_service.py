@@ -69,6 +69,7 @@ def generate_shabbos_windows(
                 "end_datetime": window_end.isoformat(),
                 "is_blackout": True,
                 "affected_stations": {"station_ids": station_ids},
+                "reason": "Shabbos",
             })
         except Exception as e:
             logger.warning(f"Could not compute Shabbos window for {d}: {e}")
@@ -138,6 +139,7 @@ def generate_yom_tov_windows(
                     "end_datetime": window_end.isoformat(),
                     "is_blackout": True,
                     "affected_stations": {"station_ids": station_ids},
+                    "reason": name,
                 })
             except Exception as e:
                 logger.warning(f"Could not compute {name} for Hebrew year {hebrew_year}: {e}")
@@ -162,15 +164,22 @@ def merge_overlapping_windows(windows: list[dict]) -> list[dict]:
 
     parsed.sort(key=lambda x: x[0])
 
+    def _pick_reason(reasons: list[str]) -> str:
+        """Pick the most specific reason when merging (Yom Tov name over Shabbos)."""
+        non_shabbos = [r for r in reasons if r != "Shabbos"]
+        return non_shabbos[0] if non_shabbos else "Shabbos"
+
     merged = []
     cur_start, cur_end, cur_window = parsed[0]
     cur_names = [cur_window["name"]]
+    cur_reasons = [cur_window.get("reason", "Manual")]
 
     for start, end, window in parsed[1:]:
         if start <= cur_end:
             # Overlapping — extend and merge names
             cur_end = max(cur_end, end)
             cur_names.append(window["name"])
+            cur_reasons.append(window.get("reason", "Manual"))
         else:
             # No overlap — finalize current and start new
             merged.append({
@@ -178,9 +187,11 @@ def merge_overlapping_windows(windows: list[dict]) -> list[dict]:
                 "name": " / ".join(cur_names),
                 "start_datetime": cur_start.isoformat(),
                 "end_datetime": cur_end.isoformat(),
+                "reason": _pick_reason(cur_reasons),
             })
             cur_start, cur_end, cur_window = start, end, window
             cur_names = [window["name"]]
+            cur_reasons = [window.get("reason", "Manual")]
 
     # Finalize last window
     merged.append({
@@ -188,6 +199,7 @@ def merge_overlapping_windows(windows: list[dict]) -> list[dict]:
         "name": " / ".join(cur_names),
         "start_datetime": cur_start.isoformat(),
         "end_datetime": cur_end.isoformat(),
+        "reason": _pick_reason(cur_reasons),
     })
 
     return merged

@@ -16,3 +16,4 @@ class HolidayWindow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_blackout: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     affected_stations: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     replacement_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(100), nullable=True)

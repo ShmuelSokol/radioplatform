@@ -8,8 +8,24 @@ export interface HolidayWindow {
   is_blackout: boolean;
   affected_stations: { station_ids: string[] } | null;
   replacement_content: string | null;
+  reason: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface HolidayListResponse {
+  holidays: HolidayWindow[];
+  total: number;
+}
+
+export interface HolidayFilters {
+  skip?: number;
+  limit?: number;
+  reason?: string;
+  status?: string;
+  station_id?: string;
+  start_after?: string;
+  start_before?: string;
 }
 
 export interface AutoGenerateResponse {
@@ -17,15 +33,16 @@ export interface AutoGenerateResponse {
   skipped: number;
 }
 
-export interface SilenceAssetResponse {
-  id: string;
-  title: string;
-  file_path: string;
-  already_existed: boolean;
-}
-
-export const listHolidays = async (): Promise<HolidayWindow[]> => {
-  const res = await apiClient.get<HolidayWindow[]>('/holidays');
+export const listHolidays = async (filters?: HolidayFilters): Promise<HolidayListResponse> => {
+  const params: Record<string, string | number> = {};
+  if (filters?.skip) params.skip = filters.skip;
+  if (filters?.limit) params.limit = filters.limit;
+  if (filters?.reason) params.reason = filters.reason;
+  if (filters?.status) params.status = filters.status;
+  if (filters?.station_id) params.station_id = filters.station_id;
+  if (filters?.start_after) params.start_after = filters.start_after;
+  if (filters?.start_before) params.start_before = filters.start_before;
+  const res = await apiClient.get<HolidayListResponse>('/holidays', { params });
   return res.data;
 };
 
@@ -51,35 +68,5 @@ export const autoGenerateBlackouts = async (
     station_id: stationId,
     months_ahead: monthsAhead,
   });
-  return res.data;
-};
-
-export interface PreviewWindowItem {
-  name: string;
-  start_datetime: string;
-  end_datetime: string;
-  duration_hours: number;
-}
-
-export interface PreviewResponse {
-  total: number;
-  shabbos_count: number;
-  yom_tov_count: number;
-  windows: PreviewWindowItem[];
-}
-
-export const previewBlackouts = async (
-  stationId: string,
-  monthsAhead: number = 12,
-): Promise<PreviewResponse> => {
-  const res = await apiClient.post<PreviewResponse>('/holidays/preview', {
-    station_id: stationId,
-    months_ahead: monthsAhead,
-  });
-  return res.data;
-};
-
-export const ensureSilenceAsset = async (): Promise<SilenceAssetResponse> => {
-  const res = await apiClient.post<SilenceAssetResponse>('/holidays/ensure-silence-asset');
   return res.data;
 };
