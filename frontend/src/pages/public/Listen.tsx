@@ -44,6 +44,7 @@ export default function Listen() {
   const [liveData, setLiveData] = useState<LiveAudioData | null>(null);
   const [activeShow, setActiveShow] = useState<ActiveShowData | null>(null);
   const [userStarted, setUserStarted] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [volume, setVolume] = useState(0.7);
 
   // Song request form state
@@ -61,12 +62,13 @@ export default function Listen() {
 
   // Fetch live-audio data
   const fetchLiveAudio = useCallback(async () => {
-    if (!stationId) return;
+    if (!stationId) return null;
     try {
       const res = await apiClient.get<LiveAudioData>(`/stations/${stationId}/live-audio`);
       setLiveData(res.data);
+      return res.data;
     } catch {
-      // Silently fail — station may be offline
+      return null;
     }
   }, [stationId]);
 
@@ -95,7 +97,17 @@ export default function Listen() {
     };
   }, [stationId, fetchLiveAudio, fetchActiveShow]);
 
-  // Play/switch audio when live data changes
+  // Start audio playback with a given data payload
+  const startAudio = useCallback((data: LiveAudioData) => {
+    const audio = audioRef.current;
+    if (!audio || !data.playing || !data.audio_url) return;
+    currentAssetRef.current = data.asset_id ?? null;
+    audio.src = data.audio_url;
+    audio.currentTime = Math.max(0, data.elapsed ?? 0);
+    audio.play().catch(() => {});
+  }, []);
+
+  // Play/switch audio when live data changes (for track transitions while listening)
   useEffect(() => {
     if (!userStarted || !liveData?.playing || !liveData.audio_url) return;
 
@@ -104,6 +116,7 @@ export default function Listen() {
 
     // New track — load and seek
     if (liveData.asset_id !== currentAssetRef.current) {
+      setIsBuffering(true);
       currentAssetRef.current = liveData.asset_id ?? null;
       audio.src = liveData.audio_url;
       audio.currentTime = Math.max(0, liveData.elapsed ?? 0);
@@ -127,20 +140,38 @@ export default function Listen() {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
-  const handlePlay = () => {
+  const handlePlay = async () => {
+    // Create audio element with buffering event listeners
     if (!audioRef.current) {
       const audio = new Audio();
       audio.crossOrigin = 'anonymous';
       audio.volume = volume;
+      audio.preload = 'auto';
+      // Clear buffering state when audio actually starts playing
+      audio.addEventListener('playing', () => setIsBuffering(false));
+      // Show buffering when audio stalls/waits
+      audio.addEventListener('waiting', () => setIsBuffering(true));
       audioRef.current = audio;
     }
+    setIsBuffering(true);
     setUserStarted(true);
-    currentAssetRef.current = null; // Force reload on next effect
-    fetchLiveAudio();
+    currentAssetRef.current = null;
+
+    // If we already have live data with an audio URL, start immediately
+    if (liveData?.playing && liveData.audio_url) {
+      startAudio(liveData);
+    } else {
+      // Fetch fresh data and start as soon as we get it
+      const freshData = await fetchLiveAudio();
+      if (freshData?.playing && freshData.audio_url) {
+        startAudio(freshData);
+      }
+    }
   };
 
   const handleStop = () => {
     setUserStarted(false);
+    setIsBuffering(false);
     currentAssetRef.current = null;
     const audio = audioRef.current;
     if (audio) {
@@ -193,12 +224,25 @@ export default function Listen() {
 
         <div className="flex items-center gap-4 mb-6">
           {userStarted ? (
-            <button
-              onClick={handleStop}
-              className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-full text-lg font-medium transition"
-            >
-              Stop
-            </button>
+            isBuffering ? (
+              <button
+                disabled
+                className="bg-brand-600 text-white px-8 py-3 rounded-full text-lg font-medium flex items-center gap-3 opacity-90 cursor-wait"
+              >
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Connecting...
+              </button>
+            ) : (
+              <button
+                onClick={handleStop}
+                className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-full text-lg font-medium transition"
+              >
+                Stop
+              </button>
+            )
           ) : (
             <button
               onClick={handlePlay}
@@ -215,7 +259,7 @@ export default function Listen() {
         </div>
 
         {/* Volume control */}
-        {userStarted && (
+        {userStarted && !isBuffering && (
           <div className="flex items-center gap-3 mb-6">
             <span className="text-gray-400 text-sm">Vol</span>
             <input
