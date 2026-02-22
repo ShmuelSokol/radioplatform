@@ -197,12 +197,20 @@ export default function Holidays() {
             <div>
               <label className="block text-sm font-medium mb-1">Music Off (Start)</label>
               <input required type="datetime-local" value={form.start_datetime}
-                onChange={e => setForm({ ...form, start_datetime: e.target.value })}
+                onChange={e => {
+                  const newStart = e.target.value;
+                  const updates: Partial<typeof form> = { start_datetime: newStart };
+                  if (!form.end_datetime || form.end_datetime < newStart) {
+                    updates.end_datetime = newStart;
+                  }
+                  setForm(f => ({ ...f, ...updates }));
+                }}
                 className="w-full px-4 py-2 border rounded-lg" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Music On (End)</label>
               <input required type="datetime-local" value={form.end_datetime}
+                min={form.start_datetime || undefined}
                 onChange={e => setForm({ ...form, end_datetime: e.target.value })}
                 className="w-full px-4 py-2 border rounded-lg" />
             </div>
