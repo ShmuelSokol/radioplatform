@@ -25,7 +25,7 @@ export default function SponsorLayout() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-14">
           <div className="flex items-center gap-6">
             <span className="font-bold text-lg text-indigo-200">Sponsor Portal</span>
-            <div className="hidden sm:flex gap-1">
+            <div className="flex gap-1">
               {navItems.map((item) => (
                 <NavLink
                   key={item.to}
