@@ -541,12 +541,47 @@ async def get_queue(
     else:
         cursor = now_utc
 
+    # Find blackout end times so we can cap silence blocks precisely
+    blackout_ends = {}  # preempt_at_iso -> blackout_end datetime
+    silence_asset_id = None
+    for e in entries:
+        if e.asset and e.asset.asset_type == "silence":
+            silence_asset_id = e.asset_id
+            break
+    if silence_asset_id:
+        bo_stmt = select(HolidayWindow).where(
+            HolidayWindow.is_blackout == True,
+            HolidayWindow.end_datetime > now_utc,
+        ).order_by(HolidayWindow.start_datetime)
+        bo_result = await db.execute(bo_stmt)
+        for w in bo_result.scalars().all():
+            if w.affected_stations is None or str(station_id) in [str(s) for s in (w.affected_stations or {}).get("station_ids", [])]:
+                bo_end = w.end_datetime
+                if bo_end.tzinfo is None:
+                    bo_end = bo_end.replace(tzinfo=timezone.utc)
+                bo_start = w.start_datetime
+                if bo_start.tzinfo is None:
+                    bo_start = bo_start.replace(tzinfo=timezone.utc)
+                blackout_ends[bo_start] = bo_end
+
     entries_data = []
     queue_duration = 0.0
+    in_silence_block = False
+    current_blackout_end = None
+
+    # If currently playing silence (active blackout), find its blackout end time
+    if now_playing_entry and now_playing_entry.asset and now_playing_entry.asset.asset_type == "silence":
+        for bo_start, bo_end in blackout_ends.items():
+            if bo_start <= now_utc:
+                current_blackout_end = bo_end
+                in_silence_block = True
+                break
+
     for e in entries:
         dur = (e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION)
         queue_duration += dur
         is_now = e.status == "playing"
+        is_silence = e.asset and e.asset.asset_type == "silence"
 
         # If entry has preempt_at in the future, it will start at that time
         if not is_now and e.preempt_at:
@@ -555,6 +590,21 @@ async def get_queue(
                 pa = pa.replace(tzinfo=timezone.utc)
             if pa > cursor:
                 cursor = pa
+            # Find which blackout this belongs to
+            if not current_blackout_end:
+                for bo_start, bo_end in blackout_ends.items():
+                    if abs((pa - bo_start).total_seconds()) < 60:
+                        current_blackout_end = bo_end
+                        break
+
+        if is_silence:
+            in_silence_block = True
+        elif in_silence_block:
+            # First non-silence entry after silence block — cap cursor to blackout end
+            in_silence_block = False
+            if current_blackout_end and current_blackout_end < cursor:
+                cursor = current_blackout_end
+            current_blackout_end = None
 
         est_start = now_playing_entry.started_at.isoformat() if is_now and now_playing_entry and now_playing_entry.started_at else cursor.isoformat()
         d = {

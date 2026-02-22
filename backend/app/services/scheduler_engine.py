@@ -512,12 +512,14 @@ class SchedulerEngine:
             await self._check_live_show_hard_stop(db, station, live_show_id, now)
             return  # Skip normal scheduler logic
 
-        # Check blackout windows first
+        # Check blackout windows — fill silence for active AND upcoming blackouts
+        from app.api.v1.queue import fill_blackout_queue
         is_blacked_out = await self._is_station_blacked_out(db, station, now)
-        if is_blacked_out:
-            # Fill queue with silence entries for the blackout duration
-            from app.api.v1.queue import fill_blackout_queue
+        try:
             await fill_blackout_queue(db, station.id)
+        except Exception as e:
+            logger.warning("fill_blackout_queue failed for station %s: %s", station.id, e)
+        if is_blacked_out:
             # Let normal queue advancement handle the silence entries
             return
 
