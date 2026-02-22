@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listSponsors, createSponsor, updateSponsor, deleteSponsor, Sponsor } from '../../api/sponsors';
 import Spinner from '../../components/Spinner';
@@ -85,7 +86,12 @@ export default function Sponsors() {
   return (
     <div className="max-w-4xl mx-auto p-8">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Sponsors & Ads</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-3xl font-bold">Sponsors & Ads</h1>
+          <Link to="/sponsor/login" className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1 rounded-lg hover:bg-indigo-50 transition">
+            Client Portal
+          </Link>
+        </div>
         <button onClick={() => { resetForm(); setShowForm(!showForm); }}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
           {showForm ? 'Cancel' : 'New Sponsor'}
