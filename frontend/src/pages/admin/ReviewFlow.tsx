@@ -10,6 +10,8 @@ import AssetHistory from '../../components/review/AssetHistory';
 import CommentBox from '../../components/review/CommentBox';
 import SilenceDetectionPanel from '../../components/audio/SilenceDetectionPanel';
 import PreviewControls from '../../components/audio/PreviewControls';
+import EnhancePanel from '../../components/audio/EnhancePanel';
+import AudienceDetectionPanel from '../../components/audio/AudienceDetectionPanel';
 import type { SilenceRegion } from '../../types';
 
 // Lazy-load WaveformPlayer to isolate wavesurfer.js errors
@@ -234,15 +236,21 @@ export default function ReviewFlow() {
 
             {/* Silence Detection + Preview Controls */}
             {audioUrl && currentAsset?.id && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <SilenceDetectionPanel
-                  assetId={currentAsset.id}
-                  waveformRef={waveformRef}
-                  onRegionsDetected={setSilenceRegions}
-                  onTrimComplete={handleTrimComplete}
-                />
-                <PreviewControls waveformRef={waveformRef} duration={currentAsset.duration} />
-              </div>
+              <>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <SilenceDetectionPanel
+                    assetId={currentAsset.id}
+                    waveformRef={waveformRef}
+                    onRegionsDetected={setSilenceRegions}
+                    onTrimComplete={handleTrimComplete}
+                  />
+                  <PreviewControls waveformRef={waveformRef} duration={currentAsset.duration} />
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <EnhancePanel assetId={currentAsset.id} onEnhanceComplete={handleTrimComplete} />
+                  <AudienceDetectionPanel assetId={currentAsset.id} waveformRef={waveformRef} />
+                </div>
+              </>
             )}
 
             {/* Notes */}
