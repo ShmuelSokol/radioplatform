@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal, bulkSetCategory, bulkAutoTrim, getEnhancePresets, enhanceAsset, enhancePreview, detectAudience } from '../api/assets';
+import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal, bulkSetCategory, bulkAutoTrim, getEnhancePresets, enhanceAsset, enhancePreview, autoEnhanceAsset, detectAudience } from '../api/assets';
 import type { ListAssetsParams, BulkCategoryParams, BulkAutoTrimParams, EnhanceRequest, EnhancePreviewRequest } from '../api/assets';
 import type { AssetListResponse } from '../types';
 
@@ -134,6 +134,18 @@ export function useEnhanceAsset() {
 export function useEnhancePreview() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: EnhancePreviewRequest }) => enhancePreview(id, body),
+  });
+}
+
+export function useAutoEnhance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => autoEnhanceAsset(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset'] });
+      queryClient.invalidateQueries({ queryKey: ['asset-audio-url'] });
+    },
   });
 }
 

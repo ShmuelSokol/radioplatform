@@ -617,6 +617,53 @@ async def enhance_asset_endpoint(
     return asset
 
 
+@router.post("/{asset_id}/auto-enhance")
+async def auto_enhance_endpoint(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """AI auto-enhancement: analyze audio and apply optimal filters."""
+    from app.services.enhance_service import auto_enhance
+    from app.services.storage_service import generate_asset_key, upload_file as upload_storage
+
+    asset = await get_asset(db, asset_id)
+    data = await _download_asset_data(asset.file_path)
+
+    input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
+    enhanced_data, new_duration, filters_applied, reasons = auto_enhance(data, input_ext)
+
+    # Upload enhanced file
+    new_key = generate_asset_key("ai-enhanced.mp3")
+    await upload_storage(enhanced_data, new_key, "audio/mpeg")
+
+    # Update asset non-destructively
+    extra = dict(asset.metadata_extra or {})
+    if "original_file_path" not in extra:
+        extra["original_file_path"] = asset.file_path
+    enhance_entry = {
+        "from": asset.file_path,
+        "to": new_key,
+        "preset": "ai_auto",
+        "filters": filters_applied,
+        "reasons": reasons,
+    }
+    extra.setdefault("enhance_history", []).append(enhance_entry)
+
+    asset.file_path = new_key
+    if new_duration > 0:
+        asset.duration = new_duration
+    asset.metadata_extra = extra
+    await db.flush()
+    await db.refresh(asset)
+
+    return {
+        "asset": AssetResponse.model_validate(asset).model_dump(),
+        "filters_applied": filters_applied,
+        "reasons": reasons,
+    }
+
+
 @router.post("/{asset_id}/enhance-preview")
 async def enhance_preview_endpoint(
     asset_id: uuid.UUID,

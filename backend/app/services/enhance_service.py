@@ -34,6 +34,12 @@ ENHANCEMENT_PRESETS: dict[str, list[dict]] = {
         {"name": "lowpass", "params": {"frequency": 10000}},
         {"name": "afftdn", "params": {"noise_floor": -20}},
     ],
+    "bbe_sonic_maximizer": [
+        {"name": "highpass", "params": {"frequency": 40}},
+        {"name": "treble", "params": {"gain": 3, "frequency": 3000}},
+        {"name": "bass", "params": {"gain": 2, "frequency": 250}},
+        {"name": "acompressor", "params": {"threshold": -15, "ratio": 2, "attack": 3, "release": 80}},
+    ],
 }
 
 
@@ -223,3 +229,143 @@ def detect_audience_segments(
             })
 
     return audience
+
+
+# ---------------------------------------------------------------------------
+# AI Auto-Enhancement — analyze audio, then build optimal filter chain
+# ---------------------------------------------------------------------------
+
+def analyze_audio(file_data: bytes) -> dict[str, Any]:
+    """Analyze audio characteristics using FFmpeg volumedetect + astats.
+
+    Returns metrics: mean_volume, max_volume, noise_floor_est, dynamic_range, etc.
+    """
+    # Run volumedetect
+    cmd_vol = [
+        settings.FFMPEG_PATH, "-i", "pipe:0",
+        "-af", "volumedetect",
+        "-f", "null", "-",
+    ]
+    res_vol = subprocess.run(cmd_vol, input=file_data, capture_output=True, timeout=120)
+    stderr_vol = res_vol.stderr.decode("utf-8", errors="replace")
+
+    stats: dict[str, Any] = {}
+
+    # Parse volumedetect output
+    m = re.search(r"mean_volume:\s*([-\d.]+)\s*dB", stderr_vol)
+    stats["mean_volume"] = float(m.group(1)) if m else -20.0
+
+    m = re.search(r"max_volume:\s*([-\d.]+)\s*dB", stderr_vol)
+    stats["max_volume"] = float(m.group(1)) if m else 0.0
+
+    # Run astats for more detailed analysis (RMS, peak, crest factor, noise floor)
+    cmd_stats = [
+        settings.FFMPEG_PATH, "-i", "pipe:0",
+        "-af", "astats=metadata=1:reset=0",
+        "-f", "null", "-",
+    ]
+    res_stats = subprocess.run(cmd_stats, input=file_data, capture_output=True, timeout=120)
+    stderr_stats = res_stats.stderr.decode("utf-8", errors="replace")
+
+    # Parse astats — look for Overall RMS level and other metrics
+    m = re.search(r"RMS level dB:\s*([-\d.]+)", stderr_stats)
+    stats["rms_level"] = float(m.group(1)) if m else stats["mean_volume"]
+
+    m = re.search(r"Peak level dB:\s*([-\d.]+)", stderr_stats)
+    stats["peak_level"] = float(m.group(1)) if m else stats["max_volume"]
+
+    m = re.search(r"Noise floor dB:\s*([-\d.]+)", stderr_stats)
+    stats["noise_floor"] = float(m.group(1)) if m else -60.0
+
+    m = re.search(r"Crest factor:\s*([-\d.]+)", stderr_stats)
+    stats["crest_factor"] = float(m.group(1)) if m else 10.0
+
+    m = re.search(r"Dynamic range:\s*([-\d.]+)", stderr_stats)
+    stats["dynamic_range"] = float(m.group(1)) if m else 20.0
+
+    m = re.search(r"Flat factor:\s*([-\d.]+)", stderr_stats)
+    stats["flat_factor"] = float(m.group(1)) if m else 0.0
+
+    # Compute derived metrics
+    stats["headroom"] = abs(stats["max_volume"])  # dB below 0
+    stats["loudness_range"] = abs(stats["max_volume"] - stats["mean_volume"])
+
+    logger.info("Audio analysis: %s", stats)
+    return stats
+
+
+def build_auto_filters(stats: dict[str, Any]) -> tuple[list[dict], list[str]]:
+    """Given audio analysis stats, build the optimal filter chain.
+
+    Returns (filters, reasons) — the filter list and human-readable explanations.
+    """
+    filters: list[dict] = []
+    reasons: list[str] = []
+
+    noise_floor = stats.get("noise_floor", -60.0)
+    mean_vol = stats.get("mean_volume", -20.0)
+    max_vol = stats.get("max_volume", 0.0)
+    headroom = stats.get("headroom", 0.0)
+    loudness_range = stats.get("loudness_range", 20.0)
+    dynamic_range = stats.get("dynamic_range", 20.0)
+
+    # 1. Noise reduction — if noise floor is high (above -50dB)
+    if noise_floor > -50:
+        # Set denoise floor slightly above the detected noise floor
+        denoise_level = max(noise_floor + 5, -40)
+        denoise_level = min(denoise_level, -10)
+        filters.append({"name": "afftdn", "params": {"noise_floor": round(denoise_level, 1)}})
+        reasons.append(f"Noise reduction: noise floor at {noise_floor:.0f}dB is high, denoising at {denoise_level:.0f}dB")
+
+    # 2. High-pass filter — always good to remove sub-bass rumble
+    # More aggressive if noise floor is high
+    hpf_freq = 80 if noise_floor < -50 else 120
+    filters.append({"name": "highpass", "params": {"frequency": hpf_freq}})
+    reasons.append(f"High-pass filter at {hpf_freq}Hz to remove rumble")
+
+    # 3. Bass boost — if audio sounds thin (mean volume very low, or high noise floor
+    #    suggests it was recorded poorly)
+    if mean_vol < -25:
+        filters.append({"name": "bass", "params": {"gain": 2, "frequency": 200}})
+        reasons.append("Gentle bass boost: audio appears thin")
+
+    # 4. Treble / clarity — add presence for intelligibility
+    treble_gain = 2
+    if noise_floor > -45:
+        treble_gain = 1  # Less treble boost if noisy (would amplify hiss)
+    elif mean_vol < -22:
+        treble_gain = 3  # More boost for quiet recordings that need clarity
+    filters.append({"name": "treble", "params": {"gain": treble_gain, "frequency": 3000}})
+    reasons.append(f"Treble boost +{treble_gain}dB at 3kHz for clarity")
+
+    # 5. Compression — if dynamic range is too wide (>15dB difference between
+    #    mean and peak, or high crest factor)
+    if loudness_range > 12 or dynamic_range > 25:
+        ratio = 3 if loudness_range > 18 else 2.5
+        threshold = max(mean_vol + 5, -30)
+        threshold = min(threshold, -8)
+        filters.append({"name": "acompressor", "params": {
+            "threshold": round(threshold, 1),
+            "ratio": ratio,
+            "attack": 8,
+            "release": 120,
+        }})
+        reasons.append(f"Compression (ratio {ratio}:1): dynamic range is {loudness_range:.0f}dB")
+
+    # 6. Loudness normalization — always apply to get broadcast-standard levels
+    target_lufs = -16  # Standard broadcast level
+    filters.append({"name": "loudnorm", "params": {"i": target_lufs, "tp": -1.5, "lra": 11}})
+    reasons.append(f"Loudness normalization to {target_lufs} LUFS (broadcast standard)")
+
+    return filters, reasons
+
+
+def auto_enhance(file_data: bytes, input_ext: str = ".mp3") -> tuple[bytes, float, list[dict], list[str]]:
+    """Analyze audio and apply optimal enhancement automatically.
+
+    Returns (enhanced_bytes, duration, filters_applied, reasons).
+    """
+    stats = analyze_audio(file_data)
+    filters, reasons = build_auto_filters(stats)
+    enhanced_data, duration = enhance_audio(file_data, filters, input_ext)
+    return enhanced_data, duration, filters, reasons

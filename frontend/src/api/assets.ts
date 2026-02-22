@@ -253,6 +253,19 @@ export const enhancePreview = async (id: string, body: EnhancePreviewRequest): P
   return res.data;
 };
 
+// --- AI Auto-Enhancement ---
+
+export interface AutoEnhanceResult {
+  asset: Asset;
+  filters_applied: EnhanceFilter[];
+  reasons: string[];
+}
+
+export const autoEnhanceAsset = async (id: string): Promise<AutoEnhanceResult> => {
+  const res = await apiClient.post<AutoEnhanceResult>(`/assets/${id}/auto-enhance`);
+  return res.data;
+};
+
 // --- Audience / Student Question Detection ---
 
 export interface AudienceSegment {

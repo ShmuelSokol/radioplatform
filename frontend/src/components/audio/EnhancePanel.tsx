@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal } from '../../hooks/useAssets';
+import { useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal, useAutoEnhance } from '../../hooks/useAssets';
 import Spinner from '../Spinner';
 
 interface EnhancePanelProps {
@@ -14,6 +14,7 @@ const PRESET_LABELS: Record<string, string> = {
   clarity_boost: 'Clarity Boost',
   warm_up: 'Warm Up',
   de_hiss: 'De-Hiss',
+  bbe_sonic_maximizer: 'BBE Sonic Maximizer',
 };
 
 export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePanelProps) {
@@ -21,10 +22,12 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
   const enhanceMutation = useEnhanceAsset();
   const previewMutation = useEnhancePreview();
   const restoreMutation = useRestoreOriginal();
+  const autoEnhanceMutation = useAutoEnhance();
 
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [enhancePending, setEnhancePending] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [aiReasons, setAiReasons] = useState<string[] | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
 
@@ -92,7 +95,22 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
   const handleSave = () => {
     setEnhancePending(false);
     setSelectedPreset(null);
+    setAiReasons(null);
     setStatusMsg('Enhancement saved.');
+  };
+
+  const handleAutoEnhance = () => {
+    setStatusMsg(null);
+    setAiReasons(null);
+    autoEnhanceMutation.mutate(assetId, {
+      onSuccess: (result) => {
+        setEnhancePending(true);
+        setAiReasons(result.reasons);
+        setStatusMsg(null);
+        onEnhanceComplete?.();
+      },
+      onError: () => setStatusMsg('AI enhancement failed'),
+    });
   };
 
   // Post-apply review state
@@ -104,6 +122,14 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
           <p className="text-sm text-amber-800 font-medium mb-1">Enhancement applied — review the result</p>
           <p className="text-xs text-amber-600">Play the audio to check. Undo to restore original, or Save to keep.</p>
         </div>
+        {aiReasons && aiReasons.length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-4">
+            <p className="text-xs font-medium text-blue-800 mb-1">AI applied these optimizations:</p>
+            <ul className="text-xs text-blue-700 space-y-0.5 list-disc list-inside">
+              {aiReasons.map((r, i) => <li key={i}>{r}</li>)}
+            </ul>
+          </div>
+        )}
         <div className="flex gap-3">
           <button
             onClick={handleUndo}
@@ -132,6 +158,15 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
           Full Editor &rarr;
         </Link>
       </div>
+
+      {/* AI Auto-Enhance */}
+      <button
+        onClick={handleAutoEnhance}
+        disabled={autoEnhanceMutation.isPending}
+        className="w-full mb-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
+      >
+        {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'AI Auto-Enhance'}
+      </button>
 
       {/* Preset buttons */}
       <div className="flex flex-wrap gap-2 mb-3">

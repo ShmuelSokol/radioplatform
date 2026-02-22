@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAssetDetail, useAssetAudioUrl, useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal } from '../../hooks/useAssets';
+import { useAssetDetail, useAssetAudioUrl, useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal, useAutoEnhance } from '../../hooks/useAssets';
 import WaveformPlayer, { type WaveformPlayerHandle } from '../../components/audio/WaveformPlayer';
 import Spinner from '../../components/Spinner';
 import AudienceDetectionPanel from '../../components/audio/AudienceDetectionPanel';
@@ -32,6 +32,7 @@ const PRESET_LABELS: Record<string, string> = {
   clarity_boost: 'Clarity Boost',
   warm_up: 'Warm Up',
   de_hiss: 'De-Hiss',
+  bbe_sonic_maximizer: 'BBE Sonic Maximizer',
 };
 
 function buildFiltersFromState(state: FilterState): Array<{ name: string; params: Record<string, number> }> {
@@ -68,12 +69,14 @@ export default function AudioEnhance() {
   const enhanceMutation = useEnhanceAsset();
   const previewMutation = useEnhancePreview();
   const restoreMutation = useRestoreOriginal();
+  const autoEnhanceMutation = useAutoEnhance();
   const waveformRef = useRef<WaveformPlayerHandle>(null);
 
   const [filters, setFilters] = useState<FilterState>({ ...defaultFilters });
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [enhancePending, setEnhancePending] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [aiReasons, setAiReasons] = useState<string[] | null>(null);
   const [waveformKey, setWaveformKey] = useState(0);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -172,8 +175,23 @@ export default function AudioEnhance() {
     });
   };
 
+  const handleAutoEnhance = () => {
+    setStatusMsg(null);
+    setAiReasons(null);
+    autoEnhanceMutation.mutate(assetId!, {
+      onSuccess: (result) => {
+        setEnhancePending(true);
+        setAiReasons(result.reasons);
+        setStatusMsg(null);
+        handleRefresh();
+      },
+      onError: () => setStatusMsg('AI enhancement failed'),
+    });
+  };
+
   const handleSave = () => {
     setEnhancePending(false);
+    setAiReasons(null);
     setStatusMsg('Enhancement saved.');
   };
 
@@ -204,6 +222,14 @@ export default function AudioEnhance() {
       {enhancePending && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
           <p className="text-sm text-amber-800 font-medium mb-2">Enhancement applied — review the result</p>
+          {aiReasons && aiReasons.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-3">
+              <p className="text-xs font-medium text-blue-800 mb-1">AI applied these optimizations:</p>
+              <ul className="text-xs text-blue-700 space-y-0.5 list-disc list-inside">
+                {aiReasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
           <div className="flex gap-3">
             <button onClick={handleUndo} disabled={restoreMutation.isPending} className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded transition disabled:opacity-50">
               {restoreMutation.isPending ? <><Spinner className="mr-1" />Restoring...</> : 'Undo Enhancement'}
@@ -220,6 +246,13 @@ export default function AudioEnhance() {
           <div className="lg:col-span-1">
             <div className="bg-white border border-gray-200 rounded-lg p-4">
               <h3 className="text-sm font-semibold mb-3">Presets</h3>
+              <button
+                onClick={handleAutoEnhance}
+                disabled={autoEnhanceMutation.isPending}
+                className="w-full mb-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-3 py-2.5 rounded text-sm font-medium transition disabled:opacity-50"
+              >
+                {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing...</> : 'AI Auto-Enhance'}
+              </button>
               <div className="flex flex-col gap-2">
                 {presetNames.map((key) => (
                   <button
