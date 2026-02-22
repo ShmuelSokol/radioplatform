@@ -230,10 +230,15 @@ async def list_all(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=2000),
     asset_type: str | None = Query(None),
+    search: str | None = Query(None, description="Search title/artist/album"),
+    category: str | None = Query(None, description="Filter by category name"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    assets, total = await list_assets(db, skip=skip, limit=limit, asset_type=asset_type)
+    assets, total = await list_assets(
+        db, skip=skip, limit=limit, asset_type=asset_type,
+        search=search, category=category,
+    )
     return AssetListResponse(assets=assets, total=total)
 
 

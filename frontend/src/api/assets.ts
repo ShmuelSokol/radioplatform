@@ -1,8 +1,18 @@
 import apiClient from './client';
 import type { Asset, AssetListResponse } from '../types';
 
-export const listAssets = async (skip = 0, limit = 50): Promise<AssetListResponse> => {
-  const res = await apiClient.get<AssetListResponse>('/assets', { params: { skip, limit } });
+export const listAssets = async (
+  skip = 0,
+  limit = 50,
+  search?: string,
+  asset_type?: string,
+  category?: string,
+): Promise<AssetListResponse> => {
+  const params: Record<string, any> = { skip, limit };
+  if (search) params.search = search;
+  if (asset_type) params.asset_type = asset_type;
+  if (category) params.category = category;
+  const res = await apiClient.get<AssetListResponse>('/assets', { params });
   return res.data;
 };
 

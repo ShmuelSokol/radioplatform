@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
@@ -6,9 +6,11 @@ import AssetSponsorBadge from '../../components/AssetSponsorBadge';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
 import { useCategories } from '../../hooks/useCategories';
 import { downloadAsset, getAssetAudioUrl } from '../../api/assets';
+import type { Asset } from '../../types';
 import Spinner from '../../components/Spinner';
 
 const EXPORT_FORMATS = ['original', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
+const PAGE_SIZE = 50;
 
 /** Real uploads have file_path starting with "assets/"; seed data uses music/, spots/, etc. */
 function hasRealAudio(filePath: string): boolean {
@@ -25,6 +27,15 @@ function formatDuration(seconds: number | null): string {
 function formatDate(iso: string | null): string {
   if (!iso) return '--';
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
 }
 
 function DownloadButton({ assetId, title }: { assetId: string; title: string }) {
@@ -123,58 +134,77 @@ function PlayButton({ assetId, title, audioRef, playingId, setPlayingId }: {
   );
 }
 
-interface Filters {
-  title: string;
-  artist: string;
-  album: string;
-  category: string;
-  asset_type: string;
-  durationMin: string;
-  durationMax: string;
-}
-
-const EMPTY_FILTERS: Filters = {
-  title: '',
-  artist: '',
-  album: '',
-  category: '',
-  asset_type: '',
-  durationMin: '',
-  durationMax: '',
-};
+const ASSET_TYPES = ['music', 'shiur', 'spot', 'jingle', 'zmanim'] as const;
 
 export default function Assets() {
-  const { data, isLoading } = useAssets();
   const { data: categories } = useCategories();
   const deleteMutation = useDeleteAsset();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const createQueueMutation = useCreateReviewQueue();
   const navigate = useNavigate();
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const setFilter = (key: keyof Filters, value: string) =>
-    setFilters((prev) => ({ ...prev, [key]: value }));
+  // Search & filter state
+  const [searchInput, setSearchInput] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [page, setPage] = useState(0);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
-  const hasFilters = Object.values(filters).some((v) => v !== '');
+  // Debounce search for API calls
+  const debouncedSearch = useDebounce(searchInput, 300);
 
-  const filtered = useMemo(() => {
-    const assets = data?.assets ?? [];
-    return assets.filter((a) => {
-      if (filters.title && !a.title.toLowerCase().includes(filters.title.toLowerCase())) return false;
-      if (filters.artist && !(a.artist ?? '').toLowerCase().includes(filters.artist.toLowerCase())) return false;
-      if (filters.album && !(a.album ?? '').toLowerCase().includes(filters.album.toLowerCase())) return false;
-      if (filters.category && !(a.category ?? '').toLowerCase().includes(filters.category.toLowerCase())) return false;
-      if (filters.asset_type && !a.asset_type.toLowerCase().includes(filters.asset_type.toLowerCase())) return false;
-      const min = filters.durationMin !== '' ? Number(filters.durationMin) * 60 : null;
-      const max = filters.durationMax !== '' ? Number(filters.durationMax) * 60 : null;
-      if (min !== null && (a.duration ?? 0) < min) return false;
-      if (max !== null && (a.duration ?? 0) > max) return false;
-      return true;
-    });
-  }, [data, filters]);
+  // Reset page when filters change
+  useEffect(() => { setPage(0); }, [debouncedSearch, categoryFilter, typeFilter]);
+
+  // Server-side filtered query
+  const { data, isLoading, isFetching } = useAssets(
+    page * PAGE_SIZE,
+    PAGE_SIZE,
+    debouncedSearch || undefined,
+    typeFilter || undefined,
+    categoryFilter || undefined,
+  );
+
+  // Suggestion query — fetch top 8 matches for autocomplete while typing
+  const suggestSearch = useDebounce(searchInput, 150);
+  const { data: suggestData } = useAssets(
+    0,
+    8,
+    suggestSearch.length >= 2 ? suggestSearch : undefined,
+    typeFilter || undefined,
+    categoryFilter || undefined,
+    suggestSearch.length >= 2 && showSuggestions,
+  );
+  const suggestions: Asset[] = suggestData?.assets ?? [];
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const assets: Asset[] = data?.assets ?? [];
+  const total: number = data?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const hasFilters = searchInput !== '' || categoryFilter !== '' || typeFilter !== '';
+
+  const clearFilters = useCallback(() => {
+    setSearchInput('');
+    setCategoryFilter('');
+    setTypeFilter('');
+    setPage(0);
+  }, []);
+
+  const realAssets = useMemo(() => assets.filter((a: Asset) => hasRealAudio(a.file_path)), [assets]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -184,8 +214,6 @@ export default function Assets() {
       return next;
     });
   };
-
-  const realAssets = useMemo(() => filtered.filter((a) => hasRealAudio(a.file_path)), [filtered]);
 
   const toggleAll = () => {
     if (selected.size === realAssets.length) {
@@ -208,7 +236,7 @@ export default function Assets() {
     );
   };
 
-  if (isLoading) return <div className="text-center py-10">Loading...</div>;
+  if (isLoading && !data) return <div className="text-center py-10">Loading...</div>;
 
   return (
     <div>
@@ -222,45 +250,51 @@ export default function Assets() {
         </Link>
       </div>
 
-      {/* Filter bar */}
+      {/* Search & filter bar */}
       <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Title</label>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Search with autocomplete */}
+          <div ref={searchRef} className="relative sm:col-span-1">
+            <label className="block text-xs text-gray-500 mb-1">Search</label>
             <input
               type="text"
-              value={filters.title}
-              onChange={(e) => setFilter('title', e.target.value)}
-              placeholder="Filter..."
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+              value={searchInput}
+              onChange={(e) => { setSearchInput(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => { if (searchInput.length >= 2) setShowSuggestions(true); }}
+              placeholder="Search title, artist, album..."
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
+            {isFetching && (
+              <span className="absolute right-2 top-7 text-gray-400 text-xs">...</span>
+            )}
+            {/* Autocomplete dropdown */}
+            {showSuggestions && searchInput.length >= 2 && suggestions.length > 0 && (
+              <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      setSearchInput(s.title);
+                      setShowSuggestions(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-0"
+                  >
+                    <div className="text-sm font-medium truncate">{s.title}</div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {s.artist ?? 'Unknown artist'} {s.album ? `\u00B7 ${s.album}` : ''}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Artist</label>
-            <input
-              type="text"
-              value={filters.artist}
-              onChange={(e) => setFilter('artist', e.target.value)}
-              placeholder="Filter..."
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Album</label>
-            <input
-              type="text"
-              value={filters.album}
-              onChange={(e) => setFilter('album', e.target.value)}
-              placeholder="Filter..."
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
+          {/* Category filter */}
           <div>
             <label className="block text-xs text-gray-500 mb-1">Category</label>
             <select
-              value={filters.category}
-              onChange={(e) => setFilter('category', e.target.value)}
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
             >
               <option value="">All</option>
               {categories?.map((cat) => (
@@ -268,50 +302,33 @@ export default function Assets() {
               ))}
             </select>
           </div>
+          {/* Type filter */}
           <div>
             <label className="block text-xs text-gray-500 mb-1">Type</label>
-            <input
-              type="text"
-              value={filters.asset_type}
-              onChange={(e) => setFilter('asset_type', e.target.value)}
-              placeholder="Filter..."
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Min (min)</label>
-            <input
-              type="number"
-              min={0}
-              value={filters.durationMin}
-              onChange={(e) => setFilter('durationMin', e.target.value)}
-              placeholder="0"
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Max (min)</label>
-            <input
-              type="number"
-              min={0}
-              value={filters.durationMax}
-              onChange={(e) => setFilter('durationMax', e.target.value)}
-              placeholder="..."
-              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
+            >
+              <option value="">All</option>
+              {ASSET_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
           </div>
         </div>
-        {hasFilters && (
-          <div className="mt-3 flex items-center gap-3">
-            <span className="text-xs text-gray-500">{filtered.length} of {data?.assets.length ?? 0} assets</span>
-            <button
-              onClick={() => setFilters(EMPTY_FILTERS)}
-              className="text-xs text-red-500 hover:text-red-700"
-            >
+        {/* Result count & clear */}
+        <div className="mt-3 flex items-center gap-3">
+          <span className="text-xs text-gray-500">
+            {total} asset{total !== 1 ? 's' : ''} found
+            {hasFilters ? '' : ' total'}
+          </span>
+          {hasFilters && (
+            <button onClick={clearFilters} className="text-xs text-red-500 hover:text-red-700">
               Clear filters
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Batch action bar */}
@@ -350,14 +367,12 @@ export default function Assets() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Release</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date Added</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Played</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {filtered.map((asset) => (
+            {assets.map((asset) => (
               <tr key={asset.id} className={selected.has(asset.id) ? 'bg-brand-50' : ''}>
                 <td className="px-3 py-4">
                   <input
@@ -391,9 +406,7 @@ export default function Assets() {
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.release_date)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.created_at)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.last_played_at)}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-right space-x-3">
                   <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
                   <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-sm">View</Link>
@@ -413,9 +426,9 @@ export default function Assets() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {assets.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-6 py-10 text-center text-gray-500">
+                <td colSpan={10} className="px-6 py-10 text-center text-gray-500">
                   {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>
@@ -423,6 +436,57 @@ export default function Assets() {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4 px-2">
+          <span className="text-sm text-gray-500">
+            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            {/* Page numbers — show up to 7 pages around current */}
+            {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
+              let p: number;
+              if (totalPages <= 7) {
+                p = i;
+              } else if (page < 4) {
+                p = i;
+              } else if (page > totalPages - 5) {
+                p = totalPages - 7 + i;
+              } else {
+                p = page - 3 + i;
+              }
+              return (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className={`px-3 py-1 text-sm border rounded ${
+                    p === page
+                      ? 'bg-brand-600 text-white border-brand-600'
+                      : 'border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {p + 1}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

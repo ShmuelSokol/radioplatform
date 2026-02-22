@@ -132,11 +132,32 @@ async def get_asset(db: AsyncSession, asset_id: uuid.UUID) -> Asset:
 
 
 async def list_assets(
-    db: AsyncSession, skip: int = 0, limit: int = 50, asset_type: str | None = None
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 50,
+    asset_type: str | None = None,
+    search: str | None = None,
+    category: str | None = None,
 ) -> tuple[list[dict], int]:
-    count_q = select(func.count(Asset.id))
+    from sqlalchemy import or_
+
+    # Build shared WHERE conditions
+    conditions = []
     if asset_type:
-        count_q = count_q.where(Asset.asset_type == asset_type)
+        conditions.append(Asset.asset_type == asset_type)
+    if category:
+        conditions.append(func.lower(Asset.category) == category.lower())
+    if search:
+        like_pat = f"%{search}%"
+        conditions.append(or_(
+            Asset.title.ilike(like_pat),
+            Asset.artist.ilike(like_pat),
+            Asset.album.ilike(like_pat),
+        ))
+
+    count_q = select(func.count(Asset.id))
+    for cond in conditions:
+        count_q = count_q.where(cond)
     count_result = await db.execute(count_q)
     total = count_result.scalar() or 0
 
@@ -153,8 +174,8 @@ async def list_assets(
         select(Asset, last_played_sq, Sponsor.name.label("sponsor_name"))
         .outerjoin(Sponsor, Asset.sponsor_id == Sponsor.id)
     )
-    if asset_type:
-        q = q.where(Asset.asset_type == asset_type)
+    for cond in conditions:
+        q = q.where(cond)
     result = await db.execute(
         q.offset(skip).limit(limit).order_by(Asset.created_at.desc())
     )

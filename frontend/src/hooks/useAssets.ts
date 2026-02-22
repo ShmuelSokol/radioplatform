@@ -1,11 +1,20 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal } from '../api/assets';
+import type { AssetListResponse } from '../types';
 
-export function useAssets(skip = 0, limit = 100, enabled = true) {
-  return useQuery({
-    queryKey: ['assets', skip, limit],
-    queryFn: () => listAssets(skip, limit),
+export function useAssets(
+  skip = 0,
+  limit = 100,
+  search?: string,
+  asset_type?: string,
+  category?: string,
+  enabled = true,
+) {
+  return useQuery<AssetListResponse>({
+    queryKey: ['assets', skip, limit, search, asset_type, category],
+    queryFn: () => listAssets(skip, limit, search, asset_type, category),
     enabled,
+    placeholderData: keepPreviousData,
   });
 }
 
