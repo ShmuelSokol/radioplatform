@@ -473,7 +473,7 @@ def create_app() -> FastAPI:
                 status_code=503,
                 content={"status": "unhealthy", "detail": f"DB unreachable: {e}"},
             )
-        return {"status": "ok"}
+        return {"status": "ok", "version": "2026-02-22a"}
 
     @app.get("/api/v1/init")
     async def init_db():
