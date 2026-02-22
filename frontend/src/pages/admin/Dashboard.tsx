@@ -67,7 +67,7 @@ type BottomTab = 'library' | 'cart' | 'log' | 'timeline';
 export default function Dashboard() {
   const { user } = useAuth();
   const { data: stationsData } = useStations();
-  const { data: assetsData } = useAssets(0, 100);
+  const { data: assetsData } = useAssets({ skip: 0, limit: 100 });
   const [clock, setClock] = useState(new Date());
   const [activeTab, setActiveTab] = useState<string>('all');
   const [librarySearch, setLibrarySearch] = useState('');

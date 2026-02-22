@@ -1,18 +1,13 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal } from '../api/assets';
+import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal, bulkSetCategory } from '../api/assets';
+import type { ListAssetsParams } from '../api/assets';
 import type { AssetListResponse } from '../types';
 
-export function useAssets(
-  skip = 0,
-  limit = 100,
-  search?: string,
-  asset_type?: string,
-  category?: string,
-  enabled = true,
-) {
+export function useAssets(params: ListAssetsParams & { enabled?: boolean } = {}) {
+  const { enabled = true, ...queryParams } = params;
   return useQuery<AssetListResponse>({
-    queryKey: ['assets', skip, limit, search, asset_type, category],
-    queryFn: () => listAssets(skip, limit, search, asset_type, category),
+    queryKey: ['assets', queryParams],
+    queryFn: () => listAssets(queryParams),
     enabled,
     placeholderData: keepPreviousData,
   });
@@ -50,6 +45,15 @@ export function useDeleteAsset() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteAsset(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
+  });
+}
+
+export function useBulkSetCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assetIds, category }: { assetIds: string[]; category: string }) =>
+      bulkSetCategory(assetIds, category),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
   });
 }

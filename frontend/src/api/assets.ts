@@ -1,18 +1,45 @@
 import apiClient from './client';
 import type { Asset, AssetListResponse } from '../types';
 
+export interface ListAssetsParams {
+  skip?: number;
+  limit?: number;
+  search?: string;
+  asset_type?: string;
+  category?: string;
+  title_search?: string;
+  artist_search?: string;
+  album_search?: string;
+  duration_min?: number;
+  duration_max?: number;
+}
+
 export const listAssets = async (
-  skip = 0,
-  limit = 50,
-  search?: string,
-  asset_type?: string,
-  category?: string,
+  params: ListAssetsParams = {},
 ): Promise<AssetListResponse> => {
-  const params: Record<string, any> = { skip, limit };
-  if (search) params.search = search;
-  if (asset_type) params.asset_type = asset_type;
-  if (category) params.category = category;
-  const res = await apiClient.get<AssetListResponse>('/assets', { params });
+  const query: Record<string, any> = {};
+  if (params.skip != null) query.skip = params.skip;
+  if (params.limit != null) query.limit = params.limit;
+  if (params.search) query.search = params.search;
+  if (params.asset_type) query.asset_type = params.asset_type;
+  if (params.category) query.category = params.category;
+  if (params.title_search) query.title_search = params.title_search;
+  if (params.artist_search) query.artist_search = params.artist_search;
+  if (params.album_search) query.album_search = params.album_search;
+  if (params.duration_min != null) query.duration_min = params.duration_min;
+  if (params.duration_max != null) query.duration_max = params.duration_max;
+  const res = await apiClient.get<AssetListResponse>('/assets', { params: query });
+  return res.data;
+};
+
+export const bulkSetCategory = async (
+  assetIds: string[],
+  category: string,
+): Promise<{ updated: number }> => {
+  const res = await apiClient.patch<{ updated: number }>('/assets/bulk-category', {
+    asset_ids: assetIds,
+    category,
+  });
   return res.data;
 };
 

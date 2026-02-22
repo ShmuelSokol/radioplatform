@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAssets, useDeleteAsset } from '../../hooks/useAssets';
+import { useAssets, useDeleteAsset, useBulkSetCategory } from '../../hooks/useAssets';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 import AssetSponsorBadge from '../../components/AssetSponsorBadge';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
@@ -10,7 +10,7 @@ import type { Asset } from '../../types';
 import Spinner from '../../components/Spinner';
 
 const EXPORT_FORMATS = ['original', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
-const PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
 
 /** Real uploads have file_path starting with "assets/"; seed data uses music/, spots/, etc. */
 function hasRealAudio(filePath: string): boolean {
@@ -139,6 +139,7 @@ const ASSET_TYPES = ['music', 'shiur', 'spot', 'jingle', 'zmanim'] as const;
 export default function Assets() {
   const { data: categories } = useCategories();
   const deleteMutation = useDeleteAsset();
+  const bulkCategoryMutation = useBulkSetCategory();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const createQueueMutation = useCreateReviewQueue();
   const navigate = useNavigate();
@@ -146,39 +147,66 @@ export default function Assets() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Search & filter state
-  const [searchInput, setSearchInput] = useState('');
+  // Per-field search state
+  const [titleSearch, setTitleSearch] = useState('');
+  const [artistSearch, setArtistSearch] = useState('');
+  const [albumSearch, setAlbumSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
-  const [page, setPage] = useState(0);
+  const [durationMin, setDurationMin] = useState('');
+  const [durationMax, setDurationMax] = useState('');
+
+  // Quick search (autocomplete across all fields)
+  const [quickSearch, setQuickSearch] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  // Debounce search for API calls
-  const debouncedSearch = useDebounce(searchInput, 300);
+  // Pagination
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [page, setPage] = useState(0);
+
+  // Bulk category picker
+  const [showBulkCategory, setShowBulkCategory] = useState(false);
+  // Bulk download picker
+  const [showBulkDownload, setShowBulkDownload] = useState(false);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+
+  // Debounce per-field searches
+  const debouncedTitle = useDebounce(titleSearch, 300);
+  const debouncedArtist = useDebounce(artistSearch, 300);
+  const debouncedAlbum = useDebounce(albumSearch, 300);
+  const debouncedDurMin = useDebounce(durationMin, 300);
+  const debouncedDurMax = useDebounce(durationMax, 300);
 
   // Reset page when filters change
-  useEffect(() => { setPage(0); }, [debouncedSearch, categoryFilter, typeFilter]);
+  useEffect(() => { setPage(0); }, [debouncedTitle, debouncedArtist, debouncedAlbum, categoryFilter, typeFilter, debouncedDurMin, debouncedDurMax]);
 
   // Server-side filtered query
-  const { data, isLoading, isFetching } = useAssets(
-    page * PAGE_SIZE,
-    PAGE_SIZE,
-    debouncedSearch || undefined,
-    typeFilter || undefined,
-    categoryFilter || undefined,
-  );
+  const durMinNum = debouncedDurMin ? parseFloat(debouncedDurMin) : undefined;
+  const durMaxNum = debouncedDurMax ? parseFloat(debouncedDurMax) : undefined;
 
-  // Suggestion query — fetch top 8 matches for autocomplete while typing
-  const suggestSearch = useDebounce(searchInput, 150);
-  const { data: suggestData } = useAssets(
-    0,
-    8,
-    suggestSearch.length >= 2 ? suggestSearch : undefined,
-    typeFilter || undefined,
-    categoryFilter || undefined,
-    suggestSearch.length >= 2 && showSuggestions,
-  );
+  const { data, isLoading, isFetching } = useAssets({
+    skip: page * pageSize,
+    limit: pageSize,
+    title_search: debouncedTitle || undefined,
+    artist_search: debouncedArtist || undefined,
+    album_search: debouncedAlbum || undefined,
+    asset_type: typeFilter || undefined,
+    category: categoryFilter || undefined,
+    duration_min: durMinNum,
+    duration_max: durMaxNum,
+  });
+
+  // Suggestion query — fetch top 8 matches for quick search autocomplete
+  const suggestSearch = useDebounce(quickSearch, 150);
+  const { data: suggestData } = useAssets({
+    skip: 0,
+    limit: 8,
+    search: suggestSearch.length >= 2 ? suggestSearch : undefined,
+    asset_type: typeFilter || undefined,
+    category: categoryFilter || undefined,
+    enabled: suggestSearch.length >= 2 && showSuggestions,
+  });
   const suggestions: Asset[] = suggestData?.assets ?? [];
 
   // Close suggestions on outside click
@@ -194,13 +222,18 @@ export default function Assets() {
 
   const assets: Asset[] = data?.assets ?? [];
   const total: number = data?.total ?? 0;
-  const totalPages = Math.ceil(total / PAGE_SIZE);
-  const hasFilters = searchInput !== '' || categoryFilter !== '' || typeFilter !== '';
+  const totalPages = Math.ceil(total / pageSize);
+  const hasFilters = titleSearch !== '' || artistSearch !== '' || albumSearch !== '' || categoryFilter !== '' || typeFilter !== '' || durationMin !== '' || durationMax !== '';
 
   const clearFilters = useCallback(() => {
-    setSearchInput('');
+    setTitleSearch('');
+    setArtistSearch('');
+    setAlbumSearch('');
     setCategoryFilter('');
     setTypeFilter('');
+    setDurationMin('');
+    setDurationMax('');
+    setQuickSearch('');
     setPage(0);
   }, []);
 
@@ -236,6 +269,30 @@ export default function Assets() {
     );
   };
 
+  const handleBulkCategory = (cat: string) => {
+    const ids = Array.from(selected);
+    bulkCategoryMutation.mutate(
+      { assetIds: ids, category: cat },
+      { onSuccess: () => { setSelected(new Set()); setShowBulkCategory(false); } },
+    );
+  };
+
+  const handleBulkDownload = async (format: string) => {
+    setShowBulkDownload(false);
+    setBulkDownloading(true);
+    const ids = Array.from(selected);
+    for (const id of ids) {
+      const asset = assets.find((a) => a.id === id);
+      if (asset) {
+        try {
+          await downloadAsset(id, asset.title, format);
+        } catch { /* skip failed */ }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    setBulkDownloading(false);
+  };
+
   if (isLoading && !data) return <div className="text-center py-10">Loading...</div>;
 
   return (
@@ -252,43 +309,41 @@ export default function Assets() {
 
       {/* Search & filter bar */}
       <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Search with autocomplete */}
-          <div ref={searchRef} className="relative sm:col-span-1">
-            <label className="block text-xs text-gray-500 mb-1">Search</label>
+        {/* Row 1: Per-field search */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Title</label>
             <input
               type="text"
-              value={searchInput}
-              onChange={(e) => { setSearchInput(e.target.value); setShowSuggestions(true); }}
-              onFocus={() => { if (searchInput.length >= 2) setShowSuggestions(true); }}
-              placeholder="Search title, artist, album..."
+              value={titleSearch}
+              onChange={(e) => setTitleSearch(e.target.value)}
+              placeholder="Search by title..."
               className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
-            {isFetching && (
-              <span className="absolute right-2 top-7 text-gray-400 text-xs">...</span>
-            )}
-            {/* Autocomplete dropdown */}
-            {showSuggestions && searchInput.length >= 2 && suggestions.length > 0 && (
-              <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                {suggestions.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      setSearchInput(s.title);
-                      setShowSuggestions(false);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                  >
-                    <div className="text-sm font-medium truncate">{s.title}</div>
-                    <div className="text-xs text-gray-500 truncate">
-                      {s.artist ?? 'Unknown artist'} {s.album ? `\u00B7 ${s.album}` : ''}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
-          {/* Category filter */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Artist</label>
+            <input
+              type="text"
+              value={artistSearch}
+              onChange={(e) => setArtistSearch(e.target.value)}
+              placeholder="Search by artist..."
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Album</label>
+            <input
+              type="text"
+              value={albumSearch}
+              onChange={(e) => setAlbumSearch(e.target.value)}
+              placeholder="Search by album..."
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+        </div>
+        {/* Row 2: Category, Type, Duration, Quick search */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Category</label>
             <select
@@ -302,7 +357,6 @@ export default function Assets() {
               ))}
             </select>
           </div>
-          {/* Type filter */}
           <div>
             <label className="block text-xs text-gray-500 mb-1">Type</label>
             <select
@@ -316,6 +370,62 @@ export default function Assets() {
               ))}
             </select>
           </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Min Duration (s)</label>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={durationMin}
+              onChange={(e) => setDurationMin(e.target.value)}
+              placeholder="e.g. 60"
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Max Duration (s)</label>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={durationMax}
+              onChange={(e) => setDurationMax(e.target.value)}
+              placeholder="e.g. 300"
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          {/* Quick search with autocomplete */}
+          <div ref={searchRef} className="relative">
+            <label className="block text-xs text-gray-500 mb-1">Quick Search</label>
+            <input
+              type="text"
+              value={quickSearch}
+              onChange={(e) => { setQuickSearch(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => { if (quickSearch.length >= 2) setShowSuggestions(true); }}
+              placeholder="Autocomplete..."
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            {showSuggestions && quickSearch.length >= 2 && suggestions.length > 0 && (
+              <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      setTitleSearch(s.title);
+                      setQuickSearch('');
+                      setShowSuggestions(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-0"
+                  >
+                    <div className="text-sm font-medium truncate">{s.title}</div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {s.artist ?? 'Unknown artist'} {s.album ? `\u00B7 ${s.album}` : ''}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         {/* Result count & clear */}
         <div className="mt-3 flex items-center gap-3">
@@ -323,6 +433,7 @@ export default function Assets() {
             {total} asset{total !== 1 ? 's' : ''} found
             {hasFilters ? '' : ' total'}
           </span>
+          {isFetching && <span className="text-xs text-gray-400">...</span>}
           {hasFilters && (
             <button onClick={clearFilters} className="text-xs text-red-500 hover:text-red-700">
               Clear filters
@@ -333,17 +444,74 @@ export default function Assets() {
 
       {/* Batch action bar */}
       {selected.size > 0 && (
-        <div className="bg-brand-50 border border-brand-200 rounded-lg p-3 mb-4 flex items-center justify-between">
+        <div className="bg-brand-50 border border-brand-200 rounded-lg p-3 mb-4 flex items-center gap-3 flex-wrap">
           <span className="text-sm font-medium text-brand-700">
             {selected.size} selected
           </span>
-          <button
-            onClick={handleCreateQueue}
-            disabled={createQueueMutation.isPending}
-            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-1.5 rounded text-sm transition disabled:opacity-50"
-          >
-            {createQueueMutation.isPending ? <><Spinner className="mr-2" />Processing...</> : 'Create Review Queue'}
-          </button>
+          <div className="flex gap-2 ml-auto flex-wrap">
+            {/* Set Category */}
+            <div className="relative">
+              <button
+                onClick={() => { setShowBulkCategory(!showBulkCategory); setShowBulkDownload(false); }}
+                disabled={bulkCategoryMutation.isPending}
+                className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1.5 rounded text-sm transition disabled:opacity-50"
+              >
+                {bulkCategoryMutation.isPending ? <><Spinner className="mr-1" />Updating...</> : 'Set Category'}
+              </button>
+              {showBulkCategory && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowBulkCategory(false)} />
+                  <div className="absolute right-0 z-20 mt-1 w-40 bg-white border border-gray-200 rounded shadow-lg py-1 max-h-48 overflow-y-auto">
+                    {categories?.map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => handleBulkCategory(cat.name)}
+                        className="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                      >
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Download */}
+            <div className="relative">
+              <button
+                onClick={() => { setShowBulkDownload(!showBulkDownload); setShowBulkCategory(false); }}
+                disabled={bulkDownloading}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm transition disabled:opacity-50"
+              >
+                {bulkDownloading ? <><Spinner className="mr-1" />Downloading...</> : 'Download'}
+              </button>
+              {showBulkDownload && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowBulkDownload(false)} />
+                  <div className="absolute right-0 z-20 mt-1 w-32 bg-white border border-gray-200 rounded shadow-lg py-1">
+                    {(['mp3', 'wav', 'flac', 'ogg', 'aac'] as const).map((fmt) => (
+                      <button
+                        key={fmt}
+                        onClick={() => handleBulkDownload(fmt)}
+                        className="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                      >
+                        {fmt.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Create Review Queue */}
+            <button
+              onClick={handleCreateQueue}
+              disabled={createQueueMutation.isPending}
+              className="bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5 rounded text-sm transition disabled:opacity-50"
+            >
+              {createQueueMutation.isPending ? <><Spinner className="mr-1" />Processing...</> : 'Create Review Queue'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -381,7 +549,7 @@ export default function Assets() {
                     onChange={() => toggleSelect(asset.id)}
                     disabled={!hasRealAudio(asset.file_path)}
                     className="rounded border-gray-300 disabled:opacity-30"
-                    title={hasRealAudio(asset.file_path) ? '' : 'No audio file — cannot add to review queue'}
+                    title={hasRealAudio(asset.file_path) ? '' : 'No audio file — cannot select'}
                   />
                 </td>
                 <td className="px-1 py-2 text-center">
@@ -437,12 +605,26 @@ export default function Assets() {
         </table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 px-2">
+      {/* Pagination + Rows per page */}
+      <div className="flex items-center justify-between mt-4 px-2">
+        <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500">
-            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+            {total > 0 ? `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} of ${total}` : '0 results'}
           </span>
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-gray-500">Rows:</label>
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
+              className="border border-gray-300 rounded px-1 py-0.5 text-sm bg-white focus:outline-none"
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {totalPages > 1 && (
           <div className="flex gap-2">
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
@@ -451,7 +633,6 @@ export default function Assets() {
             >
               Previous
             </button>
-            {/* Page numbers — show up to 7 pages around current */}
             {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
               let p: number;
               if (totalPages <= 7) {
@@ -485,8 +666,8 @@ export default function Assets() {
               Next
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

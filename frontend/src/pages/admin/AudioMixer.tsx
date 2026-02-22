@@ -79,7 +79,7 @@ function WaveformToggle({ assetId, label }: { assetId: string; label: string }) 
 }
 
 export default function AudioMixer() {
-  const { data: assetData } = useAssets(0, 500);
+  const { data: assetData } = useAssets({ skip: 0, limit: 500 });
   const assets = assetData?.assets ?? [];
 
   // Selected assets

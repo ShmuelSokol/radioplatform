@@ -55,3 +55,8 @@ class ClipRequest(BaseModel):
 class TaskStatusResponse(BaseModel):
     task_id: str
     status: str
+
+
+class BulkCategoryRequest(BaseModel):
+    asset_ids: list[uuid.UUID | str]
+    category: str

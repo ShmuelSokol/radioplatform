@@ -2,7 +2,7 @@ import hashlib
 import logging
 import uuid
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -138,6 +138,11 @@ async def list_assets(
     asset_type: str | None = None,
     search: str | None = None,
     category: str | None = None,
+    title_search: str | None = None,
+    artist_search: str | None = None,
+    album_search: str | None = None,
+    duration_min: float | None = None,
+    duration_max: float | None = None,
 ) -> tuple[list[dict], int]:
     # Build shared WHERE conditions
     conditions = []
@@ -152,6 +157,16 @@ async def list_assets(
             Asset.artist.ilike(like_pat),
             Asset.album.ilike(like_pat),
         ))
+    if title_search:
+        conditions.append(Asset.title.ilike(f"%{title_search}%"))
+    if artist_search:
+        conditions.append(Asset.artist.ilike(f"%{artist_search}%"))
+    if album_search:
+        conditions.append(Asset.album.ilike(f"%{album_search}%"))
+    if duration_min is not None:
+        conditions.append(Asset.duration >= duration_min)
+    if duration_max is not None:
+        conditions.append(Asset.duration <= duration_max)
 
     count_q = select(func.count(Asset.id))
     for cond in conditions:
@@ -219,3 +234,13 @@ async def delete_asset(db: AsyncSession, asset_id: uuid.UUID) -> None:
     asset = await get_asset(db, asset_id)
     await db.delete(asset)
     await db.flush()
+
+
+async def bulk_update_category(
+    db: AsyncSession, asset_ids: list[uuid.UUID], category: str
+) -> int:
+    result = await db.execute(
+        update(Asset).where(Asset.id.in_(asset_ids)).values(category=category)
+    )
+    await db.flush()
+    return result.rowcount

@@ -13,11 +13,12 @@ from app.schemas.asset import (
     AssetListResponse,
     AssetResponse,
     AssetUpdate,
+    BulkCategoryRequest,
     ClipRequest,
     TaskStatusResponse,
     TranscodeRequest,
 )
-from app.services.asset_service import create_asset, delete_asset, get_asset, list_assets
+from app.services.asset_service import bulk_update_category, create_asset, delete_asset, get_asset, list_assets
 from app.workers.tasks.media_tasks import task_clip_audio, task_extract_metadata, task_transcode_audio
 
 logger = logging.getLogger(__name__)
@@ -225,6 +226,18 @@ async def upload_asset(
     return asset
 
 
+@router.patch("/bulk-category")
+async def bulk_set_category(
+    body: BulkCategoryRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    ids = [uuid.UUID(str(aid)) for aid in body.asset_ids]
+    count = await bulk_update_category(db, ids, body.category)
+    await db.commit()
+    return {"updated": count}
+
+
 @router.get("", response_model=AssetListResponse)
 async def list_all(
     skip: int = Query(0, ge=0),
@@ -232,12 +245,20 @@ async def list_all(
     asset_type: str | None = Query(None),
     search: str | None = Query(None, description="Search title/artist/album"),
     category: str | None = Query(None, description="Filter by category name"),
+    title_search: str | None = Query(None, description="Search by title"),
+    artist_search: str | None = Query(None, description="Search by artist"),
+    album_search: str | None = Query(None, description="Search by album"),
+    duration_min: float | None = Query(None, description="Minimum duration in seconds"),
+    duration_max: float | None = Query(None, description="Maximum duration in seconds"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     assets, total = await list_assets(
         db, skip=skip, limit=limit, asset_type=asset_type,
         search=search, category=category,
+        title_search=title_search, artist_search=artist_search,
+        album_search=album_search,
+        duration_min=duration_min, duration_max=duration_max,
     )
     return AssetListResponse(assets=assets, total=total)
 
