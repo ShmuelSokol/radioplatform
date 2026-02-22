@@ -100,15 +100,18 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     if blackout_end.tzinfo is None:
         blackout_end = blackout_end.replace(tzinfo=timezone.utc)
 
-    # Calculate remaining blackout duration from now (or from start if not yet started)
-    effective_start = max(now, blackout_start)
-    remaining_seconds = (blackout_end - effective_start).total_seconds()
-    if remaining_seconds <= 0:
+    # Determine if blackout is active now or in the future
+    is_active_now = blackout_start <= now
+    total_seconds = (blackout_end - blackout_start).total_seconds()
+    if is_active_now:
+        # Blackout already started — only fill remaining time
+        total_seconds = (blackout_end - now).total_seconds()
+    if total_seconds <= 0:
         return 0
 
-    num_silence = math.ceil(remaining_seconds / silence_duration)
+    num_silence = math.ceil(total_seconds / silence_duration)
 
-    # Check if we already have silence entries queued for this blackout
+    # Check if we already have enough silence entries queued
     existing_silence = await db.execute(
         select(func.count(QueueEntry.id)).where(
             QueueEntry.station_id == station_id,
@@ -120,16 +123,17 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     if existing_count >= num_silence:
         return 0  # Already filled
 
-    # Stop any currently playing non-silence entry
-    playing_result = await db.execute(
-        select(QueueEntry).where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "playing",
+    if is_active_now:
+        # Blackout is active — stop current music immediately
+        playing_result = await db.execute(
+            select(QueueEntry).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "playing",
+            )
         )
-    )
-    for entry in playing_result.scalars().all():
-        if entry.asset_id != silence.id:
-            entry.status = "played"
+        for entry in playing_result.scalars().all():
+            if entry.asset_id != silence.id:
+                entry.status = "played"
 
     # Clear existing silence entries (we'll re-insert clean ones)
     await db.execute(
@@ -140,17 +144,7 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
         ).values(status="played")
     )
 
-    # Shift all pending non-silence entries to make room
-    # Get current max position
-    max_pos_result = await db.execute(
-        select(func.max(QueueEntry.position)).where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-        )
-    )
-    max_pos = max_pos_result.scalar() or 0
-
-    # Bump all pending entries up by num_silence positions
+    # Bump all pending entries up to make room for silence
     await db.execute(
         update(QueueEntry).where(
             QueueEntry.station_id == station_id,
@@ -165,8 +159,10 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
             station_id=station_id,
             asset_id=silence.id,
             position=i + 1,
-            status="playing" if i == 0 else "pending",
-            started_at=effective_start if i == 0 else None,
+            status="playing" if (i == 0 and is_active_now) else "pending",
+            started_at=now if (i == 0 and is_active_now) else None,
+            # For future blackouts, preempt_at on the first entry triggers it at the right time
+            preempt_at=blackout_start if (i == 0 and not is_active_now) else None,
             source="auto",
         )
         db.add(entry)
@@ -174,7 +170,7 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     await db.commit()
     logger.info(
         "Filled blackout queue for station %s: %d silence entries (%.0f min), ends at %s",
-        station_id, num_silence, remaining_seconds / 60, blackout_end.isoformat(),
+        station_id, num_silence, total_seconds / 60, blackout_end.isoformat(),
     )
     return num_silence
 _last_advance: dict[str, float] = {}
@@ -508,17 +504,29 @@ async def get_queue(
             "remaining_seconds": round(remaining, 1),
         }
 
+    # Calculate estimated start time for each entry
+    now_utc = datetime.now(timezone.utc)
+    if now_playing_entry and now_playing_entry.started_at:
+        asset_dur = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
+        el = (now_utc - now_playing_entry.started_at).total_seconds()
+        cursor = now_utc + timedelta(seconds=max(0, (asset_dur or DEFAULT_DURATION) - el))
+    else:
+        cursor = now_utc
+
     entries_data = []
     queue_duration = 0.0
     for e in entries:
         dur = (e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION)
         queue_duration += dur
+        is_now = e.status == "playing"
+        est_start = now_playing_entry.started_at.isoformat() if is_now and now_playing_entry and now_playing_entry.started_at else cursor.isoformat()
         d = {
             "id": str(e.id),
             "station_id": str(e.station_id),
             "asset_id": str(e.asset_id),
             "position": e.position,
             "status": e.status,
+            "estimated_start": est_start,
             "asset": {
                 "id": str(e.asset.id),
                 "title": e.asset.title,
@@ -528,6 +536,8 @@ async def get_queue(
                 "category": e.asset.category,
             } if e.asset else None,
         }
+        if not is_now:
+            cursor += timedelta(seconds=dur)
         entries_data.append(d)
 
     return {

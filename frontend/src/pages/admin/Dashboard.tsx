@@ -526,7 +526,12 @@ export default function Dashboard() {
                       ${!isCur ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   >
                     <span className="w-6 text-[11px] shrink-0">
-                      {isCur ? '▶' : !isCur ? <span className="text-gray-600 text-[10px]">⠿</span> : entry.position}
+                      {isCur ? '▶' : <span className="text-gray-600 text-[10px]">⠿</span>}
+                    </span>
+                    <span className="w-[52px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString() : ''}>
+                      {entry.estimated_start
+                        ? new Date(entry.estimated_start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+                        : ''}
                     </span>
                     <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
                     <span className="flex-1 truncate text-[12px] min-w-0">
