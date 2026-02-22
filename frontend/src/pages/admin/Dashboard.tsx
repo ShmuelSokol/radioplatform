@@ -32,7 +32,7 @@ function isValidTz(tz: string): boolean {
 }
 
 function fmtClock(d: Date, tz?: string): string {
-  const opts: Intl.DateTimeFormatOptions = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+  const opts: Intl.DateTimeFormatOptions = { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' };
   if (tz && isValidTz(tz)) opts.timeZone = tz;
   return d.toLocaleTimeString('en-US', opts);
 }
@@ -692,7 +692,7 @@ export default function Dashboard() {
             <div className="flex-1 overflow-y-auto overflow-x-auto bg-[#0a0a28]">
               <div className="min-w-[450px]">
                 <div className="bg-[#16163e] flex text-[10px] text-gray-500 uppercase border-b border-[#2a2a5e] px-2 py-0.5 sticky top-0">
-                  <span className="w-[60px] shrink-0">Time</span>
+                  <span className="w-[76px] shrink-0">Time</span>
                   <span className="w-[50px] shrink-0">Type</span>
                   <span className="flex-1">Title</span>
                   <span className="w-[80px] shrink-0">Artist</span>
@@ -700,8 +700,8 @@ export default function Dashboard() {
                 </div>
                 {playLog.map((log: any) => (
                   <div key={log.id} className="flex items-center px-2 py-[2px] border-b border-[#12122e] text-gray-400">
-                    <span className="w-[60px] tabular-nums text-[11px] shrink-0">
-                      {new Date(log.start_utc).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', ...(stationTz ? { timeZone: stationTz } : {}) })}
+                    <span className="w-[76px] tabular-nums text-[11px] shrink-0">
+                      {new Date(log.start_utc).toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', ...(stationTz ? { timeZone: stationTz } : {}) })}
                     </span>
                     <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[log.asset_type] ?? 'text-gray-500'}`}>
                       {log.asset_type ?? ''}
