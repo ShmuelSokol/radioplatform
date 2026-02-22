@@ -27,9 +27,13 @@ function fmtDurMs(sec: number | null): string {
   return `${m}:${s.toString().padStart(2, '0')}.${ms}`;
 }
 
+function isValidTz(tz: string): boolean {
+  try { Intl.DateTimeFormat(undefined, { timeZone: tz }); return true; } catch { return false; }
+}
+
 function fmtClock(d: Date, tz?: string): string {
   const opts: Intl.DateTimeFormatOptions = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
-  if (tz) opts.timeZone = tz;
+  if (tz && isValidTz(tz)) opts.timeZone = tz;
   return d.toLocaleTimeString('en-US', opts);
 }
 
@@ -92,7 +96,8 @@ export default function Dashboard() {
     }
   }, [selectedStationId]);
   const stationId = selectedStationId;
-  const stationTz = stations.find((s: any) => s.id === stationId)?.timezone as string | undefined;
+  const rawTz = stations.find((s: any) => s.id === stationId)?.timezone as string | undefined;
+  const stationTz = rawTz && isValidTz(rawTz) ? rawTz : undefined;
 
   const { data: queueData } = useQueue(stationId);
   const { data: lastPlayedMap } = useLastPlayed(stationId);
