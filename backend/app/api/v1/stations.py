@@ -68,6 +68,8 @@ async def geocode_city(
         logger.warning("Geocode request failed: %s", e)
         return []
 
+    from app.services.timezone_service import get_timezone_for_coords
+
     results = []
     for item in data:
         addr = item.get("address", {})
@@ -75,10 +77,13 @@ async def geocode_city(
         state = addr.get("state", "")
         country = addr.get("country", "")
         display = ", ".join(part for part in [city, state, country] if part)
+        lat = float(item["lat"])
+        lon = float(item["lon"])
         results.append({
             "display_name": display,
-            "latitude": float(item["lat"]),
-            "longitude": float(item["lon"]),
+            "latitude": lat,
+            "longitude": lon,
+            "timezone": get_timezone_for_coords(lat, lon),
         })
     return results
 

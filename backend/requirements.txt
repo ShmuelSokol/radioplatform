@@ -25,3 +25,4 @@ anthropic>=0.40.0
 twilio>=9.0.0
 slowapi>=0.1.9
 sentry-sdk[fastapi]>=2.0.0
+timezonefinder>=6.5.0

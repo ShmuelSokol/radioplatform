@@ -121,7 +121,13 @@ async def create_station(db: AsyncSession, data: StationCreate) -> Station:
     if existing.scalar_one_or_none():
         raise ConflictError(f"Station '{data.name}' already exists")
 
-    station = Station(**data.model_dump())
+    station_data = data.model_dump()
+    # Auto-derive timezone from coordinates
+    if data.latitude is not None and data.longitude is not None:
+        from app.services.timezone_service import get_timezone_for_coords
+        station_data["timezone"] = get_timezone_for_coords(data.latitude, data.longitude)
+
+    station = Station(**station_data)
     db.add(station)
     await db.flush()
     await db.refresh(station)
@@ -169,6 +175,14 @@ async def list_stations(
 async def update_station(db: AsyncSession, station_id: uuid.UUID, data: StationUpdate) -> Station:
     station = await get_station(db, station_id)
     update_data = data.model_dump(exclude_unset=True)
+
+    # Re-derive timezone when lat/lon changes
+    new_lat = update_data.get("latitude", station.latitude)
+    new_lon = update_data.get("longitude", station.longitude)
+    if ("latitude" in update_data or "longitude" in update_data) and new_lat is not None and new_lon is not None:
+        from app.services.timezone_service import get_timezone_for_coords
+        update_data["timezone"] = get_timezone_for_coords(new_lat, new_lon)
+
     for field, value in update_data.items():
         setattr(station, field, value)
     await db.flush()

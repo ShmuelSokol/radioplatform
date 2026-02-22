@@ -27,8 +27,10 @@ function fmtDurMs(sec: number | null): string {
   return `${m}:${s.toString().padStart(2, '0')}.${ms}`;
 }
 
-function fmtClock(d: Date): string {
-  return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function fmtClock(d: Date, tz?: string): string {
+  const opts: Intl.DateTimeFormatOptions = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+  if (tz) opts.timeZone = tz;
+  return d.toLocaleTimeString('en-US', opts);
 }
 
 function fmtHMS(sec: number): string {
@@ -90,6 +92,7 @@ export default function Dashboard() {
     }
   }, [selectedStationId]);
   const stationId = selectedStationId;
+  const stationTz = stations.find((s: any) => s.id === stationId)?.timezone as string | undefined;
 
   const { data: queueData } = useQueue(stationId);
   const { data: lastPlayedMap } = useLastPlayed(stationId);
@@ -458,7 +461,8 @@ export default function Dashboard() {
 
         {/* Clock */}
         <div className="flex items-baseline gap-1 ml-auto">
-          <span className="text-red-400 text-lg md:text-xl font-bold tabular-nums leading-none">{fmtClock(clock)}</span>
+          <span className="text-red-400 text-lg md:text-xl font-bold tabular-nums leading-none">{fmtClock(clock, stationTz)}</span>
+          {stationTz && <span className="text-gray-500 text-[10px] hidden sm:inline">{stationTz.split('/').pop()?.replace(/_/g, ' ')}</span>}
         </div>
       </div>
 
@@ -528,9 +532,9 @@ export default function Dashboard() {
                     <span className="w-6 text-[11px] shrink-0">
                       {isCur ? '▶' : <span className="text-gray-600 text-[10px]">⠿</span>}
                     </span>
-                    <span className="w-[52px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString() : ''}>
+                    <span className="w-[52px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString(undefined, stationTz ? { timeZone: stationTz } : undefined) : ''}>
                       {entry.estimated_start
-                        ? new Date(entry.estimated_start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+                        ? new Date(entry.estimated_start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })
                         : ''}
                     </span>
                     <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
@@ -692,7 +696,7 @@ export default function Dashboard() {
                 {playLog.map((log: any) => (
                   <div key={log.id} className="flex items-center px-2 py-[2px] border-b border-[#12122e] text-gray-400">
                     <span className="w-[60px] tabular-nums text-[11px] shrink-0">
-                      {new Date(log.start_utc).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
+                      {new Date(log.start_utc).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', ...(stationTz ? { timeZone: stationTz } : {}) })}
                     </span>
                     <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[log.asset_type] ?? 'text-gray-500'}`}>
                       {log.asset_type ?? ''}
