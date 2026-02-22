@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal, bulkSetCategory } from '../api/assets';
-import type { ListAssetsParams } from '../api/assets';
+import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal, bulkSetCategory, bulkAutoTrim } from '../api/assets';
+import type { ListAssetsParams, BulkCategoryParams, BulkAutoTrimParams } from '../api/assets';
 import type { AssetListResponse } from '../types';
 
 export function useAssets(params: ListAssetsParams & { enabled?: boolean } = {}) {
@@ -52,9 +52,14 @@ export function useDeleteAsset() {
 export function useBulkSetCategory() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ assetIds, category }: { assetIds: string[]; category: string }) =>
-      bulkSetCategory(assetIds, category),
+    mutationFn: (params: BulkCategoryParams) => bulkSetCategory(params),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
+  });
+}
+
+export function useBulkAutoTrim() {
+  return useMutation({
+    mutationFn: (params: BulkAutoTrimParams) => bulkAutoTrim(params),
   });
 }
 

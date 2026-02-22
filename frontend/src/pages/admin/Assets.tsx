@@ -1,16 +1,17 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAssets, useDeleteAsset, useBulkSetCategory } from '../../hooks/useAssets';
+import { useAssets, useDeleteAsset, useBulkSetCategory, useBulkAutoTrim } from '../../hooks/useAssets';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 import AssetSponsorBadge from '../../components/AssetSponsorBadge';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
 import { useCategories } from '../../hooks/useCategories';
 import { useAssetTypes } from '../../hooks/useAssetTypes';
-import { downloadAsset, getAssetAudioUrl } from '../../api/assets';
+import { downloadAsset, getAssetAudioUrl, getBulkAutoTrimStatus } from '../../api/assets';
 import type { Asset } from '../../types';
+import type { BulkAutoTrimStatus } from '../../api/assets';
 import Spinner from '../../components/Spinner';
 
-const EXPORT_FORMATS = ['original', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
+const EXPORT_FORMATS = ['original', 'mp2', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
 
 /** Real uploads have file_path starting with "assets/"; seed data uses music/, spots/, etc. */
@@ -187,12 +188,19 @@ export default function Assets() {
   const { data: assetTypes } = useAssetTypes();
   const deleteMutation = useDeleteAsset();
   const bulkCategoryMutation = useBulkSetCategory();
+  const bulkAutoTrimMutation = useBulkAutoTrim();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const createQueueMutation = useCreateReviewQueue();
   const navigate = useNavigate();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectAllFiltered, setSelectAllFiltered] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Auto-trim progress modal state
+  const [trimJobId, setTrimJobId] = useState<string | null>(null);
+  const [trimStatus, setTrimStatus] = useState<BulkAutoTrimStatus | null>(null);
+  const [showTrimModal, setShowTrimModal] = useState(false);
 
   // Per-field search state
   const [titleSearch, setTitleSearch] = useState('');
@@ -220,8 +228,23 @@ export default function Assets() {
   const debouncedDurMin = useDebounce(durationMin, 300);
   const debouncedDurMax = useDebounce(durationMax, 300);
 
-  // Reset page when filters change
-  useEffect(() => { setPage(0); }, [debouncedTitle, debouncedArtist, debouncedAlbum, categoryFilter, typeFilter, debouncedDurMin, debouncedDurMax]);
+  // Reset page and selectAllFiltered when filters change
+  useEffect(() => { setPage(0); setSelectAllFiltered(false); }, [debouncedTitle, debouncedArtist, debouncedAlbum, categoryFilter, typeFilter, debouncedDurMin, debouncedDurMax]);
+
+  // Poll auto-trim job status
+  useEffect(() => {
+    if (!trimJobId) return;
+    const interval = setInterval(async () => {
+      try {
+        const status = await getBulkAutoTrimStatus(trimJobId);
+        setTrimStatus(status);
+        if (status.status === 'completed' || status.status === 'failed') {
+          clearInterval(interval);
+        }
+      } catch { /* ignore polling errors */ }
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [trimJobId]);
 
   // Server-side filtered query — parse "m:ss" duration format
   const durMinNum = parseDurationInput(debouncedDurMin);
@@ -263,6 +286,7 @@ export default function Assets() {
   const realAssets = useMemo(() => assets.filter((a: Asset) => hasRealAudio(a.file_path)), [assets]);
 
   const toggleSelect = (id: string) => {
+    setSelectAllFiltered(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -274,10 +298,23 @@ export default function Assets() {
   const toggleAll = () => {
     if (selected.size === realAssets.length) {
       setSelected(new Set());
+      setSelectAllFiltered(false);
     } else {
       setSelected(new Set(realAssets.map((a) => a.id)));
     }
   };
+
+  // Helper: get current filter params for filter-based bulk operations
+  // Uses category_filter for BulkCategoryRequest, category for BulkAutoTrimRequest
+  const getFilterParams = () => ({
+    asset_type: typeFilter || undefined,
+    category_filter: categoryFilter || undefined,
+    title_search: debouncedTitle || undefined,
+    artist_search: debouncedArtist || undefined,
+    album_search: debouncedAlbum || undefined,
+    duration_min: durMinNum,
+    duration_max: durMaxNum,
+  });
 
   const handleCreateQueue = () => {
     const ids = Array.from(selected);
@@ -293,11 +330,31 @@ export default function Assets() {
   };
 
   const handleBulkCategory = (cat: string) => {
-    const ids = Array.from(selected);
-    bulkCategoryMutation.mutate(
-      { assetIds: ids, category: cat },
-      { onSuccess: () => { setSelected(new Set()); setShowBulkCategory(false); } },
-    );
+    if (selectAllFiltered) {
+      bulkCategoryMutation.mutate(
+        { category: cat, ...getFilterParams() },
+        { onSuccess: () => { setSelected(new Set()); setSelectAllFiltered(false); setShowBulkCategory(false); } },
+      );
+    } else {
+      bulkCategoryMutation.mutate(
+        { assetIds: Array.from(selected), category: cat },
+        { onSuccess: () => { setSelected(new Set()); setShowBulkCategory(false); } },
+      );
+    }
+  };
+
+  const handleBulkAutoTrim = () => {
+    const filterParams = getFilterParams();
+    const params = selectAllFiltered
+      ? { ...filterParams, category: filterParams.category_filter, category_filter: undefined }
+      : { asset_ids: Array.from(selected) };
+    bulkAutoTrimMutation.mutate(params, {
+      onSuccess: (data) => {
+        setTrimJobId(data.job_id);
+        setTrimStatus(null);
+        setShowTrimModal(true);
+      },
+    });
   };
 
   const handleBulkDownload = async (format: string) => {
@@ -343,10 +400,29 @@ export default function Assets() {
 
       {/* Batch action bar */}
       {selected.size > 0 && (
-        <div className="bg-brand-50 border border-brand-200 rounded-lg p-3 mb-4 flex items-center gap-3 flex-wrap">
-          <span className="text-sm font-medium text-brand-700">
-            {selected.size} selected
-          </span>
+        <div className="bg-brand-50 border border-brand-200 rounded-lg p-3 mb-4 flex flex-col gap-2">
+          {/* Select all banner */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-medium text-brand-700">
+              {selectAllFiltered ? `All ${total} results selected` : `${selected.size} selected`}
+            </span>
+            {!selectAllFiltered && selected.size === realAssets.length && total > realAssets.length && (
+              <button
+                onClick={() => setSelectAllFiltered(true)}
+                className="text-sm text-brand-600 hover:text-brand-800 underline"
+              >
+                Select all {total} results matching this filter
+              </button>
+            )}
+            {selectAllFiltered && (
+              <button
+                onClick={() => setSelectAllFiltered(false)}
+                className="text-sm text-gray-500 hover:text-gray-700 underline"
+              >
+                Clear, keep only this page
+              </button>
+            )}
+          </div>
           <div className="flex gap-2 ml-auto flex-wrap">
             {/* Set Category */}
             <div className="relative">
@@ -388,19 +464,28 @@ export default function Assets() {
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowBulkDownload(false)} />
                   <div className="absolute right-0 z-20 mt-1 w-32 bg-white border border-gray-200 rounded shadow-lg py-1">
-                    {(['mp3', 'wav', 'flac', 'ogg', 'aac'] as const).map((fmt) => (
+                    {EXPORT_FORMATS.map((fmt) => (
                       <button
                         key={fmt}
                         onClick={() => handleBulkDownload(fmt)}
                         className="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
                       >
-                        {fmt.toUpperCase()}
+                        {fmt === 'original' ? 'Original' : fmt.toUpperCase()}
                       </button>
                     ))}
                   </div>
                 </>
               )}
             </div>
+
+            {/* Auto-Clip Silence */}
+            <button
+              onClick={handleBulkAutoTrim}
+              disabled={bulkAutoTrimMutation.isPending}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-sm transition disabled:opacity-50"
+            >
+              {bulkAutoTrimMutation.isPending ? <><Spinner className="mr-1" />Starting...</> : 'Auto-Clip Silence'}
+            </button>
 
             {/* Create Review Queue */}
             <button
@@ -412,6 +497,73 @@ export default function Assets() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Auto-Trim Progress Modal */}
+      {showTrimModal && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-40" onClick={() => {
+            if (trimStatus?.status === 'completed' || trimStatus?.status === 'failed') {
+              setShowTrimModal(false);
+              setTrimJobId(null);
+              setTrimStatus(null);
+            }
+          }} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+              <h3 className="text-lg font-semibold mb-4">Auto-Clip Silence</h3>
+              {!trimStatus || trimStatus.status === 'queued' || trimStatus.status === 'running' ? (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Spinner />
+                    <span className="text-sm text-gray-600">
+                      Processing {trimStatus ? `${trimStatus.processed}/${trimStatus.total}` : '...'}
+                    </span>
+                  </div>
+                  {trimStatus && trimStatus.total > 0 && (
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 mb-3">
+                      <div
+                        className="bg-amber-500 h-2.5 rounded-full transition-all"
+                        style={{ width: `${(trimStatus.processed / trimStatus.total) * 100}%` }}
+                      />
+                    </div>
+                  )}
+                  {trimStatus && (
+                    <div className="text-xs text-gray-500 space-y-0.5">
+                      <div>Trimmed: {trimStatus.trimmed}</div>
+                      <div>Skipped (no silence): {trimStatus.skipped}</div>
+                      {trimStatus.errors > 0 && <div className="text-red-500">Errors: {trimStatus.errors}</div>}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <div className={`text-sm font-medium mb-3 ${trimStatus.status === 'completed' ? 'text-green-600' : 'text-red-600'}`}>
+                    {trimStatus.status === 'completed' ? 'Complete!' : 'Failed'}
+                  </div>
+                  <div className="text-sm text-gray-700 space-y-1">
+                    <div>Trimmed: <strong>{trimStatus.trimmed}</strong></div>
+                    <div>Skipped (no silence): <strong>{trimStatus.skipped}</strong></div>
+                    {trimStatus.errors > 0 && <div className="text-red-600">Errors: <strong>{trimStatus.errors}</strong></div>}
+                    <div className="text-gray-500">Total processed: {trimStatus.processed}/{trimStatus.total}</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowTrimModal(false);
+                      setTrimJobId(null);
+                      setTrimStatus(null);
+                      setSelected(new Set());
+                      setSelectAllFiltered(false);
+                    }}
+                    className="mt-4 w-full bg-brand-600 hover:bg-brand-700 text-white py-2 rounded text-sm transition"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       <audio ref={audioRef} hidden />

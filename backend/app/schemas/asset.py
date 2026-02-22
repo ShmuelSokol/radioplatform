@@ -58,5 +58,38 @@ class TaskStatusResponse(BaseModel):
 
 
 class BulkCategoryRequest(BaseModel):
-    asset_ids: list[uuid.UUID | str]
+    asset_ids: list[uuid.UUID | str] | None = None
+    # Filter-based selection (alternative to explicit IDs):
+    asset_type: str | None = None
+    category_filter: str | None = None
+    title_search: str | None = None
+    artist_search: str | None = None
+    album_search: str | None = None
+    duration_min: float | None = None
+    duration_max: float | None = None
+    # Target category:
     category: str
+
+
+class BulkAutoTrimRequest(BaseModel):
+    asset_ids: list[str] | None = None
+    # Filter-based selection:
+    asset_type: str | None = None
+    category: str | None = None
+    title_search: str | None = None
+    artist_search: str | None = None
+    album_search: str | None = None
+    duration_min: float | None = None
+    duration_max: float | None = None
+    threshold_db: float = -35
+    min_silence: float = 0.3
+
+
+class BulkAutoTrimStatusResponse(BaseModel):
+    job_id: str
+    status: str  # running, completed, failed
+    total: int
+    processed: int
+    trimmed: int
+    skipped: int
+    errors: int

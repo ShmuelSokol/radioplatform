@@ -32,14 +32,32 @@ export const listAssets = async (
   return res.data;
 };
 
+export interface BulkCategoryParams {
+  assetIds?: string[];
+  category: string;
+  // Filter-based selection:
+  asset_type?: string;
+  category_filter?: string;
+  title_search?: string;
+  artist_search?: string;
+  album_search?: string;
+  duration_min?: number;
+  duration_max?: number;
+}
+
 export const bulkSetCategory = async (
-  assetIds: string[],
-  category: string,
+  params: BulkCategoryParams,
 ): Promise<{ updated: number }> => {
-  const res = await apiClient.patch<{ updated: number }>('/assets/bulk-category', {
-    asset_ids: assetIds,
-    category,
-  });
+  const body: Record<string, any> = { category: params.category };
+  if (params.assetIds) body.asset_ids = params.assetIds;
+  if (params.asset_type) body.asset_type = params.asset_type;
+  if (params.category_filter) body.category_filter = params.category_filter;
+  if (params.title_search) body.title_search = params.title_search;
+  if (params.artist_search) body.artist_search = params.artist_search;
+  if (params.album_search) body.album_search = params.album_search;
+  if (params.duration_min != null) body.duration_min = params.duration_min;
+  if (params.duration_max != null) body.duration_max = params.duration_max;
+  const res = await apiClient.patch<{ updated: number }>('/assets/bulk-category', body);
   return res.data;
 };
 
@@ -158,5 +176,39 @@ export interface MixRequest {
 
 export const mixTracks = async (body: MixRequest): Promise<Asset> => {
   const res = await apiClient.post<Asset>('/studio/mix', body);
+  return res.data;
+};
+
+export interface BulkAutoTrimParams {
+  asset_ids?: string[];
+  // Filter-based selection:
+  asset_type?: string;
+  category?: string;
+  title_search?: string;
+  artist_search?: string;
+  album_search?: string;
+  duration_min?: number;
+  duration_max?: number;
+  threshold_db?: number;
+  min_silence?: number;
+}
+
+export interface BulkAutoTrimStatus {
+  job_id: string;
+  status: 'running' | 'completed' | 'failed' | 'queued';
+  total: number;
+  processed: number;
+  trimmed: number;
+  skipped: number;
+  errors: number;
+}
+
+export const bulkAutoTrim = async (params: BulkAutoTrimParams): Promise<{ job_id: string }> => {
+  const res = await apiClient.post<{ job_id: string }>('/assets/bulk-auto-trim', params);
+  return res.data;
+};
+
+export const getBulkAutoTrimStatus = async (jobId: string): Promise<BulkAutoTrimStatus> => {
+  const res = await apiClient.get<BulkAutoTrimStatus>(`/assets/bulk-auto-trim/status/${jobId}`);
   return res.data;
 };

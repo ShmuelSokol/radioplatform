@@ -2,17 +2,21 @@ import hashlib
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, require_manager
 from app.db.session import get_db
+from app.models.asset import Asset as AssetModel
 from app.models.user import User
 from app.schemas.asset import (
     AssetListResponse,
     AssetResponse,
     AssetUpdate,
+    BulkAutoTrimRequest,
+    BulkAutoTrimStatusResponse,
     BulkCategoryRequest,
     ClipRequest,
     TaskStatusResponse,
@@ -24,6 +28,37 @@ from app.workers.tasks.media_tasks import task_clip_audio, task_extract_metadata
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+# In-memory job status tracking for bulk auto-trim
+_bulk_trim_jobs: dict[str, dict] = {}
+
+
+def _build_filter_conditions(
+    asset_type: str | None = None,
+    category: str | None = None,
+    title_search: str | None = None,
+    artist_search: str | None = None,
+    album_search: str | None = None,
+    duration_min: float | None = None,
+    duration_max: float | None = None,
+) -> list:
+    """Build SQLAlchemy WHERE conditions from filter params (shared logic)."""
+    conditions = []
+    if asset_type:
+        conditions.append(AssetModel.asset_type == asset_type)
+    if category:
+        conditions.append(func.lower(AssetModel.category) == category.lower())
+    if title_search:
+        conditions.append(AssetModel.title.ilike(f"%{title_search}%"))
+    if artist_search:
+        conditions.append(AssetModel.artist.ilike(f"%{artist_search}%"))
+    if album_search:
+        conditions.append(AssetModel.album.ilike(f"%{album_search}%"))
+    if duration_min is not None:
+        conditions.append(AssetModel.duration >= duration_min)
+    if duration_max is not None:
+        conditions.append(AssetModel.duration <= duration_max)
+    return conditions
 
 
 @router.get("/ffmpeg-check")
@@ -226,14 +261,174 @@ async def upload_asset(
     return asset
 
 
+async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: float, min_silence: float):
+    """Background task: auto-detect and trim leading/trailing silence for each asset."""
+    from app.db.session import async_session_factory
+    from app.services.silence_service import detect_silence, trim_audio, get_audio_duration
+    from app.services.storage_service import download_file, upload_file as upload_storage, generate_asset_key
+
+    job = _bulk_trim_jobs[job_id]
+    job["status"] = "running"
+    job["total"] = len(asset_ids)
+
+    for aid_str in asset_ids:
+        try:
+            async with async_session_factory() as db:
+                aid = uuid.UUID(aid_str)
+                asset = await get_asset(db, aid)
+                file_path = asset.file_path
+
+                # Download audio
+                if file_path.startswith("http://") or file_path.startswith("https://"):
+                    import httpx
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(file_path, follow_redirects=True)
+                        data = resp.content
+                else:
+                    data = await download_file(file_path)
+
+                # Detect silence
+                regions = detect_silence(data, threshold_db=threshold_db, min_duration=min_silence)
+                total_duration = get_audio_duration(data)
+
+                if not regions or total_duration <= 0:
+                    job["skipped"] += 1
+                    job["processed"] += 1
+                    continue
+
+                # Identify leading silence (starts at 0) and trailing silence (ends at total_duration)
+                trim_start = 0.0
+                trim_end = total_duration
+
+                # Leading silence: region that starts at or very near 0
+                if regions and regions[0]["start"] < 0.05:
+                    trim_start = regions[0]["end"]
+
+                # Trailing silence: region that ends at or very near total_duration
+                if regions and abs(regions[-1]["end"] - total_duration) < 0.05:
+                    trim_end = regions[-1]["start"]
+
+                # If no meaningful trim needed, skip
+                if trim_start < 0.05 and abs(trim_end - total_duration) < 0.05:
+                    job["skipped"] += 1
+                    job["processed"] += 1
+                    continue
+
+                # Trim
+                trimmed_data, new_duration = trim_audio(data, trim_start, trim_end)
+
+                # Upload trimmed file
+                new_key = generate_asset_key("trimmed.mp3")
+                await upload_storage(trimmed_data, new_key, "audio/mpeg")
+
+                # Update asset non-destructively
+                extra = dict(asset.metadata_extra or {})
+                if "original_file_path" not in extra:
+                    extra["original_file_path"] = asset.file_path
+                trim_entry = {"from": asset.file_path, "to": new_key, "trim_start": trim_start, "trim_end": trim_end, "auto": True}
+                extra.setdefault("trim_history", []).append(trim_entry)
+                extra.pop("silence_regions", None)
+
+                asset.file_path = new_key
+                asset.duration = new_duration
+                asset.metadata_extra = extra
+                await db.commit()
+
+                job["trimmed"] += 1
+                job["processed"] += 1
+
+        except Exception as e:
+            logger.error("Bulk auto-trim error for asset %s: %s", aid_str, e, exc_info=True)
+            job["errors"] += 1
+            job["processed"] += 1
+
+    job["status"] = "completed"
+
+
+@router.post("/bulk-auto-trim")
+async def bulk_auto_trim(
+    body: BulkAutoTrimRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Start a bulk auto-trim job. Returns a job_id to poll for status."""
+    # Resolve asset IDs
+    if body.asset_ids:
+        asset_ids = body.asset_ids
+    else:
+        conditions = _build_filter_conditions(
+            asset_type=body.asset_type,
+            category=body.category,
+            title_search=body.title_search,
+            artist_search=body.artist_search,
+            album_search=body.album_search,
+            duration_min=body.duration_min,
+            duration_max=body.duration_max,
+        )
+        q = select(AssetModel.id)
+        for cond in conditions:
+            q = q.where(cond)
+        result = await db.execute(q)
+        asset_ids = [str(row[0]) for row in result.all()]
+
+    if not asset_ids:
+        raise HTTPException(status_code=400, detail="No assets match the given criteria")
+
+    job_id = str(uuid.uuid4())
+    _bulk_trim_jobs[job_id] = {
+        "status": "queued",
+        "total": len(asset_ids),
+        "processed": 0,
+        "trimmed": 0,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+    background_tasks.add_task(_run_bulk_auto_trim, job_id, asset_ids, body.threshold_db, body.min_silence)
+    return {"job_id": job_id}
+
+
+@router.get("/bulk-auto-trim/status/{job_id}", response_model=BulkAutoTrimStatusResponse)
+async def bulk_auto_trim_status(
+    job_id: str,
+    _user: User = Depends(require_manager),
+):
+    """Poll the status of a bulk auto-trim job."""
+    job = _bulk_trim_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return BulkAutoTrimStatusResponse(job_id=job_id, **job)
+
+
 @router.patch("/bulk-category")
 async def bulk_set_category(
     body: BulkCategoryRequest,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    ids = [uuid.UUID(str(aid)) for aid in body.asset_ids]
-    count = await bulk_update_category(db, ids, body.category)
+    if body.asset_ids:
+        # Explicit IDs
+        ids = [uuid.UUID(str(aid)) for aid in body.asset_ids]
+        count = await bulk_update_category(db, ids, body.category)
+    else:
+        # Filter-based selection
+        conditions = _build_filter_conditions(
+            asset_type=body.asset_type,
+            category=body.category_filter,
+            title_search=body.title_search,
+            artist_search=body.artist_search,
+            album_search=body.album_search,
+            duration_min=body.duration_min,
+            duration_max=body.duration_max,
+        )
+        stmt = update(AssetModel).values(category=body.category)
+        for cond in conditions:
+            stmt = stmt.where(cond)
+        result = await db.execute(stmt)
+        await db.flush()
+        count = result.rowcount
+
     await db.commit()
     return {"updated": count}
 
