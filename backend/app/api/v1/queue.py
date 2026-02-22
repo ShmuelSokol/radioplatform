@@ -58,29 +58,36 @@ def _get_blackout_window_for_station(windows: list, station_id) -> "HolidayWindo
 
 
 async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWindow | None" = None):
-    """Fill queue with silence entries covering a blackout window.
+    """Fill queue with silence entries covering blackout window(s).
 
-    - Calculates how many 5-min silence entries are needed
-    - Marks any currently playing non-silence entry as 'played'
-    - Clears pending non-silence entries (pushes them after the blackout)
-    - Inserts silence entries at the front of the queue
-    - The first real song after silence is positioned to start when blackout ends
+    When called without a specific window, processes ALL upcoming blackouts
+    for the station. Each blackout's silence entries are tracked separately
+    via preempt_at (future) or absence of preempt_at (active).
     """
+    if window:
+        return await _fill_single_blackout(db, station_id, window)
+
+    # Find ALL upcoming blackouts for this station
+    now = datetime.now(timezone.utc)
+    stmt = select(HolidayWindow).where(
+        HolidayWindow.is_blackout == True,
+        HolidayWindow.end_datetime > now,
+    ).order_by(HolidayWindow.start_datetime)
+    result = await db.execute(stmt)
+    all_windows = result.scalars().all()
+
+    total = 0
+    for w in all_windows:
+        if _get_blackout_window_for_station([w], station_id):
+            total += await _fill_single_blackout(db, station_id, w)
+    return total
+
+
+async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWindow"):
+    """Fill queue with silence for a single blackout window."""
     import math
 
     now = datetime.now(timezone.utc)
-
-    # Find the active/upcoming blackout window if not provided
-    if not window:
-        stmt = select(HolidayWindow).where(
-            HolidayWindow.is_blackout == True,
-            HolidayWindow.end_datetime > now,
-        ).order_by(HolidayWindow.start_datetime)
-        result = await db.execute(stmt)
-        windows = result.scalars().all()
-        window = _get_blackout_window_for_station(windows, station_id)
-    if not window:
-        return 0
 
     # Get silence asset
     silence_result = await db.execute(select(Asset).where(Asset.asset_type == "silence").limit(1))
@@ -103,27 +110,41 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     is_active_now = blackout_start <= now
     total_seconds = (blackout_end - blackout_start).total_seconds()
     if is_active_now:
-        # Blackout already started — only fill remaining time
         total_seconds = (blackout_end - now).total_seconds()
     if total_seconds <= 0:
         return 0
 
     num_silence = math.ceil(total_seconds / silence_duration)
 
-    # Check if we already have enough silence entries queued
-    existing_silence = await db.execute(
-        select(func.count(QueueEntry.id)).where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.asset_id == silence.id,
-            QueueEntry.status.in_(["pending", "playing"]),
+    # Count existing silence entries for THIS specific blackout
+    if is_active_now:
+        # Active blackout: count silence without preempt_at or with past preempt_at
+        existing_silence = await db.execute(
+            select(func.count(QueueEntry.id)).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.asset_id == silence.id,
+                QueueEntry.status.in_(["pending", "playing"]),
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now),
+            )
         )
-    )
+    else:
+        # Future blackout: count silence with preempt_at matching this blackout's start
+        existing_silence = await db.execute(
+            select(func.count(QueueEntry.id)).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.asset_id == silence.id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at >= blackout_start - timedelta(minutes=2),
+                QueueEntry.preempt_at <= blackout_start + timedelta(minutes=2),
+            )
+        )
     existing_count = existing_silence.scalar() or 0
     if existing_count >= num_silence:
         return 0  # Already filled
 
     if is_active_now:
-        # Blackout is active — stop current music immediately
+        # Stop current music immediately
         playing_result = await db.execute(
             select(QueueEntry).where(
                 QueueEntry.station_id == station_id,
@@ -134,16 +155,29 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
             if entry.asset_id != silence.id:
                 entry.status = "played"
 
-    # Clear existing silence entries (we'll re-insert clean ones)
-    await db.execute(
-        update(QueueEntry).where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.asset_id == silence.id,
-            QueueEntry.status.in_(["pending", "playing"]),
-        ).values(status="played")
-    )
+        # Clear THIS blackout's silence entries (active: no preempt_at or past)
+        await db.execute(
+            update(QueueEntry).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.asset_id == silence.id,
+                QueueEntry.status.in_(["pending", "playing"]),
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now),
+            ).values(status="played")
+        )
+    else:
+        # Clear THIS future blackout's silence only (matching preempt_at)
+        await db.execute(
+            update(QueueEntry).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.asset_id == silence.id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at >= blackout_start - timedelta(minutes=2),
+                QueueEntry.preempt_at <= blackout_start + timedelta(minutes=2),
+            ).values(status="played")
+        )
 
-    # Bump all pending entries up to make room for silence
+    # Bump all pending entries to make room for silence at the front
     await db.execute(
         update(QueueEntry).where(
             QueueEntry.station_id == station_id,
@@ -160,9 +194,8 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
             position=i + 1,
             status="playing" if (i == 0 and is_active_now) else "pending",
             started_at=now if (i == 0 and is_active_now) else None,
-            # For future blackouts, ALL silence entries get preempt_at so normal
-            # advance skips them until the blackout starts. The first one triggers
-            # preemption; the rest are just "not eligible until then".
+            # Future blackouts: ALL silence entries get preempt_at so normal
+            # advance skips them until the blackout starts.
             preempt_at=blackout_start if not is_active_now else None,
             source="auto",
         )
@@ -170,8 +203,10 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
 
     await db.commit()
     logger.info(
-        "Filled blackout queue for station %s: %d silence entries (%.0f min), ends at %s",
-        station_id, num_silence, total_seconds / 60, blackout_end.isoformat(),
+        "Filled blackout queue for station %s: %d silence entries (%.0f min), %s, ends at %s",
+        station_id, num_silence, total_seconds / 60,
+        "active" if is_active_now else f"starts {blackout_start.isoformat()}",
+        blackout_end.isoformat(),
     )
     return num_silence
 _last_advance: dict[str, float] = {}
