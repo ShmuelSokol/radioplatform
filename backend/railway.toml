@@ -7,4 +7,4 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 # Zero-downtime deploys: Railway keeps old instance until new one passes healthcheck
 healthcheckPath = "/health"
-healthcheckTimeout = 120
+healthcheckTimeout = 300
