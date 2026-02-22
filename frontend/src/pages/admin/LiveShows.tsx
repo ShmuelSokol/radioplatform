@@ -281,7 +281,11 @@ export default function LiveShows() {
                   <input
                     type="datetime-local"
                     value={scheduledStart}
-                    onChange={e => setScheduledStart(e.target.value)}
+                    onChange={e => {
+                      const v = e.target.value;
+                      setScheduledStart(v);
+                      if (scheduledEnd && scheduledEnd < v) setScheduledEnd(v);
+                    }}
                     className="w-full bg-[#0a0a28] border border-[#2a2a5e] rounded px-3 py-2 text-sm text-white"
                   />
                 </div>
@@ -290,6 +294,7 @@ export default function LiveShows() {
                   <input
                     type="datetime-local"
                     value={scheduledEnd}
+                    min={scheduledStart || undefined}
                     onChange={e => setScheduledEnd(e.target.value)}
                     className="w-full bg-[#0a0a28] border border-[#2a2a5e] rounded px-3 py-2 text-sm text-white"
                   />

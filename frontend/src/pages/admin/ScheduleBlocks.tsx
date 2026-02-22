@@ -130,18 +130,24 @@ export default function ScheduleBlocks() {
             <div>
               <label className="block text-sm font-medium mb-1">Start Time</label>
               <input type="time" value={blockForm.start_time}
-                onChange={e => setBlockForm({ ...blockForm, start_time: e.target.value })}
+                onChange={e => {
+                  const v = e.target.value;
+                  const updates: any = { start_time: v };
+                  if (blockForm.end_time && blockForm.end_time < v) updates.end_time = v;
+                  setBlockForm(f => ({ ...f, ...updates }));
+                }}
                 className="w-full px-3 py-2 border rounded-lg" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">End Time</label>
               <input type="time" value={blockForm.end_time}
+                min={blockForm.start_time || undefined}
                 onChange={e => setBlockForm({ ...blockForm, end_time: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Priority</label>
-              <input type="number" value={blockForm.priority}
+              <input type="number" value={blockForm.priority} min={0} max={100}
                 onChange={e => setBlockForm({ ...blockForm, priority: parseInt(e.target.value) || 0 })}
                 className="w-full px-3 py-2 border rounded-lg" />
             </div>
@@ -213,7 +219,9 @@ export default function ScheduleBlocks() {
               </div>
             </div>
           )}
-          <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Create Block</button>
+          <button type="submit" disabled={createBlock.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            {createBlock.isPending ? 'Creating...' : 'Create Block'}
+          </button>
         </form>
       )}
 
