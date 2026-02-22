@@ -390,22 +390,22 @@ async def _maybe_insert_hourly_jingle(db: AsyncSession, station_id: uuid.UUID) -
 
 
 async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) -> None:
-    """Insert time announcement + weather spot at every 15-min boundary."""
+    """Insert time announcement + weather spot at every hour (top of the hour)."""
     if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
         return
 
     now = datetime.now(timezone.utc)
-    # Check if we're within 30s of a 15-min boundary
-    if now.minute % 15 != 0 or now.second > 30:
+    # Check if we're within 30s of the top of the hour
+    if now.minute != 0 or now.second > 30:
         return
 
-    # Build slot key in Eastern time
+    # Build slot key in Eastern time (hourly for time, daily for weather)
     try:
         from zoneinfo import ZoneInfo
     except ImportError:
         from backports.zoneinfo import ZoneInfo
     eastern_now = now.astimezone(ZoneInfo("America/New_York"))
-    slot_key = eastern_now.strftime("%Y-%m-%dT%H:%M")
+    slot_key = eastern_now.strftime("%Y-%m-%dT%H")
 
     # Dedup: check PlayLog for weather already played this slot
     slot_start = now.replace(second=0, microsecond=0)
@@ -1321,9 +1321,8 @@ async def preview_weather(
 
     now = datetime.now(timezone.utc)
     eastern_now = now.astimezone(ZoneInfo("America/New_York"))
-    # Round down to nearest 15-min slot
-    rounded_minute = (eastern_now.minute // 15) * 15
-    slot_key = eastern_now.replace(minute=rounded_minute, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    # Round down to current hour
+    slot_key = eastern_now.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H")
 
     from app.services.weather_spot_service import get_or_create_weather_spot_assets, _build_time_text, _build_weather_text
     from app.services.weather_service import get_current_weather

@@ -92,16 +92,22 @@ def _build_weather_text(weather: dict, city_name: str = "Lakewood") -> str:
 async def get_or_create_weather_spot_assets(
     db: AsyncSession, slot_key: str
 ) -> tuple[Asset | None, Asset | None]:
-    """Get or create time-announcement and weather-spot assets for a 15-min slot.
+    """Get or create time-announcement and weather-spot assets.
+
+    Time announcements are keyed per-hour (slot_key like "2024-01-15T15").
+    Weather spots are cached per-day (date portion only, e.g. "2024-01-15").
 
     Args:
         db: Database session.
-        slot_key: Dedup key like "2024-01-15T15:30".
+        slot_key: Dedup key like "2024-01-15T15" (hourly).
 
     Returns:
         (time_asset, weather_asset) — either may be None on failure.
     """
-    # Check if assets already exist for this slot
+    # Weather uses daily key (just the date part)
+    weather_key = slot_key.split("T")[0] if "T" in slot_key else slot_key
+
+    # Check if assets already exist
     result = await db.execute(
         select(Asset).where(
             Asset.asset_type == "jingle",
@@ -115,7 +121,7 @@ async def get_or_create_weather_spot_assets(
         select(Asset).where(
             Asset.asset_type == "spot",
             Asset.category == "weather_spot",
-            Asset.metadata_extra["slot_key"].astext == slot_key,
+            Asset.metadata_extra["slot_key"].astext == weather_key,
         ).limit(1)
     )
     existing_weather = result.scalar_one_or_none()
@@ -126,8 +132,9 @@ async def get_or_create_weather_spot_assets(
     now_utc = datetime.now(timezone.utc)
     eastern_now = _utc_to_eastern(now_utc)
     safe_slot = slot_key.replace(":", "-")
+    safe_weather_key = weather_key.replace(":", "-")
 
-    # Generate time announcement if needed
+    # Generate time announcement if needed (per-hour)
     time_asset = existing_time
     if not time_asset:
         try:
@@ -153,31 +160,31 @@ async def get_or_create_weather_spot_assets(
             logger.warning("Failed to generate time announcement for slot %s", slot_key, exc_info=True)
             time_asset = None
 
-    # Generate weather spot if needed
+    # Generate weather spot if needed (per-day — reused until midnight)
     weather_asset = existing_weather
     if not weather_asset:
         try:
             weather_data = await get_current_weather()
             weather_text = _build_weather_text(weather_data)
             weather_bytes, weather_duration = await generate_tts(weather_text)
-            weather_path = f"weather/{safe_slot}_weather.mp3"
+            weather_path = f"weather/{safe_weather_key}_weather.mp3"
             weather_url = await upload_to_supabase(weather_bytes, weather_path)
 
             weather_asset = Asset(
                 id=uuid.uuid4(),
-                title=f"Weather Report - {slot_key}",
+                title=f"Weather Report - {weather_key}",
                 artist="Kohl Baramah",
                 duration=weather_duration,
                 file_path=weather_url,
                 asset_type="spot",
                 category="weather_spot",
-                metadata_extra={"slot_key": slot_key, "generated": True},
+                metadata_extra={"slot_key": weather_key, "generated": True},
             )
             db.add(weather_asset)
             await db.flush()
-            logger.info("Created weather spot asset for slot %s", slot_key)
+            logger.info("Created weather spot asset for day %s", weather_key)
         except Exception:
-            logger.warning("Failed to generate weather spot for slot %s", slot_key, exc_info=True)
+            logger.warning("Failed to generate weather spot for day %s", weather_key, exc_info=True)
             weather_asset = None
 
     return time_asset, weather_asset
