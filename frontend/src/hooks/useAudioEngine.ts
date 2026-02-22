@@ -36,8 +36,10 @@ export function useAudioEngine(
 ): AudioEngineState {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const analyserDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const analyserLRef = useRef<AnalyserNode | null>(null);
+  const analyserRRef = useRef<AnalyserNode | null>(null);
+  const analyserDataLRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const analyserDataRRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const [volume, setVolumeState] = useState(loadVolume);
   const [muted, setMuted] = useState(loadMuted);
@@ -73,17 +75,25 @@ export function useAudioEngine(
 
     const source = ctx.createMediaElementSource(audio);
 
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    analyserRef.current = analyser;
-    analyserDataRef.current = new Uint8Array(analyser.frequencyBinCount) as Uint8Array<ArrayBuffer>;
+    // Split stereo into L/R channels for accurate VU metering
+    const splitter = ctx.createChannelSplitter(2);
+    const analyserL = ctx.createAnalyser();
+    analyserL.fftSize = 256;
+    const analyserR = ctx.createAnalyser();
+    analyserR.fftSize = 256;
+    analyserLRef.current = analyserL;
+    analyserRRef.current = analyserR;
+    analyserDataLRef.current = new Uint8Array(analyserL.frequencyBinCount) as Uint8Array<ArrayBuffer>;
+    analyserDataRRef.current = new Uint8Array(analyserR.frequencyBinCount) as Uint8Array<ArrayBuffer>;
 
     const gain = ctx.createGain();
     gain.gain.value = loadMuted() ? 0 : loadVolume();
     gainRef.current = gain;
 
-    source.connect(analyser);
-    analyser.connect(gain);
+    source.connect(splitter);
+    splitter.connect(analyserL, 0);
+    splitter.connect(analyserR, 1);
+    source.connect(gain);
     gain.connect(ctx.destination);
 
     setAudioReady(true);
@@ -107,7 +117,8 @@ export function useAudioEngine(
       audioRef.current = null;
       ctxRef.current?.close().catch(() => {});
       ctxRef.current = null;
-      analyserRef.current = null;
+      analyserLRef.current = null;
+      analyserRRef.current = null;
       gainRef.current = null;
       setAudioReady(false);
     };
@@ -199,17 +210,18 @@ export function useAudioEngine(
 
   useEffect(() => {
     const poll = () => {
-      const analyser = analyserRef.current;
-      const data = analyserDataRef.current;
-      if (analyser && data) {
-        analyser.getByteFrequencyData(data);
-        const len = data.length;
-        const half = len >> 1;
+      const aL = analyserLRef.current;
+      const aR = analyserRRef.current;
+      const dL = analyserDataLRef.current;
+      const dR = analyserDataRRef.current;
+      if (aL && aR && dL && dR) {
+        aL.getByteFrequencyData(dL);
+        aR.getByteFrequencyData(dR);
         let sumL = 0, sumR = 0;
-        for (let i = 0; i < half; i++) sumL += data[i];
-        for (let i = half; i < len; i++) sumR += data[i];
-        const l = sumL / (half * 255);
-        const r = sumR / (half * 255);
+        for (let i = 0; i < dL.length; i++) sumL += dL[i];
+        for (let i = 0; i < dR.length; i++) sumR += dR[i];
+        const l = sumL / (dL.length * 255);
+        const r = sumR / (dR.length * 255);
         setVuLevels([Math.min(1, l * 2.5), Math.min(1, r * 2.5)]);
       }
       rafRef.current = requestAnimationFrame(poll);
