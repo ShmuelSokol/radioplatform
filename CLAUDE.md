@@ -68,6 +68,7 @@ radioplatform/
 | Station | station.py | Radio station config |
 | Asset | asset.py | Audio file metadata |
 | Category | category.py | Asset categorization |
+| AssetTypeModel | asset_type.py | Dynamic asset types (music, shiur, spot, etc.) |
 | QueueEntry | queue_entry.py | Playback queue items |
 | Schedule | schedule.py | Scheduling blocks |
 | ScheduleBlock | schedule_block.py | Time blocks within schedules |
@@ -214,7 +215,7 @@ radioplatform/
 | useArchives.ts | Show archive CRUD queries/mutations |
 
 ### API Clients (`frontend/src/api/`) — 14 modules
-auth.ts, stations.ts, assets.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
+auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
 
 ### Routes (`frontend/src/App.tsx`)
 - `/` → redirect to `/stations`
