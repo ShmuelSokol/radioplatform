@@ -158,7 +158,9 @@ export default function Navbar() {
                         <ChevronDown />
                       </button>
                       {openDropdown === group.label && (
-                        <div className="absolute left-0 top-full mt-1 min-w-[160px] bg-[#12123a] border border-[#2a2a5e] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                        <div
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="absolute left-0 top-full mt-1 min-w-[160px] bg-[#12123a] border border-[#2a2a5e] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                           {group.links.map(link => (
                             <Link key={link.to} to={link.to}
                               onClick={() => setOpenDropdown(null)}
