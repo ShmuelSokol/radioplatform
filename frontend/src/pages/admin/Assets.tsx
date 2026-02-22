@@ -136,6 +136,31 @@ function PlayButton({ assetId, title, audioRef, playingId, setPlayingId }: {
 
 const ASSET_TYPES = ['music', 'shiur', 'spot', 'jingle', 'zmanim'] as const;
 
+/** Inline column filter input with datalist autocomplete from current results */
+function ColumnFilter({ value, onChange, options, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder?: string;
+}) {
+  const listId = useMemo(() => `dl-${Math.random().toString(36).slice(2, 8)}`, []);
+  return (
+    <>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        list={listId}
+        placeholder={placeholder ?? 'Filter...'}
+        className="w-full border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
+      />
+      <datalist id={listId}>
+        {options.map((o) => <option key={o} value={o} />)}
+      </datalist>
+    </>
+  );
+}
+
 export default function Assets() {
   const { data: categories } = useCategories();
   const deleteMutation = useDeleteAsset();
@@ -155,11 +180,6 @@ export default function Assets() {
   const [typeFilter, setTypeFilter] = useState('');
   const [durationMin, setDurationMin] = useState('');
   const [durationMax, setDurationMax] = useState('');
-
-  // Quick search (autocomplete across all fields)
-  const [quickSearch, setQuickSearch] = useState('');
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
 
   // Pagination
   const [pageSize, setPageSize] = useState<number>(50);
@@ -197,33 +217,15 @@ export default function Assets() {
     duration_max: durMaxNum,
   });
 
-  // Suggestion query — fetch top 8 matches for quick search autocomplete
-  const suggestSearch = useDebounce(quickSearch, 150);
-  const { data: suggestData } = useAssets({
-    skip: 0,
-    limit: 8,
-    search: suggestSearch.length >= 2 ? suggestSearch : undefined,
-    asset_type: typeFilter || undefined,
-    category: categoryFilter || undefined,
-    enabled: suggestSearch.length >= 2 && showSuggestions,
-  });
-  const suggestions: Asset[] = suggestData?.assets ?? [];
-
-  // Close suggestions on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setShowSuggestions(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
   const assets: Asset[] = data?.assets ?? [];
   const total: number = data?.total ?? 0;
   const totalPages = Math.ceil(total / pageSize);
   const hasFilters = titleSearch !== '' || artistSearch !== '' || albumSearch !== '' || categoryFilter !== '' || typeFilter !== '' || durationMin !== '' || durationMax !== '';
+
+  // Autocomplete options from current results
+  const titleOptions = useMemo(() => [...new Set(assets.map(a => a.title).filter(Boolean))], [assets]);
+  const artistOptions = useMemo(() => [...new Set(assets.map(a => a.artist).filter((v): v is string => !!v))], [assets]);
+  const albumOptions = useMemo(() => [...new Set(assets.map(a => a.album).filter((v): v is string => !!v))], [assets]);
 
   const clearFilters = useCallback(() => {
     setTitleSearch('');
@@ -233,7 +235,6 @@ export default function Assets() {
     setTypeFilter('');
     setDurationMin('');
     setDurationMax('');
-    setQuickSearch('');
     setPage(0);
   }, []);
 
@@ -297,149 +298,25 @@ export default function Assets() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Library</h1>
-        <Link
-          to="/admin/assets/upload"
-          className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded transition"
-        >
-          Upload Asset
-        </Link>
-      </div>
-
-      {/* Search & filter bar */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
-        {/* Row 1: Per-field search */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Title</label>
-            <input
-              type="text"
-              value={titleSearch}
-              onChange={(e) => setTitleSearch(e.target.value)}
-              placeholder="Search by title..."
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Artist</label>
-            <input
-              type="text"
-              value={artistSearch}
-              onChange={(e) => setArtistSearch(e.target.value)}
-              placeholder="Search by artist..."
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Album</label>
-            <input
-              type="text"
-              value={albumSearch}
-              onChange={(e) => setAlbumSearch(e.target.value)}
-              placeholder="Search by album..."
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-          </div>
-        </div>
-        {/* Row 2: Category, Type, Duration, Quick search */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Category</label>
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
-            >
-              <option value="">All</option>
-              {categories?.map((cat) => (
-                <option key={cat.id} value={cat.name}>{cat.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Type</label>
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
-            >
-              <option value="">All</option>
-              {ASSET_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Min Duration (s)</label>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={durationMin}
-              onChange={(e) => setDurationMin(e.target.value)}
-              placeholder="e.g. 60"
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Max Duration (s)</label>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={durationMax}
-              onChange={(e) => setDurationMax(e.target.value)}
-              placeholder="e.g. 300"
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          {/* Quick search with autocomplete */}
-          <div ref={searchRef} className="relative">
-            <label className="block text-xs text-gray-500 mb-1">Quick Search</label>
-            <input
-              type="text"
-              value={quickSearch}
-              onChange={(e) => { setQuickSearch(e.target.value); setShowSuggestions(true); }}
-              onFocus={() => { if (quickSearch.length >= 2) setShowSuggestions(true); }}
-              placeholder="Autocomplete..."
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-            {showSuggestions && quickSearch.length >= 2 && suggestions.length > 0 && (
-              <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                {suggestions.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      setTitleSearch(s.title);
-                      setQuickSearch('');
-                      setShowSuggestions(false);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                  >
-                    <div className="text-sm font-medium truncate">{s.title}</div>
-                    <div className="text-xs text-gray-500 truncate">
-                      {s.artist ?? 'Unknown artist'} {s.album ? `\u00B7 ${s.album}` : ''}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        {/* Result count & clear */}
-        <div className="mt-3 flex items-center gap-3">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Library</h1>
           <span className="text-xs text-gray-500">
-            {total} asset{total !== 1 ? 's' : ''} found
-            {hasFilters ? '' : ' total'}
+            {total} asset{total !== 1 ? 's' : ''}
+            {isFetching && ' ...'}
           </span>
-          {isFetching && <span className="text-xs text-gray-400">...</span>}
           {hasFilters && (
             <button onClick={clearFilters} className="text-xs text-red-500 hover:text-red-700">
               Clear filters
             </button>
           )}
         </div>
+        <Link
+          to="/admin/assets/upload"
+          className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded transition"
+        >
+          Upload Asset
+        </Link>
       </div>
 
       {/* Batch action bar */}
@@ -537,6 +414,52 @@ export default function Assets() {
               <th className="w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Dur.</th>
               <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
               <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{ width: '14%' }}>Actions</th>
+            </tr>
+            {/* Filter row — inline search per column */}
+            <tr className="bg-gray-100 border-t border-gray-200">
+              <th className="w-8 px-2 py-1" />
+              <th className="w-10 px-1 py-1" />
+              <th className="px-2 py-1" style={{ width: '22%' }}>
+                <ColumnFilter value={titleSearch} onChange={setTitleSearch} options={titleOptions} placeholder="Search title..." />
+              </th>
+              <th className="px-2 py-1" style={{ width: '14%' }}>
+                <ColumnFilter value={artistSearch} onChange={setArtistSearch} options={artistOptions} placeholder="Search artist..." />
+              </th>
+              <th className="px-2 py-1" style={{ width: '12%' }}>
+                <ColumnFilter value={albumSearch} onChange={setAlbumSearch} options={albumOptions} placeholder="Search album..." />
+              </th>
+              <th className="w-20 px-2 py-1">
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
+                >
+                  <option value="">All</option>
+                  {categories?.map((cat) => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
+                  ))}
+                </select>
+              </th>
+              <th className="w-16 px-2 py-1">
+                <select
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
+                >
+                  <option value="">All</option>
+                  {ASSET_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </th>
+              <th className="w-14 px-1 py-1">
+                <div className="flex gap-0.5">
+                  <input type="number" min={0} value={durationMin} onChange={(e) => setDurationMin(e.target.value)} placeholder="Min" title="Min duration (seconds)" className="w-1/2 border border-gray-300 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                  <input type="number" min={0} value={durationMax} onChange={(e) => setDurationMax(e.target.value)} placeholder="Max" title="Max duration (seconds)" className="w-1/2 border border-gray-300 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                </div>
+              </th>
+              <th className="w-20 px-2 py-1" />
+              <th className="px-2 py-1" style={{ width: '14%' }} />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
