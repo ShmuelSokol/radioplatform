@@ -40,6 +40,13 @@ ENHANCEMENT_PRESETS: dict[str, list[dict]] = {
         {"name": "bass", "params": {"gain": 2, "frequency": 250}},
         {"name": "acompressor", "params": {"threshold": -15, "ratio": 2, "attack": 3, "release": 80}},
     ],
+    "voice_boost": [
+        {"name": "highpass", "params": {"frequency": 100}},
+        {"name": "equalizer", "params": {"frequency": 2500, "width": 2.0, "gain": 6}},
+        {"name": "acompressor", "params": {"threshold": -30, "ratio": 8, "attack": 3, "release": 80}},
+        {"name": "acompressor", "params": {"threshold": -18, "ratio": 3, "attack": 10, "release": 200}},
+        {"name": "loudnorm", "params": {"i": -14, "tp": -1, "lra": 7}},
+    ],
 }
 
 
@@ -77,6 +84,12 @@ def _build_single_filter(f: dict) -> str:
         gain = _validate_numeric(p.get("gain", 3), -20, 20, "treble gain")
         freq = _validate_numeric(p.get("frequency", 3000), 1000, 16000, "treble frequency")
         return f"treble=g={gain}:f={freq}"
+
+    if name == "equalizer":
+        freq = _validate_numeric(p.get("frequency", 1000), 20, 20000, "equalizer frequency")
+        width = _validate_numeric(p.get("width", 1.0), 0.01, 10, "equalizer width")
+        gain = _validate_numeric(p.get("gain", 0), -20, 20, "equalizer gain")
+        return f"equalizer=f={freq}:width_type=o:w={width}:g={gain}"
 
     if name == "acompressor":
         threshold = _validate_numeric(p.get("threshold", -20), -60, 0, "compressor threshold")

@@ -15,6 +15,7 @@ const PRESET_LABELS: Record<string, string> = {
   warm_up: 'Warm Up',
   de_hiss: 'De-Hiss',
   bbe_sonic_maximizer: 'BBE Sonic Maximizer',
+  voice_boost: 'Voice Boost',
 };
 
 export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePanelProps) {
