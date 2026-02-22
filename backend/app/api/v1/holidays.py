@@ -53,9 +53,12 @@ async def list_holidays(
         stmt = stmt.where(HolidayWindow.reason == reason)
         count_stmt = count_stmt.where(HolidayWindow.reason == reason)
 
-    # Filter by status (upcoming/active/past)
+    # Filter by status (upcoming/active/active_upcoming/past)
     now = datetime.utcnow()
-    if status == "upcoming":
+    if status == "active_upcoming":
+        stmt = stmt.where(HolidayWindow.end_datetime > now)
+        count_stmt = count_stmt.where(HolidayWindow.end_datetime > now)
+    elif status == "upcoming":
         stmt = stmt.where(HolidayWindow.start_datetime > now)
         count_stmt = count_stmt.where(HolidayWindow.start_datetime > now)
     elif status == "active":

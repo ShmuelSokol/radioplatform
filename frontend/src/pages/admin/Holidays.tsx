@@ -46,7 +46,7 @@ export default function Holidays() {
 
   // Filters
   const [reasonFilter, setReasonFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('upcoming');
+  const [statusFilter, setStatusFilter] = useState('active_upcoming');
   const [stationFilter, setStationFilter] = useState('');
 
   const filters: HolidayFilters = useMemo(() => ({
@@ -154,8 +154,9 @@ export default function Holidays() {
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
             className="px-3 py-2 border rounded-lg text-sm">
             <option value="">All</option>
-            <option value="upcoming">Upcoming</option>
+            <option value="active_upcoming">Active & Upcoming</option>
             <option value="active">Active</option>
+            <option value="upcoming">Upcoming</option>
             <option value="past">Past</option>
           </select>
         </div>
