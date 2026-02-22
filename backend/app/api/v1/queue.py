@@ -76,9 +76,18 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     result = await db.execute(stmt)
     all_windows = result.scalars().all()
 
-    total = 0
+    # Collect IDs of windows affecting this station (before any commits expire objects)
+    window_ids = []
     for w in all_windows:
         if _get_blackout_window_for_station([w], station_id):
+            window_ids.append(w.id)
+
+    total = 0
+    for wid in window_ids:
+        # Re-fetch each window fresh (previous _fill_single_blackout commits expire objects)
+        w_result = await db.execute(select(HolidayWindow).where(HolidayWindow.id == wid))
+        w = w_result.scalar_one_or_none()
+        if w:
             total += await _fill_single_blackout(db, station_id, w)
     return total
 
