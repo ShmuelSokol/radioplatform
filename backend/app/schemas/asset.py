@@ -93,3 +93,20 @@ class BulkAutoTrimStatusResponse(BaseModel):
     trimmed: int
     skipped: int
     errors: int
+
+
+class EnhanceFilter(BaseModel):
+    name: str
+    params: dict = {}
+
+
+class EnhanceRequest(BaseModel):
+    filters: list[EnhanceFilter] = []
+    preset: str | None = None  # if set, overrides filters
+
+
+class EnhancePreviewRequest(BaseModel):
+    filters: list[EnhanceFilter] = []
+    preset: str | None = None
+    start_seconds: float = 0.0
+    duration_seconds: float = 15.0

@@ -212,3 +212,67 @@ export const getBulkAutoTrimStatus = async (jobId: string): Promise<BulkAutoTrim
   const res = await apiClient.get<BulkAutoTrimStatus>(`/assets/bulk-auto-trim/status/${jobId}`);
   return res.data;
 };
+
+// --- Audio Enhancement ---
+
+export interface EnhanceFilter {
+  name: string;
+  params: Record<string, number>;
+}
+
+export interface EnhanceRequest {
+  filters?: EnhanceFilter[];
+  preset?: string;
+}
+
+export interface EnhancePreviewRequest {
+  filters?: EnhanceFilter[];
+  preset?: string;
+  start_seconds?: number;
+  duration_seconds?: number;
+}
+
+export interface EnhancePreset {
+  [presetName: string]: EnhanceFilter[];
+}
+
+export const getEnhancePresets = async (): Promise<{ presets: EnhancePreset }> => {
+  const res = await apiClient.get<{ presets: EnhancePreset }>('/assets/enhance-presets');
+  return res.data;
+};
+
+export const enhanceAsset = async (id: string, body: EnhanceRequest): Promise<Asset> => {
+  const res = await apiClient.post<Asset>(`/assets/${id}/enhance`, body);
+  return res.data;
+};
+
+export const enhancePreview = async (id: string, body: EnhancePreviewRequest): Promise<Blob> => {
+  const res = await apiClient.post(`/assets/${id}/enhance-preview`, body, {
+    responseType: 'blob',
+  });
+  return res.data;
+};
+
+// --- Audience / Student Question Detection ---
+
+export interface AudienceSegment {
+  start: number;
+  end: number;
+  duration: number;
+}
+
+export const detectAudience = async (
+  id: string,
+  quietThresholdDb = -25,
+  silenceThresholdDb = -45,
+  minDuration = 1.0,
+): Promise<{ audience_segments: AudienceSegment[]; count: number }> => {
+  const res = await apiClient.post(`/assets/${id}/detect-audience`, null, {
+    params: {
+      quiet_threshold_db: quietThresholdDb,
+      silence_threshold_db: silenceThresholdDb,
+      min_duration: minDuration,
+    },
+  });
+  return res.data;
+};

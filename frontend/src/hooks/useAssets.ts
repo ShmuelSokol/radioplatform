@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal, bulkSetCategory, bulkAutoTrim } from '../api/assets';
-import type { ListAssetsParams, BulkCategoryParams, BulkAutoTrimParams } from '../api/assets';
+import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal, bulkSetCategory, bulkAutoTrim, getEnhancePresets, enhanceAsset, enhancePreview, detectAudience } from '../api/assets';
+import type { ListAssetsParams, BulkCategoryParams, BulkAutoTrimParams, EnhanceRequest, EnhancePreviewRequest } from '../api/assets';
 import type { AssetListResponse } from '../types';
 
 export function useAssets(params: ListAssetsParams & { enabled?: boolean } = {}) {
@@ -108,5 +108,47 @@ export function useRestoreOriginal() {
       queryClient.invalidateQueries({ queryKey: ['asset'] });
       queryClient.invalidateQueries({ queryKey: ['asset-audio-url'] });
     },
+  });
+}
+
+export function useEnhancePresets() {
+  return useQuery({
+    queryKey: ['enhance-presets'],
+    queryFn: () => getEnhancePresets(),
+    staleTime: Infinity,
+  });
+}
+
+export function useEnhanceAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: EnhanceRequest }) => enhanceAsset(id, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset'] });
+      queryClient.invalidateQueries({ queryKey: ['asset-audio-url'] });
+    },
+  });
+}
+
+export function useEnhancePreview() {
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: EnhancePreviewRequest }) => enhancePreview(id, body),
+  });
+}
+
+export function useDetectAudience() {
+  return useMutation({
+    mutationFn: ({
+      id,
+      quietThresholdDb,
+      silenceThresholdDb,
+      minDuration,
+    }: {
+      id: string;
+      quietThresholdDb?: number;
+      silenceThresholdDb?: number;
+      minDuration?: number;
+    }) => detectAudience(id, quietThresholdDb, silenceThresholdDb, minDuration),
   });
 }

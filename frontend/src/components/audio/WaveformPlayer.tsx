@@ -12,6 +12,7 @@ export interface WaveformPlayerHandle {
   getDuration: () => number;
   getCurrentTime: () => number;
   getWaveSurfer: () => WaveSurfer | null;
+  setPlaybackRate: (rate: number) => void;
 }
 
 interface WaveformPlayerProps {
@@ -32,6 +33,7 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [zoom, setZoom] = useState(1);
+    const [playbackRate, setPlaybackRate] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -185,6 +187,10 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
       getDuration() { return duration; },
       getCurrentTime() { return currentTime; },
       getWaveSurfer() { return wsRef.current; },
+      setPlaybackRate(rate: number) {
+        wsRef.current?.setPlaybackRate(rate);
+        setPlaybackRate(rate);
+      },
     }));
 
     const togglePlay = useCallback(() => {
@@ -233,6 +239,27 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
           <span className="text-sm text-gray-500 font-mono">
             {formatTime(currentTime)} / {formatTime(duration)}
           </span>
+
+          {/* Playback Speed */}
+          <div className="flex items-center gap-1">
+            <label className="text-xs text-gray-500 mr-1">Speed</label>
+            {[1, 1.5, 2, 3, 4].map((rate) => (
+              <button
+                key={rate}
+                onClick={() => {
+                  wsRef.current?.setPlaybackRate(rate);
+                  setPlaybackRate(rate);
+                }}
+                className={`px-1.5 py-0.5 rounded text-xs transition ${
+                  playbackRate === rate
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                }`}
+              >
+                {rate}x
+              </button>
+            ))}
+          </div>
 
           <div className="flex items-center gap-2 ml-auto">
             <label className="text-xs text-gray-500">Zoom</label>

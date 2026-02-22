@@ -19,6 +19,8 @@ from app.schemas.asset import (
     BulkAutoTrimStatusResponse,
     BulkCategoryRequest,
     ClipRequest,
+    EnhancePreviewRequest,
+    EnhanceRequest,
     TaskStatusResponse,
     TranscodeRequest,
 )
@@ -539,6 +541,144 @@ async def update_request_settings(
         "auto_approve_requests": extra.get("auto_approve_requests", False),
         "max_requests_per_day": extra.get("max_requests_per_day", 3),
     }
+
+
+@router.get("/enhance-presets")
+async def get_enhance_presets(
+    _user: User = Depends(get_current_user),
+):
+    """Return all available audio enhancement presets."""
+    from app.services.enhance_service import ENHANCEMENT_PRESETS
+    return {"presets": ENHANCEMENT_PRESETS}
+
+
+async def _download_asset_data(file_path: str) -> bytes:
+    """Download asset audio data from storage or URL."""
+    if file_path.startswith("http://") or file_path.startswith("https://"):
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(file_path, follow_redirects=True)
+            return resp.content
+    else:
+        from app.services.storage_service import download_file
+        return await download_file(file_path)
+
+
+@router.post("/{asset_id}/enhance", response_model=AssetResponse)
+async def enhance_asset_endpoint(
+    asset_id: uuid.UUID,
+    body: EnhanceRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Apply enhancement filters to an asset. Non-destructive: keeps original."""
+    from app.services.enhance_service import ENHANCEMENT_PRESETS, enhance_audio
+    from app.services.storage_service import generate_asset_key, upload_file as upload_storage
+
+    asset = await get_asset(db, asset_id)
+    data = await _download_asset_data(asset.file_path)
+
+    # Resolve filters
+    if body.preset:
+        if body.preset not in ENHANCEMENT_PRESETS:
+            raise HTTPException(status_code=400, detail=f"Unknown preset: {body.preset}")
+        filters = ENHANCEMENT_PRESETS[body.preset]
+    else:
+        filters = [f.model_dump() for f in body.filters]
+
+    if not filters:
+        raise HTTPException(status_code=400, detail="No filters or preset specified")
+
+    input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
+    enhanced_data, new_duration = enhance_audio(data, filters, input_ext)
+
+    # Upload enhanced file
+    new_key = generate_asset_key("enhanced.mp3")
+    await upload_storage(enhanced_data, new_key, "audio/mpeg")
+
+    # Update asset non-destructively
+    extra = dict(asset.metadata_extra or {})
+    if "original_file_path" not in extra:
+        extra["original_file_path"] = asset.file_path
+    enhance_entry = {
+        "from": asset.file_path,
+        "to": new_key,
+        "preset": body.preset,
+        "filters": filters if not body.preset else None,
+    }
+    extra.setdefault("enhance_history", []).append(enhance_entry)
+
+    asset.file_path = new_key
+    if new_duration > 0:
+        asset.duration = new_duration
+    asset.metadata_extra = extra
+    await db.flush()
+    await db.refresh(asset)
+    return asset
+
+
+@router.post("/{asset_id}/enhance-preview")
+async def enhance_preview_endpoint(
+    asset_id: uuid.UUID,
+    body: EnhancePreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Preview enhancement on a short segment. Returns audio/mpeg blob."""
+    from app.services.enhance_service import ENHANCEMENT_PRESETS, enhance_preview
+
+    asset = await get_asset(db, asset_id)
+    data = await _download_asset_data(asset.file_path)
+
+    # Resolve filters
+    if body.preset:
+        if body.preset not in ENHANCEMENT_PRESETS:
+            raise HTTPException(status_code=400, detail=f"Unknown preset: {body.preset}")
+        filters = ENHANCEMENT_PRESETS[body.preset]
+    else:
+        filters = [f.model_dump() for f in body.filters]
+
+    if not filters:
+        raise HTTPException(status_code=400, detail="No filters or preset specified")
+
+    input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
+    preview_data = enhance_preview(
+        data, filters,
+        start_seconds=body.start_seconds,
+        duration_seconds=body.duration_seconds,
+        input_ext=input_ext,
+    )
+
+    return Response(content=preview_data, media_type="audio/mpeg")
+
+
+@router.post("/{asset_id}/detect-audience")
+async def detect_audience_endpoint(
+    asset_id: uuid.UUID,
+    quiet_threshold_db: float = Query(-25, description="Threshold for 'quiet' speech (dB)"),
+    silence_threshold_db: float = Query(-45, description="Threshold for actual silence (dB)"),
+    min_duration: float = Query(1.0, description="Min segment duration (seconds)"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Detect audience/student questions in a shiur recording.
+
+    Uses dual-threshold analysis: segments that are quiet (below speaker level)
+    but not silent are likely audience speech.
+    """
+    from app.services.enhance_service import detect_audience_segments
+
+    asset = await get_asset(db, asset_id)
+    data = await _download_asset_data(asset.file_path)
+
+    segments = detect_audience_segments(
+        data,
+        quiet_threshold_db=quiet_threshold_db,
+        silence_threshold_db=silence_threshold_db,
+        min_duration=min_duration,
+    )
+
+    return {"audience_segments": segments, "count": len(segments)}
 
 
 @router.get("/{asset_id}", response_model=AssetResponse)
