@@ -20,9 +20,30 @@ from app.models.station import Station
 from app.models.user import User
 from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueEntryOut, QueueListResponse, QueueReorder
 
+from app.models.holiday_window import HolidayWindow
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_DURATION = 180  # 3 minutes fallback
+
+
+async def _is_blacked_out(db: AsyncSession, station_id) -> bool:
+    """Check if a station is currently in a blackout window."""
+    now = datetime.now(timezone.utc)
+    stmt = select(HolidayWindow).where(
+        HolidayWindow.is_blackout == True,
+        HolidayWindow.start_datetime <= now,
+        HolidayWindow.end_datetime > now,
+    )
+    result = await db.execute(stmt)
+    windows = result.scalars().all()
+    for window in windows:
+        if window.affected_stations is None:
+            return True
+        station_ids = window.affected_stations.get("station_ids", [])
+        if str(station_id) in [str(sid) for sid in station_ids]:
+            return True
+    return False
 _last_advance: dict[str, float] = {}
 ADVANCE_THROTTLE = 1.0  # seconds between _check_advance calls per station
 
@@ -207,6 +228,10 @@ async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
 
 async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry | None:
     """Core playback engine: check if current track is done and auto-advance."""
+    # Skip advancement during blackout
+    if await _is_blacked_out(db, station_id):
+        return None
+
     # Check for hourly jingle insertion
     await _maybe_insert_hourly_jingle(db, station_id)
     # Check for weather/time spot insertion every 15 min
@@ -815,6 +840,13 @@ async def start_playback(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    # Block starting playback during blackout
+    if await _is_blacked_out(db, station_id):
+        return JSONResponse(
+            {"message": "Station is in blackout mode — playback blocked", "now_playing": None},
+            status_code=409,
+        )
+
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
