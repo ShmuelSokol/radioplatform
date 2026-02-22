@@ -367,7 +367,10 @@ export default function Dashboard() {
                   setStatusMessage(data?.message || 'Queue is empty — add assets from the library first');
                 }
               },
-              onError: () => setStatusMessage('Failed to start playback'),
+              onError: (err: any) => {
+                const msg = err?.response?.data?.message;
+                setStatusMessage(msg || 'Failed to start playback');
+              },
             });
           }}
             disabled={startMut.isPending}
