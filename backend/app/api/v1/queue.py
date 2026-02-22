@@ -67,8 +67,36 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     if window:
         return await _fill_single_blackout(db, station_id, window)
 
-    # Find active + near-future blackouts (within 24h) for this station
     now = datetime.now(timezone.utc)
+
+    # Clean up stale silence entries from far-future blackouts (> 24h away)
+    silence_result = await db.execute(select(Asset).where(Asset.asset_type == "silence").limit(1))
+    silence_asset = silence_result.scalar_one_or_none()
+    if silence_asset:
+        cleanup = await db.execute(
+            select(func.count(QueueEntry.id)).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.asset_id == silence_asset.id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > now + timedelta(hours=24),
+            )
+        )
+        stale_count = cleanup.scalar() or 0
+        if stale_count > 0:
+            await db.execute(
+                update(QueueEntry).where(
+                    QueueEntry.station_id == station_id,
+                    QueueEntry.asset_id == silence_asset.id,
+                    QueueEntry.status == "pending",
+                    QueueEntry.preempt_at.isnot(None),
+                    QueueEntry.preempt_at > now + timedelta(hours=24),
+                ).values(status="played")
+            )
+            await db.commit()
+            logger.info("Cleaned up %d stale far-future silence entries for station %s", stale_count, station_id)
+
+    # Find active + near-future blackouts (within 24h) for this station
     stmt = select(HolidayWindow).where(
         HolidayWindow.is_blackout == True,
         HolidayWindow.end_datetime > now,
