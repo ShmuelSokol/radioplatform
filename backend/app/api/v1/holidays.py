@@ -141,7 +141,7 @@ async def create_holiday(
     now = datetime.now(_tz.utc)
     rec_start = record.start_datetime.replace(tzinfo=_tz.utc) if record.start_datetime.tzinfo is None else record.start_datetime
     rec_end = record.end_datetime.replace(tzinfo=_tz.utc) if record.end_datetime.tzinfo is None else record.end_datetime
-    if record.is_blackout and rec_start <= now + timedelta(hours=1) and rec_end > now:
+    if record.is_blackout and rec_end > now:
         try:
             from app.api.v1.queue import fill_blackout_queue
             affected = record.affected_stations

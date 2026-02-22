@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi.responses import JSONResponse
@@ -75,7 +75,6 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
         stmt = select(HolidayWindow).where(
             HolidayWindow.is_blackout == True,
             HolidayWindow.end_datetime > now,
-            HolidayWindow.start_datetime <= now + timedelta(hours=1),
         ).order_by(HolidayWindow.start_datetime)
         result = await db.execute(stmt)
         windows = result.scalars().all()
@@ -161,8 +160,10 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
             position=i + 1,
             status="playing" if (i == 0 and is_active_now) else "pending",
             started_at=now if (i == 0 and is_active_now) else None,
-            # For future blackouts, preempt_at on the first entry triggers it at the right time
-            preempt_at=blackout_start if (i == 0 and not is_active_now) else None,
+            # For future blackouts, ALL silence entries get preempt_at so normal
+            # advance skips them until the blackout starts. The first one triggers
+            # preemption; the rest are just "not eligible until then".
+            preempt_at=blackout_start if not is_active_now else None,
             source="auto",
         )
         db.add(entry)
@@ -398,24 +399,26 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now_utc,
         )
-        .order_by(QueueEntry.preempt_at)
+        .order_by(QueueEntry.preempt_at, QueueEntry.position)
         .limit(1)
     )
     preempt_entry = preempt_result.scalar_one_or_none()
     if preempt_entry:
-        # Stop current track and start the preempt entry immediately
-        if current.started_at:
-            log = PlayLog(
-                id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
-                start_utc=current.started_at, end_utc=now_utc, source="scheduler",
-            )
-            db.add(log)
-        current.status = "played"
-        preempt_entry.status = "playing"
-        preempt_entry.started_at = now_utc
-        await db.commit()
-        logger.info("Preempted current track for time-critical entry %s", preempt_entry.id)
-        return preempt_entry
+        # Don't preempt silence with more silence — let it finish naturally
+        if current.asset_id != preempt_entry.asset_id:
+            # Stop current track and start the preempt entry immediately
+            if current.started_at:
+                log = PlayLog(
+                    id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
+                    start_utc=current.started_at, end_utc=now_utc, source="scheduler",
+                )
+                db.add(log)
+            current.status = "played"
+            preempt_entry.status = "playing"
+            preempt_entry.started_at = now_utc
+            await db.commit()
+            logger.info("Preempted current track for time-critical entry %s", preempt_entry.id)
+            return preempt_entry
 
     # Check if track duration has elapsed
     asset = current.asset
@@ -423,26 +426,51 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
     if not duration:
         duration = 180  # default 3 min
 
-    elapsed = (now_utc - current.started_at).total_seconds()
-    if elapsed < duration:
-        return current  # still playing
+    # Blackout ended while silence is playing — stop silence immediately
+    if not is_blackout and asset and asset.asset_type == "silence":
+        if current.started_at:
+            log = PlayLog(
+                id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
+                start_utc=current.started_at, end_utc=now_utc, source="scheduler",
+            )
+            db.add(log)
+        current.status = "played"
+        # Mark ALL remaining pending silence entries as played
+        await db.execute(
+            update(QueueEntry).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.asset_id == current.asset_id,
+                QueueEntry.status == "pending",
+            ).values(status="played")
+        )
+        logger.info("Blackout ended — cleared remaining silence entries for station %s", station_id)
+        # Fall through to find the next real song below
 
-    # Track finished — log it and advance
-    log = PlayLog(
-        id=uuid.uuid4(),
-        station_id=station_id,
-        asset_id=current.asset_id,
-        start_utc=current.started_at,
-        end_utc=datetime.now(timezone.utc),
-        source="scheduler",
-    )
-    db.add(log)
-    current.status = "played"
+    else:
+        elapsed = (now_utc - current.started_at).total_seconds()
+        if elapsed < duration:
+            return current  # still playing
 
-    # Find next pending
+        # Track finished — log it and advance
+        log = PlayLog(
+            id=uuid.uuid4(),
+            station_id=station_id,
+            asset_id=current.asset_id,
+            start_utc=current.started_at,
+            end_utc=datetime.now(timezone.utc),
+            source="scheduler",
+        )
+        db.add(log)
+        current.status = "played"
+
+    # Find next pending (skip entries with preempt_at in the future)
     result = await db.execute(
         select(QueueEntry)
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+        )
         .order_by(QueueEntry.position)
         .limit(1)
     )
@@ -519,6 +547,15 @@ async def get_queue(
         dur = (e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION)
         queue_duration += dur
         is_now = e.status == "playing"
+
+        # If entry has preempt_at in the future, it will start at that time
+        if not is_now and e.preempt_at:
+            pa = e.preempt_at
+            if pa.tzinfo is None:
+                pa = pa.replace(tzinfo=timezone.utc)
+            if pa > cursor:
+                cursor = pa
+
         est_start = now_playing_entry.started_at.isoformat() if is_now and now_playing_entry and now_playing_entry.started_at else cursor.isoformat()
         d = {
             "id": str(e.id),
