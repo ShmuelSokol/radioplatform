@@ -840,12 +840,30 @@ async def start_playback(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    # Block starting playback during blackout
+    # During blackout, start playing silence instead of music
     if await _is_blacked_out(db, station_id):
-        return JSONResponse(
-            {"message": "Station is in blackout mode — playback blocked", "now_playing": None},
-            status_code=409,
-        )
+        silence = await db.execute(select(Asset).where(Asset.asset_type == "silence").limit(1))
+        silence_asset = silence.scalar_one_or_none()
+        if silence_asset:
+            # Check if silence is already playing
+            existing = await db.execute(
+                select(QueueEntry).where(
+                    QueueEntry.station_id == station_id,
+                    QueueEntry.status == "playing",
+                    QueueEntry.asset_id == silence_asset.id,
+                )
+            )
+            if existing.scalar_one_or_none():
+                return {"message": "Blackout active — playing silence", "now_playing": str(silence_asset.id)}
+            # Start silence as a queue entry
+            entry = QueueEntry(
+                id=uuid.uuid4(), station_id=station_id, asset_id=silence_asset.id,
+                position=0, status="playing", started_at=datetime.now(timezone.utc), source="auto",
+            )
+            db.add(entry)
+            await db.commit()
+            return {"message": "Blackout active — playing silence", "now_playing": str(silence_asset.id)}
+        return {"message": "Blackout active but no silence asset found", "now_playing": None}
 
     result = await db.execute(
         select(QueueEntry)
