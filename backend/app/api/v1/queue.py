@@ -612,6 +612,24 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
+
+        # Compact positions: ensure playing entry is at position 1
+        # and pending entries follow sequentially (prevents stale position drift)
+        compact_result = await db.execute(
+            select(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status.in_(["pending", "playing"]),
+            )
+            .order_by(
+                # Playing first, then pending by position
+                QueueEntry.status.desc(),  # "playing" > "pending" alphabetically
+                QueueEntry.position,
+            )
+        )
+        for idx, entry in enumerate(compact_result.scalars().all()):
+            entry.position = idx + 1
+
         await db.commit()
         # Replenish AFTER commit so the next song starts immediately (skip during blackout)
         if not is_blackout:
@@ -642,10 +660,27 @@ async def get_queue(
         .order_by(QueueEntry.position)
         .limit(limit)
     )
-    entries = result.unique().scalars().all()
+    entries = list(result.unique().scalars().all())
 
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
+
+    # Sort entries for display: playing first, then regular pending by position,
+    # then future-preempt entries by position. This handles stale silence entries
+    # that were inserted at low positions by old code.
+    now_utc_sort = datetime.now(timezone.utc)
+
+    def _display_sort_key(e):
+        if e.status == "playing":
+            return (0, 0)
+        # Future preempt entries (silence scheduled for later) sort after regular entries
+        if e.preempt_at:
+            pa = e.preempt_at if e.preempt_at.tzinfo else e.preempt_at.replace(tzinfo=timezone.utc)
+            if pa > now_utc_sort:
+                return (2, e.position)
+        return (1, e.position)
+
+    entries.sort(key=_display_sort_key)
 
     # Calculate elapsed/remaining for now playing
     np_data = None
