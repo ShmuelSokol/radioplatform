@@ -519,30 +519,43 @@ class SchedulerEngine:
         # Check blackout windows first
         is_blacked_out = await self._is_station_blacked_out(db, station, now)
         if is_blacked_out:
-            # Stop any currently playing queue entry
+            import uuid as _uuid
             from app.models.queue_entry import QueueEntry
+
+            # Stop any currently playing non-silence queue entries
             playing_q = await db.execute(
                 select(QueueEntry).where(
                     QueueEntry.station_id == station.id,
                     QueueEntry.status == "playing",
                 )
             )
+            silence = await self._get_silence_asset(db)
+            silence_id = silence.id if silence else None
             for entry in playing_q.scalars().all():
-                entry.status = "played"
+                if entry.asset_id != silence_id:
+                    entry.status = "played"
             await db.flush()
 
-            silence = await self._get_silence_asset(db)
             now_playing = await service.get_now_playing(station.id)
 
             if silence:
-                # Play silence asset on loop during blackout
+                # Check if silence is already playing in queue
+                silence_playing = await db.execute(
+                    select(QueueEntry).where(
+                        QueueEntry.station_id == station.id,
+                        QueueEntry.status == "playing",
+                        QueueEntry.asset_id == silence.id,
+                    )
+                )
+                silence_entry = silence_playing.scalar_one_or_none()
+
                 needs_silence = False
                 if not now_playing:
                     needs_silence = True
                 elif now_playing.asset_id != silence.id:
                     needs_silence = True
                 elif now_playing.ends_at and now_playing.ends_at <= now:
-                    needs_silence = True  # Silence track ended, re-set it
+                    needs_silence = True  # Silence track ended, re-loop it
 
                 if needs_silence:
                     duration = silence.duration or 300.0
@@ -552,6 +565,20 @@ class SchedulerEngine:
                         block_id=None,
                         duration_seconds=duration,
                     )
+                    # Add silence as a queue entry so it shows in the dashboard
+                    if not silence_entry:
+                        silence_qe = QueueEntry(
+                            id=_uuid.uuid4(),
+                            station_id=station.id,
+                            asset_id=silence.id,
+                            position=0,
+                            status="playing",
+                            started_at=now,
+                            source="auto",
+                        )
+                        db.add(silence_qe)
+                        await db.flush()
+
                     logger.info(f"Station {station.id}: Blackout active, playing silence")
                     try:
                         from app.api.v1.websocket import broadcast_now_playing_update
