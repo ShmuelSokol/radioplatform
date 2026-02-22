@@ -2,7 +2,7 @@ import hashlib
 import logging
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -139,8 +139,6 @@ async def list_assets(
     search: str | None = None,
     category: str | None = None,
 ) -> tuple[list[dict], int]:
-    from sqlalchemy import or_
-
     # Build shared WHERE conditions
     conditions = []
     if asset_type:
