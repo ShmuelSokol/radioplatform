@@ -29,6 +29,20 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** Parse "m:ss" or plain seconds string into total seconds. Returns undefined if empty/invalid. */
+function parseDurationInput(val: string): number | undefined {
+  const trimmed = val.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.includes(':')) {
+    const [minStr, secStr] = trimmed.split(':');
+    const mins = parseInt(minStr, 10) || 0;
+    const secs = parseInt(secStr, 10) || 0;
+    return mins * 60 + secs;
+  }
+  const n = parseFloat(trimmed);
+  return isNaN(n) ? undefined : n * 60; // treat bare number as minutes
+}
+
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value);
   useEffect(() => {
@@ -201,9 +215,9 @@ export default function Assets() {
   // Reset page when filters change
   useEffect(() => { setPage(0); }, [debouncedTitle, debouncedArtist, debouncedAlbum, categoryFilter, typeFilter, debouncedDurMin, debouncedDurMax]);
 
-  // Server-side filtered query
-  const durMinNum = debouncedDurMin ? parseFloat(debouncedDurMin) : undefined;
-  const durMaxNum = debouncedDurMax ? parseFloat(debouncedDurMax) : undefined;
+  // Server-side filtered query — parse "m:ss" duration format
+  const durMinNum = parseDurationInput(debouncedDurMin);
+  const durMaxNum = parseDurationInput(debouncedDurMax);
 
   const { data, isLoading, isFetching } = useAssets({
     skip: page * pageSize,
@@ -411,7 +425,7 @@ export default function Assets() {
               <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{ width: '12%' }}>Album</th>
               <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
               <th className="w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Dur.</th>
+              <th className="w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
               <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
               <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{ width: '14%' }}>Actions</th>
             </tr>
@@ -452,10 +466,10 @@ export default function Assets() {
                   ))}
                 </select>
               </th>
-              <th className="w-14 px-1 py-1">
-                <div className="flex gap-0.5">
-                  <input type="number" min={0} value={durationMin} onChange={(e) => setDurationMin(e.target.value)} placeholder="Min" title="Min duration (seconds)" className="w-1/2 border border-gray-300 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                  <input type="number" min={0} value={durationMax} onChange={(e) => setDurationMax(e.target.value)} placeholder="Max" title="Max duration (seconds)" className="w-1/2 border border-gray-300 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
+              <th className="w-28 px-1 py-1">
+                <div className="flex gap-1">
+                  <input type="text" value={durationMin} onChange={(e) => setDurationMin(e.target.value)} placeholder="Min" title="Min duration (e.g. 3:00)" className="w-1/2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                  <input type="text" value={durationMax} onChange={(e) => setDurationMax(e.target.value)} placeholder="Max" title="Max duration (e.g. 6:30)" className="w-1/2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 </div>
               </th>
               <th className="w-20 px-2 py-1" />
