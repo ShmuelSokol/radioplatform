@@ -67,11 +67,12 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
     if window:
         return await _fill_single_blackout(db, station_id, window)
 
-    # Find ALL upcoming blackouts for this station
+    # Find active + near-future blackouts (within 24h) for this station
     now = datetime.now(timezone.utc)
     stmt = select(HolidayWindow).where(
         HolidayWindow.is_blackout == True,
         HolidayWindow.end_datetime > now,
+        HolidayWindow.start_datetime <= now + timedelta(hours=24),
     ).order_by(HolidayWindow.start_datetime)
     result = await db.execute(stmt)
     all_windows = result.scalars().all()
