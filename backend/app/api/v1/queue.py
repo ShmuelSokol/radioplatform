@@ -44,6 +44,139 @@ async def _is_blacked_out(db: AsyncSession, station_id) -> bool:
         if str(station_id) in [str(sid) for sid in station_ids]:
             return True
     return False
+
+
+def _get_blackout_window_for_station(windows: list, station_id) -> "HolidayWindow | None":
+    """Return the active/upcoming blackout window affecting this station."""
+    for w in windows:
+        if w.affected_stations is None:
+            return w
+        sids = w.affected_stations.get("station_ids", [])
+        if str(station_id) in [str(s) for s in sids]:
+            return w
+    return None
+
+
+async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWindow | None" = None):
+    """Fill queue with silence entries covering a blackout window.
+
+    - Calculates how many 5-min silence entries are needed
+    - Marks any currently playing non-silence entry as 'played'
+    - Clears pending non-silence entries (pushes them after the blackout)
+    - Inserts silence entries at the front of the queue
+    - The first real song after silence is positioned to start when blackout ends
+    """
+    import math
+
+    now = datetime.now(timezone.utc)
+
+    # Find the active/upcoming blackout window if not provided
+    if not window:
+        stmt = select(HolidayWindow).where(
+            HolidayWindow.is_blackout == True,
+            HolidayWindow.end_datetime > now,
+            HolidayWindow.start_datetime <= now + timedelta(hours=1),
+        ).order_by(HolidayWindow.start_datetime)
+        result = await db.execute(stmt)
+        windows = result.scalars().all()
+        window = _get_blackout_window_for_station(windows, station_id)
+    if not window:
+        return 0
+
+    # Get silence asset
+    silence_result = await db.execute(select(Asset).where(Asset.asset_type == "silence").limit(1))
+    silence = silence_result.scalar_one_or_none()
+    if not silence:
+        logger.warning("No silence asset found for blackout queue fill")
+        return 0
+
+    silence_duration = silence.duration or 300.0
+    blackout_start = window.start_datetime
+    blackout_end = window.end_datetime
+
+    # Make timezone-aware if needed
+    if blackout_start.tzinfo is None:
+        blackout_start = blackout_start.replace(tzinfo=timezone.utc)
+    if blackout_end.tzinfo is None:
+        blackout_end = blackout_end.replace(tzinfo=timezone.utc)
+
+    # Calculate remaining blackout duration from now (or from start if not yet started)
+    effective_start = max(now, blackout_start)
+    remaining_seconds = (blackout_end - effective_start).total_seconds()
+    if remaining_seconds <= 0:
+        return 0
+
+    num_silence = math.ceil(remaining_seconds / silence_duration)
+
+    # Check if we already have silence entries queued for this blackout
+    existing_silence = await db.execute(
+        select(func.count(QueueEntry.id)).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.asset_id == silence.id,
+            QueueEntry.status.in_(["pending", "playing"]),
+        )
+    )
+    existing_count = existing_silence.scalar() or 0
+    if existing_count >= num_silence:
+        return 0  # Already filled
+
+    # Stop any currently playing non-silence entry
+    playing_result = await db.execute(
+        select(QueueEntry).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "playing",
+        )
+    )
+    for entry in playing_result.scalars().all():
+        if entry.asset_id != silence.id:
+            entry.status = "played"
+
+    # Clear existing silence entries (we'll re-insert clean ones)
+    await db.execute(
+        update(QueueEntry).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.asset_id == silence.id,
+            QueueEntry.status.in_(["pending", "playing"]),
+        ).values(status="played")
+    )
+
+    # Shift all pending non-silence entries to make room
+    # Get current max position
+    max_pos_result = await db.execute(
+        select(func.max(QueueEntry.position)).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+        )
+    )
+    max_pos = max_pos_result.scalar() or 0
+
+    # Bump all pending entries up by num_silence positions
+    await db.execute(
+        update(QueueEntry).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+        ).values(position=QueueEntry.position + num_silence + 1)
+    )
+
+    # Insert silence entries at positions 1..num_silence
+    for i in range(num_silence):
+        entry = QueueEntry(
+            id=uuid.uuid4(),
+            station_id=station_id,
+            asset_id=silence.id,
+            position=i + 1,
+            status="playing" if i == 0 else "pending",
+            started_at=effective_start if i == 0 else None,
+            source="auto",
+        )
+        db.add(entry)
+
+    await db.commit()
+    logger.info(
+        "Filled blackout queue for station %s: %d silence entries (%.0f min), ends at %s",
+        station_id, num_silence, remaining_seconds / 60, blackout_end.isoformat(),
+    )
+    return num_silence
 _last_advance: dict[str, float] = {}
 ADVANCE_THROTTLE = 1.0  # seconds between _check_advance calls per station
 
@@ -228,14 +361,12 @@ async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
 
 async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry | None:
     """Core playback engine: check if current track is done and auto-advance."""
-    # Skip advancement during blackout
-    if await _is_blacked_out(db, station_id):
-        return None
+    is_blackout = await _is_blacked_out(db, station_id)
 
-    # Check for hourly jingle insertion
-    await _maybe_insert_hourly_jingle(db, station_id)
-    # Check for weather/time spot insertion every 15 min
-    await _maybe_insert_weather_spot(db, station_id)
+    # During blackout, skip jingles/weather but still advance silence entries
+    if not is_blackout:
+        await _maybe_insert_hourly_jingle(db, station_id)
+        await _maybe_insert_weather_spot(db, station_id)
 
     result = await db.execute(
         select(QueueEntry)
@@ -324,11 +455,12 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
         await db.commit()
-        # Replenish AFTER commit so the next song starts immediately
-        try:
-            await _replenish_queue(db, station_id)
-        except Exception as e:
-            logger.warning("Queue replenish failed (non-critical): %s", e)
+        # Replenish AFTER commit so the next song starts immediately (skip during blackout)
+        if not is_blackout:
+            try:
+                await _replenish_queue(db, station_id)
+            except Exception as e:
+                logger.warning("Queue replenish failed (non-critical): %s", e)
         return next_entry
 
     await db.commit()
@@ -840,30 +972,13 @@ async def start_playback(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    # During blackout, start playing silence instead of music
+    # During blackout, fill queue with silence entries
     if await _is_blacked_out(db, station_id):
+        count = await fill_blackout_queue(db, station_id)
         silence = await db.execute(select(Asset).where(Asset.asset_type == "silence").limit(1))
         silence_asset = silence.scalar_one_or_none()
-        if silence_asset:
-            # Check if silence is already playing
-            existing = await db.execute(
-                select(QueueEntry).where(
-                    QueueEntry.station_id == station_id,
-                    QueueEntry.status == "playing",
-                    QueueEntry.asset_id == silence_asset.id,
-                )
-            )
-            if existing.scalar_one_or_none():
-                return {"message": "Blackout active — playing silence", "now_playing": str(silence_asset.id)}
-            # Start silence as a queue entry
-            entry = QueueEntry(
-                id=uuid.uuid4(), station_id=station_id, asset_id=silence_asset.id,
-                position=0, status="playing", started_at=datetime.now(timezone.utc), source="auto",
-            )
-            db.add(entry)
-            await db.commit()
-            return {"message": "Blackout active — playing silence", "now_playing": str(silence_asset.id)}
-        return {"message": "Blackout active but no silence asset found", "now_playing": None}
+        sid = str(silence_asset.id) if silence_asset else None
+        return {"message": f"Blackout active — {count} silence entries queued", "now_playing": sid}
 
     result = await db.execute(
         select(QueueEntry)

@@ -135,6 +135,21 @@ async def create_holiday(
     db.add(record)
     await db.commit()
     await db.refresh(record)
+
+    # If this blackout is active now or starting soon, fill affected stations with silence
+    now = datetime.utcnow()
+    if record.is_blackout and record.start_datetime <= now + timedelta(hours=1) and record.end_datetime > now:
+        from app.api.v1.queue import fill_blackout_queue
+        affected = record.affected_stations
+        if affected is None:
+            # Null = all stations
+            station_result = await db.execute(select(Station).where(Station.is_active == True))
+            for st in station_result.scalars().all():
+                await fill_blackout_queue(db, st.id, record)
+        else:
+            for sid in affected.get("station_ids", []):
+                await fill_blackout_queue(db, sid, record)
+
     return record
 
 

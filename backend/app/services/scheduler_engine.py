@@ -245,12 +245,8 @@ class SchedulerEngine:
 
         for station in stations:
             try:
-                # Check blackout BEFORE advancing queue — don't start new songs during blackout
-                now = datetime.now(timezone.utc)
-                is_blacked_out = await self._is_station_blacked_out(db, station, now)
-                if not is_blacked_out:
-                    # Run queue-based playback advancement only when NOT blacked out
-                    await self._advance_queue(db, station.id)
+                # Run queue-based playback advancement (handles silence entries during blackout too)
+                await self._advance_queue(db, station.id)
                 await self._check_station(db, station)
                 # Also check per-channel playback
                 ch_stmt = select(ChannelStream).where(
@@ -519,96 +515,10 @@ class SchedulerEngine:
         # Check blackout windows first
         is_blacked_out = await self._is_station_blacked_out(db, station, now)
         if is_blacked_out:
-            import uuid as _uuid
-            from app.models.queue_entry import QueueEntry
-
-            # Stop any currently playing non-silence queue entries
-            playing_q = await db.execute(
-                select(QueueEntry).where(
-                    QueueEntry.station_id == station.id,
-                    QueueEntry.status == "playing",
-                )
-            )
-            silence = await self._get_silence_asset(db)
-            silence_id = silence.id if silence else None
-            for entry in playing_q.scalars().all():
-                if entry.asset_id != silence_id:
-                    entry.status = "played"
-            await db.flush()
-
-            now_playing = await service.get_now_playing(station.id)
-
-            if silence:
-                # Check if silence is already playing in queue
-                silence_playing = await db.execute(
-                    select(QueueEntry).where(
-                        QueueEntry.station_id == station.id,
-                        QueueEntry.status == "playing",
-                        QueueEntry.asset_id == silence.id,
-                    )
-                )
-                silence_entry = silence_playing.scalar_one_or_none()
-
-                needs_silence = False
-                if not now_playing:
-                    needs_silence = True
-                elif now_playing.asset_id != silence.id:
-                    needs_silence = True
-                elif now_playing.ends_at and now_playing.ends_at <= now:
-                    needs_silence = True  # Silence track ended, re-loop it
-
-                if needs_silence:
-                    duration = silence.duration or 300.0
-                    await service.update_now_playing(
-                        station_id=station.id,
-                        asset_id=silence.id,
-                        block_id=None,
-                        duration_seconds=duration,
-                    )
-                    # Add silence as a queue entry so it shows in the dashboard
-                    if not silence_entry:
-                        silence_qe = QueueEntry(
-                            id=_uuid.uuid4(),
-                            station_id=station.id,
-                            asset_id=silence.id,
-                            position=0,
-                            status="playing",
-                            started_at=now,
-                            source="auto",
-                        )
-                        db.add(silence_qe)
-                        await db.flush()
-
-                    logger.info(f"Station {station.id}: Blackout active, playing silence")
-                    try:
-                        from app.api.v1.websocket import broadcast_now_playing_update
-                        await broadcast_now_playing_update(str(station.id), {
-                            "station_id": str(station.id),
-                            "asset_id": str(silence.id),
-                            "started_at": now.isoformat(),
-                            "ends_at": (now + timedelta(seconds=duration)).isoformat(),
-                            "blackout": True,
-                        })
-                    except Exception as e:
-                        logger.error(f"Failed to broadcast blackout update: {e}")
-            else:
-                # No silence asset — fall back to clearing playback
-                if now_playing:
-                    logger.info(f"Station {station.id}: Blackout active, clearing playback")
-                    await service.clear_now_playing(station.id)
-                    try:
-                        from app.api.v1.websocket import broadcast_now_playing_update
-                        await broadcast_now_playing_update(str(station.id), {
-                            "station_id": str(station.id),
-                            "asset_id": None,
-                            "started_at": now.isoformat(),
-                            "ends_at": None,
-                            "blackout": True,
-                        })
-                    except Exception as e:
-                        logger.error(f"Failed to broadcast blackout update: {e}")
-            # Run silence detection (will be a no-op during blackout)
-            await self._check_silence_detection(db, station, has_playing_asset=bool(silence), is_blacked_out=True)
+            # Fill queue with silence entries for the blackout duration
+            from app.api.v1.queue import fill_blackout_queue
+            await fill_blackout_queue(db, station.id)
+            # Let normal queue advancement handle the silence entries
             return
 
         # Get current now-playing state
