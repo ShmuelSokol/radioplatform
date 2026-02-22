@@ -232,25 +232,69 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
             ).values(status="played")
         )
 
-    # Bump all pending entries to make room for silence at the front
-    await db.execute(
-        update(QueueEntry).where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-        ).values(position=QueueEntry.position + num_silence + 1)
-    )
+    if is_active_now:
+        # Active blackout: insert silence at the front (position 1..N)
+        await db.execute(
+            update(QueueEntry).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+            ).values(position=QueueEntry.position + num_silence + 1)
+        )
+        insert_at = 0
+    else:
+        # Future blackout: calculate the correct queue position where the
+        # blackout starts by walking through playable entries + summing durations
+        from sqlalchemy.orm import joinedload as jl
 
-    # Insert silence entries at positions 1..num_silence
+        cursor = now
+        # Account for currently playing entry's remaining time
+        playing_q = await db.execute(
+            select(QueueEntry).options(jl(QueueEntry.asset))
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        )
+        playing_entry = playing_q.unique().scalar_one_or_none()
+        if playing_entry and playing_entry.started_at and playing_entry.asset:
+            dur = playing_entry.asset.duration or DEFAULT_DURATION
+            el = (now - playing_entry.started_at).total_seconds()
+            cursor += timedelta(seconds=max(0, dur - el))
+
+        # Walk through playable pending entries (skip future-preempt silence)
+        pending_q = await db.execute(
+            select(QueueEntry).options(jl(QueueEntry.asset))
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now),
+            )
+            .order_by(QueueEntry.position)
+        )
+        playable = pending_q.unique().scalars().all()
+
+        insert_at = 0
+        for pe in playable:
+            dur = pe.asset.duration if pe.asset and pe.asset.duration else DEFAULT_DURATION
+            if cursor >= blackout_start:
+                break
+            cursor += timedelta(seconds=dur)
+            insert_at = pe.position
+
+        # Bump only entries after the insertion point
+        await db.execute(
+            update(QueueEntry).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.position > insert_at,
+            ).values(position=QueueEntry.position + num_silence)
+        )
+
     for i in range(num_silence):
         entry = QueueEntry(
             id=uuid.uuid4(),
             station_id=station_id,
             asset_id=silence.id,
-            position=i + 1,
+            position=insert_at + i + 1,
             status="playing" if (i == 0 and is_active_now) else "pending",
             started_at=now if (i == 0 and is_active_now) else None,
-            # Future blackouts: ALL silence entries get preempt_at so normal
-            # advance skips them until the blackout starts.
             preempt_at=blackout_start if not is_active_now else None,
             source="auto",
         )
@@ -631,8 +675,9 @@ async def get_queue(
     else:
         cursor = now_utc
 
-    # Find blackout end times so we can cap silence blocks precisely
-    blackout_ends = {}  # preempt_at_iso -> blackout_end datetime
+    # Find blackout windows so we can cap silence blocks precisely + show labels
+    blackout_ends = {}  # bo_start -> bo_end datetime
+    blackout_names = {}  # bo_start -> window name
     silence_asset_id = None
     for e in entries:
         if e.asset and e.asset.asset_type == "silence":
@@ -653,17 +698,20 @@ async def get_queue(
                 if bo_start.tzinfo is None:
                     bo_start = bo_start.replace(tzinfo=timezone.utc)
                 blackout_ends[bo_start] = bo_end
+                blackout_names[bo_start] = w.name
 
     entries_data = []
     queue_duration = 0.0
     in_silence_block = False
     current_blackout_end = None
+    current_blackout_name = None
 
     # If currently playing silence (active blackout), find its blackout end time
     if now_playing_entry and now_playing_entry.asset and now_playing_entry.asset.asset_type == "silence":
         for bo_start, bo_end in blackout_ends.items():
             if bo_start <= now_utc:
                 current_blackout_end = bo_end
+                current_blackout_name = blackout_names.get(bo_start)
                 in_silence_block = True
                 break
 
@@ -685,16 +733,24 @@ async def get_queue(
                 for bo_start, bo_end in blackout_ends.items():
                     if abs((pa - bo_start).total_seconds()) < 60:
                         current_blackout_end = bo_end
+                        current_blackout_name = blackout_names.get(bo_start)
                         break
 
         if is_silence:
             in_silence_block = True
+            # If we don't have a name yet (active blackout, no preempt_at), try to find it
+            if not current_blackout_name:
+                for bo_start, bo_end in blackout_ends.items():
+                    if bo_start <= now_utc and bo_end > now_utc:
+                        current_blackout_name = blackout_names.get(bo_start)
+                        break
         elif in_silence_block:
             # First non-silence entry after silence block — cap cursor to blackout end
             in_silence_block = False
             if current_blackout_end and current_blackout_end < cursor:
                 cursor = current_blackout_end
             current_blackout_end = None
+            current_blackout_name = None
 
         est_start = now_playing_entry.started_at.isoformat() if is_now and now_playing_entry and now_playing_entry.started_at else cursor.isoformat()
         d = {
@@ -713,6 +769,8 @@ async def get_queue(
                 "category": e.asset.category,
             } if e.asset else None,
         }
+        if is_silence and current_blackout_name:
+            d["blackout_name"] = current_blackout_name
         if not is_now:
             cursor += timedelta(seconds=dur)
         entries_data.append(d)

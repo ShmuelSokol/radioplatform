@@ -544,10 +544,12 @@ export default function Dashboard() {
                     </span>
                     <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
                     <span className="flex-1 truncate text-[12px] min-w-0">
-                      {a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
+                      {a?.asset_type === 'silence' && entry.blackout_name
+                        ? <span className="text-red-400">Scheduled Silence — {entry.blackout_name}</span>
+                        : a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
                     </span>
                     <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[a?.asset_type] ?? 'text-gray-500'}`}>
-                      {a?.asset_type ?? ''}
+                      {a?.asset_type === 'silence' ? <span className="text-red-400">silence</span> : a?.asset_type ?? ''}
                     </span>
                     <span className="w-[60px] text-[10px] shrink-0">
                       {a?.id ? <AssetCategoryBadge assetId={a.id} category={a?.category ?? null} dark compact /> : ''}
