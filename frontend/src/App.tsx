@@ -31,6 +31,7 @@ const ReviewQueues = lazy(() => import('./pages/admin/ReviewQueues'));
 const ReviewFlow = lazy(() => import('./pages/admin/ReviewFlow'));
 const Playlists = lazy(() => import('./pages/admin/Playlists'));
 const Categories = lazy(() => import('./pages/admin/Categories'));
+const AssetTypes = lazy(() => import('./pages/admin/AssetTypes'));
 const Alerts = lazy(() => import('./pages/admin/Alerts'));
 const LiveShows = lazy(() => import('./pages/admin/LiveShows'));
 const HostConsole = lazy(() => import('./pages/admin/HostConsole'));
@@ -107,6 +108,7 @@ export default function App() {
               <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
               <Route path="/admin/playlists" element={<ProtectedRoute><Playlists /></ProtectedRoute>} />
               <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
+              <Route path="/admin/asset-types" element={<ProtectedRoute><AssetTypes /></ProtectedRoute>} />
               <Route path="/admin/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
               <Route path="/admin/live" element={<ProtectedRoute><LiveShows /></ProtectedRoute>} />

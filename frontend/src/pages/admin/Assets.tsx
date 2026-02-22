@@ -5,6 +5,7 @@ import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 import AssetSponsorBadge from '../../components/AssetSponsorBadge';
 import { useCreateReviewQueue } from '../../hooks/useReviews';
 import { useCategories } from '../../hooks/useCategories';
+import { useAssetTypes } from '../../hooks/useAssetTypes';
 import { downloadAsset, getAssetAudioUrl } from '../../api/assets';
 import type { Asset } from '../../types';
 import Spinner from '../../components/Spinner';
@@ -148,8 +149,6 @@ function PlayButton({ assetId, title, audioRef, playingId, setPlayingId }: {
   );
 }
 
-const ASSET_TYPES = ['music', 'shiur', 'spot', 'jingle', 'zmanim'] as const;
-
 /** Inline column filter input with datalist autocomplete from current results */
 function ColumnFilter({ value, onChange, options, placeholder }: {
   value: string;
@@ -177,6 +176,7 @@ function ColumnFilter({ value, onChange, options, placeholder }: {
 
 export default function Assets() {
   const { data: categories } = useCategories();
+  const { data: assetTypes } = useAssetTypes();
   const deleteMutation = useDeleteAsset();
   const bulkCategoryMutation = useBulkSetCategory();
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -461,8 +461,8 @@ export default function Assets() {
                   className="w-full border border-gray-300 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
                 >
                   <option value="">All</option>
-                  {ASSET_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                  {(assetTypes ?? []).map((t) => (
+                    <option key={t.id} value={t.name}>{t.name}</option>
                   ))}
                 </select>
               </th>

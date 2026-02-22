@@ -211,6 +211,27 @@ async def _seed_default_categories():
         logger.warning("Category seeding skipped: %s", e)
 
 
+async def _seed_default_asset_types():
+    """Insert default asset types if the asset_types table is empty."""
+    try:
+        from app.db.engine import engine
+        from sqlalchemy import text
+
+        defaults = ["music", "shiur", "spot", "jingle", "zmanim"]
+        async with engine.begin() as conn:
+            result = await conn.execute(text("SELECT COUNT(*) FROM asset_types"))
+            count = result.scalar()
+            if count == 0:
+                for name in defaults:
+                    await conn.execute(
+                        text("INSERT INTO asset_types (id, name, created_at, updated_at) VALUES (gen_random_uuid(), :name, NOW(), NOW())"),
+                        {"name": name},
+                    )
+                logger.info("Seeded %d default asset types", len(defaults))
+    except Exception as e:
+        logger.warning("Asset type seeding skipped: %s", e)
+
+
 async def _seed_stations():
     """Seed the three special stations if they don't exist."""
     try:
@@ -409,6 +430,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup — create tables and start the scheduler engine
     await ensure_tables()
     await _seed_default_categories()
+    await _seed_default_asset_types()
     await _seed_stations()
     await _refresh_requested_category()
 

@@ -65,6 +65,7 @@ export default function Navbar() {
       links: [
         { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },
         { to: '/admin/categories', label: 'Categories', color: 'hover:text-teal-300' },
+        { to: '/admin/asset-types', label: 'Types', color: 'hover:text-sky-300' },
         { to: '/admin/playlists', label: 'Playlists', color: 'hover:text-indigo-300' },
         { to: '/admin/studio', label: 'Studio', color: 'hover:text-rose-300' },
         { to: '/admin/reviews', label: 'Reviews', color: 'hover:text-emerald-300' },

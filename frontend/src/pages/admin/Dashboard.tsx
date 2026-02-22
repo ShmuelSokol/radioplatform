@@ -11,6 +11,7 @@ import { useTimelinePreview } from '../../hooks/useSchedules';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import type { AssetInfo } from '../../types';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
+import { useAssetTypes } from '../../hooks/useAssetTypes';
 
 function fmtDur(sec: number | null): string {
   if (!sec || sec <= 0) return '0:00';
@@ -53,10 +54,6 @@ function fmtLastPlayed(iso: string | null | undefined): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-const ASSET_TYPES = ['all', 'music', 'spot', 'shiur', 'jingle', 'zmanim'] as const;
-const TYPE_LABELS: Record<string, string> = {
-  all: 'All', music: 'Music', spot: 'Spots', shiur: 'Shiurim', jingle: 'Jingles', zmanim: 'Zmanim',
-};
 const TYPE_COLORS: Record<string, string> = {
   music: 'text-cyan-300', spot: 'text-orange-400', shiur: 'text-purple-300',
   jingle: 'text-yellow-200', zmanim: 'text-green-300',
@@ -68,6 +65,10 @@ export default function Dashboard() {
   const { user } = useAuth();
   const { data: stationsData } = useStations();
   const { data: assetsData } = useAssets({ skip: 0, limit: 100 });
+  const { data: assetTypesData } = useAssetTypes();
+  const ASSET_TYPES = ['all', ...(assetTypesData ?? []).map(t => t.name)];
+  const TYPE_LABELS: Record<string, string> = { all: 'All' };
+  for (const t of (assetTypesData ?? [])) TYPE_LABELS[t.name] = t.name.charAt(0).toUpperCase() + t.name.slice(1);
   const [clock, setClock] = useState(new Date());
   const [activeTab, setActiveTab] = useState<string>('all');
   const [librarySearch, setLibrarySearch] = useState('');

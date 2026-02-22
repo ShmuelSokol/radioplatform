@@ -20,6 +20,7 @@ from app.api.v1.analytics import router as analytics_router
 from app.api.v1.reviews import router as reviews_router
 from app.api.v1.playlists import router as playlists_router
 from app.api.v1.categories import router as categories_router
+from app.api.v1.asset_types import router as asset_types_router
 from app.api.v1.sponsor_portal import router as sponsor_portal_router
 from app.api.v1.campaigns import router as campaigns_router
 from app.api.v1.billing import router as billing_router
@@ -55,6 +56,7 @@ router.include_router(analytics_router)
 router.include_router(reviews_router)
 router.include_router(playlists_router)
 router.include_router(categories_router)
+router.include_router(asset_types_router)
 router.include_router(sponsor_portal_router)
 router.include_router(campaigns_router)
 router.include_router(billing_router)

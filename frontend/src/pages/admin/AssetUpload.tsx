@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { uploadAsset } from '../../api/assets';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCategories } from '../../hooks/useCategories';
+import { useAssetTypes } from '../../hooks/useAssetTypes';
 import Spinner from '../../components/Spinner';
 
 const IMPORT_FORMATS = [
@@ -14,14 +15,6 @@ const IMPORT_FORMATS = [
   { value: 'ogg', label: 'OGG' },
   { value: 'aac', label: 'AAC' },
   { value: 'original', label: 'Keep Original' },
-] as const;
-
-const ASSET_TYPES = [
-  { value: 'music', label: 'Music' },
-  { value: 'spot', label: 'Spot' },
-  { value: 'shiur', label: 'Shiur' },
-  { value: 'jingle', label: 'Jingle' },
-  { value: 'zmanim', label: 'Zmanim' },
 ] as const;
 
 const FILE_ACCEPT = 'audio/*,video/*,.mp2,.mpg,.mpeg,.mp4,.mkv,.avi,.mov,.webm,.flac,.ogg,.opus,.wma,.aac,.m4a,.wv,.ape,.aiff,.aif';
@@ -51,6 +44,7 @@ function formatSize(bytes: number): string {
 export default function AssetUpload() {
   const queryClient = useQueryClient();
   const { data: categories } = useCategories();
+  const { data: assetTypes } = useAssetTypes();
 
   // Global metadata
   const [artist, setArtist] = useState('');
@@ -216,8 +210,8 @@ export default function AssetUpload() {
               onChange={(e) => setAssetType(e.target.value)}
               className="w-full border rounded px-3 py-2 text-sm bg-white"
             >
-              {ASSET_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
+              {(assetTypes ?? []).map((t) => (
+                <option key={t.id} value={t.name}>{t.name}</option>
               ))}
             </select>
           </div>
