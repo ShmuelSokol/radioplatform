@@ -3,11 +3,26 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useUnresolvedCount, useAlerts } from '../../hooks/useAlerts';
 
+interface NavLink {
+  to: string;
+  label: string;
+  color: string;
+}
+
+interface NavGroup {
+  label: string;
+  color: string;       // text color for the group label
+  hoverColor: string;  // hover highlight
+  links: NavLink[];
+}
+
 export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuthStore();
   const [menuOpen, setMenuOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const bellRef = useRef<HTMLDivElement>(null);
+  const dropdownTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
 
   const { data: unresolvedCount } = useUnresolvedCount(isAuthenticated);
@@ -24,35 +39,90 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const navLinks = isAuthenticated ? [
-    { to: '/stations', label: 'Stations', color: 'hover:text-white' },
-    { to: '/admin/dashboard', label: 'Dashboard', color: 'hover:text-yellow-300' },
-    { to: '/admin/schedules', label: 'Schedules', color: 'hover:text-orange-300' },
-    { to: '/admin/playlists', label: 'Playlists', color: 'hover:text-indigo-300' },
-    { to: '/admin/rules', label: 'Rules', color: 'hover:text-purple-300' },
-    { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
-    { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },
-    { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
-    { to: '/admin/live', label: 'Live Shows', color: 'hover:text-red-400' },
-    { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
-    { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
-    { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
-    { to: '/admin/listeners', label: 'Listeners', color: 'hover:text-green-300' },
-    { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },
-    { to: '/admin/categories', label: 'Categories', color: 'hover:text-teal-300' },
-    { to: '/admin/reviews', label: 'Reviews', color: 'hover:text-emerald-300' },
-    { to: '/admin/stations', label: 'Manage Stations', color: 'hover:text-cyan-300' },
-    { to: '/admin/requests', label: 'Requests', color: 'hover:text-lime-300' },
-    { to: '/admin/studio', label: 'Studio', color: 'hover:text-rose-300' },
-    { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
-    { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
-    { to: '/admin/crm', label: 'CRM', color: 'hover:text-pink-300' },
-  ] : [
+  // Close nav dropdowns on click outside
+  useEffect(() => {
+    function handleClick() { setOpenDropdown(null); }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const publicLinks: NavLink[] = [
     { to: '/stations', label: 'Stations', color: 'hover:text-white' },
     { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
     { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
     { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
   ];
+
+  const standaloneLinks: NavLink[] = [
+    { to: '/admin/dashboard', label: 'Dashboard', color: 'hover:text-yellow-300' },
+  ];
+
+  const navGroups: NavGroup[] = [
+    {
+      label: 'Content',
+      color: 'text-cyan-400',
+      hoverColor: 'hover:text-cyan-300',
+      links: [
+        { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },
+        { to: '/admin/categories', label: 'Categories', color: 'hover:text-teal-300' },
+        { to: '/admin/playlists', label: 'Playlists', color: 'hover:text-indigo-300' },
+        { to: '/admin/studio', label: 'Studio', color: 'hover:text-rose-300' },
+        { to: '/admin/reviews', label: 'Reviews', color: 'hover:text-emerald-300' },
+      ],
+    },
+    {
+      label: 'Broadcast',
+      color: 'text-orange-400',
+      hoverColor: 'hover:text-orange-300',
+      links: [
+        { to: '/admin/schedules', label: 'Schedules', color: 'hover:text-orange-300' },
+        { to: '/admin/rules', label: 'Rules', color: 'hover:text-purple-300' },
+        { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },
+        { to: '/admin/live', label: 'Live Shows', color: 'hover:text-red-400' },
+      ],
+    },
+    {
+      label: 'Audience',
+      color: 'text-green-400',
+      hoverColor: 'hover:text-green-300',
+      links: [
+        { to: '/admin/listeners', label: 'Listeners', color: 'hover:text-green-300' },
+        { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
+        { to: '/admin/requests', label: 'Requests', color: 'hover:text-lime-300' },
+        { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
+        { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
+        { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
+      ],
+    },
+    {
+      label: 'Settings',
+      color: 'text-purple-400',
+      hoverColor: 'hover:text-purple-300',
+      links: [
+        { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
+        { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
+        { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
+        { to: '/admin/stations', label: 'Manage Stations', color: 'hover:text-cyan-300' },
+        { to: '/admin/crm', label: 'CRM', color: 'hover:text-pink-300' },
+      ],
+    },
+  ];
+
+  const handleDropdownEnter = (label: string) => {
+    if (dropdownTimeout.current) clearTimeout(dropdownTimeout.current);
+    setOpenDropdown(label);
+  };
+
+  const handleDropdownLeave = () => {
+    dropdownTimeout.current = setTimeout(() => setOpenDropdown(null), 150);
+  };
+
+  // Chevron down icon
+  const ChevronDown = () => (
+    <svg className="w-3 h-3 ml-0.5 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </svg>
+  );
 
   return (
     <nav className="bg-[#0a0a28] text-white border-b border-[#2a2a5e]">
@@ -64,13 +134,58 @@ export default function Navbar() {
               KBR Studio
             </Link>
             {/* Desktop nav - hidden on mobile */}
-            <div className="hidden md:flex items-center gap-4">
-              {navLinks.map(link => (
-                <Link key={link.to} to={link.to}
-                  className={`text-gray-400 ${link.color} transition`}>
-                  {link.label}
-                </Link>
-              ))}
+            <div className="hidden md:flex items-center gap-3">
+              {isAuthenticated ? (
+                <>
+                  {/* Standalone links */}
+                  {standaloneLinks.map(link => (
+                    <Link key={link.to} to={link.to}
+                      className={`text-gray-400 ${link.color} transition`}>
+                      {link.label}
+                    </Link>
+                  ))}
+
+                  {/* Dropdown groups */}
+                  {navGroups.map(group => (
+                    <div key={group.label} className="relative"
+                      onMouseEnter={() => handleDropdownEnter(group.label)}
+                      onMouseLeave={handleDropdownLeave}>
+                      <button
+                        className={`flex items-center text-gray-400 ${group.hoverColor} transition`}
+                        onClick={() => setOpenDropdown(openDropdown === group.label ? null : group.label)}
+                      >
+                        {group.label}
+                        <ChevronDown />
+                      </button>
+                      {openDropdown === group.label && (
+                        <div className="absolute left-0 top-full mt-1 min-w-[160px] bg-[#12123a] border border-[#2a2a5e] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                          {group.links.map(link => (
+                            <Link key={link.to} to={link.to}
+                              onClick={() => setOpenDropdown(null)}
+                              className={`block px-4 py-1.5 text-[13px] text-gray-400 ${link.color} hover:bg-[#1a1a4e] transition`}>
+                              {link.label}
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Stations (public) */}
+                  <Link to="/stations" className="text-gray-400 hover:text-white transition">
+                    Stations
+                  </Link>
+                </>
+              ) : (
+                <>
+                  {publicLinks.map(link => (
+                    <Link key={link.to} to={link.to}
+                      className={`text-gray-400 ${link.color} transition`}>
+                      {link.label}
+                    </Link>
+                  ))}
+                </>
+              )}
             </div>
           </div>
 
@@ -171,13 +286,38 @@ export default function Navbar() {
       {menuOpen && isAuthenticated && (
         <div className="md:hidden border-t border-[#2a2a5e] bg-[#0c0c30]">
           <div className="px-4 py-2 space-y-1">
-            {navLinks.map(link => (
+            {/* Standalone links */}
+            {standaloneLinks.map(link => (
               <Link key={link.to} to={link.to}
                 onClick={() => setMenuOpen(false)}
                 className={`block py-2 px-3 text-sm text-gray-400 ${link.color} transition rounded hover:bg-[#1a1a4e]`}>
                 {link.label}
               </Link>
             ))}
+
+            {/* Grouped links */}
+            {navGroups.map(group => (
+              <div key={group.label}>
+                <div className={`px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider ${group.color}`}>
+                  {group.label}
+                </div>
+                {group.links.map(link => (
+                  <Link key={link.to} to={link.to}
+                    onClick={() => setMenuOpen(false)}
+                    className={`block py-2 px-3 pl-5 text-sm text-gray-400 ${link.color} transition rounded hover:bg-[#1a1a4e]`}>
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
+            ))}
+
+            {/* Stations */}
+            <Link to="/stations"
+              onClick={() => setMenuOpen(false)}
+              className="block py-2 px-3 text-sm text-gray-400 hover:text-white transition rounded hover:bg-[#1a1a4e]">
+              Stations
+            </Link>
+
             <div className="border-t border-[#2a2a5e] pt-2 mt-2">
               <span className="block px-3 text-[11px] text-gray-500 mb-1">{user?.email}</span>
               <button onClick={() => { logout(); setMenuOpen(false); }}
