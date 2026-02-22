@@ -348,11 +348,11 @@ export default function Assets() {
       )}
 
       <audio ref={audioRef} hidden />
-      <div className="bg-white shadow rounded-lg overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+      <div className="bg-white shadow rounded-lg overflow-hidden">
+        <table className="w-full table-fixed divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-3 text-left">
+              <th className="w-8 px-2 py-2 text-left">
                 <input
                   type="checkbox"
                   checked={realAssets.length > 0 && selected.size === realAssets.length}
@@ -360,21 +360,21 @@ export default function Assets() {
                   className="rounded border-gray-300"
                 />
               </th>
-              <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Audio</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Artist</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Album</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date Added</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+              <th className="w-10 px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase">Audio</th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{ width: '22%' }}>Title</th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{ width: '14%' }}>Artist</th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{ width: '12%' }}>Album</th>
+              <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+              <th className="w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+              <th className="w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Dur.</th>
+              <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
+              <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{ width: '14%' }}>Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {assets.map((asset) => (
               <tr key={asset.id} className={selected.has(asset.id) ? 'bg-brand-50' : ''}>
-                <td className="px-3 py-4">
+                <td className="px-2 py-2">
                   <input
                     type="checkbox"
                     checked={selected.has(asset.id)}
@@ -384,32 +384,32 @@ export default function Assets() {
                     title={hasRealAudio(asset.file_path) ? '' : 'No audio file — cannot add to review queue'}
                   />
                 </td>
-                <td className="px-3 py-4 text-center">
+                <td className="px-1 py-2 text-center">
                   {hasRealAudio(asset.file_path) ? (
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" title="Has audio file" />
+                    <span className="inline-block w-2 h-2 rounded-full bg-green-500" title="Has audio file" />
                   ) : (
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-300" title="No audio file (seed data)" />
+                    <span className="inline-block w-2 h-2 rounded-full bg-gray-300" title="No audio file (seed data)" />
                   )}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap font-medium">{asset.title}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.artist ?? '--'}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{asset.album ?? '--'}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                <td className="px-2 py-2 font-medium text-sm truncate" title={asset.title}>{asset.title}</td>
+                <td className="px-2 py-2 text-sm text-gray-500 truncate" title={asset.artist ?? ''}>{asset.artist ?? '--'}</td>
+                <td className="px-2 py-2 text-sm text-gray-500 truncate" title={asset.album ?? ''}>{asset.album ?? '--'}</td>
+                <td className="px-2 py-2 text-sm truncate">
                   <AssetCategoryBadge assetId={asset.id} category={asset.category} />
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <td className="px-2 py-2 text-xs text-gray-500 truncate">
                   {asset.asset_type}
                   {asset.asset_type === 'spot' && (
-                    <span className="ml-1.5">
+                    <span className="ml-1">
                       <AssetSponsorBadge assetId={asset.id} sponsorId={asset.sponsor_id} sponsorName={asset.sponsor_name} />
                     </span>
                   )}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDuration(asset.duration)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(asset.created_at)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-right space-x-3">
+                <td className="px-2 py-2 text-xs text-gray-500">{formatDuration(asset.duration)}</td>
+                <td className="px-2 py-2 text-xs text-gray-500">{formatDate(asset.created_at)}</td>
+                <td className="px-2 py-2 text-right space-x-2">
                   <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
-                  <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-sm">View</Link>
+                  <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-xs">View</Link>
                   <DownloadButton assetId={asset.id} title={asset.title} />
                   <button
                     onClick={() => {
@@ -419,16 +419,16 @@ export default function Assets() {
                       });
                     }}
                     disabled={deletingId === asset.id}
-                    className="text-red-600 hover:text-red-800 text-sm disabled:opacity-50"
+                    className="text-red-600 hover:text-red-800 text-xs disabled:opacity-50"
                   >
-                    {deletingId === asset.id ? <><Spinner className="mr-1" />Processing...</> : 'Delete'}
+                    {deletingId === asset.id ? '...' : 'Del'}
                   </button>
                 </td>
               </tr>
             ))}
             {assets.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-6 py-10 text-center text-gray-500">
+                <td colSpan={10} className="px-4 py-10 text-center text-gray-500">
                   {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>
