@@ -118,6 +118,23 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
         w = w_result.scalar_one_or_none()
         if w:
             total += await _fill_single_blackout(db, station_id, w)
+
+    # Compact positions after fill to prevent bloat from repeated bump operations
+    if total > 0:
+        compact_result = await db.execute(
+            select(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status.in_(["pending", "playing"]),
+            )
+            .order_by(QueueEntry.position)
+        )
+        compact_entries = compact_result.scalars().all()
+        for i, entry in enumerate(compact_entries):
+            entry.position = i + 1
+        await db.commit()
+        logger.info("Compacted %d queue positions for station %s", len(compact_entries), station_id)
+
     return total
 
 
