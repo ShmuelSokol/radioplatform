@@ -212,22 +212,35 @@ async def _seed_default_categories():
 
 
 async def _seed_default_asset_types():
-    """Insert default asset types if the asset_types table is empty."""
+    """Insert default asset types and any types already used in the assets table."""
     try:
         from app.db.engine import engine
         from sqlalchemy import text
 
         defaults = ["music", "shiur", "spot", "jingle", "zmanim"]
         async with engine.begin() as conn:
-            result = await conn.execute(text("SELECT COUNT(*) FROM asset_types"))
-            count = result.scalar()
-            if count == 0:
-                for name in defaults:
-                    await conn.execute(
-                        text("INSERT INTO asset_types (id, name, created_at, updated_at) VALUES (gen_random_uuid(), :name, NOW(), NOW())"),
-                        {"name": name},
-                    )
-                logger.info("Seeded %d default asset types", len(defaults))
+            # Gather types already in asset_types table
+            existing = await conn.execute(text("SELECT name FROM asset_types"))
+            existing_names = {row[0] for row in existing.fetchall()}
+
+            # Also discover types actually used in assets table
+            try:
+                used = await conn.execute(text(
+                    "SELECT DISTINCT asset_type FROM assets WHERE asset_type IS NOT NULL AND asset_type != ''"
+                ))
+                used_names = {row[0] for row in used.fetchall()}
+            except Exception:
+                used_names = set()
+
+            # Merge: defaults + used types - already existing
+            to_insert = (set(defaults) | used_names) - existing_names
+            for name in sorted(to_insert):
+                await conn.execute(
+                    text("INSERT INTO asset_types (id, name, created_at, updated_at) VALUES (gen_random_uuid(), :name, NOW(), NOW())"),
+                    {"name": name},
+                )
+            if to_insert:
+                logger.info("Seeded %d asset types: %s", len(to_insert), sorted(to_insert))
     except Exception as e:
         logger.warning("Asset type seeding skipped: %s", e)
 

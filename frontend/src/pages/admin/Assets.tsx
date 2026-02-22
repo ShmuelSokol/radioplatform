@@ -18,6 +18,12 @@ function hasRealAudio(filePath: string): boolean {
   return filePath.startsWith('assets/') || filePath.startsWith('http');
 }
 
+function getFileFormat(filePath: string): string {
+  const dot = filePath.lastIndexOf('.');
+  if (dot < 0) return '—';
+  return filePath.slice(dot + 1).toLowerCase();
+}
+
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '--';
   const m = Math.floor(seconds / 60);
@@ -30,7 +36,7 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/** Parse "m:ss" or plain seconds string into total seconds. Returns undefined if empty/invalid. */
+/** Parse "m:ss" or plain number (minutes) into total seconds. Returns undefined if empty/invalid. */
 function parseDurationInput(val: string): number | undefined {
   const trimmed = val.trim();
   if (!trimmed) return undefined;
@@ -41,7 +47,9 @@ function parseDurationInput(val: string): number | undefined {
     return mins * 60 + secs;
   }
   const n = parseFloat(trimmed);
-  return isNaN(n) ? undefined : n * 60; // treat bare number as minutes
+  if (isNaN(n)) return undefined;
+  // Treat bare number as minutes (e.g. "3" = 3:00 = 180s)
+  return n * 60;
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -426,6 +434,7 @@ export default function Assets() {
               <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
               <th className="w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
+              <th className="w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Format</th>
               <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
               <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{ width: '14%' }}>Actions</th>
             </tr>
@@ -468,10 +477,11 @@ export default function Assets() {
               </th>
               <th className="w-28 px-1 py-1">
                 <div className="flex gap-1">
-                  <input type="text" value={durationMin} onChange={(e) => setDurationMin(e.target.value)} placeholder="Min" title="Min duration (e.g. 3:00)" className="w-1/2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                  <input type="text" value={durationMax} onChange={(e) => setDurationMax(e.target.value)} placeholder="Max" title="Max duration (e.g. 6:30)" className="w-1/2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                  <input type="text" value={durationMin} onChange={(e) => setDurationMin(e.target.value)} placeholder="e.g. 3:00" title="Min duration — enter m:ss (3:00) or minutes (3)" className="w-1/2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                  <input type="text" value={durationMax} onChange={(e) => setDurationMax(e.target.value)} placeholder="e.g. 6:30" title="Max duration — enter m:ss (6:30) or minutes (6)" className="w-1/2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 </div>
               </th>
+              <th className="w-14 px-2 py-1" />
               <th className="w-20 px-2 py-1" />
               <th className="px-2 py-1" style={{ width: '14%' }} />
             </tr>
@@ -511,6 +521,7 @@ export default function Assets() {
                   )}
                 </td>
                 <td className="px-2 py-2 text-xs text-gray-500">{formatDuration(asset.duration)}</td>
+                <td className="px-2 py-2 text-xs text-gray-400 uppercase">{getFileFormat(asset.file_path)}</td>
                 <td className="px-2 py-2 text-xs text-gray-500">{formatDate(asset.created_at)}</td>
                 <td className="px-2 py-2 text-right space-x-2">
                   <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
@@ -533,7 +544,7 @@ export default function Assets() {
             ))}
             {assets.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-10 text-center text-gray-500">
+                <td colSpan={11} className="px-4 py-10 text-center text-gray-500">
                   {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>

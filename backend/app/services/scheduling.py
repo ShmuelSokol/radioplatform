@@ -426,6 +426,7 @@ class SchedulingService:
     ) -> NowPlaying:
         """
         Update or create the now-playing record for a station.
+        Uses upsert-style logic to avoid race conditions.
         """
         now = datetime.now(timezone.utc)
         ends_at = now + timedelta(seconds=duration_seconds) if duration_seconds else None
@@ -450,7 +451,22 @@ class SchedulingService:
             )
             self.db.add(record)
 
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            # Race condition: another process inserted first — fetch and update
+            result = await self.db.execute(stmt)
+            record = result.scalar_one_or_none()
+            if record:
+                record.asset_id = asset_id
+                record.started_at = now
+                record.ends_at = ends_at
+                record.block_id = block_id
+                await self.db.commit()
+            else:
+                raise
+
         await self.db.refresh(record)
         return record
 

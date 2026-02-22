@@ -747,7 +747,23 @@ class SchedulerEngine:
             )
             db.add(now_playing)
 
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            # Race condition: record was created concurrently — fetch and update
+            stmt2 = select(NowPlaying).where(
+                NowPlaying.station_id == station.id,
+                NowPlaying.channel_id == channel.id,
+            )
+            result2 = await db.execute(stmt2)
+            now_playing = result2.scalar_one_or_none()
+            if now_playing:
+                now_playing.asset_id = asset_id
+                now_playing.started_at = now
+                now_playing.ends_at = now + timedelta(seconds=duration)
+                now_playing.block_id = block.id
+                await db.commit()
 
         logger.info(
             f"Channel {channel.channel_name} ({channel.id}): Now playing '{asset.title}'"
