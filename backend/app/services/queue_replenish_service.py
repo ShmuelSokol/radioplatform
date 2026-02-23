@@ -86,10 +86,10 @@ class QueueReplenishService:
             await self._schedule_hourly_announcements()
 
         await self._schedule_ad_slots()
-        await self.db.flush()
+        await self.db.commit()
 
         if total_seconds >= TARGET_QUEUE_SECONDS:
-            logger.debug("Queue already full (%.1fs), skipping replenish", total_seconds)
+            logger.info("Queue already full (%.1fs >= %.1fs target), skipping content fill", total_seconds, float(TARGET_QUEUE_SECONDS))
             return
 
         shortfall = TARGET_QUEUE_SECONDS - total_seconds
@@ -126,7 +126,6 @@ class QueueReplenishService:
         if not rules:
             logger.info("No active rules found, falling back to random music fill")
             await self._fill_content(shortfall, asset_type="music", category=None)
-            await self.db.flush()
             return
 
         logger.info("Found %d active rules for replenishment (station_specific=%s)", len(rules), station_specific)
@@ -158,7 +157,7 @@ class QueueReplenishService:
             await self._schedule_hourly_announcements()
 
         await self._schedule_ad_slots()
-        await self.db.flush()
+        await self.db.commit()
         logger.info("Queue replenishment complete")
 
     async def _load_rules(self) -> list[ScheduleRule]:
@@ -360,44 +359,70 @@ class QueueReplenishService:
         asset_type: str = "music",
         category: str | None = None,
     ) -> None:
-        """Fill remaining queue with random content of the given type/category."""
-        logger.info("Filling %.1fs: type=%s category=%s", shortfall, asset_type, category)
-        query = select(Asset).where(Asset.asset_type == asset_type)
-        if category:
-            query = query.where(Asset.category == category)
-        if self.exclude_ids:
-            query = query.where(Asset.id.notin_(self.exclude_ids))
-        query = self._apply_oldies_filter(query)
-        query = query.order_by(func.random())
-        result = await self.db.execute(query)
-        candidates = result.scalars().all()
+        """Fill remaining queue with random content of the given type/category.
 
-        if not candidates:
-            logger.warning("No %s/%s candidates, retrying without recent exclusion", asset_type, category)
+        Commits in batches of BATCH_SIZE to avoid overwhelming the database
+        with a single massive flush. Recycles songs (allows repeats) when the
+        library is exhausted before reaching the target duration.
+        """
+        BATCH_SIZE = 200
+        logger.info("Filling %.1fs: type=%s category=%s", shortfall, asset_type, category)
+
+        filled = 0.0
+        passes = 0
+        max_passes = 10  # safety limit to avoid infinite loop
+
+        while filled < shortfall and passes < max_passes:
+            passes += 1
+
             query = select(Asset).where(Asset.asset_type == asset_type)
             if category:
                 query = query.where(Asset.category == category)
-            if self.queued_ids:
+            # Only exclude on first pass; allow repeats on subsequent passes
+            if passes == 1 and self.exclude_ids:
+                query = query.where(Asset.id.notin_(self.exclude_ids))
+            elif passes == 2 and self.queued_ids:
+                # Second pass: only exclude currently queued (allow recent replays)
                 query = query.where(Asset.id.notin_(self.queued_ids))
+            # passes >= 3: no exclusion, allow full recycling
             query = self._apply_oldies_filter(query)
             query = query.order_by(func.random())
             result = await self.db.execute(query)
             candidates = result.scalars().all()
 
-        if not candidates:
-            logger.warning("No %s assets available", asset_type)
-            return
+            if not candidates:
+                logger.warning("No %s/%s candidates on pass %d", asset_type, category, passes)
+                if passes >= 3:
+                    break  # truly no assets available
+                continue  # try next pass with fewer exclusions
 
-        filled = 0.0
-        for asset in candidates:
+            batch_count = 0
+            for asset in candidates:
+                if filled >= shortfall:
+                    break
+                dur = asset.duration or DEFAULT_DURATION
+                self.max_pos += 1
+                await self._enqueue_asset(asset, self.max_pos)
+                filled += dur
+                batch_count += 1
+
+                # Commit in batches to avoid huge single-transaction flushes
+                if batch_count % BATCH_SIZE == 0:
+                    await self.db.flush()
+                    await self.db.commit()
+                    logger.info("Committed batch of %d entries (%.1fs filled so far)", BATCH_SIZE, filled)
+
+            # Flush remaining entries from this pass
+            if batch_count % BATCH_SIZE != 0:
+                await self.db.flush()
+                await self.db.commit()
+
+            logger.info("Pass %d: filled %.1fs from %d candidates (%d used)", passes, filled, len(candidates), batch_count)
+
             if filled >= shortfall:
                 break
-            dur = asset.duration or DEFAULT_DURATION
-            self.max_pos += 1
-            await self._enqueue_asset(asset, self.max_pos)
-            filled += dur
 
-        logger.info("Filled %.1fs of %s content", filled, asset_type)
+        logger.info("Total filled %.1fs of %s content in %d passes", filled, asset_type, passes)
 
     async def _replenish_requests_only(self) -> None:
         """Fill queue exclusively from song requests (approved/queued) + popular requests."""

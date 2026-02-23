@@ -182,9 +182,12 @@ export function useAudioEngine(
     if (msUntilFade > 300000) return;
     // If fade start already passed but preempt hasn't, do an immediate short fade
     const actualDelay = Math.max(0, msUntilFade);
+    const remainingMs = preemptTime - Date.now();
     const actualFadeDuration = msUntilFade < 0
-      ? Math.max(200, preemptTime - Date.now()) // compress fade to remaining time
+      ? Math.max(500, remainingMs) // compress fade to remaining time (min 500ms)
       : preemptFadeMs;
+    // If preempt has already passed, skip the fade entirely
+    if (remainingMs <= 0) return;
 
     // Schedule fade-out
     const fadeTimer = setTimeout(() => {

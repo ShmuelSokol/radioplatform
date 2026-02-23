@@ -1104,13 +1104,37 @@ async def skip_current(
             db.add(log)
         current.status = "skipped"
 
-    # Advance to next
-    result = await db.execute(
+    # Advance to next — same logic as _check_advance:
+    # 1. Check for soft-preempt ad slots whose time has arrived
+    # 2. Then find next regular entry (skip future preempts)
+    now_skip = datetime.now(timezone.utc)
+    ad_result = await db.execute(
         select(QueueEntry)
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
-        .order_by(QueueEntry.position).limit(1)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.source == "ad_slot",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at <= now_skip,
+        )
+        .order_by(QueueEntry.preempt_at)
+        .limit(1)
     )
-    next_entry = result.scalar_one_or_none()
+    next_entry = ad_result.scalar_one_or_none()
+
+    if not next_entry:
+        result = await db.execute(
+            select(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_skip),
+            )
+            .order_by(QueueEntry.position)
+            .limit(1)
+        )
+        next_entry = result.scalar_one_or_none()
+
     await _replenish_queue(db, station_id)
     if next_entry:
         next_entry.status = "playing"
@@ -1562,3 +1586,43 @@ async def schedule_hourly(
     )
     count = result.scalar() or 0
     return {"message": f"Hourly scheduling complete", "preempt_entries": count}
+
+
+@router.post("/force-replenish")
+async def force_replenish(
+    station_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Force a full queue replenish for debugging."""
+    try:
+        await _replenish_queue(db, station_id)
+        await db.commit()
+    except Exception as exc:
+        logger.error("force-replenish failed: %s", exc, exc_info=True)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    # Report stats
+    result = await db.execute(
+        select(func.count())
+        .select_from(QueueEntry)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
+    )
+    total_entries = result.scalar() or 0
+
+    result2 = await db.execute(
+        select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
+        .select_from(QueueEntry)
+        .join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
+    )
+    total_seconds = float(result2.scalar() or 0)
+
+    return {
+        "message": "Replenish complete",
+        "total_entries": total_entries,
+        "total_seconds": total_seconds,
+        "total_hours": round(total_seconds / 3600, 1),
+        "target_seconds": 604800,
+        "target_hours": 168.0,
+    }

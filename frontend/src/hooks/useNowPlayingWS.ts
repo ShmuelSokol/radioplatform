@@ -61,7 +61,7 @@ export const useNowPlayingWS = (stationId: string) => {
     };
 
     poll();
-    pollTimer.current = setInterval(poll, 10000);
+    pollTimer.current = setInterval(poll, 3000);
   }, [stationId]);
 
   const connectWebSocket = useCallback(() => {
