@@ -552,7 +552,7 @@ class QueueReplenishService:
                     asset_id=asset.id,
                     position=self.max_pos,
                     status="pending",
-                    preempt_at=hour_boundary if i == 0 else None,
+                    preempt_at=hour_boundary,  # ALL entries get preempt_at so weather follows time
                 )
                 self.db.add(entry)
 

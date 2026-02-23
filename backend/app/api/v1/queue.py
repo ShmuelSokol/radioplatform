@@ -501,10 +501,9 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
     """Core playback engine: check if current track is done and auto-advance."""
     is_blackout = await _is_blacked_out(db, station_id)
 
-    # During blackout, skip jingles/weather but still advance silence entries
-    if not is_blackout:
-        await _maybe_insert_hourly_jingle(db, station_id)
-        await _maybe_insert_weather_spot(db, station_id)
+    # Hourly jingles and weather are now pre-scheduled via _schedule_hourly_announcements()
+    # in queue_replenish_service.py with exact preempt_at timestamps.
+    # The old real-time insertion functions are disabled to prevent duplicates.
 
     result = await db.execute(
         select(QueueEntry)
