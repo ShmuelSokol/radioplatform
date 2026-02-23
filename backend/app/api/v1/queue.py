@@ -791,6 +791,7 @@ async def _get_queue_impl(station_id, limit, db):
     in_silence_block = False
     current_blackout_end = None
     current_blackout_name = None
+    last_preempt_pa = None  # track consecutive preempt groups
 
     # If currently playing silence (active blackout), find its blackout end time
     if now_playing_entry and now_playing_entry.asset and now_playing_entry.asset.asset_type == "silence":
@@ -815,9 +816,14 @@ async def _get_queue_impl(station_id, limit, db):
             if e.source == "ad_slot":
                 # Soft preempt: ad plays after current song finishes (not before)
                 cursor = max(cursor, pa)
+            elif last_preempt_pa and abs((pa - last_preempt_pa).total_seconds()) < 2:
+                # Same preempt group (e.g. weather after time at same :00)
+                # Don't reset cursor — this entry plays after the previous one
+                cursor = max(cursor, pa)
             else:
-                # Hard preempt: interrupts whatever is playing at that exact moment
+                # New hard preempt: interrupts whatever is playing at that exact moment
                 cursor = pa
+            last_preempt_pa = pa
             # Find which blackout this belongs to
             if not current_blackout_end:
                 for bo_start, bo_end in blackout_ends.items():
@@ -825,6 +831,8 @@ async def _get_queue_impl(station_id, limit, db):
                         current_blackout_end = bo_end
                         current_blackout_name = blackout_names.get(bo_start)
                         break
+        else:
+            last_preempt_pa = None
 
         if is_silence:
             in_silence_block = True
@@ -866,6 +874,14 @@ async def _get_queue_impl(station_id, limit, db):
         if not is_now:
             cursor += timedelta(seconds=dur)
         entries_data.append(d)
+
+    # Re-sort by estimated_start so display order matches actual play times
+    # (preempt entries may have been sorted by preempt_at but their actual
+    # estimated play time differs — e.g. ad_slot at :30 may play after :00 time block)
+    entries_data.sort(key=lambda d: (
+        0 if d['status'] == 'playing' else 1,
+        d.get('estimated_start', ''),
+    ))
 
     return {
         "entries": entries_data,
