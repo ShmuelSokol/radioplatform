@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,6 +14,7 @@ class QueueEntryOut(BaseModel):
     asset_id: uuid.UUID | str
     position: int
     status: str
+    preempt_at: datetime | None = None
     asset: AssetResponse | None = None
 
 
