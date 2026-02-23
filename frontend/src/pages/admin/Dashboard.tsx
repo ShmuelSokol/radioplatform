@@ -514,14 +514,20 @@ export default function Dashboard() {
                 Queue empty — add assets from the library below, or press START
               </div>
             ) : (
-              queueEntries.map((entry: any) => {
+              queueEntries.map((entry: any, idx: number) => {
                 const a = entry.asset;
                 const isCur = entry.status === 'playing';
                 const isDragging = dragEntryId === entry.id;
                 const isDragOver = dragOverId === entry.id && dragEntryId !== entry.id;
-                return (
+                const prevEntry = idx > 0 ? queueEntries[idx - 1] : null;
+                const isFirstPreempt = entry.preempt_at && (!prevEntry || !prevEntry.preempt_at);
+                return (<div key={entry.id + '-wrap'}>
+                  {isFirstPreempt && (
+                    <div className="bg-orange-900/30 border-y border-orange-700/50 px-2 py-1 text-[10px] text-orange-400 uppercase tracking-wider font-bold sticky top-0 z-10">
+                      Scheduled Hourly Announcements ({queueEntries.filter((e: any) => e.preempt_at).length} entries)
+                    </div>
+                  )}
                   <div
-                    key={entry.id}
                     draggable={!isCur}
                     onDragStart={!isCur ? (e) => handleDragStart(e, entry.id) : undefined}
                     onDragOver={!isCur ? (e) => handleDragOver(e, entry.id) : undefined}
@@ -530,10 +536,11 @@ export default function Dashboard() {
                     onDragEnd={handleDragEnd}
                     className={`flex items-center px-2 py-[2px] border-b min-w-[500px] transition-colors
                       ${isCur ? 'bg-[#0000aa] text-yellow-300 border-[#12122e]'
+                        : entry.preempt_at ? 'bg-orange-950/30 text-orange-200 border-orange-900/30 hover:bg-orange-900/30'
                         : isDragOver ? 'bg-cyan-900/40 border-cyan-500 border-t-2'
                         : isDragging ? 'opacity-40 border-[#12122e]'
                         : 'text-cyan-200 hover:bg-[#14143a] border-[#12122e]'}
-                      ${!isCur ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                      ${!isCur && !entry.preempt_at ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   >
                     <span className="w-6 text-[11px] shrink-0">
                       {isCur ? '▶' : <span className="text-gray-600 text-[10px]">⠿</span>}
@@ -573,7 +580,7 @@ export default function Dashboard() {
                       )}
                     </span>
                   </div>
-                );
+                </div>);
               })
             )}
           </div>
