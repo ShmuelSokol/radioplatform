@@ -802,6 +802,7 @@ async def get_queue(
             "position": e.position,
             "status": e.status,
             "estimated_start": est_start,
+            "preempt_at": e.preempt_at.isoformat() if e.preempt_at else None,
             "asset": {
                 "id": str(e.asset.id),
                 "title": e.asset.title,
