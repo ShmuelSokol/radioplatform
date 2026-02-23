@@ -657,6 +657,7 @@ async def get_queue(
     _user: User = Depends(get_current_user),
 ):
     # Pure read-only — advancement is handled by the background scheduler.
+    import traceback as _tb
     from sqlalchemy.orm import joinedload
 
     # Fetch all pending/playing entries (no SQL limit — apply after display sort)
@@ -672,28 +673,38 @@ async def get_queue(
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
 
     # Sort ALL entries by estimated play time (chronological order)
-    now_utc_sort = datetime.now(timezone.utc)
-    if now_playing_entry and now_playing_entry.started_at:
-        _ad = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
-        _el = (now_utc_sort - now_playing_entry.started_at).total_seconds()
-        _sort_cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
-    else:
-        _sort_cursor = now_utc_sort
+    try:
+        now_utc_sort = datetime.now(timezone.utc)
+        _np_sa = now_playing_entry.started_at if now_playing_entry and now_playing_entry.started_at else None
+        if _np_sa and _np_sa.tzinfo is None:
+            _np_sa = _np_sa.replace(tzinfo=timezone.utc)
 
-    _est_map = {}
-    for e in entries:
-        if e.status == "playing":
-            _est_map[e.id] = now_playing_entry.started_at if now_playing_entry and now_playing_entry.started_at else now_utc_sort
-        elif e.preempt_at:
-            pa = e.preempt_at if e.preempt_at.tzinfo else e.preempt_at.replace(tzinfo=timezone.utc)
-            _est_map[e.id] = pa
+        if _np_sa:
+            _ad = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
+            _el = (now_utc_sort - _np_sa).total_seconds()
+            _sort_cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
         else:
-            _est_map[e.id] = _sort_cursor
-            dur = e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION
-            _sort_cursor += timedelta(seconds=dur)
+            _sort_cursor = now_utc_sort
 
-    entries.sort(key=lambda e: (0 if e.status == "playing" else 1, _est_map.get(e.id, now_utc_sort)))
-    entries = entries[:limit]
+        _est_map = {}
+        for e in entries:
+            if e.status == "playing":
+                _est_map[e.id] = _np_sa or now_utc_sort
+            elif e.preempt_at:
+                pa = e.preempt_at if e.preempt_at.tzinfo else e.preempt_at.replace(tzinfo=timezone.utc)
+                _est_map[e.id] = pa
+            else:
+                _est_map[e.id] = _sort_cursor
+                dur = e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION
+                _sort_cursor += timedelta(seconds=dur)
+
+        entries.sort(key=lambda e: (0 if e.status == "playing" else 1, _est_map.get(e.id, now_utc_sort)))
+        entries = entries[:limit]
+    except Exception as _sort_err:
+        logger.exception("Queue sort error: %s", _sort_err)
+        # Fallback: simple position sort with limit
+        entries.sort(key=lambda e: (0 if e.status == "playing" else 1, e.position))
+        entries = entries[:limit]
 
     # Calculate elapsed/remaining for now playing
     np_data = None
