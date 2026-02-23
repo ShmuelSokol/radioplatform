@@ -698,7 +698,10 @@ async def _get_queue_impl(station_id, limit, db):
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
 
-    # Sort ALL entries by estimated play time (chronological order)
+    # Sort entries by simulating actual playback order:
+    # - Regular songs play sequentially by position
+    # - Hard preempts (hourly time/weather) interrupt at their exact preempt_at
+    # - Soft preempts (ad_slots) play after current song finishes when their time arrives
     try:
         now_utc_sort = datetime.now(timezone.utc)
         _np_sa = now_playing_entry.started_at if now_playing_entry and now_playing_entry.started_at else None
@@ -708,27 +711,98 @@ async def _get_queue_impl(station_id, limit, db):
         if _np_sa:
             _ad = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
             _el = (now_utc_sort - _np_sa).total_seconds()
-            _sort_cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
+            _cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
         else:
-            _sort_cursor = now_utc_sort
+            _cursor = now_utc_sort
+
+        def _tz(dt):
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+        # Separate into groups
+        playing = [e for e in entries if e.status == "playing"]
+        regulars = sorted(
+            [e for e in entries if e.status == "pending" and not e.preempt_at],
+            key=lambda e: e.position,
+        )
+        hard_preempts = sorted(
+            [e for e in entries if e.status == "pending" and e.preempt_at and e.source != "ad_slot"],
+            key=lambda e: _tz(e.preempt_at),
+        )
+        soft_preempts = sorted(
+            [e for e in entries if e.status == "pending" and e.preempt_at and e.source == "ad_slot"],
+            key=lambda e: _tz(e.preempt_at),
+        )
 
         _est_map = {}
-        for e in entries:
-            if e.status == "playing":
-                _est_map[e.id] = _np_sa or now_utc_sort
-            elif e.preempt_at:
-                pa = e.preempt_at if e.preempt_at.tzinfo else e.preempt_at.replace(tzinfo=timezone.utc)
-                _est_map[e.id] = pa
+        for e in playing:
+            _est_map[e.id] = _np_sa or now_utc_sort
+
+        ri, hi, si = 0, 0, 0
+        _safety = len(entries) * 3  # prevent infinite loops
+        while (ri < len(regulars) or hi < len(hard_preempts) or si < len(soft_preempts)) and _safety > 0:
+            _safety -= 1
+            # 1. Fire hard preempt if its time has arrived
+            if hi < len(hard_preempts):
+                hp_pa = _tz(hard_preempts[hi].preempt_at)
+                if hp_pa <= _cursor:
+                    _cursor = hp_pa
+                    _est_map[hard_preempts[hi].id] = _cursor
+                    _dur = hard_preempts[hi].asset.duration if hard_preempts[hi].asset else DEFAULT_DURATION
+                    _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    hi += 1
+                    continue
+
+            # 2. Fire soft preempt (ad_slot) if its time has arrived
+            if si < len(soft_preempts):
+                sp_pa = _tz(soft_preempts[si].preempt_at)
+                if sp_pa <= _cursor:
+                    _est_map[soft_preempts[si].id] = _cursor
+                    _dur = soft_preempts[si].asset.duration if soft_preempts[si].asset else DEFAULT_DURATION
+                    _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    si += 1
+                    continue
+
+            # 3. Play next regular song
+            if ri < len(regulars):
+                song = regulars[ri]
+                song_dur = song.asset.duration if song.asset and song.asset.duration else DEFAULT_DURATION
+                song_end = _cursor + timedelta(seconds=song_dur)
+
+                # Check if hard preempt fires during this song
+                if hi < len(hard_preempts):
+                    hp_pa = _tz(hard_preempts[hi].preempt_at)
+                    if hp_pa < song_end:
+                        _est_map[song.id] = _cursor
+                        _cursor = hp_pa  # preempt will fire next iteration
+                        ri += 1
+                        continue
+
+                _est_map[song.id] = _cursor
+                _cursor += timedelta(seconds=song_dur)
+                ri += 1
             else:
-                _est_map[e.id] = _sort_cursor
-                dur = e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION
-                _sort_cursor += timedelta(seconds=dur)
+                # No regular songs left — process remaining preempts by time
+                next_hp = _tz(hard_preempts[hi].preempt_at) if hi < len(hard_preempts) else None
+                next_sp = _tz(soft_preempts[si].preempt_at) if si < len(soft_preempts) else None
+                if next_hp and (not next_sp or next_hp <= next_sp):
+                    _cursor = max(_cursor, next_hp)
+                    _est_map[hard_preempts[hi].id] = _cursor
+                    _dur = hard_preempts[hi].asset.duration if hard_preempts[hi].asset else DEFAULT_DURATION
+                    _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    hi += 1
+                elif next_sp:
+                    _cursor = max(_cursor, next_sp)
+                    _est_map[soft_preempts[si].id] = _cursor
+                    _dur = soft_preempts[si].asset.duration if soft_preempts[si].asset else DEFAULT_DURATION
+                    _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    si += 1
+                else:
+                    break
 
         entries.sort(key=lambda e: (0 if e.status == "playing" else 1, _est_map.get(e.id, now_utc_sort)))
         entries = entries[:limit]
     except Exception as _sort_err:
         logger.exception("Queue sort error: %s", _sort_err)
-        # Fallback: simple position sort with limit
         entries.sort(key=lambda e: (0 if e.status == "playing" else 1, e.position))
         entries = entries[:limit]
 
@@ -752,8 +826,9 @@ async def _get_queue_impl(station_id, limit, db):
             "remaining_seconds": round(remaining, 1),
         }
 
-    # Calculate estimated start time for each entry
+    # Use _est_map for estimated start times (calculated by playback simulation above)
     now_utc = datetime.now(timezone.utc)
+    # Fallback cursor only used if _est_map is missing an entry
     if now_playing_entry and now_playing_entry.started_at:
         asset_dur = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
         el = (now_utc - now_playing_entry.started_at).total_seconds()
@@ -791,7 +866,6 @@ async def _get_queue_impl(station_id, limit, db):
     in_silence_block = False
     current_blackout_end = None
     current_blackout_name = None
-    last_preempt_pa = None  # track consecutive preempt groups
 
     # If currently playing silence (active blackout), find its blackout end time
     if now_playing_entry and now_playing_entry.asset and now_playing_entry.asset.asset_type == "silence":
@@ -808,49 +882,39 @@ async def _get_queue_impl(station_id, limit, db):
         is_now = e.status == "playing"
         is_silence = e.asset and e.asset.asset_type == "silence"
 
-        # Preempt entries: hard preempt plays at exact time, soft preempt (ad_slot) waits for song end
+        # Use simulated estimated time from _est_map (accurate play order)
+        if is_now and now_playing_entry and now_playing_entry.started_at:
+            est_start = now_playing_entry.started_at.isoformat()
+        elif e.id in _est_map:
+            est_start = _est_map[e.id].isoformat()
+        else:
+            est_start = cursor.isoformat()
+            cursor += timedelta(seconds=dur)
+
+        # Blackout label tracking
         if not is_now and e.preempt_at:
             pa = e.preempt_at
             if pa.tzinfo is None:
                 pa = pa.replace(tzinfo=timezone.utc)
-            if e.source == "ad_slot":
-                # Soft preempt: ad plays after current song finishes (not before)
-                cursor = max(cursor, pa)
-            elif last_preempt_pa and abs((pa - last_preempt_pa).total_seconds()) < 2:
-                # Same preempt group (e.g. weather after time at same :00)
-                # Don't reset cursor — this entry plays after the previous one
-                cursor = max(cursor, pa)
-            else:
-                # New hard preempt: interrupts whatever is playing at that exact moment
-                cursor = pa
-            last_preempt_pa = pa
-            # Find which blackout this belongs to
             if not current_blackout_end:
                 for bo_start, bo_end in blackout_ends.items():
                     if abs((pa - bo_start).total_seconds()) < 60:
                         current_blackout_end = bo_end
                         current_blackout_name = blackout_names.get(bo_start)
                         break
-        else:
-            last_preempt_pa = None
 
         if is_silence:
             in_silence_block = True
-            # If we don't have a name yet (active blackout, no preempt_at), try to find it
             if not current_blackout_name:
                 for bo_start, bo_end in blackout_ends.items():
                     if bo_start <= now_utc and bo_end > now_utc:
                         current_blackout_name = blackout_names.get(bo_start)
                         break
         elif in_silence_block:
-            # First non-silence entry after silence block — cap cursor to blackout end
             in_silence_block = False
-            if current_blackout_end and current_blackout_end < cursor:
-                cursor = current_blackout_end
             current_blackout_end = None
             current_blackout_name = None
 
-        est_start = now_playing_entry.started_at.isoformat() if is_now and now_playing_entry and now_playing_entry.started_at else cursor.isoformat()
         d = {
             "id": str(e.id),
             "station_id": str(e.station_id),
@@ -871,17 +935,7 @@ async def _get_queue_impl(station_id, limit, db):
         }
         if is_silence and current_blackout_name:
             d["blackout_name"] = current_blackout_name
-        if not is_now:
-            cursor += timedelta(seconds=dur)
         entries_data.append(d)
-
-    # Re-sort by estimated_start so display order matches actual play times
-    # (preempt entries may have been sorted by preempt_at but their actual
-    # estimated play time differs — e.g. ad_slot at :30 may play after :00 time block)
-    entries_data.sort(key=lambda d: (
-        0 if d['status'] == 'playing' else 1,
-        d.get('estimated_start', ''),
-    ))
 
     return {
         "entries": entries_data,
