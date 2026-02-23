@@ -538,6 +538,7 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
             QueueEntry.status == "pending",
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now_utc,
+            QueueEntry.source != "ad_slot",  # ad_slots use soft preempt (wait for song end)
         )
         .order_by(QueueEntry.preempt_at, QueueEntry.position)
         .limit(1)
@@ -603,18 +604,34 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
         db.add(log)
         current.status = "played"
 
-    # Find next pending (skip entries with preempt_at in the future)
-    result = await db.execute(
+    # Check for soft-preempt ad slots first (clock-based :15/:30/:45 ads)
+    ad_result = await db.execute(
         select(QueueEntry)
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+            QueueEntry.source == "ad_slot",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at <= now_utc,
         )
-        .order_by(QueueEntry.position)
+        .order_by(QueueEntry.preempt_at)
         .limit(1)
     )
-    next_entry = result.scalar_one_or_none()
+    next_entry = ad_result.scalar_one_or_none()
+
+    if not next_entry:
+        # Normal: find next by position (skip entries with preempt_at in the future)
+        result = await db.execute(
+            select(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+            )
+            .order_by(QueueEntry.position)
+            .limit(1)
+        )
+        next_entry = result.scalar_one_or_none()
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)

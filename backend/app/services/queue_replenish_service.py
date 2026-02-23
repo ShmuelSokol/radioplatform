@@ -26,10 +26,8 @@ from app.models.station import Station
 logger = logging.getLogger(__name__)
 
 TARGET_QUEUE_SECONDS = 604800  # 7 days
-MAX_FILL_PER_RUN = 86400  # cap each replenish run to 24h of new content
 DEFAULT_DURATION = 180  # 3 minutes fallback
-SONGS_BETWEEN_ADS = 5  # ~15 min at 3 min avg
-MAX_ADS_PER_RUN = 96  # cap ad slot inserts per run (~24h worth)
+MAX_ADS_PER_RUN = 504  # 7 days × 24h × 3 quarter-hour slots
 
 
 class QueueReplenishService:
@@ -94,7 +92,7 @@ class QueueReplenishService:
             logger.debug("Queue already full (%.1fs), skipping replenish", total_seconds)
             return
 
-        shortfall = min(TARGET_QUEUE_SECONDS - total_seconds, MAX_FILL_PER_RUN)
+        shortfall = TARGET_QUEUE_SECONDS - total_seconds
         logger.info("Queue shortfall: %.1fs, replenishing...", shortfall)
 
         result = await self.db.execute(
@@ -570,10 +568,11 @@ class QueueReplenishService:
         logger.info("Scheduled hourly announcements for %d hours", hours_scheduled)
 
     async def _schedule_ad_slots(self) -> None:
-        """Schedule 'KOL BRAMAH TEST SPONSOR' ad every ~15 min (soft slot, no preempt).
+        """Schedule sponsor ad at :15, :30, :45 of every hour (soft preempt).
 
-        Interleaves ads into existing queue by finding song positions that don't
-        already have an adjacent ad slot, then inserting at position - 1 (just before).
+        Ads use preempt_at so they play when their clock time arrives — the
+        playback engine waits for the current song to finish, then plays the
+        ad before the next regular song.
         """
         # Find the ad asset
         result = await self.db.execute(
@@ -584,52 +583,51 @@ class QueueReplenishService:
             logger.warning("Ad asset 'KOL BRAMAH TEST SPONSOR' not found")
             return
 
-        # Get all pending entries with their positions and sources
-        result = await self.db.execute(
-            select(QueueEntry.position, QueueEntry.source)
-            .where(
+        now = datetime.now(timezone.utc)
+
+        # Get existing ad_slot preempt times to avoid duplicates
+        existing = await self.db.execute(
+            select(QueueEntry.preempt_at).where(
                 QueueEntry.station_id == self.station_id,
                 QueueEntry.status == "pending",
+                QueueEntry.source == "ad_slot",
+                QueueEntry.preempt_at.isnot(None),
             )
-            .order_by(QueueEntry.position)
         )
-        rows = result.all()
-        if not rows:
-            return
+        existing_times = {
+            r[0].replace(second=0, microsecond=0)
+            for r in existing.all() if r[0]
+        }
 
-        # Build sets for quick lookup
-        ad_positions = {r.position for r in rows if r.source == "ad_slot"}
-        song_positions = [r.position for r in rows if r.source != "ad_slot"]
-
-        # Find positions where an ad should be inserted (every SONGS_BETWEEN_ADS songs)
+        # Schedule for 7 days (7×24×3 = 504 quarter-hour slots)
         inserted = 0
-        for idx in range(SONGS_BETWEEN_ADS - 1, len(song_positions), SONGS_BETWEEN_ADS):
+        for hours_ahead in range(168):  # 7 days
+            for minute in (15, 30, 45):
+                slot_time = (now + timedelta(hours=hours_ahead)).replace(
+                    minute=minute, second=0, microsecond=0
+                )
+                if slot_time <= now or slot_time in existing_times:
+                    continue
+                if inserted >= MAX_ADS_PER_RUN:
+                    break
+
+                self.max_pos += 1
+                entry = QueueEntry(
+                    id=uuid.uuid4(),
+                    station_id=self.station_id,
+                    asset_id=ad_asset.id,
+                    position=self.max_pos,
+                    status="pending",
+                    source="ad_slot",
+                    preempt_at=slot_time,
+                )
+                self.db.add(entry)
+                inserted += 1
             if inserted >= MAX_ADS_PER_RUN:
                 break
-            target_pos = song_positions[idx]
-            # Check if there's already an ad slot within 2 positions of this target
-            has_nearby_ad = any(
-                abs(ap - target_pos) <= 2 for ap in ad_positions
-            )
-            if has_nearby_ad:
-                continue
-
-            # Insert ad just before this song (position - 1, fractional)
-            ad_pos = target_pos - 1
-            entry = QueueEntry(
-                id=uuid.uuid4(),
-                station_id=self.station_id,
-                asset_id=ad_asset.id,
-                position=ad_pos,
-                status="pending",
-                source="ad_slot",
-            )
-            self.db.add(entry)
-            ad_positions.add(ad_pos)
-            inserted += 1
 
         if inserted:
-            logger.info("Scheduled %d ad slots for station %s", inserted, self.station_id)
+            logger.info("Scheduled %d clock-based ad slots for station %s", inserted, self.station_id)
 
     # Backwards-compat alias
     async def _fill_random_music(self, shortfall: float) -> None:
