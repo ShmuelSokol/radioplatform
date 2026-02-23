@@ -117,25 +117,30 @@ class QueueReplenishService:
 
         logger.info("Found %d active rules for replenishment (station_specific=%s)", len(rules), station_specific)
 
+        # Step 1: Apply daypart / fixed_time rules (passive — define fill spec)
         for rule in rules:
-            if rule.rule_type == "rotation":
-                await self._apply_rotation_rule(rule, shortfall)
-            elif rule.rule_type == "interval":
-                await self._apply_interval_rule(rule, shortfall)
-            elif rule.rule_type == "daypart":
+            if rule.rule_type == "daypart":
                 await self._apply_daypart_rule(rule, shortfall)
             elif rule.rule_type == "fixed_time":
                 await self._apply_fixed_time_rule(rule, shortfall)
+
+        # Step 2: Fill main content FIRST so interval/rotation entries interleave
+        fill_type, fill_cat = self._get_fill_spec(rules)
+        fill_start_pos = self.max_pos
+        await self._fill_content(shortfall, asset_type=fill_type, category=fill_cat)
+        fill_end_pos = self.max_pos
 
         # Only insert global sponsors for stations using global rules
         if not station_specific:
             await self._insert_sponsors(shortfall)
 
-        current_duration = await self._calculate_queue_duration()
-        remaining_shortfall = TARGET_QUEUE_SECONDS - current_duration
-        if remaining_shortfall > 0:
-            fill_type, fill_cat = self._get_fill_spec(rules)
-            await self._fill_content(remaining_shortfall, asset_type=fill_type, category=fill_cat)
+        # Step 3: Apply interval / rotation rules — spread them evenly
+        # within the filled content range so they interleave properly
+        for rule in rules:
+            if rule.rule_type == "rotation":
+                await self._apply_rotation_rule(rule, shortfall)
+            elif rule.rule_type == "interval":
+                await self._apply_interval_rule(rule, shortfall, fill_start_pos, fill_end_pos)
 
         await self.db.flush()
         logger.info("Queue replenishment complete")
@@ -223,7 +228,10 @@ class QueueReplenishService:
             insert_pos = self.max_pos + (i + 1) * rule.songs_between
             await self._enqueue_asset(asset, insert_pos)
 
-    async def _apply_interval_rule(self, rule: ScheduleRule, shortfall: float) -> None:
+    async def _apply_interval_rule(
+        self, rule: ScheduleRule, shortfall: float,
+        fill_start: int | None = None, fill_end: int | None = None,
+    ) -> None:
         if not rule.interval_minutes or rule.interval_minutes <= 0:
             return
         interval_seconds = rule.interval_minutes * 60
@@ -235,11 +243,21 @@ class QueueReplenishService:
         assets = await self._find_assets_for_rule(rule)
         if not assets:
             return
-        for i in range(insertions_needed):
-            asset = assets[i % len(assets)]
-            time_offset = (i + 1) * interval_seconds
-            insert_pos = self.max_pos + int((time_offset / DEFAULT_DURATION))
-            await self._enqueue_asset(asset, insert_pos)
+
+        # If fill range is provided, spread entries evenly within it
+        if fill_start is not None and fill_end is not None and fill_end > fill_start:
+            span = fill_end - fill_start
+            step = max(1, span // (insertions_needed + 1))
+            for i in range(insertions_needed):
+                asset = assets[i % len(assets)]
+                insert_pos = fill_start + (i + 1) * step
+                await self._enqueue_asset(asset, insert_pos)
+        else:
+            for i in range(insertions_needed):
+                asset = assets[i % len(assets)]
+                time_offset = (i + 1) * interval_seconds
+                insert_pos = self.max_pos + int((time_offset / DEFAULT_DURATION))
+                await self._enqueue_asset(asset, insert_pos)
 
     async def _apply_daypart_rule(self, rule: ScheduleRule, shortfall: float) -> None:
         """Passive — defines fill spec via _get_fill_spec."""
