@@ -1351,3 +1351,53 @@ async def preview_weather(
         "time_text": time_text,
         "weather_text": weather_text,
     }
+
+
+@router.post("/insert-weather")
+async def insert_weather_now(
+    station_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Force-insert time announcement + weather spot into queue (admin trigger)."""
+    if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
+        return JSONResponse({"error": "ElevenLabs or Supabase storage not configured"}, status_code=503)
+
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    now = datetime.now(timezone.utc)
+    eastern_now = now.astimezone(ZoneInfo("America/New_York"))
+    slot_key = eastern_now.strftime("%Y-%m-%dT%H")
+
+    from app.services.weather_spot_service import get_or_create_weather_spot_assets
+    time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key)
+
+    assets_to_insert = [a for a in [time_asset, weather_asset] if a is not None]
+    if not assets_to_insert:
+        return {"message": "No weather/time assets generated", "inserted": 0}
+
+    # Bump pending positions and insert at front
+    await db.execute(
+        update(QueueEntry)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .values(position=QueueEntry.position + len(assets_to_insert))
+    )
+    result = await db.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
+    )
+    current = result.scalar_one_or_none()
+    next_pos = (current.position + 1) if current else 1
+
+    for i, asset in enumerate(assets_to_insert):
+        entry = QueueEntry(
+            id=uuid.uuid4(), station_id=station_id, asset_id=asset.id,
+            position=next_pos + i, status="pending",
+        )
+        db.add(entry)
+
+    await db.commit()
+    return {"message": f"Inserted {len(assets_to_insert)} weather/time assets", "inserted": len(assets_to_insert)}
