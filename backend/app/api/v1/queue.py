@@ -790,13 +790,14 @@ async def _get_queue_impl(station_id, limit, db):
         is_now = e.status == "playing"
         is_silence = e.asset and e.asset.asset_type == "silence"
 
-        # If entry has preempt_at in the future, it will start at that time
+        # Preempt entries play at exactly their preempt_at time (hard stop)
         if not is_now and e.preempt_at:
             pa = e.preempt_at
             if pa.tzinfo is None:
                 pa = pa.replace(tzinfo=timezone.utc)
-            if pa > cursor:
-                cursor = pa
+            # Always use preempt_at as this entry's start time — preemption
+            # interrupts whatever is playing at that exact moment
+            cursor = pa
             # Find which blackout this belongs to
             if not current_blackout_end:
                 for bo_start, bo_end in blackout_ends.items():
