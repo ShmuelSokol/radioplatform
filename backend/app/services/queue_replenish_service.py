@@ -134,13 +134,14 @@ class QueueReplenishService:
         if not station_specific:
             await self._insert_sponsors(shortfall)
 
-        # Step 3: Apply interval / rotation rules — spread them evenly
-        # within the filled content range so they interleave properly
+        # Step 3: Apply rotation rules (spread within fill range)
         for rule in rules:
             if rule.rule_type == "rotation":
                 await self._apply_rotation_rule(rule, shortfall)
-            elif rule.rule_type == "interval":
-                await self._apply_interval_rule(rule, shortfall, fill_start_pos, fill_end_pos)
+
+        # Step 4: Pre-schedule hourly time + weather with exact preempt_at timestamps
+        if self.automation_config.get("hourly_time_announcement") or self.automation_config.get("weather_enabled"):
+            await self._schedule_hourly_announcements()
 
         await self.db.flush()
         logger.info("Queue replenishment complete")
@@ -478,6 +479,77 @@ class QueueReplenishService:
 
         await self.db.flush()
         logger.info("Requests-only replenish: filled %.1fs", filled)
+
+    async def _schedule_hourly_announcements(self) -> None:
+        """Pre-schedule time announcement + weather at each hour boundary with preempt_at.
+
+        These entries use preempt_at so they interrupt the current track exactly
+        on the hour — no reliance on scheduler timing.
+        """
+        from app.config import settings
+        if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
+            logger.info("Skipping hourly announcements: TTS or storage not configured")
+            return
+
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+
+        from app.services.weather_spot_service import get_or_create_weather_spot_assets
+
+        now = datetime.now(timezone.utc)
+        eastern_tz = ZoneInfo("America/New_York")
+
+        # Check which hours already have scheduled entries (avoid duplicates)
+        result = await self.db.execute(
+            select(QueueEntry.preempt_at)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+            )
+        )
+        existing_preempts = {row[0].replace(minute=0, second=0, microsecond=0) for row in result.all() if row[0]}
+
+        # Schedule for the next 24 hours
+        hours_scheduled = 0
+        for h in range(24):
+            hour_boundary = (now + timedelta(hours=h)).replace(minute=0, second=0, microsecond=0)
+            if hour_boundary <= now:
+                continue  # Skip past hours
+            if hour_boundary in existing_preempts:
+                continue  # Already scheduled
+
+            eastern_time = hour_boundary.astimezone(eastern_tz)
+            slot_key = eastern_time.strftime("%Y-%m-%dT%H")
+
+            try:
+                time_asset, weather_asset = await get_or_create_weather_spot_assets(self.db, slot_key)
+            except Exception:
+                logger.warning("Failed to generate weather for slot %s", slot_key, exc_info=True)
+                continue
+
+            assets_to_insert = [a for a in [time_asset, weather_asset] if a is not None]
+            if not assets_to_insert:
+                continue
+
+            for i, asset in enumerate(assets_to_insert):
+                self.max_pos += 1
+                entry = QueueEntry(
+                    id=uuid.uuid4(),
+                    station_id=self.station_id,
+                    asset_id=asset.id,
+                    position=self.max_pos,
+                    status="pending",
+                    preempt_at=hour_boundary if i == 0 else None,
+                )
+                self.db.add(entry)
+
+            hours_scheduled += 1
+            logger.info("Scheduled time+weather for %s (slot %s)", hour_boundary.isoformat(), slot_key)
+
+        logger.info("Scheduled hourly announcements for %d hours", hours_scheduled)
 
     # Backwards-compat alias
     async def _fill_random_music(self, shortfall: float) -> None:
