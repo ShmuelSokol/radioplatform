@@ -807,14 +807,17 @@ async def _get_queue_impl(station_id, limit, db):
         is_now = e.status == "playing"
         is_silence = e.asset and e.asset.asset_type == "silence"
 
-        # Preempt entries play at exactly their preempt_at time (hard stop)
+        # Preempt entries: hard preempt plays at exact time, soft preempt (ad_slot) waits for song end
         if not is_now and e.preempt_at:
             pa = e.preempt_at
             if pa.tzinfo is None:
                 pa = pa.replace(tzinfo=timezone.utc)
-            # Always use preempt_at as this entry's start time — preemption
-            # interrupts whatever is playing at that exact moment
-            cursor = pa
+            if e.source == "ad_slot":
+                # Soft preempt: ad plays after current song finishes (not before)
+                cursor = max(cursor, pa)
+            else:
+                # Hard preempt: interrupts whatever is playing at that exact moment
+                cursor = pa
             # Find which blackout this belongs to
             if not current_blackout_end:
                 for bo_start, bo_end in blackout_ends.items():

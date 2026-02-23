@@ -555,9 +555,9 @@ export default function Dashboard() {
                     <span className="w-6 text-[11px] shrink-0">
                       {isCur ? '▶' : <span className="text-gray-600 text-[10px]">⠿</span>}
                     </span>
-                    <span className="w-[52px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString(undefined, stationTz ? { timeZone: stationTz } : undefined) : ''}>
+                    <span className="w-[68px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString(undefined, stationTz ? { timeZone: stationTz } : undefined) : ''}>
                       {entry.estimated_start
-                        ? new Date(entry.estimated_start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })
+                        ? new Date(entry.estimated_start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })
                         : ''}
                     </span>
                     <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
@@ -570,7 +570,7 @@ export default function Dashboard() {
                       )}
                       {entry.preempt_at && (
                         <span className="ml-2 text-[9px] text-orange-400 font-mono" title={`Preempts at ${new Date(entry.preempt_at).toLocaleString()}`}>
-                          ⏰ {new Date(entry.preempt_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })}
+                          ⏰ {new Date(entry.preempt_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })}
                         </span>
                       )}
                     </span>
