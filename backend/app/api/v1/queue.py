@@ -660,7 +660,19 @@ async def get_queue(
     import traceback as _tb
     from sqlalchemy.orm import joinedload
 
-    # Fetch all pending/playing entries (no SQL limit — apply after display sort)
+    try:
+      return await _get_queue_impl(station_id, limit, db)
+    except Exception as exc:
+        logger.exception("Queue GET error for station %s: %s", station_id, exc)
+        return {"entries": [], "total": 0, "now_playing": None,
+                "queue_duration_seconds": 0, "preempt_fade_ms": 2000,
+                "error": f"{type(exc).__name__}: {exc}",
+                "traceback": _tb.format_exc()}
+
+
+async def _get_queue_impl(station_id, limit, db):
+    from sqlalchemy.orm import joinedload
+
     result = await db.execute(
         select(QueueEntry)
         .options(joinedload(QueueEntry.asset))
