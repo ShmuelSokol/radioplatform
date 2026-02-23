@@ -14,6 +14,7 @@ class QueueEntryOut(BaseModel):
     asset_id: uuid.UUID | str
     position: int
     status: str
+    source: str | None = None
     preempt_at: datetime | None = None
     asset: AssetResponse | None = None
 

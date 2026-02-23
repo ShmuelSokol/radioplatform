@@ -830,6 +830,7 @@ async def _get_queue_impl(station_id, limit, db):
             "position": e.position,
             "status": e.status,
             "estimated_start": est_start,
+            "source": e.source,
             "preempt_at": e.preempt_at.isoformat() if e.preempt_at else None,
             "asset": {
                 "id": str(e.asset.id),
