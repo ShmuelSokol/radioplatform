@@ -548,6 +548,11 @@ export default function Dashboard() {
                       {a?.asset_type === 'silence' && entry.blackout_name
                         ? <span className="text-red-400">Scheduled Silence — {entry.blackout_name}</span>
                         : a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
+                      {entry.preempt_at && (
+                        <span className="ml-2 text-[9px] text-orange-400 font-mono" title={`Preempts at ${new Date(entry.preempt_at).toLocaleString()}`}>
+                          ⏰ {new Date(entry.preempt_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })}
+                        </span>
+                      )}
                     </span>
                     <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[a?.asset_type] ?? 'text-gray-500'}`}>
                       {a?.asset_type === 'silence' ? <span className="text-red-400">silence</span> : a?.asset_type ?? ''}
