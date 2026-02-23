@@ -74,6 +74,16 @@ class QueueReplenishService:
         )
         total_seconds = float(result.scalar() or 0)
 
+        # Always schedule hourly announcements, even if queue is "full"
+        if self.automation_config.get("hourly_time_announcement") or self.automation_config.get("weather_enabled"):
+            result2 = await self.db.execute(
+                select(func.coalesce(func.max(QueueEntry.position), 0))
+                .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "pending")
+            )
+            self.max_pos = result2.scalar() or 0
+            await self._schedule_hourly_announcements()
+            await self.db.flush()
+
         if total_seconds >= TARGET_QUEUE_SECONDS:
             logger.debug("Queue already full (%.1fs), skipping replenish", total_seconds)
             return
