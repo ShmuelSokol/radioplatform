@@ -117,6 +117,7 @@ export default function Dashboard() {
   const [dragEntryId, setDragEntryId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'warn' | 'info' } | null>(null);
+  const [queueDateFilter, setQueueDateFilter] = useState<string>('');  // YYYY-MM-DD or ''
 
   // Timeline preview — deferred until tab is active
   const [timelineTime, setTimelineTime] = useState('');
@@ -201,6 +202,26 @@ export default function Dashboard() {
   const nextEntry = queueEntries.find((e: any) => e.status === 'pending');
   const nextAsset = nextEntry?.asset ?? null;
   const playLog = logData?.logs ?? [];
+
+  // Queue date filter: extract available dates and filter entries
+  const queueDates = useMemo(() => {
+    const dates = new Set<string>();
+    for (const e of queueEntries) {
+      const ts = e.estimated_start || e.preempt_at;
+      if (ts) dates.add(new Date(ts).toLocaleDateString('en-CA', stationTz ? { timeZone: stationTz } : undefined)); // YYYY-MM-DD
+    }
+    return Array.from(dates).sort();
+  }, [queueEntries, stationTz]);
+
+  const filteredQueueEntries = useMemo(() => {
+    if (!queueDateFilter) return queueEntries;
+    return queueEntries.filter((e: any) => {
+      const ts = e.estimated_start || e.preempt_at;
+      if (!ts) return false;
+      const d = new Date(ts).toLocaleDateString('en-CA', stationTz ? { timeZone: stationTz } : undefined);
+      return d === queueDateFilter;
+    });
+  }, [queueEntries, queueDateFilter, stationTz]);
 
   // Filter assets by type tab
   const filteredAssets = useMemo(() => {
@@ -524,15 +545,26 @@ export default function Dashboard() {
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden border-b border-[#2a2a5e]">
           <div className="bg-[#16163e] px-2 py-0.5 text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-2 shrink-0 border-b border-[#2a2a5e]">
             <span className="font-bold text-gray-300">Queue</span>
-            <span>({totalQueueEntries > queueEntries.length ? `${queueEntries.length}/${totalQueueEntries}` : queueEntries.length}){totalQueueDuration > 0 ? ` — ${(totalQueueDuration / 86400).toFixed(1)}d total` : queueDuration > 0 ? ` — ${fmtHMS(queueDuration)}` : ''}</span>
+            <span>({queueDateFilter ? `${filteredQueueEntries.length} shown` : totalQueueEntries > queueEntries.length ? `${queueEntries.length}/${totalQueueEntries}` : queueEntries.length}){totalQueueDuration > 0 ? ` — ${(totalQueueDuration / 86400).toFixed(1)}d total` : queueDuration > 0 ? ` — ${fmtHMS(queueDuration)}` : ''}</span>
+            <select
+              value={queueDateFilter}
+              onChange={(e) => setQueueDateFilter(e.target.value)}
+              className="ml-auto bg-[#0a0a28] border border-[#2a2a5e] text-gray-300 text-[10px] px-1 py-0 rounded-sm focus:outline-none focus:border-cyan-700"
+            >
+              <option value="">All dates</option>
+              {queueDates.map(d => {
+                const label = new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(stationTz ? { timeZone: stationTz } : {}) });
+                return <option key={d} value={d}>{label}</option>;
+              })}
+            </select>
           </div>
           <div className="flex-1 overflow-y-auto overflow-x-auto">
-            {queueEntries.length === 0 ? (
+            {filteredQueueEntries.length === 0 ? (
               <div className="text-center text-gray-600 py-6 text-[12px]">
-                Queue empty — add assets from the library below, or press START
+                {queueEntries.length === 0 ? 'Queue empty — add assets from the library below, or press START' : 'No entries for selected date'}
               </div>
             ) : (
-              queueEntries.map((entry: any) => {
+              filteredQueueEntries.map((entry: any) => {
                 const a = entry.asset;
                 const isCur = entry.status === 'playing';
                 const isDragging = dragEntryId === entry.id;
@@ -557,10 +589,17 @@ export default function Dashboard() {
                     <span className="w-6 text-[11px] shrink-0">
                       {isCur ? '▶' : <span className="text-gray-600 text-[10px]">⠿</span>}
                     </span>
-                    <span className="w-[68px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString(undefined, stationTz ? { timeZone: stationTz } : undefined) : ''}>
-                      {entry.estimated_start
-                        ? new Date(entry.estimated_start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })
-                        : ''}
+                    <span className="w-[100px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString(undefined, stationTz ? { timeZone: stationTz } : undefined) : ''}>
+                      {entry.estimated_start ? (() => {
+                        const d = new Date(entry.estimated_start);
+                        const tzOpts = stationTz ? { timeZone: stationTz } : {};
+                        const dateStr = d.toLocaleDateString('en-CA', tzOpts);
+                        const todayStr = new Date().toLocaleDateString('en-CA', tzOpts);
+                        const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...tzOpts });
+                        return dateStr !== todayStr
+                          ? <><span className="text-[8px] text-gray-600">{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...tzOpts })}</span> {time}</>
+                          : time;
+                      })() : ''}
                     </span>
                     <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
                     <span className="flex-1 truncate text-[12px] min-w-0">
