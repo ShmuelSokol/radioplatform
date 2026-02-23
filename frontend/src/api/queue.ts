@@ -1,6 +1,6 @@
 import apiClient from './client';
 
-export const getQueue = async (stationId: string, limit = 2000) => {
+export const getQueue = async (stationId: string, limit = 500) => {
   const res = await apiClient.get(`/stations/${stationId}/queue`, { params: { limit } });
   return res.data;
 };
