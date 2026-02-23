@@ -695,6 +695,13 @@ async def _get_queue_impl(station_id, limit, db):
     )
     entries = list(result.unique().scalars().all())
 
+    # Compute total queue duration from ALL entries (before limit truncation)
+    total_queue_duration = sum(
+        (e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION)
+        for e in entries
+    )
+    total_queue_entries = len(entries)
+
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
 
@@ -940,8 +947,10 @@ async def _get_queue_impl(station_id, limit, db):
     return {
         "entries": entries_data,
         "total": len(entries_data),
+        "total_all": total_queue_entries,
         "now_playing": np_data,
         "queue_duration_seconds": round(queue_duration, 1),
+        "total_queue_duration_seconds": round(total_queue_duration, 1),
         "preempt_fade_ms": 2000,
     }
 

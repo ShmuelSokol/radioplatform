@@ -196,6 +196,8 @@ export default function Dashboard() {
   const progress = duration > 0 ? Math.min(100, (elapsed / duration) * 100) : 0;
 
   const queueDuration = queueData?.queue_duration_seconds ?? 0;
+  const totalQueueDuration = queueData?.total_queue_duration_seconds ?? 0;
+  const totalQueueEntries = queueData?.total_all ?? 0;
   const nextEntry = queueEntries.find((e: any) => e.status === 'pending');
   const nextAsset = nextEntry?.asset ?? null;
   const playLog = logData?.logs ?? [];
@@ -522,7 +524,7 @@ export default function Dashboard() {
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden border-b border-[#2a2a5e]">
           <div className="bg-[#16163e] px-2 py-0.5 text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-2 shrink-0 border-b border-[#2a2a5e]">
             <span className="font-bold text-gray-300">Queue</span>
-            <span>({queueEntries.length}){queueDuration > 0 ? ` — ${fmtHMS(queueDuration)}` : ''}</span>
+            <span>({totalQueueEntries > queueEntries.length ? `${queueEntries.length}/${totalQueueEntries}` : queueEntries.length}){totalQueueDuration > 0 ? ` — ${(totalQueueDuration / 86400).toFixed(1)}d total` : queueDuration > 0 ? ` — ${fmtHMS(queueDuration)}` : ''}</span>
           </div>
           <div className="flex-1 overflow-y-auto overflow-x-auto">
             {queueEntries.length === 0 ? (
