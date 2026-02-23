@@ -314,10 +314,26 @@ export default function Dashboard() {
     duration: nowAsset.duration,
   } : null;
 
+  // Find next upcoming preempt entry for fade-out scheduling
+  const nextPreempt = useMemo(() => {
+    const now = Date.now();
+    return queueEntries.find((e: any) => {
+      if (!e.preempt_at || e.status === 'playing') return false;
+      return new Date(e.preempt_at).getTime() > now;
+    });
+  }, [queueEntries]);
+
+  const preemptFadeMs = (queueData as any)?.preempt_fade_ms ?? 2000;
+
   const {
     volume, setVolume, muted, toggleMute,
     vuLevels, audioReady, initAudio,
-  } = useAudioEngine(audioAsset, realElapsed, isPlaying);
+  } = useAudioEngine(
+    audioAsset, realElapsed, isPlaying,
+    nextPreempt?.preempt_at ?? null,
+    nextPreempt?.asset_id ?? null,
+    preemptFadeMs,
+  );
 
   // VU meter levels: use real audio data when available, else fallback
   const vuLevel = audioReady && isPlaying

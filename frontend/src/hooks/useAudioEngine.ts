@@ -33,6 +33,9 @@ export function useAudioEngine(
   nowPlayingAsset: AssetInfo | null,
   elapsedSeconds: number,
   isPlaying: boolean,
+  nextPreemptAt: string | null = null,
+  nextPreemptAssetId: string | null = null,
+  preemptFadeMs: number = 2000,
 ): AudioEngineState {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -49,11 +52,14 @@ export function useAudioEngine(
   const rafRef = useRef<number>(0);
   const syncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(elapsedSeconds);
+  const volumeRef = useRef(volume);
+  const mutedRef = useRef(muted);
+  const fadingRef = useRef(false);
 
-  // Keep elapsed ref in sync for use in interval callback
-  useEffect(() => {
-    elapsedRef.current = elapsedSeconds;
-  }, [elapsedSeconds]);
+  // Keep refs in sync
+  useEffect(() => { elapsedRef.current = elapsedSeconds; }, [elapsedSeconds]);
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   // ── Init audio context + element ──────────────────────────────
 
@@ -141,6 +147,16 @@ export function useAudioEngine(
     }
 
     if (assetId !== lastAssetId.current) {
+      // If we were fading, restore gain for the new track
+      if (fadingRef.current) {
+        fadingRef.current = false;
+        const gain = gainRef.current;
+        const ctx = ctxRef.current;
+        if (gain && ctx) {
+          gain.gain.cancelScheduledValues(ctx.currentTime);
+          gain.gain.setValueAtTime(mutedRef.current ? 0 : volumeRef.current, ctx.currentTime);
+        }
+      }
       lastAssetId.current = assetId;
       if (assetId) {
         getAssetAudioUrl(assetId).then((url) => {
@@ -151,6 +167,68 @@ export function useAudioEngine(
       }
     }
   }, [nowPlayingAsset?.id, isPlaying, audioReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Preempt fade-out: schedule precise fade before hourly announcements ──
+
+  useEffect(() => {
+    if (!nextPreemptAt || !nextPreemptAssetId || !isPlaying || !audioReady) return;
+    if (preemptFadeMs <= 0) return;
+
+    const preemptTime = new Date(nextPreemptAt).getTime();
+    const fadeStartTime = preemptTime - preemptFadeMs;
+    const msUntilFade = fadeStartTime - Date.now();
+
+    // Skip if too far away (>5 min) or already past
+    if (msUntilFade > 300000) return;
+    // If fade start already passed but preempt hasn't, do an immediate short fade
+    const actualDelay = Math.max(0, msUntilFade);
+    const actualFadeDuration = msUntilFade < 0
+      ? Math.max(200, preemptTime - Date.now()) // compress fade to remaining time
+      : preemptFadeMs;
+
+    // Schedule fade-out
+    const fadeTimer = setTimeout(() => {
+      const gain = gainRef.current;
+      const ctx = ctxRef.current;
+      if (!gain || !ctx || mutedRef.current) return;
+
+      fadingRef.current = true;
+      gain.gain.cancelScheduledValues(ctx.currentTime);
+      gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + actualFadeDuration / 1000);
+    }, actualDelay);
+
+    // Schedule preempt audio switch (after fade completes)
+    const switchDelay = actualDelay + actualFadeDuration;
+    const preemptAssetId = nextPreemptAssetId; // capture for closure
+    const switchTimer = setTimeout(() => {
+      const audio = audioRef.current;
+      const gain = gainRef.current;
+      const ctx = ctxRef.current;
+      if (!audio || !gain || !ctx) return;
+
+      // Switch to preempt audio
+      lastAssetId.current = preemptAssetId;
+      getAssetAudioUrl(preemptAssetId).then((url) => {
+        audio.src = url;
+        audio.currentTime = 0;
+        // Restore gain for the announcement
+        gain.gain.cancelScheduledValues(ctx.currentTime);
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(
+          mutedRef.current ? 0 : volumeRef.current,
+          ctx.currentTime + 0.05,
+        );
+        fadingRef.current = false;
+        audio.play().catch(() => {});
+      }).catch(() => {});
+    }, switchDelay);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(switchTimer);
+    };
+  }, [nextPreemptAt, nextPreemptAssetId, preemptFadeMs, isPlaying, audioReady]);
 
   // ── Periodic time sync ──────────────────────────────────────────
   // Correct audio.currentTime if it drifts more than SYNC_THRESHOLD from server time
@@ -184,7 +262,7 @@ export function useAudioEngine(
     setVolumeState(clamped);
     const gain = gainRef.current;
     const ctx = ctxRef.current;
-    if (gain && ctx) {
+    if (gain && ctx && !fadingRef.current) {
       gain.gain.setTargetAtTime(clamped, ctx.currentTime, 0.02);
     }
     try { localStorage.setItem(VOLUME_KEY, String(clamped)); } catch {}
@@ -195,7 +273,7 @@ export function useAudioEngine(
       const next = !prev;
       const gain = gainRef.current;
       const ctx = ctxRef.current;
-      if (gain && ctx) {
+      if (gain && ctx && !fadingRef.current) {
         gain.gain.setTargetAtTime(
           next ? 0 : loadVolume(),
           ctx.currentTime, 0.02

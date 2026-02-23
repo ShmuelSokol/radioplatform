@@ -708,6 +708,7 @@ async def get_queue(
             "asset_id": str(now_playing_entry.asset_id),
             "position": now_playing_entry.position,
             "status": now_playing_entry.status,
+            "preempt_at": now_playing_entry.preempt_at.isoformat() if now_playing_entry.preempt_at else None,
             "asset": now_playing_entry.asset,
             "started_at": now_playing_entry.started_at.isoformat(),
             "elapsed_seconds": round(elapsed, 1),
@@ -829,6 +830,7 @@ async def get_queue(
         "total": len(entries_data),
         "now_playing": np_data,
         "queue_duration_seconds": round(queue_duration, 1),
+        "preempt_fade_ms": 2000,
     }
 
 
