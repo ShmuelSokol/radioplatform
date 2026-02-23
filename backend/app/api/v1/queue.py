@@ -1401,3 +1401,43 @@ async def insert_weather_now(
 
     await db.commit()
     return {"message": f"Inserted {len(assets_to_insert)} weather/time assets", "inserted": len(assets_to_insert)}
+
+
+@router.post("/schedule-hourly")
+async def schedule_hourly(
+    station_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Force-run hourly announcement scheduling for this station."""
+    from app.services.queue_replenish_service import QueueReplenishService
+
+    service = QueueReplenishService(db, station_id)
+    await service._load_automation_config()
+
+    # Set max_pos
+    result = await db.execute(
+        select(func.coalesce(func.max(QueueEntry.position), 0))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+    )
+    service.max_pos = result.scalar() or 0
+
+    try:
+        await service._schedule_hourly_announcements()
+        await db.commit()
+    except Exception as exc:
+        logger.error("schedule-hourly failed: %s", exc, exc_info=True)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    # Count how many preempt entries exist now
+    result = await db.execute(
+        select(func.count())
+        .select_from(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.preempt_at.isnot(None),
+        )
+    )
+    count = result.scalar() or 0
+    return {"message": f"Hourly scheduling complete", "preempt_entries": count}
