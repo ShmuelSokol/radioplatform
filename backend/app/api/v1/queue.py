@@ -669,7 +669,7 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
 @router.get("")
 async def get_queue(
     station_id: uuid.UUID,
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(2000, ge=1, le=5000),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
