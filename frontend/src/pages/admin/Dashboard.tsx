@@ -514,19 +514,12 @@ export default function Dashboard() {
                 Queue empty — add assets from the library below, or press START
               </div>
             ) : (
-              queueEntries.map((entry: any, idx: number) => {
+              queueEntries.map((entry: any) => {
                 const a = entry.asset;
                 const isCur = entry.status === 'playing';
                 const isDragging = dragEntryId === entry.id;
                 const isDragOver = dragOverId === entry.id && dragEntryId !== entry.id;
-                const prevEntry = idx > 0 ? queueEntries[idx - 1] : null;
-                const isFirstPreempt = entry.preempt_at && (!prevEntry || !prevEntry.preempt_at);
                 return (<div key={entry.id + '-wrap'}>
-                  {isFirstPreempt && (
-                    <div className="bg-orange-900/30 border-y border-orange-700/50 px-2 py-1 text-[10px] text-orange-400 uppercase tracking-wider font-bold sticky top-0 z-10">
-                      Scheduled Hourly Announcements ({queueEntries.filter((e: any) => e.preempt_at).length} entries)
-                    </div>
-                  )}
                   <div
                     draggable={!isCur}
                     onDragStart={!isCur ? (e) => handleDragStart(e, entry.id) : undefined}

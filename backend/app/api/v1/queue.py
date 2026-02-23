@@ -671,27 +671,29 @@ async def get_queue(
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
 
-    # Sort entries for display: playing first, then regular pending by position,
-    # then future-preempt entries by position. This handles stale silence entries
-    # that were inserted at low positions by old code.
+    # Sort ALL entries by estimated play time (chronological order)
     now_utc_sort = datetime.now(timezone.utc)
+    if now_playing_entry and now_playing_entry.started_at:
+        _ad = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
+        _el = (now_utc_sort - now_playing_entry.started_at).total_seconds()
+        _sort_cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
+    else:
+        _sort_cursor = now_utc_sort
 
-    def _display_sort_key(e):
+    _est_map = {}
+    for e in entries:
         if e.status == "playing":
-            return (0, 0)
-        # Future preempt entries (silence scheduled for later) sort after regular entries
-        if e.preempt_at:
+            _est_map[e.id] = now_playing_entry.started_at if now_playing_entry and now_playing_entry.started_at else now_utc_sort
+        elif e.preempt_at:
             pa = e.preempt_at if e.preempt_at.tzinfo else e.preempt_at.replace(tzinfo=timezone.utc)
-            if pa > now_utc_sort:
-                return (2, e.position)
-        return (1, e.position)
+            _est_map[e.id] = pa
+        else:
+            _est_map[e.id] = _sort_cursor
+            dur = e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION
+            _sort_cursor += timedelta(seconds=dur)
 
-    entries.sort(key=_display_sort_key)
-
-    # Apply limit: keep first `limit` regular entries + all future preempt entries
-    regular = [e for e in entries if _display_sort_key(e)[0] <= 1]
-    preempt = [e for e in entries if _display_sort_key(e)[0] == 2]
-    entries = regular[:limit] + preempt
+    entries.sort(key=lambda e: (0 if e.status == "playing" else 1, _est_map.get(e.id, now_utc_sort)))
+    entries = entries[:limit]
 
     # Calculate elapsed/remaining for now playing
     np_data = None
