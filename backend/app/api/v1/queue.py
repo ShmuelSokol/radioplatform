@@ -659,41 +659,14 @@ async def get_queue(
     # Pure read-only — advancement is handled by the background scheduler.
     from sqlalchemy.orm import joinedload
 
-    # Fetch regular queue entries (limited)
+    # Fetch all pending/playing entries (no SQL limit — apply after display sort)
     result = await db.execute(
         select(QueueEntry)
         .options(joinedload(QueueEntry.asset))
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status.in_(["pending", "playing"]),
-            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= datetime.now(timezone.utc)),
-        )
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
         .order_by(QueueEntry.position)
-        .limit(limit)
     )
     entries = list(result.unique().scalars().all())
-
-    # Also fetch ALL future preempt entries (hourly announcements) — they live at high
-    # positions and would be cut off by the limit above.
-    preempt_result = await db.execute(
-        select(QueueEntry)
-        .options(joinedload(QueueEntry.asset))
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            QueueEntry.preempt_at.isnot(None),
-            QueueEntry.preempt_at > datetime.now(timezone.utc),
-        )
-        .order_by(QueueEntry.preempt_at)
-    )
-    preempt_entries = list(preempt_result.unique().scalars().all())
-
-    # Merge, dedup by ID
-    seen_ids = {e.id for e in entries}
-    for pe in preempt_entries:
-        if pe.id not in seen_ids:
-            entries.append(pe)
-            seen_ids.add(pe.id)
 
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
@@ -714,6 +687,11 @@ async def get_queue(
         return (1, e.position)
 
     entries.sort(key=_display_sort_key)
+
+    # Apply limit: keep first `limit` regular entries + all future preempt entries
+    regular = [e for e in entries if _display_sort_key(e)[0] <= 1]
+    preempt = [e for e in entries if _display_sort_key(e)[0] == 2]
+    entries = regular[:limit] + preempt
 
     # Calculate elapsed/remaining for now playing
     np_data = None
