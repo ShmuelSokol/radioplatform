@@ -546,6 +546,7 @@ export default function Dashboard() {
                     className={`flex items-center px-2 py-[2px] border-b min-w-[500px] transition-colors
                       ${isCur ? 'bg-[#0000aa] text-yellow-300 border-[#12122e]'
                         : entry.preempt_at ? 'bg-orange-950/30 text-orange-200 border-orange-900/30 hover:bg-orange-900/30'
+                        : entry.source === 'ad_slot' ? 'bg-emerald-950/30 text-emerald-200 border-emerald-900/30 hover:bg-emerald-900/30 border-l-2 border-l-emerald-500'
                         : isDragOver ? 'bg-cyan-900/40 border-cyan-500 border-t-2'
                         : isDragging ? 'opacity-40 border-[#12122e]'
                         : 'text-cyan-200 hover:bg-[#14143a] border-[#12122e]'}
@@ -564,6 +565,9 @@ export default function Dashboard() {
                       {a?.asset_type === 'silence' && entry.blackout_name
                         ? <span className="text-red-400">Scheduled Silence — {entry.blackout_name}</span>
                         : a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
+                      {entry.source === 'ad_slot' && (
+                        <span className="ml-2 text-[9px] bg-emerald-700/60 text-emerald-200 px-1 py-px rounded font-bold">AD</span>
+                      )}
                       {entry.preempt_at && (
                         <span className="ml-2 text-[9px] text-orange-400 font-mono" title={`Preempts at ${new Date(entry.preempt_at).toLocaleString()}`}>
                           ⏰ {new Date(entry.preempt_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })}

@@ -25,8 +25,10 @@ from app.models.station import Station
 
 logger = logging.getLogger(__name__)
 
-TARGET_QUEUE_SECONDS = 86400  # 24 hours
+TARGET_QUEUE_SECONDS = 604800  # 7 days
+MAX_FILL_PER_RUN = 86400  # cap each replenish run to 24h of new content
 DEFAULT_DURATION = 180  # 3 minutes fallback
+SONGS_BETWEEN_ADS = 5  # ~15 min at 3 min avg
 
 
 class QueueReplenishService:
@@ -74,21 +76,24 @@ class QueueReplenishService:
         )
         total_seconds = float(result.scalar() or 0)
 
-        # Always schedule hourly announcements, even if queue is "full"
+        # Always schedule hourly announcements + ad slots, even if queue is "full"
+        result2 = await self.db.execute(
+            select(func.coalesce(func.max(QueueEntry.position), 0))
+            .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "pending")
+        )
+        self.max_pos = result2.scalar() or 0
+
         if self.automation_config.get("hourly_time_announcement") or self.automation_config.get("weather_enabled"):
-            result2 = await self.db.execute(
-                select(func.coalesce(func.max(QueueEntry.position), 0))
-                .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "pending")
-            )
-            self.max_pos = result2.scalar() or 0
             await self._schedule_hourly_announcements()
-            await self.db.flush()
+
+        await self._schedule_ad_slots()
+        await self.db.flush()
 
         if total_seconds >= TARGET_QUEUE_SECONDS:
             logger.debug("Queue already full (%.1fs), skipping replenish", total_seconds)
             return
 
-        shortfall = TARGET_QUEUE_SECONDS - total_seconds
+        shortfall = min(TARGET_QUEUE_SECONDS - total_seconds, MAX_FILL_PER_RUN)
         logger.info("Queue shortfall: %.1fs, replenishing...", shortfall)
 
         result = await self.db.execute(
@@ -153,6 +158,7 @@ class QueueReplenishService:
         if self.automation_config.get("hourly_time_announcement") or self.automation_config.get("weather_enabled"):
             await self._schedule_hourly_announcements()
 
+        await self._schedule_ad_slots()
         await self.db.flush()
         logger.info("Queue replenishment complete")
 
@@ -522,9 +528,9 @@ class QueueReplenishService:
         )
         existing_preempts = {row[0].replace(minute=0, second=0, microsecond=0) for row in result.all() if row[0]}
 
-        # Schedule for the next 24 hours
+        # Schedule for the next 7 days (168 hours)
         hours_scheduled = 0
-        for h in range(24):
+        for h in range(168):
             hour_boundary = (now + timedelta(hours=h)).replace(minute=0, second=0, microsecond=0)
             if hour_boundary <= now:
                 continue  # Skip past hours
@@ -560,6 +566,51 @@ class QueueReplenishService:
             logger.info("Scheduled time+weather for %s (slot %s)", hour_boundary.isoformat(), slot_key)
 
         logger.info("Scheduled hourly announcements for %d hours", hours_scheduled)
+
+    async def _schedule_ad_slots(self) -> None:
+        """Schedule 'KOL BRAMAH TEST SPONSOR' ad every ~15 min (soft slot, no preempt)."""
+        # Find the ad asset
+        result = await self.db.execute(
+            select(Asset).where(Asset.title == "KOL BRAMAH TEST SPONSOR").limit(1)
+        )
+        ad_asset = result.scalar_one_or_none()
+        if not ad_asset:
+            logger.warning("Ad asset 'KOL BRAMAH TEST SPONSOR' not found")
+            return
+
+        # Count existing pending ad slots
+        result = await self.db.execute(
+            select(func.count(QueueEntry.id)).where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.source == "ad_slot",
+            )
+        )
+        existing_count = result.scalar() or 0
+
+        # Target: 1 ad every SONGS_BETWEEN_ADS songs across the queue
+        total_songs = int(TARGET_QUEUE_SECONDS / DEFAULT_DURATION)
+        target_ads = total_songs // SONGS_BETWEEN_ADS
+        deficit = max(0, target_ads - existing_count)
+
+        if deficit <= 0:
+            logger.debug("Ad slots already sufficient (%d existing)", existing_count)
+            return
+
+        # Insert ad slots at regular position intervals
+        for i in range(deficit):
+            self.max_pos += SONGS_BETWEEN_ADS
+            entry = QueueEntry(
+                id=uuid.uuid4(),
+                station_id=self.station_id,
+                asset_id=ad_asset.id,
+                position=self.max_pos,
+                status="pending",
+                source="ad_slot",
+            )
+            self.db.add(entry)
+
+        logger.info("Scheduled %d ad slots for station %s", deficit, self.station_id)
 
     # Backwards-compat alias
     async def _fill_random_music(self, shortfall: float) -> None:
