@@ -29,6 +29,7 @@ TARGET_QUEUE_SECONDS = 604800  # 7 days
 MAX_FILL_PER_RUN = 86400  # cap each replenish run to 24h of new content
 DEFAULT_DURATION = 180  # 3 minutes fallback
 SONGS_BETWEEN_ADS = 5  # ~15 min at 3 min avg
+MAX_ADS_PER_RUN = 96  # cap ad slot inserts per run (~24h worth)
 
 
 class QueueReplenishService:
@@ -528,9 +529,10 @@ class QueueReplenishService:
         )
         existing_preempts = {row[0].replace(minute=0, second=0, microsecond=0) for row in result.all() if row[0]}
 
-        # Schedule for the next 7 days (168 hours)
+        # Schedule for the next 48 hours (weather data only reliable ~48h out;
+        # future runs will extend as hours come within range)
         hours_scheduled = 0
-        for h in range(168):
+        for h in range(48):
             hour_boundary = (now + timedelta(hours=h)).replace(minute=0, second=0, microsecond=0)
             if hour_boundary <= now:
                 continue  # Skip past hours
@@ -591,7 +593,7 @@ class QueueReplenishService:
         # Target: 1 ad every SONGS_BETWEEN_ADS songs across the queue
         total_songs = int(TARGET_QUEUE_SECONDS / DEFAULT_DURATION)
         target_ads = total_songs // SONGS_BETWEEN_ADS
-        deficit = max(0, target_ads - existing_count)
+        deficit = min(max(0, target_ads - existing_count), MAX_ADS_PER_RUN)
 
         if deficit <= 0:
             logger.debug("Ad slots already sufficient (%d existing)", existing_count)
