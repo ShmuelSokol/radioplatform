@@ -315,9 +315,9 @@ router = APIRouter(prefix="/stations/{station_id}/queue", tags=["queue"])
 
 
 async def _maybe_insert_hourly_jingle(db: AsyncSession, station_id: uuid.UUID) -> None:
-    """Insert hourly station ID jingle at the top of the hour (within first 30s)."""
+    """Insert hourly station ID jingle at the top of the hour (within first 5 min)."""
     now = datetime.now(timezone.utc)
-    if now.minute != 0 or now.second > 30:
+    if now.minute > 5:
         return
 
     current_hour = now.hour
@@ -392,11 +392,12 @@ async def _maybe_insert_hourly_jingle(db: AsyncSession, station_id: uuid.UUID) -
 async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) -> None:
     """Insert time announcement + weather spot at every hour (top of the hour)."""
     if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
+        logger.debug("Weather spot skipped: elevenlabs=%s supabase=%s", settings.elevenlabs_enabled, settings.supabase_storage_enabled)
         return
 
     now = datetime.now(timezone.utc)
-    # Check if we're within 30s of the top of the hour
-    if now.minute != 0 or now.second > 30:
+    # Check if we're within 5 minutes of the top of the hour (widened from 30s)
+    if now.minute > 5:
         return
 
     # Build slot key in Eastern time (hourly for time, daily for weather)
@@ -407,8 +408,10 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
     eastern_now = now.astimezone(ZoneInfo("America/New_York"))
     slot_key = eastern_now.strftime("%Y-%m-%dT%H")
 
+    logger.info("Weather spot check for station %s at %s (slot %s)", station_id, now.isoformat(), slot_key)
+
     # Dedup: check PlayLog for weather already played this slot
-    slot_start = now.replace(second=0, microsecond=0)
+    slot_start = now.replace(minute=0, second=0, microsecond=0)
     result = await db.execute(
         select(PlayLog).join(Asset, PlayLog.asset_id == Asset.id)
         .where(
@@ -419,6 +422,7 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
         .limit(1)
     )
     if result.scalar_one_or_none():
+        logger.info("Weather spot already played this hour for station %s", station_id)
         return
 
     # Dedup: check QueueEntry for weather already queued this slot
@@ -432,9 +436,11 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
         .limit(1)
     )
     if result.scalar_one_or_none():
+        logger.info("Weather spot already queued for station %s", station_id)
         return
 
     # Generate assets (TTS + weather fetch + upload)
+    logger.info("Generating weather/time TTS for station %s slot %s", station_id, slot_key)
     try:
         from app.services.weather_spot_service import get_or_create_weather_spot_assets
 
@@ -444,6 +450,7 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
         return
 
     if not time_asset and not weather_asset:
+        logger.warning("No weather/time assets generated for slot %s", slot_key)
         return
 
     # Insert as play-next (time first, weather second)
