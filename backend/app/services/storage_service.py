@@ -78,6 +78,15 @@ async def upload_file(
 
 
 async def download_file(key: str) -> bytes:
+    # If key is already a full URL (e.g. weather/time TTS assets store
+    # the Supabase public URL directly), fetch it via HTTP instead of
+    # constructing a storage-API path which would double-wrap the URL.
+    if key.startswith("http://") or key.startswith("https://"):
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(key, follow_redirects=True)
+            resp.raise_for_status()
+            return resp.content
+
     if settings.s3_enabled:
         import aioboto3
         session = aioboto3.Session()
