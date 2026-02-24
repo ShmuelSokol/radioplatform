@@ -176,5 +176,14 @@ class Settings(BaseSettings):
     def twilio_voice_enabled(self) -> bool:
         return bool(self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN)
 
+    # Liquidsoap (optional — runs as sidecar on Railway)
+    LIQUIDSOAP_SOCKET_PATH: str = "/tmp/liquidsoap.sock"
+    LIQUIDSOAP_ENABLED: bool = True
+    LIQUIDSOAP_HLS_DIR: str = "/tmp/hls"
+
+    @property
+    def liquidsoap_enabled(self) -> bool:
+        return self.LIQUIDSOAP_ENABLED
+
 
 settings = Settings()

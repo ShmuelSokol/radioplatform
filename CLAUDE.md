@@ -21,6 +21,7 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, w
 - **Bot**: Telegram bot with Claude API + OpenAI Whisper for voice transcription
 - **Workers**: Celery + Redis (not yet deployed — needed for media processing)
 - **Media**: FFmpeg for transcoding, clipping, HLS generation
+- **Streaming**: Liquidsoap sidecar for server-side HLS streaming with crossfade + loudness normalization (client-side fallback)
 
 ## Project Structure
 ```
@@ -150,6 +151,7 @@ radioplatform/
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
 | twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
 | live_audio_mixer.py | Audio mixer stub (future ffmpeg host+caller mixing) |
+| liquidsoap_client.py | Async Unix socket client for Liquidsoap (push tracks, skip, status, health check) |
 
 ## Frontend Details
 
@@ -320,6 +322,9 @@ Claude Code accessible over Telegram for remote development.
 | `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks | For live shows |
 | `EMERGENCY_FALLBACK_CATEGORY` | Asset category for emergency fallback (default: "emergency") | For silence detection |
 | `SILENCE_DETECTION_SECONDS` | Seconds of silence before alert (default: 30) | For silence detection |
+| `LIQUIDSOAP_ENABLED` | Enable Liquidsoap sidecar (default: true) | For HLS streaming |
+| `LIQUIDSOAP_SOCKET_PATH` | Unix socket path (default: /tmp/liquidsoap.sock) | For HLS streaming |
+| `LIQUIDSOAP_HLS_DIR` | HLS segment output dir (default: /tmp/hls) | For HLS streaming |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://api.kbrlive.com/api/v1)

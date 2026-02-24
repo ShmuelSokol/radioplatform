@@ -558,6 +558,13 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
             preempt_entry.status = "playing"
             preempt_entry.started_at = now_utc
             await db.commit()
+            # Skip in Liquidsoap to sync with preempt
+            if settings.liquidsoap_enabled:
+                try:
+                    from app.services.liquidsoap_client import skip as ls_skip
+                    await ls_skip()
+                except Exception:
+                    pass
             logger.info("Preempted current track for time-critical entry %s", preempt_entry.id)
             return preempt_entry
 
@@ -1143,6 +1150,14 @@ async def skip_current(
             .limit(1)
         )
         next_entry = result.scalar_one_or_none()
+
+    # Skip in Liquidsoap to keep it in sync
+    if settings.liquidsoap_enabled:
+        try:
+            from app.services.liquidsoap_client import skip as ls_skip
+            await ls_skip()
+        except Exception:
+            pass
 
     await _replenish_queue(db, station_id)
     if next_entry:

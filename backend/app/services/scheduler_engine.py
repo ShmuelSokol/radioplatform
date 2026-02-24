@@ -241,6 +241,15 @@ class SchedulerEngine:
 
     async def _check_all_stations(self, db: AsyncSession):
         """Check all active stations and their channels."""
+        # Periodic Liquidsoap health check
+        if settings.liquidsoap_enabled:
+            try:
+                from app.services.liquidsoap_client import is_alive
+                if not await is_alive():
+                    logger.warning("Liquidsoap not responding — clients will use fallback")
+            except Exception:
+                pass
+
         stmt = select(Station).where(Station.is_active == True)
         result = await db.execute(stmt)
         stations = result.scalars().all()
@@ -521,6 +530,28 @@ class SchedulerEngine:
         except Exception as e:
             logger.error("Precise advance failed for station %s: %s", station_id, e, exc_info=True)
 
+    async def _push_to_liquidsoap(self, audio_url: str | None, station_id):
+        """Push a track to Liquidsoap if enabled and URL is available."""
+        if not audio_url or not settings.liquidsoap_enabled:
+            return
+        try:
+            from app.services.liquidsoap_client import push_track
+            await push_track(audio_url, str(station_id))
+        except Exception as e:
+            logger.warning("Liquidsoap push failed: %s", e)
+
+    def _build_audio_url(self, asset) -> str | None:
+        """Build public audio URL for an asset."""
+        if not asset or not asset.file_path:
+            return None
+        file_path = asset.file_path
+        if file_path.startswith("http://") or file_path.startswith("https://"):
+            return file_path
+        if settings.supabase_storage_enabled:
+            bucket = settings.SUPABASE_STORAGE_BUCKET
+            return f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
+        return None
+
     async def _advance_queue(self, db: AsyncSession, station_id):
         """Advance queue-based playback: check if current track ended and move to next."""
         try:
@@ -544,6 +575,9 @@ class SchedulerEngine:
                 remaining = duration - elapsed
                 if remaining > 0:
                     self._schedule_precise_advance(station_id, remaining, cross_seconds)
+
+                # Push current track to Liquidsoap
+                await self._push_to_liquidsoap(self._build_audio_url(asset), station_id)
 
                 # Broadcast expanded WS payload
                 await self._broadcast_queue_entry(db, station_id, entry)
@@ -611,6 +645,9 @@ class SchedulerEngine:
                 "replay_gain_db": na_analysis.get("replay_gain_db", 0),
             }
 
+            # Pre-queue next track in Liquidsoap for gapless transitions
+            await self._push_to_liquidsoap(na_audio_url, station_id)
+
         # Build audio URL for current asset
         from app.config import settings as app_settings
         file_path = asset.file_path
@@ -628,6 +665,7 @@ class SchedulerEngine:
                 "asset_id": str(asset.id),
                 "started_at": entry.started_at.isoformat() if entry.started_at else None,
                 "ends_at": (entry.started_at + timedelta(seconds=(asset.duration or 180.0))).isoformat() if entry.started_at else None,
+                "hls_url": f"/hls/{station_id}/stream.m3u8" if settings.liquidsoap_enabled else None,
                 "asset": {
                     "title": asset.title,
                     "artist": asset.artist,
@@ -828,6 +866,9 @@ class SchedulerEngine:
             bucket = settings.SUPABASE_STORAGE_BUCKET
             audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
 
+        # Push to Liquidsoap
+        await self._push_to_liquidsoap(audio_url, station.id)
+
         try:
             from app.api.v1.websocket import broadcast_now_playing_update
             await broadcast_now_playing_update(str(station.id), {
@@ -837,6 +878,7 @@ class SchedulerEngine:
                 "ends_at": now_playing.ends_at.isoformat() if now_playing.ends_at else None,
                 "listener_count": now_playing.listener_count,
                 "stream_url": now_playing.stream_url,
+                "hls_url": f"/hls/{station.id}/stream.m3u8" if settings.liquidsoap_enabled else None,
                 "asset": {
                     "title": asset.title,
                     "artist": asset.artist,

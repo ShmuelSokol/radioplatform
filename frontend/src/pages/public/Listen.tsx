@@ -8,6 +8,8 @@ import { useListenerHeartbeat } from '../../hooks/useListeners';
 import { useCrmAuth, useRateSong, useActiveRaffles, useEnterRaffle } from '../../hooks/useCrm';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
+import { useAudioPlayer } from '../../hooks/useAudioPlayer';
+import { usePlayerStore } from '../../stores/playerStore';
 import type { AssetInfo } from '../../types';
 
 interface ActiveShowData {
@@ -65,6 +67,38 @@ export default function Listen() {
   const [myFavorite, setMyFavorite] = useState(false);
   const [enteredRaffles, setEnteredRaffles] = useState<Set<string>>(new Set());
 
+  // HLS streaming: use server-side stream when available, fall back to client-side
+  const [hlsFailed, setHlsFailed] = useState(false);
+  const hlsUrl = wsNowPlaying?.hls_url
+    ? `${(import.meta.env.VITE_API_URL || '').replace('/api/v1', '')}${wsNowPlaying.hls_url}`
+    : null;
+  const useHls = !!hlsUrl && !hlsFailed;
+
+  // Set up HLS player via playerStore
+  const playerStore = usePlayerStore();
+  useEffect(() => {
+    if (useHls && userStarted && hlsUrl) {
+      playerStore.play(stationId!, station?.name ?? '', hlsUrl);
+    } else if (!useHls || !userStarted) {
+      if (playerStore.isPlaying) {
+        playerStore.stop();
+      }
+    }
+  }, [useHls, userStarted, hlsUrl, stationId]);
+
+  const { audioRef: hlsAudioRef } = useAudioPlayer();
+
+  // Listen for HLS errors to trigger fallback
+  useEffect(() => {
+    const audio = hlsAudioRef.current;
+    if (!audio || !useHls) return;
+    const onError = () => {
+      setHlsFailed(true);
+    };
+    audio.addEventListener('error', onError);
+    return () => audio.removeEventListener('error', onError);
+  }, [hlsAudioRef, useHls]);
+
   // Track listener session (heartbeat every 30s while listening)
   useListenerHeartbeat(stationId, userStarted);
 
@@ -96,14 +130,14 @@ export default function Listen() {
     duration: null,
   } : null;
 
-  // Audio engine with crossfade support
+  // Audio engine with crossfade support (fallback when HLS is not available)
   const {
     volume, setVolume, muted, toggleMute,
     audioReady, initAudio,
   } = useAudioEngine(
-    userStarted ? audioAsset : null,
+    userStarted && !useHls ? audioAsset : null,
     elapsed,
-    userStarted && isWsPlaying,
+    userStarted && isWsPlaying && !useHls,
     null, null, 2000,
     // Crossfade params from WS
     wsAsset?.cue_in ?? 0,
@@ -138,11 +172,14 @@ export default function Listen() {
 
   const handlePlay = async () => {
     setUserStarted(true);
-    await initAudio();
+    if (!useHls) {
+      await initAudio();
+    }
   };
 
   const handleStop = () => {
     setUserStarted(false);
+    playerStore.stop();
   };
 
   // Cleanup on unmount
@@ -150,11 +187,20 @@ export default function Listen() {
     return () => { /* useAudioEngine handles its own cleanup */ };
   }, []);
 
+  // Sync volume to HLS audio element
+  useEffect(() => {
+    if (hlsAudioRef.current) {
+      hlsAudioRef.current.volume = muted ? 0 : volume;
+    }
+  }, [volume, muted, hlsAudioRef]);
+
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
   if (!station) return <div className="text-center py-10">Station not found</div>;
 
   return (
     <div className="max-w-2xl mx-auto">
+      {/* Hidden audio element for HLS playback */}
+      <audio ref={hlsAudioRef} className="hidden" />
       <div className="bg-white shadow rounded-lg p-8">
         <div className="flex items-center gap-6 mb-8">
           <div className="w-24 h-24 bg-brand-50 rounded-lg flex items-center justify-center text-5xl text-brand-600">
@@ -204,10 +250,13 @@ export default function Listen() {
           }`}>
             {isWsPlaying ? 'On Air' : wsConnected ? 'Offline' : 'Connecting...'}
           </span>
+          {userStarted && useHls && (
+            <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">HLS</span>
+          )}
         </div>
 
         {/* Volume control */}
-        {userStarted && audioReady && (
+        {userStarted && (audioReady || useHls) && (
           <div className="flex items-center gap-3 mb-6">
             <button onClick={toggleMute} className="text-gray-400 text-sm w-8">
               {muted ? 'Mute' : 'Vol'}

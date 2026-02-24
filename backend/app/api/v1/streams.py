@@ -113,7 +113,7 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
             "replay_gain_db": na_analysis.get("replay_gain_db", 0),
         }
 
-    return {
+    response = {
         "playing": True,
         "asset_id": str(asset.id),
         "title": asset.title,
@@ -129,3 +129,8 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "replay_gain_db": replay_gain_db,
         "next_asset": next_asset_data,
     }
+
+    if settings.liquidsoap_enabled:
+        response["hls_url"] = f"/hls/{station_id}/stream.m3u8"
+
+    return response
