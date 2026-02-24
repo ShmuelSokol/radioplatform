@@ -140,6 +140,8 @@ async def get_or_create_weather_spot_assets(
         try:
             time_text = _build_time_text(eastern_now)
             time_bytes, time_duration = await generate_tts(time_text)
+            from app.services.audio_analysis_service import normalize_audio_loudness
+            time_bytes = normalize_audio_loudness(time_bytes)
             time_path = f"weather/{safe_slot}_time.mp3"
             time_url = await upload_to_supabase(time_bytes, time_path)
 
@@ -167,6 +169,8 @@ async def get_or_create_weather_spot_assets(
             weather_data = await get_current_weather()
             weather_text = _build_weather_text(weather_data)
             weather_bytes, weather_duration = await generate_tts(weather_text)
+            from app.services.audio_analysis_service import normalize_audio_loudness
+            weather_bytes = normalize_audio_loudness(weather_bytes)
             weather_path = f"weather/{safe_weather_key}_weather.mp3"
             weather_url = await upload_to_supabase(weather_bytes, weather_path)
 

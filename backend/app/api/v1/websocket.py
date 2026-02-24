@@ -129,6 +129,61 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
             now_playing = await service.get_now_playing(station_id)
             
             if now_playing:
+                asset = now_playing.asset
+                # Get audio analysis data
+                analysis = {}
+                audio_url = None
+                if asset:
+                    if asset.metadata_extra:
+                        analysis = asset.metadata_extra.get("audio_analysis", {})
+                    # Build audio URL
+                    from app.config import settings
+                    file_path = asset.file_path
+                    if file_path.startswith("http://") or file_path.startswith("https://"):
+                        audio_url = file_path
+                    elif settings.supabase_storage_enabled:
+                        bucket = settings.SUPABASE_STORAGE_BUCKET
+                        audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
+
+                duration = (asset.duration if asset else None) or 180.0
+
+                # Peek at next pending queue entry
+                from sqlalchemy import select as sa_select, or_
+                from app.models.queue_entry import QueueEntry
+                from datetime import datetime, timezone
+                now_utc = datetime.now(timezone.utc)
+                next_result = await db.execute(
+                    sa_select(QueueEntry)
+                    .where(
+                        QueueEntry.station_id == station_id,
+                        QueueEntry.status == "pending",
+                        or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+                    )
+                    .order_by(QueueEntry.position)
+                    .limit(1)
+                )
+                next_entry = next_result.scalar_one_or_none()
+                next_asset_data = None
+                if next_entry and next_entry.asset:
+                    na = next_entry.asset
+                    na_analysis = {}
+                    if na.metadata_extra:
+                        na_analysis = na.metadata_extra.get("audio_analysis", {})
+                    na_file_path = na.file_path
+                    na_audio_url = None
+                    if na_file_path.startswith("http://") or na_file_path.startswith("https://"):
+                        na_audio_url = na_file_path
+                    elif settings.supabase_storage_enabled:
+                        na_audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{na_file_path}"
+                    next_asset_data = {
+                        "id": str(na.id),
+                        "title": na.title,
+                        "artist": na.artist,
+                        "audio_url": na_audio_url,
+                        "cue_in": na_analysis.get("cue_in_seconds", 0),
+                        "replay_gain_db": na_analysis.get("replay_gain_db", 0),
+                    }
+
                 await websocket.send_json({
                     "type": "now_playing",
                     "data": {
@@ -139,11 +194,17 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                         "listener_count": now_playing.listener_count,
                         "stream_url": now_playing.stream_url,
                         "asset": {
-                            "title": now_playing.asset.title if now_playing.asset else "Unknown",
-                            "artist": now_playing.asset.artist if now_playing.asset else None,
-                            "album": now_playing.asset.album if now_playing.asset else None,
-                            "album_art_path": now_playing.asset.album_art_path if now_playing.asset else None,
-                        } if now_playing.asset else None,
+                            "title": asset.title if asset else "Unknown",
+                            "artist": asset.artist if asset else None,
+                            "album": asset.album if asset else None,
+                            "album_art_path": asset.album_art_path if asset else None,
+                            "audio_url": audio_url,
+                            "cue_in": analysis.get("cue_in_seconds", 0),
+                            "cue_out": analysis.get("cue_out_seconds", duration),
+                            "cross_start": analysis.get("cross_start_seconds", duration - 3.0),
+                            "replay_gain_db": analysis.get("replay_gain_db", 0),
+                        } if asset else None,
+                        "next_asset": next_asset_data,
                     }
                 })
             break

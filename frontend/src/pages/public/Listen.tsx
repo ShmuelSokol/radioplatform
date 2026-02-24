@@ -1,23 +1,14 @@
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getStation } from '../../api/stations';
 import apiClient from '../../api/client';
 import { submitSongRequest, SongRequestSubmitResponse } from '../../api/songRequests';
 import { useListenerHeartbeat } from '../../hooks/useListeners';
 import { useCrmAuth, useRateSong, useActiveRaffles, useEnterRaffle } from '../../hooks/useCrm';
-
-interface LiveAudioData {
-  playing: boolean;
-  asset_id?: string;
-  title?: string;
-  artist?: string;
-  album?: string;
-  duration?: number;
-  elapsed?: number;
-  started_at?: string;
-  audio_url?: string;
-}
+import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
+import { useAudioEngine } from '../../hooks/useAudioEngine';
+import type { AssetInfo } from '../../types';
 
 interface ActiveShowData {
   active: boolean;
@@ -33,8 +24,6 @@ interface ActiveShowData {
   } | null;
 }
 
-const POLL_INTERVAL = 4000;
-
 export default function Listen() {
   const { stationId } = useParams<{ stationId: string }>();
   const { data: station, isLoading } = useQuery({
@@ -43,11 +32,11 @@ export default function Listen() {
     enabled: !!stationId,
   });
 
-  const [liveData, setLiveData] = useState<LiveAudioData | null>(null);
+  // Real-time now-playing via WebSocket (instant track changes, cue points, next track)
+  const { nowPlaying: wsNowPlaying, isConnected: wsConnected } = useNowPlayingWS(stationId ?? '');
+
   const [activeShow, setActiveShow] = useState<ActiveShowData | null>(null);
   const [userStarted, setUserStarted] = useState(false);
-  const [isBuffering, setIsBuffering] = useState(false);
-  const [volume, setVolume] = useState(0.7);
 
   // Song request form state
   const [requestOpen, setRequestOpen] = useState(false);
@@ -58,9 +47,6 @@ export default function Listen() {
   const [reqSubmitting, setReqSubmitting] = useState(false);
   const [reqResult, setReqResult] = useState<SongRequestSubmitResponse | null>(null);
   const [reqError, setReqError] = useState('');
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const currentAssetRef = useRef<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // CRM state
   const crm = useCrmAuth();
@@ -82,19 +68,57 @@ export default function Listen() {
   // Track listener session (heartbeat every 30s while listening)
   useListenerHeartbeat(stationId, userStarted);
 
-  // Fetch live-audio data
-  const fetchLiveAudio = useCallback(async () => {
-    if (!stationId) return null;
-    try {
-      const res = await apiClient.get<LiveAudioData>(`/stations/${stationId}/live-audio`);
-      setLiveData(res.data);
-      return res.data;
-    } catch {
-      return null;
-    }
-  }, [stationId]);
+  // Derive playback state from WS data
+  const isWsPlaying = !!wsNowPlaying?.asset_id && !!wsNowPlaying?.asset;
+  const wsAsset = wsNowPlaying?.asset;
+  const wsNextAsset = wsNowPlaying?.next_asset;
 
-  // Fetch active live show status
+  // Compute elapsed from started_at
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!wsNowPlaying?.started_at) { setElapsed(0); return; }
+    const update = () => {
+      const startMs = new Date(wsNowPlaying.started_at).getTime();
+      setElapsed(Math.max(0, (Date.now() - startMs) / 1000));
+    };
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [wsNowPlaying?.started_at]);
+
+  // Build AssetInfo for audio engine
+  const audioAsset: AssetInfo | null = wsNowPlaying?.asset_id && wsAsset ? {
+    id: wsNowPlaying.asset_id,
+    title: wsAsset.title,
+    artist: wsAsset.artist ?? null,
+    asset_type: 'music',
+    category: null,
+    duration: null,
+  } : null;
+
+  // Audio engine with crossfade support
+  const {
+    volume, setVolume, muted, toggleMute,
+    audioReady, initAudio,
+  } = useAudioEngine(
+    userStarted ? audioAsset : null,
+    elapsed,
+    userStarted && isWsPlaying,
+    null, null, 2000,
+    // Crossfade params from WS
+    wsAsset?.cue_in ?? 0,
+    wsAsset?.cue_out ?? 0,
+    wsAsset?.cross_start ?? 0,
+    wsAsset?.replay_gain_db ?? 0,
+    wsNextAsset?.id ?? null,
+    wsNextAsset?.cue_in ?? 0,
+    wsNextAsset?.replay_gain_db ?? 0,
+    // Direct audio URLs from WS (no auth needed for public listeners)
+    wsAsset?.audio_url ?? null,
+    wsNextAsset?.audio_url ?? null,
+  );
+
+  // Fetch active live show status (still uses polling — shows don't change often)
   const fetchActiveShow = useCallback(async () => {
     if (!stationId) return;
     try {
@@ -105,110 +129,25 @@ export default function Listen() {
     }
   }, [stationId]);
 
-  // Poll for live-audio data and live show status
   useEffect(() => {
     if (!stationId) return;
-    fetchLiveAudio();
     fetchActiveShow();
-    pollRef.current = setInterval(() => {
-      fetchLiveAudio();
-      fetchActiveShow();
-    }, POLL_INTERVAL);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [stationId, fetchLiveAudio, fetchActiveShow]);
-
-  // Start audio playback with a given data payload
-  const startAudio = useCallback((data: LiveAudioData) => {
-    const audio = audioRef.current;
-    if (!audio || !data.playing || !data.audio_url) return;
-    currentAssetRef.current = data.asset_id ?? null;
-    audio.src = data.audio_url;
-    audio.currentTime = Math.max(0, data.elapsed ?? 0);
-    audio.play().catch(() => {});
-  }, []);
-
-  // Play/switch audio when live data changes (for track transitions while listening)
-  useEffect(() => {
-    if (!userStarted || !liveData?.playing || !liveData.audio_url) return;
-
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // New track — load and seek
-    if (liveData.asset_id !== currentAssetRef.current) {
-      setIsBuffering(true);
-      currentAssetRef.current = liveData.asset_id ?? null;
-      audio.src = liveData.audio_url;
-      audio.currentTime = Math.max(0, liveData.elapsed ?? 0);
-      audio.play().catch(() => {});
-    }
-  }, [liveData?.asset_id, liveData?.playing, liveData?.audio_url, liveData?.elapsed, userStarted]);
-
-  // Stop audio when nothing is playing
-  useEffect(() => {
-    if (userStarted && liveData && !liveData.playing) {
-      const audio = audioRef.current;
-      if (audio && !audio.paused) {
-        audio.pause();
-        currentAssetRef.current = null;
-      }
-    }
-  }, [liveData?.playing, userStarted]);
-
-  // Volume sync
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
-  }, [volume]);
+    const timer = setInterval(fetchActiveShow, 15000);
+    return () => clearInterval(timer);
+  }, [stationId, fetchActiveShow]);
 
   const handlePlay = async () => {
-    // Create audio element with buffering event listeners
-    if (!audioRef.current) {
-      const audio = new Audio();
-      audio.crossOrigin = 'anonymous';
-      audio.volume = volume;
-      audio.preload = 'auto';
-      // Clear buffering state when audio actually starts playing
-      audio.addEventListener('playing', () => setIsBuffering(false));
-      // Show buffering when audio stalls/waits
-      audio.addEventListener('waiting', () => setIsBuffering(true));
-      audioRef.current = audio;
-    }
-    setIsBuffering(true);
     setUserStarted(true);
-    currentAssetRef.current = null;
-
-    // If we already have live data with an audio URL, start immediately
-    if (liveData?.playing && liveData.audio_url) {
-      startAudio(liveData);
-    } else {
-      // Fetch fresh data and start as soon as we get it
-      const freshData = await fetchLiveAudio();
-      if (freshData?.playing && freshData.audio_url) {
-        startAudio(freshData);
-      }
-    }
+    await initAudio();
   };
 
   const handleStop = () => {
     setUserStarted(false);
-    setIsBuffering(false);
-    currentAssetRef.current = null;
-    const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.src = '';
-    }
   };
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      audioRef.current?.pause();
-      audioRef.current = null;
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    return () => { /* useAudioEngine handles its own cleanup */ };
   }, []);
 
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
@@ -246,25 +185,12 @@ export default function Listen() {
 
         <div className="flex items-center gap-4 mb-6">
           {userStarted ? (
-            isBuffering ? (
-              <button
-                disabled
-                className="bg-brand-600 text-white px-8 py-3 rounded-full text-lg font-medium flex items-center gap-3 opacity-90 cursor-wait"
-              >
-                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Connecting...
-              </button>
-            ) : (
-              <button
-                onClick={handleStop}
-                className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-full text-lg font-medium transition"
-              >
-                Stop
-              </button>
-            )
+            <button
+              onClick={handleStop}
+              className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-full text-lg font-medium transition"
+            >
+              Stop
+            </button>
           ) : (
             <button
               onClick={handlePlay}
@@ -274,16 +200,18 @@ export default function Listen() {
             </button>
           )}
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-            liveData?.playing ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+            isWsPlaying ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
           }`}>
-            {liveData?.playing ? 'On Air' : 'Offline'}
+            {isWsPlaying ? 'On Air' : wsConnected ? 'Offline' : 'Connecting...'}
           </span>
         </div>
 
         {/* Volume control */}
-        {userStarted && !isBuffering && (
+        {userStarted && audioReady && (
           <div className="flex items-center gap-3 mb-6">
-            <span className="text-gray-400 text-sm">Vol</span>
+            <button onClick={toggleMute} className="text-gray-400 text-sm w-8">
+              {muted ? 'Mute' : 'Vol'}
+            </button>
             <input
               type="range"
               min={0}
@@ -297,7 +225,7 @@ export default function Listen() {
           </div>
         )}
 
-        {liveData?.playing && liveData.title && (
+        {isWsPlaying && wsAsset && (
           <div className="border-t pt-6">
             <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">Now Playing</h3>
             <div className="flex items-center gap-4">
@@ -305,19 +233,19 @@ export default function Listen() {
                 &#9835;
               </div>
               <div className="flex-1">
-                <p className="font-medium">{liveData.title}</p>
-                {liveData.artist && (
-                  <p className="text-sm text-gray-500">{liveData.artist}</p>
+                <p className="font-medium">{wsAsset.title}</p>
+                {wsAsset.artist && (
+                  <p className="text-sm text-gray-500">{wsAsset.artist}</p>
                 )}
-                {liveData.album && (
-                  <p className="text-xs text-gray-400">{liveData.album}</p>
+                {wsAsset.album && (
+                  <p className="text-xs text-gray-400">{wsAsset.album}</p>
                 )}
               </div>
             </div>
           </div>
         )}
 
-        {liveData && !liveData.playing && (
+        {!isWsPlaying && wsConnected && (
           <div className="border-t pt-6">
             <p className="text-gray-400">Nothing playing right now</p>
           </div>
@@ -542,7 +470,7 @@ export default function Listen() {
               </div>
 
               {/* Rating widget — only when a song is playing */}
-              {liveData?.playing && liveData.asset_id && (
+              {isWsPlaying && wsNowPlaying?.asset_id && (
                 <div className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
                   <span className="text-sm text-gray-600 flex-shrink-0">Rate this song:</span>
                   <div className="flex items-center gap-1">
@@ -551,7 +479,7 @@ export default function Listen() {
                         onClick={() => {
                           setMyRating(star);
                           rateMutation.mutate(
-                            { asset_id: liveData.asset_id!, rating: star, is_favorite: myFavorite },
+                            { asset_id: wsNowPlaying.asset_id!, rating: star, is_favorite: myFavorite },
                             { onSuccess: () => crm.refreshProfile() }
                           );
                         }}
@@ -566,7 +494,7 @@ export default function Listen() {
                       const newFav = !myFavorite;
                       setMyFavorite(newFav);
                       rateMutation.mutate(
-                        { asset_id: liveData.asset_id!, rating: myRating || 5, is_favorite: newFav },
+                        { asset_id: wsNowPlaying.asset_id!, rating: myRating || 5, is_favorite: newFav },
                         { onSuccess: () => crm.refreshProfile() }
                       );
                     }}

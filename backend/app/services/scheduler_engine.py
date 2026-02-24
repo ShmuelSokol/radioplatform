@@ -46,6 +46,8 @@ class SchedulerEngine:
         self._last_holiday_check: Optional[datetime] = None
         # Weather readout daily generation check: station_id → date string
         self._last_readout_check: dict[str, str] = {}
+        # Precise advance timers: station_id → TimerHandle
+        self._advance_timers: dict[str, asyncio.TimerHandle] = {}
     
     async def start(self):
         """Start the scheduler engine."""
@@ -493,13 +495,154 @@ class SchedulerEngine:
         )
         return None
 
+    def _schedule_precise_advance(self, station_id, duration_seconds: float, crossfade_seconds: float = 3.0):
+        """Schedule a precise timer to advance playback at the right moment."""
+        station_key = str(station_id)
+        # Cancel any existing timer for this station
+        old_timer = self._advance_timers.pop(station_key, None)
+        if old_timer:
+            old_timer.cancel()
+
+        delay = max(0.0, duration_seconds - crossfade_seconds)
+        loop = asyncio.get_event_loop()
+        handle = loop.call_later(delay, lambda: asyncio.ensure_future(self._precise_advance(station_id)))
+        self._advance_timers[station_key] = handle
+        logger.debug("Scheduled precise advance for station %s in %.1fs", station_id, delay)
+
+    async def _precise_advance(self, station_id):
+        """Called by precise timer to advance playback without waiting for polling."""
+        try:
+            async for db in get_db():
+                from app.api.v1.queue import _check_advance
+                entry = await _check_advance(db, station_id)
+                if entry and entry.status == "playing":
+                    await self._broadcast_queue_entry(db, station_id, entry)
+                break
+        except Exception as e:
+            logger.error("Precise advance failed for station %s: %s", station_id, e, exc_info=True)
+
     async def _advance_queue(self, db: AsyncSession, station_id):
         """Advance queue-based playback: check if current track ended and move to next."""
         try:
             from app.api.v1.queue import _check_advance
-            await _check_advance(db, station_id)
+            entry = await _check_advance(db, station_id)
+            if entry and entry.status == "playing" and entry.started_at:
+                # Schedule precise timer for this track
+                asset = entry.asset
+                duration = (asset.duration if asset else None) or 180.0
+                # Get crossfade duration from audio analysis if available
+                cross_seconds = 3.0
+                if asset and asset.metadata_extra:
+                    analysis = asset.metadata_extra.get("audio_analysis", {})
+                    cue_out = analysis.get("cue_out_seconds")
+                    cross_start = analysis.get("cross_start_seconds")
+                    if cue_out and cross_start:
+                        cross_seconds = cue_out - cross_start
+
+                # Calculate remaining time from started_at
+                elapsed = (datetime.now(timezone.utc) - entry.started_at).total_seconds()
+                remaining = duration - elapsed
+                if remaining > 0:
+                    self._schedule_precise_advance(station_id, remaining, cross_seconds)
+
+                # Broadcast expanded WS payload
+                await self._broadcast_queue_entry(db, station_id, entry)
         except Exception as e:
             logger.error("Queue advance failed for station %s: %s", station_id, e, exc_info=True)
+
+    async def _broadcast_queue_entry(self, db: AsyncSession, station_id, entry):
+        """Broadcast an expanded now_playing update for a queue entry, including analysis data + next track."""
+        from sqlalchemy.orm import joinedload
+        from app.models.queue_entry import QueueEntry
+
+        asset = entry.asset
+        if not asset:
+            return
+
+        # Get audio analysis data (defaults if missing)
+        analysis = {}
+        if asset.metadata_extra:
+            analysis = asset.metadata_extra.get("audio_analysis", {})
+
+        cue_in = analysis.get("cue_in_seconds", 0)
+        cue_out = analysis.get("cue_out_seconds", asset.duration or 180.0)
+        cross_start = analysis.get("cross_start_seconds", (asset.duration or 180.0) - 3.0)
+        replay_gain_db = analysis.get("replay_gain_db", 0)
+
+        # Peek at next pending entry
+        from sqlalchemy import or_
+        now_utc = datetime.now(timezone.utc)
+        next_result = await db.execute(
+            select(QueueEntry)
+            .options(joinedload(QueueEntry.asset))
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+            )
+            .order_by(QueueEntry.position)
+            .limit(1)
+        )
+        next_entry = next_result.unique().scalar_one_or_none()
+
+        next_asset_data = None
+        if next_entry and next_entry.asset:
+            na = next_entry.asset
+            na_analysis = {}
+            if na.metadata_extra:
+                na_analysis = na.metadata_extra.get("audio_analysis", {})
+
+            # Build audio URL for next asset
+            from app.config import settings as app_settings
+            na_file_path = na.file_path
+            na_audio_url = None
+            if na_file_path.startswith("http://") or na_file_path.startswith("https://"):
+                na_audio_url = na_file_path
+            elif app_settings.supabase_storage_enabled:
+                bucket = app_settings.SUPABASE_STORAGE_BUCKET
+                na_audio_url = f"{app_settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{na_file_path}"
+
+            next_asset_data = {
+                "id": str(na.id),
+                "title": na.title,
+                "artist": na.artist,
+                "audio_url": na_audio_url,
+                "cue_in": na_analysis.get("cue_in_seconds", 0),
+                "replay_gain_db": na_analysis.get("replay_gain_db", 0),
+            }
+
+        # Build audio URL for current asset
+        from app.config import settings as app_settings
+        file_path = asset.file_path
+        audio_url = None
+        if file_path.startswith("http://") or file_path.startswith("https://"):
+            audio_url = file_path
+        elif app_settings.supabase_storage_enabled:
+            bucket = app_settings.SUPABASE_STORAGE_BUCKET
+            audio_url = f"{app_settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
+
+        try:
+            from app.api.v1.websocket import broadcast_now_playing_update
+            await broadcast_now_playing_update(str(station_id), {
+                "station_id": str(station_id),
+                "asset_id": str(asset.id),
+                "started_at": entry.started_at.isoformat() if entry.started_at else None,
+                "ends_at": (entry.started_at + timedelta(seconds=(asset.duration or 180.0))).isoformat() if entry.started_at else None,
+                "asset": {
+                    "title": asset.title,
+                    "artist": asset.artist,
+                    "album": asset.album,
+                    "album_art_path": asset.album_art_path,
+                    "audio_url": audio_url,
+                    "cue_in": cue_in,
+                    "cue_out": cue_out,
+                    "cross_start": cross_start,
+                    "replay_gain_db": replay_gain_db,
+                },
+                "next_asset": next_asset_data,
+            })
+        except Exception as e:
+            logger.error("Failed to broadcast expanded WS update: %s", e)
 
     async def _check_station(self, db: AsyncSession, station: Station):
         """Check a single station and advance playback if needed."""
@@ -671,7 +814,20 @@ class SchedulerEngine:
         except Exception as e:
             logger.warning("Icecast metadata push failed: %s", e)
 
-        # Broadcast update via WebSocket
+        # Broadcast update via WebSocket (with analysis data)
+        analysis = {}
+        if asset.metadata_extra:
+            analysis = asset.metadata_extra.get("audio_analysis", {})
+
+        # Build audio URL
+        file_path = asset.file_path
+        audio_url = None
+        if file_path.startswith("http://") or file_path.startswith("https://"):
+            audio_url = file_path
+        elif settings.supabase_storage_enabled:
+            bucket = settings.SUPABASE_STORAGE_BUCKET
+            audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
+
         try:
             from app.api.v1.websocket import broadcast_now_playing_update
             await broadcast_now_playing_update(str(station.id), {
@@ -686,7 +842,13 @@ class SchedulerEngine:
                     "artist": asset.artist,
                     "album": asset.album,
                     "album_art_path": asset.album_art_path,
+                    "audio_url": audio_url,
+                    "cue_in": analysis.get("cue_in_seconds", 0),
+                    "cue_out": analysis.get("cue_out_seconds", duration),
+                    "cross_start": analysis.get("cross_start_seconds", duration - 3.0),
+                    "replay_gain_db": analysis.get("replay_gain_db", 0),
                 },
+                "next_asset": None,
             })
         except Exception as e:
             logger.error(f"Failed to broadcast WebSocket update: {e}")

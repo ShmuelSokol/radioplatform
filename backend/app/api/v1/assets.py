@@ -219,6 +219,7 @@ async def backfill_release_dates(
 
 @router.post("/upload", response_model=AssetResponse, status_code=201)
 async def upload_asset(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str = Form(...),
     format: str = Form("mp3"),
@@ -260,6 +261,8 @@ async def upload_asset(
     )
     # Dispatch metadata extraction task
     task_extract_metadata.delay(str(asset.id), asset.file_path)
+    # Fire background audio analysis (loudness, cue points)
+    background_tasks.add_task(_run_analysis_background, str(asset.id))
     return asset
 
 
@@ -345,6 +348,108 @@ async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: f
             job["processed"] += 1
 
     job["status"] = "completed"
+
+
+async def _run_analysis_background(asset_id: str):
+    """Background task: run audio analysis (loudness + cue points) for a single asset."""
+    from app.db.session import async_session_factory
+    from app.services.audio_analysis_service import analyze_audio
+
+    try:
+        async with async_session_factory() as db:
+            await analyze_audio(db, asset_id)
+            await db.commit()
+    except Exception as e:
+        logger.error("Background audio analysis failed for asset %s: %s", asset_id, e, exc_info=True)
+
+
+# In-memory job status tracking for bulk audio analysis
+_bulk_analyze_jobs: dict[str, dict] = {}
+
+
+async def _run_bulk_analyze(job_id: str, asset_ids: list[str]):
+    """Background task: analyze audio for multiple assets."""
+    from app.db.session import async_session_factory
+    from app.services.audio_analysis_service import analyze_audio
+
+    job = _bulk_analyze_jobs[job_id]
+    job["status"] = "running"
+    job["total"] = len(asset_ids)
+
+    for aid_str in asset_ids:
+        try:
+            async with async_session_factory() as db:
+                await analyze_audio(db, aid_str)
+                await db.commit()
+                job["analyzed"] += 1
+        except Exception as e:
+            logger.error("Bulk analyze error for asset %s: %s", aid_str, e, exc_info=True)
+            job["errors"] += 1
+        job["processed"] += 1
+
+    job["status"] = "completed"
+
+
+@router.post("/{asset_id}/analyze-audio")
+async def analyze_audio_endpoint(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Manually trigger audio analysis for a single asset."""
+    from app.services.audio_analysis_service import analyze_audio
+    analysis = await analyze_audio(db, str(asset_id))
+    await db.commit()
+    return {"analysis": analysis}
+
+
+@router.post("/bulk-analyze")
+async def bulk_analyze_endpoint(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Batch-analyze all assets missing audio_analysis metadata. Returns job_id to poll."""
+    # Find assets missing audio_analysis
+    from sqlalchemy import or_, cast, String
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    result = await db.execute(
+        select(AssetModel.id).where(
+            or_(
+                AssetModel.metadata_extra.is_(None),
+                ~AssetModel.metadata_extra.has_key("audio_analysis"),
+            )
+        )
+    )
+    asset_ids = [str(row[0]) for row in result.all()]
+
+    if not asset_ids:
+        return {"message": "All assets already analyzed", "total": 0}
+
+    job_id = str(uuid.uuid4())
+    _bulk_analyze_jobs[job_id] = {
+        "status": "queued",
+        "total": len(asset_ids),
+        "processed": 0,
+        "analyzed": 0,
+        "errors": 0,
+    }
+
+    background_tasks.add_task(_run_bulk_analyze, job_id, asset_ids)
+    return {"job_id": job_id, "total": len(asset_ids)}
+
+
+@router.get("/bulk-analyze/status/{job_id}")
+async def bulk_analyze_status(
+    job_id: str,
+    _user: User = Depends(require_manager),
+):
+    """Poll the status of a bulk audio analysis job."""
+    job = _bulk_analyze_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
 
 
 @router.post("/bulk-auto-trim")

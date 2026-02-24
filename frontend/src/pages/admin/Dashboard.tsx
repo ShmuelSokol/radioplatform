@@ -9,6 +9,7 @@ import {
 } from '../../hooks/useQueue';
 import { useTimelinePreview } from '../../hooks/useSchedules';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
+import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import type { AssetInfo } from '../../types';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 import { useAssetTypes } from '../../hooks/useAssetTypes';
@@ -348,6 +349,9 @@ export default function Dashboard() {
 
   const preemptFadeMs = (queueData as any)?.preempt_fade_ms ?? 2000;
 
+  // WS hook for real-time cue points + next track data
+  const { nowPlaying: wsNowPlaying } = useNowPlayingWS(stationId ?? '');
+
   const {
     volume, setVolume, muted, toggleMute,
     vuLevels, audioReady, initAudio,
@@ -356,6 +360,14 @@ export default function Dashboard() {
     nextPreempt?.preempt_at ?? null,
     nextPreempt?.asset_id ?? null,
     preemptFadeMs,
+    // Crossfade params from WS
+    wsNowPlaying?.asset?.cue_in ?? 0,
+    wsNowPlaying?.asset?.cue_out ?? 0,
+    wsNowPlaying?.asset?.cross_start ?? 0,
+    wsNowPlaying?.asset?.replay_gain_db ?? 0,
+    wsNowPlaying?.next_asset?.id ?? null,
+    wsNowPlaying?.next_asset?.cue_in ?? 0,
+    wsNowPlaying?.next_asset?.replay_gain_db ?? 0,
   );
 
   // VU meter levels: use real audio data when available, else fallback

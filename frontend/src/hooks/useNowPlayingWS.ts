@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-interface NowPlayingData {
+export interface NowPlayingData {
   station_id: string;
   asset_id?: string;
   started_at: string;
@@ -12,6 +12,19 @@ interface NowPlayingData {
     artist?: string;
     album?: string;
     album_art_path?: string;
+    audio_url?: string;
+    cue_in?: number;
+    cue_out?: number;
+    cross_start?: number;
+    replay_gain_db?: number;
+  };
+  next_asset?: {
+    id: string;
+    title?: string;
+    artist?: string;
+    audio_url?: string;
+    cue_in?: number;
+    replay_gain_db?: number;
   };
 }
 
