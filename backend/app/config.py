@@ -178,7 +178,7 @@ class Settings(BaseSettings):
 
     # Liquidsoap (optional — runs as sidecar on Railway)
     LIQUIDSOAP_SOCKET_PATH: str = "/tmp/liquidsoap.sock"
-    LIQUIDSOAP_ENABLED: bool = True
+    LIQUIDSOAP_ENABLED: bool = False  # Set to True when Liquidsoap is configured
     LIQUIDSOAP_HLS_DIR: str = "/tmp/hls"
 
     @property
