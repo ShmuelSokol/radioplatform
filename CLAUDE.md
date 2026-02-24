@@ -38,6 +38,8 @@ radioplatform/
 │   ├── app/services/             # 17 business logic services
 │   ├── app/workers/tasks/        # Celery tasks (media processing)
 │   ├── app/streaming/            # HLS generator, playlist engine
+│   ├── liquidsoap/radio.liq      # Liquidsoap pipeline (crossfade, normalization, HLS output)
+│   ├── start.sh                  # Process launcher (Liquidsoap sidecar + uvicorn)
 │   ├── tests/                    # pytest async tests
 │   ├── vercel.json               # Rewrites all routes to api/index
 │   └── pyproject.toml            # bcrypt==4.1.3 pinned for passlib compat
@@ -179,7 +181,7 @@ radioplatform/
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
-- Listen.tsx — Listen to a station (with song request form)
+- Listen.tsx — Listen to a station (HLS primary + client-side fallback, song requests)
 - ProgramGuide.tsx — Public EPG with station/date picker and timeline
 - Hosts.tsx — Public DJ/host profile cards
 - Archives.tsx — Public show archive browser with playback
@@ -346,6 +348,7 @@ Claude Code accessible over Telegram for remote development.
 - **Pydantic schemas**: ID fields use `uuid.UUID | str` for cross-DB compatibility (SQLite returns strings)
 - **Frontend Vercel deploy**: Repo-local git email is set to `shmuelsokol@yahoo.com` (matching the Vercel account). Deploy directly: `cd frontend && npx vercel --prod --yes`.
 - **Weather caching**: Weather TTS audio is cached per 15-min slot. Text changes don't take effect until the next slot.
+- **Liquidsoap sidecar**: Runs via `start.sh` on Railway alongside uvicorn. If Liquidsoap isn't available (missing binary or socket timeout), the system degrades gracefully — clients use the dual-buffer Web Audio engine. Set `LIQUIDSOAP_ENABLED=false` to disable entirely. HLS segments served at `/hls/{station_id}/`.
 
 ## Milestones
 - **M1** (complete): Backend skeleton, auth, station CRUD, asset upload, React frontend — DEPLOYED
