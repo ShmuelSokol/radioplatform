@@ -1,0 +1,28 @@
+<icecast>
+    <location>Brooklyn, NY</location>
+    <hostname>stream.kbrlive.com</hostname>
+    <limits>
+        <clients>1000</clients>
+        <sources>4</sources>
+        <queue-size>524288</queue-size>
+        <burst-size>65535</burst-size>
+    </limits>
+    <authentication>
+        <source-password>CHANGE_ME</source-password>
+        <admin-user>admin</admin-user>
+        <admin-password>CHANGE_ME</admin-password>
+    </authentication>
+    <listen-socket>
+        <port>8000</port>
+        <bind-address>127.0.0.1</bind-address>
+    </listen-socket>
+    <mount>
+        <mount-name>/live</mount-name>
+        <bitrate>192</bitrate>
+        <type>audio/mpeg</type>
+        <stream-name>Kol Bramah Live</stream-name>
+    </mount>
+    <paths>
+        <logdir>/var/log/icecast2</logdir>
+    </paths>
+</icecast>

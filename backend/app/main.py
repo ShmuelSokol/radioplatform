@@ -515,15 +515,6 @@ def create_app() -> FastAPI:
         await ensure_tables()
         return {"status": "tables_created", "created": _tables_created}
 
-    # Mount HLS static files (Liquidsoap output)
-    if settings.liquidsoap_enabled:
-        import os
-        hls_dir = settings.LIQUIDSOAP_HLS_DIR
-        os.makedirs(hls_dir, exist_ok=True)
-        from fastapi.staticfiles import StaticFiles
-        app.mount("/hls", StaticFiles(directory=hls_dir), name="hls")
-        logger.info("HLS static files mounted at /hls from %s", hls_dir)
-
     # Register API routers
     from app.api.v1 import router as api_v1_router
     app.include_router(api_v1_router, prefix="/api/v1")

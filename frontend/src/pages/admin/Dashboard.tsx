@@ -9,8 +9,6 @@ import {
 } from '../../hooks/useQueue';
 import { useTimelinePreview } from '../../hooks/useSchedules';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
-import { useAudioPlayer } from '../../hooks/useAudioPlayer';
-import { usePlayerStore } from '../../stores/playerStore';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import type { AssetInfo } from '../../types';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
@@ -354,40 +352,33 @@ export default function Dashboard() {
   // WS hook for real-time cue points + next track data
   const { nowPlaying: wsNowPlaying } = useNowPlayingWS(stationId ?? '');
 
-  // HLS streaming: prefer server-side stream when available
-  const [hlsFailed, setHlsFailed] = useState(false);
-  const dashHlsUrl = wsNowPlaying?.hls_url
-    ? `${(import.meta.env.VITE_API_URL || '').replace('/api/v1', '')}${wsNowPlaying.hls_url}`
-    : null;
-  const dashUseHls = !!dashHlsUrl && !hlsFailed;
-
-  const dashPlayerStore = usePlayerStore();
-  useEffect(() => {
-    if (dashUseHls && isPlaying && dashHlsUrl) {
-      const stName = stations.find((s: any) => s.id === stationId)?.name ?? '';
-      dashPlayerStore.play(stationId!, stName, dashHlsUrl);
-    } else {
-      if (dashPlayerStore.isPlaying && dashPlayerStore.hlsUrl) {
-        dashPlayerStore.stop();
-      }
-    }
-  }, [dashUseHls, isPlaying, dashHlsUrl, stationId]);
-
-  const { audioRef: dashHlsAudioRef } = useAudioPlayer();
+  // Icecast stream: direct MP3 stream via <audio> element
+  const dashStreamUrl = wsNowPlaying?.stream_url || null;
+  const [streamFailed, setStreamFailed] = useState(false);
+  const dashUseStream = !!dashStreamUrl && !streamFailed;
+  const dashStreamAudioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
-    const audio = dashHlsAudioRef.current;
-    if (!audio || !dashUseHls) return;
-    const onError = () => setHlsFailed(true);
+    const audio = dashStreamAudioRef.current;
+    if (!audio || !dashUseStream || !isPlaying) return;
+    audio.src = dashStreamUrl!;
+    audio.play().catch(() => setStreamFailed(true));
+    return () => { audio.pause(); audio.src = ''; };
+  }, [dashUseStream, isPlaying, dashStreamUrl]);
+
+  useEffect(() => {
+    const audio = dashStreamAudioRef.current;
+    if (!audio || !dashUseStream) return;
+    const onError = () => setStreamFailed(true);
     audio.addEventListener('error', onError);
     return () => audio.removeEventListener('error', onError);
-  }, [dashHlsAudioRef, dashUseHls]);
+  }, [dashUseStream]);
 
   const {
     volume, setVolume, muted, toggleMute,
     vuLevels, audioReady, initAudio,
   } = useAudioEngine(
-    dashUseHls ? null : audioAsset, realElapsed, dashUseHls ? false : isPlaying,
+    dashUseStream ? null : audioAsset, realElapsed, dashUseStream ? false : isPlaying,
     nextPreempt?.preempt_at ?? null,
     nextPreempt?.asset_id ?? null,
     preemptFadeMs,
@@ -401,12 +392,12 @@ export default function Dashboard() {
     wsNowPlaying?.next_asset?.replay_gain_db ?? 0,
   );
 
-  // Sync volume to HLS audio element in dashboard
+  // Sync volume to stream audio element in dashboard
   useEffect(() => {
-    if (dashHlsAudioRef.current) {
-      dashHlsAudioRef.current.volume = muted ? 0 : volume;
+    if (dashStreamAudioRef.current) {
+      dashStreamAudioRef.current.volume = muted ? 0 : volume;
     }
-  }, [volume, muted, dashHlsAudioRef]);
+  }, [volume, muted]);
 
   // VU meter levels: use real audio data when available, else fallback
   const vuLevel = audioReady && isPlaying
@@ -419,7 +410,7 @@ export default function Dashboard() {
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] h-[calc(100vh-3rem)] flex flex-col select-none overflow-hidden">
       <audio ref={previewAudioRef} className="hidden" />
-      <audio ref={dashHlsAudioRef} className="hidden" />
+      <audio ref={dashStreamAudioRef} className="hidden" />
 
       {/* Toast notification for rule warnings */}
       {toastMessage && (

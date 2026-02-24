@@ -176,14 +176,17 @@ class Settings(BaseSettings):
     def twilio_voice_enabled(self) -> bool:
         return bool(self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN)
 
-    # Liquidsoap (optional — runs as sidecar on Railway)
-    LIQUIDSOAP_SOCKET_PATH: str = "/tmp/liquidsoap.sock"
-    LIQUIDSOAP_ENABLED: bool = False  # Set to True when Liquidsoap is configured
-    LIQUIDSOAP_HLS_DIR: str = "/tmp/hls"
+    # Liquidsoap (remote server — dedicated VPS)
+    LIQUIDSOAP_HOST: str = ""  # e.g., "stream.kbrlive.com" — empty to disable
+    LIQUIDSOAP_TELNET_PORT: int = 1234
+    LIQUIDSOAP_ENABLED: bool = False
+
+    # Icecast stream URL (public, served by the VPS)
+    ICECAST_STREAM_URL: str = ""  # e.g., "https://stream.kbrlive.com/live"
 
     @property
     def liquidsoap_enabled(self) -> bool:
-        return self.LIQUIDSOAP_ENABLED
+        return self.LIQUIDSOAP_ENABLED and bool(self.LIQUIDSOAP_HOST)
 
 
 settings = Settings()

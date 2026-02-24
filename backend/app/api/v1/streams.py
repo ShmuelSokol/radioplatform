@@ -19,7 +19,7 @@ async def stream_info(station_id: uuid.UUID, db: AsyncSession = Depends(get_db))
     return {
         "station_id": str(station.id),
         "station_name": station.name,
-        "hls_url": f"/hls/{station_id}/main/live.m3u8",
+        "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
     }
 
 
@@ -131,6 +131,6 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     }
 
     if settings.liquidsoap_enabled:
-        response["hls_url"] = f"/hls/{station_id}/stream.m3u8"
+        response["stream_url"] = settings.ICECAST_STREAM_URL
 
     return response

@@ -194,7 +194,7 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                         "ends_at": now_playing.ends_at.isoformat() if now_playing.ends_at else None,
                         "listener_count": now_playing.listener_count,
                         "stream_url": now_playing.stream_url,
-                        "hls_url": f"/hls/{station_id}/stream.m3u8" if settings.liquidsoap_enabled else None,
+                        "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
                         "asset": {
                             "title": asset.title if asset else "Unknown",
                             "artist": asset.artist if asset else None,

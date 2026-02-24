@@ -665,7 +665,7 @@ class SchedulerEngine:
                 "asset_id": str(asset.id),
                 "started_at": entry.started_at.isoformat() if entry.started_at else None,
                 "ends_at": (entry.started_at + timedelta(seconds=(asset.duration or 180.0))).isoformat() if entry.started_at else None,
-                "hls_url": f"/hls/{station_id}/stream.m3u8" if settings.liquidsoap_enabled else None,
+                "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
                 "asset": {
                     "title": asset.title,
                     "artist": asset.artist,
@@ -878,7 +878,7 @@ class SchedulerEngine:
                 "ends_at": now_playing.ends_at.isoformat() if now_playing.ends_at else None,
                 "listener_count": now_playing.listener_count,
                 "stream_url": now_playing.stream_url,
-                "hls_url": f"/hls/{station.id}/stream.m3u8" if settings.liquidsoap_enabled else None,
+                "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
                 "asset": {
                     "title": asset.title,
                     "artist": asset.artist,

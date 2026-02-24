@@ -7,7 +7,6 @@ export interface NowPlayingData {
   ends_at?: string;
   listener_count?: number;
   stream_url?: string;
-  hls_url?: string;
   asset?: {
     title: string;
     artist?: string;

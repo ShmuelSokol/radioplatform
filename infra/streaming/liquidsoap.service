@@ -1,0 +1,14 @@
+[Unit]
+Description=Liquidsoap Radio Stream
+After=icecast2.service
+Requires=icecast2.service
+
+[Service]
+Type=simple
+User=liquidsoap
+ExecStart=/usr/bin/liquidsoap /etc/liquidsoap/radio.liq
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

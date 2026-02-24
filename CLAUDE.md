@@ -11,7 +11,7 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, w
 - **GitHub**: https://github.com/ShmuelSokol/radioplatform
 
 ## Tech Stack
-- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + hls.js + Zustand + React Query
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + Zustand + React Query
 - **Backend**: Python 3.12 + FastAPI (async) + SQLAlchemy 2.0 (asyncpg)
 - **Database**: Supabase PostgreSQL (transaction pooler on port 6543)
 - **Hosting**: Frontend on Vercel, Backend on Railway (persistent process — enables real WebSockets + scheduler)
@@ -21,7 +21,7 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, w
 - **Bot**: Telegram bot with Claude API + OpenAI Whisper for voice transcription
 - **Workers**: Celery + Redis (not yet deployed — needed for media processing)
 - **Media**: FFmpeg for transcoding, clipping, HLS generation
-- **Streaming**: Liquidsoap sidecar for server-side HLS streaming with crossfade + loudness normalization (client-side fallback)
+- **Streaming**: Liquidsoap + Icecast on dedicated VPS for MP3 streaming with crossfade + loudness normalization (client-side Web Audio fallback)
 
 ## Project Structure
 ```
@@ -39,7 +39,7 @@ radioplatform/
 │   ├── app/workers/tasks/        # Celery tasks (media processing)
 │   ├── app/streaming/            # HLS generator, playlist engine
 │   ├── liquidsoap/radio.liq      # Liquidsoap pipeline (crossfade, normalization, HLS output)
-│   ├── start.sh                  # Process launcher (Liquidsoap sidecar + uvicorn)
+│   ├── start.sh                  # Process launcher (uvicorn only — Liquidsoap runs on VPS)
 │   ├── tests/                    # pytest async tests
 │   ├── vercel.json               # Rewrites all routes to api/index
 │   └── pyproject.toml            # bcrypt==4.1.3 pinned for passlib compat
@@ -59,6 +59,7 @@ radioplatform/
 │   └── .env.example              # Template
 ├── docs/                         # API reference documentation
 ├── docker/                       # Dockerfiles, nginx.conf
+├── infra/streaming/              # VPS config: Liquidsoap, Icecast, Nginx, systemd
 └── infra/terraform/              # Terraform IaC (Vercel frontend provisioning)
 ```
 
@@ -153,7 +154,7 @@ radioplatform/
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
 | twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
 | live_audio_mixer.py | Audio mixer stub (future ffmpeg host+caller mixing) |
-| liquidsoap_client.py | Async Unix socket client for Liquidsoap (push tracks, skip, status, health check) |
+| liquidsoap_client.py | Async TCP telnet client for Liquidsoap on VPS (push tracks, skip, status, health check) |
 
 ## Frontend Details
 
@@ -324,9 +325,10 @@ Claude Code accessible over Telegram for remote development.
 | `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks | For live shows |
 | `EMERGENCY_FALLBACK_CATEGORY` | Asset category for emergency fallback (default: "emergency") | For silence detection |
 | `SILENCE_DETECTION_SECONDS` | Seconds of silence before alert (default: 30) | For silence detection |
-| `LIQUIDSOAP_ENABLED` | Enable Liquidsoap sidecar (default: true) | For HLS streaming |
-| `LIQUIDSOAP_SOCKET_PATH` | Unix socket path (default: /tmp/liquidsoap.sock) | For HLS streaming |
-| `LIQUIDSOAP_HLS_DIR` | HLS segment output dir (default: /tmp/hls) | For HLS streaming |
+| `LIQUIDSOAP_ENABLED` | Enable Liquidsoap (remote VPS) | For streaming |
+| `LIQUIDSOAP_HOST` | VPS hostname for Liquidsoap telnet | For streaming |
+| `LIQUIDSOAP_TELNET_PORT` | Liquidsoap telnet port (default: 1234) | For streaming |
+| `ICECAST_STREAM_URL` | Public Icecast stream URL (e.g., https://stream.kbrlive.com/live) | For streaming |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://api.kbrlive.com/api/v1)
@@ -348,7 +350,7 @@ Claude Code accessible over Telegram for remote development.
 - **Pydantic schemas**: ID fields use `uuid.UUID | str` for cross-DB compatibility (SQLite returns strings)
 - **Frontend Vercel deploy**: Repo-local git email is set to `shmuelsokol@yahoo.com` (matching the Vercel account). Deploy directly: `cd frontend && npx vercel --prod --yes`.
 - **Weather caching**: Weather TTS audio is cached per 15-min slot. Text changes don't take effect until the next slot.
-- **Liquidsoap sidecar**: Runs via `start.sh` on Railway alongside uvicorn. If Liquidsoap isn't available (missing binary or socket timeout), the system degrades gracefully — clients use the dual-buffer Web Audio engine. Set `LIQUIDSOAP_ENABLED=false` to disable entirely. HLS segments served at `/hls/{station_id}/`.
+- **Liquidsoap + Icecast**: Runs on a dedicated VPS (not Railway). Backend communicates via TCP telnet. Listeners connect directly to Icecast MP3 stream via `<audio>` element. If VPS is down, clients auto-fall back to the dual-buffer Web Audio engine. Set `LIQUIDSOAP_ENABLED=false` to disable. VPS config in `infra/streaming/`.
 
 ## Milestones
 - **M1** (complete): Backend skeleton, auth, station CRUD, asset upload, React frontend — DEPLOYED

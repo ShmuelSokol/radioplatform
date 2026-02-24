@@ -1,12 +1,11 @@
 """
-Async client for communicating with Liquidsoap over Unix domain socket.
+Async client for communicating with Liquidsoap over TCP telnet.
 
 Uses the Liquidsoap telnet protocol: send a command, read the response, close.
-Graceful degradation: if socket doesn't exist or connection fails, returns None.
+Graceful degradation: if host is not configured or connection fails, returns None.
 """
 import asyncio
 import logging
-import os
 
 from app.config import settings
 
@@ -14,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 async def _send_command(command: str) -> str | None:
-    """Send a single command to Liquidsoap and return the response."""
-    socket_path = settings.LIQUIDSOAP_SOCKET_PATH
-    if not os.path.exists(socket_path):
-        logger.debug("Liquidsoap socket not found at %s", socket_path)
+    """Send a single command to Liquidsoap via TCP telnet."""
+    host = settings.LIQUIDSOAP_HOST
+    port = settings.LIQUIDSOAP_TELNET_PORT
+    if not host:
         return None
 
     try:
-        reader, writer = await asyncio.open_unix_connection(socket_path)
+        reader, writer = await asyncio.open_connection(host, port)
         writer.write((command + "\n").encode())
         await writer.drain()
 
@@ -42,14 +41,8 @@ async def _send_command(command: str) -> str | None:
         response = "\n".join(response_lines)
         logger.debug("Liquidsoap command '%s' -> '%s'", command, response[:100])
         return response
-    except FileNotFoundError:
-        logger.debug("Liquidsoap socket not found")
-        return None
-    except ConnectionRefusedError:
-        logger.warning("Liquidsoap connection refused")
-        return None
-    except asyncio.TimeoutError:
-        logger.warning("Liquidsoap command timed out: %s", command)
+    except (ConnectionRefusedError, OSError, asyncio.TimeoutError) as e:
+        logger.warning("Liquidsoap command failed (%s:%d): %s", host, port, e)
         return None
     except Exception as e:
         logger.warning("Liquidsoap command failed: %s", e)
