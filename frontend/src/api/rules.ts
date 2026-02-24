@@ -1,8 +1,10 @@
 import apiClient from './client';
 import type { ScheduleRule, RuleListResponse, SchedulePreview } from '../types';
 
-export const listRules = async (skip = 0, limit = 50): Promise<RuleListResponse> => {
-  const res = await apiClient.get<RuleListResponse>('/rules', { params: { skip, limit } });
+export const listRules = async (skip = 0, limit = 50, stationId?: string | null): Promise<RuleListResponse> => {
+  const params: Record<string, unknown> = { skip, limit };
+  if (stationId) params.station_id = stationId;
+  const res = await apiClient.get<RuleListResponse>('/rules', { params });
   return res.data;
 };
 

@@ -42,6 +42,7 @@ const RecordingStudio = lazy(() => import('./pages/admin/RecordingStudio'));
 const AudioEnhance = lazy(() => import('./pages/admin/AudioEnhance'));
 const LiveListeners = lazy(() => import('./pages/admin/LiveListeners'));
 const CrmDashboard = lazy(() => import('./pages/admin/CrmDashboard'));
+const ProgramClock = lazy(() => import('./pages/admin/ProgramClock'));
 
 // Public pages (lazy-loaded)
 const ProgramGuide = lazy(() => import('./pages/public/ProgramGuide'));
@@ -121,6 +122,7 @@ export default function App() {
               <Route path="/admin/studio" element={<ProtectedRoute><RecordingStudio /></ProtectedRoute>} />
               <Route path="/admin/listeners" element={<ProtectedRoute><LiveListeners /></ProtectedRoute>} />
               <Route path="/admin/crm" element={<ProtectedRoute><CrmDashboard /></ProtectedRoute>} />
+              <Route path="/admin/program-clock" element={<ProtectedRoute><ProgramClock /></ProtectedRoute>} />
             </Route>
 
             {/* Sponsor portal login (no layout) */}

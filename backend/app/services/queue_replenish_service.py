@@ -600,12 +600,13 @@ class QueueReplenishService:
         ad before the next regular song.
         """
         # Find the ad asset
+        ad_title = self.automation_config.get("ad_slot_asset_title", "KOL BRAMAH TEST SPONSOR")
         result = await self.db.execute(
-            select(Asset).where(Asset.title == "KOL BRAMAH TEST SPONSOR").limit(1)
+            select(Asset).where(Asset.title == ad_title).limit(1)
         )
         ad_asset = result.scalar_one_or_none()
         if not ad_asset:
-            logger.warning("Ad asset 'KOL BRAMAH TEST SPONSOR' not found")
+            logger.warning("Ad asset '%s' not found", ad_title)
             return
 
         now = datetime.now(timezone.utc)
@@ -627,7 +628,8 @@ class QueueReplenishService:
         # Schedule for 7 days (7×24×3 = 504 quarter-hour slots)
         inserted = 0
         for hours_ahead in range(168):  # 7 days
-            for minute in (15, 30, 45):
+            ad_minutes = self.automation_config.get("ad_slot_minutes", [15, 30, 45])
+            for minute in ad_minutes:
                 slot_time = (now + timedelta(hours=hours_ahead)).replace(
                     minute=minute, second=0, microsecond=0
                 )

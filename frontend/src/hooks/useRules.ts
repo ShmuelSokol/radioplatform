@@ -30,6 +30,14 @@ export function useDeleteRule() {
   });
 }
 
+export function useStationRules(stationId: string | null) {
+  return useQuery({
+    queryKey: ['rules', stationId],
+    queryFn: () => listRules(0, 200, stationId),
+    enabled: !!stationId,
+  });
+}
+
 export function useSchedulePreview(date: string | null) {
   return useQuery({
     queryKey: ['schedule-preview', date],
