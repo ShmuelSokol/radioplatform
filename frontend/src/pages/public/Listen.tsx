@@ -65,6 +65,12 @@ export default function Listen() {
   const [myFavorite, setMyFavorite] = useState(false);
   const [enteredRaffles, setEnteredRaffles] = useState<Set<string>>(new Set());
 
+  // Reset rating and favorite when track changes
+  useEffect(() => {
+    setMyRating(0);
+    setMyFavorite(false);
+  }, [wsNowPlaying?.asset_id]);
+
   // Icecast stream: direct MP3 stream via <audio> element
   const streamUrl = wsNowPlaying?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
@@ -563,7 +569,7 @@ export default function Listen() {
                           onClick={() => {
                             enterRaffleMutation.mutate(raffle.id, {
                               onSuccess: () => setEnteredRaffles(prev => new Set(prev).add(raffle.id)),
-                              onError: () => setEnteredRaffles(prev => new Set(prev).add(raffle.id)),
+                              onError: () => {},
                             });
                           }}
                           disabled={enterRaffleMutation.isPending}

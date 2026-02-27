@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface NowPlayingData {
   station_id: string;
@@ -40,131 +40,139 @@ export const useNowPlayingWS = (stationId: string) => {
   const reconnectAttempts = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const maxReconnectAttempts = 5;
   const usingPolling = useRef(false);
+  // Stable ref to the connect function — updated each render but only called on stationId change
+  const connectFnRef = useRef<() => void>(() => {});
+  const maxReconnectAttempts = 5;
 
-  const clearTimers = useCallback(() => {
-    if (reconnectTimer.current) {
-      clearTimeout(reconnectTimer.current);
-      reconnectTimer.current = null;
-    }
-    if (pollTimer.current) {
-      clearInterval(pollTimer.current);
-      pollTimer.current = null;
-    }
-  }, []);
+  // Keep connectFnRef up-to-date without causing effect re-runs
+  connectFnRef.current = () => {
+    if (!stationId) return;
 
-  const startPollingFallback = useCallback(() => {
-    if (pollTimer.current) return;
-    usingPolling.current = true;
-
-    const poll = async () => {
-      try {
-        const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/now-playing/${stationId}`
-        );
-        if (response.ok) {
-          const data = await response.json();
-          setNowPlaying(data);
-          setIsConnected(true);
-        }
-      } catch {
-        setIsConnected(false);
+    const clearTimers = () => {
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+      if (pollTimer.current) {
+        clearInterval(pollTimer.current);
+        pollTimer.current = null;
       }
     };
 
-    poll();
-    pollTimer.current = setInterval(poll, 3000);
-  }, [stationId]);
+    const startPollingFallback = () => {
+      if (pollTimer.current) return;
+      usingPolling.current = true;
 
-  const connectWebSocket = useCallback(() => {
-    if (!stationId) return;
-
-    // Use dedicated WS URL if set, otherwise derive from API URL
-    const wsBase = import.meta.env.VITE_WS_URL;
-    const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
-    let wsUrl: string;
-
-    if (wsBase) {
-      // Dedicated WS URL (e.g., Railway backend with WebSocket support)
-      wsUrl = `${wsBase}/api/v1/ws/now-playing/${stationId}`;
-    } else if (apiUrl.startsWith('http')) {
-      // Absolute URL — convert http(s) to ws(s)
-      wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/now-playing/' + stationId;
-    } else {
-      // Relative URL — use current host
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      wsUrl = `${protocol}//${window.location.host}${apiUrl}/ws/now-playing/${stationId}`;
-    }
-
-    try {
-      const ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        setIsConnected(true);
-        reconnectAttempts.current = 0;
-        usingPolling.current = false;
-        // Stop polling if we were using it as fallback
-        if (pollTimer.current) {
-          clearInterval(pollTimer.current);
-          pollTimer.current = null;
-        }
-      };
-
-      ws.onmessage = (event) => {
+      const poll = async () => {
         try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'now_playing' && message.data) {
-            setNowPlaying(message.data);
-          }
-          // Respond to server pings
-          if (message.type === 'ping') {
-            ws.send('pong');
+          const response = await fetch(
+            `${import.meta.env.VITE_API_URL}/now-playing/${stationId}`
+          );
+          if (response.ok) {
+            const data = await response.json();
+            setNowPlaying(data);
+            setIsConnected(true);
           }
         } catch {
-          // Ignore malformed messages
+          setIsConnected(false);
         }
       };
 
-      ws.onerror = () => {
-        setIsConnected(false);
-      };
+      poll();
+      pollTimer.current = setInterval(poll, 3000);
+    };
 
-      ws.onclose = () => {
-        setIsConnected(false);
-        wsRef.current = null;
+    const connect = () => {
+      // Use dedicated WS URL if set, otherwise derive from API URL
+      const wsBase = import.meta.env.VITE_WS_URL;
+      const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
+      let wsUrl: string;
 
-        // Attempt reconnection with exponential backoff
-        if (reconnectAttempts.current < maxReconnectAttempts) {
-          const delay = Math.min(1000 * 2 ** reconnectAttempts.current, 30000);
-          reconnectAttempts.current++;
-          reconnectTimer.current = setTimeout(connectWebSocket, delay);
-        } else {
-          // Fall back to REST polling after max reconnect attempts
-          startPollingFallback();
-        }
-      };
+      if (wsBase) {
+        wsUrl = `${wsBase}/api/v1/ws/now-playing/${stationId}`;
+      } else if (apiUrl.startsWith('http')) {
+        wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/now-playing/' + stationId;
+      } else {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${window.location.host}${apiUrl}/ws/now-playing/${stationId}`;
+      }
 
-      wsRef.current = ws;
-    } catch {
-      // WebSocket constructor failed — fall back to polling
-      startPollingFallback();
-    }
-  }, [stationId, startPollingFallback]);
+      try {
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          setIsConnected(true);
+          reconnectAttempts.current = 0;
+          usingPolling.current = false;
+          if (pollTimer.current) {
+            clearInterval(pollTimer.current);
+            pollTimer.current = null;
+          }
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === 'now_playing' && message.data) {
+              setNowPlaying(message.data);
+            }
+            if (message.type === 'ping') {
+              ws.send('pong');
+            }
+          } catch {
+            // Ignore malformed messages
+          }
+        };
+
+        ws.onerror = () => {
+          setIsConnected(false);
+        };
+
+        ws.onclose = () => {
+          setIsConnected(false);
+          wsRef.current = null;
+
+          if (reconnectAttempts.current < maxReconnectAttempts) {
+            const delay = Math.min(1000 * 2 ** reconnectAttempts.current, 30000);
+            reconnectAttempts.current++;
+            reconnectTimer.current = setTimeout(connect, delay);
+          } else {
+            startPollingFallback();
+          }
+        };
+
+        wsRef.current = ws;
+      } catch {
+        startPollingFallback();
+      }
+    };
+
+    clearTimers();
+    connect();
+  };
 
   useEffect(() => {
     if (!stationId) return;
 
-    connectWebSocket();
+    reconnectAttempts.current = 0;
+    connectFnRef.current();
 
     return () => {
-      clearTimers();
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+      if (pollTimer.current) {
+        clearInterval(pollTimer.current);
+        pollTimer.current = null;
+      }
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
     };
-  }, [stationId, connectWebSocket, clearTimers]);
+  }, [stationId]); // Only re-run when stationId changes
 
   return { nowPlaying, isConnected };
 };
