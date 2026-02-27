@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import func
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_admin
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.asset import Asset
@@ -46,15 +46,20 @@ async def me(current_user: User = Depends(get_current_user)):
 
 @router.post("/seed", status_code=201)
 async def seed_admin(db: AsyncSession = Depends(get_db)):
-    """Create or update default admin user."""
+    """
+    Bootstrap endpoint — creates the initial admin user.
+    Only works when NO admin exists yet (first-time setup).
+    Once an admin exists, use the admin panel or require admin auth to modify users.
+    """
     result = await db.execute(select(User).where(User.role == UserRole.ADMIN))
     existing = result.scalar_one_or_none()
     if existing:
-        existing.email = "admin"
-        existing.hashed_password = hash_password("613Radio")
-        existing.is_active = True
-        await db.commit()
-        return {"message": "Admin user updated", "email": existing.email}
+        # Admin already exists — refuse to overwrite without explicit admin auth
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=403,
+            detail="Admin user already exists. Use /auth/seed-reset (requires admin auth) to update credentials.",
+        )
 
     admin = User(
         id=uuid.uuid4(),
@@ -67,6 +72,24 @@ async def seed_admin(db: AsyncSession = Depends(get_db)):
     db.add(admin)
     await db.commit()
     return {"message": "Admin user created", "email": admin.email}
+
+
+@router.post("/seed-reset", status_code=200)
+async def seed_reset_admin(
+    db: AsyncSession = Depends(get_db),
+    _admin: "User" = Depends(require_admin),
+):
+    """Reset admin credentials — requires existing admin auth."""
+    result = await db.execute(select(User).where(User.role == UserRole.ADMIN))
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.email = "admin"
+        existing.hashed_password = hash_password("613Radio")
+        existing.is_active = True
+        await db.commit()
+        return {"message": "Admin user updated", "email": existing.email}
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="No admin user found. Use /auth/seed to create one.")
 
 
 @router.post("/migrate", status_code=200)
@@ -175,7 +198,7 @@ SAMPLE_RULES = [
 
 
 @router.post("/seed-all", status_code=201)
-async def seed_all(db: AsyncSession = Depends(get_db)):
+async def seed_all(db: AsyncSession = Depends(get_db), _admin: "User" = Depends(require_admin)):
     """Drop all data and re-seed everything: admin, station, assets, rules."""
     # Clear existing data
     await db.execute(text("DELETE FROM queue_entries"))
@@ -291,6 +314,6 @@ async def seed_all(db: AsyncSession = Depends(get_db)):
 
 # Keep old endpoint for backwards compat
 @router.post("/seed-assets", status_code=201)
-async def seed_assets(db: AsyncSession = Depends(get_db)):
+async def seed_assets(db: AsyncSession = Depends(get_db), _admin: "User" = Depends(require_admin)):
     """Redirect to seed-all."""
     return await seed_all(db)

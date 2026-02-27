@@ -73,45 +73,29 @@ class TestMpegConversion:
         assert ".mpeg" in SEEKABLE_EXTENSIONS
         assert ".mpg" in SEEKABLE_EXTENSIONS
 
-    def test_convert_audio_pipe_fail_triggers_tempfile_fallback(self):
-        """When pipe conversion fails, it should fall back to temp file conversion."""
+    def test_convert_audio_always_uses_tempfile(self):
+        """Implementation always uses temp files for reliable MPEG conversion (no pipe mode)."""
         from app.services.audio_convert_service import _convert_with_ffmpeg
 
         fake_mpeg_data = _make_minimal_mp2_in_mpeg_ps()
+        fake_mp3 = _make_valid_mp3_frame()
 
         with patch("app.services.audio_convert_service.subprocess.run") as mock_run:
-            # First call (pipe mode) fails
-            pipe_result = MagicMock()
-            pipe_result.returncode = 1
-            pipe_result.stderr = b"pipe: Invalid data"
-            pipe_result.stdout = b""
-
-            # Second call (temp file mode) succeeds
+            # Temp file conversion succeeds on the first (and only) call
             tempfile_result = MagicMock()
             tempfile_result.returncode = 0
             tempfile_result.stdout = b""
             tempfile_result.stderr = b""
+            mock_run.return_value = tempfile_result
 
-            mock_run.side_effect = [pipe_result, tempfile_result]
+            with patch("builtins.open", return_value=io.BytesIO(fake_mp3)):
+                result = _convert_with_ffmpeg(fake_mpeg_data, "mp3", ".mpeg")
 
-            # Patch open to return fake MP3 data for the temp output file
-            fake_mp3 = _make_valid_mp3_frame()
-            with patch("builtins.open", side_effect=lambda *a, **kw: io.BytesIO(fake_mp3)):
-                # This won't work perfectly because open is used for both read and write
-                # but we're testing the flow
-                pass
-
-            # Just verify the calls happen
-            result = _convert_with_ffmpeg(fake_mpeg_data, "mp3", ".mpeg")
-
-            # Should have tried pipe first, then temp file
-            assert mock_run.call_count == 2
-            # First call should use pipe:0
-            first_cmd = mock_run.call_args_list[0][0][0]
-            assert "pipe:0" in first_cmd
-            # Second call should use a temp file (not pipe)
-            second_cmd = mock_run.call_args_list[1][0][0]
-            assert "pipe:0" not in second_cmd
+            # Should make exactly one subprocess call (temp file, not pipe)
+            assert mock_run.call_count == 1
+            cmd = mock_run.call_args_list[0][0][0]
+            # Should NOT use pipe:0 as input — uses a real temp file path instead
+            assert "pipe:0" not in cmd
 
     def test_convert_audio_args_include_vn(self):
         """Conversion args should include -vn to strip video streams."""

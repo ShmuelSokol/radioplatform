@@ -124,93 +124,108 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
     
     try:
         # Send initial state
-        from app.db.session import get_async_session
-        async for db in get_async_session():
-            service = SchedulingService(db)
-            now_playing = await service.get_now_playing(station_id)
-            
-            if now_playing:
-                asset = now_playing.asset
-                # Get audio analysis data
-                analysis = {}
-                audio_url = None
-                if asset:
-                    if asset.metadata_extra:
-                        analysis = asset.metadata_extra.get("audio_analysis", {})
-                    # Build audio URL
-                    from app.config import settings
-                    file_path = asset.file_path
-                    if file_path.startswith("http://") or file_path.startswith("https://"):
-                        audio_url = file_path
-                    elif settings.supabase_storage_enabled:
-                        bucket = settings.SUPABASE_STORAGE_BUCKET
-                        audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
+        try:
+            from app.db.session import get_async_session
+            from sqlalchemy import select as sa_select, or_
+            from app.models.queue_entry import QueueEntry
+            from datetime import datetime, timezone
 
-                duration = (asset.duration if asset else None) or 180.0
+            async for db in get_async_session():
+                service = SchedulingService(db)
+                now_playing = await service.get_now_playing(station_id)
 
-                # Peek at next pending queue entry
-                from sqlalchemy import select as sa_select, or_
-                from app.models.queue_entry import QueueEntry
-                from datetime import datetime, timezone
-                now_utc = datetime.now(timezone.utc)
-                next_result = await db.execute(
-                    sa_select(QueueEntry)
-                    .where(
-                        QueueEntry.station_id == station_id,
-                        QueueEntry.status == "pending",
-                        or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+                if now_playing:
+                    asset = getattr(now_playing, "asset", None)
+                    # Get audio analysis data
+                    analysis = {}
+                    audio_url = None
+                    # Resolve the Supabase bucket name once, used for both current and next asset
+                    supabase_bucket = getattr(settings, "SUPABASE_STORAGE_BUCKET", None)
+                    if asset:
+                        if getattr(asset, "metadata_extra", None):
+                            analysis = asset.metadata_extra.get("audio_analysis", {})
+                        file_path = asset.file_path or ""
+                        if file_path.startswith("http://") or file_path.startswith("https://"):
+                            audio_url = file_path
+                        elif getattr(settings, "supabase_storage_enabled", False) and supabase_bucket:
+                            audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{supabase_bucket}/{file_path}"
+
+                    duration = (getattr(asset, "duration", None) if asset else None) or 180.0
+
+                    # Peek at next pending queue entry
+                    now_utc = datetime.now(timezone.utc)
+                    next_result = await db.execute(
+                        sa_select(QueueEntry)
+                        .where(
+                            QueueEntry.station_id == station_id,
+                            QueueEntry.status == "pending",
+                            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+                        )
+                        .order_by(QueueEntry.position)
+                        .limit(1)
                     )
-                    .order_by(QueueEntry.position)
-                    .limit(1)
-                )
-                next_entry = next_result.scalar_one_or_none()
-                next_asset_data = None
-                if next_entry and next_entry.asset:
-                    na = next_entry.asset
-                    na_analysis = {}
-                    if na.metadata_extra:
-                        na_analysis = na.metadata_extra.get("audio_analysis", {})
-                    na_file_path = na.file_path
-                    na_audio_url = None
-                    if na_file_path.startswith("http://") or na_file_path.startswith("https://"):
-                        na_audio_url = na_file_path
-                    elif settings.supabase_storage_enabled:
-                        na_audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{na_file_path}"
-                    next_asset_data = {
-                        "id": str(na.id),
-                        "title": na.title,
-                        "artist": na.artist,
-                        "audio_url": na_audio_url,
-                        "cue_in": na_analysis.get("cue_in_seconds", 0),
-                        "replay_gain_db": na_analysis.get("replay_gain_db", 0),
-                    }
+                    next_entry = next_result.scalar_one_or_none()
+                    next_asset_data = None
+                    if next_entry and getattr(next_entry, "asset", None):
+                        na = next_entry.asset
+                        na_analysis = {}
+                        if getattr(na, "metadata_extra", None):
+                            na_analysis = na.metadata_extra.get("audio_analysis", {})
+                        na_file_path = getattr(na, "file_path", "") or ""
+                        na_audio_url = None
+                        if na_file_path.startswith("http://") or na_file_path.startswith("https://"):
+                            na_audio_url = na_file_path
+                        elif getattr(settings, "supabase_storage_enabled", False) and supabase_bucket:
+                            na_audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{supabase_bucket}/{na_file_path}"
+                        next_asset_data = {
+                            "id": str(na.id),
+                            "title": na.title,
+                            "artist": na.artist,
+                            "audio_url": na_audio_url,
+                            "cue_in": na_analysis.get("cue_in_seconds", 0),
+                            "replay_gain_db": na_analysis.get("replay_gain_db", 0),
+                        }
 
-                await websocket.send_json({
-                    "type": "now_playing",
-                    "data": {
-                        "station_id": str(now_playing.station_id),
-                        "asset_id": str(now_playing.asset_id) if now_playing.asset_id else None,
-                        "started_at": now_playing.started_at.isoformat(),
-                        "ends_at": now_playing.ends_at.isoformat() if now_playing.ends_at else None,
-                        "listener_count": now_playing.listener_count,
-                        "stream_url": now_playing.stream_url,
-                        "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
-                        "asset": {
-                            "title": asset.title if asset else "Unknown",
-                            "artist": asset.artist if asset else None,
-                            "album": asset.album if asset else None,
-                            "album_art_path": asset.album_art_path if asset else None,
-                            "audio_url": audio_url,
-                            "cue_in": analysis.get("cue_in_seconds", 0),
-                            "cue_out": analysis.get("cue_out_seconds", duration),
-                            "cross_start": analysis.get("cross_start_seconds", duration - 3.0),
-                            "replay_gain_db": analysis.get("replay_gain_db", 0),
-                        } if asset else None,
-                        "next_asset": next_asset_data,
-                    }
-                })
-            break
-        
+                    started_at = getattr(now_playing, "started_at", None)
+                    ends_at = getattr(now_playing, "ends_at", None)
+                    asset_id = getattr(now_playing, "asset_id", None)
+                    station_id_val = getattr(now_playing, "station_id", station_id)
+
+                    await websocket.send_json({
+                        "type": "now_playing",
+                        "data": {
+                            "station_id": str(station_id_val),
+                            "asset_id": str(asset_id) if asset_id else None,
+                            "started_at": started_at.isoformat() if started_at else None,
+                            "ends_at": ends_at.isoformat() if ends_at else None,
+                            "listener_count": getattr(now_playing, "listener_count", 0),
+                            "stream_url": getattr(settings, "ICECAST_STREAM_URL", None) if getattr(settings, "liquidsoap_enabled", False) else None,
+                            "asset": {
+                                "title": asset.title if asset else "Unknown",
+                                "artist": getattr(asset, "artist", None) if asset else None,
+                                "album": getattr(asset, "album", None) if asset else None,
+                                "album_art_path": getattr(asset, "album_art_path", None) if asset else None,
+                                "audio_url": audio_url,
+                                "cue_in": analysis.get("cue_in_seconds", 0),
+                                "cue_out": analysis.get("cue_out_seconds", duration),
+                                "cross_start": analysis.get("cross_start_seconds", duration - 3.0),
+                                "replay_gain_db": analysis.get("replay_gain_db", 0),
+                            } if asset else None,
+                            "next_asset": next_asset_data,
+                        }
+                    })
+                else:
+                    await websocket.send_json({"type": "now_playing", "data": None})
+                break
+        except WebSocketDisconnect:
+            raise
+        except Exception as e:
+            logger.error(f"Error sending initial now-playing state for station {station_id}: {e}", exc_info=True)
+            try:
+                await websocket.send_json({"type": "error", "message": "Failed to load now-playing state"})
+            except Exception:
+                pass
+
         # Keep connection alive and handle incoming messages (if any)
         while True:
             try:
@@ -221,7 +236,7 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
             except asyncio.TimeoutError:
                 # Send keepalive ping
                 await websocket.send_json({"type": "ping"})
-            
+
     except WebSocketDisconnect:
         manager.disconnect(station_id, websocket)
     except Exception as e:

@@ -13,3 +13,7 @@ async def get_db() -> AsyncIterator[AsyncSession]:
         except Exception:
             await session.rollback()
             raise
+
+
+# Alias for compatibility with code that imports get_async_session
+get_async_session = get_db

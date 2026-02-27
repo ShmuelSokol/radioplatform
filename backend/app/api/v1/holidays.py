@@ -4,7 +4,7 @@ Holiday/blackout window management endpoints.
 import asyncio
 import logging
 import tempfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -54,7 +54,7 @@ async def list_holidays(
         count_stmt = count_stmt.where(HolidayWindow.reason == reason)
 
     # Filter by status (upcoming/active/active_upcoming/past)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if status == "active_upcoming":
         stmt = stmt.where(HolidayWindow.end_datetime > now)
         count_stmt = count_stmt.where(HolidayWindow.end_datetime > now)

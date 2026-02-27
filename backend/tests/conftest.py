@@ -66,6 +66,22 @@ def event_loop():
     loop.close()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def reset_rate_limiter():
+    """Reset the auth rate limiter between tests to prevent cross-test pollution."""
+    try:
+        from app.api.v1.auth import limiter
+        limiter.reset()
+    except Exception:
+        pass
+    yield
+    try:
+        from app.api.v1.auth import limiter
+        limiter.reset()
+    except Exception:
+        pass
+
+
 @pytest_asyncio.fixture
 async def db_session() -> AsyncIterator[AsyncSession]:
     # Import all models
