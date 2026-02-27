@@ -91,13 +91,23 @@ audio_manager = AudioConnectionManager()
 
 async def _authenticate_ws(websocket: WebSocket, show_id: str) -> User | None:
     """
-    Read the first WebSocket message, expect {"type": "auth", "token": "<jwt>"}.
-    Validate the JWT and verify the user has manager/admin role or is the show host.
+    Accept the WebSocket connection, then read the first message expecting
+    {"type": "auth", "token": "<jwt>"}. Validate the JWT and verify the user
+    has manager/admin role or is the show host.
     Returns the User on success, or None after closing the socket on failure.
     Close codes:
       4001 – invalid / missing token
       4003 – first message was not an auth message
+
+    NOTE: this function calls websocket.accept() itself so that there is no
+    window where the connection is open but unauthenticated.
     """
+    try:
+        await websocket.accept()
+    except Exception as e:
+        logger.error("WS auth: failed to accept connection for show %s: %s", show_id, e)
+        return None
+
     try:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
         msg = json.loads(raw)
@@ -163,8 +173,6 @@ async def _authenticate_ws(websocket: WebSocket, show_id: str) -> User | None:
 @router.websocket("/ws/live/{show_id}/events")
 async def websocket_live_events(websocket: WebSocket, show_id: str):
     """Real-time show state + caller updates WebSocket."""
-    await websocket.accept()
-
     user = await _authenticate_ws(websocket, show_id)
     if user is None:
         return
@@ -235,8 +243,6 @@ async def websocket_live_events(websocket: WebSocket, show_id: str):
 @router.websocket("/ws/live/{show_id}/audio")
 async def websocket_live_audio(websocket: WebSocket, show_id: str):
     """Binary audio WebSocket — receives MP3 chunks from host browser, forwards to Icecast."""
-    await websocket.accept()
-
     user = await _authenticate_ws(websocket, show_id)
     if user is None:
         return

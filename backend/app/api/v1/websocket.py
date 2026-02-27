@@ -120,8 +120,12 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
     WebSocket endpoint for real-time now-playing updates.
     Clients subscribe to a station and receive updates when playback changes.
     """
-    await manager.connect(station_id, websocket)
-    
+    try:
+        await manager.connect(station_id, websocket)
+    except Exception as e:
+        logger.error(f"WebSocket connect failed for station {station_id}: {e}", exc_info=True)
+        return
+
     try:
         # Send initial state
         try:

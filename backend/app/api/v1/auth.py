@@ -58,7 +58,7 @@ async def seed_admin(db: AsyncSession = Depends(get_db)):
         from fastapi import HTTPException
         raise HTTPException(
             status_code=403,
-            detail="Admin user already exists. Use /auth/seed-reset (requires admin auth) to update credentials.",
+            detail="Seed is disabled after initial setup",
         )
 
     admin = User(
