@@ -30,8 +30,14 @@ async def start_playback(station_id: str) -> dict:
     await stop_current(station_id)
 
     # Generate HLS
-    manifest_path, proc = await generate_hls_segments(tmp.name, station_id)
-    _active_processes[station_id] = proc
+    try:
+        manifest_path, proc = await generate_hls_segments(tmp.name, station_id)
+        _active_processes[station_id] = proc
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
     await engine.set_now_playing(item)
     await engine.set_state("playing")
@@ -73,8 +79,14 @@ async def play_now(station_id: str, asset_id: str, title: str, file_path: str, d
     tmp.write(file_data)
     tmp.close()
 
-    manifest_path, proc = await generate_hls_segments(tmp.name, station_id)
-    _active_processes[station_id] = proc
+    try:
+        manifest_path, proc = await generate_hls_segments(tmp.name, station_id)
+        _active_processes[station_id] = proc
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
     item = {"asset_id": asset_id, "title": title, "file_path": file_path, "duration": duration}
     await engine.set_now_playing(item)

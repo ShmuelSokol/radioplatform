@@ -46,7 +46,7 @@ class ConnectionManager:
         dead_connections = set()
         message_str = json.dumps(message)
         
-        for connection in self.active_connections[station_id]:
+        for connection in set(self.active_connections[station_id]):
             try:
                 await connection.send_text(message_str)
             except Exception as e:
@@ -78,7 +78,7 @@ class AlertConnectionManager:
             return
         dead = set()
         message_str = json.dumps(message)
-        for ws in self.connections:
+        for ws in set(self.connections):
             try:
                 await ws.send_text(message_str)
             except Exception:

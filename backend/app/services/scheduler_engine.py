@@ -513,8 +513,8 @@ class SchedulerEngine:
             old_timer.cancel()
 
         delay = max(0.0, duration_seconds - crossfade_seconds)
-        loop = asyncio.get_event_loop()
-        handle = loop.call_later(delay, lambda: asyncio.ensure_future(self._precise_advance(station_id)))
+        loop = asyncio.get_running_loop()
+        handle = loop.call_later(delay, lambda: loop.create_task(self._precise_advance(station_id)))
         self._advance_timers[station_key] = handle
         logger.debug("Scheduled precise advance for station %s in %.1fs", station_id, delay)
 

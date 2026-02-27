@@ -152,11 +152,6 @@ class QueueReplenishService:
             if rule.rule_type == "rotation":
                 await self._apply_rotation_rule(rule, shortfall)
 
-        # Step 4: Pre-schedule hourly time + weather with exact preempt_at timestamps
-        if self.automation_config.get("hourly_time_announcement") or self.automation_config.get("weather_enabled"):
-            await self._schedule_hourly_announcements()
-
-        await self._schedule_ad_slots()
         await self.db.commit()
         logger.info("Queue replenishment complete")
 
