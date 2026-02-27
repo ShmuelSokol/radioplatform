@@ -138,9 +138,10 @@ class QueueReplenishService:
                 await self._apply_fixed_time_rule(rule, shortfall)
 
         # Step 2: Fill main content FIRST so interval/rotation entries interleave
-        fill_type, fill_cat = self._get_fill_spec(rules)
+        # Use time-aware fill so morning/afternoon/evening rules are respected
+        # across the full 7-day queue window, not just the current hour's rule.
         fill_start_pos = self.max_pos
-        await self._fill_content(shortfall, asset_type=fill_type, category=fill_cat)
+        await self._fill_content_time_aware(shortfall, rules)
         fill_end_pos = self.max_pos
 
         # Only insert global sponsors for stations using global rules
@@ -156,29 +157,24 @@ class QueueReplenishService:
         logger.info("Queue replenishment complete")
 
     async def _load_rules(self) -> list[ScheduleRule]:
-        """Load active rules for this station.
+        """Load ALL active rules for this station across all time windows.
 
         Station-specific rules take priority. If ANY exist for this station,
         global rules (station_id IS NULL) are ignored entirely.
-        """
-        now = datetime.now(timezone.utc)
-        current_hour = now.hour
-        current_day = now.weekday()
 
+        NOTE: Hour/day filtering is intentionally removed here. When filling a
+        7-day queue window we need all daypart rules so _fill_content_time_aware
+        can distribute content correctly across morning/afternoon/evening slots.
+        """
         result = await self.db.execute(
             select(ScheduleRule)
             .where(
                 ScheduleRule.is_active == True,
                 ScheduleRule.station_id == self.station_id,
-                ScheduleRule.hour_start <= current_hour,
-                ScheduleRule.hour_end >= current_hour,
             )
             .order_by(ScheduleRule.priority.desc())
         )
-        station_rules = [
-            r for r in result.scalars().all()
-            if str(current_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
-        ]
+        station_rules = list(result.scalars().all())
 
         if station_rules:
             logger.info(
@@ -192,15 +188,10 @@ class QueueReplenishService:
             .where(
                 ScheduleRule.is_active == True,
                 ScheduleRule.station_id.is_(None),
-                ScheduleRule.hour_start <= current_hour,
-                ScheduleRule.hour_end >= current_hour,
             )
             .order_by(ScheduleRule.priority.desc())
         )
-        return [
-            r for r in result.scalars().all()
-            if str(current_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
-        ]
+        return list(result.scalars().all())
 
     def _get_fill_spec(self, rules: list[ScheduleRule]) -> tuple[str, str | None]:
         """Return (asset_type, category) for gap-filling from the top daypart rule."""
@@ -347,6 +338,82 @@ class QueueReplenishService:
                 for i in range(insertions):
                     self.max_pos += songs_between
                     await self._enqueue_asset(sponsor_asset, self.max_pos)
+
+    async def _fill_content_time_aware(
+        self,
+        shortfall: float,
+        rules: list[ScheduleRule],
+    ) -> None:
+        """Distribute the content shortfall across daypart rules proportionally.
+
+        For each hour in the next 7 days we find the highest-priority daypart
+        rule whose hour_start/hour_end range and days_of_week cover that slot.
+        The shortfall is then divided in proportion to how many hours each rule
+        "owns", so morning/afternoon/evening content is correctly represented in
+        the queue even though we're filling days in advance.
+
+        Falls back to plain music fill when no daypart rules exist.
+        """
+        daypart_rules = [r for r in rules if r.rule_type == "daypart"]
+        if not daypart_rules:
+            fill_type, fill_cat = self._get_fill_spec(rules)
+            await self._fill_content(shortfall, asset_type=fill_type, category=fill_cat)
+            return
+
+        now = datetime.now(timezone.utc)
+        total_hours = 168  # 7-day window
+
+        # Count how many hours in the window each daypart rule "owns".
+        # Rules are already sorted by priority desc so the first match wins.
+        rule_hours: list[float] = [0.0] * len(daypart_rules)
+        uncovered_hours = 0
+
+        for h in range(total_hours):
+            slot = now + timedelta(hours=h)
+            slot_hour = slot.hour
+            slot_weekday = slot.weekday()
+            matched = False
+            for i, rule in enumerate(daypart_rules):
+                allowed_days = (rule.days_of_week or "0,1,2,3,4,5,6").split(",")
+                if str(slot_weekday) not in allowed_days:
+                    continue
+                if rule.hour_start <= slot_hour < rule.hour_end:
+                    rule_hours[i] += 1.0
+                    matched = True
+                    break
+            if not matched:
+                uncovered_hours += 1
+
+        total_covered = sum(rule_hours)
+        logger.info(
+            "Time-aware fill: %.1fs shortfall across %d daypart rules "
+            "(%d/%d hours covered in 7-day window)",
+            shortfall, len(daypart_rules), int(total_covered), total_hours,
+        )
+
+        if total_covered == 0:
+            # No rules match any slot in the window — plain fallback
+            fill_type, fill_cat = self._get_fill_spec(rules)
+            await self._fill_content(shortfall, asset_type=fill_type, category=fill_cat)
+            return
+
+        for i, rule in enumerate(daypart_rules):
+            if rule_hours[i] <= 0:
+                continue
+            weight = rule_hours[i] / total_covered
+            bucket_seconds = shortfall * weight
+            logger.info(
+                "  Rule '%s' (%s / %s): owns %d hrs (%.1f%%) → filling %.1fs",
+                rule.name, rule.asset_type, rule.category or "any",
+                int(rule_hours[i]), weight * 100, bucket_seconds,
+            )
+            await self._fill_content(bucket_seconds, asset_type=rule.asset_type, category=rule.category)
+
+        # Any uncovered hours get a plain music fill
+        if uncovered_hours > 0 and total_hours > 0:
+            gap_seconds = shortfall * (uncovered_hours / total_hours)
+            logger.info("  Gap (uncovered %d hrs): filling %.1fs with music", uncovered_hours, gap_seconds)
+            await self._fill_content(gap_seconds, asset_type="music", category=None)
 
     async def _fill_content(
         self,
