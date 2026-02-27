@@ -4,9 +4,15 @@ WebSocket endpoints for live show events and host audio streaming.
 import asyncio
 import json
 import logging
+import uuid
 from typing import Dict, Set
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
+
+from app.core.security import decode_token
+from app.db.session import get_async_session
+from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +87,90 @@ class AudioConnectionManager:
 audio_manager = AudioConnectionManager()
 
 
+# --- Auth Helper ---
+
+async def _authenticate_ws(websocket: WebSocket, show_id: str) -> User | None:
+    """
+    Read the first WebSocket message, expect {"type": "auth", "token": "<jwt>"}.
+    Validate the JWT and verify the user has manager/admin role or is the show host.
+    Returns the User on success, or None after closing the socket on failure.
+    Close codes:
+      4001 – invalid / missing token
+      4003 – first message was not an auth message
+    """
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
+        msg = json.loads(raw)
+    except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as e:
+        logger.warning("WS auth: failed to read first message for show %s: %s", show_id, e)
+        await websocket.close(code=4001)
+        return None
+
+    if msg.get("type") != "auth":
+        logger.warning("WS auth: unexpected first message type '%s' for show %s", msg.get("type"), show_id)
+        await websocket.close(code=4003)
+        return None
+
+    token = msg.get("token", "")
+    try:
+        payload = decode_token(token)
+    except ValueError:
+        logger.warning("WS auth: invalid token for show %s", show_id)
+        await websocket.close(code=4001)
+        return None
+
+    if payload.get("type") != "access":
+        logger.warning("WS auth: wrong token type for show %s", show_id)
+        await websocket.close(code=4001)
+        return None
+
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        await websocket.close(code=4001)
+        return None
+
+    # Load user and check permissions
+    try:
+        async for db in get_async_session():
+            result = await db.execute(select(User).where(User.id == uuid.UUID(user_id_str)))
+            user = result.scalar_one_or_none()
+
+            if not user or not user.is_active:
+                await websocket.close(code=4001)
+                return None
+
+            # Allow admin/manager OR the show's host
+            if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+                return user
+
+            # Check if this user is the host of the show
+            from app.services.live_show_service import get_show
+            show = await get_show(db, show_id)
+            if show and show.host_user_id == user.id:
+                return user
+
+            logger.warning("WS auth: user %s lacks permission for show %s", user.id, show_id)
+            await websocket.close(code=4001)
+            return None
+    except Exception as e:
+        logger.error("WS auth: DB error for show %s: %s", show_id, e)
+        await websocket.close(code=4001)
+        return None
+
+
 # --- WebSocket Endpoints ---
 
 @router.websocket("/ws/live/{show_id}/events")
-async def websocket_live_events(websocket: WebSocket, show_id: str, token: str = Query("")):
+async def websocket_live_events(websocket: WebSocket, show_id: str):
     """Real-time show state + caller updates WebSocket."""
-    await live_show_manager.connect(show_id, websocket)
+    await websocket.accept()
+
+    user = await _authenticate_ws(websocket, show_id)
+    if user is None:
+        return
+
+    live_show_manager.active_connections.setdefault(show_id, set()).add(websocket)
+    logger.info("Live show WS authed for show %s user %s (total: %d)", show_id, user.id, len(live_show_manager.active_connections[show_id]))
 
     try:
         # Send initial show state
@@ -149,9 +233,16 @@ async def websocket_live_events(websocket: WebSocket, show_id: str, token: str =
 
 
 @router.websocket("/ws/live/{show_id}/audio")
-async def websocket_live_audio(websocket: WebSocket, show_id: str, token: str = Query("")):
+async def websocket_live_audio(websocket: WebSocket, show_id: str):
     """Binary audio WebSocket — receives MP3 chunks from host browser, forwards to Icecast."""
-    await audio_manager.connect(show_id, websocket)
+    await websocket.accept()
+
+    user = await _authenticate_ws(websocket, show_id)
+    if user is None:
+        return
+
+    audio_manager.active_connections[show_id] = websocket
+    logger.info("Audio WS authed for show %s user %s", show_id, user.id)
 
     try:
         while True:
