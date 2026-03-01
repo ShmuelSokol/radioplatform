@@ -102,6 +102,7 @@ export default function Dashboard() {
   const stationTz = rawTz && isValidTz(rawTz) ? rawTz : undefined;
 
   const { data: queueData } = useQueue(stationId);
+  const { nowPlaying: wsNowPlaying } = useNowPlayingWS(stationId ?? '');
   const { data: lastPlayedMap } = useLastPlayed(stationId);
   const { data: logData } = usePlayLog(stationId, bottomTab === 'log');
   const skipMut = useSkipCurrent(stationId ?? '');
@@ -128,12 +129,15 @@ export default function Dashboard() {
   );
 
   // ── Client-side real-time countdown ────────────────────────
-  // Server sends started_at (ISO) + duration. We interpolate locally.
+  // Prefer WS data (real-time) over REST queueData (10s poll) for timing.
   const [realElapsed, setRealElapsed] = useState(0);
   const [realRemaining, setRealRemaining] = useState(0);
   const rafRef = useRef<number>(0);
-  const serverStartedAt = queueData?.now_playing?.started_at ?? null;
-  const serverDuration = queueData?.now_playing?.asset?.duration ?? 0;
+  const serverStartedAt = wsNowPlaying?.started_at ?? queueData?.now_playing?.started_at ?? null;
+  const wsEndsAt = wsNowPlaying?.ends_at ?? null;
+  const serverDuration = wsEndsAt && serverStartedAt
+    ? Math.max(0, (new Date(wsEndsAt).getTime() - new Date(serverStartedAt).getTime()) / 1000)
+    : (queueData?.now_playing?.asset?.duration ?? 0);
   const isPlaying = !!queueData?.now_playing;
 
   // Clear status message when playback starts
@@ -348,9 +352,6 @@ export default function Dashboard() {
   }, [queueEntries]);
 
   const preemptFadeMs = (queueData as any)?.preempt_fade_ms ?? 2000;
-
-  // WS hook for real-time cue points + next track data
-  const { nowPlaying: wsNowPlaying } = useNowPlayingWS(stationId ?? '');
 
   // Icecast stream: direct MP3 stream via <audio> element
   const dashStreamUrl = wsNowPlaying?.stream_url || null;
