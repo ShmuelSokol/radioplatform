@@ -145,7 +145,7 @@ export default function Dashboard() {
     if (serverStartedAt && serverDuration > 0) {
       const startMs = new Date(serverStartedAt).getTime();
       const nowMs = Date.now();
-      const el = Math.max(0, (nowMs - startMs) / 1000);
+      const el = Math.min(Math.max(0, (nowMs - startMs) / 1000), serverDuration);
       const rem = Math.max(0, serverDuration - el);
       setRealElapsed(el);
       setRealRemaining(rem);

@@ -102,18 +102,21 @@ export default function Listen() {
   const wsAsset = wsNowPlaying?.asset;
   const wsNextAsset = wsNowPlaying?.next_asset;
 
-  // Compute elapsed from started_at
+  // Compute elapsed from started_at (capped at ends_at)
   const [elapsed, setElapsed] = useState(0);
+  const wsEndsAt = wsNowPlaying?.ends_at;
   useEffect(() => {
     if (!wsNowPlaying?.started_at) { setElapsed(0); return; }
+    const startMs = new Date(wsNowPlaying.started_at).getTime();
+    const maxDuration = wsEndsAt ? (new Date(wsEndsAt).getTime() - startMs) / 1000 : 0;
     const update = () => {
-      const startMs = new Date(wsNowPlaying.started_at).getTime();
-      setElapsed(Math.max(0, (Date.now() - startMs) / 1000));
+      const raw = Math.max(0, (Date.now() - startMs) / 1000);
+      setElapsed(maxDuration > 0 ? Math.min(raw, maxDuration) : raw);
     };
     update();
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
-  }, [wsNowPlaying?.started_at]);
+  }, [wsNowPlaying?.started_at, wsEndsAt]);
 
   // Build AssetInfo for audio engine
   const audioAsset: AssetInfo | null = wsNowPlaying?.asset_id && wsAsset ? {
