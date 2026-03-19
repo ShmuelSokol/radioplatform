@@ -292,6 +292,9 @@ export function useAudioEngine(
       // Apply replay gain
       const targetGain = mutedRef.current ? 0 : volumeRef.current * replayGainMultiplier(currentReplayGainDb);
 
+      // Check if the inactive deck already has this track pre-loaded
+      const inactiveDeck = getInactiveDeck();
+      const inactiveSrc = inactiveDeck?.audio.src ?? '';
       const loadAndPlay = async () => {
         try {
           let url: string;
@@ -303,11 +306,28 @@ export function useAudioEngine(
             return;
           }
 
-          activeDeck.audio.src = url;
-          activeDeck.audio.currentTime = Math.max(currentCueIn, elapsedRef.current);
-          activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
-          activeDeck.gain.gain.setValueAtTime(targetGain, ctx.currentTime);
-          activeDeck.audio.play().catch(() => {});
+          // If inactive deck already has this URL pre-loaded, swap to it instantly
+          if (inactiveDeck && inactiveSrc === url && inactiveDeck.audio.readyState >= 2) {
+            // Silence old active deck
+            activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
+            activeDeck.gain.gain.setValueAtTime(0, ctx.currentTime);
+            activeDeck.audio.pause();
+
+            // Play from inactive deck (already loaded)
+            inactiveDeck.audio.currentTime = Math.max(currentCueIn, elapsedRef.current);
+            inactiveDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
+            inactiveDeck.gain.gain.setValueAtTime(targetGain, ctx.currentTime);
+            inactiveDeck.audio.play().catch(() => {});
+
+            // Swap active deck
+            activeDeckRef.current = activeDeckRef.current === 'A' ? 'B' : 'A';
+          } else {
+            activeDeck.audio.src = url;
+            activeDeck.audio.currentTime = Math.max(currentCueIn, elapsedRef.current);
+            activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
+            activeDeck.gain.gain.setValueAtTime(targetGain, ctx.currentTime);
+            activeDeck.audio.play().catch(() => {});
+          }
         } catch {
           // Load failure
         }
@@ -423,10 +443,19 @@ export function useAudioEngine(
       const activeDeck = getActiveDeck();
       if (activeDeck && !crossfadingRef.current && !crossfadeTriggeredRef.current) {
         const ct = activeDeck.audio.currentTime;
+        const dur = activeDeck.audio.duration;
         const cs = crossStartRef.current;
-        if (cs > 0 && ct >= cs && nextAssetIdRef.current) {
-          crossfadeTriggeredRef.current = true;
-          executeCrossfade();
+
+        if (nextAssetIdRef.current) {
+          if (cs > 0 && ct >= cs) {
+            // Crossfade at the designated cross_start point
+            crossfadeTriggeredRef.current = true;
+            executeCrossfade();
+          } else if (cs <= 0 && isFinite(dur) && dur > 0 && ct >= dur - CROSSFADE_DURATION) {
+            // No cross_start set — crossfade 3s before end to avoid gap
+            crossfadeTriggeredRef.current = true;
+            executeCrossfade();
+          }
         }
       }
 
