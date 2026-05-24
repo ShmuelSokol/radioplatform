@@ -1,0 +1,11 @@
+# Wiki operation log
+
+Append-only. Format: `<OP> <YYYY-MM-DD> <page-or-topic> <summary>`
+
+Operations: INGEST | QUERY | UPDATE | LINT
+
+INGEST 2026-05-24 README.md Wiki system bootstrapped with 4 initial pages from today's session.
+INGEST 2026-05-24 streaming-architecture.md Liquidsoap+Icecast moved to dedicated VPS (TCP telnet, no HLS, plain <audio>). VPS not provisioned yet.
+INGEST 2026-05-24 audio-engine.md Client-side dual-deck crossfade engine. Fixed gap: auto-crossfade 3s before end + instant pre-loaded deck swap.
+INGEST 2026-05-24 hourly-slots.md Hourly/half-hour slot scheduling. Bug: weather_interval_minutes=30 ignored, weather only at :00 not :30.
+INGEST 2026-05-24 dashboard-timing.md Elapsed timer overflow fixed — now uses WS data + Math.min cap instead of stale 10s REST poll.
