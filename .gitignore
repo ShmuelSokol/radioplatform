@@ -58,3 +58,6 @@ media/
 minio-data/
 *.db
 bot/uv.lock
+
+# Claude Code hook state (transient, machine-local)
+.claude/hooks/.last-stop-sha
