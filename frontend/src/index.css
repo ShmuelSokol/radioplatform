@@ -5,3 +5,106 @@
 body {
   @apply bg-gray-50 text-gray-900 antialiased;
 }
+
+/* ── V2 theme ──────────────────────────────────────────── */
+
+.v2-root {
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background:
+    radial-gradient(1100px 500px at 15% -10%, rgba(124, 58, 237, 0.18), transparent 60%),
+    radial-gradient(900px 450px at 90% 0%, rgba(217, 70, 239, 0.12), transparent 55%),
+    #07071a;
+  color: #e5e7eb;
+  min-height: 100vh;
+}
+
+.v2-glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.v2-glass-strong {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+@keyframes v2-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.v2-fade-up {
+  animation: v2-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes v2-spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.v2-spin-slow {
+  animation: v2-spin-slow 14s linear infinite;
+}
+
+@keyframes v2-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.45); }
+  70% { box-shadow: 0 0 0 14px rgba(244, 63, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+}
+
+.v2-pulse-ring {
+  animation: v2-pulse-ring 2s ease-out infinite;
+}
+
+@keyframes v2-eq {
+  0%, 100% { height: 30%; }
+  50% { height: 100%; }
+}
+
+.v2-eq-bar {
+  animation: v2-eq 0.9s ease-in-out infinite;
+}
+
+/* V2 range slider */
+.v2-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.15);
+  outline: none;
+}
+.v2-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #a78bfa, #e879f9);
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.v2-range::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+.v2-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #a78bfa, #e879f9);
+  cursor: pointer;
+}
+
+/* Light sheet for V1 pages rendered inside the V2 shell */
+.v2-sheet {
+  background: #f9fafb;
+  color: #111827;
+  border-radius: 1rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}

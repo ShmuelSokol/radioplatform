@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useUnresolvedCount, useAlerts } from '../../hooks/useAlerts';
+import { useUiStore } from '../../stores/uiStore';
+import VersionToggle from './VersionToggle';
 
 interface NavLink {
   to: string;
@@ -18,6 +20,7 @@ interface NavGroup {
 
 export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuthStore();
+  const isV2 = useUiStore((s) => s.version) === 'v2';
   const [menuOpen, setMenuOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
@@ -127,12 +130,16 @@ export default function Navbar() {
   );
 
   return (
-    <nav className="bg-[#0a0a28] text-white border-b border-[#2a2a5e]">
+    <nav className={isV2
+      ? 'v2-glass-strong sticky top-0 z-50 text-white border-b border-white/10'
+      : 'bg-[#0a0a28] text-white border-b border-[#2a2a5e]'}>
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-12">
           {/* Logo + desktop links */}
           <div className="flex items-center gap-4 text-sm">
-            <Link to="/" className="text-lg font-bold tracking-tight text-cyan-300">
+            <Link to="/" className={isV2
+              ? 'text-lg font-extrabold tracking-tight bg-gradient-to-r from-violet-300 to-fuchsia-300 bg-clip-text text-transparent'
+              : 'text-lg font-bold tracking-tight text-cyan-300'}>
               KBR Studio
             </Link>
             {/* Desktop nav - hidden on mobile */}
@@ -194,6 +201,7 @@ export default function Navbar() {
           </div>
 
           <div className="flex items-center gap-3">
+            <VersionToggle />
             {isAuthenticated ? (
               <>
                 {/* Alert Bell */}

@@ -5,6 +5,7 @@ import Layout from './components/layout/Layout';
 import SponsorLayout from './components/layout/SponsorLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useAuthStore } from './stores/authStore';
+import { useUiStore } from './stores/uiStore';
 
 // Auth pages (eager - fast initial load)
 import Login from './pages/admin/Login';
@@ -13,6 +14,8 @@ import SponsorLogin from './pages/sponsor/Login';
 // Public pages (lazy-loaded)
 const StationList = lazy(() => import('./pages/public/StationList'));
 const Listen = lazy(() => import('./pages/public/Listen'));
+const StationListV2 = lazy(() => import('./pages/public/StationListV2'));
+const ListenV2 = lazy(() => import('./pages/public/ListenV2'));
 
 // Admin pages (lazy-loaded - code split)
 const Dashboard = lazy(() => import('./pages/admin/Dashboard'));
@@ -75,6 +78,12 @@ function SponsorProtectedRoute({ children }: { children: React.ReactNode }) {
 
 const Loading = () => <div className="text-center py-10 text-gray-400">Loading...</div>;
 
+/** Renders the V2 page when the V2 toggle is on, otherwise the V1 page. */
+function Versioned({ v1, v2 }: { v1: React.ReactNode; v2: React.ReactNode }) {
+  const isV2 = useUiStore((s) => s.version) === 'v2';
+  return <>{isV2 ? v2 : v1}</>;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -85,8 +94,8 @@ export default function App() {
             <Route element={<Layout />}>
               {/* Public */}
               <Route path="/" element={<Navigate to="/stations" replace />} />
-              <Route path="/stations" element={<StationList />} />
-              <Route path="/listen/:stationId" element={<Listen />} />
+              <Route path="/stations" element={<Versioned v1={<StationList />} v2={<StationListV2 />} />} />
+              <Route path="/listen/:stationId" element={<Versioned v1={<Listen />} v2={<ListenV2 />} />} />
               <Route path="/guide" element={<ProgramGuide />} />
               <Route path="/hosts" element={<Hosts />} />
               <Route path="/archives" element={<Archives />} />
