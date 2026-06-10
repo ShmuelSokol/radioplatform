@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
@@ -603,26 +603,41 @@ class QueueReplenishService:
         now = datetime.now(timezone.utc)
         eastern_tz = ZoneInfo("America/New_York")
 
-        # Check which hours already have scheduled entries (avoid duplicates)
+        # Check which exact slot times already have scheduled ANNOUNCEMENT entries.
+        # CRITICAL: exclude ad_slot entries and compare exact minutes — the old code
+        # bucketed every preempt (including :15/:30/:45 ad slots) to the top of the
+        # hour, so once ads were scheduled days ahead, every hour looked "already
+        # scheduled" and time/weather announcements silently stopped being created.
         result = await self.db.execute(
             select(QueueEntry.preempt_at)
             .where(
                 QueueEntry.station_id == self.station_id,
                 QueueEntry.status == "pending",
                 QueueEntry.preempt_at.isnot(None),
+                or_(QueueEntry.source.is_(None), QueueEntry.source != "ad_slot"),
             )
         )
-        existing_preempts = {row[0].replace(minute=0, second=0, microsecond=0) for row in result.all() if row[0]}
+
+        def _norm(dt: datetime) -> datetime:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.replace(second=0, microsecond=0)
+
+        existing_preempts = {_norm(row[0]) for row in result.all() if row[0]}
+
+        weather_interval = int(self.automation_config.get("weather_interval_minutes", 30) or 0)
+        half_hour_weather = self.automation_config.get("weather_enabled") and weather_interval == 30
 
         # Schedule for the next 48 hours (weather data only reliable ~48h out;
         # future runs will extend as hours come within range)
         hours_scheduled = 0
         for h in range(48):
             hour_boundary = (now + timedelta(hours=h)).replace(minute=0, second=0, microsecond=0)
-            if hour_boundary <= now:
-                continue  # Skip past hours
-            if hour_boundary in existing_preempts:
-                continue  # Already scheduled
+            half_boundary = hour_boundary + timedelta(minutes=30)
+            need_hour = hour_boundary > now and hour_boundary not in existing_preempts
+            need_half = half_hour_weather and half_boundary > now and half_boundary not in existing_preempts
+            if not need_hour and not need_half:
+                continue
 
             eastern_time = hour_boundary.astimezone(eastern_tz)
             slot_key = eastern_time.strftime("%Y-%m-%dT%H")
@@ -633,24 +648,34 @@ class QueueReplenishService:
                 logger.warning("Failed to generate weather for slot %s", slot_key, exc_info=True)
                 continue
 
-            assets_to_insert = [a for a in [time_asset, weather_asset] if a is not None]
-            if not assets_to_insert:
-                continue
+            if need_hour:
+                assets_to_insert = [a for a in [time_asset, weather_asset] if a is not None]
+                for asset in assets_to_insert:
+                    self.max_pos += 1
+                    self.db.add(QueueEntry(
+                        id=uuid.uuid4(),
+                        station_id=self.station_id,
+                        asset_id=asset.id,
+                        position=self.max_pos,
+                        status="pending",
+                        preempt_at=hour_boundary,  # ALL entries get preempt_at so weather follows time
+                    ))
+                if assets_to_insert:
+                    hours_scheduled += 1
+                    logger.info("Scheduled time+weather for %s (slot %s)", hour_boundary.isoformat(), slot_key)
 
-            for i, asset in enumerate(assets_to_insert):
+            # Half-hour weather refresh (weather_interval_minutes == 30)
+            if need_half and weather_asset is not None:
                 self.max_pos += 1
-                entry = QueueEntry(
+                self.db.add(QueueEntry(
                     id=uuid.uuid4(),
                     station_id=self.station_id,
-                    asset_id=asset.id,
+                    asset_id=weather_asset.id,
                     position=self.max_pos,
                     status="pending",
-                    preempt_at=hour_boundary,  # ALL entries get preempt_at so weather follows time
-                )
-                self.db.add(entry)
-
-            hours_scheduled += 1
-            logger.info("Scheduled time+weather for %s (slot %s)", hour_boundary.isoformat(), slot_key)
+                    preempt_at=half_boundary,
+                ))
+                logger.info("Scheduled :30 weather for %s", half_boundary.isoformat())
 
         logger.info("Scheduled hourly announcements for %d hours", hours_scheduled)
 

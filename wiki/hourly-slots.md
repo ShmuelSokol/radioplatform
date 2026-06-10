@@ -25,9 +25,14 @@
 }
 ```
 
-## Bug: weather_interval_minutes ignored (as of 2026-05-24)
+## FIXED 2026-06-10: announcement-masking bug + :30 weather
 
-Config says `weather_interval_minutes: 30` but code only inserts weather at :00 of each hour. The old 30-min logic in `scheduling.py:359-379` was disabled to prevent duplicates, and the replacement (`queue_replenish_service.py:620`) only loops hourly boundaries. **Weather at :30 is NOT happening.**
+Two bugs fixed in `_schedule_hourly_announcements`:
+
+1. **Masking (severe)**: the dedup set bucketed ALL pending preempts (including the 504 seven-day ad slots at :15/:30/:45) to the top of the hour — so once ads were scheduled, every hour looked "already scheduled" and time/weather/station-ID announcements silently stopped being created. Fix: dedup excludes `source == "ad_slot"` and compares exact minutes.
+2. **:30 weather**: `weather_interval_minutes: 30` was ignored (weather only at :00). Fix: weather-only entry also scheduled at `hour + 30min` when interval == 30.
+
+If announcements ever vanish again, check the dedup set in `_schedule_hourly_announcements` first.
 
 ## TTS generation
 

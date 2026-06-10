@@ -333,7 +333,15 @@ export default function Dashboard() {
   }, [toastMessage]);
 
   // ── Audio engine ───────────────────────────────────────────
-  const audioAsset: AssetInfo | null = nowAsset ? {
+  // Prefer WS now-playing (instant on skip/advance) over REST queueData (10s poll).
+  const audioAsset: AssetInfo | null = wsNowPlaying?.asset_id && wsNowPlaying.asset ? {
+    id: wsNowPlaying.asset_id,
+    title: wsNowPlaying.asset.title,
+    artist: wsNowPlaying.asset.artist ?? null,
+    asset_type: nowAsset?.asset_type ?? 'music',
+    category: nowAsset?.category ?? null,
+    duration: nowAsset?.duration ?? null,
+  } : nowAsset ? {
     id: nowAsset.id,
     title: nowAsset.title,
     artist: nowAsset.artist,

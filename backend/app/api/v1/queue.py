@@ -1163,11 +1163,32 @@ async def skip_current(
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
+        next_id = next_entry.id
+        next_asset_id = next_entry.asset_id
         await db.commit()
-        return {"message": "Skipped", "now_playing": str(next_entry.asset_id)}
+        await _broadcast_now_playing_entry(db, station_id, next_id)
+        return {"message": "Skipped", "now_playing": str(next_asset_id)}
 
     await db.commit()
     return {"message": "Queue empty", "now_playing": None}
+
+
+async def _broadcast_now_playing_entry(db: AsyncSession, station_id, entry_id) -> None:
+    """Immediately push the new now-playing over WebSocket so clients switch
+    without waiting for the scheduler's next poll cycle."""
+    try:
+        from sqlalchemy.orm import joinedload
+        from app.services.scheduler_engine import get_scheduler
+        res = await db.execute(
+            select(QueueEntry)
+            .options(joinedload(QueueEntry.asset))
+            .where(QueueEntry.id == entry_id)
+        )
+        fresh = res.unique().scalar_one_or_none()
+        if fresh:
+            await get_scheduler()._broadcast_queue_entry(db, station_id, fresh)
+    except Exception as e:
+        logger.warning("Instant now-playing broadcast failed: %s", e)
 
 
 @router.post("/move-up")
@@ -1475,8 +1496,11 @@ async def start_playback(
 
     next_entry.status = "playing"
     next_entry.started_at = datetime.now(timezone.utc)
+    started_id = next_entry.id
+    started_asset_id = next_entry.asset_id
     await db.commit()
-    return {"message": "Started", "now_playing": str(next_entry.asset_id)}
+    await _broadcast_now_playing_entry(db, station_id, started_id)
+    return {"message": "Started", "now_playing": str(started_asset_id)}
 
 
 
