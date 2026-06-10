@@ -20,6 +20,10 @@ A site-wide V1/V2 UI switch (pill in the navbar, both versions) so the new desig
 
 `index.css`: `.v2-root`, `.v2-glass`, `.v2-glass-strong`, `.v2-sheet`, `.v2-fade-up`, `.v2-spin-slow`, `.v2-eq-bar`, `.v2-range`. Font: Inter (loaded in `index.html`). Palette: deep navy `#07071a` + violet/fuchsia gradients.
 
+## Deploy note (Vercel CLI)
+
+Device login (`vercel login`) requires `npx vercel@latest` — the machine's cached CLI 50.18.2 uses a deprecated device-flow API and returns "Could not verify user code" for every code. Codes expire ~10 min. After auth, deploy/whoami must also use `vercel@latest` or they won't see the saved credentials. Prefer a long-lived token from vercel.com/account/settings/tokens to avoid the login dance.
+
 ## Dev-against-prod testing
 
 `frontend/vite.config.ts` reads `VITE_PROXY_TARGET` from `.env.local` (gitignored) to proxy `/api` to the production backend — avoids CORS and needing a local backend. Smoke test: `node v2-smoke.mjs` (Playwright, screenshots to `screenshots/v2-smoke/`).

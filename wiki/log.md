@@ -10,3 +10,4 @@ INGEST 2026-05-24 audio-engine.md Client-side dual-deck crossfade engine. Fixed 
 INGEST 2026-05-24 hourly-slots.md Hourly/half-hour slot scheduling. Bug: weather_interval_minutes=30 ignored, weather only at :00 not :30.
 INGEST 2026-05-24 dashboard-timing.md Elapsed timer overflow fixed — now uses WS data + Math.min cap instead of stale 10s REST poll.
 INGEST 2026-06-10 v2-ui.md V2 UI toggle (navbar pill, localStorage). Native V2: stations+listen; other pages in light sheet. Vite proxy VITE_PROXY_TARGET for dev-against-prod.
+INGEST 2026-06-10 v2-ui.md V2 deployed live to kbrlive.com + verified in prod browser (zero JS errors). Vercel CLI note: device login needs `vercel@latest` (cached 50.18.2 rejects codes); creds at AppData/Roaming/com.vercel.cli.
