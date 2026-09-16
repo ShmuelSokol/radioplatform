@@ -297,9 +297,6 @@ Claude Code accessible over Telegram for remote development.
 
 **Run locally**: `cd bot && uv run python main.py`
 
-## TypeSafe (Jev) — use for semantic judgments
-The `typesafe:typesafe-ai` skill (Claude Code plugin, installed 2026-09-16) is the default tool for any feature that needs AI "common sense": routing, ranking, extraction, verification, classification, moderation. **Invoke the skill before designing or coding any such feature**, and read the live docs it points to (https://docs.typesafe.ai/llms.txt) rather than working from memory. Prefer TypeSafe's typed primitives (Choice / Noul / Score) over a prompt-and-parse LLM call. Keep the API key server-side (backend env var, not frontend).
-
 ## CRITICAL: Read Before You Write
 > **NEVER guess function names, class names, import paths, or field names.**
 > Before writing ANY code that imports from or references existing modules, you MUST first READ the actual source file to confirm the exact names. This applies to:

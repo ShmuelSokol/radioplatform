@@ -14,4 +14,3 @@ INGEST 2026-06-10 v2-ui.md V2 deployed live to kbrlive.com + verified in prod br
 INGEST 2026-06-10 skip-latency.md Skip lag root cause: skip/start endpoints never WS-broadcast; Dashboard audio fed by 10s REST poll. Both fixed.
 INGEST 2026-06-10 hourly-slots.md SEVERE: ad-slot preempts masked ALL hourly announcements via hour-bucketed dedup. Fixed + :30 weather added.
 INGEST 2026-09-16 song-request-matching.md fuzzy_match_asset BUG: artist nicknames pick wrong recording ("Reb Shlomo"->Shlomo Simcha, not Carlebach); can auto-approve to air. Recall is char-level so semantic requests surface garbage. Library has heavy dup rows.
-INGEST 2026-09-16 typesafe-jev.md TypeSafe/Jev added: SDK usage, key locations, Railway UA 403 gotcha, primitives. Benchmarked on song matching — fixes nickname case; recall is the real ceiling.

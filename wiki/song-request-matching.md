@@ -29,18 +29,9 @@ it cannot choose a candidate it was never shown.
 5 "B'tzeis Yisroel". Duplicates crowd out the candidate list and spread any ranking
 signal across interchangeable rows.
 
-## TypeSafe (Jev) evaluation
+## Conclusion
 
-Jev was benchmarked against this as a *selection* layer (code recalls candidates, Jev
-picks). It fixed the "Reb Shlomo" case, matched the current matcher everywhere it was
-already right, and correctly declined a nonsense request at 0.99 confidence and the
-garbage-candidate Egypt request at 0.89. Choice confidence on correct picks was LOW
-(0.22-0.47) — expected, not a failure: probability legitimately spreads across ~25
-interchangeable duplicate rows. Per TypeSafe docs, Choice confidence measures
-distribution concentration, not correctness. **Do not threshold on it here** until the
-duplicates are collapsed.
-
-Conclusion: selection is the cheap win; **recall is the real ceiling**. Fix recall
-(wider net / trigram / embeddings) before investing further in the selection layer.
-
-See [[typesafe-jev]] for SDK and API notes.
+Selection is the cheap win; **recall is the real ceiling**. A smarter selection layer
+bolted on top inherits the character-level candidate list and still cannot see
+`B'tzeis Yisroel` for a semantic query. Fix recall first (trigram / embeddings), then
+improve selection, then collapse the duplicate rows.
