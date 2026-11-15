@@ -181,6 +181,10 @@ async def _add_missing_columns(engine):
         "CREATE INDEX IF NOT EXISTS ix_song_ratings_asset ON song_ratings (asset_id)",
         "CREATE INDEX IF NOT EXISTS ix_raffle_entries_raffle ON raffle_entries (raffle_id)",
         "CREATE INDEX IF NOT EXISTS ix_raffle_entries_member ON raffle_entries (member_id)",
+        # Queue + play log hot paths (queue page, scheduler tick, skip, add, history).
+        # Without these every lookup scans all played history for all stations.
+        "CREATE INDEX IF NOT EXISTS ix_queue_entries_station_status_position ON queue_entries (station_id, status, position)",
+        "CREATE INDEX IF NOT EXISTS ix_play_logs_station_start ON play_logs (station_id, start_utc)",
     ]
     for sql in migrations:
         try:

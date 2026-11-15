@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,9 @@ class QueueStatus(str, enum.Enum):
 
 class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "queue_entries"
+    __table_args__ = (
+        Index("ix_queue_entries_station_status_position", "station_id", "status", "position"),
+    )
 
     station_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stations.id", ondelete="CASCADE"), nullable=False
