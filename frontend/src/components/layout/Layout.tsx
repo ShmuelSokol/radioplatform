@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import Navbar from './Navbar';
 import AudioPlayer from '../audio/AudioPlayer';
+import ViewOnlyNotice from './ViewOnlyNotice';
 import { useUiStore } from '../../stores/uiStore';
 
 // Routes that have native V2 (dark) designs — rendered full-bleed in the V2 shell.
@@ -35,6 +36,7 @@ export default function Layout() {
           <Outlet />
         </main>
         <AudioPlayer />
+        <ViewOnlyNotice />
       </div>
     );
   }
@@ -47,6 +49,7 @@ export default function Layout() {
           <Outlet />
         </main>
         <AudioPlayer />
+        <ViewOnlyNotice />
       </div>
     );
   }
@@ -68,6 +71,7 @@ export default function Layout() {
         )}
       </main>
       <AudioPlayer />
+      <ViewOnlyNotice />
     </div>
   );
 }

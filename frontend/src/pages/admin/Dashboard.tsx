@@ -300,14 +300,16 @@ export default function Dashboard() {
     } catch (err: any) {
       if (before) qc.setQueryData(queueKey, before);
       const msg = err?.response?.data?.detail || err?.response?.data?.message;
-      setToast({ text: typeof msg === 'string' ? msg : `Could not send “${asset.title}”. Check the connection and try again.`, type: 'error' });
+      if (err?.response?.status !== 403) setToast({ text: typeof msg === 'string' ? msg : `Could not send “${asset.title}”. Check the connection and try again.`, type: 'error' });
     } finally {
       setBusyId(null);
       refreshQueue();
     }
   }, [qc, refreshQueue]);
 
-  const onMutError = useCallback(() => {
+  const onMutError = useCallback((err?: unknown) => {
+    // A refusal is not a connection problem; the app-wide notice explains it.
+    if ((err as { response?: { status?: number } } | undefined)?.response?.status === 403) return;
     setToast({ text: 'That did not go through. Check the connection and try again.', type: 'error' });
   }, []);
 
