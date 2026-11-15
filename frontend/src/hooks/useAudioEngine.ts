@@ -672,5 +672,39 @@ export function useAudioEngine(
     return () => clearInterval(timer);
   }, [audioReady, getDeck, executeCrossfade]);
 
+  // ── Mix over: a jingle played on top of the item on air, which carries on ──
+  // Several pages can hold a connection to the same station; each message plays once.
+  useEffect(() => {
+    const onMixOver = (event: Event) => {
+      const data = (event as CustomEvent).detail as {
+        url?: string; replay_gain_db?: number | null; _taken?: boolean;
+      };
+      const ctx = ctxRef.current;
+      const out = mergerRef.current;
+      if (!data?.url || data._taken || !ctx || !out || ctx.state !== 'running') return;
+      data._taken = true;
+      fetch(data.url)
+        .then((res) => res.arrayBuffer())
+        .then((bytes) => ctx.decodeAudioData(bytes))
+        .then((buffer) => {
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          const gain = ctx.createGain();
+          gain.gain.value = mutedRef.current
+            ? 0
+            : volumeRef.current * replayGainMultiplier(data.replay_gain_db ?? 0);
+          source.connect(gain);
+          gain.connect(out);
+          source.onended = () => gain.disconnect();
+          source.start();
+        })
+        .catch(() => {
+          // The jingle could not be loaded; the item on air is not affected
+        });
+    };
+    window.addEventListener('kbr-mix-over', onMixOver);
+    return () => window.removeEventListener('kbr-mix-over', onMixOver);
+  }, [replayGainMultiplier]);
+
   return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio };
 }

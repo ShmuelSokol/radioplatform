@@ -121,6 +121,10 @@ export const useNowPlayingWS = (stationId: string) => {
             if (message.type === 'now_playing' && message.data) {
               setNowPlaying(message.data);
             }
+            if (message.type === 'mix_over' && message.data) {
+              // A jingle to play on top of what is on air; the audio engine picks it up
+              window.dispatchEvent(new CustomEvent('kbr-mix-over', { detail: message.data }));
+            }
             if (message.type === 'ping') {
               ws.send('pong');
             }

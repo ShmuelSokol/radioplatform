@@ -61,4 +61,4 @@ Server contract: [operator-actions](operator-actions.md). In the transport bar N
 
 At 1024 to 1279 px the bar is tight: the volume slider hides below 1536 px, "Soft fade" shortens to "Soft" below 1280 px.
 
-Not built on the server yet: Loop and Mix over.
+Loop (`queue/loop`) and Mix over (`queue/mix-over`) exist on the server; see `operator-actions.md`.

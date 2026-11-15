@@ -56,6 +56,15 @@ class QueueFireNow(BaseModel):
     client_request_id: str | None = Field(default=None, max_length=100)
 
 
+class QueueMixOver(BaseModel):
+    """Play an asset (a jingle, a sweeper) on top of what is on air. Nothing ends, nothing
+    in the queue moves."""
+
+    asset_id: uuid.UUID
+    # Same as fire-now: a repeat of the same id within a few seconds is ignored
+    client_request_id: str | None = Field(default=None, max_length=100)
+
+
 class QueueLoop(BaseModel):
     """Loop the item on air (it plays again each time it ends) until switched off or Next."""
 

@@ -32,6 +32,12 @@ the engine owns the clock.
   changed, drop the pre-loaded track), `/timed` (load now, air at an exact second, music fades
   under it; used for hard-timed items and Play Now), `/status`.
 - Both directions carry `X-Playout-Token`. There is no telnet.
+- **Mix over** sits on top of the lanes (`/overlay`): a jingle added to whatever is on air.
+  It sends no start report.
+- **Crossfade order matters**: in the song-to-song transition the incoming song must be the
+  first source of `add`, because `add` passes on only its first source's titles and the start
+  report is made from them. With the outgoing song first, natural song changes were never
+  reported (found on the rig 2026-11-15; Next was unaffected, which hid it).
 - **Three lanes**: timed, main (3 s crossfade), emergency (local files in
   `/var/lib/kbr-engine/emergency`, then silence). If the backend is unreachable the engine
   plays what it has, then the emergency folder, and picks the queue up again by itself.

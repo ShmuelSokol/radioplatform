@@ -120,6 +120,20 @@ async def engine_timed(uri: str, at_epoch: float, entry_id: str = "") -> bool:
     return await _command("/timed", {"uri": uri, "at": at_epoch, "id": entry_id})
 
 
+async def engine_overlay(asset) -> bool:
+    """Play an asset on top of what is on air (Mix over). The item on air carries on."""
+    url = audio_url(asset)
+    if not url:
+        return False
+    fields = {"kbr_lane": "overlay", "title": asset.title or ""}
+    analysis = (asset.metadata_extra or {}).get("audio_analysis", {}) if asset.metadata_extra else {}
+    gain = analysis.get("replay_gain_db")
+    if isinstance(gain, (int, float)) and gain != 0:
+        fields["liq_amplify"] = f"{float(gain):.2f} dB"
+    annotations = ",".join(f"{k}={_quote(v)}" for k, v in fields.items())
+    return await _command("/overlay", {"uri": f"annotate:{annotations}:{url}"})
+
+
 # ── Building what the engine plays ───────────────────────────────────────────
 
 
