@@ -89,6 +89,82 @@ def _build_weather_text(weather: dict, city_name: str = "Lakewood") -> str:
     return _apply_word_replacements(text)
 
 
+async def find_weather_spot_asset(db: AsyncSession, weather_key: str) -> Asset | None:
+    """The weather spot asset for one day (weather_key like "2024-01-15"), if any."""
+    result = await db.execute(
+        select(Asset).where(
+            Asset.asset_type == "spot",
+            Asset.category == "weather_spot",
+            Asset.metadata_extra["slot_key"].astext == weather_key,
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def store_uploaded_weather_spot(
+    db: AsyncSession,
+    weather_key: str,
+    audio_bytes: bytes,
+    *,
+    source: str = "shprach",
+    script: str | None = None,
+) -> tuple[Asset, bool]:
+    """Make an uploaded, ready-made recording the weather spot for one day.
+
+    The day's weather spot is a single asset keyed by date, and the hourly
+    scheduler pre-queues that asset up to 48 hours ahead. So when one already
+    exists (usually an ElevenLabs one made by the scheduler) it is updated in
+    place: queue entries that already point at it then play the uploaded audio.
+    With no asset yet, one is created and get_or_create_weather_spot_assets()
+    finds it later instead of calling ElevenLabs.
+
+    Returns (asset, replaced) where replaced says an existing spot was overwritten.
+    """
+    from app.services.audio_analysis_service import normalize_audio_loudness
+    from app.services.silence_service import get_audio_duration
+
+    audio_bytes = normalize_audio_loudness(audio_bytes)
+    duration = get_audio_duration(audio_bytes)
+    if duration <= 0:
+        raise ValueError("Uploaded file is not readable audio")
+
+    # A new path on every upload: the public URL is cached, so re-using the
+    # path would keep serving the old recording after a same-day replacement.
+    stamp = datetime.now(timezone.utc).strftime("%H%M%S")
+    path = f"weather/{weather_key}_weather_{source}_{stamp}.mp3"
+    url = await upload_to_supabase(audio_bytes, path)
+
+    extra = {
+        "slot_key": weather_key,
+        "generated": False,
+        "source": source,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if script:
+        extra["script"] = script
+
+    asset = await find_weather_spot_asset(db, weather_key)
+    replaced = asset is not None
+    if asset is None:
+        asset = Asset(
+            id=uuid.uuid4(),
+            title=f"Weather Report - {weather_key}",
+            artist="Kohl Baramah",
+            file_path=url,
+            asset_type="spot",
+            category="weather_spot",
+        )
+        db.add(asset)
+    asset.file_path = url
+    asset.duration = duration
+    # Replaced wholesale on purpose: any cached analysis/trim points in the old
+    # metadata belong to the old recording.
+    asset.metadata_extra = extra
+    await db.flush()
+    logger.info("Stored uploaded %s weather spot for day %s (replaced=%s)", source, weather_key, replaced)
+    return asset, replaced
+
+
 async def get_or_create_weather_spot_assets(
     db: AsyncSession, slot_key: str
 ) -> tuple[Asset | None, Asset | None]:

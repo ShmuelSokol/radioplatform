@@ -156,6 +156,7 @@ radioplatform/
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
+| weather_spots | weather_spots.py | /weather-spots (upload a ready-made daily weather spot, e.g. Shprach voice; replaces the ElevenLabs one for that date) |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
@@ -173,7 +174,7 @@ radioplatform/
 | queue_replenish_service.py | Auto-replenish playback queue |
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
-| weather_spot_service.py | Weather/time announcement generation + caching |
+| weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots (ElevenLabs is the fallback) |
 | sun_service.py | Sunrise/sunset calculations (astral) |
 | icecast_service.py | Icecast OTA broadcast source client |
 | email_service.py | Resend transactional email (campaign updates, invoices, payments) |
