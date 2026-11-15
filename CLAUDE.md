@@ -189,7 +189,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Main control panel with queue, library, cart machine, weather preview
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel. Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
@@ -404,6 +404,9 @@ cd backend && npx vercel --prod --yes
 
 # Deploy frontend to Vercel
 cd frontend && npx vercel --prod --yes
+
+# Browser check of the control room against a fake backend (desktop + phone sizes)
+cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/control-room.mjs
 
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com

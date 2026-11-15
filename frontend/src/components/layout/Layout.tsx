@@ -13,9 +13,27 @@ function isV2Native(pathname: string): boolean {
   );
 }
 
+// Full-bleed "app" screens: fixed to the viewport, the nav stays on top and the
+// page manages its own scrolling panes (no max-width, no page padding).
+function isAppShell(pathname: string): boolean {
+  return pathname === '/admin/dashboard';
+}
+
 export default function Layout() {
   const isV2 = useUiStore((s) => s.version) === 'v2';
   const { pathname } = useLocation();
+
+  if (isAppShell(pathname)) {
+    return (
+      <div className={`${isV2 ? 'v2-root ' : ''}app-shell flex flex-col overflow-hidden`}>
+        <Navbar />
+        <main className="flex-1 min-h-0">
+          <Outlet />
+        </main>
+        <AudioPlayer />
+      </div>
+    );
+  }
 
   if (!isV2) {
     return (
