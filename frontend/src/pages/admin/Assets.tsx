@@ -10,6 +10,8 @@ import { downloadAsset, getAssetAudioUrl, getBulkAutoTrimStatus } from '../../ap
 import type { Asset } from '../../types';
 import type { BulkAutoTrimStatus } from '../../api/assets';
 import Spinner from '../../components/Spinner';
+import { useAuth } from '../../hooks/useAuth';
+import { isManager } from '../../auth/access';
 
 const EXPORT_FORMATS = ['original', 'mp2', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
@@ -186,6 +188,8 @@ function ColumnFilter({ value, onChange, options, placeholder }: {
 export default function Assets() {
   const { data: categories } = useCategories();
   const { data: assetTypes } = useAssetTypes();
+  const { user } = useAuth();
+  const canEdit = isManager(user?.role);
   const deleteMutation = useDeleteAsset();
   const bulkCategoryMutation = useBulkSetCategory();
   const bulkAutoTrimMutation = useBulkAutoTrim();
@@ -390,12 +394,14 @@ export default function Assets() {
             </button>
           )}
         </div>
-        <Link
-          to="/admin/assets/upload"
-          className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded transition"
-        >
-          Upload Asset
-        </Link>
+        {canEdit && (
+          <Link
+            to="/admin/assets/upload"
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded transition"
+          >
+            Upload Asset
+          </Link>
+        )}
       </div>
 
       {/* Batch action bar */}
@@ -693,7 +699,7 @@ export default function Assets() {
                   <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
                   <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-xs">View</Link>
                   <span className="hidden md:inline"><DownloadButton assetId={asset.id} title={asset.title} /></span>
-                  <button
+                  {canEdit && <button
                     onClick={() => {
                       setDeletingId(asset.id);
                       deleteMutation.mutate(asset.id, {
@@ -704,7 +710,7 @@ export default function Assets() {
                     className="hidden md:inline text-red-600 hover:text-red-800 text-xs disabled:opacity-50"
                   >
                     {deletingId === asset.id ? '...' : 'Del'}
-                  </button>
+                  </button>}
                 </td>
               </tr>
             ))}
