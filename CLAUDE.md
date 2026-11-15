@@ -340,6 +340,8 @@ Claude Code accessible over Telegram for remote development.
 |----------|-------------|----------|
 | `DATABASE_URL` | Supabase PostgreSQL pooler URI | Yes |
 | `JWT_SECRET_KEY` | Secret for JWT signing | Yes |
+| `ADMIN_SEED_PASSWORD` | Password for accounts created by `/auth/seed` (unset = seeding refused) | First-time setup |
+| `ALLOW_DESTRUCTIVE_SEED` | Allow `/auth/seed-all` (wipes data) in production | No |
 | `CORS_ORIGINS` | JSON array of allowed origins | Yes |
 | `APP_ENV` | "production" | Yes |
 | `APP_DEBUG` | "false" in production | No |
@@ -377,9 +379,11 @@ Claude Code accessible over Telegram for remote development.
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://api.kbrlive.com/api/v1)
 
-## Default Credentials
-- Admin: `admin` / `613Radio`
-- Seed endpoint: `POST /api/v1/auth/seed` (creates or updates admin user)
+## Credentials
+- **Never write a password, key or token in this repository. It is public.**
+- There is no default admin password. `POST /api/v1/auth/seed` (first-time setup only) creates the `admin` account with the password in the `ADMIN_SEED_PASSWORD` environment variable and refuses if it is unset.
+- `POST /api/v1/auth/seed-all` deletes the whole library, stations and rules before re-seeding. It is refused in production unless `ALLOW_DESTRUCTIVE_SEED=true`.
+- Scripts and load tests read `KBR_ADMIN_EMAIL` / `KBR_ADMIN_PASSWORD` from the environment.
 
 ## Known Gotchas
 - **ALWAYS verify live site after deploy**: After deploying, test the live URLs (frontend + backend health + key API endpoints) to confirm the site works. Don't assume deploys succeed — check `curl https://api.kbrlive.com/health` and try loading key frontend pages.

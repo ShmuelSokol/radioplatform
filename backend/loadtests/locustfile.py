@@ -6,6 +6,7 @@ Run:     locust -f tests/load_test.py --host https://studio-kolbramah-api-produc
 
 Open http://localhost:8089 in your browser to configure and start the test.
 """
+import os
 from locust import HttpUser, task, between
 
 
@@ -39,7 +40,10 @@ class AdminUser(HttpUser):
         """Login on start."""
         response = self.client.post(
             "/api/v1/auth/login",
-            json={"email": "admin", "password": "613Radio"},
+            json={
+                "email": os.environ.get("KBR_ADMIN_EMAIL", "admin"),
+                "password": os.environ.get("KBR_ADMIN_PASSWORD", ""),
+            },
         )
         if response.status_code == 200:
             self.token = response.json().get("access_token", "")

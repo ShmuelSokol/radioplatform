@@ -68,3 +68,29 @@ async def test_refresh_token(client: AsyncClient, admin_user: User):
     data = response.json()
     assert "access_token" in data
     assert "refresh_token" in data
+
+
+@pytest.mark.asyncio
+async def test_seed_refuses_without_configured_password(client: AsyncClient, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "ADMIN_SEED_PASSWORD", "")
+    r = await client.post("/api/v1/auth/seed")
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_seed_uses_configured_password(client: AsyncClient, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "ADMIN_SEED_PASSWORD", "from-the-environment")
+    assert (await client.post("/api/v1/auth/seed")).status_code == 201
+    r = await client.post("/api/v1/auth/login", json={"email": "admin", "password": "from-the-environment"})
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_seed_all_is_refused_in_production(client: AsyncClient, auth_headers: dict, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "APP_ENV", "production")
+    monkeypatch.setattr(settings, "ALLOW_DESTRUCTIVE_SEED", False)
+    r = await client.post("/api/v1/auth/seed-all", headers=auth_headers)
+    assert r.status_code == 403
