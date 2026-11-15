@@ -109,3 +109,14 @@ async def test_two_advances_at_once_promote_only_one_entry(db_session):
     assert statuses[playing.id] == "played"
     assert statuses[pending.id] == "playing"
     assert statuses[third.id] == "pending"
+async def test_skip_returns_the_new_queue_in_one_call(client, auth_headers, db_session):
+    station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=10.0)
+    res = await client.post(f"/api/v1/stations/{station.id}/queue/skip", headers=auth_headers)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["now_playing"] == str(pending.asset_id)
+    # Same body as GET /queue, so the client needs no follow-up request
+    listed = (await client.get(f"/api/v1/stations/{station.id}/queue", headers=auth_headers)).json()
+    assert body["queue"]["now_playing"]["asset_id"] == str(pending.asset_id)
+    assert set(body["queue"]) == set(listed)
+    assert [e["id"] for e in body["queue"]["entries"]] == [e["id"] for e in listed["entries"]]
