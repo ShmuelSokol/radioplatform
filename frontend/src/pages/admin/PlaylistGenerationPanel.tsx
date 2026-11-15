@@ -31,6 +31,7 @@ export default function PlaylistGenerationPanel({
   const [enabled, setEnabled] = useState(false);
   const [hours, setHours] = useState(6);
   const [distance, setDistance] = useState(2);
+  const [minVote, setMinVote] = useState(0);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export default function PlaylistGenerationPanel({
     setEnabled(data.enabled);
     setHours(data.hours);
     setDistance(data.artist_distance);
+    setMinVote(data.min_vote ?? 0);
   }, [data]);
 
   const save = useMutation({
@@ -47,6 +49,7 @@ export default function PlaylistGenerationPanel({
         enabled,
         hours,
         artist_distance: distance,
+        min_vote: minVote,
       }),
     onSuccess: () => {
       setMessage("Saved.");
@@ -79,7 +82,8 @@ export default function PlaylistGenerationPanel({
     !!data &&
     (enabled !== data.enabled ||
       hours !== data.hours ||
-      distance !== data.artist_distance);
+      distance !== data.artist_distance ||
+      minVote !== (data.min_vote ?? 0));
 
   return (
     <section className="bg-white border rounded-lg p-5 mb-6">
@@ -129,6 +133,18 @@ export default function PlaylistGenerationPanel({
             max={20}
             value={distance}
             onChange={(e) => setDistance(Number(e.target.value) || 0)}
+            className="w-24 px-3 py-2 border rounded-lg"
+          />
+        </label>
+        <label className="text-sm">
+          <span className="block font-medium mb-1">Minimum vote</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={minVote}
+            onChange={(e) => setMinVote(Math.max(0, Number(e.target.value) || 0))}
+            title="Only songs with at least this vote are drawn. 0 plays everything. Set a song's vote on its page in the library."
             className="w-24 px-3 py-2 border rounded-lg"
           />
         </label>

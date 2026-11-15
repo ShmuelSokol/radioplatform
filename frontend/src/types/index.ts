@@ -86,6 +86,7 @@ export interface Asset {
   category: string | null;
   created_at: string | null;
   last_played_at: string | null;
+  vote?: number;
   release_date: string | null;
   sponsor_id: string | null;
   sponsor_name: string | null;
