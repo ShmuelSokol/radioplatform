@@ -82,7 +82,21 @@ class QueueReplenishService:
         )
         self.max_pos = result2.scalar() or 0
 
-        if self.automation_config.get("hourly_time_announcement") or self.automation_config.get("weather_enabled"):
+        # Program blocks ("Weather Sponsors": station ID, weather, PSA, sponsor...)
+        # replace the built-in hourly time and weather once a station has any.
+        from app.services.program_block_service import reconcile_block_entries
+
+        blocks_result = None
+        try:
+            blocks_result = await reconcile_block_entries(self.db, self.station_id)
+        except Exception:
+            logger.exception("Program blocks could not be queued for station %s", self.station_id)
+        if blocks_result is not None:
+            self.max_pos = max(self.max_pos, blocks_result["max_pos"])
+        if blocks_result is None and (
+            self.automation_config.get("hourly_time_announcement")
+            or self.automation_config.get("weather_enabled")
+        ):
             await self._schedule_hourly_announcements()
 
         await self._schedule_ad_slots()
