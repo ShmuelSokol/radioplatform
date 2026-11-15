@@ -129,6 +129,7 @@ class PlannedSpot(BaseModel):
     daypart: str
     timing_mode: str = "soft"
     fixed: bool = False
+    block: str | None = None  # the program block whose sponsor place this is
     schedule_id: UUID | str
     sponsor_id: UUID | str
     sponsor_name: str
@@ -142,6 +143,7 @@ class UnplacedSpot(BaseModel):
     schedule_id: UUID | str
     sponsor_name: str
     reason: str
+    count: int = 1  # plays with the same sponsorship, day, part of the day and reason
 
 
 class OffAirWindow(BaseModel):

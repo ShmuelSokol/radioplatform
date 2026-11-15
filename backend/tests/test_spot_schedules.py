@@ -79,7 +79,7 @@ def test_exact_times_hard_on_the_hour_soft_elsewhere():
     placed, unplaced = plan_spots([pinned, rival], NY, date(2026, 11, 16), 1, blackouts=[off])
     assert [(p.schedule.id, p.local.hour) for p in placed] == [("pinned", 7)]
     assert sorted(u.reason for u in unplaced) == [
-        "07:00 is already taken by pinned",
+        "7:00 AM is already taken by pinned",
         "station is off the air (Shabbos)",
     ]
 
@@ -535,3 +535,22 @@ async def test_queue_and_preview_keep_off_shabbos(
     assert body["unplaced"] == []
     assert [w["name"] for w in body["off_air"]] == ["Shabbos"]
     assert body["off_air"][0]["skipped_plays"] >= 2
+
+
+def test_passed_daypart_and_twelve_hour_clock():
+    from datetime import UTC, date, datetime
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+
+    from app.services.spot_schedule_service import Unplaced, clock_12, daypart_over
+
+    assert clock_12(18, 15) == "6:15 PM"
+    assert clock_12(0, 5) == "12:05 AM"
+    assert clock_12(12, 0) == "12:00 PM"
+
+    tz = ZoneInfo("America/New_York")
+    now = datetime(2026, 11, 15, 22, 20, tzinfo=UTC)  # 5:20 PM in New York
+    sched = SimpleNamespace()
+    assert daypart_over(Unplaced(date(2026, 11, 15), "morning", sched, "x"), tz, now)
+    assert not daypart_over(Unplaced(date(2026, 11, 15), "evening", sched, "x"), tz, now)
+    assert not daypart_over(Unplaced(date(2026, 11, 16), "morning", sched, "x"), tz, now)

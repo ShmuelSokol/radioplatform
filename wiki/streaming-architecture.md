@@ -32,6 +32,12 @@ the engine owns the clock.
   changed, drop the pre-loaded track), `/timed` (load now, air at an exact second, music fades
   under it; used for hard-timed items and Play Now), `/status`.
 - Both directions carry `X-Playout-Token`. There is no telnet.
+- **Groups in the timed lane**: items handed over for the same time (a program block: ID,
+  weather, sponsors) play through together in the order received; the backend sends them by
+  position. Until 2026-11-15 only the first item of such a group aired and the rest stayed
+  stuck in the timed queue. The song the group interrupted is not reported again when the
+  music lane comes back (it is skipped at once).
+- **Soft with a limit (`hard_by`)**: see `program-blocks.md`.
 - **Mix over** sits on top of the lanes (`/overlay`): a jingle added to whatever is on air.
   It sends no start report.
 - **Crossfade order matters**: in the song-to-song transition the incoming song must be the

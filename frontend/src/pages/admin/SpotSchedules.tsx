@@ -107,13 +107,18 @@ export default function SpotSchedules() {
     queryFn: listSpotSchedules,
   });
 
-  const [form, setForm] = useState(emptyForm);
+  const [error, setError] = useState('');
+  const [form, setFormState] = useState(emptyForm);
+  // A message about the form goes away as soon as the form is changed.
+  const setForm = (next: typeof emptyForm) => {
+    setFormState(next);
+    setError('');
+  };
   const [showForm, setShowForm] = useState(false);
   const [spotSearch, setSpotSearch] = useState('');
   const [spot, setSpot] = useState<Asset | null>(null);
   const [previewStation, setPreviewStation] = useState('');
   const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
-  const [error, setError] = useState('');
 
   const stationId = previewStation || stations[0]?.id || '';
 
@@ -184,7 +189,9 @@ export default function SpotSchedules() {
     if (!form.sponsor_id || !spot) return setError('Choose a sponsor and a spot.');
     const exact = form.when === 'exact';
     if (!form.days.length) return setError('Choose at least one day.');
-    if (exact && !form.times.length) return setError('Add at least one exact time.');
+    // A time still sitting in the box (not yet added with the button) counts too.
+    const times = [...new Set([...form.times, ...(form.newTime ? [form.newTime] : [])])].sort();
+    if (exact && !times.length) return setError('Add at least one exact time.');
     if (!exact && !form.dayparts.length) return setError('Choose at least one time of day.');
     createMut.mutate({
       sponsor_id: form.sponsor_id,
@@ -194,7 +201,7 @@ export default function SpotSchedules() {
       days_of_week: [...form.days].sort().join(','),
       dayparts: form.dayparts.join(','),
       plays_per_daypart: form.plays_per_daypart,
-      fixed_times: exact ? form.times.join(',') : null,
+      fixed_times: exact ? times.join(',') : null,
       timing_mode: form.timing || null,
       start_date: form.start_date || null,
       end_date: form.end_date || null,
@@ -202,6 +209,7 @@ export default function SpotSchedules() {
     });
   };
 
+  const unplacedPlays = (plan?.unplaced ?? []).reduce((n, u) => n + (u.count ?? 1), 0);
   const byDay = useMemo(() => {
     const groups = new Map<string, PlannedSpot[]>();
     for (const p of plan?.planned ?? []) {
@@ -219,8 +227,8 @@ export default function SpotSchedules() {
         <div>
           <h1 className="text-3xl font-bold">Spot Schedule</h1>
           <p className="text-gray-600 mt-1">
-            Choose when each sponsor's spot airs. Spots go in the station's sponsor slots and are
-            spread evenly through each part of the day.
+            Choose when each sponsor's spot airs: spread evenly through each part of the day, or
+            at exact clock times.
           </p>
         </div>
         <button
@@ -367,7 +375,7 @@ export default function SpotSchedules() {
                       type="button"
                       aria-label={`Remove ${clock(t)}`}
                       onClick={() => setForm({ ...form, times: form.times.filter((x) => x !== t) })}
-                      className="px-2 text-gray-500 hover:text-red-600"
+                      className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] text-lg text-gray-500 hover:text-red-600"
                     >
                       ×
                     </button>
@@ -577,16 +585,19 @@ export default function SpotSchedules() {
             {!!plan?.unplaced.length && (
               <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4">
                 <p className="font-semibold">
-                  {plan.unplaced.length} play{plan.unplaced.length === 1 ? '' : 's'} could not be
-                  given a slot
+                  {unplacedPlays} play{unplacedPlays === 1 ? '' : 's'} could not be given a place
                 </p>
                 <ul className="text-sm mt-1 list-disc list-inside">
-                  {plan.unplaced.slice(0, 8).map((u, i) => (
+                  {plan.unplaced.slice(0, 12).map((u, i) => (
                     <li key={i}>
-                      {u.sponsor_name}, {formatDay(u.local_date)} {u.daypart}: {u.reason}
+                      {u.sponsor_name}, {formatDay(u.local_date)} {u.daypart}
+                      {u.count > 1 ? ` (${u.count} plays)` : ''}: {u.reason}
                     </li>
                   ))}
                 </ul>
+                {plan.unplaced.length > 12 && (
+                  <p className="text-sm mt-1">…and {plan.unplaced.length - 12} more.</p>
+                )}
               </div>
             )}
             {!!plan?.off_air?.length && (
@@ -616,14 +627,17 @@ export default function SpotSchedules() {
                     </span>
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {spots.map((p) => (
+                    {spots.map((p, i) => (
                       <span
-                        key={p.scheduled_at}
+                        key={`${p.scheduled_at}-${i}`}
                         className="text-sm bg-gray-100 rounded-lg px-3 py-1"
                         title={p.asset_title}
                       >
                         <span className="font-medium">{formatTime(p.local_time)}</span>{' '}
                         {p.sponsor_name}
+                        {p.block && (
+                          <span className="ml-2 text-xs text-gray-600">in {p.block}</span>
+                        )}
                         {p.timing_mode === 'hard' && (
                           <span className="ml-2 text-xs font-semibold text-red-700" title={TIMING_LABEL.hard}>
                             on the second

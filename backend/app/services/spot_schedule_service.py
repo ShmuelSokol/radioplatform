@@ -6,7 +6,9 @@ on these days". This module turns the schedules into concrete clock slots and
 keeps the station queue's pending ad_slot entries in step with that plan.
 
 The clock slots themselves are the station's existing ad slot minutes
-(automation_config.ad_slot_minutes, default :15/:30/:45). Playback is not
+(automation_config.ad_slot_minutes, default :15/:30/:45), unless the station
+has program blocks with sponsor places: then the spread plays go into those
+places instead (see wiki/program-blocks.md) and the block writes them. Playback is not
 touched here: entries are written exactly as the legacy ad slot code wrote
 them (source="ad_slot" + preempt_at), so the player treats them the same way.
 """
@@ -80,6 +82,9 @@ class Placement:
     schedule: SpotSchedule
     timing_mode: str = "soft"
     fixed: bool = False  # an exact time chosen on the schedule, not a spread slot
+    block: str | None = None  # name of the program block whose sponsor place this is
+    seat: int = 0  # which of that block's places (0 = first)
+    hard_by: datetime | None = None  # UTC; soft, but fade the song if still waiting then
 
 
 @dataclass
@@ -89,6 +94,31 @@ class Unplaced:
     schedule: SpotSchedule
     reason: str
     blackout: "Blackout | None" = None  # set when the whole daypart is off the air
+
+
+def clock_12(hour: int, minute: int) -> str:
+    """6:15 PM, the way the rest of the site writes a time."""
+    return f"{(hour % 12) or 12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+
+
+def daypart_over(u: "Unplaced", tz: ZoneInfo, now: datetime) -> bool:
+    """True when the play's time of day has already ended (nothing to fix there)."""
+    end_hour = DAYPARTS[u.daypart][1]
+    end = datetime(u.local_date.year, u.local_date.month, u.local_date.day, tzinfo=tz) + timedelta(
+        hours=end_hour
+    )
+    return end <= now
+
+
+@dataclass
+class Break:
+    """One airing of a program block that has sponsor places."""
+
+    local: datetime  # station-local start
+    capacity: int  # how many sponsorships fit
+    timing_mode: str
+    name: str
+    latest_minutes: int | None = None  # soft, but no later than this many minutes
 
 
 @dataclass(frozen=True)
@@ -150,6 +180,7 @@ def plan_spots(
     slot_minutes: list[int] | None = None,
     blackouts: list[Blackout] | None = None,
     timing_defaults: dict | None = None,
+    breaks: list[Break] | None = None,
 ) -> tuple[list[Placement], list[Unplaced]]:
     """Assign each schedule's plays to clock slots, spread evenly through each daypart.
 
@@ -161,12 +192,43 @@ def plan_spots(
     Slots inside a blackout (Shabbos, Yom Tov) are not slots: plays are spread
     over what is left of the daypart, and a daypart that is entirely off the
     air is skipped (reported unplaced with ``blackout`` set).
+
+    ``breaks`` (not None when the station has program blocks with sponsor
+    places): spread plays go into those places instead of the clock slots. A
+    play aims at the break its share of the daypart points to and takes the
+    first free place there, or the next break with room. An exact time that
+    is a break's start takes a place in that break.
     """
     blackouts = blackouts or []
     minutes = sorted({int(m) for m in (slot_minutes or DEFAULT_SLOT_MINUTES) if 0 <= int(m) < 60})
     ordered = sorted(schedules, key=lambda s: (str(s.created_at or ""), str(s.id)))
     placements: list[Placement] = []
     unplaced: list[Unplaced] = []
+
+    room: dict[datetime, int] = {}
+    by_time: dict[datetime, Break] = {}
+    for b in breaks or []:
+        if b.capacity > 0 and not any(x.covers(b.local) for x in blackouts):
+            by_time[b.local] = b
+            room[b.local] = b.capacity
+
+    def seat_in(b: Break, sched) -> Placement:
+        seat = b.capacity - room[b.local]
+        room[b.local] -= 1
+        at = b.local.astimezone(UTC).replace(second=0, microsecond=0)
+        return Placement(
+            at=at,
+            local=b.local,
+            daypart=daypart_of(b.local.hour),
+            schedule=sched,
+            timing_mode=b.timing_mode,
+            fixed=bool(getattr(sched, "fixed_times", None)),
+            block=b.name,
+            seat=seat,
+            hard_by=at + timedelta(minutes=b.latest_minutes)
+            if b.timing_mode == "soft" and b.latest_minutes
+            else None,
+        )
 
     for day_offset in range(days):
         local_date = start_date + timedelta(days=day_offset)
@@ -194,6 +256,9 @@ def plan_spots(
                         )
                     )
                     continue
+                if room.get(local):
+                    placements.append(seat_in(by_time[local], sched))
+                    continue
                 if local in fixed_at:
                     other = fixed_at[local].name or "another sponsorship"
                     unplaced.append(
@@ -201,7 +266,7 @@ def plan_spots(
                             local_date,
                             daypart_of(hour),
                             sched,
-                            f"{hour:02d}:{minute:02d} is already taken by {other}",
+                            f"{clock_12(hour, minute)} is already taken by {other}",
                         )
                     )
                     continue
@@ -226,6 +291,32 @@ def plan_spots(
                 if not getattr(s, "fixed_times", None) and _applies(s, local_date, daypart)
             ]
             if not wanting:
+                continue
+            if breaks is not None:
+                day_breaks = sorted(
+                    (
+                        b
+                        for b in by_time.values()
+                        if b.local.date() == local_date and h_start <= b.local.hour < h_end
+                    ),
+                    key=lambda b: b.local,
+                )
+                for sched in wanting:
+                    plays = max(1, int(sched.plays_per_daypart or 1))
+                    for k in range(plays):
+                        open_ = [b for b in day_breaks if room[b.local] > 0]
+                        if not open_:
+                            reason = (
+                                "no sponsor place left in this time of day's blocks"
+                                if day_breaks
+                                else "no block with sponsor places in this time of day"
+                            )
+                            unplaced.append(Unplaced(local_date, daypart, sched, reason))
+                            continue
+                        idx = int((k + 0.5) * len(day_breaks) / plays) % len(day_breaks)
+                        while room[day_breaks[idx].local] <= 0:
+                            idx = (idx + 1) % len(day_breaks)
+                        placements.append(seat_in(day_breaks[idx], sched))
                 continue
             slots = [
                 slot
@@ -287,7 +378,7 @@ def plan_spots(
                     )
                 )
 
-    placements.sort(key=lambda p: p.at)
+    placements.sort(key=lambda p: (p.at, p.seat))
     return placements, unplaced
 
 
@@ -332,7 +423,12 @@ async def plan_for_station(
     blackouts = await load_blackouts(
         db, station.id, now - timedelta(days=1), now + timedelta(days=days + 1)
     )
-    return plan_spots(
+    from app.services.program_block_service import load_breaks
+
+    breaks = await load_breaks(
+        db, station, now - timedelta(days=1), now + timedelta(days=days + 1)
+    )
+    placements, unplaced = plan_spots(
         schedules,
         tz,
         now.astimezone(tz).date(),
@@ -340,7 +436,11 @@ async def plan_for_station(
         minutes,
         blackouts,
         (station.automation_config or {}).get("spot_timing"),
+        breaks,
     )
+    # A part of the day that is already over cannot be fixed; leave it out.
+    unplaced = [u for u in unplaced if not daypart_over(u, tz, now)]
+    return placements, unplaced
 
 
 async def reconcile_spot_slots(
@@ -367,8 +467,11 @@ async def reconcile_spot_slots(
     latest = now + timedelta(days=HORIZON_DAYS)
 
     placements, unplaced = await plan_for_station(db, station, days=HORIZON_DAYS + 1, now=now)
+    # Places inside program blocks are written by the block, in its order.
     desired: dict[datetime, uuid.UUID] = {
-        p.at: p.schedule.asset_id for p in placements if earliest < p.at <= latest
+        p.at: p.schedule.asset_id
+        for p in placements
+        if earliest < p.at <= latest and p.block is None
     }
     timing: dict[datetime, str] = {p.at: p.timing_mode for p in placements}
 

@@ -115,6 +115,7 @@ radioplatform/
 | Sponsor | sponsor.py | Sponsor/ad management (linked to User via user_id) |
 | SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
 | SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
+| ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
 | PlaylistTemplate | playlist_template.py | Rotation pattern templates |
@@ -153,6 +154,7 @@ radioplatform/
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
 | spot_schedules | spot_schedules.py | /spot-schedules |
 | spot_recordings | spot_recordings.py | /spot-recordings |
+| program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
 | copy_review | copy_review.py | /sponsorship (rules + copy review) |
 | campaigns | campaigns.py | /campaigns |
 | billing | billing.py | /billing |
@@ -182,6 +184,7 @@ radioplatform/
 | schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
 | spot_schedule_service.py | Plans sponsor spots into clock slots and keeps pending `ad_slot` queue entries in step (see `wiki/spot-schedules.md`) |
 | spot_voice_service.py | Makes spot audio from a script; Shprach call is a stub, placeholder tones until wired (see `wiki/spot-recordings.md`) |
+| program_block_service.py | Expands program blocks into timed queue entries (`source="block"`) and replaces the built-in hourly time and weather (see `wiki/program-blocks.md`) |
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots (ElevenLabs is the fallback) |
@@ -216,6 +219,7 @@ radioplatform/
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
 - SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead
 - SpotRecordings.tsx — Record Spots: write a script, make or upload audio, listen, approve into the library
+- ProgramBlocks.tsx — Named blocks ("Weather Sponsors"): items in order, clock times, hard or soft, next 24 hours
 - SponsorshipRules.tsx — Edit the sponsorship wording rules (versioned) and try the wording check
 - Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
@@ -287,6 +291,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedule-check` → ScheduleCheck (protected)
 - `/admin/spot-schedule` → SpotSchedules (protected)
 - `/admin/spot-recordings` → SpotRecordings (protected)
+- `/admin/program-blocks` → ProgramBlocks (protected)
 - `/admin/sponsorship-rules` → SponsorshipRules (protected)
 - `/admin/playlists` → Playlists (protected)
 - `/admin/alerts` → Alerts (protected)

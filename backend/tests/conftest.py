@@ -80,6 +80,19 @@ async def reset_rate_limiter():
         pass
 
 
+@pytest.fixture(autouse=True)
+def reset_weather_state():
+    """Weather answers and announcement-generation pauses are kept per process; start each test clean."""
+    from app.services.weather_service import clear_weather_cache
+    from app.services.weather_spot_service import resume_generation
+
+    clear_weather_cache()
+    resume_generation()
+    yield
+    clear_weather_cache()
+    resume_generation()
+
+
 @pytest_asyncio.fixture
 async def db_session() -> AsyncIterator[AsyncSession]:
     # Import all models

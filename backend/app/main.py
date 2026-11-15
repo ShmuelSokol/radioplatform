@@ -136,6 +136,8 @@ async def _add_missing_columns(engine):
         # Preempt mechanism for exact-time playback (time announcements)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS timing_mode VARCHAR(10)",
+        "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS hard_by TIMESTAMPTZ",
+        "ALTER TABLE program_blocks ADD COLUMN IF NOT EXISTS latest_minutes INTEGER",
         # Source tracking: 'request', 'manual', 'auto' (replenish)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'auto'",
         # Schedule block columns that may be missing from early table creation

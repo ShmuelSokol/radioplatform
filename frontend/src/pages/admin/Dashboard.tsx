@@ -9,7 +9,7 @@ import {
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
-import { fireNow, insertAt, loopCurrent, queueEnd, queueNext } from '../../api/liveControl';
+import { fireNow, insertAt, loopCurrent, mixOver, queueEnd, queueNext } from '../../api/liveControl';
 import type { SkipFade } from '../../api/queue';
 import { insertEntry as addQueuePlaceholder } from '../../hooks/queueOptimistic';
 import type { QueueDataLike } from '../../hooks/queueOptimistic';
@@ -265,7 +265,7 @@ export default function Dashboard() {
     // row when the request settles, and a failure puts the old queue back.
     const queueKey = ['queue', sid];
     let before: QueueDataLike | undefined;
-    if (how !== 'now') {
+    if (how !== 'now' && how !== 'mix') {
       await qc.cancelQueries({ queryKey: queueKey });
       before = qc.getQueryData<QueueDataLike>(queueKey);
       if (before) {
@@ -286,6 +286,10 @@ export default function Dashboard() {
           setInsertBeforeId(null);
           setToast({ text: `That spot already passed, so “${asset.title}” will play next.`, type: 'warn' });
         }
+      } else if (how === 'mix') {
+        latest.current.initAudio();
+        await mixOver(sid, asset.id);
+        setToast({ text: `Playing over the current item: “${asset.title}”`, type: 'ok' });
       } else if (how === 'now') {
         latest.current.initAudio();
         await fireNow(sid, asset.id);

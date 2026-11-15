@@ -108,6 +108,11 @@ function HotButtons(p: Props) {
               className={`flex-1 h-10 text-sm font-bold ${p.fireMode === 'next' ? 'bg-amber-500 text-black' : 'bg-transparent text-gray-400 hover:bg-white/5'}`}>
               Play next
             </button>
+            <button type="button" role="radio" aria-checked={p.fireMode === 'mix'} onClick={() => p.onFireMode('mix')}
+              title="Play a button on top of the item on air, which carries on"
+              className={`flex-1 h-10 text-sm font-bold ${p.fireMode === 'mix' ? 'bg-violet-500 text-white' : 'bg-transparent text-gray-400 hover:bg-white/5'}`}>
+              Mix over
+            </button>
           </div>
         )}
         <p className="px-1 text-[11px] leading-snug text-gray-500">
@@ -117,7 +122,9 @@ function HotButtons(p: Props) {
             ? 'Tap a button to drop it into the queue at the marked spot.'
             : p.fireMode === 'now'
               ? 'A tap cuts to that item immediately.'
-              : 'A tap plays that item when the current one ends.'}
+              : p.fireMode === 'mix'
+                ? 'A tap plays that item on top of what is on air. The song carries on.'
+                : 'A tap plays that item when the current one ends.'}
         </p>
         {pflOn && pfl.canChooseOutput && (
           pfl.outputs.length > 0 ? (
