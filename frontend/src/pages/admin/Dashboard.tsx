@@ -18,6 +18,7 @@ import QueuePanel from './controlroom/QueuePanel';
 import type { QueueRow } from './controlroom/QueuePanel';
 import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
+import { usePfl } from './controlroom/pfl';
 import { LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
@@ -348,6 +349,9 @@ export default function Dashboard() {
     setPane(p => (p === 'library' || p === 'buttons' ? 'queue' : p));
   }, []);
 
+  // Pre-listen (PFL): one off-air player shared by the cart and the library
+  const pfl = usePfl();
+
   // Off-air time + weather preview
   const [weatherState, setWeatherState] = useState<'idle' | 'loading' | 'playing'>('idle');
   const previewWeather = useCallback(async () => {
@@ -447,6 +451,7 @@ export default function Dashboard() {
       disabled={noStation}
       onPreviewWeather={previewWeather}
       weatherState={weatherState}
+      pfl={pfl}
       wide={wide}
     />
   );
@@ -460,6 +465,8 @@ export default function Dashboard() {
       onTogglePin={togglePin}
       searchRef={searchRef}
       disabled={noStation}
+      pflId={pfl.playingId}
+      onPfl={pfl.toggle}
     />
   );
   const sidePanel = (tab: Pane) =>
