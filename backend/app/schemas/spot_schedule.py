@@ -143,6 +143,7 @@ class UnplacedSpot(BaseModel):
     schedule_id: UUID | str
     sponsor_name: str
     reason: str
+    count: int = 1  # plays with the same sponsorship, day, part of the day and reason
 
 
 class OffAirWindow(BaseModel):

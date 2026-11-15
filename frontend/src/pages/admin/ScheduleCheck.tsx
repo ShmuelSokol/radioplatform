@@ -26,15 +26,27 @@ function dayLabel(local: string) {
   return DAY.format(new Date(`${local.slice(0, 10)}T12:00:00`));
 }
 
+/** True when a finding ends on a later day (ending at midnight the next day does not count). */
+function spansDays(f: Finding) {
+  const startDay = f.local_start.slice(0, 10);
+  const endDay = f.local_end.slice(0, 10);
+  if (startDay === endDay) return false;
+  const next = new Date(`${startDay}T12:00:00`);
+  next.setDate(next.getDate() + 1);
+  const nextDay = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+  return !(endDay === nextDay && f.local_end.slice(11) === "00:00");
+}
+
 /** The same overlap repeats every day it applies; show it once with its days. */
 function group(findings: Finding[]) {
   const groups = new Map<string, { first: Finding; days: string[] }>();
   for (const f of findings) {
+    // A span over several days is its own line; it does not repeat daily.
     const key = [
       f.kind,
       f.title,
-      f.local_start.slice(11),
-      f.local_end.slice(11),
+      spansDays(f) ? f.local_start : f.local_start.slice(11),
+      spansDays(f) ? f.local_end : f.local_end.slice(11),
     ].join("|");
     const g = groups.get(key);
     const day = dayLabel(f.local_start);
@@ -80,7 +92,11 @@ export default function ScheduleCheck() {
   }, [data]);
 
   const when = (g: { first: Finding; days: string[] }) =>
-    `${clock(g.first.local_start)} to ${clock(g.first.local_end)}, ${
+    spansDays(g.first)
+      ? `${dayLabel(g.first.local_start)} ${clock(g.first.local_start)} to ${dayLabel(
+          g.first.local_end,
+        )} ${clock(g.first.local_end)}`
+      : `${clock(g.first.local_start)} to ${clock(g.first.local_end)}, ${
       g.days.length > 3
         ? `${g.days.length} days starting ${g.days[0]}`
         : g.days.join(", ")

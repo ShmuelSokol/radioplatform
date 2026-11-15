@@ -96,6 +96,20 @@ class Unplaced:
     blackout: "Blackout | None" = None  # set when the whole daypart is off the air
 
 
+def clock_12(hour: int, minute: int) -> str:
+    """6:15 PM, the way the rest of the site writes a time."""
+    return f"{(hour % 12) or 12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+
+
+def daypart_over(u: "Unplaced", tz: ZoneInfo, now: datetime) -> bool:
+    """True when the play's time of day has already ended (nothing to fix there)."""
+    end_hour = DAYPARTS[u.daypart][1]
+    end = datetime(u.local_date.year, u.local_date.month, u.local_date.day, tzinfo=tz) + timedelta(
+        hours=end_hour
+    )
+    return end <= now
+
+
 @dataclass
 class Break:
     """One airing of a program block that has sponsor places."""
@@ -252,7 +266,7 @@ def plan_spots(
                             local_date,
                             daypart_of(hour),
                             sched,
-                            f"{hour:02d}:{minute:02d} is already taken by {other}",
+                            f"{clock_12(hour, minute)} is already taken by {other}",
                         )
                     )
                     continue
@@ -414,7 +428,7 @@ async def plan_for_station(
     breaks = await load_breaks(
         db, station, now - timedelta(days=1), now + timedelta(days=days + 1)
     )
-    return plan_spots(
+    placements, unplaced = plan_spots(
         schedules,
         tz,
         now.astimezone(tz).date(),
@@ -424,6 +438,9 @@ async def plan_for_station(
         (station.automation_config or {}).get("spot_timing"),
         breaks,
     )
+    # A part of the day that is already over cannot be fixed; leave it out.
+    unplaced = [u for u in unplaced if not daypart_over(u, tz, now)]
+    return placements, unplaced
 
 
 async def reconcile_spot_slots(
