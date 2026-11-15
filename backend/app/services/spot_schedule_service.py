@@ -471,7 +471,7 @@ async def reconcile_spot_slots(
     desired: dict[datetime, uuid.UUID] = {
         p.at: p.schedule.asset_id
         for p in placements
-        if earliest < p.at <= latest and p.block is None
+        if now < p.at <= latest and p.block is None
     }
     timing: dict[datetime, str] = {p.at: p.timing_mode for p in placements}
 
@@ -504,6 +504,21 @@ async def reconcile_spot_slots(
             )
         )
     ).scalar() or 0
+
+    # A spot due within the safety margin is still added (so an exact time set
+    # a minute before it is due airs), but only once: skip it when any ad_slot
+    # entry for that minute exists, whatever its status (it may have aired).
+    soon = [at for at in desired if at <= earliest]
+    if soon:
+        rows = await db.execute(
+            select(QueueEntry.preempt_at).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.source == "ad_slot",
+                QueueEntry.preempt_at >= min(soon),
+                QueueEntry.preempt_at <= max(soon) + timedelta(minutes=1),
+            )
+        )
+        kept |= {as_utc(r[0]).replace(second=0, microsecond=0) for r in rows.all()}
 
     added = 0
     for at in sorted(desired):

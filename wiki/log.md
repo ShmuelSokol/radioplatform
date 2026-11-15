@@ -71,3 +71,4 @@ UPDATE 2026-11-15 program-blocks.md Sponsor places in blocks (kind "sponsors", s
 UPDATE 2026-11-15 spot-schedules.md,schedule-look-ahead.md unplaced plays are grouped (count) per sponsorship/day/daypart/reason; dayparts already over are dropped in plan_for_station; times in reasons use 12-hour clock_12()
 INGEST 2026-11-15 streaming-architecture.md Engine timed lane played only the first item of a same-time group; now the lane stays open while the timed queue has items, and items are pushed in the order received.
 UPDATE 2026-11-15 program-blocks.md, streaming-architecture.md Playout engine now honours hard_by and plays block groups in position order.
+UPDATE 2026-11-15 spot-schedules.md reconcile_spot_slots now adds (never removes) exact-time entries due inside the 2-minute safety margin, once per minute (any status)

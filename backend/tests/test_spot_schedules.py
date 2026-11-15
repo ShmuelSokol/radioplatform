@@ -554,3 +554,50 @@ def test_passed_daypart_and_twelve_hour_clock():
     assert daypart_over(Unplaced(date(2026, 11, 15), "morning", sched, "x"), tz, now)
     assert not daypart_over(Unplaced(date(2026, 11, 15), "evening", sched, "x"), tz, now)
     assert not daypart_over(Unplaced(date(2026, 11, 16), "morning", sched, "x"), tz, now)
+
+
+@pytest.mark.asyncio
+async def test_exact_time_due_within_two_minutes_still_airs_once(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """Review of PR 45: an exact time set a minute before it is due used to show
+    as planned but never reach the queue."""
+    station, assets, sponsors = await _setup(db_session, client, auth_headers)
+    station_id = station.id
+    r = await client.post(
+        "/api/v1/spot-schedules",
+        json={
+            "sponsor_id": sponsors[0],
+            "asset_id": str(assets[0].id),
+            "station_id": str(station_id),
+            "fixed_times": "08:00",
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201, r.text
+    for e in await _ad_slots(db_session, station_id):
+        await db_session.delete(e)
+    await db_session.flush()
+
+    tomorrow = datetime.now(NY).date() + timedelta(days=1)
+    due = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, tzinfo=NY)
+    now = (due - timedelta(seconds=70)).astimezone(UTC)
+
+    def at_due(entries):
+        return [
+            e
+            for e in entries
+            if (e.preempt_at if e.preempt_at.tzinfo else e.preempt_at.replace(tzinfo=UTC))
+            == due.astimezone(UTC)
+        ]
+
+    await reconcile_spot_slots(db_session, station_id, now=now)
+    assert len(at_due(await _ad_slots(db_session, station_id))) == 1
+    # A second refill does not add it twice, nor after it has aired.
+    await reconcile_spot_slots(db_session, station_id, now=now + timedelta(seconds=20))
+    entries = at_due(await _ad_slots(db_session, station_id))
+    assert len(entries) == 1
+    entries[0].status = "played"
+    await db_session.flush()
+    await reconcile_spot_slots(db_session, station_id, now=now + timedelta(seconds=40))
+    assert len(at_due(await _ad_slots(db_session, station_id))) == 1
