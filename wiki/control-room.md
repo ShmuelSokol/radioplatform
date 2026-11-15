@@ -63,4 +63,4 @@ Loop is a toggle in the same group: `liveControl.loopCurrent` posts `queue/loop 
 
 The transport bar is one row from 1280 px (`xl`) and two rows below that (title and clock on top; countdown, Intro, sound and the Loop / Fade / Soft fade / NEXT group underneath). Both rows are in the DOM and one is hidden, so browser checks must pick the `:visible` button.
 
-Not built on the server yet: Mix over.
+Mix over exists on the server (`queue/mix-over`, see `operator-actions.md`); the control room has no button for it yet.

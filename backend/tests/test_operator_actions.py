@@ -163,3 +163,65 @@ async def test_next_ends_a_loop(client, auth_headers, db_session):
     assert body["now_playing"] == other_asset
     assert body["queue"]["loop_asset_id"] is None
     assert not [r for r in body["queue"]["entries"] if r["source"] == "loop" and r["status"] == "pending"]
+
+
+@pytest.mark.asyncio
+async def test_mix_over_plays_on_top_and_leaves_the_queue_alone(
+    client, auth_headers, db_session, monkeypatch
+):
+    from sqlalchemy import select
+
+    from app.api.v1 import websocket as ws_module
+    from app.models.asset import Asset
+    from app.models.play_log import PlayLog
+    from app.services import playout_engine
+
+    station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=10.0)
+    jingle = await db_session.get(Asset, pending.asset_id)
+    jingle.file_path = "https://files.example/jingle.mp3"
+    await db_session.commit()
+    sent = []
+
+    async def fake_broadcast(station_id, message):
+        sent.append((station_id, message))
+
+    monkeypatch.setattr(ws_module.manager, "broadcast_to_station", fake_broadcast)
+    url = f"/api/v1/stations/{station.id}/queue/mix-over"
+    before = (await client.get(f"/api/v1/stations/{station.id}/queue", headers=auth_headers)).json()
+
+    res = await client.post(
+        url, headers=auth_headers, json={"asset_id": str(jingle.id), "client_request_id": "tap-1"}
+    )
+    assert res.status_code == 200 and res.json()["on_air"] is True
+    # Browser playback: every open player is told to mix it in
+    assert len(sent) == 1 and sent[0][1]["type"] == "mix_over"
+    assert sent[0][1]["data"]["url"] == "https://files.example/jingle.mp3"
+    # A double tap plays it once
+    again = await client.post(
+        url, headers=auth_headers, json={"asset_id": str(jingle.id), "client_request_id": "tap-1"}
+    )
+    assert again.json().get("duplicate") is True and len(sent) == 1
+
+    after = (await client.get(f"/api/v1/stations/{station.id}/queue", headers=auth_headers)).json()
+    assert [(r["id"], r["status"]) for r in after["entries"]] == [
+        (r["id"], r["status"]) for r in before["entries"]
+    ]
+    logs = (await db_session.execute(select(PlayLog).where(PlayLog.asset_id == jingle.id))).scalars().all()
+    assert len(logs) == 1
+
+    # On an engine station the engine gets it instead, as an overlay
+    commands = []
+
+    async def fake_command(path, payload=None):
+        commands.append((path, payload))
+        return True
+
+    monkeypatch.setattr(playout_engine, "_command", fake_command)
+    monkeypatch.setattr(queue_module.settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(queue_module.settings, "PLAYOUT_ENGINE_STATION_ID", str(station.id))
+    monkeypatch.setattr(queue_module.settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(queue_module.settings, "PLAYOUT_ENGINE_TOKEN", "test-token")
+    res = await client.post(url, headers=auth_headers, json={"asset_id": str(jingle.id)})
+    assert res.status_code == 200 and len(sent) == 1
+    assert commands[0][0] == "/overlay" and commands[0][1]["uri"].endswith(":https://files.example/jingle.mp3")
+    assert 'kbr_lane="overlay"' in commands[0][1]["uri"]

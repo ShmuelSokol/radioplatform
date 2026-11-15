@@ -139,7 +139,7 @@ radioplatform/
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
-| queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `fire-now`, `insert`, `loop`; see `wiki/operator-actions.md`) |
+| queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `fire-now`, `insert`, `loop`, `mix-over`; see `wiki/operator-actions.md`) |
 | rules | rules.py | /rules |
 | schedules | schedules.py | /schedules |
 | now_playing | now_playing.py | /now-playing |

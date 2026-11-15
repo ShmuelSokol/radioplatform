@@ -31,6 +31,7 @@ from app.schemas.queue import (
     QueueFireNow,
     QueueInsert,
     QueueLoop,
+    QueueMixOver,
     QueueReorder,
 )
 
@@ -1342,6 +1343,58 @@ async def fire_now(
         skipped = await _skip_current_locked(station_id, db, keep_incoming=False)
     done = {**queued, "message": "Going on air", "on_air": True, "queue": skipped.get("queue")}
     _remember_fire_request(station_id, body.client_request_id, done)
+    return done
+
+
+@router.post("/mix-over")
+async def mix_over(
+    station_id: uuid.UUID,
+    body: QueueMixOver,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """Play an asset on top of what is on air. The item on air carries on and the queue
+    does not move."""
+    from app.services import playout_engine
+
+    if body.client_request_id:
+        repeat = _recent_fire_request(station_id, "mix:" + body.client_request_id)
+        if repeat is not None:
+            return {**repeat, "duplicate": True}
+    asset = await db.get(Asset, body.asset_id)
+    if asset is None:
+        raise NotFoundError("Asset not found")
+    url = playout_engine.audio_url(asset)
+    if not url:
+        raise HTTPException(status_code=409, detail="This item has no audio file to play")
+
+    if settings.engine_drives(station_id):
+        if not await playout_engine.engine_overlay(asset):
+            raise HTTPException(status_code=503, detail="The playout engine did not respond")
+    else:
+        # Browser playback: every open player mixes it in on top of its own audio
+        from app.api.v1.websocket import manager as ws_manager
+
+        analysis = (asset.metadata_extra or {}).get("audio_analysis", {}) if asset.metadata_extra else {}
+        await ws_manager.broadcast_to_station(str(station_id), {
+            "type": "mix_over",
+            "data": {
+                "station_id": str(station_id),
+                "asset_id": str(asset.id),
+                "title": asset.title,
+                "url": url,
+                "replay_gain_db": analysis.get("replay_gain_db"),
+            },
+        })
+
+    now = datetime.now(timezone.utc)
+    db.add(PlayLog(
+        id=uuid.uuid4(), station_id=station_id, asset_id=asset.id, start_utc=now,
+        end_utc=now + timedelta(seconds=float(asset.duration or 0)), source="manual",
+    ))
+    await db.commit()
+    done = {"message": "Mixing over", "asset_id": str(asset.id), "on_air": True}
+    _remember_fire_request(station_id, body.client_request_id and "mix:" + body.client_request_id, done)
     return done
 
 

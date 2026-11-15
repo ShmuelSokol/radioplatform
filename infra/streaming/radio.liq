@@ -10,6 +10,7 @@
 #   1. timed  — hard-timed items and Play Now (starts on the second, music fades under it)
 #   2. main   — the normal queue, crossfaded
 #   3. emergency — files on this machine, played if the backend is unreachable (no dead air)
+# On top of the lanes: mix over, a jingle added to whatever is on air without ending it.
 #
 # Configuration comes from environment variables (see kbr-engine.env.example).
 
@@ -79,7 +80,9 @@ def transition(ending, starting) =
     hard_cut := false
     add(normalize=false, [starting.source])
   else
-    add(normalize=false, [fade.out(duration=3., ending.source), starting.source])
+    # The incoming song is listed first: `add` passes on the titles of its first source
+    # only, and the start report to the backend is made from them.
+    add(normalize=false, [starting.source, fade.out(duration=3., ending.source)])
   end
 end
 main = cross(duration=3., transition, main)
@@ -149,6 +152,14 @@ emergency = mksafe(emergency)
 
 radio = fallback(id="radio", track_sensitive=false, [timed, main, emergency])
 radio = amplify({master_gain()}, radio)
+# What is on air from the lanes above. Start reports and /status read this, so an item
+# mixed over the top (below) never counts as a change of track.
+program = radio
+
+# ── Mix over: a jingle played on top of the programme, which carries on ──────
+overlay_queue = request.queue(id="overlay", interactive=false)
+overlay = amplify(1., override="liq_amplify", overlay_queue)
+radio = add(normalize=false, [program, overlay])
 
 # Next: fade out quickly, skip whatever is on air, come back at full level on the new track
 def skip_on_air(~seconds) =
@@ -204,7 +215,7 @@ def report_started(m) =
     send_started(m)
   end
 end
-radio.on_metadata(report_started)
+program.on_metadata(report_started)
 
 # ── Control endpoints (localhost only; nginx adds TLS in front) ──────────────
 def authorized(req) =
@@ -255,8 +266,16 @@ control("/timed", fun (req) -> begin
   '{"ok":true}'
 end)
 
+# Mix over: play this on top of what is on air
+control("/overlay", fun (req) -> begin
+  let json.parse (body : {uri : string}) = req.body()
+  log.important("overlay: mixing over the programme")
+  overlay_queue.push(request.create(body.uri))
+  '{"ok":true}'
+end)
+
 control("/status", fun (_) -> begin
-  m = radio.last_metadata() ?? []
+  m = program.last_metadata() ?? []
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
                   main_remaining=main.remaining(), timed_waiting=timed_queue.length()})
 end)
