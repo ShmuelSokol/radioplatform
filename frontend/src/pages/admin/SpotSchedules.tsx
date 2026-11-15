@@ -623,14 +623,17 @@ export default function SpotSchedules() {
                     </span>
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {spots.map((p) => (
+                    {spots.map((p, i) => (
                       <span
-                        key={p.scheduled_at}
+                        key={`${p.scheduled_at}-${i}`}
                         className="text-sm bg-gray-100 rounded-lg px-3 py-1"
                         title={p.asset_title}
                       >
                         <span className="font-medium">{formatTime(p.local_time)}</span>{' '}
                         {p.sponsor_name}
+                        {p.block && (
+                          <span className="ml-2 text-xs text-gray-600">in {p.block}</span>
+                        )}
                         {p.timing_mode === 'hard' && (
                           <span className="ml-2 text-xs font-semibold text-red-700" title={TIMING_LABEL.hard}>
                             on the second

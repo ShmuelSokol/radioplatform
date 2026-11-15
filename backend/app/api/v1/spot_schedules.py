@@ -55,6 +55,10 @@ async def _refresh_queues(db: AsyncSession, station_ids: set) -> None:
     for station_id in targets:
         try:
             await reconcile_spot_slots(db, station_id)
+            # Sponsor places inside program blocks are written by the block.
+            from app.services.program_block_service import reconcile_block_entries
+
+            await reconcile_block_entries(db, station_id, rebuild=True)
         except Exception:
             # The periodic queue refill will pick the change up.
             logger.exception("Spot slot refresh failed for station %s", station_id)
@@ -134,6 +138,7 @@ async def preview_spot_plan(
                 daypart=p.daypart,
                 timing_mode=p.timing_mode,
                 fixed=p.fixed,
+                block=p.block,
                 schedule_id=p.schedule.id,
                 sponsor_id=p.schedule.sponsor_id,
                 sponsor_name=sponsors.get(str(p.schedule.sponsor_id), "Unknown"),

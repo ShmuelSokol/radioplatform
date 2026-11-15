@@ -35,6 +35,7 @@ export interface PlannedSpot {
   daypart: Daypart;
   timing_mode: TimingMode;
   fixed: boolean;
+  block: string | null; // the program block whose sponsor place this is
   schedule_id: string;
   sponsor_id: string;
   sponsor_name: string;

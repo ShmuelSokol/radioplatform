@@ -17,6 +17,15 @@ import Spinner from '../../components/Spinner';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/** soft-limit = after the song, but no later than a number of minutes. */
+type Timing = BlockTiming | 'soft-limit';
+
+function timingText(mode: BlockTiming, latest: number | null, short = false) {
+  if (mode === 'hard') return 'on the second';
+  if (latest) return `after the song, at most ${latest} min late`;
+  return short ? 'after the song' : 'after the song finishes';
+}
+
 const emptyForm = {
   id: '',
   name: '',
@@ -24,7 +33,8 @@ const emptyForm = {
   times: [] as string[],
   newTime: '',
   everyHourAt: '00',
-  timing: 'hard' as BlockTiming,
+  timing: 'hard' as Timing,
+  latest: 5,
   items: [] as BlockItem[],
 };
 
@@ -42,6 +52,8 @@ function itemText(item: BlockItem) {
   if (item.label) return item.label;
   if (item.kind === 'time') return 'Time announcement';
   if (item.kind === 'weather') return 'Weather';
+  if (item.kind === 'sponsors')
+    return `${item.count} sponsor place${item.count === 1 ? '' : 's'}`;
   if (item.kind === 'category')
     return item.category ? `${item.asset_type} / ${item.category}` : item.asset_type;
   return 'Recording';
@@ -51,6 +63,8 @@ function itemHint(item: BlockItem) {
   if (item.kind === 'asset') return 'this recording every time';
   if (item.kind === 'category') return 'takes turns: the one that has rested longest';
   if (item.kind === 'time') return "the hour's time announcement";
+  if (item.kind === 'sponsors')
+    return 'filled from the sponsorships that want this time of day (Spot Schedule)';
   return "the day's weather";
 }
 
@@ -79,6 +93,7 @@ export default function ProgramBlocks() {
   };
   const [search, setSearch] = useState('');
   const [combo, setCombo] = useState('');
+  const [places, setPlaces] = useState(3);
 
   const { data: blocks, isLoading } = useQuery({
     queryKey: ['program-blocks', station],
@@ -143,7 +158,8 @@ export default function ProgramBlocks() {
       name: b.name,
       days: b.days_of_week.split(',').filter(Boolean).map(Number),
       times: b.times.split(',').filter(Boolean),
-      timing: b.timing_mode,
+      timing: b.timing_mode === 'soft' && b.latest_minutes ? 'soft-limit' : b.timing_mode,
+      latest: b.latest_minutes ?? 5,
       items: b.items,
     });
     setShowForm(true);
@@ -172,7 +188,8 @@ export default function ProgramBlocks() {
       is_active: true,
       days_of_week: [...form.days].sort().join(','),
       times: times.join(','),
-      timing_mode: form.timing,
+      timing_mode: (form.timing === 'hard' ? 'hard' : 'soft') as BlockTiming,
+      latest_minutes: form.timing === 'soft-limit' ? form.latest : null,
       items: form.items,
     };
     if (form.id) {
@@ -243,12 +260,30 @@ export default function ProgramBlocks() {
               <select
                 id="block-timing"
                 value={form.timing}
-                onChange={(e) => setForm({ ...form, timing: e.target.value as BlockTiming })}
+                onChange={(e) => setForm({ ...form, timing: e.target.value as Timing })}
                 className="w-full px-3 py-2 border rounded-lg"
               >
                 <option value="hard">On the second: the song on air fades out</option>
                 <option value="soft">After the song on air finishes</option>
+                <option value="soft-limit">After the song, but no later than…</option>
               </select>
+              {form.timing === 'soft-limit' && (
+                <label className="flex items-center gap-2 mt-2 text-sm">
+                  Fade the song if it is still playing
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    aria-label="Minutes to wait at most"
+                    value={form.latest}
+                    onChange={(e) =>
+                      setForm({ ...form, latest: Math.max(1, Math.min(60, Number(e.target.value) || 1)) })
+                    }
+                    className="w-20 px-2 py-1.5 border rounded-lg"
+                  />
+                  minutes after the time
+                </label>
+              )}
             </div>
           </div>
 
@@ -481,6 +516,24 @@ export default function ProgramBlocks() {
                     Add
                   </button>
                 </div>
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    aria-label="Number of sponsor places"
+                    value={places}
+                    onChange={(e) => setPlaces(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                    className="w-16 px-2 py-2 border rounded-lg"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addItem({ kind: 'sponsors', count: places })}
+                    className="px-3 py-2 border rounded-lg bg-white hover:bg-gray-50"
+                  >
+                    Add sponsor places
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-2 mt-3">
                   <button
                     type="button"
@@ -546,7 +599,7 @@ export default function ProgramBlocks() {
                           .split(',')
                           .map((d) => DAYS[Number(d)])
                           .join(', ')}{' '}
-                    · {b.timing_mode === 'hard' ? 'on the second' : 'after the song finishes'}
+                    · {timingText(b.timing_mode, b.latest_minutes)}
                     {seconds != null && ` · runs ${length(seconds)}`}
                   </p>
                   <p className="text-sm text-gray-800 mt-1">
@@ -592,16 +645,22 @@ export default function ProgramBlocks() {
                   <span className="font-mono tabular-nums">{o.local_time}</span>
                   <span className="font-medium">{o.block_name}</span>
                   <span className="text-sm text-gray-600">
-                    {o.timing_mode === 'hard' ? 'on the second' : 'after the song'} · runs{' '}
+                    {timingText(o.timing_mode, o.latest_minutes, true)} · runs{' '}
                     {length(o.seconds)}
                   </span>
                 </div>
                 <p className="text-sm text-gray-700">
                   {o.items
-                    .filter((i) => !i.problem)
-                    .map((i) => (i.title && i.kind !== 'time' && i.kind !== 'weather' ? i.title : i.label))
+                    .filter((i) => !i.problem && !i.open_place)
+                    .map((i) => (i.title && !['time', 'weather', 'sponsor'].includes(i.kind) ? i.title : i.label))
                     .join('  →  ')}
                 </p>
+                {o.items.some((i) => i.open_place) && (
+                  <p className="text-sm text-gray-500">
+                    {o.items.filter((i) => i.open_place).length} sponsor place
+                    {o.items.filter((i) => i.open_place).length === 1 ? '' : 's'} still open
+                  </p>
+                )}
                 {o.problems.map((p) => (
                   <p key={p} className="text-sm text-amber-700">
                     Left out: {p}

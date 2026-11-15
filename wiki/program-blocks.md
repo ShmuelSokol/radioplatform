@@ -11,13 +11,17 @@ playlist runs during a stretch of the day.
 `ProgramBlock` (`program_blocks`): `station_id`, `name`, `is_active`,
 `days_of_week` ("0,1,..", 0 = Monday), `times` ("HH:MM" CSV, station time),
 `timing_mode` (hard = the song on air fades and the block starts on the second,
-soft = the song finishes first), `items` (JSON list, in order):
+soft = the song finishes first), `latest_minutes` (soft only: wait for the
+song at most this long, then fade it; queued as `QueueEntry.hard_by`), `items` (JSON list, in order):
 
 - `{"kind": "asset", "asset_id"}`: that recording every time
 - `{"kind": "category", "asset_type", "category"?}`: takes turns, the one that
   has rested longest (so "spot / sponsorship" rotates the sponsors, "spot / psa" the PSAs)
 - `{"kind": "time"}` / `{"kind": "weather"}`: the hour's time clip and the day's
   weather from `get_or_create_weather_spot_assets`
+
+- `{"kind": "sponsors", "count": N}`: N sponsor places, filled by the spot
+  planner (below)
 
 Items may carry a `label` (the page stores the recording's title there).
 
@@ -46,6 +50,30 @@ entries that code queued (source "auto", no timing mode, category
 `time_announcement` or `weather_spot`). A station with no blocks behaves as
 before. So a station moving to blocks must put the time and weather in a block
 or it loses them.
+
+## Sponsor places
+
+When any active block has a `sponsors` item, `spot_schedule_service` stops
+using the :15/:30/:45 clock slots for spread sponsorships. Each airing of such
+a block is a `Break` with as many places as its `sponsors` items add up to.
+A sponsorship that wants N plays in a daypart aims at the break its share of
+the daypart points to and takes the first free place there, else the next break
+with room; with no room left it is unplaced ("no sponsor place left in this time
+of day's blocks", shown on Schedule Check). An exact-time sponsorship whose time
+is a block's start takes a place in that block; other exact times keep their
+own `ad_slot` entry.
+
+Placements in blocks (`Placement.block` set) are not written by
+`reconcile_spot_slots`: the block reconciler asks the spot plan which
+sponsorships fill each airing and queues them in the block's order. So a
+spot schedule edit rebuilds the block entries too (`_refresh_queues` in
+`api/v1/spot_schedules.py`), and a block edit re-runs the spot reconcile first.
+
+## Soft with a limit (`hard_by`)
+
+`QueueEntry.hard_by`: a soft entry that is still waiting at this time is
+treated as hard (the song on air fades). The in-browser path checks it in
+`api/v1/queue.py` (preempt check). The playout engine does not read it yet.
 
 ## Preview
 
