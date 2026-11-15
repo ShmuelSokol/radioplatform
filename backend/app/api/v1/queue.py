@@ -510,6 +510,81 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
     logger.info("Inserted weather spot for slot %s (%d items, preempt_at=%s)", slot_key, len(assets_to_insert), boundary.isoformat())
 
 
+# Item types that must never be used to keep a station on the air
+_NOT_FILLER_TYPES = ("silence", "spot", "jingle", "sweeper", "station_id", "time", "weather")
+
+
+async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) -> QueueEntry | None:
+    """The next queue entry due to play: a soft-timed slot whose time has come,
+    otherwise the first pending entry by position (future timed entries wait)."""
+    ad_result = await db.execute(
+        select(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            soft_timed(),
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at <= now_utc,
+        )
+        .order_by(QueueEntry.preempt_at)
+        .limit(1)
+    )
+    entry = ad_result.scalar_one_or_none()
+    if entry:
+        return entry
+    result = await db.execute(
+        select(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+        )
+        .order_by(QueueEntry.position)
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _refill_for_next(db: AsyncSession, station_id) -> QueueEntry | None:
+    """Nothing is left to play: fill the queue (schedule, rotation, rules) and
+    return what should go on air now. A station must never stop just because
+    its queue ran out, so if the normal fill finds nothing, any music is queued,
+    and failing that any playable item."""
+    try:
+        await _replenish_queue(db, station_id)
+    except Exception as exc:
+        logger.warning("Queue refill failed for station %s: %s", station_id, exc)
+    now_utc = datetime.now(timezone.utc)
+    entry = await _pick_next_pending(db, station_id, now_utc)
+    if entry:
+        return entry
+
+    for only_music in (True, False):
+        query = select(Asset).where(Asset.file_path.isnot(None), Asset.file_path != "")
+        if only_music:
+            query = query.where(Asset.asset_type == "music")
+        else:
+            query = query.where(Asset.asset_type.notin_(_NOT_FILLER_TYPES))
+        assets = (await db.execute(query.order_by(func.random()).limit(20))).scalars().all()
+        if assets:
+            break
+    if not assets:
+        logger.error("Station %s has nothing to play: the library has no playable items", station_id)
+        return None
+    top = (await db.execute(
+        select(func.coalesce(func.max(QueueEntry.position), 0))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+    )).scalar() or 0
+    for i, asset in enumerate(assets, start=1):
+        db.add(QueueEntry(
+            id=uuid.uuid4(), station_id=station_id, asset_id=asset.id,
+            position=top + i, status="pending", source="fallback",
+        ))
+    await db.flush()
+    logger.warning("Station %s ran dry; queued %d fallback items", station_id, len(assets))
+    return await _pick_next_pending(db, station_id, now_utc)
+
+
 async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
     """Auto-fill queue to ~24 hours of content using schedule rules."""
     from app.services.queue_replenish_service import QueueReplenishService
@@ -807,34 +882,10 @@ async def _check_advance_locked(
         # Looping: the same item goes in again as the next thing to play
         await add_loop_repeat(db, station_id)
 
-    # Check for soft-preempt ad slots first (clock-based :15/:30/:45 ads)
-    ad_result = await db.execute(
-        select(QueueEntry)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            soft_timed(),
-            QueueEntry.preempt_at.isnot(None),
-            QueueEntry.preempt_at <= now_utc,
-        )
-        .order_by(QueueEntry.preempt_at)
-        .limit(1)
-    )
-    next_entry = ad_result.scalar_one_or_none()
-
-    if not next_entry:
-        # Normal: find next by position (skip entries with preempt_at in the future)
-        result = await db.execute(
-            select(QueueEntry)
-            .where(
-                QueueEntry.station_id == station_id,
-                QueueEntry.status == "pending",
-                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
-            )
-            .order_by(QueueEntry.position)
-            .limit(1)
-        )
-        next_entry = result.scalar_one_or_none()
+    next_entry = await _pick_next_pending(db, station_id, now_utc)
+    if not next_entry and not is_blackout:
+        # The queue ran out: fill it and carry on rather than going silent
+        next_entry = await _refill_for_next(db, station_id)
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
@@ -1521,32 +1572,12 @@ async def _skip_current_locked(
     # 1. Check for soft-preempt ad slots whose time has arrived
     # 2. Then find next regular entry (skip future preempts)
     now_skip = datetime.now(timezone.utc)
-    ad_result = await db.execute(
-        select(QueueEntry)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            soft_timed(),
-            QueueEntry.preempt_at.isnot(None),
-            QueueEntry.preempt_at <= now_skip,
-        )
-        .order_by(QueueEntry.preempt_at)
-        .limit(1)
-    )
-    next_entry = ad_result.scalar_one_or_none()
-
-    if not next_entry:
-        result = await db.execute(
-            select(QueueEntry)
-            .where(
-                QueueEntry.station_id == station_id,
-                QueueEntry.status == "pending",
-                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_skip),
-            )
-            .order_by(QueueEntry.position)
-            .limit(1)
-        )
-        next_entry = result.scalar_one_or_none()
+    next_entry = await _pick_next_pending(db, station_id, now_skip)
+    refilled = False
+    if not next_entry and not await _is_blacked_out(db, station_id):
+        # The last item was skipped: fill the queue and carry on, never stop
+        next_entry = await _refill_for_next(db, station_id)
+        refilled = True
 
     # Skip in Liquidsoap to keep it in sync
     if settings.liquidsoap_enabled:
@@ -1556,7 +1587,8 @@ async def _skip_current_locked(
         except Exception:
             pass
 
-    await _replenish_queue(db, station_id)
+    if not refilled:
+        await _replenish_queue(db, station_id)
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
@@ -2001,18 +2033,8 @@ async def start_playback(
             logger.error("_replenish_queue failed during start: %s", exc, exc_info=True)
         return {"message": "Playout engine will start the next track", "now_playing": None}
 
-    # Auto-fill queue before starting
-    try:
-        await _replenish_queue(db, station_id)
-    except Exception as exc:
-        logger.error("_replenish_queue failed during start: %s", exc, exc_info=True)
-
-    result = await db.execute(
-        select(QueueEntry)
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
-        .order_by(QueueEntry.position).limit(1)
-    )
-    next_entry = result.scalar_one_or_none()
+    # Fill the queue (schedule, rules, rotation; any music as a last resort) and start
+    next_entry = await _refill_for_next(db, station_id)
     if not next_entry:
         await db.commit()
         return {"message": "Queue empty — no music assets available", "now_playing": None}
