@@ -4,6 +4,10 @@ import { listSponsors } from '../../api/sponsors';
 import { getAssetAudioUrl, listAssets } from '../../api/assets';
 import {
   createSpotSchedule,
+  getTimingDefaults,
+  setTimingDefaults,
+  TimingDefaults,
+  TimingMode,
   deleteSpotSchedule,
   listSpotSchedules,
   previewSpotPlan,
@@ -30,6 +34,10 @@ const emptyForm = {
   days: [0, 1, 2, 3, 4, 5, 6] as number[],
   dayparts: ['morning', 'afternoon', 'evening'] as Daypart[],
   plays_per_daypart: 1,
+  when: 'spread' as 'spread' | 'exact',
+  times: [] as string[], // "HH:MM" station time
+  newTime: '',
+  timing: '' as '' | TimingMode, // '' = the station's default for that slot
   start_date: '',
   end_date: '',
 };
@@ -44,6 +52,15 @@ function formatTime(local: string): string {
   const suffix = h >= 12 ? 'PM' : 'AM';
   return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${suffix}`;
 }
+
+function clock(hhmm: string): string {
+  return formatTime(`0000-00-00 ${hhmm}`);
+}
+
+const TIMING_LABEL: Record<TimingMode, string> = {
+  hard: 'On the second (song fades out)',
+  soft: 'After the song finishes',
+};
 
 function formatDay(isoDate: string): string {
   const [y, mo, d] = isoDate.split('-').map(Number);
@@ -61,8 +78,10 @@ function describe(s: SpotSchedule): string {
     .split(',')
     .map((p) => DAYPARTS.find((d) => d.key === p)?.label.toLowerCase() ?? p)
     .join(', ');
+  const how = s.timing_mode ? `, ${TIMING_LABEL[s.timing_mode].toLowerCase()}` : '';
+  if (s.fixed_times) return `${dayText} at ${s.fixed_times.split(',').map(clock).join(', ')}${how}`;
   const times = s.plays_per_daypart === 1 ? 'once' : `${s.plays_per_daypart} times`;
-  return `${dayText}, ${times} each ${parts}`;
+  return `${dayText}, ${times} each ${parts}${how}`;
 }
 
 function formatWhen(iso: string, timeZone: string) {
@@ -110,6 +129,19 @@ export default function SpotSchedules() {
     enabled: !!stationId,
   });
 
+  const { data: timingDefaults } = useQuery({
+    queryKey: ['spot-timing-defaults', stationId],
+    queryFn: () => getTimingDefaults(stationId),
+    enabled: !!stationId,
+  });
+  const timingMut = useMutation({
+    mutationFn: (d: TimingDefaults) => setTimingDefaults(stationId, d),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['spot-timing-defaults'] });
+      queryClient.invalidateQueries({ queryKey: ['spot-plan'] });
+    },
+  });
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['spot-schedules'] });
     queryClient.invalidateQueries({ queryKey: ['spot-plan'] });
@@ -150,8 +182,10 @@ export default function SpotSchedules() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.sponsor_id || !spot) return setError('Choose a sponsor and a spot.');
-    if (!form.days.length || !form.dayparts.length)
-      return setError('Choose at least one day and one time of day.');
+    const exact = form.when === 'exact';
+    if (!form.days.length) return setError('Choose at least one day.');
+    if (exact && !form.times.length) return setError('Add at least one exact time.');
+    if (!exact && !form.dayparts.length) return setError('Choose at least one time of day.');
     createMut.mutate({
       sponsor_id: form.sponsor_id,
       asset_id: spot.id,
@@ -160,6 +194,8 @@ export default function SpotSchedules() {
       days_of_week: [...form.days].sort().join(','),
       dayparts: form.dayparts.join(','),
       plays_per_daypart: form.plays_per_daypart,
+      fixed_times: exact ? form.times.join(',') : null,
+      timing_mode: form.timing || null,
       start_date: form.start_date || null,
       end_date: form.end_date || null,
       is_active: true,
@@ -299,6 +335,70 @@ export default function SpotSchedules() {
           </div>
 
           <div>
+            <label className="block text-sm font-medium mb-1">When it plays</label>
+            <div className="flex flex-wrap gap-2">
+              {([
+                ['spread', 'Spread through the day'],
+                ['exact', 'At exact times'],
+              ] as const).map(([key, label]) => (
+                <button
+                  type="button"
+                  key={key}
+                  aria-pressed={form.when === key}
+                  onClick={() => setForm({ ...form, when: key })}
+                  className={`px-3 py-1.5 rounded-lg border ${
+                    form.when === key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {form.when === 'exact' ? (
+            <div>
+              <label className="block text-sm font-medium mb-1">Exact times (station time)</label>
+              <div className="flex flex-wrap items-center gap-2">
+                {form.times.map((t) => (
+                  <span key={t} className="inline-flex items-center gap-1 bg-gray-100 rounded-lg pl-3 pr-1 py-1 text-sm">
+                    {clock(t)}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${clock(t)}`}
+                      onClick={() => setForm({ ...form, times: form.times.filter((x) => x !== t) })}
+                      className="px-2 text-gray-500 hover:text-red-600"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <input
+                  type="time"
+                  aria-label="Time to add"
+                  value={form.newTime}
+                  onChange={(e) => setForm({ ...form, newTime: e.target.value })}
+                  className="px-3 py-1.5 border rounded-lg"
+                />
+                <button
+                  type="button"
+                  disabled={!form.newTime}
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      times: [...new Set([...form.times, form.newTime])].sort(),
+                      newTime: '',
+                    })
+                  }
+                  className="px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-40"
+                >
+                  Add time
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+          <div>
             <label className="block text-sm font-medium mb-1">Times of day (station time)</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {DAYPARTS.map((p) => (
@@ -316,9 +416,7 @@ export default function SpotSchedules() {
               ))}
             </div>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
+              <div className="max-w-xs">
               <label className="block text-sm font-medium mb-1">Plays in each time of day</label>
               <input
                 type="number"
@@ -328,7 +426,24 @@ export default function SpotSchedules() {
                 onChange={(e) => setForm({ ...form, plays_per_daypart: Number(e.target.value) || 1 })}
                 className="w-full px-3 py-2 border rounded-lg"
               />
-            </div>
+              </div>
+            </>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium mb-1">How the time is kept</label>
+            <select
+              value={form.timing}
+              onChange={(e) => setForm({ ...form, timing: e.target.value as '' | TimingMode })}
+              className="w-full md:w-auto px-3 py-2 border rounded-lg"
+            >
+              <option value="">Station default for that slot</option>
+              <option value="hard">{TIMING_LABEL.hard}</option>
+              <option value="soft">{TIMING_LABEL.soft}</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Starts (optional)</label>
               <input
@@ -435,6 +550,30 @@ export default function SpotSchedules() {
           </div>
         ) : (
           <div className="p-6 space-y-5">
+            {timingDefaults && (
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm border rounded-lg p-3">
+                <span className="font-medium">Unless a schedule says otherwise:</span>
+                {([
+                  ['on_the_hour', 'Spots on the hour play'],
+                  ['other', 'Other spots play'],
+                ] as const).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2">
+                    {label}
+                    <select
+                      value={timingDefaults[key]}
+                      disabled={timingMut.isPending}
+                      onChange={(e) =>
+                        timingMut.mutate({ ...timingDefaults, [key]: e.target.value as TimingMode })
+                      }
+                      className="px-2 py-1 border rounded-lg"
+                    >
+                      <option value="hard">on the second (song fades out)</option>
+                      <option value="soft">after the song finishes</option>
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )}
             {!!plan?.unplaced.length && (
               <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4">
                 <p className="font-semibold">
@@ -485,6 +624,11 @@ export default function SpotSchedules() {
                       >
                         <span className="font-medium">{formatTime(p.local_time)}</span>{' '}
                         {p.sponsor_name}
+                        {p.timing_mode === 'hard' && (
+                          <span className="ml-2 text-xs font-semibold text-red-700" title={TIMING_LABEL.hard}>
+                            on the second
+                          </span>
+                        )}
                       </span>
                     ))}
                   </div>

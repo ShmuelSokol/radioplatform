@@ -6,9 +6,11 @@ per daypart; the queue's clock slots follow.
 
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +29,11 @@ from app.schemas.spot_schedule import (
     SpotScheduleUpdate,
     UnplacedSpot,
 )
-from app.services.spot_schedule_service import plan_for_station, reconcile_spot_slots
+from app.services.spot_schedule_service import (
+    DEFAULT_TIMING,
+    plan_for_station,
+    reconcile_spot_slots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +127,8 @@ async def preview_spot_plan(
                 scheduled_at=p.at,
                 local_time=p.local.strftime("%Y-%m-%d %H:%M"),
                 daypart=p.daypart,
+                timing_mode=p.timing_mode,
+                fixed=p.fixed,
                 schedule_id=p.schedule.id,
                 sponsor_id=p.schedule.sponsor_id,
                 sponsor_name=sponsors.get(str(p.schedule.sponsor_id), "Unknown"),
@@ -144,6 +152,40 @@ async def preview_spot_plan(
             for b, n in sorted(skipped.items(), key=lambda kv: kv[0].start)
         ],
     )
+
+
+class TimingDefaults(BaseModel):
+    station_id: UUID
+    on_the_hour: Literal["hard", "soft"]
+    other: Literal["hard", "soft"]
+
+
+@router.get("/timing-defaults")
+async def get_timing_defaults(
+    station_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_manager),
+):
+    station = await _get_or_404(db, Station, station_id, "Station")
+    saved = (station.automation_config or {}).get("spot_timing") or {}
+    return {**DEFAULT_TIMING, **{k: v for k, v in saved.items() if k in DEFAULT_TIMING}}
+
+
+@router.put("/timing-defaults")
+async def set_timing_defaults(
+    data: TimingDefaults,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_manager),
+):
+    """How a sponsor spot honours its time when its own schedule does not say."""
+    station = await _get_or_404(db, Station, data.station_id, "Station")
+    config = dict(station.automation_config or {})
+    config["spot_timing"] = {"on_the_hour": data.on_the_hour, "other": data.other}
+    station.automation_config = config
+    await db.flush()
+    await _refresh_queues(db, {station.id})
+    await db.commit()
+    return config["spot_timing"]
 
 
 @router.post("", response_model=SpotScheduleOut, status_code=201)
