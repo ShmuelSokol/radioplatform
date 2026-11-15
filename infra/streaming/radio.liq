@@ -239,9 +239,16 @@ control("/flush", fun (_) -> begin
   '{"ok":true}'
 end)
 
+# Timed items already taken, newest first. The backend may offer one again after it
+# restarts; it must not air twice.
+timed_seen = ref([])
 control("/timed", fun (req) -> begin
-  let json.parse (body : {uri : string, at : float}) = req.body()
-  schedule_timed(uri=body.uri, at=body.at)
+  let json.parse (body : {uri : string, at : float, id : string?}) = req.body()
+  id = body.id ?? ""
+  if id == "" or not list.mem(id, timed_seen()) then
+    if id != "" then timed_seen := list.prefix(50, id :: timed_seen()) end
+    schedule_timed(uri=body.uri, at=body.at)
+  end
   '{"ok":true}'
 end)
 

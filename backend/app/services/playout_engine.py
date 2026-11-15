@@ -109,9 +109,13 @@ async def engine_flush(station_id) -> bool:
     return await _command("/flush")
 
 
-async def engine_timed(uri: str, at_epoch: float) -> bool:
-    """Load an item now and put it on air at `at_epoch` (music fades under it)."""
-    return await _command("/timed", {"uri": uri, "at": at_epoch})
+async def engine_timed(uri: str, at_epoch: float, entry_id: str = "") -> bool:
+    """Load an item now and put it on air at `at_epoch` (music fades under it).
+
+    The engine ignores an `entry_id` it already holds, so handing the same item over twice
+    (after a backend restart, when our own record of it is gone) does not air it twice.
+    """
+    return await _command("/timed", {"uri": uri, "at": at_epoch, "id": entry_id})
 
 
 # ── Building what the engine plays ───────────────────────────────────────────
@@ -459,7 +463,7 @@ async def tick(db: AsyncSession, station) -> None:
         at = entry.preempt_at
         if at.tzinfo is None:
             at = at.replace(tzinfo=UTC)
-        if await engine_timed(uri, at.timestamp()):
+        if await engine_timed(uri, at.timestamp(), key):
             state.timed_sent.add(key)
             logger.info("Handed timed entry %s to the engine for %s", key, at.isoformat())
 

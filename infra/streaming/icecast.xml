@@ -1,16 +1,19 @@
+<!-- /etc/icecast2/icecast.xml — setup.sh fills in the passwords and the host name. -->
 <icecast>
     <location>Brooklyn, NY</location>
-    <hostname>stream.kbrlive.com</hostname>
+    <hostname>STREAM_DOMAIN</hostname>
     <limits>
         <clients>1000</clients>
-        <sources>4</sources>
+        <sources>2</sources>
         <queue-size>524288</queue-size>
+        <burst-on-connect>1</burst-on-connect>
         <burst-size>65535</burst-size>
     </limits>
     <authentication>
-        <source-password>CHANGE_ME</source-password>
+        <source-password>SOURCE_PASSWORD</source-password>
+        <relay-password>RELAY_PASSWORD</relay-password>
         <admin-user>admin</admin-user>
-        <admin-password>CHANGE_ME</admin-password>
+        <admin-password>ADMIN_PASSWORD</admin-password>
     </authentication>
     <listen-socket>
         <port>8000</port>
@@ -18,11 +21,25 @@
     </listen-socket>
     <mount>
         <mount-name>/live</mount-name>
-        <bitrate>192</bitrate>
         <type>audio/mpeg</type>
         <stream-name>Kol Bramah Live</stream-name>
     </mount>
     <paths>
+        <basedir>/usr/share/icecast2</basedir>
         <logdir>/var/log/icecast2</logdir>
+        <webroot>/usr/share/icecast2/web</webroot>
+        <adminroot>/usr/share/icecast2/admin</adminroot>
     </paths>
+    <logging>
+        <accesslog>access.log</accesslog>
+        <errorlog>error.log</errorlog>
+        <loglevel>3</loglevel>
+    </logging>
+    <security>
+        <chroot>0</chroot>
+        <changeowner>
+            <user>icecast2</user>
+            <group>icecast</group>
+        </changeowner>
+    </security>
 </icecast>
