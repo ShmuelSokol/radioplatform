@@ -114,7 +114,7 @@ export default function LiveShows() {
 
   return (
     <div className="w-full">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-bold text-cyan-300">Live Shows</h1>
         <button
           onClick={() => { resetForm(); setShowModal(true); }}
@@ -154,7 +154,7 @@ export default function LiveShows() {
               className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex flex-wrap items-center gap-2 mb-1">
                   <span className="text-white font-medium truncate">{show.title}</span>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase font-bold ${STATUS_COLORS[show.status]}`}>
                     {show.status}

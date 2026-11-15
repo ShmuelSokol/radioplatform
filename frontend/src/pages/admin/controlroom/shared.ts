@@ -127,3 +127,27 @@ export function useHotButtons(stationId: string | null) {
 
   return { pins, toggle };
 }
+
+// Date formatters are slow to build (very slow in Safari) and the queue asks
+// for thousands of them, so keep one per time zone and shape.
+const fmtCache = new Map<string, Intl.DateTimeFormat>();
+function cachedFmt(locale: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = locale + JSON.stringify(opts);
+  let f = fmtCache.get(key);
+  if (!f) { f = new Intl.DateTimeFormat(locale, opts); fmtCache.set(key, f); }
+  return f;
+}
+const tzOpt = (tz?: string) => (tz ? { timeZone: tz } : {});
+
+/** YYYY-MM-DD in the station's time zone. */
+export function dayKey(d: Date | string | number, tz?: string): string {
+  return cachedFmt('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', ...tzOpt(tz) }).format(new Date(d));
+}
+/** "3:05 PM" in the station's time zone. */
+export function clockTime(d: Date | string | number, tz?: string): string {
+  return cachedFmt('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...tzOpt(tz) }).format(new Date(d));
+}
+/** "Mon" in the station's time zone. */
+export function weekdayShort(d: Date | string | number, tz?: string): string {
+  return cachedFmt('en-US', { weekday: 'short', ...tzOpt(tz) }).format(new Date(d));
+}

@@ -19,7 +19,7 @@ import type { QueueRow } from './controlroom/QueuePanel';
 import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
 import { LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
-import { isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
+import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 
 type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule';
@@ -204,7 +204,7 @@ export default function Dashboard() {
     const dates = new Set<string>();
     for (const e of queueEntries) {
       const ts = e.estimated_start || e.preempt_at;
-      if (ts) dates.add(new Date(ts).toLocaleDateString('en-CA', stationTz ? { timeZone: stationTz } : undefined));
+      if (ts) dates.add(dayKey(ts, stationTz));
     }
     return Array.from(dates).sort();
   }, [queueEntries, stationTz]);
@@ -214,7 +214,7 @@ export default function Dashboard() {
     return queueEntries.filter(e => {
       const ts = e.estimated_start || e.preempt_at;
       if (!ts) return false;
-      return new Date(ts).toLocaleDateString('en-CA', stationTz ? { timeZone: stationTz } : undefined) === queueDateFilter;
+      return dayKey(ts, stationTz) === queueDateFilter;
     });
   }, [queueEntries, queueDateFilter, stationTz]);
 
