@@ -17,6 +17,8 @@ Blackouts (Shabbos, Yom Tov) and time with no block generate nothing and are rep
 
 Off by default: `automation_config.playlist_generation = {enabled, hours, artist_distance}`; when on, `QueueReplenishService` fills from it instead of the rule-based fill. API: `GET/PUT /playlists/generation`, `POST /playlists/generation/regenerate`.
 
-Not built yet: minimum vote (no vote field on Asset), jingle groups with counts, seasonal and parsha types switched by the calendar, "reset sacks".
+Minimum vote: `Asset.vote` is a staff-set whole number (0 = unrated), edited on the song's page and shown in the library list beside "Last played". `playlist_generation.min_vote` (0 = off) keeps songs under that vote out of every draw. A type where NO song reaches the minimum (jingles, usually unrated) is drawn as if there were no minimum, and the preview says so; otherwise a minimum would silence the type. Listener ratings (`SongRating`) are a separate thing and do not feed this.
+
+Not built yet: jingle groups with counts, seasonal and parsha types switched by the calendar, "reset sacks".
 
 Test note: the draw is random, so `tests/test_playlist_generation.py` seeds `random`; in its tiny library some orders legitimately reuse a queued song to keep the artist rule.

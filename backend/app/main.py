@@ -129,6 +129,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS sponsor_id UUID REFERENCES sponsors(id) ON DELETE SET NULL",
         # Release date for music assets (MusicBrainz auto-detection)
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS release_date DATE",
+        # Staff vote per song, used by playlist generation's minimum vote
+        "ALTER TABLE assets ADD COLUMN IF NOT EXISTS vote INTEGER NOT NULL DEFAULT 0",
         # Preempt mechanism for exact-time playback (time announcements)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS timing_mode VARCHAR(10)",

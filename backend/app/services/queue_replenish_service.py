@@ -205,6 +205,7 @@ class QueueReplenishService:
             datetime.now(timezone.utc) + timedelta(seconds=queued_seconds),
             (target - queued_seconds) / 3600,
             artist_distance=generation.artist_distance,
+            min_vote=generation.min_vote,
             cursor=saved.get("cursor") or {},
             recent_artists=[row[1] for row in pending][-20:],
             busy_ids=set(self.queued_ids),
