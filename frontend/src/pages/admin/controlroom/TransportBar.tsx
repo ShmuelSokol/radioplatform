@@ -34,6 +34,10 @@ interface Props {
   /** Go to the next item. No argument is the plain Next (cut); 'fade' and 'soft' fade the item out first. */
   onNext: (fade?: 'hard' | 'fade' | 'soft') => void;
   nextBusy: boolean;
+  /** The item on air is set to repeat. */
+  looping: boolean;
+  onLoop: () => void;
+  loopBusy: boolean;
   audio: TransportAudio;
   stationTz?: string;
   liveShow: { id: string; title: string } | null;
@@ -126,7 +130,7 @@ export default function TransportBar(p: Props) {
       aria-label="Station"
       value={p.stationId ?? ''}
       onChange={(e) => p.onStation(e.target.value)}
-      className="h-8 lg:h-9 max-w-[60vw] lg:max-w-[140px] xl:max-w-[220px] bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-100 text-sm px-2 rounded-md focus:outline-none focus:border-cyan-500"
+      className="h-8 lg:h-9 max-w-[60vw] lg:max-w-[220px] bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-100 text-sm px-2 rounded-md focus:outline-none focus:border-cyan-500"
     >
       {p.stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
     </select>
@@ -139,13 +143,20 @@ export default function TransportBar(p: Props) {
   const fadeBtn = 'h-11 lg:h-12 px-2.5 lg:px-3 rounded-lg border border-amber-500/60 bg-amber-500/10 hover:bg-amber-500/25 active:bg-amber-500/40 text-amber-200 text-xs lg:text-sm font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed';
   const nextButton = (
     <div className="flex items-center gap-1.5 shrink-0" role="group" aria-label="Go to the next item">
+      <button type="button" onClick={p.onLoop} disabled={!p.isPlaying || p.loopBusy}
+        data-testid="loop" aria-pressed={p.looping}
+        title={p.looping ? 'Loop is on: this item repeats. Press to switch it off.' : 'Repeat this item until you switch Loop off or press Next'}
+        className={`h-11 lg:h-12 px-2.5 lg:px-3 rounded-lg border text-xs lg:text-sm font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed
+          ${p.looping ? 'bg-fuchsia-500 border-fuchsia-300 text-white animate-pulse' : 'border-fuchsia-400/50 bg-fuchsia-500/10 hover:bg-fuchsia-500/25 text-fuchsia-200'}`}>
+        Loop
+      </button>
       <button type="button" onClick={() => p.onNext('fade')} disabled={!p.isPlaying || p.nextBusy}
         data-testid="next-fade" title="Fade this item out quickly, then go to the next" className={fadeBtn}>
         Fade
       </button>
       <button type="button" onClick={() => p.onNext('soft')} disabled={!p.isPlaying || p.nextBusy}
         data-testid="next-soft" title="Fade this item out slowly (3 seconds), then go to the next" className={fadeBtn}>
-        <span className="sm:hidden lg:inline xl:hidden">Soft</span><span className="hidden sm:inline lg:hidden xl:inline">Soft fade</span>
+        <span className="sm:hidden">Soft</span><span className="hidden sm:inline">Soft fade</span>
       </button>
       <button
         type="button"
@@ -154,7 +165,7 @@ export default function TransportBar(p: Props) {
         title="Go to the next item now, with no fade (N)"
         className="h-11 lg:h-12 px-3 sm:px-4 lg:px-5 rounded-lg bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-black text-base font-extrabold tracking-wide shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        {p.nextBusy ? '…' : <>NEXT<span className="hidden sm:inline lg:hidden xl:inline"> ⏭</span></>}
+        {p.nextBusy ? '…' : <>NEXT<span className="hidden sm:inline"> ⏭</span></>}
       </button>
     </div>
   );
@@ -188,7 +199,7 @@ export default function TransportBar(p: Props) {
         type="range" min="0" max="1" step="0.01" value={audio.volume}
         aria-label="Monitor volume"
         onChange={e => audio.setVolume(parseFloat(e.target.value))}
-        className="hidden sm:block lg:hidden 2xl:block w-20 2xl:w-28 h-1 accent-cyan-400 cursor-pointer"
+        className="hidden sm:block xl:hidden 2xl:block w-20 2xl:w-28 h-1 accent-cyan-400 cursor-pointer"
       />
     </div>
   );
@@ -196,11 +207,11 @@ export default function TransportBar(p: Props) {
   return (
     <header className="shrink-0 bg-[#0c0c2c] border-b border-[#2a2a5e] text-gray-200">
       {/* Row 1: status, title, clock */}
-      <div className="flex items-center gap-2 lg:gap-4 px-3 lg:px-4 pt-2 lg:py-2">
+      <div className="flex items-center gap-2 lg:gap-4 px-3 lg:px-4 pt-2 xl:py-2">
         {onAir}
         <div className="hidden lg:block shrink-0">{stationSelect}</div>
 
-        <div className="flex-1 min-w-0 lg:min-w-[9rem]">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate text-base lg:text-xl font-bold text-yellow-300 leading-tight">
               {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
@@ -228,7 +239,7 @@ export default function TransportBar(p: Props) {
           </Link>
         )}
 
-        <div className="hidden lg:flex items-center gap-2 xl:gap-3">
+        <div className="hidden xl:flex items-center gap-3">
           {intro}
           <div className="text-right leading-none">
             <div className={`text-3xl xl:text-4xl font-extrabold tabular-nums ${ending ? 'text-red-400 animate-pulse' : 'text-white'}`}>
@@ -258,7 +269,7 @@ export default function TransportBar(p: Props) {
       </div>
 
       {/* Row 2 (phones and tablets): countdown, Next, sound */}
-      <div className="flex lg:hidden flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2">
+      <div className="flex xl:hidden flex-wrap items-center gap-x-2 gap-y-1.5 px-3 lg:px-4 py-2">
         <div className={`text-3xl font-extrabold tabular-nums leading-none ${ending ? 'text-red-400 animate-pulse' : 'text-white'}`}>
           -{fmtCountdown(p.remaining)}
         </div>

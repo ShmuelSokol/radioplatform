@@ -59,6 +59,8 @@ Server contract: [operator-actions](operator-actions.md). In the transport bar N
 
 `liveControl.fireNow` is one `queue/fire-now` call with a `client_request_id`; a second tap on the same item within 1.5 s reuses the id, so the server answers it as a duplicate and the item plays once. `liveControl.insertAt` is one `queue/insert` call. The marker in the queue sits *before* a row, the API inserts *after* an entry, so Dashboard passes the pending row above the marker (null for the first row = top). The new insert call returns no scheduling-rule warnings, unlike the old add + reorder.
 
-At 1024 to 1279 px the bar is tight: the volume slider hides below 1536 px, "Soft fade" shortens to "Soft" below 1280 px.
+Loop is a toggle in the same group: `liveControl.loopCurrent` posts `queue/loop {on}`, and the button lights from `loop_asset_id` in the queue body, so every operator sees it.
 
-Not built on the server yet: Loop and Mix over.
+The transport bar is one row from 1280 px (`xl`) and two rows below that (title and clock on top; countdown, Intro, sound and the Loop / Fade / Soft fade / NEXT group underneath). Both rows are in the DOM and one is hidden, so browser checks must pick the `:visible` button.
+
+Not built on the server yet: Mix over.

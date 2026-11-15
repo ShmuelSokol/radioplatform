@@ -9,7 +9,7 @@ import {
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
-import { fireNow, insertAt, queueEnd, queueNext } from '../../api/liveControl';
+import { fireNow, insertAt, loopCurrent, queueEnd, queueNext } from '../../api/liveControl';
 import type { SkipFade } from '../../api/queue';
 import { insertEntry as addQueuePlaceholder } from '../../hooks/queueOptimistic';
 import type { QueueDataLike } from '../../hooks/queueOptimistic';
@@ -316,6 +316,28 @@ export default function Dashboard() {
     skipMut.mutate(fade, { onError: onMutError });
   }, [initAudio, skipMut, onMutError]);
 
+  // Loop: the item on air repeats until Loop is switched off, Next, or a play-now.
+  const looping = !!(queueData as { loop_asset_id?: string | null } | undefined)?.loop_asset_id;
+  const [loopBusy, setLoopBusy] = useState(false);
+  const toggleLoop = useCallback(async () => {
+    const sid = latest.current.stationId;
+    if (!sid) return;
+    setLoopBusy(true);
+    try {
+      const res = await loopCurrent(sid, !looping);
+      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
+      else refreshQueue();
+      setToast(res.loop
+        ? { text: 'Loop is on: this item repeats until you switch Loop off or press Next.', type: 'warn' }
+        : { text: 'Loop is off. This play finishes, then the queue carries on.', type: 'ok' });
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail;
+      setToast({ text: typeof msg === 'string' ? msg : 'Loop did not go through. Check the connection and try again.', type: 'error' });
+    } finally {
+      setLoopBusy(false);
+    }
+  }, [looping, qc, refreshQueue]);
+
   const handleStart = useCallback(() => {
     if (!stationId) { setStatusMessage('No station available'); return; }
     setStatusMessage(null);
@@ -513,6 +535,9 @@ export default function Dashboard() {
         statusMessage={statusMessage}
         onNext={handleNext}
         nextBusy={skipMut.isPending}
+        looping={looping}
+        onLoop={toggleLoop}
+        loopBusy={loopBusy}
         audio={{ audioReady, initAudio, volume, setVolume, muted, toggleMute, vuL, vuR }}
         stationTz={stationTz}
         liveShow={liveShow ? { id: liveShow.id, title: liveShow.title } : null}

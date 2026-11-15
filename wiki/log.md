@@ -57,3 +57,4 @@ INGEST 2026-11-15 operator-actions.md new page: skip?fade=hard|fade|soft (fade_s
 INGEST 2026-11-15 playlist-generation.md Minimum vote: staff-set Asset.vote (0 = unrated), generation setting min_vote; a type with no song at the minimum is drawn without it and the preview notes it. Library list shows Vote and Last played.
 UPDATE 2026-11-15 operator-actions.md Loop added: POST queue/loop {on}, automation_config.loop_asset_id, repeats are queue entries with source "loop"; Next/fire-now end it.
 UPDATE 2026-11-15 control-room.md NEXT=hard cut, Fade, Soft fade buttons; Intro countdown; fire-now and insert are single calls via liveControl.ts (double tap guarded by client_request_id); frontend/node_modules symlink removed from git (.gitignore now matches a symlink too).
+UPDATE 2026-11-15 control-room.md Loop button (queue/loop, lit from loop_asset_id); transport bar is two rows below 1280 px, both rows stay in the DOM.
