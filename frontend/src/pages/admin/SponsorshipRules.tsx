@@ -38,7 +38,7 @@ export default function SponsorshipRules() {
   const changed = rules ? text.trim() !== rules.rules_text.trim() : false;
 
   return (
-    <div className="max-w-4xl mx-auto p-8 space-y-8">
+    <div className="w-full space-y-8">
       <div>
         <h1 className="text-3xl font-bold">Sponsorship Rules</h1>
         <p className="text-gray-600 mt-1">

@@ -129,9 +129,13 @@ async function open(browser, contextOpts) {
     if (DELAY) await new Promise(r => setTimeout(r, DELAY));
     await route.fulfill({ status: data === null ? 204 : 200, contentType: 'application/json', body: data === null ? '' : JSON.stringify(data) });
   });
+  // Stand in for the now-playing push channel so a check can announce a track change.
+  const sockets = [];
+  await page.routeWebSocket(/\/ws\/now-playing\//, (ws) => { sockets.push(ws); });
+  const push = (data) => sockets.forEach(ws => { try { ws.send(JSON.stringify({ type: 'now_playing', data })); } catch { /* closed */ } });
   await page.goto(`${BASE}/admin/dashboard`);
   await page.getByTestId('queue-row').first().waitFor();
-  return { page, backend, ctx, errors };
+  return { page, backend, ctx, errors, push };
 }
 const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${name}.png` }); } };
 const layout = (page) => page.evaluate(() => {
@@ -141,7 +145,7 @@ const layout = (page) => page.evaluate(() => {
 
 async function desktop(browser, width, height) {
   const tag = `desktop ${width}x${height}`;
-  const { page, backend, ctx, errors } = await open(browser, { viewport: { width, height } });
+  const { page, backend, ctx, errors, push } = await open(browser, { viewport: { width, height } });
   let l = await layout(page);
   check(`${tag}: uses the full width`, l.room.left === 0 && l.room.right === l.vw, `${l.room.left}..${l.room.right} of ${l.vw}`);
   check(`${tag}: fills the height with no page scrollbars`, l.docH <= l.vh && l.docW <= l.vw && l.room.bottom === l.vh, `doc ${l.docW}x${l.docH}`);
@@ -224,6 +228,18 @@ async function desktop(browser, width, height) {
   await page.waitForTimeout(300);
   await shot(page, `${width}-5-pinned`);
   check(`${tag}: starred library item becomes an instant button`, await page.getByTestId('hot-button').filter({ hasText: 'Song number 50' }).count() === 1);
+
+  // A pushed track change refreshes the queue at once, not at the next 10 second poll
+  const track = (id, at) => ({ station_id: SID, asset_id: id, started_at: new Date(at).toISOString(), asset: { title: 'Pushed song' } });
+  push(track('p1', Date.now() - 60000));
+  await page.waitForTimeout(300 + DELAY);
+  const queueGets = () => backend.calls.filter(c => c.method === 'GET' && c.path === `/stations/${SID}/queue`).length;
+  const getsBefore = queueGets();
+  const pushedAt = Date.now();
+  push(track('p2', Date.now()));
+  let refreshMs = -1;
+  while (Date.now() - pushedAt < 3000) { if (queueGets() > getsBefore) { refreshMs = Date.now() - pushedAt; break; } await page.waitForTimeout(20); }
+  check(`${tag}: a pushed track change refreshes the queue at once`, refreshMs >= 0 && refreshMs < 1500, `${refreshMs} ms`);
 
   // Other tabs render
   await page.getByRole('tab', { name: 'Go live' }).click();

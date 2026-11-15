@@ -651,7 +651,9 @@ class SchedulerEngine:
                 # Calculate remaining time from started_at
                 elapsed = (datetime.now(timezone.utc) - entry.started_at).total_seconds()
                 remaining = duration - elapsed
-                if remaining > 0:
+                # Past the crossfade point the timer has already fired; arming it again
+                # (with a delay of 0) would only start a second advance.
+                if remaining > cross_seconds:
                     self._schedule_precise_advance(station_id, remaining, cross_seconds)
 
                 # Push current track to Liquidsoap

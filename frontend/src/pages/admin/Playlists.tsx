@@ -75,7 +75,7 @@ export default function Playlists() {
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
 
   return (
-    <div className="max-w-5xl mx-auto p-8">
+    <div className="w-full">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Playlist Templates</h1>
         <button onClick={() => setShowForm(!showForm)}

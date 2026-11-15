@@ -28,3 +28,5 @@ Things the code alone will not tell you:
   only searched the first 100 assets in the browser.
 - **Test:** `frontend/e2e/control-room.mjs` drives the built site against an in-memory fake
   backend at desktop, iPhone and iPad sizes (Chromium emulation, not real Safari).
+
+- **Track changes are pushed.** `Dashboard.tsx` watches the now-playing socket; when the asset or its start time changes it invalidates `queue`, `play-log` and `last-played` right away. The first message after opening a station is treated as the current state, not a change. Queue edits by another operator are not pushed, so the 10 s poll in `useQueue` is still needed. `e2e/control-room.mjs` fakes the socket with `routeWebSocket` and checks this.
