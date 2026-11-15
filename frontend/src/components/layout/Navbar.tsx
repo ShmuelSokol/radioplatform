@@ -4,6 +4,8 @@ import { useAuthStore } from '../../stores/authStore';
 import { useUnresolvedCount, useAlerts } from '../../hooks/useAlerts';
 import { useUiStore } from '../../stores/uiStore';
 import VersionToggle from './VersionToggle';
+import { useAuth } from '../../hooks/useAuth';
+import { canAccess, isManager } from '../../auth/access';
 
 interface NavLink {
   to: string;
@@ -19,7 +21,11 @@ interface NavGroup {
 }
 
 export default function Navbar() {
-  const { isAuthenticated, user, logout } = useAuthStore();
+  const { isAuthenticated, logout } = useAuthStore();
+  const { user } = useAuth();
+  const role = user?.role;
+  // Alerts are a manager screen; other roles would only get refusals.
+  const showAlerts = isAuthenticated && isManager(role);
   const isV2 = useUiStore((s) => s.version) === 'v2';
   const [menuOpen, setMenuOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
@@ -28,8 +34,8 @@ export default function Navbar() {
   const dropdownTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
 
-  const { data: unresolvedCount } = useUnresolvedCount(isAuthenticated);
-  const { data: recentAlerts } = useAlerts(isAuthenticated ? { limit: 5, is_resolved: false } : null);
+  const { data: unresolvedCount } = useUnresolvedCount(showAlerts);
+  const { data: recentAlerts } = useAlerts(showAlerts ? { limit: 5, is_resolved: false } : null);
 
   // Close bell dropdown on click outside
   useEffect(() => {
@@ -56,11 +62,15 @@ export default function Navbar() {
     { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
   ];
 
+  // Only offer links to screens this person's role can open.
+  const allowed = (link: NavLink) => canAccess(role, link.to);
+
   const standaloneLinks: NavLink[] = [
     { to: '/admin/dashboard', label: 'Dashboard', color: 'hover:text-yellow-300' },
-  ];
+    { to: '/sponsor/dashboard', label: 'Sponsor Portal', color: 'hover:text-indigo-300' },
+  ].filter(allowed);
 
-  const navGroups: NavGroup[] = [
+  const allNavGroups: NavGroup[] = [
     {
       label: 'Content',
       color: 'text-cyan-400',
@@ -116,6 +126,10 @@ export default function Navbar() {
       ],
     },
   ];
+
+  const navGroups = allNavGroups
+    .map(g => ({ ...g, links: g.links.filter(allowed) }))
+    .filter(g => g.links.length > 0);
 
   const handleDropdownEnter = (label: string) => {
     if (dropdownTimeout.current) clearTimeout(dropdownTimeout.current);
@@ -209,7 +223,7 @@ export default function Navbar() {
             {isAuthenticated ? (
               <>
                 {/* Alert Bell */}
-                <div className="relative" ref={bellRef}>
+                {showAlerts && <div className="relative" ref={bellRef}>
                   <button onClick={() => setBellOpen(!bellOpen)}
                     className="relative text-gray-400 hover:text-white p-1 transition">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -267,7 +281,7 @@ export default function Navbar() {
                       </button>
                     </div>
                   )}
-                </div>
+                </div>}
 
                 <span className="text-[11px] text-gray-500 hidden sm:inline">{user?.email}</span>
                 <button onClick={logout}

@@ -8,11 +8,15 @@ Set up full station programming via the live API:
 Usage:
     cd backend && uv run python scripts/setup_programming.py
 """
+import os
 import sys
 import httpx
 
 API_BASE = "https://api.kbrlive.com/api/v1"
-CREDS = {"email": "admin", "password": "613Radio"}
+CREDS = {
+    "email": os.environ.get("KBR_ADMIN_EMAIL", "admin"),
+    "password": os.environ["KBR_ADMIN_PASSWORD"],  # never hard-code: this repo is public
+}
 
 # Station IDs
 STATIONS = {

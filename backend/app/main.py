@@ -44,8 +44,10 @@ async def ensure_tables():
         await _add_missing_columns(engine)
 
         _tables_created = True
-    except Exception as e:
-        logging.warning(f"Table creation skipped: {e}")
+    except Exception:
+        # Loud on purpose: a database that could not be set up used to be a
+        # one-line warning, and the app then ran with no tables at all.
+        logger.exception("DATABASE SETUP FAILED: tables were not created; /health will report 'starting'")
 
 
 async def _add_missing_columns(engine):
@@ -207,7 +209,7 @@ async def _seed_default_categories():
             if count == 0:
                 for name in defaults:
                     await conn.execute(
-                        text("INSERT INTO categories (id, name, created_at, updated_at) VALUES (gen_random_uuid(), :name, NOW(), NOW())"),
+                        text("INSERT INTO categories (id, name, fade_allowed, created_at, updated_at) VALUES (gen_random_uuid(), :name, true, NOW(), NOW())"),
                         {"name": name},
                     )
                 logger.info("Seeded %d default categories", len(defaults))

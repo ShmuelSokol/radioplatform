@@ -34,6 +34,13 @@ class Settings(BaseSettings):
 
     # JWT
     JWT_SECRET_KEY: str = "change-me-in-production"
+
+    # Password given to accounts created by the seed endpoints. No default on
+    # purpose: the repository is public, so a password written here is public.
+    ADMIN_SEED_PASSWORD: str = ""
+    # /auth/seed-all wipes the library, stations and rules. Off in production
+    # unless this is explicitly set.
+    ALLOW_DESTRUCTIVE_SEED: bool = False
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7

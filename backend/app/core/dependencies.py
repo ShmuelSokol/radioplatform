@@ -113,6 +113,14 @@ async def require_dj_or_manager(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+async def require_staff(user: User = Depends(get_current_user)) -> User:
+    """Any station staff role (admin, manager, DJ, viewer). Keeps sponsor
+    accounts out of the library, queue, rules and review screens."""
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER, UserRole.DJ, UserRole.VIEWER):
+        raise ForbiddenError("Staff access required")
+    return user
+
+
 async def require_sponsor(user: User = Depends(get_current_user)) -> User:
     if user.role != UserRole.SPONSOR:
         raise ForbiddenError("Sponsor access required")

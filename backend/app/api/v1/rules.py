@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, require_admin
+from app.core.dependencies import require_admin, require_staff
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.schedule_rule import ScheduleRule
@@ -21,10 +21,10 @@ router = APIRouter(prefix="/rules", tags=["rules"])
 @router.get("", response_model=RuleListResponse)
 async def list_rules(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=500),
     station_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     from sqlalchemy import or_
     q = select(ScheduleRule)
@@ -102,7 +102,7 @@ async def delete_rule(
 async def preview_schedule(
     date: str = Query(None, description="Date in YYYY-MM-DD format"),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Generate a preview of what the schedule would look like for a given date."""
     target_date = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now(timezone.utc)

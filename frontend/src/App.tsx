@@ -1,10 +1,11 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/layout/Layout';
 import SponsorLayout from './components/layout/SponsorLayout';
 import ErrorBoundary from './components/ErrorBoundary';
-import { useAuthStore } from './stores/authStore';
+import { useAuth } from './hooks/useAuth';
+import { canAccess, homeFor } from './auth/access';
 import { useUiStore } from './stores/uiStore';
 
 // Auth pages (eager - fast initial load)
@@ -69,16 +70,38 @@ const queryClient = new QueryClient({
   },
 });
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
+/**
+ * Gate for signed-in screens. Sends anonymous visitors to the right login page
+ * and sends a signed-in user who lacks the role for this screen to their own
+ * home, instead of showing a screen that can only fail.
+ */
+function RoleRoute({ children, loginPath }: { children: React.ReactNode; loginPath: string }) {
+  const { user, isLoading, isAuthenticated, refetch } = useAuth();
+  const { pathname } = useLocation();
+  if (!isAuthenticated) return <Navigate to={loginPath} replace />;
+  if (!user) {
+    if (isLoading) return <div className="text-center py-10 text-gray-400">Loading...</div>;
+    // Signed in but the account lookup failed (server unreachable). Do not
+    // throw a working operator back to the login page over a network blip.
+    return (
+      <div className="text-center py-10 text-gray-400">
+        <p>Could not reach the server to confirm your account.</p>
+        <button onClick={() => refetch()} className="mt-3 px-4 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-500">
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (!canAccess(user.role, pathname)) return <Navigate to={homeFor(user.role)} replace />;
   return <>{children}</>;
 }
 
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  return <RoleRoute loginPath="/admin/login">{children}</RoleRoute>;
+}
+
 function SponsorProtectedRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  if (!isAuthenticated) return <Navigate to="/sponsor/login" replace />;
-  return <>{children}</>;
+  return <RoleRoute loginPath="/sponsor/login">{children}</RoleRoute>;
 }
 
 const Loading = () => <div className="text-center py-10 text-gray-400">Loading...</div>;

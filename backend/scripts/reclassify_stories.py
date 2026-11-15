@@ -8,10 +8,14 @@ Uses the live API (no direct DB connection needed).
 Usage:
     cd backend && uv run python scripts/reclassify_stories.py
 """
+import os
 import httpx
 
 API_BASE = "https://api.kbrlive.com/api/v1"
-CREDS = {"email": "admin", "password": "613Radio"}
+CREDS = {
+    "email": os.environ.get("KBR_ADMIN_EMAIL", "admin"),
+    "password": os.environ["KBR_ADMIN_PASSWORD"],  # never hard-code: this repo is public
+}
 
 # Keywords that indicate a story/talk (case-insensitive)
 STORY_KEYWORDS = [
