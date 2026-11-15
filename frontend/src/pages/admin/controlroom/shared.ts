@@ -102,28 +102,105 @@ export function useStored<T>(key: string, fallback: T): [T, (v: T) => void] {
   return [value, set];
 }
 
+export const CART_PAGES = 10;
+
+/** A named set of instant buttons: ten pages, like the cart operators know. */
+export interface CartSet { name: string; pages: CtlAsset[][] }
+interface CartState { sets: CartSet[]; set: number; page: number }
+
+const emptyPages = (): CtlAsset[][] => Array.from({ length: CART_PAGES }, () => []);
+const DEFAULT_CART: CartState = { sets: [{ name: 'Default', pages: emptyPages() }], set: 0, page: 0 };
+
+function readCart(key: string): CartState {
+  const raw = readJson<unknown>(key, null);
+  // Older builds stored one flat list of buttons: keep it as page 1 of the first set.
+  if (Array.isArray(raw)) {
+    const pages = emptyPages();
+    pages[0] = raw as CtlAsset[];
+    return { sets: [{ name: 'Default', pages }], set: 0, page: 0 };
+  }
+  const c = raw as Partial<CartState> | null;
+  if (!c || !Array.isArray(c.sets) || c.sets.length === 0) return DEFAULT_CART;
+  const sets = c.sets.map(s => ({
+    name: String(s?.name || 'Set'),
+    pages: emptyPages().map((_, i) => (Array.isArray(s?.pages?.[i]) ? s.pages[i] : [])),
+  }));
+  const set = Math.min(Math.max(0, Number(c.set) || 0), sets.length - 1);
+  const page = Math.min(Math.max(0, Number(c.page) || 0), CART_PAGES - 1);
+  return { sets, set, page };
+}
+
 /**
- * Operator-pinned instant buttons, per station. Stored in this browser only
- * for now (a phone and a desktop each keep their own set).
+ * Operator-pinned instant buttons, per station: named sets of ten pages each.
+ * Stored in this browser only for now (a phone and a desktop each keep their own).
  */
 export function useHotButtons(stationId: string | null) {
   const key = `kbr_hot_buttons_${stationId ?? 'none'}`;
-  const [pins, setPins] = useState<CtlAsset[]>(() => readJson<CtlAsset[]>(key, []));
-  useEffect(() => { setPins(readJson<CtlAsset[]>(key, [])); }, [key]);
+  const [cart, setCart] = useState<CartState>(() => readCart(key));
+  useEffect(() => { setCart(readCart(key)); }, [key]);
 
-  const toggle = useCallback((asset: CtlAsset) => {
-    setPins(prev => {
-      const next = prev.some(p => p.id === asset.id)
-        ? prev.filter(p => p.id !== asset.id)
-        : [...prev, {
-            id: asset.id, title: asset.title, artist: asset.artist ?? null,
-            duration: asset.duration ?? null, asset_type: asset.asset_type,
-            category: asset.category ?? null,
-          }];
+  const update = useCallback((fn: (c: CartState) => CartState) => {
+    setCart(prev => {
+      const next = fn(prev);
       try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* private mode */ }
       return next;
     });
   }, [key]);
 
-  return { pins, toggle };
+  /** Add the asset to the page on screen, or take it off if it is already there. */
+  const toggle = useCallback((asset: CtlAsset) => update(c => {
+    const cur = c.sets[c.set].pages[c.page];
+    const nextPage = cur.some(p => p.id === asset.id)
+      ? cur.filter(p => p.id !== asset.id)
+      : [...cur, {
+          id: asset.id, title: asset.title, artist: asset.artist ?? null,
+          duration: asset.duration ?? null, asset_type: asset.asset_type,
+          category: asset.category ?? null,
+        }];
+    const sets = c.sets.map((s, si) => si !== c.set ? s : { ...s, pages: s.pages.map((pg, pi) => (pi === c.page ? nextPage : pg)) });
+    return { ...c, sets };
+  }), [update]);
+
+  const selectPage = useCallback((page: number) => update(c => ({ ...c, page })), [update]);
+  const selectSet = useCallback((set: number) => update(c => ({ ...c, set, page: 0 })), [update]);
+  const addSet = useCallback((name: string) => update(c => ({ sets: [...c.sets, { name, pages: emptyPages() }], set: c.sets.length, page: 0 })), [update]);
+  const renameSet = useCallback((name: string) => update(c => ({ ...c, sets: c.sets.map((s, i) => (i === c.set ? { ...s, name } : s)) })), [update]);
+  const deleteSet = useCallback(() => update(c => {
+    if (c.sets.length <= 1) return c;
+    return { sets: c.sets.filter((_, i) => i !== c.set), set: 0, page: 0 };
+  }), [update]);
+
+  const pins = cart.sets[cart.set].pages[cart.page];
+  return { pins, toggle, cart, selectPage, selectSet, addSet, renameSet, deleteSet };
+}
+
+/** "3:05:09" and "PM" in the station's time zone, for the running log. */
+export function clockTimeSec(d: Date | string | number, tz?: string): { time: string; ampm: string } {
+  const parts = cachedFmt('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...tzOpt(tz) }).formatToParts(new Date(d));
+  const get = (t: string) => parts.find(x => x.type === t)?.value ?? '';
+  return { time: `${get('hour')}:${get('minute')}:${get('second')}`, ampm: get('dayPeriod') };
+}
+
+// Date formatters are slow to build (very slow in Safari) and the queue asks
+// for thousands of them, so keep one per time zone and shape.
+const fmtCache = new Map<string, Intl.DateTimeFormat>();
+function cachedFmt(locale: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = locale + JSON.stringify(opts);
+  let f = fmtCache.get(key);
+  if (!f) { f = new Intl.DateTimeFormat(locale, opts); fmtCache.set(key, f); }
+  return f;
+}
+const tzOpt = (tz?: string) => (tz ? { timeZone: tz } : {});
+
+/** YYYY-MM-DD in the station's time zone. */
+export function dayKey(d: Date | string | number, tz?: string): string {
+  return cachedFmt('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', ...tzOpt(tz) }).format(new Date(d));
+}
+/** "3:05 PM" in the station's time zone. */
+export function clockTime(d: Date | string | number, tz?: string): string {
+  return cachedFmt('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...tzOpt(tz) }).format(new Date(d));
+}
+/** "Mon" in the station's time zone. */
+export function weekdayShort(d: Date | string | number, tz?: string): string {
+  return cachedFmt('en-US', { weekday: 'short', ...tzOpt(tz) }).format(new Date(d));
 }

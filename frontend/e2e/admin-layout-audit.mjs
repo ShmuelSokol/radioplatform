@@ -41,6 +41,7 @@ if (process.env.ONLY) pages = pages.filter(p => p.startsWith(process.env.ONLY));
 const VIEWS = [
   { name: 'desktop-1920', opts: { viewport: { width: 1920, height: 1080 } }, wide: true },
   { name: 'iphone', opts: { ...devices['iPhone 13'] }, wide: false },
+  { name: 'small-phone', opts: { ...devices['iPhone SE'] }, wide: false },
 ];
 
 let failures = 0;
@@ -57,8 +58,10 @@ for (const view of VIEWS) {
     await page.goto(`${BASE}${path}`);
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(400);
-    const m = await page.evaluate(() => {
-      const vw = innerWidth;
+    const m = await page.evaluate((deviceW) => {
+      // A phone browser widens its layout viewport to fit content that sticks out,
+      // so innerWidth would hide the overflow. Measure against the real screen width.
+      const vw = deviceW;
       const main = document.querySelector('main');
       let widest = 0;
       const offenders = [];
@@ -73,7 +76,7 @@ for (const view of VIEWS) {
         }
       }
       return { vw, docW: document.documentElement.scrollWidth, used: Math.round((widest / vw) * 100), offenders, docH: document.documentElement.scrollHeight, vh: innerHeight };
-    });
+    }, view.opts.viewport.width);
     let navOk = true;
     if (m.docH > m.vh + 50) {
       await page.evaluate(() => scrollTo(0, 400));

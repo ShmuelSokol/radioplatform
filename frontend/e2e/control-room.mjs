@@ -24,7 +24,7 @@ const check = (name, ok, detail = '') => {
   if (!ok) failures++;
 };
 
-function makeBackend() {
+function makeBackend(queueSize = 60) {
   const assets = [];
   const types = ['music', 'jingle', 'spot', 'shiur', 'zmanim'];
   for (let i = 1; i <= 140; i++) {
@@ -35,7 +35,7 @@ function makeBackend() {
   const byId = Object.fromEntries(assets.map(a => [a.id, a]));
   let seq = 0;
   let queue = []; // {id, asset_id, position, status, started_at}
-  for (let i = 1; i <= 60; i++) queue.push({ id: `q${++seq}`, asset_id: `m${i}`, position: i, status: i === 1 ? 'playing' : 'pending', started_at: i === 1 ? new Date(Date.now() - 20_000).toISOString() : null });
+  for (let i = 1; i <= queueSize; i++) queue.push({ id: `q${++seq}`, asset_id: `m${((i - 1) % 140) + 1}`, position: i, status: i === 1 ? 'playing' : 'pending', started_at: i === 1 ? new Date(Date.now() - 20_000).toISOString() : null });
   const calls = [];
   const pending = () => queue.filter(e => e.status === 'pending').sort((a, b) => a.position - b.position);
   const playing = () => queue.find(e => e.status === 'playing');
@@ -112,8 +112,8 @@ function makeBackend() {
   return { handle, calls, order: () => view().entries.map(e => e.asset_id), nowId: () => playing()?.asset_id };
 }
 
-async function open(browser, contextOpts) {
-  const backend = makeBackend();
+async function open(browser, contextOpts, queueSize) {
+  const backend = makeBackend(queueSize);
   const ctx = await browser.newContext(contextOpts);
   await ctx.addInitScript((ui) => { localStorage.setItem('access_token', 'test'); localStorage.setItem('refresh_token', 'test'); if (ui) localStorage.setItem('ui_version', ui); }, process.env.UI_VERSION || '');
   const page = await ctx.newPage();
@@ -229,6 +229,28 @@ async function desktop(browser, width, height) {
   await shot(page, `${width}-5-pinned`);
   check(`${tag}: starred library item becomes an instant button`, await page.getByTestId('hot-button').filter({ hasText: 'Song number 50' }).count() === 1);
 
+  // Cart pages and named sets, like the jingle cart operators know
+  const pinned50 = () => page.getByTestId('hot-button').filter({ hasText: 'Song number 50' }).count();
+  await page.getByTestId('cart-page').nth(1).click();
+  check(`${tag}: cart page 2 starts empty`, await pinned50() === 0);
+  await page.getByRole('button', { name: 'Add to instant buttons' }).click();
+  check(`${tag}: a button can be put on page 2`, await pinned50() === 1);
+  await page.getByTestId('cart-page').nth(2).click();
+  check(`${tag}: page 3 is separate from page 2`, await pinned50() === 0);
+  await page.getByTestId('cart-page').nth(0).click();
+  check(`${tag}: page 1 keeps its button`, await pinned50() === 1);
+  page.once('dialog', d => d.accept('Purim'));
+  await page.getByTestId('cart').getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'New set' }).click();
+  check(`${tag}: a new named set starts empty and is selected`, await pinned50() === 0 && await page.getByLabel('Button set').evaluate(el => el.selectedOptions[0].textContent) === 'Purim');
+  await page.getByLabel('Button set').selectOption({ label: 'Default' });
+  check(`${tag}: switching back to the first set restores its buttons`, await pinned50() === 1);
+  await page.reload();
+  await page.getByTestId('queue-row').first().waitFor();
+  check(`${tag}: sets and pages survive a reload`, await pinned50() === 1 && await page.getByLabel('Button set').locator('option').count() === 2);
+  const air = await page.getByTestId('air-time').nth(1).textContent();
+  check(`${tag}: queue rows show air time to the second`, /^\d{1,2}:\d{2}:\d{2}\s*(AM|PM)/.test(air.trim()), air);
+
   // A pushed track change refreshes the queue at once, not at the next 10 second poll
   const track = (id, at) => ({ station_id: SID, asset_id: id, started_at: new Date(at).toISOString(), asset: { title: 'Pushed song' } });
   push(track('p1', Date.now() - 60000));
@@ -267,6 +289,7 @@ async function phone(browser, deviceName) {
   const l2 = await layout(page);
   check(`${tag}: header stays frozen while the queue scrolls`, l2.header.top === l.header.top && l2.nav.top === 0);
   await page.getByTestId('queue-scroll').evaluate(el => { el.scrollTop = 0; });
+  await page.locator('[data-testid=queue-row][data-entry-id=q1]').waitFor(); // the list redraws its window after a scroll
   await shot(page, `${tag.replace(/\s+/g, '-')}-1-queue`);
 
   // Tap a row, then "Insert before"; lands in the library
@@ -306,6 +329,44 @@ async function phone(browser, deviceName) {
   await ctx.close();
 }
 
+// A queue far longer than a day: only the rows on screen may be drawn, and
+// everything must still work at the far end of the list.
+async function longQueue(browser, contextOpts, tag, rowH) {
+  const N = 5000;
+  const { page, backend, ctx, errors } = await open(browser, contextOpts, N);
+  if (tag.startsWith('phone')) await page.getByRole('button', { name: 'Queue', exact: true }).tap().catch(() => {});
+  const scroller = page.getByTestId('queue-scroll');
+  const rows = () => page.getByTestId('queue-row').count();
+  const drawn = await rows();
+  check(`${tag}: long queue draws only the rows near the screen`, drawn > 5 && drawn < 120, `${drawn} of ${N}`);
+  const h = await scroller.evaluate(el => el.scrollHeight);
+  check(`${tag}: long queue scrollbar covers the whole queue`, h === N * rowH, `${h} vs ${N * rowH}`);
+  // Jump to the middle, then the very end.
+  await scroller.evaluate(el => { el.scrollTop = el.scrollHeight / 2; });
+  await page.waitForTimeout(150);
+  const mid = await scroller.evaluate(el => { const top = el.getBoundingClientRect().top; const r = [...el.querySelectorAll('[data-testid=queue-row]')].find(x => x.getBoundingClientRect().bottom > top + 1); return r?.dataset.entryId; });
+  check(`${tag}: long queue shows the right rows mid-list`, Math.abs(Number(String(mid).slice(1)) - N / 2) <= 2, `first visible ${mid}`);
+  await scroller.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await page.waitForTimeout(150);
+  const last = await scroller.evaluate(el => { const r = el.querySelectorAll('[data-testid=queue-row]'); return r[r.length - 1]?.dataset.entryId; });
+  check(`${tag}: long queue reaches the last item`, last === `q${N}`, `last drawn ${last}`);
+  check(`${tag}: long queue still draws few rows at the end`, (await rows()) < 120);
+  // Insert before the last item, from the far end of the list.
+  const lastRow = page.locator(`[data-testid=queue-row][data-entry-id=q${N}]`);
+  await lastRow.getByTestId('insert-here').click();
+  await page.getByTestId('insert-banner').waitFor();
+  if (!tag.startsWith('phone')) { // on a phone the library takes over the screen
+    const h2 = await scroller.evaluate(el => el.scrollHeight);
+    check(`${tag}: insert marker keeps the list height exact`, h2 === N * rowH + 40, `${h2}`);
+  }
+  await page.getByTestId('library-row').first().getByRole('button', { name: 'Insert' }).click();
+  await page.waitForTimeout(600);
+  const order = backend.order();
+  check(`${tag}: insert at the far end lands before the last item`, order.length === N + 1 && order[order.length - 2] === 'm1' && order[order.length - 1] === `m${((N - 1) % 140) + 1}`, `${order.slice(-3)}`);
+  check(`${tag}: long queue has no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 const browser = await chromium.launch();
 await desktop(browser, 1440, 900);
 await desktop(browser, 2560, 1440);
@@ -313,6 +374,8 @@ await desktop(browser, 1024, 768);
 await phone(browser, 'iPhone 13');
 await phone(browser, 'iPhone SE');
 await phone(browser, 'iPad Mini');
+await longQueue(browser, { viewport: { width: 1440, height: 900 } }, 'desktop long queue', 40);
+await longQueue(browser, { ...devices['iPhone 13'] }, 'phone long queue', 66);
 await browser.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 process.exit(failures ? 1 : 0);

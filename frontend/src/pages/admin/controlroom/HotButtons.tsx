@@ -1,10 +1,19 @@
 import { memo, useState } from 'react';
 import { useAssets } from '../../../hooks/useAssets';
-import { fmtDur, typeStyle } from './shared';
-import type { CtlAsset, FireMode, SendFn } from './shared';
+import { CART_PAGES, fmtDur, typeStyle } from './shared';
+import type { CartSet, CtlAsset, FireMode, SendFn } from './shared';
 
 interface Props {
   pins: CtlAsset[];
+  /** Named sets of ten pages; `pins` is the page on screen. */
+  sets: CartSet[];
+  setIndex: number;
+  pageIndex: number;
+  onSelectSet: (i: number) => void;
+  onSelectPage: (i: number) => void;
+  onAddSet: (name: string) => void;
+  onRenameSet: (name: string) => void;
+  onDeleteSet: () => void;
   onTogglePin: (a: CtlAsset) => void;
   onSend: SendFn;
   busyId: string | null;
@@ -63,7 +72,7 @@ function HotButtons(p: Props) {
   const pinnedIds = new Set(p.pins.map(x => x.id));
   const jingles = (jingleData?.assets ?? []).filter(a => !pinnedIds.has(a.id));
   const spots = (spotData?.assets ?? []).filter(a => !pinnedIds.has(a.id));
-  const nothing = p.pins.length === 0 && jingles.length === 0 && spots.length === 0;
+  const set = p.sets[p.setIndex] ?? p.sets[0];
 
   return (
     <section className="flex flex-col min-h-0 h-full bg-[#0a0a28]" aria-label="Instant buttons">
@@ -95,26 +104,63 @@ function HotButtons(p: Props) {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2 space-y-4">
-        {p.pins.length > 0 && (
-          <div className="flex justify-end -mb-3">
+        {/* The cart: named sets, ten pages each */}
+        <div className="space-y-2" data-testid="cart">
+          <div className="flex items-center gap-1.5">
+            <select
+              aria-label="Button set"
+              value={p.setIndex}
+              onChange={(e) => p.onSelectSet(Number(e.target.value))}
+              className="flex-1 min-w-0 h-9 bg-[#14143c] border border-[#3a3a7e] text-gray-100 text-sm px-2 rounded-md focus:outline-none focus:border-cyan-500"
+            >
+              {p.sets.map((s, i) => <option key={i} value={i}>{s.name}</option>)}
+            </select>
             <button type="button" onClick={() => setEditing(e => !e)}
-              className="h-7 px-2 rounded text-[11px] font-semibold text-gray-400 hover:text-white hover:bg-white/10">
-              {editing ? 'Done editing' : 'Edit my buttons'}
+              className={`h-9 px-2.5 rounded-md text-xs font-semibold shrink-0 ${editing ? 'bg-cyan-600 text-white' : 'bg-white/10 text-gray-200 hover:bg-white/20'}`}>
+              {editing ? 'Done' : 'Edit'}
             </button>
           </div>
+          {editing && (
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" className="h-9 px-2.5 rounded-md bg-white/10 hover:bg-white/20 text-xs font-semibold text-gray-100"
+                onClick={() => { const n = window.prompt('Name for the new set of buttons'); if (n?.trim()) p.onAddSet(n.trim()); }}>
+                New set
+              </button>
+              <button type="button" className="h-9 px-2.5 rounded-md bg-white/10 hover:bg-white/20 text-xs font-semibold text-gray-100"
+                onClick={() => { const n = window.prompt('New name for this set', set.name); if (n?.trim()) p.onRenameSet(n.trim()); }}>
+                Rename
+              </button>
+              {p.sets.length > 1 && (
+                <button type="button" className="h-9 px-2.5 rounded-md bg-red-900/60 hover:bg-red-800 text-xs font-semibold text-red-100"
+                  onClick={() => { if (window.confirm(`Delete the set "${set.name}" and all its buttons?`)) p.onDeleteSet(); }}>
+                  Delete set
+                </button>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-10 gap-1" role="tablist" aria-label="Button page">
+            {Array.from({ length: CART_PAGES }, (_, i) => {
+              const filled = (set.pages[i]?.length ?? 0) > 0;
+              const on = i === p.pageIndex;
+              return (
+                <button key={i} type="button" role="tab" aria-selected={on} data-testid="cart-page"
+                  title={`Page ${i + 1}${filled ? `: ${set.pages[i].length} buttons` : ' (empty)'}`}
+                  onClick={() => p.onSelectPage(i)}
+                  className={`h-9 rounded-md text-sm font-bold tabular-nums border
+                    ${on ? 'bg-cyan-500 border-cyan-300 text-black' : filled ? 'bg-white/10 border-white/20 text-gray-100 hover:bg-white/20' : 'bg-transparent border-white/10 text-gray-600 hover:bg-white/5'}`}>
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <Wall title={`${set.name} · page ${p.pageIndex + 1}`} items={p.pins} p={p} editing={editing} />
+        {p.pins.length === 0 && (
+          <p className="px-1 text-[11px] text-gray-500">This page is empty. Tap the ☆ next to anything in the library to put a button here.</p>
         )}
-        <Wall title="My buttons" items={p.pins} p={p} editing={editing} />
         <Wall title="Jingles" items={jingles} p={p} editing={false} />
         <Wall title="Sponsor spots" items={spots} p={p} editing={false} />
 
-        {nothing && (
-          <div className="text-center text-gray-500 py-8 px-3 text-sm">
-            No instant buttons yet. Tap the ☆ next to anything in the library to put it here.
-          </div>
-        )}
-        {!nothing && p.pins.length === 0 && (
-          <p className="px-1 text-[11px] text-gray-500">Tap the ☆ next to anything in the library to add your own buttons.</p>
-        )}
 
         <div>
           <div className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-gray-500">Off air</div>

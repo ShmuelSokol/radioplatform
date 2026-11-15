@@ -85,7 +85,7 @@ export default function Sponsors() {
 
   return (
     <div className="w-full">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
         <div className="flex items-center gap-4">
           <h1 className="text-3xl font-bold">Sponsors & Ads</h1>
           <Link to="/sponsor/login" className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1 rounded-lg hover:bg-indigo-50 transition">
@@ -175,8 +175,8 @@ export default function Sponsors() {
       <div className="space-y-3">
         {sponsors?.length === 0 && <p className="text-gray-500 text-center py-8">No sponsors configured</p>}
         {sponsors?.map(s => (
-          <div key={s.id} className="bg-white p-4 rounded-lg shadow-md flex justify-between items-center">
-            <div>
+          <div key={s.id} className="bg-white p-4 rounded-lg shadow-md flex flex-wrap justify-between items-center gap-3">
+            <div className="min-w-0">
               <h3 className="font-bold">{s.name}</h3>
               <p className="text-sm text-gray-600">
                 {s.length_seconds}s · Priority {s.priority} · {s.insertion_policy.replace(/_/g, ' ')}
