@@ -20,9 +20,26 @@ export const playNext = async (stationId: string, assetId: string) => {
   return res.data;
 };
 
-export const skipCurrent = async (stationId: string) => {
-  const res = await apiClient.post(`/stations/${stationId}/queue/skip`);
+/** How the item on air ends when the operator moves on: cut, quick fade, or long fade. */
+export type SkipFade = 'hard' | 'fade' | 'soft';
+
+export const skipCurrent = async (stationId: string, fade?: SkipFade) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/skip`, null, fade ? { params: { fade } } : undefined);
   return res.data;
+};
+
+export const fireNowRequest = async (stationId: string, assetId: string, clientRequestId: string) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/fire-now`, {
+    asset_id: assetId, mode: 'fade', client_request_id: clientRequestId,
+  });
+  return res.data as { id: string; on_air: boolean; duplicate?: boolean; queue?: unknown };
+};
+
+export const insertAfter = async (stationId: string, assetIds: string[], afterEntryId: string | null) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/insert`, {
+    asset_ids: assetIds, after_entry_id: afterEntryId,
+  });
+  return res.data as { ids: string[]; queue?: unknown };
 };
 
 export const moveUp = async (stationId: string, entryId: string) => {

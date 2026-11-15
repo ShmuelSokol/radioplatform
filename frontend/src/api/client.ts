@@ -15,6 +15,9 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+/** Fired on window when the server refuses an action this login may not take. */
+export const FORBIDDEN_EVENT = 'kbr:forbidden';
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -39,6 +42,9 @@ apiClient.interceptors.response.use(
           window.location.href = isSponsor ? '/sponsor/login' : '/admin/login';
         }
       }
+    }
+    if (error.response?.status === 403 && (originalRequest?.method ?? 'get').toLowerCase() !== 'get') {
+      window.dispatchEvent(new CustomEvent(FORBIDDEN_EVENT));
     }
     return Promise.reject(error);
   }

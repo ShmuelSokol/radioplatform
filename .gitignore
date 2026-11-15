@@ -8,7 +8,7 @@ venv/
 *.egg
 
 # Node
-node_modules/
+node_modules
 frontend/dist/
 
 # Environment
