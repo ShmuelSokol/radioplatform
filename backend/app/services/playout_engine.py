@@ -273,6 +273,15 @@ async def handle_next(db: AsyncSession, station_id, given: list[str] | None = No
     if state.cued_entry_id:
         exclude.add(state.cued_entry_id)
 
+    # Looping: queue the next repeat of the item on air, unless one is already waiting
+    try:
+        from app.api.v1.queue import add_loop_repeat
+
+        await add_loop_repeat(db, station_id, ignore_ids=exclude)
+        await db.commit()
+    except Exception as e:
+        logger.warning("Loop repeat could not be queued: %s", e)
+
     for _ in range(5):
         entry = await pick_next(db, station_id, exclude)
         if entry is None:

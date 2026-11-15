@@ -106,3 +106,60 @@ async def test_intro_length_is_saved_and_shown_in_the_queue(client, auth_headers
     row = next(r for r in queue["entries"] if r["id"] == str(pending.id))
     assert row["asset"]["intro_seconds"] == 12.5
     assert "intro_seconds" in queue["now_playing"]["asset"]
+
+
+async def _finish_current(db_session, station):
+    """Make the item on air reach its end, then let the station advance."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.models.queue_entry import QueueEntry
+
+    res = await db_session.execute(
+        select(QueueEntry).where(
+            QueueEntry.station_id == station.id, QueueEntry.status == "playing"
+        ).execution_options(populate_existing=True)
+    )
+    current = res.scalar_one()
+    current.started_at = datetime.now(UTC) - timedelta(seconds=181)
+    await db_session.commit()
+    entry = await queue_module._check_advance(db_session, station.id)
+    return entry
+
+
+@pytest.mark.asyncio
+async def test_loop_repeats_the_item_on_air_until_switched_off(client, auth_headers, db_session):
+    station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=10.0)
+    looped_asset, other_asset, other_entry = playing.asset_id, pending.asset_id, pending.id
+    url = f"/api/v1/stations/{station.id}/queue/loop"
+
+    body = (await client.post(url, headers=auth_headers, json={"on": True})).json()
+    assert body["loop"] is True and body["asset_id"] == str(looped_asset)
+    assert body["queue"]["loop_asset_id"] == str(looped_asset)
+
+    # It ends twice: both times the same item starts again, the next song keeps waiting
+    for _ in range(2):
+        entry = await _finish_current(db_session, station)
+        assert entry.asset_id == looped_asset and entry.source == "loop"
+
+    # Loop off: the play in progress finishes, then the queue carries on
+    body = (await client.post(url, headers=auth_headers, json={"on": False})).json()
+    assert body["loop"] is False and body["queue"]["loop_asset_id"] is None
+    entry = await _finish_current(db_session, station)
+    assert entry.id == other_entry and entry.asset_id == other_asset
+
+
+@pytest.mark.asyncio
+async def test_next_ends_a_loop(client, auth_headers, db_session):
+    station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=10.0)
+    other_asset = str(pending.asset_id)
+    base = f"/api/v1/stations/{station.id}/queue"
+    await client.post(f"{base}/loop", headers=auth_headers, json={"on": True})
+    await _finish_current(db_session, station)  # one repeat is on air now
+    queue_module._automatic_change.clear()  # the change is long over when Next is pressed
+
+    body = (await client.post(f"{base}/skip", headers=auth_headers)).json()
+    assert body["now_playing"] == other_asset
+    assert body["queue"]["loop_asset_id"] is None
+    assert not [r for r in body["queue"]["entries"] if r["source"] == "loop" and r["status"] == "pending"]
