@@ -114,9 +114,19 @@ class UnplacedSpot(BaseModel):
     reason: str
 
 
+class OffAirWindow(BaseModel):
+    """A blackout inside the look-ahead and how many plays it set aside."""
+
+    name: str
+    start: datetime
+    end: datetime
+    skipped_plays: int
+
+
 class SpotPlanPreview(BaseModel):
     station_id: UUID | str
     timezone: str
     days: int
     planned: list[PlannedSpot]
     unplaced: list[UnplacedSpot]
+    off_air: list[OffAirWindow] = []

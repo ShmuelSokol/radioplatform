@@ -21,4 +21,5 @@ QUERY 2026-11-15 hourly-slots.md Before changing how ad slots at :15/:30/:45 are
 INGEST 2026-11-15 spot-schedules.md Sponsor spot schedules replace the single hardcoded ad-slot asset once any schedule exists; portal history was always empty (nothing wrote PlaySource.AD) and now matches plays by asset.
 INGEST 2026-11-15 sponsorship-copy-review.md Sponsorship wording rules are data (versioned table, manager-editable), never hardcoded in prompts; copy review reads the version in force. Real Claude call not exercised in tests.
 UPDATE 2026-11-15 spot-schedules.md review follow-ups: legacy spot off switch, DST missing times, validation, audio ownership, preview hides past
+UPDATE 2026-11-15 spot-schedules.md planner now keeps spots out of HolidayWindow blackouts; preview reports off_air windows
 INGEST 2026-11-15 (no page) queue_entries/play_logs had no station indexes in prod path (create_all, not alembic); added via main.py migrations + model __table_args__. Fresh-DB create_all currently fails on playback_mode enum default.
