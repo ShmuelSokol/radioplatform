@@ -139,7 +139,7 @@ async def save_rules(db: AsyncSession, rules_text: str, user_id) -> SponsorshipR
 
 _BASIC_PATTERNS: list[tuple[str, str, str]] = [
     (
-        r"\b(call|visit|come (?:in|by|down|on)|stop (?:in|by)|buy|order|shop|hurry|"
+        r"\b(call|visit|come (?:in|by|down|on|to|and)|stop (?:in|by)|buy|order|shop|hurry|"
         r"don'?t miss|sign up|book (?:now|today|your)|try (?:our|the|it)|get yours|act now|"
         r"check (?:out|us))\b",
         "This reads as a call to action. A sponsorship announcement may inform, "
