@@ -32,6 +32,7 @@ from app.models.song_rating import SongRating
 from app.models.raffle import Raffle, RaffleEntry
 from app.models.asset_type import AssetTypeModel
 from app.models.audit_log import AuditLog
+from app.models.sponsorship_rules import SponsorshipRules
 
 __all__ = [
     "User", "UserRole",
@@ -68,4 +69,5 @@ __all__ = [
     "Raffle", "RaffleEntry",
     "AssetTypeModel",
     "AuditLog",
+    "SponsorshipRules",
 ]
