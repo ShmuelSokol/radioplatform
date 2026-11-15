@@ -21,7 +21,19 @@ async def get_now_playing(
     station_id: UUID | str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get current now-playing state for a station."""
+    """Get current now-playing state for a station.
+
+    The listener page polls this when its WebSocket keeps failing, and uses the
+    result as if it were a WebSocket message. A station that plays from its queue
+    keeps no now-playing record, so answer with the same message the WebSocket sends.
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.api.v1.websocket import _cached_queue_now_playing
+
+    queue_payload = await _cached_queue_now_playing(str(station_id), db)
+    if queue_payload is not None:
+        return JSONResponse(queue_payload)
     service = SchedulingService(db)
     record = await service.get_now_playing(station_id)
     return record

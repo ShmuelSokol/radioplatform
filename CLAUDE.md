@@ -449,6 +449,9 @@ cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/con
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 
+# Many stations x many listeners: does everyone switch songs together? (see wiki/multi-station-load.md)
+cd backend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... uv run python loadtests/multi_station.py --base http://localhost:8000 --listeners 150
+
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com
 

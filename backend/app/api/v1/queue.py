@@ -1,15 +1,17 @@
 import asyncio
+import json
 import logging
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, Response
 
 from app.config import settings
 from app.core.dependencies import (
@@ -877,28 +879,67 @@ async def get_queue(
     # Pure read-only — advancement is handled by the background scheduler.
 
     try:
-        return await _get_queue_impl(station_id, limit, db)
+        body = await _get_queue_impl(station_id, limit, db)
+        # Thousands of plain entries: encode them directly. FastAPI's generic
+        # encoder walks every value in Python and was a tenth of the server's CPU
+        # with a few control rooms open. Only now_playing holds a database object.
+        body["now_playing"] = jsonable_encoder(body["now_playing"])
+        return Response(json.dumps(body, default=_json_default), media_type="application/json")
     except Exception as exc:
         logger.exception("Queue GET error for station %s: %s", station_id, exc)
         return {"entries": [], "total": 0, "now_playing": None,
                 "queue_duration_seconds": 0, "preempt_fade_ms": 2000}
 
 
-async def _get_queue_impl(station_id, limit, db):
-    from sqlalchemy.orm import joinedload, noload
+def _json_default(value):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    return jsonable_encoder(value)
 
+
+async def _get_queue_impl(station_id, limit, db):
+    from types import SimpleNamespace
+
+    from sqlalchemy.orm import noload
+
+    # The control room polls this every few seconds for a queue that runs days
+    # ahead (thousands of rows). Reading plain columns instead of ORM objects is
+    # several times cheaper, and this read changes nothing, so it needs no
+    # identity map. Only the columns used below are fetched.
+    entry_cols = (
+        QueueEntry.id, QueueEntry.station_id, QueueEntry.asset_id, QueueEntry.position,
+        QueueEntry.status, QueueEntry.started_at, QueueEntry.preempt_at,
+        QueueEntry.source, QueueEntry.timing_mode,
+    )
+    asset_cols = (
+        Asset.id, Asset.title, Asset.artist, Asset.duration, Asset.intro_seconds,
+        Asset.asset_type, Asset.category,
+    )
     result = await db.execute(
-        select(QueueEntry)
-        # The response only uses asset columns: skip the station, its channels and
-        # the asset categories, which otherwise cost three extra queries per call.
-        .options(
-            joinedload(QueueEntry.asset).noload(Asset.categories),
-            noload(QueueEntry.station),
-        )
+        select(*entry_cols, *asset_cols)
+        .select_from(QueueEntry)
+        .outerjoin(Asset, QueueEntry.asset_id == Asset.id)
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
         .order_by(QueueEntry.position)
     )
-    entries = list(result.unique().scalars().all())
+    n = len(entry_cols)
+    entry_names = [c.key for c in entry_cols]
+    asset_names = [c.key for c in asset_cols]
+    entries = []
+    for row in result.all():
+        e = SimpleNamespace(**dict(zip(entry_names, row[:n])))
+        e.asset = SimpleNamespace(**dict(zip(asset_names, row[n:]))) if row[n] is not None else None
+        entries.append(e)
+    # The now-playing block returns the whole asset record: load that one fully.
+    for e in entries:
+        if e.status == "playing" and e.asset is not None:
+            e.asset = (
+                await db.execute(
+                    select(Asset).options(noload(Asset.categories)).where(Asset.id == e.asset.id)
+                )
+            ).scalar_one()
 
     # Compute total queue duration from ALL entries (before limit truncation)
     total_queue_duration = sum(

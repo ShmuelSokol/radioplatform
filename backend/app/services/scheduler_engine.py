@@ -676,12 +676,28 @@ class SchedulerEngine:
         self, db: AsyncSession, station_id, entry, change_fade_seconds: float | None = None
     ):
         """Broadcast an expanded now_playing update for a queue entry, including analysis data + next track."""
+        payload = await self.queue_entry_payload(db, station_id, entry, change_fade_seconds, push=True)
+        if payload is None:
+            return
+        try:
+            from app.api.v1.websocket import broadcast_now_playing_update
+            await broadcast_now_playing_update(str(station_id), payload)
+        except Exception as e:
+            logger.error("Failed to broadcast expanded WS update: %s", e)
+
+    async def queue_entry_payload(
+        self, db: AsyncSession, station_id, entry, change_fade_seconds: float | None = None,
+        push: bool = False,
+    ) -> dict | None:
+        """The now_playing message for a queue entry: analysis data + next track.
+        Also what a listener gets on connecting, so both always agree.
+        `push` also pre-queues the next track in Liquidsoap (broadcasts only)."""
         from sqlalchemy.orm import joinedload
         from app.models.queue_entry import QueueEntry
 
         asset = entry.asset
         if not asset:
-            return
+            return None
 
         # Get audio analysis data (defaults if missing)
         analysis = {}
@@ -736,7 +752,8 @@ class SchedulerEngine:
             }
 
             # Pre-queue next track in Liquidsoap for gapless transitions
-            await self._push_to_liquidsoap(na_audio_url, station_id)
+            if push:
+                await self._push_to_liquidsoap(na_audio_url, station_id)
 
         # Build audio URL for current asset
         from app.config import settings as app_settings
@@ -748,37 +765,33 @@ class SchedulerEngine:
             bucket = app_settings.SUPABASE_STORAGE_BUCKET
             audio_url = f"{app_settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
 
-        try:
-            from app.api.v1.websocket import broadcast_now_playing_update
-            await broadcast_now_playing_update(str(station_id), {
-                "station_id": str(station_id),
-                "asset_id": str(asset.id),
-                "started_at": entry.started_at.isoformat() if entry.started_at else None,
-                "ends_at": (entry.started_at + timedelta(seconds=(asset.duration or 180.0))).isoformat() if entry.started_at else None,
-                "stream_url": settings.public_stream_url(station_id),
-                "asset": {
-                    "title": asset.title,
-                    "artist": asset.artist,
-                    "album": asset.album,
-                    "album_art_path": asset.album_art_path,
-                    "audio_url": audio_url,
-                    "cue_in": cue_in,
-                    "intro_seconds": asset.intro_seconds,
-                    "cue_out": cue_out,
-                    "cross_start": cross_start,
-                    "replay_gain_db": replay_gain_db,
-                },
-                "next_asset": next_asset_data,
-                # Set only on the message that announces an operator's Next: how long the
-                # outgoing item fades (hard / fade / soft). Absent = the player's default.
-                **(
-                    {"change_fade_seconds": change_fade_seconds}
-                    if change_fade_seconds is not None
-                    else {}
-                ),
-            })
-        except Exception as e:
-            logger.error("Failed to broadcast expanded WS update: %s", e)
+        return {
+            "station_id": str(station_id),
+            "asset_id": str(asset.id),
+            "started_at": entry.started_at.isoformat() if entry.started_at else None,
+            "ends_at": (entry.started_at + timedelta(seconds=(asset.duration or 180.0))).isoformat() if entry.started_at else None,
+            "stream_url": settings.public_stream_url(station_id),
+            "asset": {
+                "title": asset.title,
+                "artist": asset.artist,
+                "album": asset.album,
+                "album_art_path": asset.album_art_path,
+                "audio_url": audio_url,
+                "cue_in": cue_in,
+                "intro_seconds": asset.intro_seconds,
+                "cue_out": cue_out,
+                "cross_start": cross_start,
+                "replay_gain_db": replay_gain_db,
+            },
+            "next_asset": next_asset_data,
+            # Set only on the message that announces an operator's Next: how long the
+            # outgoing item fades (hard / fade / soft). Absent = the player's default.
+            **(
+                {"change_fade_seconds": change_fade_seconds}
+                if change_fade_seconds is not None
+                else {}
+            ),
+        }
 
     async def _check_station(self, db: AsyncSession, station: Station):
         """Check a single station and advance playback if needed."""

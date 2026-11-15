@@ -38,7 +38,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 def setup_middleware(app: FastAPI) -> None:
     # GZip compression for responses > 500 bytes
-    app.add_middleware(GZipMiddleware, minimum_size=500)
+    # Level 5, not the default 9: nearly the same size for JSON at a fraction of the
+    # CPU (the control room fetches a days-long queue every few seconds).
+    app.add_middleware(GZipMiddleware, minimum_size=500, compresslevel=5)
 
     # Security headers
     app.add_middleware(SecurityHeadersMiddleware)
