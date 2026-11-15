@@ -1,5 +1,5 @@
+import asyncio
 import logging
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -10,15 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.core.dependencies import get_current_user, require_dj_or_manager, require_manager
+from app.core.dependencies import require_dj_or_manager, require_manager, require_staff
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
-from app.models.station import Station
 from app.models.user import User
-from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueEntryOut, QueueListResponse, QueueReorder
+from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueReorder
 
 from app.models.holiday_window import HolidayWindow
 
@@ -497,6 +496,24 @@ async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
     await service.replenish()
 
 
+_advance_locks: dict[str, asyncio.Lock] = {}
+
+
+def advance_lock(station_id) -> asyncio.Lock:
+    """One track change at a time per station.
+
+    The 3s poll, the precise timer and the Next button each use their own DB session.
+    Without this, two of them can read the same playing entry at the same moment and
+    each promote a different pending entry: one item is marked playing, replaced a
+    moment later and never heard.
+    """
+    key = str(station_id)
+    lock = _advance_locks.get(key)
+    if lock is None:
+        lock = _advance_locks[key] = asyncio.Lock()
+    return lock
+
+
 async def _check_advance(
     db: AsyncSession, station_id: uuid.UUID, early_seconds: float = 0.0
 ) -> QueueEntry | None:
@@ -505,16 +522,26 @@ async def _check_advance(
     `early_seconds` lets the precise timer advance at the crossfade point instead of
     the very end of the track (see SchedulerEngine._precise_advance).
     """
+    async with advance_lock(station_id):
+        return await _check_advance_locked(db, station_id, early_seconds)
+
+
+async def _check_advance_locked(
+    db: AsyncSession, station_id: uuid.UUID, early_seconds: float = 0.0
+) -> QueueEntry | None:
     is_blackout = await _is_blacked_out(db, station_id)
 
     # Hourly jingles and weather are now pre-scheduled via _schedule_hourly_announcements()
     # in queue_replenish_service.py with exact preempt_at timestamps.
     # The old real-time insertion functions are disabled to prevent duplicates.
 
+    # populate_existing: this session may have loaded these rows before another
+    # advance changed them; read their committed state, not the cached one.
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
         .order_by(QueueEntry.started_at.desc().nullslast())
+        .execution_options(populate_existing=True)
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
@@ -601,7 +628,10 @@ async def _check_advance(
         # Fall through to find the next real song below
 
     else:
-        elapsed = (now_utc - current.started_at).total_seconds()
+        started = current.started_at
+        if started.tzinfo is None:  # SQLite returns naive datetimes
+            started = started.replace(tzinfo=timezone.utc)
+        elapsed = (now_utc - started).total_seconds()
         # Small tolerance so a timer that fires a few ms early still advances
         if elapsed < duration - max(0.0, early_seconds) - 0.05:
             return current  # still playing
@@ -685,10 +715,9 @@ async def get_queue(
     station_id: uuid.UUID,
     limit: int = Query(2000, ge=1, le=5000),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     # Pure read-only — advancement is handled by the background scheduler.
-    from sqlalchemy.orm import joinedload
 
     try:
         return await _get_queue_impl(station_id, limit, db)
@@ -979,7 +1008,7 @@ async def get_play_log(
     station_id: uuid.UUID,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Get recent play history."""
     from sqlalchemy.orm import selectinload
@@ -1013,7 +1042,7 @@ async def get_play_log(
 async def get_last_played(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Get the most recent play time for each asset."""
     result = await db.execute(
@@ -1111,10 +1140,17 @@ async def skip_current(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    # Same lock as the automatic advance, so Next cannot collide with a song change
+    async with advance_lock(station_id):
+        return await _skip_current_locked(station_id, db)
+
+
+async def _skip_current_locked(station_id: uuid.UUID, db: AsyncSession):
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
         .order_by(QueueEntry.started_at.desc().nullslast())
+        .execution_options(populate_existing=True)
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
@@ -1179,10 +1215,24 @@ async def skip_current(
         next_asset_id = next_entry.asset_id
         await db.commit()
         await _broadcast_now_playing_entry(db, station_id, next_id)
-        return {"message": "Skipped", "now_playing": str(next_asset_id)}
+        return {
+            "message": "Skipped",
+            "now_playing": str(next_asset_id),
+            "queue": await _queue_after_action(db, station_id),
+        }
 
     await db.commit()
-    return {"message": "Queue empty", "now_playing": None}
+    return {"message": "Queue empty", "now_playing": None, "queue": await _queue_after_action(db, station_id)}
+
+
+async def _queue_after_action(db: AsyncSession, station_id) -> dict | None:
+    """The same body as GET /queue, returned with an action's response so the
+    client does not need a second request to show the result."""
+    try:
+        return await _get_queue_impl(station_id, 2000, db)
+    except Exception as exc:
+        logger.warning("Queue snapshot after action failed: %s", exc)
+        return None
 
 
 async def _broadcast_now_playing_entry(db: AsyncSession, station_id, entry_id) -> None:
@@ -1469,10 +1519,13 @@ async def start_playback(
         sid = str(silence_asset.id) if silence_asset else None
         return {"message": f"Blackout active — {count} silence entries queued", "now_playing": sid}
 
+    # populate_existing: this session may have loaded these rows before another
+    # advance changed them; read their committed state, not the cached one.
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
         .order_by(QueueEntry.started_at.desc().nullslast())
+        .execution_options(populate_existing=True)
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
@@ -1520,7 +1573,7 @@ async def start_playback(
 async def preview_weather(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Generate (or return cached) weather + time TTS for preview — does NOT insert into queue."""
     if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
@@ -1645,7 +1698,7 @@ async def schedule_hourly(
         )
     )
     count = result.scalar() or 0
-    return {"message": f"Hourly scheduling complete", "preempt_entries": count}
+    return {"message": "Hourly scheduling complete", "preempt_entries": count}
 
 
 @router.post("/force-replenish")

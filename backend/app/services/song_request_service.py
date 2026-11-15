@@ -2,7 +2,7 @@
 
 import re
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
 from sqlalchemy import func, select

@@ -1,5 +1,4 @@
 import json
-import uuid
 
 import redis.asyncio as aioredis
 

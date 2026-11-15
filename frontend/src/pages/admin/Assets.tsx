@@ -89,7 +89,7 @@ function DownloadButton({ assetId, title }: { assetId: string; title: string }) 
       <button
         onClick={() => { setOpen(!open); setError(null); }}
         disabled={downloading}
-        className="text-blue-600 hover:text-blue-800 text-sm disabled:opacity-50"
+        className="text-blue-600 hover:text-blue-800 text-xs disabled:opacity-50"
       >
         {downloading ? <><Spinner className="mr-1" />Processing...</> : 'Download'}
       </button>
@@ -150,7 +150,7 @@ function PlayButton({ assetId, title, audioRef, playingId, setPlayingId }: {
     <button
       onClick={handlePlay}
       disabled={loading}
-      className={`text-sm ${isPlaying ? 'text-green-600 hover:text-green-800 font-medium' : 'text-emerald-600 hover:text-emerald-800'} disabled:opacity-50`}
+      className={`text-xs ${isPlaying ? 'text-green-600 hover:text-green-800 font-medium' : 'text-emerald-600 hover:text-emerald-800'} disabled:opacity-50`}
       title={isPlaying ? `Stop ${title}` : `Play ${title}`}
     >
       {loading ? '...' : isPlaying ? 'Stop' : 'Play'}
@@ -579,31 +579,31 @@ export default function Assets() {
                   className="rounded border-gray-300"
                 />
               </th>
-              <th className="w-10 px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase">Audio</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{ width: '22%' }}>Title</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{ width: '14%' }}>Artist</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{ width: '12%' }}>Album</th>
-              <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-              <th className="w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-              <th className="w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Format</th>
-              <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
-              <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{ width: '14%' }}>Actions</th>
+              <th className="hidden md:table-cell w-10 px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase">Audio</th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase md:w-[22%]">Title</th>
+              <th className="hidden md:table-cell px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase md:w-[14%]">Artist</th>
+              <th className="hidden lg:table-cell px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase lg:w-[12%]">Album</th>
+              <th className="hidden md:table-cell w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+              <th className="hidden md:table-cell w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+              <th className="w-14 md:w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase"><span className="md:hidden">Len</span><span className="hidden md:inline">Duration</span></th>
+              <th className="hidden lg:table-cell w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Format</th>
+              <th className="hidden lg:table-cell w-24 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
+              <th className="w-24 md:w-48 px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
             {/* Filter row — inline search per column */}
             <tr className="bg-gray-100 border-t border-gray-200">
               <th className="w-8 px-2 py-1" />
-              <th className="w-10 px-1 py-1" />
-              <th className="px-2 py-1" style={{ width: '22%' }}>
+              <th className="hidden md:table-cell w-10 px-1 py-1" />
+              <th className="px-2 py-1 md:w-[22%]">
                 <ColumnFilter value={titleSearch} onChange={setTitleSearch} options={titleOptions} placeholder="Search title..." />
               </th>
-              <th className="px-2 py-1" style={{ width: '14%' }}>
+              <th className="hidden md:table-cell px-2 py-1 md:w-[14%]">
                 <ColumnFilter value={artistSearch} onChange={setArtistSearch} options={artistOptions} placeholder="Search artist..." />
               </th>
-              <th className="px-2 py-1" style={{ width: '12%' }}>
+              <th className="hidden lg:table-cell px-2 py-1 lg:w-[12%]">
                 <ColumnFilter value={albumSearch} onChange={setAlbumSearch} options={albumOptions} placeholder="Search album..." />
               </th>
-              <th className="w-20 px-2 py-1">
+              <th className="hidden md:table-cell w-20 px-2 py-1">
                 <select
                   value={categoryFilter}
                   onChange={(e) => setCategoryFilter(e.target.value)}
@@ -615,7 +615,7 @@ export default function Assets() {
                   ))}
                 </select>
               </th>
-              <th className="w-16 px-2 py-1">
+              <th className="hidden md:table-cell w-16 px-2 py-1">
                 <select
                   value={typeFilter}
                   onChange={(e) => setTypeFilter(e.target.value)}
@@ -627,15 +627,17 @@ export default function Assets() {
                   ))}
                 </select>
               </th>
-              <th className="w-28 px-1 py-1">
+              <th className="w-14 md:w-28 px-1 py-1">
+                <div className="hidden md:block">
                 <div className="flex gap-1">
                   <input type="text" value={durationMin} onChange={(e) => setDurationMin(e.target.value)} placeholder="e.g. 3:00" title="Min duration — enter m:ss (3:00) or minutes (3)" className="w-1/2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
                   <input type="text" value={durationMax} onChange={(e) => setDurationMax(e.target.value)} placeholder="e.g. 6:30" title="Max duration — enter m:ss (6:30) or minutes (6)" className="w-1/2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 </div>
+                </div>
               </th>
-              <th className="w-14 px-2 py-1" />
-              <th className="w-20 px-2 py-1" />
-              <th className="px-2 py-1" style={{ width: '14%' }} />
+              <th className="hidden lg:table-cell w-14 px-2 py-1" />
+              <th className="hidden lg:table-cell w-24 px-2 py-1" />
+              <th className="w-24 md:w-48 px-2 py-1" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -651,20 +653,26 @@ export default function Assets() {
                     title={hasRealAudio(asset.file_path) ? '' : 'No audio file — cannot select'}
                   />
                 </td>
-                <td className="px-1 py-2 text-center">
+                <td className="hidden md:table-cell px-1 py-2 text-center">
                   {hasRealAudio(asset.file_path) ? (
                     <span className="inline-block w-2 h-2 rounded-full bg-green-500" title="Has audio file" />
                   ) : (
                     <span className="inline-block w-2 h-2 rounded-full bg-gray-300" title="No audio file (seed data)" />
                   )}
                 </td>
-                <td className="px-2 py-2 font-medium text-sm truncate" title={asset.title}>{asset.title}</td>
-                <td className="px-2 py-2 text-sm text-gray-500 truncate" title={asset.artist ?? ''}>{asset.artist ?? '--'}</td>
-                <td className="px-2 py-2 text-sm text-gray-500 truncate" title={asset.album ?? ''}>{asset.album ?? '--'}</td>
-                <td className="px-2 py-2 text-sm truncate">
+                <td className="px-2 py-2 font-medium text-sm md:truncate" title={asset.title}>
+                  <span className="line-clamp-2 md:line-clamp-none md:inline break-words">{asset.title}</span>
+                  {/* Phones hide the other columns, so carry the essentials under the title */}
+                  <span className="md:hidden block text-xs font-normal text-gray-500 truncate">
+                    {asset.artist ? `${asset.artist} · ` : ''}{asset.asset_type}{asset.category ? ` · ${asset.category}` : ''}
+                  </span>
+                </td>
+                <td className="hidden md:table-cell px-2 py-2 text-sm text-gray-500 truncate" title={asset.artist ?? ''}>{asset.artist ?? '--'}</td>
+                <td className="hidden lg:table-cell px-2 py-2 text-sm text-gray-500 truncate" title={asset.album ?? ''}>{asset.album ?? '--'}</td>
+                <td className="hidden md:table-cell px-2 py-2 text-sm truncate">
                   <AssetCategoryBadge assetId={asset.id} category={asset.category} />
                 </td>
-                <td className="px-2 py-2 text-xs text-gray-500 truncate">
+                <td className="hidden md:table-cell px-2 py-2 text-xs text-gray-500 truncate">
                   {asset.asset_type}
                   {asset.asset_type === 'spot' && (
                     <span className="ml-1">
@@ -673,12 +681,12 @@ export default function Assets() {
                   )}
                 </td>
                 <td className="px-2 py-2 text-xs text-gray-500">{formatDuration(asset.duration)}</td>
-                <td className="px-2 py-2 text-xs text-gray-400 uppercase">{getFileFormat(asset.file_path)}</td>
-                <td className="px-2 py-2 text-xs text-gray-500">{formatDate(asset.created_at)}</td>
-                <td className="px-2 py-2 text-right space-x-2">
+                <td className="hidden lg:table-cell px-2 py-2 text-xs text-gray-400 uppercase">{getFileFormat(asset.file_path)}</td>
+                <td className="hidden lg:table-cell px-2 py-2 text-xs text-gray-500 whitespace-nowrap">{formatDate(asset.created_at)}</td>
+                <td className="px-2 py-2 text-right space-x-2 whitespace-nowrap">
                   <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
                   <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-xs">View</Link>
-                  <DownloadButton assetId={asset.id} title={asset.title} />
+                  <span className="hidden md:inline"><DownloadButton assetId={asset.id} title={asset.title} /></span>
                   <button
                     onClick={() => {
                       setDeletingId(asset.id);
@@ -687,7 +695,7 @@ export default function Assets() {
                       });
                     }}
                     disabled={deletingId === asset.id}
-                    className="text-red-600 hover:text-red-800 text-xs disabled:opacity-50"
+                    className="hidden md:inline text-red-600 hover:text-red-800 text-xs disabled:opacity-50"
                   >
                     {deletingId === asset.id ? '...' : 'Del'}
                   </button>

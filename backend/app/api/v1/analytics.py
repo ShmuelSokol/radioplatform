@@ -5,13 +5,12 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, case, extract
+from sqlalchemy import func, select, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_db, require_manager
 from app.models.asset import Asset
 from app.models.play_log import PlayLog
-from app.models.sponsor import Sponsor
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -187,6 +186,7 @@ async def analytics_summary(
     # Total airtime (seconds)
     stmt = (
         select(func.sum(Asset.duration))
+        .select_from(PlayLog)
         .join(Asset, PlayLog.asset_id == Asset.id)
         .where(*base_filter)
     )

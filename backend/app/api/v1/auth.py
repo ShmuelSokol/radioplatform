@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import func
 
+from app.config import settings
 from app.core.dependencies import get_current_user, require_admin
 from app.core.security import hash_password
 from app.db.session import get_db
@@ -44,6 +44,17 @@ async def me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+def _seed_password() -> str:
+    """Password for seeded accounts, from ADMIN_SEED_PASSWORD. Never hard-coded."""
+    from fastapi import HTTPException
+    if not settings.ADMIN_SEED_PASSWORD:
+        raise HTTPException(
+            status_code=503,
+            detail="Set the ADMIN_SEED_PASSWORD environment variable before seeding accounts",
+        )
+    return settings.ADMIN_SEED_PASSWORD
+
+
 @router.post("/seed", status_code=201)
 async def seed_admin(db: AsyncSession = Depends(get_db)):
     """
@@ -64,7 +75,7 @@ async def seed_admin(db: AsyncSession = Depends(get_db)):
     admin = User(
         id=uuid.uuid4(),
         email="admin",
-        hashed_password=hash_password("613Radio"),
+        hashed_password=hash_password(_seed_password()),
         role=UserRole.ADMIN,
         display_name="Admin",
         is_active=True,
@@ -84,7 +95,7 @@ async def seed_reset_admin(
     existing = result.scalar_one_or_none()
     if existing:
         existing.email = "admin"
-        existing.hashed_password = hash_password("613Radio")
+        existing.hashed_password = hash_password(_seed_password())
         existing.is_active = True
         await db.commit()
         return {"message": "Admin user updated", "email": existing.email}
@@ -200,6 +211,13 @@ SAMPLE_RULES = [
 @router.post("/seed-all", status_code=201)
 async def seed_all(db: AsyncSession = Depends(get_db), _admin: "User" = Depends(require_admin)):
     """Drop all data and re-seed everything: admin, station, assets, rules."""
+    if settings.APP_ENV == "production" and not settings.ALLOW_DESTRUCTIVE_SEED:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=403,
+            detail="seed-all deletes the whole library and is disabled in production (set ALLOW_DESTRUCTIVE_SEED=true to override)",
+        )
+    seed_pw = _seed_password()
     # Clear existing data
     await db.execute(text("DELETE FROM queue_entries"))
     await db.execute(text("DELETE FROM schedule_rules"))
@@ -211,16 +229,16 @@ async def seed_all(db: AsyncSession = Depends(get_db), _admin: "User" = Depends(
     admin = result.scalar_one_or_none()
     if not admin:
         admin = User(
-            id=uuid.uuid4(), email="admin", hashed_password=hash_password("613Radio"),
+            id=uuid.uuid4(), email="admin", hashed_password=hash_password(_seed_password()),
             role=UserRole.ADMIN, display_name="Admin", is_active=True,
         )
         db.add(admin)
 
     # Create sample users
     sample_users = [
-        {"email": "manager1", "password": "manager123", "role": UserRole.MANAGER, "display_name": "Sarah Cohen"},
-        {"email": "dj_moshe", "password": "moshe123", "role": UserRole.MANAGER, "display_name": "Moshe Levy"},
-        {"email": "viewer1", "password": "view123", "role": UserRole.VIEWER, "display_name": "David Klein"},
+        {"email": "manager1", "password": seed_pw, "role": UserRole.MANAGER, "display_name": "Sarah Cohen"},
+        {"email": "dj_moshe", "password": seed_pw, "role": UserRole.MANAGER, "display_name": "Moshe Levy"},
+        {"email": "viewer1", "password": seed_pw, "role": UserRole.VIEWER, "display_name": "David Klein"},
     ]
     for u in sample_users:
         exists = await db.execute(select(User).where(User.email == u["email"]))

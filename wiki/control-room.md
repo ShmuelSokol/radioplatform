@@ -7,6 +7,7 @@ HotButtons, SidePanels = Played / Schedule / Go live).
 Things the code alone will not tell you:
 
 - **One file decides what "fire now" and "insert here" mean:** `frontend/src/api/liveControl.ts`.
+- **Sends show up at once:** `send()` in `Dashboard.tsx` adds a placeholder row to the cached queue (`hooks/queueOptimistic.ts`, id prefix `optimistic-`) before calling `liveControl`, restores the old queue on error and refetches when the call settles. "Fire now" is not optimistic because the engine decides what is on air.
   Today they are composed from existing queue endpoints (fire now = `play-next` then `skip`;
   insert at a point = `add` then `reorder-dnd` to the target position). They are two calls,
   not atomic. When the playout engine ships real endpoints, change only that file.

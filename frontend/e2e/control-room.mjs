@@ -4,6 +4,7 @@
  *
  *   cd frontend && npm run build && npx vite preview --port 4173 &
  *   node e2e/control-room.mjs            # optional: BASE_URL, SHOTS_DIR, UI_VERSION=v2
+ *   API_DELAY_MS=300 node e2e/control-room.mjs   # slow fake server: also checks sends show up at once
  *
  * Exits non-zero if any check fails.
  */
@@ -16,6 +17,7 @@ const { chromium, devices } = createRequire(import.meta.url)('playwright');
 const BASE = process.env.BASE_URL || 'http://localhost:4173';
 const SHOTS = process.env.SHOTS_DIR || '';
 const SID = 'st-1';
+const DELAY = Number(process.env.API_DELAY_MS || 0);
 let failures = 0;
 const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
@@ -124,6 +126,7 @@ async function open(browser, contextOpts) {
     let body = null;
     try { body = req.postDataJSON(); } catch { /* none */ }
     const data = backend.handle(req.method(), path, Object.fromEntries(url.searchParams), body);
+    if (DELAY) await new Promise(r => setTimeout(r, DELAY));
     await route.fulfill({ status: data === null ? 204 : 200, contentType: 'application/json', body: data === null ? '' : JSON.stringify(data) });
   });
   await page.goto(`${BASE}/admin/dashboard`);
@@ -177,8 +180,20 @@ async function desktop(browser, width, height) {
   // Play next from the library
   await page.getByRole('searchbox').fill('Song number 100');
   await page.waitForFunction(() => { const rows = document.querySelectorAll('[data-testid=library-row]'); return rows.length === 1 && /Song number 100 /.test(rows[0].textContent); });
-  await page.getByTestId('library-row').first().getByRole('button', { name: 'Next', exact: true }).click();
-  await page.waitForTimeout(400);
+  const shownMs = await page.evaluate(() => new Promise((resolve) => {
+    const btn = [...document.querySelector('[data-testid=library-row]').querySelectorAll('button')].find(b => b.textContent.trim() === 'Next');
+    const t0 = performance.now();
+    btn.click();
+    const look = () => {
+      const second = document.querySelectorAll('[data-testid=queue-row]')[1];
+      if (/Song number 100 /.test(second?.textContent || '')) resolve(Math.round(performance.now() - t0));
+      else if (performance.now() - t0 > 5000) resolve(-1);
+      else requestAnimationFrame(look);
+    };
+    requestAnimationFrame(look);
+  }));
+  if (DELAY >= 200) check(`${tag}: "Next" shows in the queue before the slow server answers`, shownMs >= 0 && shownMs < DELAY, `${shownMs} ms with a ${DELAY} ms server`);
+  await page.waitForTimeout(400 + DELAY * 3);
   check(`${tag}: "Next" on a library song queues it right after the current item`, backend.order()[1] === 'm100');
 
   // Instant button, play-now mode
@@ -215,8 +230,10 @@ async function desktop(browser, width, height) {
   check(`${tag}: go-live panel shows the form and scheduled shows`, await page.getByRole('button', { name: /Go live/ }).count() > 0 && await page.getByText('Thursday Night Live').count() === 1);
   await shot(page, `${width}-4-go-live`);
   await page.getByRole('tab', { name: 'Played' }).click();
+  await page.getByText('Earlier song').first().waitFor({ timeout: 5000 }).catch(() => {});
   check(`${tag}: played log shows`, await page.getByText('Earlier song').count() === 1);
   await page.getByRole('tab', { name: 'Schedule' }).click();
+  await page.getByText('Afternoon music').first().waitFor({ timeout: 5000 }).catch(() => {});
   check(`${tag}: schedule status shows`, await page.getByText('Afternoon music').count() === 1);
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();

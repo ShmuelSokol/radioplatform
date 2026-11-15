@@ -7,11 +7,9 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import func as sql_func
 
 from app.config import settings
 from app.db.session import get_db
@@ -583,7 +581,9 @@ class SchedulerEngine:
                 # Calculate remaining time from started_at
                 elapsed = (datetime.now(timezone.utc) - entry.started_at).total_seconds()
                 remaining = duration - elapsed
-                if remaining > 0:
+                # Past the crossfade point the timer has already fired; arming it again
+                # (with a delay of 0) would only start a second advance.
+                if remaining > cross_seconds:
                     self._schedule_precise_advance(station_id, remaining, cross_seconds)
 
                 # Push current track to Liquidsoap
@@ -887,7 +887,6 @@ class SchedulerEngine:
                 "started_at": now_playing.started_at.isoformat(),
                 "ends_at": now_playing.ends_at.isoformat() if now_playing.ends_at else None,
                 "listener_count": now_playing.listener_count,
-                "stream_url": now_playing.stream_url,
                 "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
                 "asset": {
                     "title": asset.title,

@@ -57,7 +57,7 @@ export default function CallScreener() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto py-6 px-4">
+    <div className="w-full">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

@@ -114,6 +114,7 @@ radioplatform/
 | ChannelStream | channel_stream.py | Stream configuration |
 | Sponsor | sponsor.py | Sponsor/ad management (linked to User via user_id) |
 | SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
+| SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
 | PlaylistTemplate | playlist_template.py | Rotation pattern templates |
@@ -151,6 +152,7 @@ radioplatform/
 | playlists | playlists.py | /playlists |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
 | spot_schedules | spot_schedules.py | /spot-schedules |
+| spot_recordings | spot_recordings.py | /spot-recordings |
 | copy_review | copy_review.py | /sponsorship (rules + copy review) |
 | campaigns | campaigns.py | /campaigns |
 | billing | billing.py | /billing |
@@ -176,7 +178,9 @@ radioplatform/
 | scheduling.py | Schedule resolution logic |
 | scheduler_engine.py | Background scheduling engine |
 | queue_replenish_service.py | Auto-replenish playback queue |
+| schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
 | spot_schedule_service.py | Plans sponsor spots into clock slots and keeps pending `ad_slot` queue entries in step (see `wiki/spot-schedules.md`) |
+| spot_voice_service.py | Makes spot audio from a script; Shprach call is a stub, placeholder tones until wired (see `wiki/spot-recordings.md`) |
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots (ElevenLabs is the fallback) |
@@ -207,7 +211,9 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsor/ad management
+- ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
 - SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead
+- SpotRecordings.tsx — Record Spots: write a script, make or upload audio, listen, approve into the library
 - SponsorshipRules.tsx — Edit the sponsorship wording rules (versioned) and try the wording check
 - Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
@@ -276,7 +282,9 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
+- `/admin/schedule-check` → ScheduleCheck (protected)
 - `/admin/spot-schedule` → SpotSchedules (protected)
+- `/admin/spot-recordings` → SpotRecordings (protected)
 - `/admin/sponsorship-rules` → SponsorshipRules (protected)
 - `/admin/playlists` → Playlists (protected)
 - `/admin/alerts` → Alerts (protected)
@@ -323,7 +331,8 @@ Claude Code accessible over Telegram for remote development.
 
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
-- **Auth**: JWT Bearer tokens. Roles: admin, manager, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor).
+- **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`.
+- **Page layout**: admin and sponsor pages fill the window; no `max-w-* mx-auto` page wrappers. Rules in `wiki/admin-page-layout.md`.
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
 - **DB Sessions**: Import `get_db` from `app.db.session` (not `get_async_session`).
@@ -338,6 +347,8 @@ Claude Code accessible over Telegram for remote development.
 |----------|-------------|----------|
 | `DATABASE_URL` | Supabase PostgreSQL pooler URI | Yes |
 | `JWT_SECRET_KEY` | Secret for JWT signing | Yes |
+| `ADMIN_SEED_PASSWORD` | Password for accounts created by `/auth/seed` (unset = seeding refused) | First-time setup |
+| `ALLOW_DESTRUCTIVE_SEED` | Allow `/auth/seed-all` (wipes data) in production | No |
 | `CORS_ORIGINS` | JSON array of allowed origins | Yes |
 | `APP_ENV` | "production" | Yes |
 | `APP_DEBUG` | "false" in production | No |
@@ -375,9 +386,11 @@ Claude Code accessible over Telegram for remote development.
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://api.kbrlive.com/api/v1)
 
-## Default Credentials
-- Admin: `admin` / `613Radio`
-- Seed endpoint: `POST /api/v1/auth/seed` (creates or updates admin user)
+## Credentials
+- **Never write a password, key or token in this repository. It is public.**
+- There is no default admin password. `POST /api/v1/auth/seed` (first-time setup only) creates the `admin` account with the password in the `ADMIN_SEED_PASSWORD` environment variable and refuses if it is unset.
+- `POST /api/v1/auth/seed-all` deletes the whole library, stations and rules before re-seeding. It is refused in production unless `ALLOW_DESTRUCTIVE_SEED=true`.
+- Scripts and load tests read `KBR_ADMIN_EMAIL` / `KBR_ADMIN_PASSWORD` from the environment.
 
 ## Known Gotchas
 - **ALWAYS verify live site after deploy**: After deploying, test the live URLs (frontend + backend health + key API endpoints) to confirm the site works. Don't assume deploys succeed — check `curl https://api.kbrlive.com/health` and try loading key frontend pages.
@@ -412,6 +425,10 @@ Claude Code accessible over Telegram for remote development.
 # Run backend tests locally (SQLite, no external services needed)
 cd backend && uv run pytest tests/ -v
 
+# Lint (both run in CI and must stay green; style-only ruff rules are switched off in pyproject.toml)
+cd backend && uv run ruff check app/ tests/
+cd frontend && npm run lint
+
 # Deploy backend to Vercel
 cd backend && npx vercel --prod --yes
 
@@ -420,6 +437,9 @@ cd frontend && npx vercel --prod --yes
 
 # Browser check of the control room against a fake backend (desktop + phone sizes)
 cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/control-room.mjs
+
+# Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
+cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com

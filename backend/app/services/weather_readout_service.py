@@ -13,7 +13,7 @@ Station automation_config.weather_readout schema:
 }
 """
 import logging
-from datetime import date, datetime, time, timezone
+from datetime import date, time
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

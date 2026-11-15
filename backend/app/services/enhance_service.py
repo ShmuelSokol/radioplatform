@@ -317,8 +317,6 @@ def build_auto_filters(stats: dict[str, Any]) -> tuple[list[dict], list[str]]:
 
     noise_floor = stats.get("noise_floor", -60.0)
     mean_vol = stats.get("mean_volume", -20.0)
-    max_vol = stats.get("max_volume", 0.0)
-    headroom = stats.get("headroom", 0.0)
     loudness_range = stats.get("loudness_range", 20.0)
     dynamic_range = stats.get("dynamic_range", 20.0)
 

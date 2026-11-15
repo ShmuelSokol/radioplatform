@@ -24,6 +24,7 @@ from app.api.v1.asset_types import router as asset_types_router
 from app.api.v1.sponsor_portal import router as sponsor_portal_router
 from app.api.v1.spot_schedules import router as spot_schedules_router
 from app.api.v1.copy_review import router as copy_review_router
+from app.api.v1.spot_recordings import router as spot_recordings_router
 from app.api.v1.campaigns import router as campaigns_router
 from app.api.v1.billing import router as billing_router
 from app.api.v1.ai_emails import router as ai_emails_router
@@ -63,6 +64,7 @@ router.include_router(asset_types_router)
 router.include_router(sponsor_portal_router)
 router.include_router(spot_schedules_router)
 router.include_router(copy_review_router)
+router.include_router(spot_recordings_router)
 router.include_router(campaigns_router)
 router.include_router(billing_router)
 router.include_router(ai_emails_router)

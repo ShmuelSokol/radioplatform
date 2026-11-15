@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.playlist_entry import PlaybackMode
-from app.models.schedule_block import DayOfWeek, RecurrenceType, SunEvent
+from app.models.schedule_block import RecurrenceType, SunEvent
 
 
 # ==================== Schedule ====================

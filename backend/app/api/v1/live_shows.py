@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_admin, require_dj_or_manager, require_manager
-from app.core.exceptions import NotFoundError, ConflictError, BadRequestError
+from app.core.dependencies import get_db, require_admin, require_dj_or_manager, require_staff
+from app.core.exceptions import NotFoundError
 from app.models.live_show import LiveShow, LiveShowStatus
 from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.user import User
@@ -52,7 +52,7 @@ async def list_shows(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_dj_or_manager),
+    _user: User = Depends(require_staff),
 ):
     """List live shows with optional filters."""
     shows, total = await live_show_service.list_shows(

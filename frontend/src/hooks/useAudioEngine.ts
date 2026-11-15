@@ -393,6 +393,11 @@ export function useAudioEngine(
 
     const run = async () => {
       try {
+        // Already pre-loaded and ready: go live now, without a round trip for its URL
+        if (assetId && deckAssetRef.current[inLabel] === assetId && inDeck.audio.readyState >= 2) {
+          goLive();
+          return;
+        }
         let url: string;
         if (audioUrlOverride) {
           url = audioUrlOverride;

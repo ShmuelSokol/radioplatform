@@ -95,7 +95,7 @@ export default function ScheduleBlocks() {
   if (isLoading) return <div className="p-8">Loading...</div>;
 
   return (
-    <div className="max-w-5xl mx-auto p-8">
+    <div className="w-full">
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => navigate('/admin/schedules')} className="text-blue-600 hover:text-blue-800">&larr; Schedules</button>
         <h1 className="text-3xl font-bold">{schedule?.name || 'Schedule'} — Blocks</h1>
