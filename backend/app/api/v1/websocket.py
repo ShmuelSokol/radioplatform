@@ -4,6 +4,7 @@ WebSocket endpoints for real-time updates.
 import asyncio
 import json
 import logging
+import time
 from typing import Dict, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -14,6 +15,13 @@ from app.services.scheduling import SchedulingService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["websocket"])
+
+# A listener that cannot take a message within this time is dropped (it reconnects).
+SEND_TIMEOUT = 5.0
+# The scheduler re-announces the song on air every tick (3 s). Listeners only need
+# a message when something changed; an unchanged one goes out at most this often.
+UNCHANGED_RESEND_SECONDS = 30.0
+
 
 # Connection manager for broadcasting now-playing updates
 class ConnectionManager:
@@ -39,20 +47,22 @@ class ConnectionManager:
         """Broadcast a message to all connections for a station."""
         if station_id not in self.active_connections:
             return
-        
-        dead_connections = set()
         message_str = json.dumps(message)
-        
-        for connection in set(self.active_connections[station_id]):
+        connections = list(self.active_connections[station_id])
+
+        async def send(connection):
+            # One slow or stuck listener must not hold up everyone else's message.
             try:
-                await connection.send_text(message_str)
+                await asyncio.wait_for(connection.send_text(message_str), timeout=SEND_TIMEOUT)
+                return None
             except Exception as e:
-                logger.error(f"Failed to send to WebSocket: {e}")
-                dead_connections.add(connection)
-        
-        # Clean up dead connections
+                logger.info("Dropping now-playing WebSocket: %s", e or type(e).__name__)
+                return connection
+
+        dead_connections = await asyncio.gather(*(send(c) for c in connections))
         for connection in dead_connections:
-            self.disconnect(station_id, connection)
+            if connection is not None:
+                self.disconnect(station_id, connection)
 
 manager = ConnectionManager()
 
@@ -131,7 +141,14 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
             from app.models.queue_entry import QueueEntry
             from datetime import datetime, timezone
 
-            async for db in get_async_session():
+            # A station that plays from its queue: send exactly what the scheduler
+            # broadcasts, so a listener who joins mid-song starts on the right song
+            # (an unchanged now-playing message repeats only every 30 s).
+            queue_payload = await _cached_queue_now_playing(station_id)
+            if queue_payload is not None:
+                await websocket.send_json({"type": "now_playing", "data": queue_payload})
+
+            async for db in (get_async_session() if queue_payload is None else _no_session()):
                 service = SchedulingService(db)
                 now_playing = await service.get_now_playing(station_id)
 
@@ -245,12 +262,86 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
         manager.disconnect(station_id, websocket)
 
 
+# station_id -> (when, message data) for listeners joining. After a release every
+# listener reconnects within seconds; without this each one would take a database
+# connection (the pool has 15) and starve the scheduler and the control room.
+_join_cache: Dict[str, tuple[float, dict]] = {}
+_join_locks: Dict[str, asyncio.Lock] = {}
+JOIN_CACHE_SECONDS = 5.0
+
+
+async def _no_session():
+    return
+    yield
+
+
+async def _cached_queue_now_playing(station_id: str, db=None) -> dict | None:
+    """`db`: a request's own session to use on a cache miss (else a new one)."""
+    from app.db.session import get_async_session
+
+    hit = _join_cache.get(station_id)
+    if hit and time.monotonic() - hit[0] < JOIN_CACHE_SECONDS:
+        return hit[1]
+    lock = _join_locks.setdefault(station_id, asyncio.Lock())
+    async with lock:
+        hit = _join_cache.get(station_id)
+        if hit and time.monotonic() - hit[0] < JOIN_CACHE_SECONDS:
+            return hit[1]
+        payload = None
+        if db is not None:
+            payload = await _queue_now_playing(db, station_id)
+        else:
+            async for session in get_async_session():
+                payload = await _queue_now_playing(session, station_id)
+                break
+        if payload is not None:
+            _join_cache[station_id] = (time.monotonic(), payload)
+        return payload
+
+
+async def _queue_now_playing(db, station_id: str) -> dict | None:
+    """The scheduler's now_playing message for the station's playing queue entry, if any."""
+    import uuid as _uuid
+
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import joinedload
+
+    from app.models.queue_entry import QueueEntry
+    from app.services.scheduler_engine import get_scheduler
+
+    try:
+        sid = _uuid.UUID(str(station_id))
+    except ValueError:
+        return None
+    entry = (
+        await db.execute(
+            sa_select(QueueEntry)
+            .options(joinedload(QueueEntry.asset))
+            .where(QueueEntry.station_id == sid, QueueEntry.status == "playing")
+            .order_by(QueueEntry.started_at.desc().nullslast())
+            .limit(1)
+        )
+    ).unique().scalar_one_or_none()
+    if entry is None or entry.asset is None:
+        return None
+    return await get_scheduler().queue_entry_payload(db, sid, entry)
+
+
 async def broadcast_now_playing_update(station_id: str, now_playing_data: dict):
     """
     Helper function to broadcast now-playing updates to all connected clients.
     Called by the scheduling engine when playback changes.
     """
-    await manager.broadcast_to_station(station_id, {
-        "type": "now_playing",
-        "data": now_playing_data,
-    })
+    message = {"type": "now_playing", "data": now_playing_data}
+    key = json.dumps(message, sort_keys=True, default=str)
+    now = time.monotonic()
+    last = _last_now_playing.get(station_id)
+    if last and last[0] == key and now - last[1] < UNCHANGED_RESEND_SECONDS:
+        return
+    _last_now_playing[station_id] = (key, now)
+    _join_cache.pop(station_id, None)  # the next listener to join reads the new song
+    await manager.broadcast_to_station(station_id, message)
+
+
+# station_id -> (last message sent, when)
+_last_now_playing: Dict[str, tuple[str, float]] = {}
