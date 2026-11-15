@@ -78,7 +78,7 @@ class ScheduleBlock(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ENUM(PlaybackMode, name="playback_mode", create_type=True),
         default=PlaybackMode.SEQUENTIAL,
         nullable=False,
-        server_default="sequential",
+        server_default=PlaybackMode.SEQUENTIAL.name,  # native enum labels are the member names
     )
 
     # For ONE_TIME recurrence: date range when this block is active
