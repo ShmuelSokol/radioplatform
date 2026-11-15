@@ -32,12 +32,26 @@ settings.harbor.bind_addrs := ["127.0.0.1"]
 
 auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")]
 
+# On start-up tell the backend we hold nothing of its queue any more. Done before any
+# track is requested, so the two cannot cross.
+try
+  ignore(http.post(headers=auth_headers, timeout=8., data="{}",
+                   "#{backend_url}/playout/#{station_id}/hello"))
+catch err do
+  log.important("hello: backend unreachable: #{err}")
+end
+
 # ── Main lane: ask the backend for the next track ────────────────────────────
+# Last entry from the music lane that went on air (sent with the next request, so the
+# backend can catch up if a start report was lost while it was unreachable)
+last_main_entry = ref("")
 def next_request() =
   try
-    resp = http.get(headers=auth_headers, timeout=8., "#{backend_url}/playout/#{station_id}/next")
+    resp = http.get(headers=auth_headers, timeout=8.,
+                    "#{backend_url}/playout/#{station_id}/next?on_air=#{last_main_entry()}")
     if resp.status_code == 200 then
-      let json.parse (data : {uri : string}) = resp
+      let json.parse (data : {uri : string, entry_id : string}) = resp
+      log.important("next: backend gave entry #{data.entry_id}")
       request.create(data.uri)
     else
       null()
@@ -65,17 +79,22 @@ def transition(ending, starting) =
 end
 main = cross(duration=3., transition, main)
 
-# Gain on the main lane, used for the quick fade on Next and under timed items
+# The music lane is muted while a timed item takes over, so nothing of it leaks through
 main_gain = ref(1.)
 main = amplify({main_gain()}, main)
+# Set when a timed item interrupted a song: that song does not resume afterwards
+main_interrupted = ref(false)
 
-def ramp_main(~target, ~duration, after) =
+# Master gain, used for the quick fade on Next and when a timed item takes over
+master_gain = ref(1.)
+
+def ramp_master(~target, ~duration, after) =
   steps = 20
-  from = main_gain()
+  from = master_gain()
   i = ref(0)
   def step() =
     i := i() + 1
-    main_gain := from + (target - from) * float_of_int(i()) / float_of_int(steps)
+    master_gain := from + (target - from) * float_of_int(i()) / float_of_int(steps)
     if i() >= steps then
       after()
       (-1.)
@@ -86,18 +105,8 @@ def ramp_main(~target, ~duration, after) =
   thread.run.recurrent(delay=0., step)
 end
 
-def restore_main() =
-  thread.run(delay=0.1, {main_gain := 1.})
-end
-
-# Next: fade the music out quickly, skip, come back at full level on the new track
-def skip_main() =
-  ramp_main(target=0., duration=skip_fade, fun () -> begin
-    hard_cut := true
-    main.skip()
-    restore_main()
-  end)
-end
+# Which lane is on air right now ("main", "timed" or "emergency")
+on_air_lane = ref("")
 
 # ── Timed lane: hard-timed items and Play Now ────────────────────────────────
 timed_queue = request.queue(id="timed", interactive=false)
@@ -108,19 +117,22 @@ timed = switch(id="timed_gate", track_sensitive=true, [({timed_armed()}, timed_q
 def schedule_timed(~uri, ~at) =
   r = request.create(uri)
   def go_on_air() =
-    ramp_main(target=0., duration=skip_fade, fun () -> begin
-      # The interrupted song does not resume afterwards: move the music lane on to
-      # its next song now (silently), then put the timed item on air.
-      hard_cut := true
-      main.skip()
-      thread.run(delay=0.1, {timed_armed := true})
-      thread.run(delay=0.6, {main_gain := 1.})
-      thread.run(delay=1.6, {timed_armed := false})
+    ramp_master(target=0., duration=skip_fade, fun () -> begin
+      # Mute the music lane, put the timed item on air at full level. The interrupted
+      # song does not resume: when the music lane comes back it moves to its next song
+      # (see report_started).
+      if on_air_lane() == "main" then
+        main_gain := 0.
+        main_interrupted := true
+      end
+      timed_armed := true
+      master_gain := 1.
+      thread.run(delay=1.5, {timed_armed := false})
     end)
   end
   def load() =
     timed_queue.push(r)
-    wait = at - time() - skip_fade - 0.1
+    wait = at - time() - skip_fade
     thread.run(delay=(if wait > 0. then wait else 0. end), go_on_air)
   end
   thread.run(fast=false, load)
@@ -131,6 +143,20 @@ emergency = playlist(id="emergency", mode="randomize", reload_mode="watch", emer
 emergency = mksafe(emergency)
 
 radio = fallback(id="radio", track_sensitive=false, [timed, main, emergency])
+radio = amplify({master_gain()}, radio)
+
+# Next: fade out quickly, skip whatever is on air, come back at full level on the new track
+def skip_on_air() =
+  ramp_master(target=0., duration=skip_fade, fun () -> begin
+    if on_air_lane() == "timed" then
+      timed_queue.skip()
+    else
+      hard_cut := true
+      main.skip()
+    end
+    thread.run(delay=0.1, {master_gain := 1.})
+  end)
+end
 
 # ── Broadcast sound: gentle compression and a limiter on the whole output ────
 radio = compress(threshold=-14., ratio=3., attack=20., release=200., radio)
@@ -140,6 +166,17 @@ radio = limit(threshold=-1., radio)
 def send_started(m) =
   entry = m["kbr_entry"]
   lane = if entry == "" then "emergency" else m["kbr_lane"] end
+  on_air_lane := lane
+  if lane == "main" then
+    last_main_entry := entry
+    if main_interrupted() then
+      # Back from a timed item: leave the interrupted song and start the next one
+      main_interrupted := false
+      hard_cut := true
+      main.skip()
+      thread.run(delay=0.15, {main_gain := 1.})
+    end
+  end
   payload = json.stringify({entry_id=entry, lane=lane, title=m["title"], at=time()})
   def post() =
     try
@@ -164,17 +201,6 @@ def report_started(m) =
 end
 radio.on_metadata(report_started)
 
-# On start-up tell the backend we hold nothing of its queue any more
-def say_hello() =
-  try
-    ignore(http.post(headers=auth_headers, timeout=8., data="{}",
-                     "#{backend_url}/playout/#{station_id}/hello"))
-  catch err do
-    log.important("hello: backend unreachable: #{err}")
-  end
-end
-thread.run(fast=false, say_hello)
-
 # ── Control endpoints (localhost only; nginx adds TLS in front) ──────────────
 def authorized(req) =
   token != "" and req.headers["x-playout-token"] == token
@@ -194,7 +220,7 @@ def control(path, handler) =
 end
 
 control("/skip", fun (_) -> begin
-  skip_main()
+  skip_on_air()
   '{"ok":true}'
 end)
 

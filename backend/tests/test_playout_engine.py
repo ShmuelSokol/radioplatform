@@ -259,3 +259,48 @@ async def test_stream_url_only_when_live(engine_station, monkeypatch):
     monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", True)
     assert settings.public_stream_url(station.id) == "https://stream.example.com/live"
     assert settings.public_stream_url(uuid.uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_fire_now_uses_timed_lane(client, db_session, auth_headers, engine_station):
+    station, entries, sent = engine_station
+    asset_id = str(entries[3].asset_id)
+    resp = await client.post(
+        f"/api/v1/stations/{station.id}/queue/fire-now",
+        headers=auth_headers,
+        json={"asset_id": asset_id},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["on_air"] is True
+    timed_calls = [p for path, p in sent if path == "/timed"]
+    assert len(timed_calls) == 1
+    assert f'kbr_entry="{body["id"]}"' in timed_calls[0]["uri"]
+    # The main lane must not also play it
+    nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert nxt.json()["entry_id"] != body["id"]
+
+
+@pytest.mark.asyncio
+async def test_fire_now_after_current_only_queues(client, auth_headers, engine_station):
+    station, entries, sent = engine_station
+    resp = await client.post(
+        f"/api/v1/stations/{station.id}/queue/fire-now",
+        headers=auth_headers,
+        json={"asset_id": str(entries[3].asset_id), "mode": "after-current"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["on_air"] is False
+    assert not [p for path, p in sent if path == "/timed"]
+
+
+@pytest.mark.asyncio
+async def test_next_catches_up_on_lost_start_report(client, db_session, engine_station):
+    station, entries, _ = engine_station
+    # The engine played entries[0] while we were unreachable: no start report arrived.
+    playout_engine.reset_state()
+    resp = await client.get(
+        f"/api/v1/playout/{station.id}/next?on_air={entries[0].id}", headers=HEADERS
+    )
+    assert resp.json()["entry_id"] == str(entries[1].id)
+    assert await _status(db_session, entries[0]) == "played"

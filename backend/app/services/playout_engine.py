@@ -225,10 +225,42 @@ async def handle_hello(station_id) -> None:
     logger.info("Playout engine connected for station %s", station_id)
 
 
-async def handle_next(db: AsyncSession, station_id) -> dict | None:
+async def _reconcile_on_air(db: AsyncSession, station_id, on_air: str | None) -> None:
+    """The engine says `on_air` already went on air. If we still show it as pending, its
+    start report was lost (we were unreachable): close it so it is not played twice."""
+    if not on_air:
+        return
+    try:
+        on_air_id = uuid.UUID(on_air)
+    except ValueError:
+        return
+    res = await db.execute(
+        select(QueueEntry).where(
+            QueueEntry.id == on_air_id,
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+        )
+    )
+    entry = res.scalar_one_or_none()
+    if entry is None:
+        return
+    logger.warning("Entry %s aired without a start report reaching us; closing it", on_air)
+    res = await db.execute(
+        select(QueueEntry).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "playing"
+        )
+    )
+    for prev in res.scalars().all():
+        prev.status = "played"
+    entry.status = "played"
+    await db.commit()
+
+
+async def handle_next(db: AsyncSession, station_id, on_air: str | None = None) -> dict | None:
     """The engine wants its next track: {"uri", "entry_id"}, or None if the queue is empty."""
     state = get_state(station_id)
     _touch(state)
+    await _reconcile_on_air(db, station_id, on_air)
 
     # The engine only asks when it holds nothing pre-loaded, so an entry we already handed
     # out is on its way to air (its "started" report may not have reached us yet).
@@ -253,6 +285,7 @@ async def handle_next(db: AsyncSession, station_id) -> dict | None:
         uri = build_uri(entry, "main")
         if uri:
             state.cued_entry_id = str(entry.id)
+            logger.info("Engine next -> %s", entry.id)
             return {"uri": uri, "entry_id": str(entry.id)}
         # No playable file for this entry: drop it and try the following one
         logger.error("Queue entry %s has no playable audio URL; skipping it", entry.id)
@@ -270,6 +303,7 @@ async def handle_started(
     now = datetime.now(UTC)
     skipped = state.skip_requested
     state.skip_requested = False
+    logger.info("Engine started -> entry=%s lane=%s", entry_id or "-", lane)
 
     entry: QueueEntry | None = None
     if entry_id:

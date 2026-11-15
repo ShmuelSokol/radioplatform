@@ -17,7 +17,7 @@ from app.models.asset import Asset
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.user import User
-from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueReorder
+from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueFireNow, QueueReorder
 
 from app.models.holiday_window import HolidayWindow
 
@@ -1132,6 +1132,46 @@ async def play_next(
     db.add(entry)
     await db.commit()
     return {"id": str(entry.id), "position": entry.position, "message": "Queued as next"}
+
+
+@router.post("/fire-now", status_code=201)
+async def fire_now(
+    station_id: uuid.UUID,
+    body: QueueFireNow,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """Put an asset on air now (one call instead of play-next + skip)."""
+    queued = await play_next(station_id, QueueAdd(asset_id=body.asset_id), db, _user)
+    if body.mode == "after-current":
+        return {**queued, "message": "Plays after the current track", "on_air": False}
+
+    if settings.engine_drives(station_id):
+        # The engine loads the file, fades the music out and starts it; the song that
+        # was playing does not resume. The real start comes back as a now-playing update.
+        from sqlalchemy.orm import joinedload
+        from app.services import playout_engine
+        res = await db.execute(
+            select(QueueEntry).options(joinedload(QueueEntry.asset))
+            .where(QueueEntry.id == uuid.UUID(queued["id"]))
+        )
+        entry = res.unique().scalar_one()
+        uri = playout_engine.build_uri(entry, "timed")
+        state = playout_engine.get_state(station_id)
+        state.timed_sent.add(str(entry.id))
+        if uri and await playout_engine.engine_timed(uri, time.time()):
+            return {**queued, "message": "Going on air", "on_air": True}
+        state.timed_sent.discard(str(entry.id))
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "The playout engine did not respond. The item is queued as next.",
+                "id": queued["id"],
+            },
+        )
+
+    await skip_current(station_id, db, _user)
+    return {**queued, "message": "Going on air", "on_air": True}
 
 
 @router.post("/skip")

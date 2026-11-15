@@ -45,10 +45,15 @@ async def hello(station_id: uuid.UUID = Depends(_require_engine)):
 @router.get("/{station_id}/next")
 async def next_track(
     station_id: uuid.UUID = Depends(_require_engine),
+    on_air: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """What should play next. 204 when the queue is empty (the engine retries)."""
-    result = await playout_engine.handle_next(db, station_id)
+    """What should play next. 204 when the queue is empty (the engine retries).
+
+    `on_air` is the last music-lane entry the engine put on air; it lets the backend
+    catch up if that start report was lost.
+    """
+    result = await playout_engine.handle_next(db, station_id, on_air)
     if result is None:
         return Response(status_code=204)
     return result
