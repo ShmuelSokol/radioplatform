@@ -89,7 +89,7 @@ function DownloadButton({ assetId, title }: { assetId: string; title: string }) 
       <button
         onClick={() => { setOpen(!open); setError(null); }}
         disabled={downloading}
-        className="text-blue-600 hover:text-blue-800 text-sm disabled:opacity-50"
+        className="text-blue-600 hover:text-blue-800 text-xs disabled:opacity-50"
       >
         {downloading ? <><Spinner className="mr-1" />Processing...</> : 'Download'}
       </button>
@@ -150,7 +150,7 @@ function PlayButton({ assetId, title, audioRef, playingId, setPlayingId }: {
     <button
       onClick={handlePlay}
       disabled={loading}
-      className={`text-sm ${isPlaying ? 'text-green-600 hover:text-green-800 font-medium' : 'text-emerald-600 hover:text-emerald-800'} disabled:opacity-50`}
+      className={`text-xs ${isPlaying ? 'text-green-600 hover:text-green-800 font-medium' : 'text-emerald-600 hover:text-emerald-800'} disabled:opacity-50`}
       title={isPlaying ? `Stop ${title}` : `Play ${title}`}
     >
       {loading ? '...' : isPlaying ? 'Stop' : 'Play'}
@@ -587,8 +587,8 @@ export default function Assets() {
               <th className="w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
               <th className="w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Format</th>
-              <th className="w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
-              <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{ width: '14%' }}>Actions</th>
+              <th className="w-24 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
+              <th className="w-48 px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
             {/* Filter row — inline search per column */}
             <tr className="bg-gray-100 border-t border-gray-200">
@@ -634,8 +634,8 @@ export default function Assets() {
                 </div>
               </th>
               <th className="w-14 px-2 py-1" />
-              <th className="w-20 px-2 py-1" />
-              <th className="px-2 py-1" style={{ width: '14%' }} />
+              <th className="w-24 px-2 py-1" />
+              <th className="w-48 px-2 py-1" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -674,8 +674,8 @@ export default function Assets() {
                 </td>
                 <td className="px-2 py-2 text-xs text-gray-500">{formatDuration(asset.duration)}</td>
                 <td className="px-2 py-2 text-xs text-gray-400 uppercase">{getFileFormat(asset.file_path)}</td>
-                <td className="px-2 py-2 text-xs text-gray-500">{formatDate(asset.created_at)}</td>
-                <td className="px-2 py-2 text-right space-x-2">
+                <td className="px-2 py-2 text-xs text-gray-500 whitespace-nowrap">{formatDate(asset.created_at)}</td>
+                <td className="px-2 py-2 text-right space-x-2 whitespace-nowrap">
                   <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
                   <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-xs">View</Link>
                   <DownloadButton assetId={asset.id} title={asset.title} />
