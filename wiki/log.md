@@ -69,3 +69,5 @@ INGEST 2026-11-15 hourly-slots.md OpenWeatherMap key blocked: scheduler retried 
 UPDATE 2026-11-15 station-permissions.md Station permissions now also cover schedules, playlists, spot schedules and live shows through station_write_guard (core/station_guard.py); holidays and station-less objects stay role-only.
 UPDATE 2026-11-15 program-blocks.md Sponsor places in blocks (kind "sponsors", spot planner Break seats replace :15/:30/:45 when any block has places); soft-with-limit via ProgramBlock.latest_minutes -> QueueEntry.hard_by (browser path only, engine not yet).
 UPDATE 2026-11-15 spot-schedules.md,schedule-look-ahead.md unplaced plays are grouped (count) per sponsorship/day/daypart/reason; dayparts already over are dropped in plan_for_station; times in reasons use 12-hour clock_12()
+INGEST 2026-11-15 streaming-architecture.md Engine timed lane played only the first item of a same-time group; now the lane stays open while the timed queue has items, and items are pushed in the order received.
+UPDATE 2026-11-15 program-blocks.md, streaming-architecture.md Playout engine now honours hard_by and plays block groups in position order.
