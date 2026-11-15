@@ -53,4 +53,12 @@ KBR Studio features the control room does not have yet, and why: Intro countdown
 
 The headphones output uses `setSinkId` where the browser has it (Chrome, Edge; not iPhone Safari, where the picker is hidden). Browsers only name the outputs after the microphone has been allowed once, so "Choose the headphones output" asks for the microphone and releases it at once. The choice is kept in localStorage `kbr_pfl_output`; if that device is gone the sound falls back to the default output instead of going silent. The time and weather preview still uses its own audio elements and the default output.
 
-Agreed with the engine thread (2026-11-15), not built yet: `queue/skip?fade=hard|fade|soft`, `intro_seconds` on assets and queue rows, `queue/loop`, `queue/mix-over`, `queue/insert {asset_id, after_entry_id}`, `queue/fire-now {asset_id, mode}`. Level meters stay measured in the browser.
+## Next, Fade, Soft fade, Intro, play now, insert
+
+Server contract: [operator-actions](operator-actions.md). In the transport bar NEXT (and the N key) sends `skip?fade=hard`, Fade sends `fade`, Soft fade sends `soft`, matching KBR Studio's Go next / Fade / Soft fade. The Intro countdown shows only while `asset.intro_seconds - elapsed > 0` (nothing shows for items with no intro length set).
+
+`liveControl.fireNow` is one `queue/fire-now` call with a `client_request_id`; a second tap on the same item within 1.5 s reuses the id, so the server answers it as a duplicate and the item plays once. `liveControl.insertAt` is one `queue/insert` call. The marker in the queue sits *before* a row, the API inserts *after* an entry, so Dashboard passes the pending row above the marker (null for the first row = top). The new insert call returns no scheduling-rule warnings, unlike the old add + reorder.
+
+At 1024 to 1279 px the bar is tight: the volume slider hides below 1536 px, "Soft fade" shortens to "Soft" below 1280 px.
+
+Not built on the server yet: Loop and Mix over.

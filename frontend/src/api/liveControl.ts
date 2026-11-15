@@ -2,20 +2,31 @@
  * Live-control actions used by the control room (pages/admin/Dashboard.tsx).
  *
  * This is the ONE place that decides which backend calls mean "fire now" and
- * "insert at this point". Today they are composed from the existing queue
- * endpoints. When the playout engine ships dedicated atomic endpoints, switch
- * the bodies here and nothing else in the UI has to change.
+ * "insert at this point". Each is a single request; the server contract is in
+ * wiki/operator-actions.md.
  */
-import { addToQueue, playNext, skipCurrent, reorderDnd } from './queue';
+import { addToQueue, playNext, fireNowRequest, insertAfter } from './queue';
 
-export interface InsertResult {
-  warnings: string[];
-}
+/** Two taps on the same button inside this window count as one. */
+const DOUBLE_TAP_MS = 1500;
+const lastFire = new Map<string, { at: number; requestId: string }>();
 
-/** Put the asset on air right away: queue it as next, then advance to it. */
-export const fireNow = async (stationId: string, assetId: string) => {
-  await playNext(stationId, assetId);
-  return skipCurrent(stationId);
+const newRequestId = () =>
+  (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+/**
+ * Put the asset on air right away. A second tap on the same item within a moment
+ * reuses the request id, and the server answers it without playing the item twice.
+ */
+export const fireNow = (stationId: string, assetId: string) => {
+  const key = `${stationId}:${assetId}`;
+  const prev = lastFire.get(key);
+  const now = Date.now();
+  const requestId = prev && now - prev.at < DOUBLE_TAP_MS ? prev.requestId : newRequestId();
+  lastFire.set(key, { at: now, requestId });
+  return fireNowRequest(stationId, assetId, requestId);
 };
 
 /** Play the asset as soon as the current item ends. */
@@ -25,16 +36,8 @@ export const queueNext = (stationId: string, assetId: string) => playNext(statio
 export const queueEnd = (stationId: string, assetId: string) => addToQueue(stationId, assetId);
 
 /**
- * Insert the asset so it plays at `position` (i.e. just before the entry that
- * currently holds that position). Returns scheduling-rule warnings, if any.
+ * Insert the asset right after the given queue entry; null means at the top,
+ * so it plays next.
  */
-export const insertAt = async (
-  stationId: string,
-  assetId: string,
-  position: number,
-): Promise<InsertResult> => {
-  const added = (await addToQueue(stationId, assetId)) as { id: string; position: number };
-  if (added.position === position) return { warnings: [] };
-  const res = await reorderDnd(stationId, added.id, position);
-  return { warnings: res.warnings ?? [] };
-};
+export const insertAt = (stationId: string, assetId: string, afterEntryId: string | null) =>
+  insertAfter(stationId, [assetId], afterEntryId);
