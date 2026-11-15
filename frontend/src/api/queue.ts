@@ -83,3 +83,9 @@ export const previewWeather = async (stationId: string) => {
   const res = await apiClient.post(`/stations/${stationId}/queue/preview-weather`);
   return res.data as { time_url: string | null; weather_url: string | null; time_text: string | null; weather_text: string | null };
 };
+
+/** Loop the item on air: it plays again each time it ends, until switched off, Next or play now. */
+export const setLoop = async (stationId: string, on: boolean) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/loop`, { on });
+  return res.data as { loop: boolean; asset_id: string | null; queue?: { entries?: unknown[] } };
+};
