@@ -8,6 +8,8 @@ Who may operate (change) which station. Reading is not restricted by station.
 - Enforcement: `require_station_operator` is a router-level dependency on the queue router (`/stations/{id}/queue/...`) and the controls router (`/stations/{id}/controls/...`). It checks every non-GET request, on top of each route's role guard. Station edit and delete check it in `stations.py`.
 - Screens: Users page (admin) has "Stations this person may operate"; Stations page has the Protected tick (admin). `/auth/me` returns `station_ids`. A refused action shows the app-wide "not allowed" notice.
 
-Not covered yet (station id arrives in the query or body, not the path): schedules, schedule blocks, playlists/generation, spot schedules, live shows, holidays. Those are still limited by role only. When adding a write route for one station, call `may_operate_station`.
+- Routes that do not carry the station in the path (schedules, schedule blocks, playlist entries, playlists and generation, spot schedules, live shows) use `station_write_guard` in `backend/app/core/station_guard.py`: a router-level dependency that finds the station from `station_id` in the query or body, or from the object named in the path or body (schedule, block, template, slot, show), and applies the same rule. A new write route on those routers is covered automatically if it uses the same parameter names; a new parameter name needs a line in that router's guard.
+
+Not restricted by station: holidays (one window can cover several stations, `affected_stations`), objects that belong to no station (shared playlist templates, spot schedules for all stations), the library, rules. Those are limited by role only.
 
 Tests: `backend/tests/test_station_permissions.py`.

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import station_guard as sg
 from app.core.dependencies import get_db, require_admin, require_dj_or_manager, require_staff
 from app.core.exceptions import NotFoundError
 from app.models.live_show import LiveShow, LiveShowStatus
@@ -29,7 +30,11 @@ from app.services.twilio_voice_service import generate_hold_twiml, generate_no_s
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/live-shows", tags=["live-shows"])
+router = APIRouter(
+    prefix="/live-shows",
+    tags=["live-shows"],
+    dependencies=[Depends(sg.station_write_guard(path={"show_id": sg.of_live_show}))],
+)
 
 
 # --- Show CRUD ---

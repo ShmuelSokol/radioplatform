@@ -27,6 +27,7 @@ OVERLAP = "overlap"  # two or more blocks cover the same time; one wins
 GAP = "gap"  # no block covers this time
 SPOT_UNPLACED = "spot_unplaced"  # a sponsor play has no free slot
 OFF_AIR = "off_air"  # Shabbos / Yom Tov
+BLOCK_ITEM = "block_item"  # a program block has an item with nothing to play
 
 
 @dataclass
@@ -195,6 +196,29 @@ async def look_ahead(
                 needs_attention=True,
             )
         )
+
+    # Program blocks ("Weather Sponsors"): an item that has nothing to play.
+    from app.services.program_block_service import plan_blocks
+
+    seen: set[tuple] = set()
+    for occurrence in await plan_blocks(db, station, hours=days * 24, now=now):
+        for problem in occurrence.problems:
+            key = (str(occurrence.block.id), problem)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(
+                Finding(
+                    kind=BLOCK_ITEM,
+                    start=occurrence.at,
+                    end=occurrence.at + timedelta(minutes=1),
+                    title=f'"{occurrence.block.name}" has an item with nothing to play',
+                    detail=f"{problem}.",
+                    resolution="The rest of the block plays; this item is left out. "
+                    "Fix it on the Program Blocks page.",
+                    needs_attention=True,
+                )
+            )
 
     findings.sort(key=lambda f: (f.start, f.kind))
     return {

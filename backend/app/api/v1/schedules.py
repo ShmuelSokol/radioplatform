@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import station_guard as sg
 from app.core.dependencies import get_db, require_manager
 from app.models.playlist_entry import PlaylistEntry as PlaylistEntryModel
 from app.models.schedule import Schedule as ScheduleModel
@@ -28,7 +29,23 @@ from app.schemas.schedule import (
     ScheduleUpdate,
 )
 
-router = APIRouter(prefix="/schedules", tags=["schedules"])
+router = APIRouter(
+    prefix="/schedules",
+    tags=["schedules"],
+    dependencies=[
+        Depends(
+            sg.station_write_guard(
+                path={"schedule_id": sg.of_schedule, "block_id": sg.of_block, "entry_id": sg.of_playlist_entry},
+                body={
+                    "schedule_id": sg.of_schedule,
+                    "block_id": sg.of_block,
+                    "winner_block_id": sg.of_block,
+                    "other_block_ids": sg.of_block,
+                },
+            )
+        )
+    ],
+)
 
 
 # ==================== Public EPG ====================

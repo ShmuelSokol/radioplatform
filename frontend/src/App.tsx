@@ -32,6 +32,7 @@ const Holidays = lazy(() => import('./pages/admin/Holidays'));
 const Sponsors = lazy(() => import('./pages/admin/Sponsors'));
 const SpotSchedules = lazy(() => import('./pages/admin/SpotSchedules'));
 const SpotRecordings = lazy(() => import('./pages/admin/SpotRecordings'));
+const ProgramBlocks = lazy(() => import('./pages/admin/ProgramBlocks'));
 const ScheduleCheck = lazy(() => import('./pages/admin/ScheduleCheck'));
 const SponsorshipRules = lazy(() => import('./pages/admin/SponsorshipRules'));
 const Analytics = lazy(() => import('./pages/admin/Analytics'));
@@ -160,6 +161,7 @@ export default function App() {
               <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
               <Route path="/admin/spot-schedule" element={<ProtectedRoute><SpotSchedules /></ProtectedRoute>} />
               <Route path="/admin/spot-recordings" element={<ProtectedRoute><SpotRecordings /></ProtectedRoute>} />
+              <Route path="/admin/program-blocks" element={<ProtectedRoute><ProgramBlocks /></ProtectedRoute>} />
               <Route path="/admin/schedule-check" element={<ProtectedRoute><ScheduleCheck /></ProtectedRoute>} />
               <Route path="/admin/sponsorship-rules" element={<ProtectedRoute><SponsorshipRules /></ProtectedRoute>} />
               <Route path="/admin/playlists" element={<ProtectedRoute><Playlists /></ProtectedRoute>} />

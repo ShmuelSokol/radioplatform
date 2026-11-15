@@ -342,9 +342,16 @@ export default function ScheduleBlocks() {
               <div>
                 <h3 className="font-bold text-lg">{block.name}</h3>
                 <p className="text-sm text-gray-600">
-                  {block.until_next
-                    ? `Starts ${block.start_sun_event ? 'by the sun' : block.start_time?.slice(0, 5)}, runs until the next playlist`
-                    : `${block.start_time?.slice(0, 5)} — ${block.end_time?.slice(0, 5)}`}
+                  {(() => {
+                    const from = block.start_sun_event
+                      ? sunText(block.start_sun_event, block.start_sun_offset)
+                      : clockText(block.start_time?.slice(0, 5));
+                    if (block.until_next) return `Starts ${from}, runs until the next playlist`;
+                    const to = block.end_sun_event
+                      ? sunText(block.end_sun_event, block.end_sun_offset)
+                      : clockText(block.end_time?.slice(0, 5));
+                    return `${from} — ${to}`;
+                  })()}
                   {' '}&middot; {block.recurrence_type}
                   {block.recurrence_type === 'weekly' && block.recurrence_pattern?.length
                     ? ` (${block.recurrence_pattern.map((d: string) => dayShort(String(d))).join(', ')})` : ''}
