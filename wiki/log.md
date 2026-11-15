@@ -24,3 +24,5 @@ UPDATE 2026-11-15 spot-schedules.md review follow-ups: legacy spot off switch, D
 UPDATE 2026-11-15 spot-schedules.md planner now keeps spots out of HolidayWindow blackouts; preview reports off_air windows
 INGEST 2026-11-15 (no page) queue_entries/play_logs had no station indexes in prod path (create_all, not alembic); added via main.py migrations + model __table_args__. Fresh-DB create_all currently fails on playback_mode enum default.
 INGEST 2026-11-15 schedule-look-ahead.md Engine matched schedule blocks in UTC, not station time (fixed); equal-priority overlaps now have a fixed tie-break; look-ahead page shares the engine's resolver
+INGEST 2026-11-15 hourly-slots.md Time announcement text was built from generation time, not the slot hour (clips are made up to 48h ahead; after a restart all 48 said the same wrong time). Now derived from slot_key via _slot_time.
+INGEST 2026-11-15 audio-engine.md Player drifted ~5.5s ahead of server per song after PR 1 (server advanced at full duration + poll; player at cross_start). Fixed: precise timer advances at cross_start; player lead bounded to 1s.
