@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -495,6 +496,24 @@ async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
     await service.replenish()
 
 
+_advance_locks: dict[str, asyncio.Lock] = {}
+
+
+def advance_lock(station_id) -> asyncio.Lock:
+    """One track change at a time per station.
+
+    The 3s poll, the precise timer and the Next button each use their own DB session.
+    Without this, two of them can read the same playing entry at the same moment and
+    each promote a different pending entry: one item is marked playing, replaced a
+    moment later and never heard.
+    """
+    key = str(station_id)
+    lock = _advance_locks.get(key)
+    if lock is None:
+        lock = _advance_locks[key] = asyncio.Lock()
+    return lock
+
+
 async def _check_advance(
     db: AsyncSession, station_id: uuid.UUID, early_seconds: float = 0.0
 ) -> QueueEntry | None:
@@ -503,16 +522,26 @@ async def _check_advance(
     `early_seconds` lets the precise timer advance at the crossfade point instead of
     the very end of the track (see SchedulerEngine._precise_advance).
     """
+    async with advance_lock(station_id):
+        return await _check_advance_locked(db, station_id, early_seconds)
+
+
+async def _check_advance_locked(
+    db: AsyncSession, station_id: uuid.UUID, early_seconds: float = 0.0
+) -> QueueEntry | None:
     is_blackout = await _is_blacked_out(db, station_id)
 
     # Hourly jingles and weather are now pre-scheduled via _schedule_hourly_announcements()
     # in queue_replenish_service.py with exact preempt_at timestamps.
     # The old real-time insertion functions are disabled to prevent duplicates.
 
+    # populate_existing: this session may have loaded these rows before another
+    # advance changed them; read their committed state, not the cached one.
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
         .order_by(QueueEntry.started_at.desc().nullslast())
+        .execution_options(populate_existing=True)
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
@@ -599,7 +628,10 @@ async def _check_advance(
         # Fall through to find the next real song below
 
     else:
-        elapsed = (now_utc - current.started_at).total_seconds()
+        started = current.started_at
+        if started.tzinfo is None:  # SQLite returns naive datetimes
+            started = started.replace(tzinfo=timezone.utc)
+        elapsed = (now_utc - started).total_seconds()
         # Small tolerance so a timer that fires a few ms early still advances
         if elapsed < duration - max(0.0, early_seconds) - 0.05:
             return current  # still playing
@@ -1108,10 +1140,17 @@ async def skip_current(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    # Same lock as the automatic advance, so Next cannot collide with a song change
+    async with advance_lock(station_id):
+        return await _skip_current_locked(station_id, db)
+
+
+async def _skip_current_locked(station_id: uuid.UUID, db: AsyncSession):
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
         .order_by(QueueEntry.started_at.desc().nullslast())
+        .execution_options(populate_existing=True)
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
@@ -1466,10 +1505,13 @@ async def start_playback(
         sid = str(silence_asset.id) if silence_asset else None
         return {"message": f"Blackout active — {count} silence entries queued", "now_playing": sid}
 
+    # populate_existing: this session may have loaded these rows before another
+    # advance changed them; read their committed state, not the cached one.
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
         .order_by(QueueEntry.started_at.desc().nullslast())
+        .execution_options(populate_existing=True)
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
