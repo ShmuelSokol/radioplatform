@@ -81,6 +81,29 @@ export default function AssetDetail() {
             <p className="font-medium">{asset.category ?? '--'}</p>
           </div>
           <div>
+            <span className="text-gray-500">Vote</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              key={asset.vote ?? 0}
+              defaultValue={asset.vote ?? 0}
+              onBlur={(e) => {
+                const vote = Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0)));
+                if (!assetId || vote === (asset.vote ?? 0)) return;
+                updateMutation.mutate({ id: assetId, data: { vote } });
+              }}
+              title="Playlist generation can be told to draw only songs with at least a certain vote."
+              className="block w-24 border border-gray-300 rounded px-2 py-1 text-sm mt-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <span className="text-gray-500">Last played</span>
+            <p className="font-medium">
+              {asset.last_played_at ? new Date(asset.last_played_at).toLocaleString() : 'Never'}
+            </p>
+          </div>
+          <div>
             <span className="text-gray-500">Release Date</span>
             <input
               type="date"

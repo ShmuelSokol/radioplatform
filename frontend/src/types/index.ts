@@ -78,6 +78,8 @@ export interface Asset {
   artist: string | null;
   album: string | null;
   duration: number | null;
+  /** Intro length in seconds, counted from where the item starts on air (cue in) */
+  intro_seconds?: number | null;
   file_path: string;
   album_art_path: string | null;
   metadata_extra: Record<string, unknown> | null;
@@ -86,6 +88,7 @@ export interface Asset {
   category: string | null;
   created_at: string | null;
   last_played_at: string | null;
+  vote?: number;
   release_date: string | null;
   sponsor_id: string | null;
   sponsor_name: string | null;

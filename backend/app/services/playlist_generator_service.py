@@ -41,6 +41,7 @@ class Settings:
     enabled: bool = False
     hours: int = DEFAULT_HOURS
     artist_distance: int = DEFAULT_ARTIST_DISTANCE
+    min_vote: int = 0
 
 
 def settings_for(automation_config: dict | None) -> Settings:
@@ -49,6 +50,7 @@ def settings_for(automation_config: dict | None) -> Settings:
         enabled=bool(raw.get("enabled", False)),
         hours=max(1, min(48, int(raw.get("hours", DEFAULT_HOURS) or DEFAULT_HOURS))),
         artist_distance=max(0, min(20, int(raw.get("artist_distance", DEFAULT_ARTIST_DISTANCE)))),
+        min_vote=max(0, min(100, int(raw.get("min_vote", 0) or 0))),
     )
 
 
@@ -82,8 +84,11 @@ def _artist_key(artist: str | None) -> str | None:
 class _Library:
     """Songs of each type, with when each last aired on this station."""
 
-    def __init__(self, db: AsyncSession, station_id, busy_ids: set):
+    def __init__(self, db: AsyncSession, station_id, busy_ids: set, min_vote: int = 0):
         self.db = db
+        self.min_vote = min_vote
+        # Types where no song reached the minimum vote, so the minimum was ignored.
+        self.below_vote: set[tuple] = set()
         self.station_id = station_id
         self.busy = {str(i) for i in busy_ids}
         self.pools: dict[tuple, list] = {}
@@ -107,7 +112,14 @@ class _Library:
                 stmt = stmt.where(Asset.category == category)
             else:
                 stmt = stmt.where((Asset.category != "do_not_play") | (Asset.category.is_(None)))
-            self.pools[key] = list((await self.db.execute(stmt)).all())
+            rows = []
+            if self.min_vote:
+                rows = list((await self.db.execute(stmt.where(Asset.vote >= self.min_vote))).all())
+            if not rows:
+                rows = list((await self.db.execute(stmt)).all())
+                if self.min_vote and rows:
+                    self.below_vote.add(key)
+            self.pools[key] = rows
         return self.pools[key]
 
     async def draw(self, asset_type, category, recent_artists, at: datetime):
@@ -156,6 +168,7 @@ async def generate(
     hours: float,
     *,
     artist_distance: int = DEFAULT_ARTIST_DISTANCE,
+    min_vote: int = 0,
     cursor: dict | None = None,
     recent_artists: list[str | None] | None = None,
     busy_ids: set | None = None,
@@ -178,7 +191,7 @@ async def generate(
     )
     blackouts = await load_blackouts(db, station.id, start, end)
     svc = SchedulingService(db)
-    library = _Library(db, station.id, busy_ids or set())
+    library = _Library(db, station.id, busy_ids or set(), min_vote)
     recent: deque = deque(
         [k for k in (_artist_key(a) for a in (recent_artists or [])) if k],
         maxlen=artist_distance or 1,
@@ -248,4 +261,7 @@ async def generate(
             recent.append(artist)
         at += timedelta(seconds=duration)
 
+    for asset_type, category in sorted(library.below_vote, key=str):
+        name = f"{asset_type} / {category}" if category else asset_type
+        note(f"No {name} has a vote of {min_vote} or more, so the minimum vote was ignored for that type.")
     return Plan(picks=picks, cursor=cursor, notes=notes)

@@ -102,6 +102,7 @@ class GenerationSettings(BaseModel):
     enabled: bool
     hours: int = Field(6, ge=1, le=48)
     artist_distance: int = Field(2, ge=0, le=20)
+    min_vote: int = Field(0, ge=0, le=100)
 
 
 async def _station(db: AsyncSession, station_id: UUID) -> Station:
@@ -146,6 +147,7 @@ async def get_generation(
         start,
         look,
         artist_distance=settings.artist_distance,
+        min_vote=settings.min_vote,
         cursor=saved.get("cursor") or {},
     )
     try:
@@ -157,6 +159,7 @@ async def get_generation(
         "enabled": settings.enabled,
         "hours": settings.hours,
         "artist_distance": settings.artist_distance,
+        "min_vote": settings.min_vote,
         "queued_hours": round(queued / 3600, 1),
         "preview_from": start,
         "preview_hours": look,
@@ -190,11 +193,21 @@ async def set_generation(
     station = await _station(db, data.station_id)
     config = dict(station.automation_config or {})
     saved = dict(config.get(CONFIG_KEY) or {})
-    saved.update(enabled=data.enabled, hours=data.hours, artist_distance=data.artist_distance)
+    saved.update(
+        enabled=data.enabled,
+        hours=data.hours,
+        artist_distance=data.artist_distance,
+        min_vote=data.min_vote,
+    )
     config[CONFIG_KEY] = saved
     station.automation_config = config
     await db.commit()
-    return {"enabled": data.enabled, "hours": data.hours, "artist_distance": data.artist_distance}
+    return {
+        "enabled": data.enabled,
+        "hours": data.hours,
+        "artist_distance": data.artist_distance,
+        "min_vote": data.min_vote,
+    }
 
 
 @router.post("/generation/regenerate")

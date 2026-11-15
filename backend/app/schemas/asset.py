@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AssetResponse(BaseModel):
@@ -12,6 +12,7 @@ class AssetResponse(BaseModel):
     artist: str | None = None
     album: str | None = None
     duration: float | None = None
+    intro_seconds: float | None = None
     file_path: str
     album_art_path: str | None = None
     metadata_extra: dict | None = None
@@ -20,6 +21,7 @@ class AssetResponse(BaseModel):
     category: str | None = None
     created_at: datetime | None = None
     last_played_at: datetime | None = None
+    vote: int = 0
     release_date: str | None = None
     sponsor_id: uuid.UUID | str | None = None
     sponsor_name: str | None = None
@@ -35,10 +37,12 @@ class AssetUpdate(BaseModel):
     artist: str | None = None
     album: str | None = None
     duration: float | None = None
+    intro_seconds: float | None = Field(default=None, ge=0, le=600)
     asset_type: str | None = None
     category: str | None = None
     file_path: str | None = None
     release_date: str | None = None
+    vote: int | None = Field(None, ge=0, le=100)
     sponsor_id: uuid.UUID | str | None = None
 
 

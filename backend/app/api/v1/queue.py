@@ -3,8 +3,9 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,9 +17,16 @@ from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry
+from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, soft_timed
 from app.models.user import User
-from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueFireNow, QueueReorder
+from app.schemas.queue import (
+    QueueAdd,
+    QueueBulkAdd,
+    QueueDndReorder,
+    QueueFireNow,
+    QueueInsert,
+    QueueReorder,
+)
 
 from app.models.holiday_window import HolidayWindow
 
@@ -524,6 +532,24 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+# Recent fire-now requests by the client's request id, so a double tap fires once
+FIRE_REPEAT_WINDOW_SECONDS = 5.0
+_fire_requests: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+def _recent_fire_request(station_id, request_id: str) -> dict | None:
+    now = time.monotonic()
+    for key in [k for k, (at, _) in _fire_requests.items() if now - at > FIRE_REPEAT_WINDOW_SECONDS]:
+        _fire_requests.pop(key, None)
+    hit = _fire_requests.get((str(station_id), request_id))
+    return hit[1] if hit else None
+
+
+def _remember_fire_request(station_id, request_id: str | None, response: dict) -> None:
+    if request_id:
+        _fire_requests[(str(station_id), request_id)] = (time.monotonic(), response)
+
+
 _advance_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -599,7 +625,7 @@ async def _check_advance_locked(
             QueueEntry.status == "pending",
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now_utc,
-            QueueEntry.source != "ad_slot",  # ad_slots use soft preempt (wait for song end)
+            hard_timed(),  # ad_slots use soft preempt (wait for song end)
         )
         .order_by(QueueEntry.preempt_at, QueueEntry.position)
         .limit(1)
@@ -682,7 +708,7 @@ async def _check_advance_locked(
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            QueueEntry.source == "ad_slot",
+            soft_timed(),
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now_utc,
         )
@@ -810,11 +836,11 @@ async def _get_queue_impl(station_id, limit, db):
             key=lambda e: e.position,
         )
         hard_preempts = sorted(
-            [e for e in entries if e.status == "pending" and e.preempt_at and e.source != "ad_slot"],
+            [e for e in entries if e.status == "pending" and e.preempt_at and not is_soft_timed(e)],
             key=lambda e: _tz(e.preempt_at),
         )
         soft_preempts = sorted(
-            [e for e in entries if e.status == "pending" and e.preempt_at and e.source == "ad_slot"],
+            [e for e in entries if e.status == "pending" and e.preempt_at and is_soft_timed(e)],
             key=lambda e: _tz(e.preempt_at),
         )
 
@@ -1014,6 +1040,7 @@ async def _get_queue_impl(station_id, limit, db):
                 "title": e.asset.title,
                 "artist": e.asset.artist,
                 "duration": e.asset.duration,
+                "intro_seconds": e.asset.intro_seconds,
                 "asset_type": e.asset.asset_type,
                 "category": e.asset.category,
             } if e.asset else None,
@@ -1172,9 +1199,15 @@ async def fire_now(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Put an asset on air now (one call instead of play-next + skip)."""
+    if body.client_request_id:
+        repeat = _recent_fire_request(station_id, body.client_request_id)
+        if repeat is not None:
+            return {**repeat, "duplicate": True}
     queued = await play_next(station_id, QueueAdd(asset_id=body.asset_id), db, _user)
     if body.mode == "after-current":
-        return {**queued, "message": "Plays after the current track", "on_air": False}
+        done = {**queued, "message": "Plays after the current track", "on_air": False}
+        _remember_fire_request(station_id, body.client_request_id, done)
+        return done
 
     if settings.engine_drives(station_id):
         # The engine loads the file, fades the music out and starts it; the song that
@@ -1190,7 +1223,9 @@ async def fire_now(
         state = playout_engine.get_state(station_id)
         state.timed_sent.add(str(entry.id))
         if uri and await playout_engine.engine_timed(uri, time.time(), str(entry.id)):
-            return {**queued, "message": "Going on air", "on_air": True}
+            done = {**queued, "message": "Going on air", "on_air": True}
+            _remember_fire_request(station_id, body.client_request_id, done)
+            return done
         state.timed_sent.discard(str(entry.id))
         return JSONResponse(
             status_code=503,
@@ -1200,22 +1235,33 @@ async def fire_now(
             },
         )
 
-    await skip_current(station_id, db, _user)
-    return {**queued, "message": "Going on air", "on_air": True}
+    # The operator asked for this item: it goes on air even if a song change is in progress
+    async with advance_lock(station_id):
+        skipped = await _skip_current_locked(station_id, db, keep_incoming=False)
+    done = {**queued, "message": "Going on air", "on_air": True, "queue": skipped.get("queue")}
+    _remember_fire_request(station_id, body.client_request_id, done)
+    return done
+
+
+# How long the outgoing item fades when the operator presses Next, by the button used
+SKIP_FADE_SECONDS = {"hard": 0.0, "fade": 0.5, "soft": 3.0}
 
 
 @router.post("/skip")
 async def skip_current(
     station_id: uuid.UUID,
+    fade: Literal["hard", "fade", "soft"] = Query("fade"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    """Next. `fade`: hard = cut, fade = quick fade (default), soft = long fade."""
+    fade_seconds = SKIP_FADE_SECONDS[fade]
     if settings.engine_drives(station_id):
         # The playout engine fades out and starts the next track itself, then reports
         # the real start back (which updates the queue and every client).
         from app.services import playout_engine
-        if await playout_engine.engine_skip(station_id):
-            return {"message": "Skipped", "now_playing": None}
+        if await playout_engine.engine_skip(station_id, fade_seconds):
+            return {"message": "Skipped", "now_playing": None, "fade_seconds": fade_seconds}
         return JSONResponse(
             status_code=503,
             content={"detail": "The playout engine did not respond. Nothing was skipped."},
@@ -1223,10 +1269,16 @@ async def skip_current(
 
     # Same lock as the automatic advance, so Next cannot collide with a song change
     async with advance_lock(station_id):
-        return await _skip_current_locked(station_id, db)
+        done = await _skip_current_locked(station_id, db, fade_seconds=fade_seconds)
+    return {**done, "fade_seconds": fade_seconds}
 
 
-async def _skip_current_locked(station_id: uuid.UUID, db: AsyncSession):
+async def _skip_current_locked(
+    station_id: uuid.UUID,
+    db: AsyncSession,
+    fade_seconds: float | None = None,
+    keep_incoming: bool = True,
+):
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
@@ -1235,7 +1287,7 @@ async def _skip_current_locked(station_id: uuid.UUID, db: AsyncSession):
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
-    if current and _incoming_from_automatic_change(station_id, current.id):
+    if current and keep_incoming and _incoming_from_automatic_change(station_id, current.id):
         # The station is already changing to this song (it is fading in right now).
         # Skipping it as well would jump two songs on one press: keep it on air.
         return {
@@ -1267,7 +1319,7 @@ async def _skip_current_locked(station_id: uuid.UUID, db: AsyncSession):
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            QueueEntry.source == "ad_slot",
+            soft_timed(),
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now_skip,
         )
@@ -1304,7 +1356,7 @@ async def _skip_current_locked(station_id: uuid.UUID, db: AsyncSession):
         next_id = next_entry.id
         next_asset_id = next_entry.asset_id
         await db.commit()
-        await _broadcast_now_playing_entry(db, station_id, next_id)
+        await _broadcast_now_playing_entry(db, station_id, next_id, fade_seconds)
         return {
             "message": "Skipped",
             "now_playing": str(next_asset_id),
@@ -1325,7 +1377,9 @@ async def _queue_after_action(db: AsyncSession, station_id) -> dict | None:
         return None
 
 
-async def _broadcast_now_playing_entry(db: AsyncSession, station_id, entry_id) -> None:
+async def _broadcast_now_playing_entry(
+    db: AsyncSession, station_id, entry_id, change_fade_seconds: float | None = None
+) -> None:
     """Immediately push the new now-playing over WebSocket so clients switch
     without waiting for the scheduler's next poll cycle."""
     try:
@@ -1338,9 +1392,74 @@ async def _broadcast_now_playing_entry(db: AsyncSession, station_id, entry_id) -
         )
         fresh = res.unique().scalar_one_or_none()
         if fresh:
-            await get_scheduler()._broadcast_queue_entry(db, station_id, fresh)
+            await get_scheduler()._broadcast_queue_entry(
+                db, station_id, fresh, change_fade_seconds=change_fade_seconds
+            )
     except Exception as e:
         logger.warning("Instant now-playing broadcast failed: %s", e)
+
+
+@router.post("/insert", status_code=201)
+async def insert_into_queue(
+    station_id: uuid.UUID,
+    body: QueueInsert,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """Insert assets, in order, right after a queue entry (or at the top). One call:
+    the response carries the new queue (same body as GET /queue)."""
+    asset_ids = ([body.asset_id] if body.asset_id else []) + list(body.asset_ids)
+    if not asset_ids:
+        raise HTTPException(status_code=422, detail="Give asset_id or asset_ids")
+    found = await db.execute(select(Asset.id).where(Asset.id.in_(asset_ids)))
+    known = set(found.scalars().all())
+    if any(a not in known for a in asset_ids):
+        raise NotFoundError("Asset not found")
+
+    async with advance_lock(station_id):
+        result = await db.execute(
+            select(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+            .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
+        )
+        current = result.scalar_one_or_none()
+        after_pos = current.position if current else 0
+        if body.after_entry_id:
+            res = await db.execute(
+                select(QueueEntry).where(
+                    QueueEntry.id == body.after_entry_id, QueueEntry.station_id == station_id
+                )
+            )
+            anchor = res.scalar_one_or_none()
+            # An anchor that has already played or gone: insert at the top instead
+            if anchor and anchor.status in ("pending", "playing"):
+                after_pos = anchor.position
+        await db.execute(
+            update(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.position > after_pos,
+            )
+            .values(position=QueueEntry.position + len(asset_ids))
+        )
+        new_ids = []
+        for i, asset_id in enumerate(asset_ids):
+            entry = QueueEntry(
+                id=uuid.uuid4(), station_id=station_id, asset_id=asset_id,
+                position=after_pos + 1 + i, status="pending", source="manual",
+            )
+            db.add(entry)
+            new_ids.append(str(entry.id))
+        await db.commit()
+    if settings.engine_drives(station_id):
+        from app.services import playout_engine
+        await playout_engine.engine_flush(station_id)
+    return {
+        "message": f"Inserted {len(new_ids)}",
+        "ids": new_ids,
+        "queue": await _queue_after_action(db, station_id),
+    }
 
 
 @router.post("/move-up")

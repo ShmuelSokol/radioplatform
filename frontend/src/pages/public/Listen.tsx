@@ -149,6 +149,7 @@ export default function Listen() {
     wsAsset?.audio_url ?? null,
     wsNextAsset?.audio_url ?? null,
     wsNowPlaying?.started_at ?? null,
+    wsNowPlaying?.change_fade_seconds ?? null,
   );
 
   // Fetch active live show status (still uses polling — shows don't change often)

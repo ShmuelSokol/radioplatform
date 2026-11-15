@@ -7,6 +7,8 @@ export interface NowPlayingData {
   ends_at?: string;
   listener_count?: number;
   stream_url?: string;
+  /** Present only on the message announcing an operator's Next: fade length of the outgoing item */
+  change_fade_seconds?: number;
   asset?: {
     title: string;
     artist?: string;
@@ -14,6 +16,8 @@ export interface NowPlayingData {
     album_art_path?: string;
     audio_url?: string;
     cue_in?: number;
+    /** Intro length in seconds, counted from where the item starts on air (cue in) */
+    intro_seconds?: number | null;
     cue_out?: number;
     cross_start?: number;
     replay_gain_db?: number;

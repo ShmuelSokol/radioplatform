@@ -151,8 +151,8 @@ radio = fallback(id="radio", track_sensitive=false, [timed, main, emergency])
 radio = amplify({master_gain()}, radio)
 
 # Next: fade out quickly, skip whatever is on air, come back at full level on the new track
-def skip_on_air() =
-  ramp_master(target=0., duration=skip_fade, fun () -> begin
+def skip_on_air(~seconds) =
+  ramp_master(target=0., duration=seconds, fun () -> begin
     if on_air_lane() == "timed" then
       timed_queue.skip()
     else
@@ -224,8 +224,11 @@ def control(path, handler) =
   harbor.http.register(port=control_port, method="POST", path, h)
 end
 
-control("/skip", fun (_) -> begin
-  skip_on_air()
+# Body may carry {"fade": seconds}: 0 = cut, longer = soft fade. Default is the quick fade.
+control("/skip", fun (req) -> begin
+  let json.parse (body : {fade : float?}) = req.body()
+  wanted = null.default(body.fade, {skip_fade})
+  skip_on_air(seconds=max(0.02, wanted))
   '{"ok":true}'
 end)
 
@@ -244,7 +247,7 @@ end)
 timed_seen = ref([])
 control("/timed", fun (req) -> begin
   let json.parse (body : {uri : string, at : float, id : string?}) = req.body()
-  id = body.id ?? ""
+  id = null.default(body.id, {""})
   if id == "" or not list.mem(id, timed_seen()) then
     if id != "" then timed_seen := list.prefix(50, id :: timed_seen()) end
     schedule_timed(uri=body.uri, at=body.at)

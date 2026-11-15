@@ -18,6 +18,7 @@ export interface PlaylistGeneration {
   enabled: boolean;
   hours: number;
   artist_distance: number;
+  min_vote: number;
   queued_hours: number;
   preview_hours: number;
   notes: string[];
@@ -29,6 +30,7 @@ export interface GenerationSettings {
   enabled: boolean;
   hours: number;
   artist_distance: number;
+  min_vote: number;
 }
 
 export const getPlaylistGeneration = async (
