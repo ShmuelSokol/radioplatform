@@ -34,6 +34,7 @@ from app.models.asset_type import AssetTypeModel
 from app.models.audit_log import AuditLog
 from app.models.spot_schedule import SpotSchedule
 from app.models.sponsorship_rules import SponsorshipRules
+from app.models.spot_recording import SpotRecording
 
 __all__ = [
     "User", "UserRole",
@@ -72,4 +73,5 @@ __all__ = [
     "AuditLog",
     "SpotSchedule",
     "SponsorshipRules",
+    "SpotRecording",
 ]
