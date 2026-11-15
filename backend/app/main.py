@@ -132,6 +132,7 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS vote INTEGER NOT NULL DEFAULT 0",
         # Preempt mechanism for exact-time playback (time announcements)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
+        "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS timing_mode VARCHAR(10)",
         # Source tracking: 'request', 'manual', 'auto' (replenish)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'auto'",
         # Schedule block columns that may be missing from early table creation
@@ -331,6 +332,10 @@ async def _resume_playback_on_startup():
             # 2. Entries that ended while the server was down: mark played and log them
             stale_playing_count = 0
             for entry in finished:
+                # The playout engine keeps playing through a backend restart; it reports
+                # what really aired, so its station's entries are left for it to settle.
+                if settings.engine_drives(entry.station_id):
+                    continue
                 play_log = PlayLog(
                     station_id=entry.station_id,
                     asset_id=entry.asset_id,
@@ -362,6 +367,8 @@ async def _resume_playback_on_startup():
 
                     if station.id in on_air:
                         continue  # still playing; the scheduler carries on from here
+                    if settings.engine_drives(station.id):
+                        continue  # the engine asks for its next track itself
 
                     # 4b. Start playback — find next pending entry
                     next_result = await db.execute(

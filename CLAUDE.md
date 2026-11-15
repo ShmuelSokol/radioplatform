@@ -50,7 +50,7 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, w
 - **Bot**: Telegram bot with Claude API + OpenAI Whisper for voice transcription
 - **Workers**: Celery + Redis (not yet deployed — needed for media processing)
 - **Media**: FFmpeg for transcoding, clipping, HLS generation
-- **Streaming**: Liquidsoap + Icecast on dedicated VPS for MP3 streaming with crossfade + loudness normalization (client-side Web Audio fallback)
+- **Streaming**: in-browser player today; a single playout engine (Liquidsoap 2.2 + Icecast on its own server) is built and switched off until the server exists. See `wiki/streaming-architecture.md`
 
 ## Project Structure
 ```
@@ -88,7 +88,7 @@ radioplatform/
 │   └── .env.example              # Template
 ├── docs/                         # API reference documentation
 ├── docker/                       # Dockerfiles, nginx.conf
-├── infra/streaming/              # VPS config: Liquidsoap, Icecast, Nginx, systemd
+├── infra/streaming/              # Playout engine server: radio.liq, setup.sh, Icecast, nginx, systemd
 └── infra/terraform/              # Terraform IaC (Vercel frontend provisioning)
 ```
 
@@ -162,6 +162,7 @@ radioplatform/
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
+| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login) |
 | weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips; ElevenLabs is only the fallback |
 
 ### Services (`backend/app/services/`)
@@ -194,7 +195,8 @@ radioplatform/
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
 | twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
 | live_audio_mixer.py | Audio mixer stub (future ffmpeg host+caller mixing) |
-| liquidsoap_client.py | Async TCP telnet client for Liquidsoap on VPS (push tracks, skip, status, health check) |
+| liquidsoap_client.py | Old telnet push client for Liquidsoap. Superseded by playout_engine.py; keep `LIQUIDSOAP_ENABLED` off |
+| playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details
 
@@ -382,6 +384,11 @@ Claude Code accessible over Telegram for remote development.
 | `LIQUIDSOAP_HOST` | VPS hostname for Liquidsoap telnet | For streaming |
 | `LIQUIDSOAP_TELNET_PORT` | Liquidsoap telnet port (default: 1234) | For streaming |
 | `ICECAST_STREAM_URL` | Public Icecast stream URL (e.g., https://stream.kbrlive.com/live) | For streaming |
+| `PLAYOUT_ENGINE_ENABLED` | Let the playout engine drive one station (default false) | For the engine |
+| `PLAYOUT_ENGINE_STATION_ID` | The station the engine plays | For the engine |
+| `PLAYOUT_ENGINE_URL` | Engine control URL (e.g., https://stream.kbrlive.com/control) | For the engine |
+| `PLAYOUT_ENGINE_TOKEN` | Shared secret sent both ways in `X-Playout-Token` | For the engine |
+| `PLAYOUT_STREAM_LIVE` | true = the site plays the engine's stream instead of the in-browser player | For the engine |
 
 ### Frontend (Vercel)
 - `VITE_API_URL` — Backend API base URL (https://api.kbrlive.com/api/v1)
@@ -405,7 +412,7 @@ Claude Code accessible over Telegram for remote development.
 - **Pydantic schemas**: ID fields use `uuid.UUID | str` for cross-DB compatibility (SQLite returns strings)
 - **Frontend Vercel deploy**: Repo-local git email is set to `shmuelsokol@yahoo.com` (matching the Vercel account). Deploy directly: `cd frontend && npx vercel --prod --yes`.
 - **Weather caching**: Weather TTS audio is cached per 15-min slot. Text changes don't take effect until the next slot.
-- **Liquidsoap + Icecast**: Runs on a dedicated VPS (not Railway). Backend communicates via TCP telnet. Listeners connect directly to Icecast MP3 stream via `<audio>` element. If VPS is down, clients auto-fall back to the dual-buffer Web Audio engine. Set `LIQUIDSOAP_ENABLED=false` to disable. VPS config in `infra/streaming/`.
+- **Playout engine**: Liquidsoap 2.2 + Icecast on its own server (not Railway), set up by `infra/streaming/setup.sh` (Ubuntu 24.04). The engine pulls the next track and reports real starts; for an engine station nothing in the backend advances playback by duration. Off until `PLAYOUT_ENGINE_*` is set. The older telnet path (`LIQUIDSOAP_ENABLED`) must stay off.
 
 ## Milestones
 - **M1** (complete): Backend skeleton, auth, station CRUD, asset upload, React frontend — DEPLOYED

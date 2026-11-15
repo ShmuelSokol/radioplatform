@@ -200,7 +200,7 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                             "started_at": started_at.isoformat() if started_at else None,
                             "ends_at": ends_at.isoformat() if ends_at else None,
                             "listener_count": getattr(now_playing, "listener_count", 0),
-                            "stream_url": getattr(settings, "ICECAST_STREAM_URL", None) if getattr(settings, "liquidsoap_enabled", False) else None,
+                            "stream_url": settings.public_stream_url(station_id),
                             "asset": {
                                 "title": asset.title if asset else "Unknown",
                                 "artist": getattr(asset, "artist", None) if asset else None,
