@@ -692,11 +692,16 @@ async def get_queue(
 
 
 async def _get_queue_impl(station_id, limit, db):
-    from sqlalchemy.orm import joinedload
+    from sqlalchemy.orm import joinedload, noload
 
     result = await db.execute(
         select(QueueEntry)
-        .options(joinedload(QueueEntry.asset))
+        # The response only uses asset columns: skip the station, its channels and
+        # the asset categories, which otherwise cost three extra queries per call.
+        .options(
+            joinedload(QueueEntry.asset).noload(Asset.categories),
+            noload(QueueEntry.station),
+        )
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
         .order_by(QueueEntry.position)
     )
