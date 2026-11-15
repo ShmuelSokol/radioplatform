@@ -4,7 +4,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 
 ## Pages
 
-- [streaming-architecture](streaming-architecture.md) — Liquidsoap + Icecast on VPS, TCP telnet, Icecast stream vs client-side fallback
+- [streaming-architecture](streaming-architecture.md) — The playout engine (Liquidsoap + Icecast): pull next / report started, flags, server setup, outage behaviour
 - [audio-engine](audio-engine.md) — Client-side dual-deck Web Audio engine, crossfade, pre-loading, gap fixes
 - [hourly-slots](hourly-slots.md) — Station ID, time announcements, weather, ad slots at :00/:15/:30/:45
 - [admin-page-layout](admin-page-layout.md) — Full-width rule for every admin page, the padding the dark pages depend on, phone tables, the layout audit script
@@ -14,6 +14,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [v2-ui](v2-ui.md) — V1/V2 UI toggle, V2 design system, dev-against-prod proxy
 - [lint-workflow](lint-workflow.md) — Wiki housekeeping procedure
 - [release-pickup](release-pickup.md) — open tabs reload themselves onto a new release, never while audio plays
+- [playlist-generation](playlist-generation.md) — queue generated ahead from sequences of song types, artist distance, longest-rested first
 - [rds-feed](rds-feed.md) — plain-text now-playing line for the FM RDS encoder (Magic RDS)
 - [song-request-matching.md](song-request-matching.md) — how listener requests map to library assets; known nickname + recall bugs
 - [spot-schedules](spot-schedules.md) — Sponsor spot scheduling by daypart, how clock slots get filled, legacy single-spot fallback, sponsor portal data sources

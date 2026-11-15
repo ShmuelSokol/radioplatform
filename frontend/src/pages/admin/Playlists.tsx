@@ -8,6 +8,7 @@ import {
   useDeleteTemplateSlot,
   useAssetTypes,
 } from '../../hooks/usePlaylists';
+import PlaylistGenerationPanel from './PlaylistGenerationPanel';
 
 export default function Playlists() {
   const { data: stationsData } = useStations();
@@ -94,6 +95,8 @@ export default function Playlists() {
           ))}
         </select>
       </div>
+
+      <PlaylistGenerationPanel stationId={filterStationId} />
 
       {/* Create form */}
       {showForm && (

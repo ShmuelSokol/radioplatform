@@ -322,8 +322,14 @@ class SchedulerEngine:
 
         for station in stations:
             try:
-                # Run queue-based playback advancement (handles silence entries during blackout too)
-                await self._advance_queue(db, station.id)
+                if settings.engine_drives(station.id):
+                    # The playout engine owns the clock for this station: it asks for the
+                    # next track and reports real starts. No time-based advance here.
+                    from app.services import playout_engine
+                    await playout_engine.tick(db, station)
+                else:
+                    # Run queue-based playback advancement (handles silence entries during blackout too)
+                    await self._advance_queue(db, station.id)
                 await self._check_station(db, station)
                 # Also check per-channel playback
                 ch_stmt = select(ChannelStream).where(
@@ -597,6 +603,8 @@ class SchedulerEngine:
         """
         if not self.is_leader:
             return  # another process took over between scheduling and firing
+        if settings.engine_drives(station_id):
+            return
         try:
             async for db in get_db():
                 from app.api.v1.queue import _check_advance
@@ -745,7 +753,7 @@ class SchedulerEngine:
                 "asset_id": str(asset.id),
                 "started_at": entry.started_at.isoformat() if entry.started_at else None,
                 "ends_at": (entry.started_at + timedelta(seconds=(asset.duration or 180.0))).isoformat() if entry.started_at else None,
-                "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
+                "stream_url": settings.public_stream_url(station_id),
                 "asset": {
                     "title": asset.title,
                     "artist": asset.artist,
@@ -957,7 +965,7 @@ class SchedulerEngine:
                 "started_at": now_playing.started_at.isoformat(),
                 "ends_at": now_playing.ends_at.isoformat() if now_playing.ends_at else None,
                 "listener_count": now_playing.listener_count,
-                "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
+                "stream_url": settings.public_stream_url(station.id),
                 "asset": {
                     "title": asset.title,
                     "artist": asset.artist,

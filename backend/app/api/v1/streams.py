@@ -20,7 +20,7 @@ async def stream_info(station_id: uuid.UUID, db: AsyncSession = Depends(get_db))
     return {
         "station_id": str(station.id),
         "station_name": station.name,
-        "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
+        "stream_url": settings.public_stream_url(station.id),
     }
 
 
