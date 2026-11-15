@@ -199,3 +199,22 @@ async def test_time_clip_validation(client: AsyncClient, auth_headers: dict):
         assert (await _put_time(client, auth_headers, 24)).status_code == 422
     resp = await client.put("/api/v1/time-announcements/3", files={"file": ("t.mp3", io.BytesIO(b"x"), "audio/mpeg")})
     assert resp.status_code in (401, 403)
+
+
+def test_duration_of_piped_mp3_comes_from_decoding():
+    """The normalized MP3 has no length header ("Duration: N/A"); the decode progress line gives the length."""
+    import shutil
+    import subprocess
+
+    from app.config import settings
+    from app.services.audio_analysis_service import normalize_audio_loudness
+    from app.services.weather_spot_service import _decoded_duration
+
+    assert _decoded_duration(b"not audio") == 0.0
+    if not shutil.which(settings.FFMPEG_PATH):
+        pytest.skip("FFmpeg not installed")
+    tone = subprocess.run(
+        [settings.FFMPEG_PATH, "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-f", "mp3", "pipe:1"],
+        capture_output=True, timeout=60,
+    ).stdout
+    assert 2.8 < _decoded_duration(normalize_audio_loudness(tone)) < 3.3

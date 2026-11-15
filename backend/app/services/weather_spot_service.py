@@ -134,13 +134,36 @@ async def find_time_clip_asset(db: AsyncSession, hour: int) -> Asset | None:
     return result.scalar_one_or_none()
 
 
+def _decoded_duration(audio_bytes: bytes) -> float:
+    """Audio length found by decoding the whole file.
+
+    The normalized MP3 comes out of an FFmpeg pipe, so it has no length header
+    and FFmpeg reports "Duration: N/A" for it. The progress line of a full
+    decode ("time=00:00:44.78") still gives the real length.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [settings.FFMPEG_PATH, "-i", "pipe:0", "-f", "null", "-"],
+            input=audio_bytes, capture_output=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0.0
+    times = re.findall(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr.decode("utf-8", errors="replace"))
+    if not times:
+        return 0.0
+    h, m, s = times[-1]
+    return int(h) * 3600 + int(m) * 60 + float(s)
+
+
 async def _store_upload(audio_bytes: bytes, path_stem: str) -> tuple[str, float]:
     """Normalize an uploaded recording, store it, return (public_url, duration)."""
     from app.services.audio_analysis_service import normalize_audio_loudness
     from app.services.silence_service import get_audio_duration
 
     audio_bytes = normalize_audio_loudness(audio_bytes)
-    duration = get_audio_duration(audio_bytes)
+    duration = get_audio_duration(audio_bytes) or _decoded_duration(audio_bytes)
     if duration <= 0:
         raise ValueError("Uploaded file is not readable audio")
     # A new path on every upload: the public URL is cached, so re-using the
