@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import AssetCategoryBadge from '../../../components/AssetCategoryBadge';
-import { clockTime, dayKey, fmtAgo, fmtDur, fmtHMS, typeStyle, useMediaQuery, weekdayShort } from './shared';
+import { clockTime, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, typeStyle, useMediaQuery, weekdayShort } from './shared';
 
 export interface QueueRow {
   id: string;
@@ -43,13 +43,15 @@ const ROW_DESKTOP = 40;   // lg:h-10
 const ROW_PHONE = 66;     // h-[66px]
 const MARKER_H = 40;      // h-10
 const ACTIONS_H = 61;     // h-[61px]
-const OVERSCAN = 12;      // extra rows drawn above and below the window
+const OVERSCAN = 30;      // extra rows drawn above and below, so a fast fling rarely outruns the redraw
 const STEP = 6;           // redraw only after scrolling this many rows
 
-function fmtStart(iso: string | null | undefined, today: string, tz?: string): { time: string; day: string | null } {
-  if (!iso) return { time: '', day: null };
+// Projected air time to the second, as on the running log operators know.
+function fmtStart(iso: string | null | undefined, today: string, tz?: string): { time: string; sub: string } {
+  if (!iso) return { time: '', sub: '' };
   const d = new Date(iso);
-  return { time: clockTime(d, tz), day: dayKey(d, tz) !== today ? weekdayShort(d, tz) : null };
+  const { time, ampm } = clockTimeSec(d, tz);
+  return { time, sub: dayKey(d, tz) !== today ? `${ampm} ${weekdayShort(d, tz)}` : ampm };
 }
 
 function QueuePanel(p: Props) {
@@ -199,9 +201,9 @@ function QueuePanel(p: Props) {
                   </button>
                 )}
 
-                <span className="w-[58px] lg:w-[68px] shrink-0 tabular-nums text-xs text-gray-400 leading-tight">
+                <span className="w-[62px] lg:w-[92px] shrink-0 tabular-nums text-[13px] text-gray-300 leading-tight" data-testid="air-time">
                   {start.time}
-                  {start.day && <span className="block text-[10px] text-gray-500">{start.day}</span>}
+                  <span className="block lg:inline lg:ml-1 text-[10px] text-gray-500">{start.sub}</span>
                 </span>
 
                 <span className="flex-1 min-w-0 leading-tight">
@@ -226,7 +228,7 @@ function QueuePanel(p: Props) {
                 <span className="hidden 2xl:block w-24 shrink-0 text-xs" onClick={(e) => e.stopPropagation()}>
                   {a?.id && !isSilence ? <AssetCategoryBadge assetId={a.id} category={a.category ?? null} dark compact /> : null}
                 </span>
-                <span className="hidden 2xl:block w-20 shrink-0 text-xs text-gray-500 tabular-nums" title={lp ? new Date(lp).toLocaleString() : 'Not played recently'}>
+                <span className="hidden xl:block w-20 shrink-0 text-xs text-gray-500 tabular-nums" title={lp ? new Date(lp).toLocaleString() : 'Not played recently'}>
                   {fmtAgo(lp)}
                 </span>
                 <span className="w-11 shrink-0 text-right tabular-nums text-sm text-gray-300">{fmtDur(a?.duration)}</span>
