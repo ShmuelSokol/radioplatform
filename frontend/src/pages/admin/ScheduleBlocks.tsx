@@ -52,7 +52,12 @@ export default function ScheduleBlocks() {
   const handleCreateBlock = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await createBlock.mutateAsync({ ...blockForm, schedule_id: scheduleId || '' });
+      await createBlock.mutateAsync({
+        ...blockForm,
+        schedule_id: scheduleId || '',
+        // a start-only block has no end; the server ignores it
+        end_time: blockForm.until_next ? blockForm.start_time : blockForm.end_time,
+      });
       setShowBlockForm(false);
       setBlockForm({ schedule_id: scheduleId || '', name: '', start_time: '08:00', end_time: '12:00', recurrence_type: 'daily', priority: 0, playback_mode: 'sequential' });
     } catch (err) {
@@ -92,6 +97,25 @@ export default function ScheduleBlocks() {
     { value: 'dusk', label: 'Dusk' },
   ];
 
+  const weekDays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const dayShort = (d: string) => d.charAt(0).toUpperCase() + d.slice(1, 3);
+  const toggleDay = (day: string) => {
+    const current: string[] = blockForm.recurrence_pattern || [];
+    const next = current.includes(day) ? current.filter(d => d !== day) : [...current, day];
+    setBlockForm({ ...blockForm, recurrence_pattern: weekDays.filter(d => next.includes(d)) });
+  };
+  // Starts the studio program keys to the calendar. Candle lighting is 18 minutes before sunset.
+  const startPresets = [
+    {
+      label: 'Friday, candle lighting + 1 min',
+      apply: { recurrence_type: 'weekly' as const, recurrence_pattern: ['friday'], start_sun_event: 'sunset' as const, start_sun_offset: -17, until_next: true },
+    },
+    {
+      label: '72 min after Shabbos',
+      apply: { recurrence_type: 'weekly' as const, recurrence_pattern: ['saturday'], start_sun_event: 'sunset' as const, start_sun_offset: 72, until_next: true },
+    },
+  ];
+
   if (isLoading) return <div className="p-8">Loading...</div>;
 
   return (
@@ -126,6 +150,37 @@ export default function ScheduleBlocks() {
               </select>
             </div>
           </div>
+          {blockForm.recurrence_type === 'weekly' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Days</label>
+              <div className="flex flex-wrap gap-2">
+                {weekDays.map(day => {
+                  const on = (blockForm.recurrence_pattern || []).includes(day);
+                  return (
+                    <button type="button" key={day} onClick={() => toggleDay(day)} aria-pressed={on}
+                      className={`px-3 py-1.5 rounded-lg border text-sm ${on ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
+                      {dayShort(day)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" className="h-4 w-4" checked={!!blockForm.until_next}
+                onChange={e => setBlockForm({ ...blockForm, until_next: e.target.checked })} />
+              Runs until the next playlist starts (no end time)
+            </label>
+            <span className="text-sm text-gray-500">Quick starts:</span>
+            {startPresets.map(preset => (
+              <button type="button" key={preset.label}
+                onClick={() => setBlockForm(f => ({ ...f, ...preset.apply }))}
+                className="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50">
+                {preset.label}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Start Time</label>
@@ -138,7 +193,7 @@ export default function ScheduleBlocks() {
                 }}
                 className="w-full px-3 py-2 border rounded-lg" />
             </div>
-            <div>
+            <div className={blockForm.until_next ? 'invisible' : ''}>
               <label className="block text-sm font-medium mb-1">End Time</label>
               <input type="time" value={blockForm.end_time}
                 min={blockForm.start_time || undefined}
@@ -234,8 +289,12 @@ export default function ScheduleBlocks() {
               <div>
                 <h3 className="font-bold text-lg">{block.name}</h3>
                 <p className="text-sm text-gray-600">
-                  {block.start_time?.slice(0, 5)} — {block.end_time?.slice(0, 5)}
+                  {block.until_next
+                    ? `Starts ${block.start_sun_event ? 'by the sun' : block.start_time?.slice(0, 5)}, runs until the next playlist`
+                    : `${block.start_time?.slice(0, 5)} — ${block.end_time?.slice(0, 5)}`}
                   {' '}&middot; {block.recurrence_type}
+                  {block.recurrence_type === 'weekly' && block.recurrence_pattern?.length
+                    ? ` (${block.recurrence_pattern.map((d: string) => dayShort(String(d))).join(', ')})` : ''}
                   {' '}&middot; {block.playback_mode}
                   {' '}&middot; Priority {block.priority}
                   {block.start_sun_event && ` · Start: ${block.start_sun_event}${block.start_sun_offset ? ` (${block.start_sun_offset > 0 ? '+' : ''}${block.start_sun_offset}min)` : ''}`}

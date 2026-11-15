@@ -167,6 +167,9 @@ async def detect_schedule_conflicts(
     for other in blocks:
         if str(other.id) == str(target.id):
             continue
+        # Start-only blocks hand over to each other; they cannot overlap.
+        if getattr(target, "until_next", False) or getattr(other, "until_next", False):
+            continue
         # Check time overlap (simple comparison — same start_time/end_time ranges)
         if target.start_time is not None and other.start_time is not None:
             if target.start_time < other.end_time and target.end_time > other.start_time:

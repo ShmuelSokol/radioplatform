@@ -96,6 +96,7 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS review_status VARCHAR(50) DEFAULT 'pending'",
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS playlist_template_id UUID REFERENCES playlist_templates(id) ON DELETE SET NULL",
         "ALTER TABLE stations ADD COLUMN IF NOT EXISTS automation_config JSONB",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS until_next BOOLEAN NOT NULL DEFAULT false",
         # Sponsor portal columns
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)",
