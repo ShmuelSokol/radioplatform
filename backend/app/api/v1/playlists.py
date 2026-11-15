@@ -11,6 +11,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import station_guard as sg
 from app.core.dependencies import get_db, require_manager
 from app.models.asset import Asset
 from app.models.playlist_template import PlaylistTemplate, TemplateSlot
@@ -25,7 +26,18 @@ from app.schemas.playlist_template import (
     TemplateSlotUpdate,
 )
 
-router = APIRouter(prefix="/playlists", tags=["playlists"])
+router = APIRouter(
+    prefix="/playlists",
+    tags=["playlists"],
+    dependencies=[
+        Depends(
+            sg.station_write_guard(
+                path={"template_id": sg.of_template, "slot_id": sg.of_template_slot},
+                body={"template_id": sg.of_template},
+            )
+        )
+    ],
+)
 
 
 # ==================== Templates ====================

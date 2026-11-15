@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import station_guard as sg
 from app.core.dependencies import get_db, require_manager
 from app.core.exceptions import NotFoundError
 from app.models.asset import Asset
@@ -37,7 +38,11 @@ from app.services.spot_schedule_service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/spot-schedules", tags=["spot-schedules"])
+router = APIRouter(
+    prefix="/spot-schedules",
+    tags=["spot-schedules"],
+    dependencies=[Depends(sg.station_write_guard(path={"schedule_id": sg.of_spot_schedule}))],
+)
 
 
 async def _refresh_queues(db: AsyncSession, station_ids: set) -> None:
