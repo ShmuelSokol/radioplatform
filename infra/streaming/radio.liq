@@ -42,16 +42,21 @@ catch err do
 end
 
 # ── Main lane: ask the backend for the next track ────────────────────────────
-# Last entry from the music lane that went on air (sent with the next request, so the
-# backend can catch up if a start report was lost while it was unreachable)
+# Last entry from the music lane that went on air
 last_main_entry = ref("")
+# The last few entries the backend handed us, newest first, sent back with every request
+# for the next track. The backend never hands these out again, and closes the older ones
+# if a start report was lost while it was unreachable (so nothing is played twice).
+given = ref([])
 def next_request() =
   try
+    handed = string.concat(separator=",", given())
     resp = http.get(headers=auth_headers, timeout=8.,
-                    "#{backend_url}/playout/#{station_id}/next?on_air=#{last_main_entry()}")
+                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}")
     if resp.status_code == 200 then
       let json.parse (data : {uri : string, entry_id : string}) = resp
       log.important("next: backend gave entry #{data.entry_id}")
+      given := list.prefix(5, data.entry_id :: given())
       request.create(data.uri)
     else
       null()
@@ -227,6 +232,10 @@ end)
 # Drop the pre-loaded next track (the queue changed) and ask the backend again
 control("/flush", fun (_) -> begin
   main_requests.set_queue([])
+  # The pre-loaded entry will not air after all: forget that it was handed to us
+  if given() != [] and list.hd(default="", given()) != last_main_entry() then
+    given := list.tl(given())
+  end
   '{"ok":true}'
 end)
 

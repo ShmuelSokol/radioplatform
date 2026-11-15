@@ -297,10 +297,13 @@ async def test_fire_now_after_current_only_queues(client, auth_headers, engine_s
 @pytest.mark.asyncio
 async def test_next_catches_up_on_lost_start_report(client, db_session, engine_station):
     station, entries, _ = engine_station
-    # The engine played entries[0] while we were unreachable: no start report arrived.
+    # The engine was handed entries[0] and entries[1] and played them while we were
+    # unreachable and restarted: no start reports arrived, and our memory is gone.
     playout_engine.reset_state()
     resp = await client.get(
-        f"/api/v1/playout/{station.id}/next?on_air={entries[0].id}", headers=HEADERS
+        f"/api/v1/playout/{station.id}/next?given={entries[1].id},{entries[0].id}", headers=HEADERS
     )
-    assert resp.json()["entry_id"] == str(entries[1].id)
+    # Neither is handed out again; the older one is closed, the newest may still report
+    assert resp.json()["entry_id"] == str(entries[2].id)
     assert await _status(db_session, entries[0]) == "played"
+    assert await _status(db_session, entries[1]) == "pending"
