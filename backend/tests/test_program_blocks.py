@@ -256,6 +256,17 @@ def test_sponsorships_fill_the_places_in_blocks():
     placed, unplaced = plan_spots([_spot("m", dayparts="morning")], NY, day, 1, breaks=breaks)
     assert not placed and unplaced[0].reason == "no block with sponsor places in this time of day"
 
+    # A morning wholly inside Shabbos is skipped on purpose (blackout set), not a problem.
+    from app.services.spot_schedule_service import Blackout
+
+    shabbos = Blackout(
+        datetime(2026, 11, 15, 16, 0, tzinfo=NY), datetime(2026, 11, 16, 18, 0, tzinfo=NY), "Shabbos"
+    )
+    placed, unplaced = plan_spots(
+        [_spot("m", dayparts="morning")], NY, day, 1, blackouts=[shabbos], breaks=breaks
+    )
+    assert not placed and unplaced and all(u.blackout is shabbos for u in unplaced)
+
 
 @pytest.mark.asyncio
 async def test_block_sponsor_places_reach_the_queue_in_block_order(

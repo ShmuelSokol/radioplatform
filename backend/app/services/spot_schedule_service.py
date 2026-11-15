@@ -293,6 +293,36 @@ def plan_spots(
             if not wanting:
                 continue
             if breaks is not None:
+                # A part of the day wholly inside Shabbos/Yom Tov is skipped on
+                # purpose (reported with ``blackout`` set, like the slot path).
+                points = [
+                    x
+                    for h in range(h_start, h_end)
+                    for m in (0, 15, 30, 45)
+                    if _exists(
+                        x := datetime(
+                            local_date.year, local_date.month, local_date.day, h, m, tzinfo=tz
+                        )
+                    )
+                ]
+                off = None
+                if blackouts and points and all(
+                    any(b.covers(x) for b in blackouts) for x in points
+                ):
+                    off = next(b for b in blackouts if b.covers(points[0]))
+                if off is not None:
+                    for sched in wanting:
+                        for _ in range(max(1, int(sched.plays_per_daypart or 1))):
+                            unplaced.append(
+                                Unplaced(
+                                    local_date,
+                                    daypart,
+                                    sched,
+                                    f"station is off the air ({off.name})",
+                                    blackout=off,
+                                )
+                            )
+                    continue
                 day_breaks = sorted(
                     (
                         b
