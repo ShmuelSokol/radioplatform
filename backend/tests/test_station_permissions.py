@@ -92,3 +92,48 @@ async def test_admin_assigns_stations_and_protects(client: AsyncClient, db_sessi
     assert r.json()["station_ids"] == [str(fm.id)]
     r = await client.put(f"/api/v1/users/{manager_user.id}", json={"station_ids": None}, headers=admin)
     assert r.json()["station_ids"] is None
+
+
+@pytest.mark.asyncio
+async def test_schedules_and_playlists_follow_station_permissions(
+    client: AsyncClient, db_session: AsyncSession
+):
+    from app.models.schedule import Schedule
+
+    fm, web, _ = await _stations(db_session)
+    fm_schedule = Schedule(id=uuid.uuid4(), station_id=fm.id, name="FM week")
+    web_schedule = Schedule(id=uuid.uuid4(), station_id=web.id, name="Web week")
+    db_session.add_all([fm_schedule, web_schedule])
+    await db_session.commit()
+    _, manager = await _user(client, db_session, UserRole.MANAGER)
+    _, admin = await _user(client, db_session, UserRole.ADMIN)
+
+    # station named in the body
+    r = await client.post("/api/v1/schedules/", json={"station_id": str(fm.id), "name": "x"}, headers=manager)
+    assert r.status_code == 403
+    r = await client.post("/api/v1/schedules/", json={"station_id": str(web.id), "name": "x"}, headers=manager)
+    assert r.status_code == 201, r.text
+    # station reached through the object in the path
+    r = await client.patch(f"/api/v1/schedules/{fm_schedule.id}", json={"name": "y"}, headers=manager)
+    assert r.status_code == 403
+    r = await client.patch(f"/api/v1/schedules/{web_schedule.id}", json={"name": "y"}, headers=manager)
+    assert r.status_code == 200, r.text
+    assert (await client.delete(f"/api/v1/schedules/{fm_schedule.id}", headers=manager)).status_code == 403
+    # ... or through a parent named in the body
+    block = {"schedule_id": str(fm_schedule.id), "name": "b", "start_time": "06:00:00", "end_time": "09:00:00"}
+    assert (await client.post("/api/v1/schedules/blocks", json=block, headers=manager)).status_code == 403
+    # station in the query
+    r = await client.post(
+        "/api/v1/playlists/generation/regenerate", params={"station_id": str(fm.id)}, headers=manager
+    )
+    assert r.status_code == 403
+    r = await client.put(
+        "/api/v1/playlists/generation",
+        json={"station_id": str(fm.id), "enabled": False, "hours": 6, "artist_distance": 2},
+        headers=manager,
+    )
+    assert r.status_code == 403
+    # reading stays open, and the admin is not limited
+    assert (await client.get(f"/api/v1/schedules/{fm_schedule.id}", headers=manager)).status_code == 200
+    r = await client.patch(f"/api/v1/schedules/{fm_schedule.id}", json={"name": "z"}, headers=admin)
+    assert r.status_code == 200
