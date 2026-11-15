@@ -34,6 +34,13 @@ class SpotSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(60), default="morning,afternoon,evening", nullable=False
     )
     plays_per_daypart: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # Exact clock times in station time, comma-separated "HH:MM". When set, the
+    # spot airs at these times on its days instead of being spread over dayparts.
+    fixed_times: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    # "hard" = the song on air fades so the spot starts on the second;
+    # "soft" = the song finishes first. NULL = the station's default for that slot.
+    timing_mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

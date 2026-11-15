@@ -34,7 +34,124 @@ def _sched(name, dayparts="morning,afternoon,evening", plays=1, days="0,1,2,3,4,
         plays_per_daypart=plays,
         asset_id=f"asset-{name}",
         sponsor_id=f"sponsor-{name}",
+        name=name,
+        fixed_times=kw.pop("fixed_times", None),
+        timing_mode=kw.pop("timing_mode", None),
     )
+
+
+def test_exact_times_hard_on_the_hour_soft_elsewhere():
+    """A spot can be pinned to clock times. On the hour is hard by default, the rest soft."""
+    pinned = _sched("pinned", fixed_times="07:00,13:30,07:00", created_at="1")
+    spread = _sched("spread", dayparts="afternoon", plays=18, created_at="2")
+    placed, unplaced = plan_spots([pinned, spread], NY, date(2026, 11, 16), 1)
+    mine = [p for p in placed if p.schedule is pinned]
+    assert [(p.local.hour, p.local.minute, p.timing_mode, p.fixed) for p in mine] == [
+        (7, 0, "hard", True),
+        (13, 30, "soft", True),
+    ]
+    # the spread spots work around the pinned 1:30 and stay soft
+    others = [p for p in placed if p.schedule is spread]
+    assert all((p.local.hour, p.local.minute) != (13, 30) for p in others)
+    assert len(others) == 17 and len(unplaced) == 1
+    assert {p.timing_mode for p in others} == {"soft"} and not any(p.fixed for p in others)
+
+    # the schedule's own choice wins over the default, and the station can change the default
+    forced = _sched("forced", fixed_times="09:15", timing_mode="hard")
+    placed, _ = plan_spots([forced], NY, date(2026, 11, 16), 1)
+    assert placed[0].timing_mode == "hard"
+    placed, _ = plan_spots(
+        [pinned],
+        NY,
+        date(2026, 11, 16),
+        1,
+        timing_defaults={"on_the_hour": "soft", "other": "hard"},
+    )
+    assert [p.timing_mode for p in placed] == ["soft", "hard"]
+
+    # two sponsors cannot have the same second; Shabbos is still off limits
+    rival = _sched("rival", fixed_times="07:00", created_at="3")
+    off = Blackout(
+        datetime(2026, 11, 16, 13, 0, tzinfo=NY).astimezone(UTC),
+        datetime(2026, 11, 16, 14, 0, tzinfo=NY).astimezone(UTC),
+        "Shabbos",
+    )
+    placed, unplaced = plan_spots([pinned, rival], NY, date(2026, 11, 16), 1, blackouts=[off])
+    assert [(p.schedule.id, p.local.hour) for p in placed] == [("pinned", 7)]
+    assert sorted(u.reason for u in unplaced) == [
+        "07:00 is already taken by pinned",
+        "station is off the air (Shabbos)",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_exact_time_spot_reaches_the_queue_with_its_timing(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    station, assets, sponsors = await _setup(db_session, client, auth_headers)
+    station_id, asset_id = station.id, str(assets[0].id)
+    r = await client.post(
+        "/api/v1/spot-schedules",
+        json={
+            "sponsor_id": sponsors[0],
+            "asset_id": asset_id,
+            "station_id": str(station_id),
+            "fixed_times": "8:00, 08:30",
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["fixed_times"] == "08:00,08:30" and body["timing_mode"] is None
+    slots = await _ad_slots(db_session, station_id)
+    assert 12 <= len(slots) <= 14
+    for s in slots:
+        local = (
+            s.preempt_at.replace(tzinfo=UTC).astimezone(NY)
+            if s.preempt_at.tzinfo is None
+            else s.preempt_at.astimezone(NY)
+        )
+        assert (local.hour, local.minute) in {(8, 0), (8, 30)}
+        assert s.timing_mode == ("hard" if local.minute == 0 else "soft")
+
+    # switching the schedule to soft updates the entries already queued, in place
+    before = sorted(str(s.id) for s in slots)
+    r = await client.put(
+        f"/api/v1/spot-schedules/{body['id']}", json={"timing_mode": "soft"}, headers=auth_headers
+    )
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    slots = await _ad_slots(db_session, station_id)
+    assert sorted(str(s.id) for s in slots) == before
+    assert {s.timing_mode for s in slots} == {"soft"}
+
+    r = await client.get(
+        f"/api/v1/spot-schedules/preview?station_id={station_id}&days=2", headers=auth_headers
+    )
+    assert all(p["fixed"] and p["timing_mode"] == "soft" for p in r.json()["planned"])
+
+    # the station default: make the on-the-hour slot soft, and let the schedule follow it
+    url = "/api/v1/spot-schedules/timing-defaults"
+    r = await client.get(url, params={"station_id": str(station_id)}, headers=auth_headers)
+    assert r.json() == {"on_the_hour": "hard", "other": "soft"}
+    r = await client.put(
+        f"/api/v1/spot-schedules/{body['id']}", json={"timing_mode": None}, headers=auth_headers
+    )
+    assert r.status_code == 200, r.text
+    r = await client.put(
+        url,
+        json={"station_id": str(station_id), "on_the_hour": "soft", "other": "hard"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    for s in await _ad_slots(db_session, station_id):
+        minute = s.preempt_at.minute
+        assert s.timing_mode == ("soft" if minute == 0 else "hard")
+
+    for bad in ({"fixed_times": "25:00"}, {"fixed_times": "noon"}, {"timing_mode": "loud"}):
+        r = await client.put(f"/api/v1/spot-schedules/{body['id']}", json=bad, headers=auth_headers)
+        assert r.status_code == 422, bad
 
 
 def test_spring_forward_skips_missing_times():

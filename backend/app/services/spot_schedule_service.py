@@ -40,12 +40,46 @@ HORIZON_DAYS = 7
 SAFETY_MARGIN = timedelta(minutes=2)
 
 
+TIMING_MODES = ("hard", "soft")
+# Station setting automation_config["spot_timing"] = {"on_the_hour": ..., "other": ...}
+DEFAULT_TIMING = {"on_the_hour": "hard", "other": "soft"}
+
+
+def default_timing(minute: int, station_defaults: dict | None = None) -> str:
+    """How a spot in this clock slot honours its time when its schedule does not say.
+
+    hard: the song on air fades out and the spot starts on the second.
+    soft: the song finishes and the spot plays right after.
+    """
+    chosen = {**DEFAULT_TIMING, **(station_defaults or {})}
+    mode = chosen["on_the_hour"] if minute == 0 else chosen["other"]
+    return mode if mode in TIMING_MODES else DEFAULT_TIMING["other"]
+
+
+def parse_fixed_times(value: str | None) -> list[tuple[int, int]]:
+    """'07:00, 13:30' -> [(7, 0), (13, 30)], sorted, duplicates dropped. Raises ValueError."""
+    found = set()
+    for part in _csv(value):
+        hour, _, minute = part.partition(":")
+        h, m = int(hour), int(minute or 0)
+        if not (0 <= h < 24 and 0 <= m < 60):
+            raise ValueError(f"{part} is not a time of day")
+        found.add((h, m))
+    return sorted(found)
+
+
+def daypart_of(hour: int) -> str:
+    return next(name for name, (start, end) in DAYPARTS.items() if start <= hour < end)
+
+
 @dataclass
 class Placement:
     at: datetime  # UTC, minute precision
     local: datetime  # station-local wall time
     daypart: str
     schedule: SpotSchedule
+    timing_mode: str = "soft"
+    fixed: bool = False  # an exact time chosen on the schedule, not a spread slot
 
 
 @dataclass
@@ -87,16 +121,18 @@ def _csv(value: str | None) -> list[str]:
     return [v.strip() for v in (value or "").split(",") if v.strip()]
 
 
-def _applies(schedule: SpotSchedule, local_date: date, daypart: str) -> bool:
+def _applies_on(schedule: SpotSchedule, local_date: date) -> bool:
     if not schedule.is_active:
         return False
     if schedule.start_date and local_date < schedule.start_date:
         return False
     if schedule.end_date and local_date > schedule.end_date:
         return False
-    if str(local_date.weekday()) not in _csv(schedule.days_of_week):
-        return False
-    return daypart in _csv(schedule.dayparts)
+    return str(local_date.weekday()) in _csv(schedule.days_of_week)
+
+
+def _applies(schedule: SpotSchedule, local_date: date, daypart: str) -> bool:
+    return _applies_on(schedule, local_date) and daypart in _csv(schedule.dayparts)
 
 
 def _exists(local: datetime) -> bool:
@@ -113,6 +149,7 @@ def plan_spots(
     days: int,
     slot_minutes: list[int] | None = None,
     blackouts: list[Blackout] | None = None,
+    timing_defaults: dict | None = None,
 ) -> tuple[list[Placement], list[Unplaced]]:
     """Assign each schedule's plays to clock slots, spread evenly through each daypart.
 
@@ -133,8 +170,61 @@ def plan_spots(
 
     for day_offset in range(days):
         local_date = start_date + timedelta(days=day_offset)
+
+        # Exact times first: they are promises, and the spread plays work around them.
+        fixed_at: dict[datetime, SpotSchedule] = {}
+        for sched in ordered:
+            if not getattr(sched, "fixed_times", None) or not _applies_on(sched, local_date):
+                continue
+            for hour, minute in parse_fixed_times(sched.fixed_times):
+                local = datetime(
+                    local_date.year, local_date.month, local_date.day, hour, minute, tzinfo=tz
+                )
+                if not _exists(local):
+                    continue
+                off = next((b for b in blackouts if b.covers(local)), None)
+                if off is not None:
+                    unplaced.append(
+                        Unplaced(
+                            local_date,
+                            daypart_of(hour),
+                            sched,
+                            f"station is off the air ({off.name})",
+                            blackout=off,
+                        )
+                    )
+                    continue
+                if local in fixed_at:
+                    other = fixed_at[local].name or "another sponsorship"
+                    unplaced.append(
+                        Unplaced(
+                            local_date,
+                            daypart_of(hour),
+                            sched,
+                            f"{hour:02d}:{minute:02d} is already taken by {other}",
+                        )
+                    )
+                    continue
+                fixed_at[local] = sched
+                placements.append(
+                    Placement(
+                        at=local.astimezone(UTC).replace(second=0, microsecond=0),
+                        local=local,
+                        daypart=daypart_of(hour),
+                        schedule=sched,
+                        timing_mode=sched.timing_mode
+                        if sched.timing_mode in TIMING_MODES
+                        else default_timing(minute, timing_defaults),
+                        fixed=True,
+                    )
+                )
+
         for daypart, (h_start, h_end) in DAYPARTS.items():
-            wanting = [s for s in ordered if _applies(s, local_date, daypart)]
+            wanting = [
+                s
+                for s in ordered
+                if not getattr(s, "fixed_times", None) and _applies(s, local_date, daypart)
+            ]
             if not wanting:
                 continue
             slots = [
@@ -154,6 +244,7 @@ def plan_spots(
                 if not on_air:
                     off_air = next(b for b in blackouts if b.covers(first))
                 slots = on_air
+            slots = [x for x in slots if x not in fixed_at]
             if off_air is not None:
                 for sched in wanting:
                     for _ in range(max(1, int(sched.plays_per_daypart or 1))):
@@ -190,6 +281,9 @@ def plan_spots(
                         local=local,
                         daypart=daypart,
                         schedule=taken[idx],
+                        timing_mode=taken[idx].timing_mode
+                        if taken[idx].timing_mode in TIMING_MODES
+                        else default_timing(local.minute, timing_defaults),
                     )
                 )
 
@@ -238,7 +332,15 @@ async def plan_for_station(
     blackouts = await load_blackouts(
         db, station.id, now - timedelta(days=1), now + timedelta(days=days + 1)
     )
-    return plan_spots(schedules, tz, now.astimezone(tz).date(), days, minutes, blackouts)
+    return plan_spots(
+        schedules,
+        tz,
+        now.astimezone(tz).date(),
+        days,
+        minutes,
+        blackouts,
+        (station.automation_config or {}).get("spot_timing"),
+    )
 
 
 async def reconcile_spot_slots(
@@ -268,6 +370,7 @@ async def reconcile_spot_slots(
     desired: dict[datetime, uuid.UUID] = {
         p.at: p.schedule.asset_id for p in placements if earliest < p.at <= latest
     }
+    timing: dict[datetime, str] = {p.at: p.timing_mode for p in placements}
 
     existing = await db.execute(
         select(QueueEntry).where(
@@ -285,6 +388,8 @@ async def reconcile_spot_slots(
             continue  # about to air (or overdue) — leave it alone
         if at not in kept and str(desired.get(at)) == str(entry.asset_id):
             kept.add(at)
+            if entry.timing_mode != timing[at]:
+                entry.timing_mode = timing[at]
         else:
             await db.delete(entry)
             removed += 1
@@ -311,6 +416,7 @@ async def reconcile_spot_slots(
                 status="pending",
                 source="ad_slot",
                 preempt_at=at,
+                timing_mode=timing[at],
             )
         )
         added += 1
