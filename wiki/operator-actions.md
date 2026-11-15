@@ -48,7 +48,18 @@ Always go through `soft_timed()` / `hard_timed()` / `is_soft_timed()` in
 scheduling side sets the field; the engine (`playout_engine.pick_next`, `tick`) and the web
 player path (`_check_advance_locked`, skip, queue time estimates) read it.
 
+## Loop
+
+`POST queue/loop {on: bool}` returns `{loop, asset_id, queue}`. On: the item on air plays again
+each time it ends. Off, Next or fire-now ends it; the play in progress finishes normally.
+GET /queue has `loop_asset_id` (null when off). Stored in the station's
+`automation_config["loop_asset_id"]`; each repeat is a real queue entry with source `"loop"`,
+added just before it is needed (`add_loop_repeat` in `api/v1/queue.py`, called at the automatic
+advance and when the playout engine asks for its next track). A Next within 4 s of a repeat
+starting is the "kept incoming" case and leaves the loop on.
+
 ## Not built yet
 
-Loop on the current item and Mix over (a jingle over the current item without ending it).
-PFL and meters are done in the browser, no server part.
+Mix over (a jingle over the current item without ending it). PFL and meters are done in the
+browser, no server part. The RDS text feed needs no hook: it reads the playing queue entry,
+which the engine's start reports keep current.
