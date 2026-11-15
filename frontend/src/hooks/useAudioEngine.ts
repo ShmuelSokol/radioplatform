@@ -8,6 +8,16 @@ const SYNC_INTERVAL = 10000;
 const SYNC_THRESHOLD = 5;
 const TRACK_CHANGE_COOLDOWN = 15000;
 const CROSSFADE_DURATION = 3.0; // seconds
+// Manual track change (skip / play-now): quick fade instead of a hard cut
+const SKIP_FADE_OUT = 0.6; // seconds
+const SKIP_FADE_IN = 0.15; // seconds
+// On a cold load, keep the current track on air until the new one can play (capped)
+const COLD_LOAD_MAX_WAIT_MS = 4000;
+// Crossfade trigger check. A timer, not requestAnimationFrame: rAF stops in background tabs.
+const CROSSFADE_CHECK_MS = 100;
+
+type DeckLabel = 'A' | 'B';
+const otherDeck = (label: DeckLabel): DeckLabel => (label === 'A' ? 'B' : 'A');
 
 function loadVolume(): number {
   try {
@@ -56,6 +66,10 @@ export function useAudioEngine(
   // Optional direct audio URL (for public Listen page — no auth needed)
   audioUrlOverride: string | null = null,
   nextAudioUrlOverride: string | null = null,
+  // Server start time of the current track (ISO). Used to position a newly started
+  // track; `elapsedSeconds` still belongs to the previous track on the render where
+  // the track changes.
+  currentStartedAt: string | null = null,
 ): AudioEngineState {
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserLRef = useRef<AnalyserNode | null>(null);
@@ -90,6 +104,29 @@ export function useAudioEngine(
   const nextReplayGainDbRef = useRef(nextReplayGainDb);
   const nextAudioUrlRef = useRef(nextAudioUrlOverride);
   const crossfadeTriggeredRef = useRef(false);
+  const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Which asset each deck currently holds (loaded or loading)
+  const deckAssetRef = useRef<Record<DeckLabel, string | null>>({ A: null, B: null });
+  // While a skip fade-out is running, the fading deck must not be re-loaded (performance.now() ms)
+  const fadeBusyUntilRef = useRef(0);
+  // Bumped on every track change so stale async work can bail out
+  const changeTokenRef = useRef(0);
+  // Bumped after the decks swap so the pre-loader re-runs for the new idle deck
+  const [swapTick, setSwapTick] = useState(0);
+  // Assigned during render so effects in the same pass see the new track's start time
+  const startedAtRef = useRef(currentStartedAt);
+  startedAtRef.current = currentStartedAt;
+
+  // Where in the track playback should be right now
+  const livePosition = useCallback((cueIn: number) => {
+    const startedAt = startedAtRef.current;
+    if (startedAt) {
+      const startMs = new Date(startedAt).getTime();
+      if (isFinite(startMs)) return Math.max(cueIn, (Date.now() - startMs) / 1000);
+    }
+    return Math.max(cueIn, elapsedRef.current);
+  }, []);
 
   // Keep refs in sync
   useEffect(() => { elapsedRef.current = elapsedSeconds; }, [elapsedSeconds]);
@@ -189,6 +226,9 @@ export function useAudioEngine(
     return () => {
       cancelAnimationFrame(rafRef.current);
       if (syncTimerRef.current) clearInterval(syncTimerRef.current);
+      if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+      changeTokenRef.current++;
+      deckAssetRef.current = { A: null, B: null };
       deckARef.current?.audio.pause();
       deckBRef.current?.audio.pause();
       deckARef.current = null;
@@ -198,32 +238,6 @@ export function useAudioEngine(
       setAudioReady(false);
     };
   }, []);
-
-  // ── Pre-load next track on inactive deck ──
-  useEffect(() => {
-    if (!audioReady || !nextAssetId) return;
-    const inactiveDeck = getInactiveDeck();
-    if (!inactiveDeck) return;
-
-    const loadNext = async () => {
-      try {
-        let url: string;
-        if (nextAudioUrlOverride) {
-          url = nextAudioUrlOverride;
-        } else {
-          url = await getAssetAudioUrl(nextAssetId);
-        }
-        // Only set src if it's different (avoid reloading same track)
-        if (inactiveDeck.audio.src !== url) {
-          inactiveDeck.audio.src = url;
-          inactiveDeck.audio.load();
-        }
-      } catch {
-        // Preload failure is non-critical
-      }
-    };
-    loadNext();
-  }, [nextAssetId, nextAudioUrlOverride, audioReady, getInactiveDeck]);
 
   // ── Crossfade execution ──
   const executeCrossfade = useCallback(() => {
@@ -249,25 +263,26 @@ export function useAudioEngine(
     activeDeck.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + CROSSFADE_DURATION);
 
     // After crossfade completes, swap decks
-    setTimeout(() => {
+    crossfadeTimerRef.current = setTimeout(() => {
+      crossfadeTimerRef.current = null;
       activeDeck.audio.pause();
-      activeDeckRef.current = activeDeckRef.current === 'A' ? 'B' : 'A';
+      activeDeckRef.current = otherDeck(activeDeckRef.current);
       crossfadingRef.current = false;
       crossfadeTriggeredRef.current = false;
       trackChangeTimeRef.current = Date.now();
+      setSwapTick(t => t + 1);
     }, CROSSFADE_DURATION * 1000 + 100);
   }, [getActiveDeck, getInactiveDeck, replayGainMultiplier]);
 
-  // ── Track changes → play on active deck ──
+  // ── Track changes → bring the new track on air ──
   useEffect(() => {
     if (!audioReady) return;
-    const activeDeck = getActiveDeck();
-    if (!activeDeck) return;
 
     const assetId = nowPlayingAsset?.id ?? null;
 
     if (!isPlaying || !nowPlayingAsset) {
       if (lastAssetId.current !== null) {
+        changeTokenRef.current++;
         deckARef.current?.audio.pause();
         deckBRef.current?.audio.pause();
         lastAssetId.current = null;
@@ -275,66 +290,161 @@ export function useAudioEngine(
       return;
     }
 
-    if (assetId !== lastAssetId.current) {
-      // If we were crossfading into this track, it's already playing on the new active deck
-      if (crossfadingRef.current) {
+    if (assetId === lastAssetId.current) return;
+
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+
+    let outLabel = activeDeckRef.current;
+    let inLabel = otherDeck(outLabel);
+
+    if (crossfadingRef.current) {
+      // We are already crossfading into this track — nothing to do
+      if (deckAssetRef.current[inLabel] === assetId) {
         lastAssetId.current = assetId;
         return;
       }
+      // A different track was requested mid-crossfade: settle the swap now and carry on
+      if (crossfadeTimerRef.current) {
+        clearTimeout(crossfadeTimerRef.current);
+        crossfadeTimerRef.current = null;
+      }
+      activeDeckRef.current = inLabel;
+      crossfadingRef.current = false;
+      outLabel = inLabel;
+      inLabel = otherDeck(outLabel);
+    }
 
-      crossfadeTriggeredRef.current = false;
+    const outDeck = getDeck(outLabel);
+    const inDeck = getDeck(inLabel);
+    if (!outDeck || !inDeck) return;
+
+    // Already on air: we crossfaded into it before the server announced it.
+    // Re-loading here would restart the track and cause an audible jump.
+    if (deckAssetRef.current[outLabel] === assetId && !outDeck.audio.paused) {
       lastAssetId.current = assetId;
+      return;
+    }
+
+    crossfadeTriggeredRef.current = false;
+    lastAssetId.current = assetId;
+    trackChangeTimeRef.current = Date.now();
+    const token = ++changeTokenRef.current;
+    const cueIn = currentCueIn;
+    const replayGain = replayGainMultiplier(currentReplayGainDb);
+
+    let wentLive = false;
+    const goLive = () => {
+      if (wentLive || token !== changeTokenRef.current) return;
+      wentLive = true;
+      const now = ctx.currentTime;
+      const targetGain = mutedRef.current ? 0 : volumeRef.current * replayGain;
+
+      // Quick fade-out of whatever is on air (no hard cut)
+      outDeck.gain.gain.cancelScheduledValues(now);
+      outDeck.gain.gain.setValueAtTime(outDeck.gain.gain.value, now);
+      outDeck.gain.gain.linearRampToValueAtTime(0, now + SKIP_FADE_OUT);
+      fadeBusyUntilRef.current = performance.now() + SKIP_FADE_OUT * 1000;
+
+      // Bring the new track up at its live position
+      try { inDeck.audio.currentTime = livePosition(cueIn); } catch { /* not seekable yet */ }
+      inDeck.gain.gain.cancelScheduledValues(now);
+      inDeck.gain.gain.setValueAtTime(0, now);
+      inDeck.gain.gain.linearRampToValueAtTime(targetGain, now + SKIP_FADE_IN);
+      inDeck.audio.play().catch(() => {});
+
+      activeDeckRef.current = inLabel;
       trackChangeTimeRef.current = Date.now();
 
-      const ctx = ctxRef.current;
-      if (!ctx) return;
+      // Once the fade-out is done, stop the old deck and let the pre-loader use it
+      setTimeout(() => {
+        if (activeDeckRef.current !== outLabel && !crossfadingRef.current) outDeck.audio.pause();
+        setSwapTick(t => t + 1);
+      }, SKIP_FADE_OUT * 1000 + 50);
+    };
 
-      // Apply replay gain
-      const targetGain = mutedRef.current ? 0 : volumeRef.current * replayGainMultiplier(currentReplayGainDb);
-
-      // Check if the inactive deck already has this track pre-loaded
-      const inactiveDeck = getInactiveDeck();
-      const inactiveSrc = inactiveDeck?.audio.src ?? '';
-      const loadAndPlay = async () => {
-        try {
-          let url: string;
-          if (audioUrlOverride) {
-            url = audioUrlOverride;
-          } else if (assetId) {
-            url = await getAssetAudioUrl(assetId);
-          } else {
-            return;
-          }
-
-          // If inactive deck already has this URL pre-loaded, swap to it instantly
-          if (inactiveDeck && inactiveSrc === url && inactiveDeck.audio.readyState >= 2) {
-            // Silence old active deck
-            activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
-            activeDeck.gain.gain.setValueAtTime(0, ctx.currentTime);
-            activeDeck.audio.pause();
-
-            // Play from inactive deck (already loaded)
-            inactiveDeck.audio.currentTime = Math.max(currentCueIn, elapsedRef.current);
-            inactiveDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
-            inactiveDeck.gain.gain.setValueAtTime(targetGain, ctx.currentTime);
-            inactiveDeck.audio.play().catch(() => {});
-
-            // Swap active deck
-            activeDeckRef.current = activeDeckRef.current === 'A' ? 'B' : 'A';
-          } else {
-            activeDeck.audio.src = url;
-            activeDeck.audio.currentTime = Math.max(currentCueIn, elapsedRef.current);
-            activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
-            activeDeck.gain.gain.setValueAtTime(targetGain, ctx.currentTime);
-            activeDeck.audio.play().catch(() => {});
-          }
-        } catch {
-          // Load failure
+    const run = async () => {
+      try {
+        let url: string;
+        if (audioUrlOverride) {
+          url = audioUrlOverride;
+        } else if (assetId) {
+          url = await getAssetAudioUrl(assetId);
+        } else {
+          return;
         }
-      };
-      loadAndPlay();
-    }
-  }, [nowPlayingAsset?.id, isPlaying, audioReady, currentCueIn, currentReplayGainDb, audioUrlOverride, getActiveDeck, replayGainMultiplier]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (token !== changeTokenRef.current) return;
+
+        const preloaded = deckAssetRef.current[inLabel] === assetId;
+        if (preloaded && inDeck.audio.readyState >= 2) {
+          goLive();
+          return;
+        }
+
+        // Cold load on the idle deck. The current track stays on air until the
+        // new one can play, so there is no silent gap while it downloads.
+        if (!preloaded) {
+          deckAssetRef.current[inLabel] = assetId;
+          inDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
+          inDeck.gain.gain.setValueAtTime(0, ctx.currentTime);
+          inDeck.audio.src = url;
+          inDeck.audio.load();
+        }
+        const onReady = () => goLive();
+        inDeck.audio.addEventListener('canplay', onReady, { once: true });
+        setTimeout(() => {
+          inDeck.audio.removeEventListener('canplay', onReady);
+          goLive();
+        }, COLD_LOAD_MAX_WAIT_MS);
+      } catch {
+        // Load failure
+      }
+    };
+    run();
+  }, [nowPlayingAsset?.id, isPlaying, audioReady, currentCueIn, currentReplayGainDb, audioUrlOverride, getDeck, livePosition, replayGainMultiplier]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Pre-load next track on the idle deck ──
+  // Declared after the track-change effect so a track change claims its deck first.
+  useEffect(() => {
+    if (!audioReady || !nextAssetId) return;
+    const currentId = nowPlayingAsset?.id ?? null;
+
+    // The idle deck is free for pre-loading only when it is not mid-crossfade or mid-fade-out,
+    // not holding the track that is (about to be) on air, and not already loaded.
+    const idleDeckFor = (): { label: DeckLabel; deck: AudioDeck } | null => {
+      if (crossfadingRef.current) return null;
+      if (performance.now() < fadeBusyUntilRef.current) return null; // re-runs via swapTick
+      const activeLabel = activeDeckRef.current;
+      const label = otherDeck(activeLabel);
+      const deck = getDeck(label);
+      if (!deck) return null;
+      const held = deckAssetRef.current[label];
+      if (held === nextAssetId) return null;
+      if (currentId && held === currentId) return null;
+      if (deckAssetRef.current[activeLabel] === nextAssetId) return null;
+      return { label, deck };
+    };
+
+    if (!idleDeckFor()) return;
+    let cancelled = false;
+
+    const loadNext = async () => {
+      try {
+        const url = nextAudioUrlOverride ?? await getAssetAudioUrl(nextAssetId);
+        if (cancelled) return;
+        const idle = idleDeckFor();
+        if (!idle) return;
+        deckAssetRef.current[idle.label] = nextAssetId;
+        idle.deck.audio.pause();
+        idle.deck.audio.src = url;
+        idle.deck.audio.load();
+      } catch {
+        // Preload failure is non-critical
+      }
+    };
+    loadNext();
+    return () => { cancelled = true; };
+  }, [nextAssetId, nextAudioUrlOverride, audioReady, swapTick, nowPlayingAsset?.id, getDeck]);
 
   // ── Preempt fade-out: schedule precise fade before hourly announcements ──
   useEffect(() => {
@@ -439,31 +549,37 @@ export function useAudioEngine(
         setVuLevels([Math.min(1, l * 2.5), Math.min(1, r * 2.5)]);
       }
 
-      // Client-driven crossfade check
-      const activeDeck = getActiveDeck();
-      if (activeDeck && !crossfadingRef.current && !crossfadeTriggeredRef.current) {
-        const ct = activeDeck.audio.currentTime;
-        const dur = activeDeck.audio.duration;
-        const cs = crossStartRef.current;
-
-        if (nextAssetIdRef.current) {
-          if (cs > 0 && ct >= cs) {
-            // Crossfade at the designated cross_start point
-            crossfadeTriggeredRef.current = true;
-            executeCrossfade();
-          } else if (cs <= 0 && isFinite(dur) && dur > 0 && ct >= dur - CROSSFADE_DURATION) {
-            // No cross_start set — crossfade 3s before end to avoid gap
-            crossfadeTriggeredRef.current = true;
-            executeCrossfade();
-          }
-        }
-      }
-
       rafRef.current = requestAnimationFrame(poll);
     };
     rafRef.current = requestAnimationFrame(poll);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [audioReady, getActiveDeck, executeCrossfade]);
+  }, [audioReady]);
+
+  // ── Client-driven crossfade check (timer-based so it keeps running in background tabs) ──
+  useEffect(() => {
+    if (!audioReady) return;
+    const timer = setInterval(() => {
+      if (crossfadingRef.current || crossfadeTriggeredRef.current) return;
+      const activeLabel = activeDeckRef.current;
+      const activeDeck = getDeck(activeLabel);
+      const nextId = nextAssetIdRef.current;
+      if (!activeDeck || activeDeck.audio.paused || !nextId) return;
+      // Only crossfade when the idle deck really holds the next track
+      if (deckAssetRef.current[otherDeck(activeLabel)] !== nextId) return;
+
+      const ct = activeDeck.audio.currentTime;
+      const dur = activeDeck.audio.duration;
+      const cs = crossStartRef.current;
+      const atCrossStart = cs > 0 && ct >= cs;
+      // No cross_start set — crossfade 3s before end to avoid a gap
+      const nearEnd = cs <= 0 && isFinite(dur) && dur > 0 && ct >= dur - CROSSFADE_DURATION;
+      if (atCrossStart || nearEnd) {
+        crossfadeTriggeredRef.current = true;
+        executeCrossfade();
+      }
+    }, CROSSFADE_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [audioReady, getDeck, executeCrossfade]);
 
   return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio };
 }

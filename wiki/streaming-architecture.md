@@ -26,6 +26,13 @@ All in `infra/streaming/`: icecast.xml, radio.liq, liquidsoap.service, nginx-str
 
 As of 2026-05-24, the VPS is not set up. `LIQUIDSOAP_ENABLED=false` (default). All listeners use client-side Web Audio engine. Plan: Hetzner CX22 in Ashburn (~$4/mo).
 
+## Do not just flip LIQUIDSOAP_ENABLED (found 2026-11-15)
+
+- `_advance_queue` runs every 3s poll and calls `push_track` for the current entry each time (and `_broadcast_queue_entry` pushes the next one too), so the Liquidsoap queue would fill with duplicates.
+- Backend advances by DB duration; Liquidsoap by real audio. Two clocks drift, so now-playing would not match the audio.
+- `radio.liq` binds telnet to 0.0.0.0:1234 with no auth and `setup.sh` opens the port.
+- Planned fix: Liquidsoap pulls the next track from the backend (`request.dynamic`) and posts back when a track really starts; control link private.
+
 ## Why not Railway sidecar?
 
 Tried it — OCaml runtime + audio processing consumed too much CPU/memory on shared container. Caused severe performance degradation.
