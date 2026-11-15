@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.holiday_window import HolidayWindow
 from app.models.queue_entry import QueueEntry
 from app.models.spot_schedule import SpotSchedule
 from app.models.station import Station
@@ -53,6 +54,19 @@ class Unplaced:
     daypart: str
     schedule: SpotSchedule
     reason: str
+    blackout: "Blackout | None" = None  # set when the whole daypart is off the air
+
+
+@dataclass(frozen=True)
+class Blackout:
+    """A stretch when the station is off the air (Shabbos, Yom Tov). UTC."""
+
+    start: datetime
+    end: datetime
+    name: str
+
+    def covers(self, at: datetime) -> bool:
+        return self.start <= at < self.end
 
 
 def station_tz(name: str | None) -> ZoneInfo:
@@ -98,6 +112,7 @@ def plan_spots(
     start_date: date,
     days: int,
     slot_minutes: list[int] | None = None,
+    blackouts: list[Blackout] | None = None,
 ) -> tuple[list[Placement], list[Unplaced]]:
     """Assign each schedule's plays to clock slots, spread evenly through each daypart.
 
@@ -105,7 +120,12 @@ def plan_spots(
     day, no matter what time it is run, so repeated runs do not shuffle spots.
     When two spots want the same slot, the later one moves to the next free
     slot in that daypart. If a daypart is full, the spot is reported unplaced.
+
+    Slots inside a blackout (Shabbos, Yom Tov) are not slots: plays are spread
+    over what is left of the daypart, and a daypart that is entirely off the
+    air is skipped (reported unplaced with ``blackout`` set).
     """
+    blackouts = blackouts or []
     minutes = sorted({int(m) for m in (slot_minutes or DEFAULT_SLOT_MINUTES) if 0 <= int(m) < 60})
     ordered = sorted(schedules, key=lambda s: (str(s.created_at or ""), str(s.id)))
     placements: list[Placement] = []
@@ -127,6 +147,26 @@ def plan_spots(
                     )
                 )
             ]
+            off_air = None
+            if blackouts and slots:
+                first = slots[0]
+                on_air = [x for x in slots if not any(b.covers(x) for b in blackouts)]
+                if not on_air:
+                    off_air = next(b for b in blackouts if b.covers(first))
+                slots = on_air
+            if off_air is not None:
+                for sched in wanting:
+                    for _ in range(max(1, int(sched.plays_per_daypart or 1))):
+                        unplaced.append(
+                            Unplaced(
+                                local_date,
+                                daypart,
+                                sched,
+                                f"station is off the air ({off_air.name})",
+                                blackout=off_air,
+                            )
+                        )
+                continue
             taken: dict[int, SpotSchedule] = {}
             for sched in wanting:
                 plays = max(1, int(sched.plays_per_daypart or 1))
@@ -167,6 +207,27 @@ async def load_station_schedules(db: AsyncSession, station_id) -> list[SpotSched
     return list(result.scalars().all())
 
 
+async def load_blackouts(
+    db: AsyncSession, station_id, start: datetime, end: datetime
+) -> list[Blackout]:
+    """Blackout windows touching [start, end) that apply to this station."""
+    result = await db.execute(
+        select(HolidayWindow).where(
+            HolidayWindow.is_blackout.is_(True),
+            HolidayWindow.start_datetime < end,
+            HolidayWindow.end_datetime > start,
+        )
+    )
+    found = []
+    for w in result.scalars().all():
+        if w.affected_stations is not None:
+            ids = [str(x) for x in (w.affected_stations.get("station_ids") or [])]
+            if str(station_id) not in ids:
+                continue
+        found.append(Blackout(as_utc(w.start_datetime), as_utc(w.end_datetime), w.name))
+    return sorted(found, key=lambda b: b.start)
+
+
 async def plan_for_station(
     db: AsyncSession, station: Station, days: int = HORIZON_DAYS, now: datetime | None = None
 ) -> tuple[list[Placement], list[Unplaced]]:
@@ -174,7 +235,10 @@ async def plan_for_station(
     schedules = await load_station_schedules(db, station.id)
     tz = station_tz(station.timezone)
     minutes = (station.automation_config or {}).get("ad_slot_minutes") or DEFAULT_SLOT_MINUTES
-    return plan_spots(schedules, tz, now.astimezone(tz).date(), days, minutes)
+    blackouts = await load_blackouts(
+        db, station.id, now - timedelta(days=1), now + timedelta(days=days + 1)
+    )
+    return plan_spots(schedules, tz, now.astimezone(tz).date(), days, minutes, blackouts)
 
 
 async def reconcile_spot_slots(

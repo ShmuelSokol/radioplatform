@@ -50,11 +50,18 @@ def _utc_to_eastern(utc_dt: datetime) -> datetime:
     return utc_dt.astimezone(ZoneInfo("America/New_York"))
 
 
+# Station sign-off for the hourly time announcement. Spelled for the voice
+# engine ("Kohl Baramah" is how it pronounces Kol Berama correctly).
+TIME_ANNOUNCEMENT_TEMPLATE = "The time is {time} on Radio {brand}, W M D I 107.9, the highest frequency."
+
+
 def _build_time_text(eastern_now: datetime, brand_name: str = "Kohl Baramah") -> str:
     hour = eastern_now.strftime("%I").lstrip("0")
     minute = eastern_now.strftime("%M")
     ampm = eastern_now.strftime("%p")
-    text = f"The time is {hour}:{minute} {ampm} on {brand_name}."
+    # On the hour say "3 PM", not "3:00 PM".
+    spoken = f"{hour} {ampm}" if minute == "00" else f"{hour}:{minute} {ampm}"
+    text = TIME_ANNOUNCEMENT_TEMPLATE.format(time=spoken, brand=brand_name)
     return _apply_word_replacements(text)
 
 
@@ -87,6 +94,20 @@ def _build_weather_text(weather: dict, city_name: str = "Lakewood") -> str:
 
     text = " ".join(parts)
     return _apply_word_replacements(text)
+
+
+def _slot_time(slot_key: str, fallback: datetime) -> datetime:
+    """The Eastern clock time a slot key ("2024-01-15T15") stands for.
+
+    Announcements are generated up to 48 hours before they air, so the spoken
+    time must come from the slot, never from the moment of generation.
+    """
+    for fmt in ("%Y-%m-%dT%H", "%Y-%m-%dT%H:%M", "%Y-%m-%dT%H-%M"):
+        try:
+            return datetime.strptime(slot_key, fmt).replace(tzinfo=fallback.tzinfo)
+        except ValueError:
+            continue
+    return fallback
 
 
 async def get_or_create_weather_spot_assets(
@@ -138,7 +159,7 @@ async def get_or_create_weather_spot_assets(
     time_asset = existing_time
     if not time_asset:
         try:
-            time_text = _build_time_text(eastern_now)
+            time_text = _build_time_text(_slot_time(slot_key, eastern_now))
             time_bytes, time_duration = await generate_tts(time_text)
             from app.services.audio_analysis_service import normalize_audio_loudness
             time_bytes = normalize_audio_loudness(time_bytes)

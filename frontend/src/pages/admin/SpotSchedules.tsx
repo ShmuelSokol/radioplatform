@@ -65,6 +65,19 @@ function describe(s: SpotSchedule): string {
   return `${dayText}, ${times} each ${parts}`;
 }
 
+function formatWhen(iso: string, timeZone: string) {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      weekday: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone,
+    });
+  } catch {
+    return new Date(iso).toLocaleString();
+  }
+}
+
 export default function SpotSchedules() {
   const queryClient = useQueryClient();
   const { data: stationData } = useStations();
@@ -432,6 +445,21 @@ export default function SpotSchedules() {
                   {plan.unplaced.slice(0, 8).map((u, i) => (
                     <li key={i}>
                       {u.sponsor_name}, {formatDay(u.local_date)} {u.daypart}: {u.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!!plan?.off_air?.length && (
+              <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg p-4 text-sm">
+                <p className="font-semibold">No spots while the station is off the air</p>
+                <ul className="mt-1 list-disc list-inside">
+                  {plan.off_air.map((w, i) => (
+                    <li key={i}>
+                      {w.name}: {formatWhen(w.start, plan.timezone)} to{' '}
+                      {formatWhen(w.end, plan.timezone)}. {w.skipped_plays} play
+                      {w.skipped_plays === 1 ? '' : 's'} left out; the rest were moved to open
+                      times around it.
                     </li>
                   ))}
                 </ul>
