@@ -242,8 +242,8 @@ export default function TransportBar(p: Props) {
         <div className="hidden xl:flex items-center gap-3">
           {intro}
           <div className="text-right leading-none">
-            <div className={`text-3xl xl:text-4xl font-extrabold tabular-nums ${ending ? 'text-red-400 animate-pulse' : 'text-white'}`}>
-              -{fmtCountdown(p.remaining)}
+            <div className={`text-3xl xl:text-4xl font-extrabold tabular-nums ${ending ? 'text-red-400 animate-pulse' : p.isPlaying ? 'text-white' : 'text-gray-600'}`}>
+              {p.isPlaying ? `-${fmtCountdown(p.remaining)}` : '0:00'}
             </div>
             <div className="text-[11px] text-gray-500 tabular-nums mt-0.5">
               {fmtDur(p.elapsed)} / {fmtDur(p.duration)}
@@ -270,8 +270,8 @@ export default function TransportBar(p: Props) {
 
       {/* Row 2 (phones and tablets): countdown, Next, sound */}
       <div className="flex xl:hidden flex-wrap items-center gap-x-2 gap-y-1.5 px-3 lg:px-4 py-2">
-        <div className={`text-3xl font-extrabold tabular-nums leading-none ${ending ? 'text-red-400 animate-pulse' : 'text-white'}`}>
-          -{fmtCountdown(p.remaining)}
+        <div className={`text-3xl font-extrabold tabular-nums leading-none ${ending ? 'text-red-400 animate-pulse' : p.isPlaying ? 'text-white' : 'text-gray-600'}`}>
+          {p.isPlaying ? `-${fmtCountdown(p.remaining)}` : '0:00'}
         </div>
         <div className="hidden sm:block text-[11px] text-gray-500 tabular-nums leading-tight">
           <div>{fmtDur(p.elapsed)}</div>

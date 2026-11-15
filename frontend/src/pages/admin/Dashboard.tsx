@@ -139,8 +139,10 @@ export default function Dashboard() {
     const t = setInterval(tick, 200);
     return () => clearInterval(t);
   }, [serverStartedAt, serverDuration]);
-  const duration = serverDuration || (nowAsset?.duration ?? 0);
-  const remaining = Math.max(0, duration - realElapsed);
+  // Stopped: the last now-playing message can still be around, so show no time at all
+  const duration = isPlaying ? (serverDuration || (nowAsset?.duration ?? 0)) : 0;
+  const shownElapsed = isPlaying ? realElapsed : 0;
+  const remaining = isPlaying ? Math.max(0, duration - realElapsed) : 0;
   // Intro length is counted from where the item starts on air, so the countdown is simply intro minus elapsed.
   const introLength = Number((nowAsset as { intro_seconds?: number | null } | null)?.intro_seconds ?? wsNowPlaying?.asset?.intro_seconds ?? 0);
   const introSeconds = isPlaying && introLength > realElapsed ? introLength - realElapsed : 0;
@@ -532,7 +534,7 @@ export default function Dashboard() {
         isPlaying={isPlaying}
         nowAsset={nowAsset}
         nextAsset={nextAsset}
-        elapsed={realElapsed}
+        elapsed={shownElapsed}
         remaining={remaining}
         duration={duration}
         introSeconds={introSeconds}
