@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,7 @@ class PlaySource(str, enum.Enum):
 
 class PlayLog(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "play_logs"
+    __table_args__ = (Index("ix_play_logs_station_start", "station_id", "start_utc"),)
 
     station_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stations.id", ondelete="CASCADE"), nullable=False
