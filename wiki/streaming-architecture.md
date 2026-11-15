@@ -53,6 +53,26 @@ the engine owns the clock.
 - What plays next is still decided by the queue and `SchedulingService`; the engine picks
   nothing itself.
 
+## One player per station
+
+The queue is the only player (the engine plays it when it drives a station). Only
+`_check_advance` / the precise timer (or `playout_engine.tick`) advance playback; they keep
+no `now_playing` row, the WebSocket payload is built from the playing queue entry.
+`SchedulerEngine._check_station` plays nothing: it handles live-show hard stops, blackout
+silence and dead air. Dead air (no `playing` entry past `SILENCE_DETECTION_SECONDS`) raises
+one alert per spell and recovers through `queue.start_from_queue` (under `advance_lock`, starts
+nothing if an item is already playing), the same path as Start. A leftover `now_playing` row
+is deleted on the next check.
+
+Until 2026-11-15 `_check_station` also ran an old block player whenever a schedule block was
+active: it picked songs from the block, wrote `now_playing` (with `block_id`) and play_logs,
+and broadcast now_playing messages that browsers obeyed. With the queue writing no
+`now_playing` row it fired every song, so the station ran two sequences at once (KBR
+Jerusalem, "Night Chill" block): stops after Fade and songs faded early. `_check_channel`
+(a per-channel copy of it) and the emergency jingle fallback were removed for the same
+reason. Test: `tests/test_one_player_per_station.py`. Schedule blocks still matter: they
+feed the queue through replenish.
+
 ## Backend restarts and two processes
 
 `EngineState` is in memory, per process. It is safe to lose: the pre-loaded entry is covered

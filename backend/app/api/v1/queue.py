@@ -2030,19 +2030,40 @@ async def start_playback(
             logger.error("_replenish_queue failed during start: %s", exc, exc_info=True)
         return {"message": "Playout engine will start the next track", "now_playing": None}
 
-    # Fill the queue (schedule, rules, rotation; any music as a last resort) and start
+    started = await start_from_queue(db, station_id)
+    if started is None:
+        return {"message": "Queue empty — no music assets available", "now_playing": None}
+    return {"message": "Started", "now_playing": str(started.asset_id)}
+
+
+async def start_from_queue(db: AsyncSession, station_id) -> QueueEntry | None:
+    """Refill the queue (schedule, rules, rotation; any music as a last resort) and
+    start its next item. The Start button and the scheduler's dead-air recovery both
+    use this, so the queue stays the station's only player. If something started
+    meanwhile, that entry is returned and nothing else starts."""
+    async with advance_lock(station_id):
+        already = (await db.execute(
+            select(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )).scalar_one_or_none()
+        if already is not None:
+            return already
+        return await _start_next_locked(db, station_id)
+
+
+async def _start_next_locked(db: AsyncSession, station_id) -> QueueEntry | None:
     next_entry = await _refill_for_next(db, station_id)
     if not next_entry:
         await db.commit()
-        return {"message": "Queue empty — no music assets available", "now_playing": None}
-
+        return None
     next_entry.status = "playing"
     next_entry.started_at = datetime.now(timezone.utc)
     started_id = next_entry.id
-    started_asset_id = next_entry.asset_id
     await db.commit()
     await _broadcast_now_playing_entry(db, station_id, started_id)
-    return {"message": "Started", "now_playing": str(started_asset_id)}
+    return next_entry
 
 
 
