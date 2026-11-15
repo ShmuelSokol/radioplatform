@@ -212,7 +212,7 @@ export default function ProgramClock() {
             ))}
           </select>
           {/* Day tabs */}
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {DAYS.map((d, i) => (
               <button
                 key={d}

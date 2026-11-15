@@ -222,7 +222,7 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
         <div ref={containerRef} className={loading || error ? 'hidden' : ''} />
 
         {/* Controls */}
-        <div className="flex items-center gap-4 mt-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3">
           <button
             onClick={togglePlay}
             className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-1.5 rounded text-sm transition"
