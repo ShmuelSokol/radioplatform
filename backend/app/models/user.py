@@ -37,5 +37,8 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     social_links: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_action: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Stations this person may operate. None = every station that is not
+    # protected. A protected station always needs to be listed here.
+    station_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     assets = relationship("Asset", back_populates="created_by_user", lazy="noload")

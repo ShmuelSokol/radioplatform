@@ -76,6 +76,9 @@ async def create_user(
         photo_url=body.photo_url,
         is_public=body.is_public,
         social_links=body.social_links,
+        station_ids=(
+            None if body.station_ids is None else sorted({str(uuid.UUID(s)) for s in body.station_ids})
+        ),
         is_active=True,
     )
     db.add(user)
@@ -133,6 +136,10 @@ async def update_user(
         user.is_public = body.is_public
     if body.social_links is not None:
         user.social_links = body.social_links
+    if "station_ids" in body.model_fields_set:
+        user.station_ids = (
+            None if body.station_ids is None else sorted({str(uuid.UUID(s)) for s in body.station_ids})
+        )
     await db.commit()
     await db.refresh(user)
     return user

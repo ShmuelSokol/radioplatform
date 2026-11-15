@@ -30,6 +30,7 @@ class StationUpdate(BaseModel):
     description: str | None = None
     logo_url: str | None = None
     automation_config: dict | None = None
+    protected: bool | None = None
 
 
 class ChannelStreamResponse(BaseModel):
@@ -58,6 +59,7 @@ class StationResponse(BaseModel):
     description: str | None = None
     logo_url: str | None = None
     automation_config: dict | None = None
+    protected: bool = False
     channels: list[ChannelStreamResponse] = []
 
 

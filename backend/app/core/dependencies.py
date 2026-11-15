@@ -121,6 +121,44 @@ async def require_staff(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def may_operate_station(user: User, station) -> bool:
+    """Admins operate everything. Other staff operate the stations they are
+    assigned to; with no assignment, every station that is not protected."""
+    if user.role == UserRole.ADMIN:
+        return True
+    assigned = user.station_ids
+    if station.protected:
+        return assigned is not None and str(station.id) in assigned
+    return assigned is None or str(station.id) in assigned
+
+
+async def require_station_operator(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Router-level guard for /stations/{station_id}/... routes: anything that
+    changes a station needs the caller to be allowed on THAT station. Reads are
+    left to each route's own guard."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    raw = request.path_params.get("station_id")
+    if not raw:
+        return
+    from app.models.station import Station
+
+    if credentials is None:
+        raise UnauthorizedError()
+    user = await get_current_user(request, credentials, db)
+    try:
+        station_id = uuid.UUID(str(raw))
+    except ValueError:
+        return  # the route's own validation answers
+    station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+    if station is not None and not may_operate_station(user, station):
+        raise ForbiddenError("Your login is not set up to operate this station")
+
+
 async def require_sponsor(user: User = Depends(get_current_user)) -> User:
     if user.role != UserRole.SPONSOR:
         raise ForbiddenError("Sponsor access required")
