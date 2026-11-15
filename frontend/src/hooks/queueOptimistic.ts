@@ -88,7 +88,7 @@ export function insertEntry(
   data: QueueDataLike,
   stationId: string,
   asset: { id: string; [key: string]: unknown },
-  where: 'end' | 'next',
+  where: 'end' | 'next' | { beforeId: string },
 ): QueueDataLike {
   const maxPos = data.entries.reduce((m, e) => (e.status === 'pending' ? Math.max(m, e.position) : m), 0);
   const entry: QueueEntryLike = {
@@ -103,9 +103,15 @@ export function insertEntry(
     asset,
   };
   if (where === 'end') return withEntries(data, [...data.entries, entry]);
-  // "Play next": directly after whatever is playing now.
   let idx = 0;
-  data.entries.forEach((e, i) => { if (e.status === 'playing') idx = i + 1; });
+  if (where === 'next') {
+    // "Play next": directly after whatever is playing now.
+    data.entries.forEach((e, i) => { if (e.status === 'playing') idx = i + 1; });
+  } else {
+    // "Insert here": directly before the marked entry.
+    idx = data.entries.findIndex((e) => e.id === where.beforeId);
+    if (idx < 0) return data;
+  }
   const next = data.entries[idx];
   entry.position = next ? next.position : maxPos + 1;
   entry.estimated_start = next?.estimated_start ?? null;

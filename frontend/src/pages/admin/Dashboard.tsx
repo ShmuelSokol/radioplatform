@@ -10,6 +10,8 @@ import { useLiveShows } from '../../hooks/useLiveShows';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { fireNow, insertAt, queueEnd, queueNext } from '../../api/liveControl';
+import { insertEntry as addQueuePlaceholder } from '../../hooks/queueOptimistic';
+import type { QueueDataLike } from '../../hooks/queueOptimistic';
 import type { AssetInfo } from '../../types';
 import TransportBar from './controlroom/TransportBar';
 import QueuePanel from './controlroom/QueuePanel';
@@ -231,9 +233,21 @@ export default function Dashboard() {
     const { stationId: sid, queueEntries: entries, insertBeforeId: targetId, busyId: busy } = latest.current;
     if (!sid || busy) return;
     setBusyId(asset.id);
+    const target = how === 'insert' ? entries.find(e => e.id === targetId && e.status === 'pending') : undefined;
+    // Show the song in the queue right away; the server's answer replaces this
+    // row when the request settles, and a failure puts the old queue back.
+    const queueKey = ['queue', sid];
+    let before: QueueDataLike | undefined;
+    if (how !== 'now') {
+      await qc.cancelQueries({ queryKey: queueKey });
+      before = qc.getQueryData<QueueDataLike>(queueKey);
+      if (before) {
+        const where = how === 'end' ? 'end' : target ? { beforeId: target.id } : 'next';
+        qc.setQueryData(queueKey, addQueuePlaceholder(before, sid, { ...asset }, where));
+      }
+    }
     try {
       if (how === 'insert') {
-        const target = entries.find(e => e.id === targetId && e.status === 'pending');
         if (target) {
           const res = await insertAt(sid, asset.id, target.position);
           setToast(res.warnings.length
@@ -256,13 +270,14 @@ export default function Dashboard() {
         setToast({ text: `Added to the end: “${asset.title}”`, type: 'ok' });
       }
     } catch (err: any) {
+      if (before) qc.setQueryData(queueKey, before);
       const msg = err?.response?.data?.detail || err?.response?.data?.message;
       setToast({ text: typeof msg === 'string' ? msg : `Could not send “${asset.title}”. Check the connection and try again.`, type: 'error' });
     } finally {
       setBusyId(null);
       refreshQueue();
     }
-  }, [refreshQueue]);
+  }, [qc, refreshQueue]);
 
   const onMutError = useCallback(() => {
     setToast({ text: 'That did not go through. Check the connection and try again.', type: 'error' });

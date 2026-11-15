@@ -27,3 +27,5 @@ INGEST 2026-11-15 schedule-look-ahead.md Engine matched schedule blocks in UTC, 
 INGEST 2026-11-15 hourly-slots.md Time announcement text was built from generation time, not the slot hour (clips are made up to 48h ahead; after a restart all 48 said the same wrong time). Now derived from slot_key via _slot_time.
 INGEST 2026-11-15 audio-engine.md Player drifted ~5.5s ahead of server per song after PR 1 (server advanced at full duration + poll; player at cross_start). Fixed: precise timer advances at cross_start; player lead bounded to 1s.
 INGEST 2026-11-15 (no page) lint is now meaningful: ruff keeps F/E/N/UP bug rules, style-only rules (E501, I001, UP017...) ignored in backend/pyproject.toml; frontend has eslint.config.js (flat, ESLint 9) and CI runs npm run lint. GET /stations/{id}/stream was crashing (settings never imported), found by ruff F821.
+QUERY 2026-11-15 control-room.md before making library sends optimistic
+INGEST 2026-11-15 control-room.md library sends (next / end / insert) now put a placeholder row in the cached queue before the request; id starts with optimistic-, replaced on refetch, rolled back on error. e2e: API_DELAY_MS=300 checks it.
