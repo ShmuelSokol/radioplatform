@@ -134,7 +134,7 @@ export default function Navbar() {
   return (
     <nav className={isV2
       ? 'v2-glass-strong sticky top-0 z-50 text-white border-b border-white/10'
-      : 'bg-[#0a0a28] text-white border-b border-[#2a2a5e]'}>
+      : 'sticky top-0 z-50 bg-[#0a0a28] text-white border-b border-[#2a2a5e]'}>
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-12">
           {/* Logo + desktop links */}
@@ -298,7 +298,7 @@ export default function Navbar() {
 
       {/* Mobile dropdown menu */}
       {menuOpen && isAuthenticated && (
-        <div className="md:hidden border-t border-[#2a2a5e] bg-[#0c0c30]">
+        <div className="md:hidden border-t border-[#2a2a5e] bg-[#0c0c30] max-h-[calc(100dvh-3rem)] overflow-y-auto">
           <div className="px-4 py-2 space-y-1">
             {/* Standalone links */}
             {standaloneLinks.map(link => (
