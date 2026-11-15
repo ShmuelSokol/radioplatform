@@ -179,17 +179,17 @@ async def list_audit_logs(
         "total": total,
         "logs": [
             {
-                "id": str(l.id),
-                "user_email": l.user_email,
-                "action": l.action,
-                "resource_type": l.resource_type,
-                "resource_id": l.resource_id,
-                "detail": l.detail,
-                "changes": l.changes,
-                "request_id": l.request_id,
-                "created_at": l.created_at.isoformat() if l.created_at else None,
+                "id": str(log.id),
+                "user_email": log.user_email,
+                "action": log.action,
+                "resource_type": log.resource_type,
+                "resource_id": log.resource_id,
+                "detail": log.detail,
+                "changes": log.changes,
+                "request_id": log.request_id,
+                "created_at": log.created_at.isoformat() if log.created_at else None,
             }
-            for l in logs
+            for log in logs
         ],
     }
 

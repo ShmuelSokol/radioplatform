@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, require_manager
+from app.core.dependencies import require_manager
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.station import StationCreate, StationListResponse, StationResponse, StationUpdate

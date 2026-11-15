@@ -1,7 +1,7 @@
 """
 Scheduler control endpoints — start/stop the automatic scheduling engine.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.core.dependencies import require_manager
 from app.models.user import User

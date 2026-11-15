@@ -9,7 +9,6 @@ from app.core.dependencies import get_current_user, require_admin
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.schedule_rule import ScheduleRule
-from app.models.asset import Asset
 from app.models.user import User
 from app.schemas.rule import (
     RuleCreate, RuleListResponse, RuleOut, RuleUpdate,
