@@ -1,0 +1,20 @@
+[Unit]
+Description=KBR Live playout engine (Liquidsoap)
+After=network-online.target icecast2.service
+Wants=network-online.target
+Requires=icecast2.service
+
+[Service]
+Type=simple
+User=liquidsoap
+Group=liquidsoap
+EnvironmentFile=/etc/kbr-engine/env
+ExecStart=/usr/bin/liquidsoap /etc/kbr-engine/radio.liq
+Restart=always
+RestartSec=3
+# Audio must not be starved by anything else on the machine
+Nice=-10
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

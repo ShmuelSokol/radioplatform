@@ -36,6 +36,11 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(20), default="auto", nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     preempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # How a timed entry (one with preempt_at) goes on air:
+    #   "hard" = the item on air is faded out so this starts exactly at preempt_at
+    #   "soft" = the item on air finishes, then this plays
+    #   None   = the older rule: source "ad_slot" is soft, anything else is hard
+    timing_mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     station = relationship("Station", lazy="selectin")
     asset = relationship("Asset", lazy="selectin")

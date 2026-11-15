@@ -38,6 +38,7 @@ from app.api.v1.weather_spots import router as weather_spots_router, time_router
 from app.api.v1.mixer import router as mixer_router
 from app.api.v1.listeners import router as listeners_router
 from app.api.v1.crm import router as crm_router
+from app.api.v1.playout import router as playout_router
 from app.api.v1.rds import router as rds_router
 
 router = APIRouter()
@@ -80,4 +81,5 @@ router.include_router(time_announcements_router)
 router.include_router(mixer_router)
 router.include_router(listeners_router)
 router.include_router(crm_router)
+router.include_router(playout_router)
 router.include_router(rds_router)

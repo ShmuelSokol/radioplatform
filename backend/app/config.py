@@ -195,5 +195,37 @@ class Settings(BaseSettings):
     def liquidsoap_enabled(self) -> bool:
         return self.LIQUIDSOAP_ENABLED and bool(self.LIQUIDSOAP_HOST)
 
+    # Playout engine (Liquidsoap on the stream server). The engine asks the backend
+    # what plays next and reports what really went on air. See app/services/playout_engine.py.
+    PLAYOUT_ENGINE_ENABLED: bool = False
+    PLAYOUT_ENGINE_STATION_ID: str = ""  # the one station the engine plays
+    PLAYOUT_ENGINE_URL: str = ""  # engine control URL, e.g. "https://stream.kbrlive.com/control"
+    PLAYOUT_ENGINE_TOKEN: str = ""  # shared secret, sent both ways in X-Playout-Token
+    # When true, listeners and the dashboard play ICECAST_STREAM_URL instead of the in-browser player
+    PLAYOUT_STREAM_LIVE: bool = False
+
+    @property
+    def playout_engine_enabled(self) -> bool:
+        return bool(
+            self.PLAYOUT_ENGINE_ENABLED
+            and self.PLAYOUT_ENGINE_STATION_ID
+            and self.PLAYOUT_ENGINE_URL
+            and self.PLAYOUT_ENGINE_TOKEN
+        )
+
+    def engine_drives(self, station_id) -> bool:
+        """True when this station's playback is driven by the playout engine."""
+        return self.playout_engine_enabled and str(station_id) == self.PLAYOUT_ENGINE_STATION_ID
+
+    def public_stream_url(self, station_id) -> str | None:
+        """Stream URL clients should play for this station, or None for the in-browser player."""
+        if not self.ICECAST_STREAM_URL:
+            return None
+        if self.liquidsoap_enabled:
+            return self.ICECAST_STREAM_URL
+        if self.engine_drives(station_id) and self.PLAYOUT_STREAM_LIVE:
+            return self.ICECAST_STREAM_URL
+        return None
+
 
 settings = Settings()

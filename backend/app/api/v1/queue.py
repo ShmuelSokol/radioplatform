@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -17,7 +18,7 @@ from app.models.asset import Asset
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.user import User
-from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueReorder
+from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueFireNow, QueueReorder
 
 from app.models.holiday_window import HolidayWindow
 
@@ -1134,12 +1135,63 @@ async def play_next(
     return {"id": str(entry.id), "position": entry.position, "message": "Queued as next"}
 
 
+@router.post("/fire-now", status_code=201)
+async def fire_now(
+    station_id: uuid.UUID,
+    body: QueueFireNow,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """Put an asset on air now (one call instead of play-next + skip)."""
+    queued = await play_next(station_id, QueueAdd(asset_id=body.asset_id), db, _user)
+    if body.mode == "after-current":
+        return {**queued, "message": "Plays after the current track", "on_air": False}
+
+    if settings.engine_drives(station_id):
+        # The engine loads the file, fades the music out and starts it; the song that
+        # was playing does not resume. The real start comes back as a now-playing update.
+        from sqlalchemy.orm import joinedload
+        from app.services import playout_engine
+        res = await db.execute(
+            select(QueueEntry).options(joinedload(QueueEntry.asset))
+            .where(QueueEntry.id == uuid.UUID(queued["id"]))
+        )
+        entry = res.unique().scalar_one()
+        uri = playout_engine.build_uri(entry, "timed")
+        state = playout_engine.get_state(station_id)
+        state.timed_sent.add(str(entry.id))
+        if uri and await playout_engine.engine_timed(uri, time.time(), str(entry.id)):
+            return {**queued, "message": "Going on air", "on_air": True}
+        state.timed_sent.discard(str(entry.id))
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "The playout engine did not respond. The item is queued as next.",
+                "id": queued["id"],
+            },
+        )
+
+    await skip_current(station_id, db, _user)
+    return {**queued, "message": "Going on air", "on_air": True}
+
+
 @router.post("/skip")
 async def skip_current(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    if settings.engine_drives(station_id):
+        # The playout engine fades out and starts the next track itself, then reports
+        # the real start back (which updates the queue and every client).
+        from app.services import playout_engine
+        if await playout_engine.engine_skip(station_id):
+            return {"message": "Skipped", "now_playing": None}
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "The playout engine did not respond. Nothing was skipped."},
+        )
+
     # Same lock as the automatic advance, so Next cannot collide with a song change
     async with advance_lock(station_id):
         return await _skip_current_locked(station_id, db)
@@ -1542,6 +1594,14 @@ async def start_playback(
             current.started_at = datetime.now(timezone.utc)
             await db.commit()
         return {"message": "Already playing", "now_playing": str(current.asset_id)}
+
+    if settings.engine_drives(station_id):
+        # The engine pulls its next track by itself; just make sure there is something to pull.
+        try:
+            await _replenish_queue(db, station_id)
+        except Exception as exc:
+            logger.error("_replenish_queue failed during start: %s", exc, exc_info=True)
+        return {"message": "Playout engine will start the next track", "now_playing": None}
 
     # Auto-fill queue before starting
     try:
