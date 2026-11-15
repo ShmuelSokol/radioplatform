@@ -695,6 +695,10 @@ class QueueReplenishService:
             return
 
         # Legacy behaviour (no spot schedules yet): one asset in every slot.
+        # Set automation_config.ad_slot_legacy_spot to false to turn it off for good,
+        # so deleting the last spot schedule does not bring the test spot back.
+        if self.automation_config.get("ad_slot_legacy_spot", True) is False:
+            return
         ad_title = self.automation_config.get("ad_slot_asset_title", "KOL BRAMAH TEST SPONSOR")
         result = await self.db.execute(
             select(Asset).where(Asset.title == ad_title).limit(1)

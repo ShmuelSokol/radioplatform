@@ -5,9 +5,10 @@ per daypart; the queue's clock slots follow.
 """
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +55,12 @@ async def _get_or_404(db: AsyncSession, model, obj_id, label: str):
     return record
 
 
+def _check_audio_owner(asset: Asset, sponsor_id) -> None:
+    """A sponsor's schedule may only air that sponsor's audio (or unowned audio)."""
+    if asset.sponsor_id is not None and str(asset.sponsor_id) != str(sponsor_id):
+        raise HTTPException(status_code=422, detail="That audio belongs to a different sponsor")
+
+
 @router.get("", response_model=list[SpotScheduleOut])
 async def list_spot_schedules(
     sponsor_id: UUID | None = None,
@@ -81,7 +88,9 @@ async def preview_spot_plan(
     """Look ahead: every sponsor spot planned for the next N days on a station,
     plus any spot that could not be given a slot."""
     station = await _get_or_404(db, Station, station_id, "Station")
-    placements, unplaced = await plan_for_station(db, station, days=days)
+    now = datetime.now(UTC)
+    placements, unplaced = await plan_for_station(db, station, days=days, now=now)
+    placements = [p for p in placements if p.at > now]  # not what already passed today
 
     sponsor_ids = {p.schedule.sponsor_id for p in placements} | {
         u.schedule.sponsor_id for u in unplaced
@@ -137,6 +146,7 @@ async def create_spot_schedule(
     if data.station_id:
         await _get_or_404(db, Station, data.station_id, "Station")
 
+    _check_audio_owner(asset, sponsor.id)
     # Tie the audio to the sponsor so their portal shows its plays.
     if asset.sponsor_id is None:
         asset.sponsor_id = sponsor.id
@@ -163,10 +173,16 @@ async def update_spot_schedule(
 
     if changes.get("asset_id"):
         asset = await _get_or_404(db, Asset, changes["asset_id"], "Spot audio")
+        _check_audio_owner(asset, record.sponsor_id)
         if asset.sponsor_id is None:
             asset.sponsor_id = record.sponsor_id
     if changes.get("station_id"):
         await _get_or_404(db, Station, changes["station_id"], "Station")
+
+    start = changes.get("start_date", record.start_date)
+    end = changes.get("end_date", record.end_date)
+    if start and end and start > end:
+        raise HTTPException(status_code=422, detail="start_date must not be after end_date")
 
     for key, value in changes.items():
         setattr(record, key, value)

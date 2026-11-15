@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.services.spot_schedule_service import DAYPARTS
 
@@ -40,6 +40,16 @@ class SpotScheduleCreate(SpotScheduleBase):
     sponsor_id: UUID
     asset_id: UUID
 
+    @model_validator(mode="after")
+    def _dates_in_order(self):
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("start_date must not be after end_date")
+        return self
+
+
+# May be left out of an update, but cannot be cleared.
+_NOT_NULLABLE = ("asset_id", "days_of_week", "dayparts", "plays_per_daypart", "is_active")
+
 
 class SpotScheduleUpdate(BaseModel):
     name: str | None = None
@@ -51,6 +61,17 @@ class SpotScheduleUpdate(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def _no_null_required(self):
+        nulls = [
+            f for f in _NOT_NULLABLE if f in self.model_fields_set and getattr(self, f) is None
+        ]
+        if nulls:
+            raise ValueError(f"{', '.join(nulls)} cannot be null")
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("start_date must not be after end_date")
+        return self
 
     @field_validator("days_of_week")
     @classmethod

@@ -85,6 +85,13 @@ def _applies(schedule: SpotSchedule, local_date: date, daypart: str) -> bool:
     return daypart in _csv(schedule.dayparts)
 
 
+def _exists(local: datetime) -> bool:
+    """False for wall-clock times skipped by a spring-forward clock change
+    (e.g. 02:15 on that night). They would land on the next hour's slots in UTC."""
+    back = local.astimezone(UTC).astimezone(local.tzinfo)
+    return (back.hour, back.minute) == (local.hour, local.minute)
+
+
 def plan_spots(
     schedules: list[SpotSchedule],
     tz: ZoneInfo,
@@ -111,9 +118,14 @@ def plan_spots(
             if not wanting:
                 continue
             slots = [
-                datetime(local_date.year, local_date.month, local_date.day, h, m, tzinfo=tz)
+                slot
                 for h in range(h_start, h_end)
                 for m in minutes
+                if _exists(
+                    slot := datetime(
+                        local_date.year, local_date.month, local_date.day, h, m, tzinfo=tz
+                    )
+                )
             ]
             taken: dict[int, SpotSchedule] = {}
             for sched in wanting:
