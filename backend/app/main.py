@@ -130,6 +130,7 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS release_date DATE",
         # Preempt mechanism for exact-time playback (time announcements)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
+        "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS timing_mode VARCHAR(10)",
         # Source tracking: 'request', 'manual', 'auto' (replenish)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'auto'",
         # Schedule block columns that may be missing from early table creation
@@ -251,67 +252,6 @@ async def _seed_default_asset_types():
         logger.warning("Asset type seeding skipped: %s", e)
 
 
-async def _seed_stations():
-    """Seed the three special stations if they don't exist."""
-    try:
-        from app.db.engine import engine
-        from sqlalchemy import text
-        import json
-
-        stations = [
-            {
-                "name": "Nothing New",
-                "timezone": "America/New_York",
-                "description": "Only the classics — songs from 10+ years ago",
-                "automation_config": json.dumps({"oldies_only": True, "oldies_min_years": 10}),
-            },
-            {
-                "name": "Kol Bramah Yerushalayim",
-                "timezone": "Asia/Jerusalem",
-                "description": "Broadcasting from Yerushalayim",
-                "latitude": 31.7683,
-                "longitude": 35.2137,
-                "automation_config": None,
-            },
-            {
-                "name": "Requests Only",
-                "timezone": "America/New_York",
-                "description": "You pick the music — listener requests only",
-                "automation_config": json.dumps({"requests_only": True, "popular_request_threshold": 3}),
-            },
-        ]
-
-        async with engine.begin() as conn:
-            for s in stations:
-                exists = await conn.execute(
-                    text("SELECT 1 FROM stations WHERE name = :name"),
-                    {"name": s["name"]},
-                )
-                if exists.scalar_one_or_none():
-                    continue
-                await conn.execute(
-                    text("""
-                        INSERT INTO stations (id, name, type, timezone, latitude, longitude,
-                                              description, automation_config, is_active,
-                                              created_at, updated_at)
-                        VALUES (gen_random_uuid(), :name, 'internet', :timezone,
-                                :latitude, :longitude, :description,
-                                :automation_config::jsonb, true, NOW(), NOW())
-                    """),
-                    {
-                        "name": s["name"],
-                        "timezone": s["timezone"],
-                        "description": s["description"],
-                        "latitude": s.get("latitude"),
-                        "longitude": s.get("longitude"),
-                        "automation_config": s.get("automation_config"),
-                    },
-                )
-                logger.info("Seeded station: %s", s["name"])
-    except Exception as e:
-        logger.warning("Station seeding skipped: %s", e)
-
-
 async def _refresh_requested_category():
     """Refresh the dynamic 'requested' category on startup."""
     try:
@@ -390,6 +330,10 @@ async def _resume_playback_on_startup():
             # 2. Entries that ended while the server was down: mark played and log them
             stale_playing_count = 0
             for entry in finished:
+                # The playout engine keeps playing through a backend restart; it reports
+                # what really aired, so its station's entries are left for it to settle.
+                if settings.engine_drives(entry.station_id):
+                    continue
                 play_log = PlayLog(
                     station_id=entry.station_id,
                     asset_id=entry.asset_id,
@@ -421,6 +365,8 @@ async def _resume_playback_on_startup():
 
                     if station.id in on_air:
                         continue  # still playing; the scheduler carries on from here
+                    if settings.engine_drives(station.id):
+                        continue  # the engine asks for its next track itself
 
                     # 4b. Start playback — find next pending entry
                     next_result = await db.execute(
@@ -480,7 +426,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await ensure_tables()
     await _seed_default_categories()
     await _seed_default_asset_types()
-    await _seed_stations()
     await _refresh_requested_category()
 
     # Resume playback for all stations (close stale entries, fill queues, start playing)

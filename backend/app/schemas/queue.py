@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
@@ -16,6 +17,7 @@ class QueueEntryOut(BaseModel):
     status: str
     source: str | None = None
     preempt_at: datetime | None = None
+    timing_mode: str | None = None
     asset: AssetResponse | None = None
 
 
@@ -41,3 +43,11 @@ class QueueDndReorder(BaseModel):
 
 class QueueBulkAdd(BaseModel):
     asset_ids: list[uuid.UUID]
+
+
+class QueueFireNow(BaseModel):
+    """Put an asset on air now. `fade`: the music fades out and the asset starts at once.
+    `after-current`: it plays when the current track ends (same as play-next)."""
+
+    asset_id: uuid.UUID
+    mode: Literal["fade", "after-current"] = "fade"

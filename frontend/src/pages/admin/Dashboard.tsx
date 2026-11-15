@@ -18,6 +18,7 @@ import QueuePanel from './controlroom/QueuePanel';
 import type { QueueRow } from './controlroom/QueuePanel';
 import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
+import { usePfl } from './controlroom/pfl';
 import { LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
@@ -98,7 +99,7 @@ export default function Dashboard() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const { pins, toggle: togglePin } = useHotButtons(stationId);
+  const { pins, toggle: togglePin, cart, selectPage, selectSet, addSet, renameSet, deleteSet } = useHotButtons(stationId);
   const pinnedIds = useMemo(() => new Set(pins.map(p => p.id)), [pins]);
 
   useEffect(() => {
@@ -348,6 +349,9 @@ export default function Dashboard() {
     setPane(p => (p === 'library' || p === 'buttons' ? 'queue' : p));
   }, []);
 
+  // Pre-listen (PFL): one off-air player shared by the cart and the library
+  const pfl = usePfl();
+
   // Off-air time + weather preview
   const [weatherState, setWeatherState] = useState<'idle' | 'loading' | 'playing'>('idle');
   const previewWeather = useCallback(async () => {
@@ -429,6 +433,14 @@ export default function Dashboard() {
   const hotButtons = (wide: boolean) => (
     <HotButtons
       pins={pins}
+      sets={cart.sets}
+      setIndex={cart.set}
+      pageIndex={cart.page}
+      onSelectSet={selectSet}
+      onSelectPage={selectPage}
+      onAddSet={addSet}
+      onRenameSet={renameSet}
+      onDeleteSet={deleteSet}
       onTogglePin={togglePin}
       onSend={send}
       busyId={busyId}
@@ -439,6 +451,7 @@ export default function Dashboard() {
       disabled={noStation}
       onPreviewWeather={previewWeather}
       weatherState={weatherState}
+      pfl={pfl}
       wide={wide}
     />
   );
@@ -452,6 +465,8 @@ export default function Dashboard() {
       onTogglePin={togglePin}
       searchRef={searchRef}
       disabled={noStation}
+      pflId={pfl.playingId}
+      onPfl={pfl.toggle}
     />
   );
   const sidePanel = (tab: Pane) =>

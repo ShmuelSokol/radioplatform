@@ -88,6 +88,24 @@ class QueueReplenishService:
         await self._schedule_ad_slots()
         await self.db.commit()
 
+        # Playlist generation: fill a few hours ahead from the schedule blocks'
+        # playlist sequences instead of the rule-based 7-day fill.
+        from app.services.playlist_generator_service import settings_for
+
+        generation = settings_for(self.automation_config)
+        if generation.enabled:
+            if await self._fill_from_playlists(generation, total_seconds):
+                return
+            # Nothing could be generated (no block with a sequence): keep the
+            # station on the air with the ordinary fill, but only as far ahead
+            # as generation looks, so sequences take over once they exist.
+            shortfall = generation.hours * 3600 - total_seconds
+            if shortfall > 0:
+                self.queued_ids = set()
+                self.exclude_ids = set()
+                await self._fill_content(shortfall, asset_type="music", category=None)
+            return
+
         if total_seconds >= TARGET_QUEUE_SECONDS:
             logger.info("Queue already full (%.1fs >= %.1fs target), skipping content fill", total_seconds, float(TARGET_QUEUE_SECONDS))
             return
@@ -153,6 +171,70 @@ class QueueReplenishService:
 
         await self.db.commit()
         logger.info("Queue replenishment complete")
+
+    async def _fill_from_playlists(self, generation, queued_seconds: float) -> bool:
+        """Top the queue up to `generation.hours` from playlist sequences.
+
+        Returns False when nothing could be generated at all.
+        """
+        from app.services.playlist_generator_service import CONFIG_KEY, generate
+
+        target = generation.hours * 3600
+        if queued_seconds >= target:
+            return True
+        station = (
+            await self.db.execute(select(Station).where(Station.id == self.station_id))
+        ).scalar_one()
+        pending = (
+            await self.db.execute(
+                select(QueueEntry.asset_id, Asset.artist)
+                .join(Asset, QueueEntry.asset_id == Asset.id)
+                .where(
+                    QueueEntry.station_id == self.station_id,
+                    QueueEntry.status.in_(["pending", "playing"]),
+                )
+                .order_by(QueueEntry.position)
+            )
+        ).all()
+        self.queued_ids = {row[0] for row in pending}
+        config = dict(station.automation_config or {})
+        saved = dict(config.get(CONFIG_KEY) or {})
+        plan = await generate(
+            self.db,
+            station,
+            datetime.now(timezone.utc) + timedelta(seconds=queued_seconds),
+            (target - queued_seconds) / 3600,
+            artist_distance=generation.artist_distance,
+            cursor=saved.get("cursor") or {},
+            recent_artists=[row[1] for row in pending][-20:],
+            busy_ids=set(self.queued_ids),
+        )
+        if not plan.picks:
+            logger.info("Playlist generation produced nothing: %s", "; ".join(plan.notes))
+            return False
+        result = await self.db.execute(
+            select(func.coalesce(func.max(QueueEntry.position), 0)).where(
+                QueueEntry.station_id == self.station_id, QueueEntry.status == "pending"
+            )
+        )
+        position = result.scalar() or 0
+        for pick in plan.picks:
+            position += 1
+            self.db.add(
+                QueueEntry(
+                    id=uuid.uuid4(),
+                    station_id=self.station_id,
+                    asset_id=pick.asset_id,
+                    position=position,
+                    status="pending",
+                )
+            )
+        saved["cursor"] = plan.cursor
+        config[CONFIG_KEY] = saved
+        station.automation_config = config
+        await self.db.commit()
+        logger.info("Playlist generation queued %d items", len(plan.picks))
+        return True
 
     async def _load_rules(self) -> list[ScheduleRule]:
         """Load ALL active rules for this station across all time windows.

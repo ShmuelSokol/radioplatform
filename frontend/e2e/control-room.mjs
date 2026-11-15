@@ -58,6 +58,7 @@ function makeBackend(queueSize = 60) {
     if (path === '/stations') return { stations: [{ id: SID, name: 'Kol Berama', timezone: 'America/New_York', is_active: true, channels: [] }, { id: 'st-2', name: 'Second Feed', timezone: 'America/New_York', is_active: true, channels: [] }], total: 2 };
     if (path === '/asset-types') return types.map((name, i) => ({ id: `t${i}`, name }));
     if (path === '/categories') return [];
+    if (/^\/assets\/[^/]+\/audio-url$/.test(path)) return { url: 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=' };
     if (path === '/alerts/unresolved-count') return { unresolved_count: 0 };
     if (path === '/alerts') return { alerts: [], total: 0 };
     if (path === '/live-shows') return { shows: [{ id: 'ls1', station_id: SID, title: 'Thursday Night Live', status: 'scheduled', scheduled_start: new Date(Date.now() + 3600e3).toISOString() }], total: 1 };
@@ -228,6 +229,41 @@ async function desktop(browser, width, height) {
   await page.waitForTimeout(300);
   await shot(page, `${width}-5-pinned`);
   check(`${tag}: starred library item becomes an instant button`, await page.getByTestId('hot-button').filter({ hasText: 'Song number 50' }).count() === 1);
+
+  // Cart pages and named sets, like the jingle cart operators know
+  const pinned50 = () => page.getByTestId('hot-button').filter({ hasText: 'Song number 50' }).count();
+  await page.getByTestId('cart-page').nth(1).click();
+  check(`${tag}: cart page 2 starts empty`, await pinned50() === 0);
+  await page.getByRole('button', { name: 'Add to instant buttons' }).click();
+  check(`${tag}: a button can be put on page 2`, await pinned50() === 1);
+  await page.getByTestId('cart-page').nth(2).click();
+  check(`${tag}: page 3 is separate from page 2`, await pinned50() === 0);
+  await page.getByTestId('cart-page').nth(0).click();
+  check(`${tag}: page 1 keeps its button`, await pinned50() === 1);
+  page.once('dialog', d => d.accept('Purim'));
+  await page.getByTestId('cart').getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'New set' }).click();
+  check(`${tag}: a new named set starts empty and is selected`, await pinned50() === 0 && await page.getByLabel('Button set').evaluate(el => el.selectedOptions[0].textContent) === 'Purim');
+  await page.getByLabel('Button set').selectOption({ label: 'Default' });
+  check(`${tag}: switching back to the first set restores its buttons`, await pinned50() === 1);
+  await page.reload();
+  await page.getByTestId('queue-row').first().waitFor();
+  check(`${tag}: sets and pages survive a reload`, await pinned50() === 1 && await page.getByLabel('Button set').locator('option').count() === 2);
+  const air = await page.getByTestId('air-time').nth(1).textContent();
+  check(`${tag}: queue rows show air time to the second`, /^\d{1,2}:\d{2}:\d{2}\s*(AM|PM)/.test(air.trim()), air);
+
+  // PFL: a button is heard off air and nothing reaches the station
+  const pflBefore = { now: backend.nowId(), order: backend.order().join(), writes: backend.calls.filter(c => c.method !== 'GET').length };
+  await page.getByTestId('pfl-toggle').click();
+  await page.getByTestId('hot-button').filter({ hasText: 'Station ID 4' }).click();
+  await page.waitForTimeout(300 + DELAY);
+  await shot(page, `${width}-6-pfl`);
+  check(`${tag}: in PFL a button asks for its audio and does not go on air`,
+    backend.calls.some(c => c.path === '/assets/j4/audio-url')
+      && backend.nowId() === pflBefore.now && backend.order().join() === pflBefore.order
+      && backend.calls.filter(c => c.method !== 'GET').length === pflBefore.writes);
+  await page.getByTestId('pfl-banner').getByRole('button', { name: 'Done' }).click();
+  check(`${tag}: leaving PFL puts the buttons back on air duty`, await page.getByTestId('pfl-banner').count() === 0);
 
   // A pushed track change refreshes the queue at once, not at the next 10 second poll
   const track = (id, at) => ({ station_id: SID, asset_id: id, started_at: new Date(at).toISOString(), asset: { title: 'Pushed song' } });

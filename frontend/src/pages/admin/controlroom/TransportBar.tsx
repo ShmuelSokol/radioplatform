@@ -219,7 +219,7 @@ export default function TransportBar(p: Props) {
           </div>
           {nextButton}
           {sound}
-          <div className="hidden 2xl:flex w-56 flex-col gap-1" aria-hidden="true">
+          <div className="hidden xl:flex w-32 2xl:w-56 flex-col gap-1" aria-hidden="true" title={audio.audioReady ? 'Level of what you are hearing' : 'Press Listen to see levels'}>
             <VuBar level={audio.vuL} />
             <VuBar level={audio.vuR} />
           </div>

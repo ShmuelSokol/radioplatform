@@ -38,3 +38,19 @@ Things the code alone will not tell you:
 Consequences: a row far from the screen is not in the DOM (tests must scroll to it, and wait a beat after setting `scrollTop`). Date formatting goes through the cached formatters in `shared.ts` (`dayKey`, `clockTime`, `weekdayShort`); building an `Intl.DateTimeFormat` per row per render was a large part of the Safari stutter.
 
 Not done: the queue request still returns up to 2,000 entries (about 930 KB at that size) every refresh. Paging it needs the day filter and insert-by-id to work on entries that are not loaded.
+
+## Instant buttons are a cart: named sets of ten pages
+
+Operators come from KBR Studio 1.82 (the desktop program the station runs today), whose jingle cart has pages 1 to 10 and named sets. `useHotButtons` in `shared.ts` stores `{ sets: [{ name, pages: CtlAsset[][10] }], set, page }` under the same localStorage key as before (`kbr_hot_buttons_<stationId>`); an old flat array is read as page 1 of "Default". The ☆ in the library adds to, or removes from, the page on screen. Still per browser, not shared between operators.
+
+Queue rows show projected air time to the second (`clockTimeSec`), because that is what the old running log shows.
+
+KBR Studio features the control room does not have yet, and why: Intro countdown (assets have no intro length), Fade and Soft fade (skip has no fade option; engine work), Mix over, Loop, HS, Spots mode, blocks that expand into their items in the log.
+
+## PFL (pre-listen) is one shared off-air player
+
+`usePfl` in `controlroom/pfl.ts` is the only off-air player for assets: the ▶ on library rows and the cart's PFL mode both use it, so starting one item stops the other. In PFL mode a cart button calls `pfl.toggle` and never `onSend`, so nothing reaches the station (`e2e/control-room.mjs` asserts no write call is made). It needs no server: it plays the asset's `audio-url` on its own audio element.
+
+The headphones output uses `setSinkId` where the browser has it (Chrome, Edge; not iPhone Safari, where the picker is hidden). Browsers only name the outputs after the microphone has been allowed once, so "Choose the headphones output" asks for the microphone and releases it at once. The choice is kept in localStorage `kbr_pfl_output`; if that device is gone the sound falls back to the default output instead of going silent. The time and weather preview still uses its own audio elements and the default output.
+
+Agreed with the engine thread (2026-11-15), not built yet: `queue/skip?fade=hard|fade|soft`, `intro_seconds` on assets and queue rows, `queue/loop`, `queue/mix-over`, `queue/insert {asset_id, after_entry_id}`, `queue/fire-now {asset_id, mode}`. Level meters stay measured in the browser.

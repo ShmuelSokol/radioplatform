@@ -94,3 +94,11 @@ async def test_seed_all_is_refused_in_production(client: AsyncClient, auth_heade
     monkeypatch.setattr(settings, "ALLOW_DESTRUCTIVE_SEED", False)
     r = await client.post("/api/v1/auth/seed-all", headers=auth_headers)
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_disable_or_demote_themselves(client: AsyncClient, admin_user: User, auth_headers: dict):
+    r = await client.put(f"/api/v1/users/{admin_user.id}", json={"is_active": False}, headers=auth_headers)
+    assert r.status_code == 400
+    r = await client.put(f"/api/v1/users/{admin_user.id}", json={"role": "viewer"}, headers=auth_headers)
+    assert r.status_code == 400
