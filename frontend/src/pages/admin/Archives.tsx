@@ -135,7 +135,7 @@ export default function AdminArchives() {
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] min-h-[calc(100vh-4rem)] flex flex-col text-white p-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h1 className="text-xl font-bold text-cyan-300">
           Show Archives
           {data && <span className="ml-2 text-gray-500 text-sm font-normal">({data.total})</span>}

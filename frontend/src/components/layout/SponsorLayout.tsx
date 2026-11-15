@@ -23,7 +23,7 @@ export default function SponsorLayout() {
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Top nav */}
       <nav className="bg-indigo-700 text-white shadow-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-14">
+        <div className="px-4 sm:px-6 lg:px-8 flex items-center justify-between h-14">
           <div className="flex items-center gap-6">
             <span className="font-bold text-lg text-indigo-200">Sponsor Portal</span>
             <div className="flex gap-1">
@@ -57,7 +57,7 @@ export default function SponsorLayout() {
       </nav>
 
       {/* Content */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 w-full min-w-0 px-4 sm:px-6 lg:px-8 py-6">
         <Outlet />
       </main>
     </div>

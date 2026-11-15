@@ -93,9 +93,16 @@ export function useSkipCurrent(stationId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => skipCurrent(stationId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['queue', stationId] });
-      qc.invalidateQueries({ queryKey: ['play-log', stationId] });
+    onMutate: async () => {
+      // A poll already in flight would put the old song back
+      await qc.cancelQueries({ queryKey: ['queue', stationId] });
+    },
+    onSuccess: (res) => {
+      // The skip response carries the new queue: no second request needed
+      if (res?.queue?.entries) qc.setQueryData(['queue', stationId], res.queue);
+      else qc.invalidateQueries({ queryKey: ['queue', stationId] });
+      // The play log catches up on its own poll
+      qc.invalidateQueries({ queryKey: ['play-log', stationId], refetchType: 'none' });
     },
   });
 }

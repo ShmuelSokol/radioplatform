@@ -51,7 +51,7 @@ export default function AssetDetail() {
   if (!asset) return <div className="text-center py-10 text-red-500">Asset not found</div>;
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full">
       <div className="flex items-center gap-3 mb-6">
         <Link to="/admin/assets" className="text-brand-600 hover:text-brand-800 text-sm">&larr; Back to Assets</Link>
         <h1 className="text-2xl font-bold">{asset.title}</h1>

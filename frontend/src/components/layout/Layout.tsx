@@ -13,6 +13,10 @@ function isV2Native(pathname: string): boolean {
   );
 }
 
+// Every page uses the full window width (no centred max-width column); pages lay
+// themselves out inside it. Keep the padding below as it is: the dark full-bleed
+// pages (Users, Alerts, Rules, ...) cancel it with `-mx-4 sm:-mx-6 lg:-mx-8 -my-6`.
+//
 // Full-bleed "app" screens: fixed to the viewport, the nav stays on top and the
 // page manages its own scrolling panes (no max-width, no page padding).
 function isAppShell(pathname: string): boolean {
@@ -39,7 +43,7 @@ export default function Layout() {
     return (
       <div className="min-h-screen flex flex-col">
         <Navbar />
-        <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+        <main className="flex-1 w-full min-w-0 px-4 sm:px-6 lg:px-8 py-6">
           <Outlet />
         </main>
         <AudioPlayer />
@@ -53,7 +57,7 @@ export default function Layout() {
       <Navbar />
       <main
         key={pathname}
-        className={`v2-fade-up flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6`}
+        className={`v2-fade-up flex-1 w-full min-w-0 px-4 sm:px-6 lg:px-8 py-6`}
       >
         {native ? (
           <Outlet />

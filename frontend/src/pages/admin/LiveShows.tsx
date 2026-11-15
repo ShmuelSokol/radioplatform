@@ -113,7 +113,7 @@ export default function LiveShows() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto py-6 px-4">
+    <div className="w-full">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-cyan-300">Live Shows</h1>
         <button
