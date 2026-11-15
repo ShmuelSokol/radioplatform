@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, require_manager
+from app.core.dependencies import require_manager, require_staff
 from app.db.session import get_db
 from app.models.asset import Asset as AssetModel
 from app.models.user import User
@@ -553,7 +553,7 @@ async def list_all(
     duration_min: float | None = Query(None, description="Minimum duration in seconds"),
     duration_max: float | None = Query(None, description="Maximum duration in seconds"),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     assets, total = await list_assets(
         db, skip=skip, limit=limit, asset_type=asset_type,
@@ -573,7 +573,7 @@ BROWSER_AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".webm"}
 async def get_audio_url(
     asset_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Return a public URL for wavesurfer.js to fetch audio directly.
 
@@ -650,7 +650,7 @@ async def update_request_settings(
 
 @router.get("/enhance-presets")
 async def get_enhance_presets(
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Return all available audio enhancement presets."""
     from app.services.enhance_service import ENHANCEMENT_PRESETS
@@ -774,7 +774,7 @@ async def enhance_preview_endpoint(
     asset_id: uuid.UUID,
     body: EnhancePreviewRequest,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Preview enhancement on a short segment. Returns audio/mpeg blob."""
     from app.services.enhance_service import ENHANCEMENT_PRESETS, enhance_preview
@@ -811,7 +811,7 @@ async def detect_audience_endpoint(
     silence_threshold_db: float = Query(-45, description="Threshold for actual silence (dB)"),
     min_duration: float = Query(1.0, description="Min segment duration (seconds)"),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Detect audience/student questions in a shiur recording.
 
@@ -837,7 +837,7 @@ async def detect_audience_endpoint(
 async def get_one(
     asset_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     return await get_asset(db, asset_id)
 
@@ -895,7 +895,7 @@ async def download_asset(
     asset_id: uuid.UUID,
     format: str = Query("original", description="Export format: original, mp3, wav, flac, ogg, aac"),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     from fastapi import HTTPException
     asset = await get_asset(db, asset_id)
@@ -972,7 +972,7 @@ async def detect_silence_endpoint(
     threshold_db: float = Query(-30),
     min_duration: float = Query(0.5),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Detect silence regions in an asset's audio file."""
     asset = await get_asset(db, asset_id)

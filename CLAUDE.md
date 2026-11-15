@@ -322,7 +322,7 @@ Claude Code accessible over Telegram for remote development.
 
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
-- **Auth**: JWT Bearer tokens. Roles: admin, manager, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor).
+- **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`.
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
 - **DB Sessions**: Import `get_db` from `app.db.session` (not `get_async_session`).
