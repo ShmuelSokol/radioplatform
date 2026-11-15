@@ -152,7 +152,7 @@ async def test_skip_goes_to_engine_and_logs_manual(
 
     resp = await client.post(f"/api/v1/stations/{station.id}/queue/skip", headers=auth_headers)
     assert resp.status_code == 200
-    assert ("/skip", None) in sent
+    assert ("/skip", {"fade": 0.5}) in sent
     # The database only changes when the engine reports the real start
     assert await _status(db_session, entries[0]) == "playing"
 
@@ -307,3 +307,68 @@ async def test_next_catches_up_on_lost_start_report(client, db_session, engine_s
     assert resp.json()["entry_id"] == str(entries[2].id)
     assert await _status(db_session, entries[0]) == "played"
     assert await _status(db_session, entries[1]) == "pending"
+
+
+@pytest.mark.asyncio
+async def test_timing_mode_decides_hard_or_soft(client, db_session, engine_station):
+    """`timing_mode` wins over the older rule (ad_slot = soft, anything else = hard)."""
+    station, entries, sent = engine_station
+    soon = datetime.now(UTC) + timedelta(seconds=20)
+    res = await db_session.execute(
+        select(QueueEntry).where(QueueEntry.id.in_([entries[2].id, entries[3].id]))
+    )
+    rows = {r.id: r for r in res.scalars().all()}
+    # A sponsor slot marked hard: goes to the timed lane, on the second
+    rows[entries[2].id].preempt_at = soon
+    rows[entries[2].id].source = "ad_slot"
+    rows[entries[2].id].timing_mode = "hard"
+    # A scheduled item marked soft: never sent to the timed lane
+    rows[entries[3].id].preempt_at = soon
+    rows[entries[3].id].source = "auto"
+    rows[entries[3].id].timing_mode = "soft"
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+    timed_calls = [p for path, p in sent if path == "/timed"]
+    assert [c["id"] for c in timed_calls] == [str(entries[2].id)]
+
+    # Once its time has come, the soft item is the next thing handed out
+    rows[entries[3].id].preempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+    picked = await playout_engine.pick_next(db_session, station.id, set())
+    assert picked.id == entries[3].id
+
+
+@pytest.mark.asyncio
+async def test_loop_hands_the_engine_the_same_item_again(client, auth_headers, db_session, engine_station):
+    station, entries, sent = engine_station
+    engine = {"X-Playout-Token": TOKEN}
+    base = f"/api/v1/playout/{station.id}"
+    first = (await client.get(f"{base}/next", headers=engine)).json()
+    await client.post(f"{base}/started", headers=engine, json={"entry_id": first["entry_id"], "lane": "main"})
+    second = (await client.get(f"{base}/next?given={first['entry_id']}", headers=engine)).json()
+    assert second["entry_id"] == str(entries[1].id)
+
+    # Loop on: the pre-loaded track is dropped and the engine is handed a repeat instead
+    res = await client.post(
+        f"/api/v1/stations/{station.id}/queue/loop", headers=auth_headers, json={"on": True}
+    )
+    assert res.status_code == 200 and ("/flush", None) in sent
+    given = [first["entry_id"]]
+    handed = []
+    for _ in range(2):
+        nxt = (await client.get(f"{base}/next?given={','.join(given)}", headers=engine)).json()
+        handed.append(nxt["entry_id"])
+        given.insert(0, nxt["entry_id"])
+        # The start report for it has not arrived yet when the engine asks again
+    assert len(set(handed)) == 2 and str(entries[1].id) not in handed
+    res = await db_session.execute(select(QueueEntry).where(QueueEntry.id.in_([uuid.UUID(h) for h in handed])))
+    rows = res.scalars().all()
+    assert {r.asset_id for r in rows} == {entries[0].asset_id} and {r.source for r in rows} == {"loop"}
+
+    # Loop off: the repeat that has not aired is dropped and the queue carries on
+    await client.post(
+        f"/api/v1/stations/{station.id}/queue/loop", headers=auth_headers, json={"on": False}
+    )
+    nxt = (await client.get(f"{base}/next?given={given[1]}", headers=engine)).json()
+    assert nxt["entry_id"] == str(entries[1].id)

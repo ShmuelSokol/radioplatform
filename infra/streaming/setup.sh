@@ -3,13 +3,15 @@
 # Ubuntu 24.04 server. Safe to run again: it keeps the secrets it made the first time.
 #
 #   curl -fsSL https://raw.githubusercontent.com/ShmuelSokol/radioplatform/main/infra/streaming/setup.sh \
-#     | bash -s -- <station-id> [stream-domain] [backend-url]
+#     | bash -s -- [station-id] [stream-domain] [backend-url]
+#
+# With no station id it takes the first station the backend lists.
 #
 # At the end it prints the settings the backend needs. No password is ever written
 # to the repository; they are generated here and stay on this machine.
 set -euo pipefail
 
-STATION_ID="${1:?usage: setup.sh <station-id> [stream-domain] [backend-url]}"
+STATION_ID="${1:-}"
 DOMAIN="${2:-stream.kbrlive.com}"
 BACKEND_URL="${3:-https://api.kbrlive.com/api/v1}"
 REF="${KBR_SETUP_REF:-main}"
@@ -23,6 +25,16 @@ ENV_FILE=/etc/kbr-engine/env
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q liquidsoap icecast2 nginx certbot python3-certbot-nginx curl ufw openssl
+
+if [ -z "$STATION_ID" ]; then
+  STATION_ID="$(curl -fsSL "$BACKEND_URL/stations" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+rows = data.get("stations", data) if isinstance(data, dict) else data
+print(rows[0]["id"] if rows else "")')"
+  [ -n "$STATION_ID" ] || { echo "Could not find a station at $BACKEND_URL/stations. Pass the station id as the first argument."; exit 1; }
+  echo "Using station $STATION_ID"
+fi
 
 mkdir -p /etc/kbr-engine /var/lib/kbr-engine/emergency
 chown -R liquidsoap:liquidsoap /var/lib/kbr-engine

@@ -672,7 +672,9 @@ class SchedulerEngine:
         except Exception as e:
             logger.error("Queue advance failed for station %s: %s", station_id, e, exc_info=True)
 
-    async def _broadcast_queue_entry(self, db: AsyncSession, station_id, entry):
+    async def _broadcast_queue_entry(
+        self, db: AsyncSession, station_id, entry, change_fade_seconds: float | None = None
+    ):
         """Broadcast an expanded now_playing update for a queue entry, including analysis data + next track."""
         from sqlalchemy.orm import joinedload
         from app.models.queue_entry import QueueEntry
@@ -761,11 +763,19 @@ class SchedulerEngine:
                     "album_art_path": asset.album_art_path,
                     "audio_url": audio_url,
                     "cue_in": cue_in,
+                    "intro_seconds": asset.intro_seconds,
                     "cue_out": cue_out,
                     "cross_start": cross_start,
                     "replay_gain_db": replay_gain_db,
                 },
                 "next_asset": next_asset_data,
+                # Set only on the message that announces an operator's Next: how long the
+                # outgoing item fades (hard / fade / soft). Absent = the player's default.
+                **(
+                    {"change_fade_seconds": change_fade_seconds}
+                    if change_fade_seconds is not None
+                    else {}
+                ),
             })
         except Exception as e:
             logger.error("Failed to broadcast expanded WS update: %s", e)

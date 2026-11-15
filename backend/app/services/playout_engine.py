@@ -28,7 +28,7 @@ from sqlalchemy.orm import joinedload
 
 from app.config import settings
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry
+from app.models.queue_entry import QueueEntry, hard_timed, soft_timed
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +93,13 @@ async def _command(path: str, payload: dict | None = None) -> bool:
         return False
 
 
-async def engine_skip(station_id) -> bool:
-    """Fade out the current track and start the next one now."""
+async def engine_skip(station_id, fade_seconds: float | None = None) -> bool:
+    """Fade out the current track and start the next one now.
+
+    `fade_seconds` None = the engine's own default (KBR_SKIP_FADE_SECONDS)."""
     state = get_state(station_id)
     state.skip_requested = True
-    ok = await _command("/skip")
+    ok = await _command("/skip", None if fade_seconds is None else {"fade": fade_seconds})
     if not ok:
         state.skip_requested = False
     return ok
@@ -189,7 +191,7 @@ async def pick_next(
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            QueueEntry.source == "ad_slot",
+            soft_timed(),
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now,
         )
@@ -270,6 +272,15 @@ async def handle_next(db: AsyncSession, station_id, given: list[str] | None = No
     exclude = set(state.timed_sent) | already_given
     if state.cued_entry_id:
         exclude.add(state.cued_entry_id)
+
+    # Looping: queue the next repeat of the item on air, unless one is already waiting
+    try:
+        from app.api.v1.queue import add_loop_repeat
+
+        await add_loop_repeat(db, station_id, ignore_ids=exclude)
+        await db.commit()
+    except Exception as e:
+        logger.warning("Loop repeat could not be queued: %s", e)
 
     for _ in range(5):
         entry = await pick_next(db, station_id, exclude)
@@ -445,7 +456,7 @@ async def tick(db: AsyncSession, station) -> None:
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            QueueEntry.source != "ad_slot",
+            hard_timed(),
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at > now,
             QueueEntry.preempt_at <= horizon,

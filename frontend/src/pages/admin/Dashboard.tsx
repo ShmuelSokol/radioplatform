@@ -10,6 +10,7 @@ import { useLiveShows } from '../../hooks/useLiveShows';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { fireNow, insertAt, queueEnd, queueNext } from '../../api/liveControl';
+import type { SkipFade } from '../../api/queue';
 import { insertEntry as addQueuePlaceholder } from '../../hooks/queueOptimistic';
 import type { QueueDataLike } from '../../hooks/queueOptimistic';
 import type { AssetInfo } from '../../types';
@@ -140,6 +141,9 @@ export default function Dashboard() {
   }, [serverStartedAt, serverDuration]);
   const duration = serverDuration || (nowAsset?.duration ?? 0);
   const remaining = Math.max(0, duration - realElapsed);
+  // Intro length is counted from where the item starts on air, so the countdown is simply intro minus elapsed.
+  const introLength = Number((nowAsset as { intro_seconds?: number | null } | null)?.intro_seconds ?? wsNowPlaying?.asset?.intro_seconds ?? 0);
+  const introSeconds = isPlaying && introLength > realElapsed ? introLength - realElapsed : 0;
 
   // ── Audio monitor (what the operator hears in this browser) ─
   const audioAsset: AssetInfo | null = wsNowPlaying?.asset_id && wsNowPlaying.asset ? {
@@ -193,6 +197,7 @@ export default function Dashboard() {
     wsNowPlaying?.next_asset?.replay_gain_db ?? 0,
     null, null,
     serverStartedAt,
+    wsNowPlaying?.change_fade_seconds ?? null,
   );
   useEffect(() => {
     if (dashStreamAudioRef.current) dashStreamAudioRef.current.volume = muted ? 0 : volume;
@@ -271,10 +276,11 @@ export default function Dashboard() {
     try {
       if (how === 'insert') {
         if (target) {
-          const res = await insertAt(sid, asset.id, target.position);
-          setToast(res.warnings.length
-            ? { text: `Inserted “${asset.title}”. Note: ${res.warnings.join(' | ')}`, type: 'warn' }
-            : { text: `Inserted “${asset.title}”`, type: 'ok' });
+          // The marker sits before `target`, so the new item goes after the entry above it.
+          const pendingRows = entries.filter(e => e.status === 'pending');
+          const above = pendingRows[pendingRows.findIndex(e => e.id === target.id) - 1];
+          await insertAt(sid, asset.id, above ? above.id : null);
+          setToast({ text: `Inserted “${asset.title}”`, type: 'ok' });
         } else {
           await queueNext(sid, asset.id);
           setInsertBeforeId(null);
@@ -307,9 +313,9 @@ export default function Dashboard() {
     setToast({ text: 'That did not go through. Check the connection and try again.', type: 'error' });
   }, []);
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback((fade?: SkipFade) => {
     initAudio();
-    skipMut.mutate(undefined, { onError: onMutError });
+    skipMut.mutate(fade, { onError: onMutError });
   }, [initAudio, skipMut, onMutError]);
 
   const handleStart = useCallback(() => {
@@ -404,7 +410,7 @@ export default function Dashboard() {
         if (searchRef.current) searchRef.current.focus();
         else setTimeout(() => searchRef.current?.focus(), 0);
       } else if ((e.key === 'n' || e.key === 'N') && !e.repeat && keyActions.current.isPlaying) {
-        keyActions.current.handleNext();
+        keyActions.current.handleNext('hard');
       }
     };
     window.addEventListener('keydown', onKey);
@@ -503,6 +509,7 @@ export default function Dashboard() {
         elapsed={realElapsed}
         remaining={remaining}
         duration={duration}
+        introSeconds={introSeconds}
         onStart={handleStart}
         starting={startMut.isPending}
         statusMessage={statusMessage}
