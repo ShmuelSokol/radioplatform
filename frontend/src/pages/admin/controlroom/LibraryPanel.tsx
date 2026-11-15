@@ -1,7 +1,6 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { useAssets } from '../../../hooks/useAssets';
 import { useAssetTypes } from '../../../hooks/useAssetTypes';
-import { getAssetAudioUrl } from '../../../api/assets';
 import { fmtDur, typeStyle, useDebounced } from './shared';
 import type { CtlAsset, SendFn } from './shared';
 
@@ -15,6 +14,9 @@ interface Props {
   onTogglePin: (a: CtlAsset) => void;
   searchRef: React.RefObject<HTMLInputElement>;
   disabled: boolean;
+  /** Item being pre-listened to (PFL), heard in this browser only. */
+  pflId: string | null;
+  onPfl: (id: string) => void;
 }
 
 const PAGE = 50;
@@ -40,30 +42,8 @@ function LibraryPanel(p: Props) {
   // Results on screen belong to an older search until the new ones arrive.
   const stale = isPlaceholderData || search.trim() !== debounced;
 
-  // Off-air preview ("cue"): plays in this browser only, never on the station.
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const stopPreview = () => {
-    audioRef.current?.pause();
-    audioRef.current = null;
-    setPreviewId(null);
-  };
-  useEffect(() => () => { audioRef.current?.pause(); }, []);
-  const togglePreview = async (id: string) => {
-    if (previewId === id) { stopPreview(); return; }
-    stopPreview();
-    setPreviewId(id);
-    try {
-      const url = await getAssetAudioUrl(id);
-      const a = new Audio(url);
-      audioRef.current = a;
-      a.onended = () => setPreviewId(cur => (cur === id ? null : cur));
-      a.onerror = () => setPreviewId(cur => (cur === id ? null : cur));
-      await a.play();
-    } catch {
-      setPreviewId(cur => (cur === id ? null : cur));
-    }
-  };
+  const previewId = p.pflId;
+  const togglePreview = p.onPfl;
 
   const inserting = p.insertLabel !== null;
 
@@ -127,7 +107,8 @@ function LibraryPanel(p: Props) {
             <div key={asset.id} data-testid="library-row"
               className="flex items-center gap-2 px-2 min-h-[56px] lg:min-h-[48px] border-b border-[#15153a] hover:bg-[#12123a]">
               <button type="button" onClick={() => togglePreview(asset.id)}
-                title="Preview here only (not on air)" aria-label={previewId === asset.id ? 'Stop preview' : 'Preview'}
+                title="Pre-listen (PFL): only you hear it, not on air" aria-label={previewId === asset.id ? 'Stop pre-listen' : 'Pre-listen'}
+                data-testid="library-pfl" aria-pressed={previewId === asset.id}
                 className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-sm
                   ${previewId === asset.id ? 'bg-white text-black' : 'bg-white/10 text-gray-200 hover:bg-white/20'}`}>
                 {previewId === asset.id ? '■' : '▶'}
