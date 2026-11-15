@@ -22,6 +22,8 @@ const MAX_LEAD_SECONDS = 1.0;
 const NATURAL_END_WINDOW_SECONDS = 4.0;
 // Crossfade trigger check. A timer, not requestAnimationFrame: rAF stops in background tabs.
 const CROSSFADE_CHECK_MS = 100;
+// A deck this close to the server's position for the current play is playing that play
+const REPLAY_TOLERANCE_SECONDS = 4.0;
 
 type DeckLabel = 'A' | 'B';
 const otherDeck = (label: DeckLabel): DeckLabel => (label === 'A' ? 'B' : 'A');
@@ -97,6 +99,11 @@ export function useAudioEngine(
   const [audioReady, setAudioReady] = useState(false);
 
   const lastAssetId = useRef<string | null>(null);
+  // Server start time of the play we last handled, and the asset whose change is still
+  // in flight. Together they tell "the same item was queued again" (a new play of the
+  // same asset) apart from a late-arriving start time for a change already handled.
+  const lastStartedAtRef = useRef<string | null>(null);
+  const pendingAssetRef = useRef<string | null>(null);
   const rafRef = useRef<number>(0);
   const syncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(elapsedSeconds);
@@ -295,11 +302,32 @@ export function useAudioEngine(
         deckARef.current?.audio.pause();
         deckBRef.current?.audio.pause();
         lastAssetId.current = null;
+        lastStartedAtRef.current = null;
+        pendingAssetRef.current = null;
       }
       return;
     }
 
-    if (assetId === lastAssetId.current) return;
+    // Same asset as before: nothing to do, unless the server started a NEW play of it
+    // (the same item queued twice in a row) and no deck is playing that new play.
+    let replay = false;
+    if (assetId === lastAssetId.current) {
+      if (!currentStartedAt || currentStartedAt === lastStartedAtRef.current) return;
+      const prevMs = lastStartedAtRef.current ? new Date(lastStartedAtRef.current).getTime() : NaN;
+      const sameInstant = Math.abs(new Date(currentStartedAt).getTime() - prevMs) < 1000;
+      lastStartedAtRef.current = currentStartedAt;
+      if (sameInstant) return; // same play, start time only formatted differently
+      if (pendingAssetRef.current === assetId) return; // its change is still being brought up
+      const onAirLabel = crossfadingRef.current ? otherDeck(activeDeckRef.current) : activeDeckRef.current;
+      const onAir = getDeck(onAirLabel);
+      const inPlace = !!onAir && deckAssetRef.current[onAirLabel] === assetId && !onAir.audio.paused
+        && !onAir.audio.ended && Math.abs(onAir.audio.currentTime - livePosition(currentCueIn)) < REPLAY_TOLERANCE_SECONDS;
+      // Already crossfaded into the new play (pre-loaded on the idle deck), or the start
+      // time only arrived late for a change already handled.
+      if (inPlace) return;
+      replay = true;
+    }
+    lastStartedAtRef.current = currentStartedAt;
 
     const ctx = ctxRef.current;
     if (!ctx) return;
@@ -312,7 +340,7 @@ export function useAudioEngine(
 
     if (crossfadingRef.current) {
       // We are already crossfading into this track — nothing to do
-      if (deckAssetRef.current[inLabel] === assetId) {
+      if (!replay && deckAssetRef.current[inLabel] === assetId) {
         lastAssetId.current = assetId;
         return;
       }
@@ -333,13 +361,14 @@ export function useAudioEngine(
 
     // Already on air: we crossfaded into it before the server announced it.
     // Re-loading here would restart the track and cause an audible jump.
-    if (deckAssetRef.current[outLabel] === assetId && !outDeck.audio.paused) {
+    if (!replay && deckAssetRef.current[outLabel] === assetId && !outDeck.audio.paused) {
       lastAssetId.current = assetId;
       return;
     }
 
     crossfadeTriggeredRef.current = false;
     lastAssetId.current = assetId;
+    pendingAssetRef.current = assetId;
     trackChangeTimeRef.current = Date.now();
     const token = ++changeTokenRef.current;
     const cueIn = currentCueIn;
@@ -358,6 +387,7 @@ export function useAudioEngine(
     const goLive = () => {
       if (wentLive || token !== changeTokenRef.current) return;
       wentLive = true;
+      pendingAssetRef.current = null;
       // A natural crossfade still settling must not flip the decks back afterwards
       if (crossfadeTimerRef.current) {
         clearTimeout(crossfadeTimerRef.current);
@@ -375,7 +405,12 @@ export function useAudioEngine(
       fadeBusyUntilRef.current = performance.now() + fadeOut * 1000;
 
       // Bring the new track up at its live position
-      try { inDeck.audio.currentTime = livePosition(cueIn); } catch { /* not seekable yet */ }
+      // A position at or past the end of the new track means the start time we hold still
+      // belongs to the previous track (it arrives separately): start from the top instead.
+      let startPos = livePosition(cueIn);
+      const inDur = inDeck.audio.duration;
+      if (isFinite(inDur) && inDur > 0 && startPos > inDur - 1) startPos = cueIn;
+      try { inDeck.audio.currentTime = startPos; } catch { /* not seekable yet */ }
       inDeck.gain.gain.cancelScheduledValues(now);
       inDeck.gain.gain.setValueAtTime(0, now);
       inDeck.gain.gain.linearRampToValueAtTime(targetGain, now + fadeIn);
@@ -434,7 +469,7 @@ export function useAudioEngine(
       }
     };
     run();
-  }, [nowPlayingAsset?.id, isPlaying, audioReady, currentCueIn, currentReplayGainDb, audioUrlOverride, getDeck, livePosition, replayGainMultiplier]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nowPlayingAsset?.id, currentStartedAt, isPlaying, audioReady, currentCueIn, currentReplayGainDb, audioUrlOverride, getDeck, livePosition, replayGainMultiplier]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Pre-load next track on the idle deck ──
   // Declared after the track-change effect so a track change claims its deck first.
@@ -454,7 +489,10 @@ export function useAudioEngine(
       const held = deckAssetRef.current[label];
       if (held === nextAssetId) return null;
       if (currentId && held === currentId) return null;
-      if (deckAssetRef.current[activeLabel] === nextAssetId) return null;
+      // The active deck already holds the next asset: we crossfaded into it before the server
+      // announced it. But if the SAME item is queued twice in a row, the idle deck needs
+      // its own copy for the second play.
+      if (deckAssetRef.current[activeLabel] === nextAssetId && nextAssetId !== currentId) return null;
       return { label, deck };
     };
 
