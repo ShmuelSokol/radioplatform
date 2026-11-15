@@ -71,3 +71,4 @@ UPDATE 2026-11-15 program-blocks.md Sponsor places in blocks (kind "sponsors", s
 UPDATE 2026-11-15 spot-schedules.md,schedule-look-ahead.md unplaced plays are grouped (count) per sponsorship/day/daypart/reason; dayparts already over are dropped in plan_for_station; times in reasons use 12-hour clock_12()
 INGEST 2026-11-15 streaming-architecture.md Engine timed lane played only the first item of a same-time group; now the lane stays open while the timed queue has items, and items are pushed in the order received.
 UPDATE 2026-11-15 program-blocks.md, streaming-architecture.md Playout engine now honours hard_by and plays block groups in position order.
+INGEST 2026-11-15 control-room.md Web player: an operator's Next fade (change_fade_seconds) now wins over the near-end heuristic; before, Next within the last ~7 s of an item (short looped jingles always) faded over 3 s. Check: node e2e/audio-engine.mjs next-quick-fade-near-the-end.
