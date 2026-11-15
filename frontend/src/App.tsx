@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/layout/Layout';
@@ -6,6 +6,7 @@ import SponsorLayout from './components/layout/SponsorLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useAuth } from './hooks/useAuth';
 import { canAccess, homeFor } from './auth/access';
+import { applyUpdateOnNavigation } from './lib/appUpdate';
 import { useUiStore } from './stores/uiStore';
 
 // Auth pages (eager - fast initial load)
@@ -103,6 +104,17 @@ function SponsorProtectedRoute({ children }: { children: React.ReactNode }) {
   return <RoleRoute loginPath="/sponsor/login">{children}</RoleRoute>;
 }
 
+/** Loads a newly published release when the person changes screens. */
+function UpdateOnNavigation() {
+  const { pathname } = useLocation();
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    applyUpdateOnNavigation();
+  }, [pathname]);
+  return null;
+}
+
 const Loading = () => <div className="text-center py-10 text-gray-400">Loading...</div>;
 
 /** Renders the V2 page when the V2 toggle is on, otherwise the V1 page. */
@@ -115,6 +127,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <UpdateOnNavigation />
         <ErrorBoundary>
         <Suspense fallback={<Loading />}>
           <Routes>
