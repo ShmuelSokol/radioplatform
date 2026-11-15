@@ -72,3 +72,4 @@ UPDATE 2026-11-15 spot-schedules.md,schedule-look-ahead.md unplaced plays are gr
 INGEST 2026-11-15 streaming-architecture.md Engine timed lane played only the first item of a same-time group; now the lane stays open while the timed queue has items, and items are pushed in the order received.
 UPDATE 2026-11-15 program-blocks.md, streaming-architecture.md Playout engine now honours hard_by and plays block groups in position order.
 INGEST 2026-11-15 control-room.md Web player: an operator's Next fade (change_fade_seconds) now wins over the near-end heuristic; before, Next within the last ~7 s of an item (short looped jingles always) faded over 3 s. Check: node e2e/audio-engine.mjs next-quick-fade-near-the-end.
+UPDATE 2026-11-15 spot-schedules.md reconcile_spot_slots now adds (never removes) exact-time entries due inside the 2-minute safety margin, once per minute (any status)
