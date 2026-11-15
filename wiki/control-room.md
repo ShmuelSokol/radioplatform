@@ -61,10 +61,6 @@ Server contract: [operator-actions](operator-actions.md). In the transport bar N
 
 Loop is a toggle in the same group: `liveControl.loopCurrent` posts `queue/loop {on}`, and the button lights from `loop_asset_id` in the queue body, so every operator sees it.
 
-<<<<<<< HEAD
-Loop (`queue/loop`) and Mix over (`queue/mix-over`) exist on the server; see `operator-actions.md`.
-=======
 The transport bar is one row from 1280 px (`xl`) and two rows below that (title and clock on top; countdown, Intro, sound and the Loop / Fade / Soft fade / NEXT group underneath). Both rows are in the DOM and one is hidden, so browser checks must pick the `:visible` button.
 
-Not built on the server yet: Mix over.
->>>>>>> origin/main
+Mix over exists on the server (`queue/mix-over`, see `operator-actions.md`); the control room has no button for it yet.
