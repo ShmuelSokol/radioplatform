@@ -3,14 +3,19 @@ Playlist template CRUD endpoints — manage rotation patterns of asset types/cat
 """
 from uuid import UUID
 
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import get_db, require_manager
 from app.models.asset import Asset
 from app.models.playlist_template import PlaylistTemplate, TemplateSlot
+from app.models.queue_entry import QueueEntry
+from app.models.station import Station
 from app.schemas.playlist_template import (
     PlaylistTemplateCreate,
     PlaylistTemplateInDB,
@@ -87,6 +92,140 @@ async def list_asset_types(
         {"asset_type": row[0], "category": row[1]}
         for row in result.all()
     ]
+
+
+# ==================== Generation ahead of time ====================
+
+
+class GenerationSettings(BaseModel):
+    station_id: UUID
+    enabled: bool
+    hours: int = Field(6, ge=1, le=48)
+    artist_distance: int = Field(2, ge=0, le=20)
+
+
+async def _station(db: AsyncSession, station_id: UUID) -> Station:
+    station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+    if not station:
+        raise HTTPException(status_code=404, detail="Station not found")
+    return station
+
+
+async def _queued_seconds(db: AsyncSession, station_id: UUID) -> float:
+    result = await db.execute(
+        select(func.coalesce(func.sum(func.coalesce(Asset.duration, 180)), 0))
+        .select_from(QueueEntry)
+        .join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
+    )
+    return float(result.scalar() or 0)
+
+
+@router.get("/generation")
+async def get_generation(
+    station_id: UUID,
+    hours: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_manager),
+):
+    """Settings, plus a dry run of what generation would queue next. Changes nothing."""
+    from zoneinfo import ZoneInfo
+
+    from app.services.playlist_generator_service import CONFIG_KEY, generate, settings_for
+
+    station = await _station(db, station_id)
+    settings = settings_for(station.automation_config)
+    look = max(1, min(48, hours or settings.hours))
+    queued = await _queued_seconds(db, station_id)
+    # When generation is off the queue is days long; preview from now instead.
+    start = datetime.now(UTC) + timedelta(seconds=queued if settings.enabled else 0)
+    saved = (station.automation_config or {}).get(CONFIG_KEY) or {}
+    plan = await generate(
+        db,
+        station,
+        start,
+        look,
+        artist_distance=settings.artist_distance,
+        cursor=saved.get("cursor") or {},
+    )
+    try:
+        tz = ZoneInfo(station.timezone or "UTC")
+    except Exception:
+        tz = UTC
+    return {
+        "station_id": str(station.id),
+        "enabled": settings.enabled,
+        "hours": settings.hours,
+        "artist_distance": settings.artist_distance,
+        "queued_hours": round(queued / 3600, 1),
+        "preview_from": start,
+        "preview_hours": look,
+        "notes": plan.notes,
+        "preview": [
+            {
+                "at": p.at,
+                "local_time": p.at.astimezone(tz).strftime("%a %H:%M"),
+                "block": p.block_name,
+                "asset_type": p.asset_type,
+                "category": p.category,
+                "asset_id": str(p.asset_id),
+                "title": p.title,
+                "artist": p.artist,
+                "duration": p.duration,
+                "artist_rule_relaxed": p.artist_rule_relaxed,
+            }
+            for p in plan.picks
+        ],
+    }
+
+
+@router.put("/generation")
+async def set_generation(
+    data: GenerationSettings,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_manager),
+):
+    from app.services.playlist_generator_service import CONFIG_KEY
+
+    station = await _station(db, data.station_id)
+    config = dict(station.automation_config or {})
+    saved = dict(config.get(CONFIG_KEY) or {})
+    saved.update(enabled=data.enabled, hours=data.hours, artist_distance=data.artist_distance)
+    config[CONFIG_KEY] = saved
+    station.automation_config = config
+    await db.commit()
+    return {"enabled": data.enabled, "hours": data.hours, "artist_distance": data.artist_distance}
+
+
+@router.post("/generation/regenerate")
+async def regenerate(
+    station_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_manager),
+):
+    """Throw away the automatically queued songs that have not started and generate again.
+
+    Keeps what is playing, anything a person queued, requests, sponsor spots and
+    timed items (time, weather).
+    """
+    from app.services.playlist_generator_service import settings_for
+    from app.services.queue_replenish_service import QueueReplenishService
+
+    station = await _station(db, station_id)
+    if not settings_for(station.automation_config).enabled:
+        raise HTTPException(status_code=409, detail="Playlist generation is switched off")
+    removed = await db.execute(
+        delete(QueueEntry).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.source == "auto",
+            QueueEntry.preempt_at.is_(None),
+        )
+    )
+    await db.commit()
+    await QueueReplenishService(db, station_id).replenish()
+    await db.commit()
+    return {"removed": removed.rowcount, "queued_hours": round(await _queued_seconds(db, station_id) / 3600, 1)}
 
 
 @router.get("/{template_id}", response_model=PlaylistTemplateInDB)
