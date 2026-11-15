@@ -17,6 +17,7 @@ class QueueEntryOut(BaseModel):
     status: str
     source: str | None = None
     preempt_at: datetime | None = None
+    timing_mode: str | None = None
     asset: AssetResponse | None = None
 
 
