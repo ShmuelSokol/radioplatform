@@ -21,12 +21,26 @@ export interface UpcomingScheduleEntry {
   station_name: string;
   time_slot: string;
   asset_title: string;
+  scheduled_at?: string | null;
 }
 
 export interface SponsorStats {
   total_plays_month: number;
   total_plays_alltime: number;
   next_scheduled: string | null;
+  next_scheduled_at?: string | null;
+  last_played?: string | null;
+}
+
+export interface SponsorSpot {
+  asset_id: string;
+  title: string;
+  duration_seconds: number | null;
+  last_played_at: string | null;
+  next_play_at: string | null;
+  plays_month: number;
+  plays_alltime: number;
+  scheduled: boolean;
 }
 
 export const getPlayHistory = async (page = 1, limit = 25): Promise<PlayHistoryResponse> => {
@@ -43,5 +57,10 @@ export const getUpcomingSchedule = async (): Promise<UpcomingScheduleEntry[]> =>
 
 export const getSponsorStats = async (): Promise<SponsorStats> => {
   const res = await apiClient.get<SponsorStats>('/sponsor-portal/stats');
+  return res.data;
+};
+
+export const getMySpots = async (): Promise<SponsorSpot[]> => {
+  const res = await apiClient.get<SponsorSpot[]>('/sponsor-portal/spots');
   return res.data;
 };
