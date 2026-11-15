@@ -56,7 +56,9 @@ async def get_current_weather(
         return hit[1]
     failed = _failed.get(key)
     if failed and now < failed[0]:
-        raise failed[1]
+        # Drop the stored traceback first: re-raising the same object would keep
+        # appending frames to it on every call during the back-off.
+        raise failed[1].with_traceback(None)
     try:
         result = await _fetch_weather(lat, lon, timezone_name)
     except Exception as e:
