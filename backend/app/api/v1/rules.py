@@ -21,7 +21,7 @@ router = APIRouter(prefix="/rules", tags=["rules"])
 @router.get("", response_model=RuleListResponse)
 async def list_rules(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=500),
     station_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
