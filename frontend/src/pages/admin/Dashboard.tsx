@@ -98,7 +98,7 @@ export default function Dashboard() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const { pins, toggle: togglePin } = useHotButtons(stationId);
+  const { pins, toggle: togglePin, cart, selectPage, selectSet, addSet, renameSet, deleteSet } = useHotButtons(stationId);
   const pinnedIds = useMemo(() => new Set(pins.map(p => p.id)), [pins]);
 
   useEffect(() => {
@@ -429,6 +429,14 @@ export default function Dashboard() {
   const hotButtons = (wide: boolean) => (
     <HotButtons
       pins={pins}
+      sets={cart.sets}
+      setIndex={cart.set}
+      pageIndex={cart.page}
+      onSelectSet={selectSet}
+      onSelectPage={selectPage}
+      onAddSet={addSet}
+      onRenameSet={renameSet}
+      onDeleteSet={deleteSet}
       onTogglePin={togglePin}
       onSend={send}
       busyId={busyId}

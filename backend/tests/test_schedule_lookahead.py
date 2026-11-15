@@ -103,13 +103,16 @@ async def test_look_ahead_gaps_and_off_air(
     station, _ = await _station(
         db_session, [{"name": "Day", "start_time": time(6), "end_time": time(22)}]
     )
-    now = datetime.now(UTC)
+    # Start the off-air window at 2:07 AM station time tomorrow: inside the
+    # overnight gap and off the 15-minute grid, whatever time the test runs.
+    tomorrow = (datetime.now(NY) + timedelta(days=1)).date()
+    off_start = datetime.combine(tomorrow, time(2, 7), tzinfo=NY).astimezone(UTC)
     db_session.add(
         HolidayWindow(
             id=uuid.uuid4(),
             name="Shabbos",
-            start_datetime=now + timedelta(hours=30),
-            end_datetime=now + timedelta(hours=55),
+            start_datetime=off_start,
+            end_datetime=off_start + timedelta(hours=25),
         )
     )
     await db_session.commit()

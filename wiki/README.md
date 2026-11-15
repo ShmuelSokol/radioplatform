@@ -15,6 +15,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [lint-workflow](lint-workflow.md) — Wiki housekeeping procedure
 - [release-pickup](release-pickup.md) — open tabs reload themselves onto a new release, never while audio plays
 - [playlist-generation](playlist-generation.md) — queue generated ahead from sequences of song types, artist distance, longest-rested first
+- [rds-feed](rds-feed.md) — plain-text now-playing line for the FM RDS encoder (Magic RDS)
 - [song-request-matching.md](song-request-matching.md) — how listener requests map to library assets; known nickname + recall bugs
 - [spot-schedules](spot-schedules.md) — Sponsor spot scheduling by daypart, how clock slots get filled, legacy single-spot fallback, sponsor portal data sources
 - [schedule-look-ahead](schedule-look-ahead.md) — Conflict look-ahead page, shared block resolver, tie-break order, blocks are station-local time (were UTC)

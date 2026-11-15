@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, require_admin
 from app.core.security import hash_password
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import BadRequestError, NotFoundError
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.models.user_preference import UserPreference
@@ -102,6 +102,13 @@ async def update_user(
     user = result.scalar_one_or_none()
     if not user:
         raise NotFoundError("User not found")
+    # An admin must not be able to lock themselves out: with one admin account
+    # that would leave nobody able to sign in and undo it.
+    if user.id == _admin.id:
+        if body.is_active is False:
+            raise BadRequestError("You cannot disable your own account")
+        if body.role is not None and UserRole(body.role) != UserRole.ADMIN:
+            raise BadRequestError("You cannot remove your own admin role")
     if body.email is not None:
         user.email = body.email
     if body.password is not None:

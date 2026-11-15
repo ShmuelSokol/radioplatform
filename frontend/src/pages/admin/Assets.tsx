@@ -733,7 +733,7 @@ export default function Assets() {
           </div>
         </div>
         {totalPages > 1 && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2">
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
