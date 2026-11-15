@@ -10,13 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.models.asset import Asset
+from app.models.holiday_window import HolidayWindow
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.sponsor import Sponsor
 from app.models.station import Station
 from app.models.user import User, UserRole
 from app.services.queue_replenish_service import QueueReplenishService
-from app.services.spot_schedule_service import plan_spots, reconcile_spot_slots
+from app.services.spot_schedule_service import Blackout, plan_spots, reconcile_spot_slots
 
 NY = ZoneInfo("America/New_York")
 
@@ -43,6 +44,29 @@ def test_spring_forward_skips_missing_times():
     assert all(p.local.hour != 2 for p in placed)
     assert len(placed) == 15 and len(unplaced) == 3
     assert len({p.at for p in placed}) == 15
+
+
+def test_blackout_moves_and_skips_plays():
+    # Shabbos: Friday 16:20 to Saturday 17:30 New York time (Nov 20-21, 2026).
+    shabbos = Blackout(
+        datetime(2026, 11, 20, 16, 20, tzinfo=NY).astimezone(UTC),
+        datetime(2026, 11, 21, 17, 30, tzinfo=NY).astimezone(UTC),
+        "Shabbos",
+    )
+    s = _sched("a", dayparts="morning,afternoon,evening", plays=2)
+    placed, unplaced = plan_spots([s], NY, date(2026, 11, 20), 2, blackouts=[shabbos])
+    assert not any(shabbos.covers(p.at) for p in placed)
+
+    def on(day, part):
+        return [p for p in placed if p.local.day == day and p.daypart == part]
+
+    fri_pm = on(20, "afternoon")
+    assert len(fri_pm) == 2  # squeezed in before candle lighting
+    # Saturday afternoon: only the slots after Shabbos ends are used
+    assert [(p.local.hour, p.local.minute) for p in on(21, "afternoon")] == [(17, 30), (17, 45)]
+    # Friday evening and Saturday morning are fully off the air: 2 plays each, skipped
+    assert len([u for u in unplaced if u.blackout is shabbos]) == 4
+    assert len(unplaced) == 4
 
 
 # ── planner (pure) ──────────────────────────────────────────────────
@@ -362,3 +386,35 @@ async def test_sponsor_portal_shows_only_their_real_plays(
     assert len(spots) == 1
     assert spots[0]["title"] == "Spot A" and spots[0]["plays_alltime"] == 2
     assert spots[0]["scheduled"] is True and spots[0]["next_play_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_queue_and_preview_keep_off_shabbos(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    station, assets, sponsors = await _setup(db_session, client, auth_headers)
+    now = datetime.now(UTC)
+    start, end = now + timedelta(days=2), now + timedelta(days=3, hours=1)
+    db_session.add(
+        HolidayWindow(id=uuid.uuid4(), name="Shabbos", start_datetime=start, end_datetime=end)
+    )
+    await db_session.commit()
+    r = await client.post(
+        "/api/v1/spot-schedules",
+        json={"sponsor_id": sponsors[0], "asset_id": str(assets[0].id)},
+        headers=auth_headers,
+    )
+    assert r.status_code == 201
+    slots = await _ad_slots(db_session, station.id)
+    assert slots
+    for s in slots:
+        at = s.preempt_at if s.preempt_at.tzinfo else s.preempt_at.replace(tzinfo=UTC)
+        assert not (start <= at < end)
+
+    r = await client.get(
+        f"/api/v1/spot-schedules/preview?station_id={station.id}&days=7", headers=auth_headers
+    )
+    body = r.json()
+    assert body["unplaced"] == []
+    assert [w["name"] for w in body["off_air"]] == ["Shabbos"]
+    assert body["off_air"][0]["skipped_plays"] >= 2

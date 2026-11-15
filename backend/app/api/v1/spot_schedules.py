@@ -19,6 +19,7 @@ from app.models.sponsor import Sponsor
 from app.models.spot_schedule import SpotSchedule
 from app.models.station import Station
 from app.schemas.spot_schedule import (
+    OffAirWindow,
     PlannedSpot,
     SpotPlanPreview,
     SpotScheduleCreate,
@@ -91,6 +92,12 @@ async def preview_spot_plan(
     now = datetime.now(UTC)
     placements, unplaced = await plan_for_station(db, station, days=days, now=now)
     placements = [p for p in placements if p.at > now]  # not what already passed today
+    # Dayparts wholly inside Shabbos/Yom Tov are skipped on purpose, not a problem to fix.
+    skipped: dict = {}
+    for u in unplaced:
+        if u.blackout is not None:
+            skipped[u.blackout] = skipped.get(u.blackout, 0) + 1
+    unplaced = [u for u in unplaced if u.blackout is None]
 
     sponsor_ids = {p.schedule.sponsor_id for p in placements} | {
         u.schedule.sponsor_id for u in unplaced
@@ -131,6 +138,10 @@ async def preview_spot_plan(
                 reason=u.reason,
             )
             for u in unplaced
+        ],
+        off_air=[
+            OffAirWindow(name=b.name, start=b.start, end=b.end, skipped_plays=n)
+            for b, n in sorted(skipped.items(), key=lambda kv: kv[0].start)
         ],
     )
 

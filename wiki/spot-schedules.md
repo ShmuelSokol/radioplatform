@@ -21,7 +21,7 @@ A `SpotSchedule` row = "air this sponsor's asset N times in each chosen daypart,
 
 ## Not done yet
 
-Blackout (Shabbos/Yom Tov) awareness, spacing rules between sponsors, and auto-resolve reporting are planned as the conflict look-ahead step.
+Spacing rules between sponsors are still to come.
 
 ## Edge rules (added after review, 2026-11-15)
 
@@ -30,3 +30,7 @@ Blackout (Shabbos/Yom Tov) awareness, spacing rules between sponsors, and auto-r
 - **Validation**: `start_date` after `end_date` is 422 (create and update, including against the stored other date). Explicit `null` for `asset_id`, `days_of_week`, `dayparts`, `plays_per_daypart`, `is_active` on PUT is 422; `name`, `station_id`, `start_date`, `end_date` may be cleared with null.
 - **Audio ownership**: a schedule can only use audio that is unowned or already belongs to the same sponsor (422 otherwise).
 - **Preview** lists only times still ahead.
+
+## Shabbos and Yom Tov (blackouts)
+
+The planner reads `HolidayWindow` rows with `is_blackout` for the station (`load_blackouts`). A slot inside a blackout is not a slot: plays in a partly covered daypart are spread over the slots that remain (Friday afternoon before candle lighting, Saturday after it ends); a daypart that is entirely off the air is skipped. Skipped plays come back as `Unplaced` with `blackout` set, and the preview reports them under `off_air` (per window, with a count) instead of `unplaced`, because they are intended, not a problem for a manager to fix. `reconcile_spot_slots` uses the same plan, so queued slots inside a new or changed window are removed on the next refill.
