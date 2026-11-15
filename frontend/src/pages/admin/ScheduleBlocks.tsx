@@ -49,19 +49,33 @@ export default function ScheduleBlocks() {
   const [addingEntryTo, setAddingEntryTo] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState('');
 
+  const [formError, setFormError] = useState('');
+
   const handleCreateBlock = async (e: React.FormEvent) => {
     e.preventDefault();
+    const weekly = blockForm.recurrence_type === 'weekly';
+    if (weekly && !(blockForm.recurrence_pattern || []).length) {
+      setFormError('Pick at least one day for a weekly block.');
+      return;
+    }
+    setFormError('');
+    const startOnly = !!blockForm.until_next;
     try {
       await createBlock.mutateAsync({
         ...blockForm,
         schedule_id: scheduleId || '',
+        // days only mean something on a weekly block
+        recurrence_pattern: weekly ? blockForm.recurrence_pattern : undefined,
         // a start-only block has no end; the server ignores it
-        end_time: blockForm.until_next ? blockForm.start_time : blockForm.end_time,
+        end_time: startOnly ? blockForm.start_time : blockForm.end_time,
+        end_sun_event: startOnly ? null : blockForm.end_sun_event,
+        end_sun_offset: startOnly ? null : blockForm.end_sun_offset,
       });
       setShowBlockForm(false);
       setBlockForm({ schedule_id: scheduleId || '', name: '', start_time: '08:00', end_time: '12:00', recurrence_type: 'daily', priority: 0, playback_mode: 'sequential' });
     } catch (err) {
       console.error('Failed to create block:', err);
+      setFormError('Could not save the block. Check the fields and try again.');
     }
   };
 
@@ -116,6 +130,25 @@ export default function ScheduleBlocks() {
     },
   ];
 
+  const sunText = (event?: string | null, offset?: number | null) => {
+    if (!event) return '';
+    const o = offset || 0;
+    return o === 0 ? event : `${Math.abs(o)} min ${o < 0 ? 'before' : 'after'} ${event}`;
+  };
+  const clockText = (hhmm?: string) => {
+    if (!hhmm) return '';
+    const [h, m] = hhmm.split(':').map(Number);
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+  };
+  const startText = blockForm.start_sun_event
+    ? sunText(blockForm.start_sun_event, blockForm.start_sun_offset)
+    : clockText(blockForm.start_time);
+  const endText = blockForm.until_next
+    ? 'the next playlist starts'
+    : blockForm.end_sun_event
+      ? sunText(blockForm.end_sun_event, blockForm.end_sun_offset)
+      : clockText(blockForm.end_time);
+
   if (isLoading) return <div className="p-8">Loading...</div>;
 
   return (
@@ -131,7 +164,7 @@ export default function ScheduleBlocks() {
 
       {showBlockForm && (
         <form onSubmit={handleCreateBlock} className="bg-white p-6 rounded-lg shadow-md mb-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Block Name</label>
               <input required type="text" value={blockForm.name}
@@ -141,7 +174,7 @@ export default function ScheduleBlocks() {
             <div>
               <label className="block text-sm font-medium mb-1">Recurrence</label>
               <select value={blockForm.recurrence_type}
-                onChange={e => setBlockForm({ ...blockForm, recurrence_type: e.target.value as any })}
+                onChange={e => setBlockForm({ ...blockForm, recurrence_type: e.target.value as any, recurrence_pattern: e.target.value === 'weekly' ? blockForm.recurrence_pattern : undefined })}
                 className="w-full px-3 py-2 border rounded-lg">
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
@@ -181,9 +214,14 @@ export default function ScheduleBlocks() {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Start Time</label>
+              {blockForm.start_sun_event ? (
+                <div className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-gray-700 text-sm" data-testid="start-by-sun">
+                  {startText}
+                </div>
+              ) : (
               <input type="time" value={blockForm.start_time}
                 onChange={e => {
                   const v = e.target.value;
@@ -192,13 +230,19 @@ export default function ScheduleBlocks() {
                   setBlockForm(f => ({ ...f, ...updates }));
                 }}
                 className="w-full px-3 py-2 border rounded-lg" />
+              )}
             </div>
             <div className={blockForm.until_next ? 'invisible' : ''}>
               <label className="block text-sm font-medium mb-1">End Time</label>
+              {blockForm.end_sun_event ? (
+                <div className="w-full px-3 py-2 border rounded-lg bg-gray-50 text-gray-700 text-sm">
+                  {endText}
+                </div>
+              ) : (
               <input type="time" value={blockForm.end_time}
-                min={blockForm.start_time || undefined}
                 onChange={e => setBlockForm({ ...blockForm, end_time: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg" />
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Priority</label>
@@ -228,7 +272,7 @@ export default function ScheduleBlocks() {
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Start Sun Event</label>
               <select value={blockForm.start_sun_event || ''}
@@ -243,7 +287,7 @@ export default function ScheduleBlocks() {
                 onChange={e => setBlockForm({ ...blockForm, start_sun_offset: parseInt(e.target.value) || 0 })}
                 className="w-full px-3 py-2 border rounded-lg" />
             </div>
-            <div>
+            <div className={blockForm.until_next ? 'hidden' : ''}>
               <label className="block text-sm font-medium mb-1">End Sun Event</label>
               <select value={blockForm.end_sun_event || ''}
                 onChange={e => setBlockForm({ ...blockForm, end_sun_event: e.target.value as any || undefined })}
@@ -251,7 +295,7 @@ export default function ScheduleBlocks() {
                 {sunEvents.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
             </div>
-            <div>
+            <div className={blockForm.until_next ? 'hidden' : ''}>
               <label className="block text-sm font-medium mb-1">End Offset (min)</label>
               <input type="number" value={blockForm.end_sun_offset || 0}
                 onChange={e => setBlockForm({ ...blockForm, end_sun_offset: parseInt(e.target.value) || 0 })}
@@ -259,7 +303,7 @@ export default function ScheduleBlocks() {
             </div>
           </div>
           {blockForm.recurrence_type === 'one_time' && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Start Date</label>
                 <input type="date" value={blockForm.start_date || ''}
@@ -274,7 +318,16 @@ export default function ScheduleBlocks() {
               </div>
             </div>
           )}
-          <button type="submit" disabled={createBlock.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+          <p className="text-sm text-gray-700" data-testid="block-summary">
+            This block runs from <strong>{startText}</strong> until <strong>{endText}</strong>
+            {blockForm.recurrence_type === 'weekly'
+              ? (blockForm.recurrence_pattern || []).length
+                ? ` on ${(blockForm.recurrence_pattern || []).map((d: string) => dayShort(d)).join(', ')}`
+                : ' (no days picked yet)'
+              : blockForm.recurrence_type === 'daily' ? ' every day' : ''}.
+          </p>
+          {formError && <p className="text-sm text-red-600" role="alert">{formError}</p>}
+                    <button type="submit" disabled={createBlock.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
             {createBlock.isPending ? 'Creating...' : 'Create Block'}
           </button>
         </form>

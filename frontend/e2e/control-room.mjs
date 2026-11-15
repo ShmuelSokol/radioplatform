@@ -38,6 +38,7 @@ function makeBackend(queueSize = 60) {
   for (let i = 1; i <= queueSize; i++) queue.push({ id: `q${++seq}`, asset_id: `m${((i - 1) % 140) + 1}`, position: i, status: i === 1 ? 'playing' : 'pending', started_at: i === 1 ? new Date(Date.now() - 20_000).toISOString() : null });
   const calls = [];
   const fired = new Map();
+  let loopId = null;
   const pending = () => queue.filter(e => e.status === 'pending').sort((a, b) => a.position - b.position);
   const playing = () => queue.find(e => e.status === 'playing');
   const view = () => {
@@ -50,7 +51,7 @@ function makeBackend(queueSize = 60) {
       return { id: e.id, station_id: SID, asset_id: e.asset_id, position: e.position, status: e.status, estimated_start: est, source: 'manual', preempt_at: null, asset: { id: a.id, title: a.title, artist: a.artist, duration: a.duration, asset_type: a.asset_type, category: a.category, intro_seconds: a.intro_seconds ?? null } };
     });
     const p = entries.find(e => e.status === 'playing');
-    return { entries, total: entries.length, total_all: entries.length, now_playing: p ? { ...p, started_at: playing().started_at } : null, queue_duration_seconds: 9000, total_queue_duration_seconds: 9000, preempt_fade_ms: 2000 };
+    return { loop_asset_id: loopId, entries, total: entries.length, total_all: entries.length, now_playing: p ? { ...p, started_at: playing().started_at } : null, queue_duration_seconds: 9000, total_queue_duration_seconds: 9000, preempt_fade_ms: 2000 };
   };
   const handle = (method, path, query, body) => {
     calls.push({ method, path, query, body });
@@ -99,6 +100,7 @@ function makeBackend(queueSize = 60) {
       if (body.client_request_id) fired.set(body.client_request_id, done);
       return done;
     }
+    if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: view() }; }
     if (path === `${q}/insert`) {
       const anchor = body.after_entry_id ? queue.find(x => x.id === body.after_entry_id && x.status !== 'skipped') : null;
       const after = anchor ? anchor.position : (playing()?.position ?? 0);
@@ -227,7 +229,7 @@ async function desktop(browser, width, height) {
   await page.waitForFunction(() => /Station ID 3/.test(document.querySelector('[data-testid=control-room] header')?.textContent || ''));
   check(`${tag}: instant button puts the jingle on air immediately`, backend.nowId() === 'j3');
   check(`${tag}: play now is one request`, backend.calls.filter(c => c.path.endsWith('/queue/fire-now')).length === 1 && !backend.calls.some(c => c.path.endsWith('/queue/skip')));
-  const introText = await page.getByTestId('intro-countdown').first().textContent().catch(() => '');
+  const introText = await page.locator('[data-testid=intro-countdown]:visible').first().textContent().catch(() => '');
   check(`${tag}: intro countdown shows while the intro runs`, /0:0[1-6]\s*Intro/i.test(introText), introText);
   await shot(page, `${width}-3-jingle-on-air`);
 
@@ -247,10 +249,20 @@ async function desktop(browser, width, height) {
   check(`${tag}: NEXT and N cut with no fade`, skips().join() === 'hard,hard', skips().join());
   check(`${tag}: NEXT button and the N key both advance`, backend.nowId() === 'm100', `now ${backend.nowId()}`);
 
+  // Loop
+  const loopBtn = page.locator('[data-testid=loop]:visible').first();
+  await loopBtn.click();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=loop]')].every(b => b.getAttribute('aria-pressed') === 'true'));
+  await shot(page, `${width}-7-loop`);
+  await loopBtn.click();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=loop]')].every(b => b.getAttribute('aria-pressed') === 'false'));
+  const loops = backend.calls.filter(c => c.path.endsWith('/queue/loop')).map(c => c.body.on);
+  check(`${tag}: Loop lights when on and switches off again`, loops.join() === 'true,false', loops.join());
+
   // Fade and Soft fade
-  await page.getByTestId('next-fade').first().click();
+  await page.locator('[data-testid=next-fade]:visible').first().click();
   await page.waitForTimeout(300 + DELAY);
-  await page.getByTestId('next-soft').first().click();
+  await page.locator('[data-testid=next-soft]:visible').first().click();
   await page.waitForTimeout(300 + DELAY);
   check(`${tag}: Fade and Soft fade ask for their own fade`, skips().slice(-2).join() === 'fade,soft', skips().join());
 

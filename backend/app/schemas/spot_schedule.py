@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.services.spot_schedule_service import DAYPARTS
+from app.services.spot_schedule_service import DAYPARTS, TIMING_MODES, parse_fixed_times
 
 
 def _clean_days(value: str) -> str:
@@ -22,6 +22,23 @@ def _clean_dayparts(value: str) -> str:
     return ",".join(p for p in DAYPARTS if p in parts)
 
 
+def _clean_times(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    times = parse_fixed_times(value)
+    if len(times) > 48:
+        raise ValueError("at most 48 exact times a day")
+    return ",".join(f"{h:02d}:{m:02d}" for h, m in times)
+
+
+def _clean_timing(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+    if value not in TIMING_MODES:
+        raise ValueError("timing_mode must be hard or soft")
+    return value
+
+
 class SpotScheduleBase(BaseModel):
     name: str | None = None
     station_id: UUID | None = None
@@ -31,9 +48,15 @@ class SpotScheduleBase(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     is_active: bool = True
+    # Exact station-time clock times ("07:00,13:30"); replaces the daypart spread
+    fixed_times: str | None = None
+    # hard | soft | None (the station's default for that slot)
+    timing_mode: str | None = None
 
     _days = field_validator("days_of_week")(_clean_days)
     _parts = field_validator("dayparts")(_clean_dayparts)
+    _times = field_validator("fixed_times")(_clean_times)
+    _timing = field_validator("timing_mode")(_clean_timing)
 
 
 class SpotScheduleCreate(SpotScheduleBase):
@@ -61,6 +84,11 @@ class SpotScheduleUpdate(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     is_active: bool | None = None
+    fixed_times: str | None = None
+    timing_mode: str | None = None
+
+    _times = field_validator("fixed_times")(_clean_times)
+    _timing = field_validator("timing_mode")(_clean_timing)
 
     @model_validator(mode="after")
     def _no_null_required(self):
@@ -99,6 +127,8 @@ class PlannedSpot(BaseModel):
     scheduled_at: datetime
     local_time: str
     daypart: str
+    timing_mode: str = "soft"
+    fixed: bool = False
     schedule_id: UUID | str
     sponsor_id: UUID | str
     sponsor_name: str

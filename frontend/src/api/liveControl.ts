@@ -5,7 +5,7 @@
  * "insert at this point". Each is a single request; the server contract is in
  * wiki/operator-actions.md.
  */
-import { addToQueue, playNext, fireNowRequest, insertAfter } from './queue';
+import { addToQueue, playNext, fireNowRequest, insertAfter, setLoop } from './queue';
 
 /** Two taps on the same button inside this window count as one. */
 const DOUBLE_TAP_MS = 1500;
@@ -41,3 +41,6 @@ export const queueEnd = (stationId: string, assetId: string) => addToQueue(stati
  */
 export const insertAt = (stationId: string, assetId: string, afterEntryId: string | null) =>
   insertAfter(stationId, [assetId], afterEntryId);
+
+/** Switch looping of the item on air on or off. */
+export const loopCurrent = (stationId: string, on: boolean) => setLoop(stationId, on);
