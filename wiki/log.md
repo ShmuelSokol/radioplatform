@@ -66,3 +66,5 @@ INGEST 2026-11-15 station-permissions.md Per-station staff permissions (User.sta
 UPDATE 2026-11-15 control-room.md Loop button (queue/loop, lit from loop_asset_id); transport bar is two rows below 1280 px, both rows stay in the DOM.
 UPDATE 2026-11-15 station-permissions.md Station permissions now also cover schedules, playlists, spot schedules and live shows through station_write_guard (core/station_guard.py); holidays and station-less objects stay role-only.
 UPDATE 2026-11-15 program-blocks.md Sponsor places in blocks (kind "sponsors", spot planner Break seats replace :15/:30/:45 when any block has places); soft-with-limit via ProgramBlock.latest_minutes -> QueueEntry.hard_by (browser path only, engine not yet).
+INGEST 2026-11-15 streaming-architecture.md Engine timed lane played only the first item of a same-time group; now the lane stays open while the timed queue has items, and items are pushed in the order received.
+UPDATE 2026-11-15 program-blocks.md, streaming-architecture.md Playout engine now honours hard_by and plays block groups in position order.

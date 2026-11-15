@@ -113,13 +113,20 @@ def ramp_master(~target, ~duration, after) =
   thread.run.recurrent(delay=0., step)
 end
 
-# Which lane is on air right now ("main", "timed" or "emergency")
-on_air_lane = ref("")
-
 # ── Timed lane: hard-timed items and Play Now ────────────────────────────────
 timed_queue = request.queue(id="timed", interactive=false)
 timed_armed = ref(false)
-timed = switch(id="timed_gate", track_sensitive=true, [({timed_armed()}, timed_queue)])
+# Which lane is on air right now ("main", "timed" or "emergency")
+on_air_lane = ref("")
+# Items due at the same time form a group (a block: ID, weather, sponsors). Once the lane
+# is on air it stays on until the group has played through, in the order it was handed over.
+def timed_open() =
+  timed_armed() or (on_air_lane() == "timed" and timed_queue.length() > 0)
+end
+timed = switch(id="timed_gate", track_sensitive=true, [(timed_open, timed_queue)])
+
+# Start time of the last group scheduled to take over
+timed_group_at = ref(-1.)
 
 # Load the item now; put it on air at `at` (unix seconds). The music fades under it.
 def schedule_timed(~uri, ~at) =
@@ -138,12 +145,14 @@ def schedule_timed(~uri, ~at) =
       thread.run(delay=1.5, {timed_armed := false})
     end)
   end
-  def load() =
-    timed_queue.push(r)
+  # Pushed here, not in a thread, so a group keeps the order it was handed over in
+  timed_queue.push(r)
+  # One take-over per group: the rest of the group follows from the queue
+  if abs(at - timed_group_at()) > 0.5 then
+    timed_group_at := at
     wait = at - time() - skip_fade
     thread.run(delay=(if wait > 0. then wait else 0. end), go_on_air)
   end
-  thread.run(fast=false, load)
 end
 
 # ── Emergency lane: local files, then silence as the very last resort ────────
@@ -179,21 +188,8 @@ radio = compress(threshold=-14., ratio=3., attack=20., release=200., radio)
 radio = limit(threshold=-1., radio)
 
 # ── Tell the backend what really went on air ─────────────────────────────────
-def send_started(m) =
-  entry = m["kbr_entry"]
-  lane = if entry == "" then "emergency" else m["kbr_lane"] end
-  on_air_lane := lane
-  if lane == "main" then
-    last_main_entry := entry
-    if main_interrupted() then
-      # Back from a timed item: leave the interrupted song and start the next one
-      main_interrupted := false
-      hard_cut := true
-      main.skip()
-      thread.run(delay=0.15, {main_gain := 1.})
-    end
-  end
-  payload = json.stringify({entry_id=entry, lane=lane, title=m["title"], at=time()})
+def report_to_backend(entry, lane, title) =
+  payload = json.stringify({entry_id=entry, lane=lane, title=title, at=time()})
   def post() =
     try
       ignore(http.post(headers=auth_headers, timeout=8., data=payload,
@@ -204,6 +200,24 @@ def send_started(m) =
   end
   thread.run(fast=false, post)
 end
+
+def send_started(m) =
+  entry = m["kbr_entry"]
+  lane = if entry == "" then "emergency" else m["kbr_lane"] end
+  on_air_lane := lane
+  if lane == "main" and main_interrupted() then
+    # Back from a timed item: leave the interrupted song and start the next one. The
+    # interrupted song is not reported again (it already ended for the backend).
+    main_interrupted := false
+    hard_cut := true
+    main.skip()
+    thread.run(delay=0.15, {main_gain := 1.})
+  else
+    if lane == "main" then last_main_entry := entry end
+    report_to_backend(entry, lane, m["title"])
+  end
+end
+
 
 # Fires on every change of what is on air, including returning to a song after a
 # timed item. Reported once per change.
