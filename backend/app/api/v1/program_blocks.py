@@ -7,11 +7,11 @@ See wiki/program-blocks.md.
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_manager
+from app.core.dependencies import get_db, may_operate_station, require_manager
 from app.core.exceptions import NotFoundError
 from app.models.program_block import ProgramBlock
 from app.models.station import Station
@@ -47,6 +47,12 @@ async def _get(db: AsyncSession, block_id: UUID) -> ProgramBlock:
     if not block:
         raise NotFoundError("Block not found")
     return block
+
+
+async def _allowed(db: AsyncSession, user: User, station_id) -> None:
+    """A block puts things on a station's air: the same rule as operating it."""
+    if not may_operate_station(user, await _station(db, station_id)):
+        raise HTTPException(status_code=403, detail="You are not assigned to this station")
 
 
 async def _requeue(db: AsyncSession, station_id) -> None:
@@ -120,9 +126,9 @@ async def preview_program_blocks(
 async def create_program_block(
     data: ProgramBlockCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
 ):
-    await _station(db, data.station_id)
+    await _allowed(db, user, data.station_id)
     block = ProgramBlock(
         station_id=data.station_id,
         name=data.name.strip(),
@@ -145,9 +151,10 @@ async def update_program_block(
     block_id: UUID,
     data: ProgramBlockUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
 ):
     block = await _get(db, block_id)
+    await _allowed(db, user, block.station_id)
     changes = data.model_dump(exclude_unset=True, exclude={"items"})
     for key, value in changes.items():
         if value is not None:
@@ -166,9 +173,10 @@ async def update_program_block(
 async def delete_program_block(
     block_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_manager),
+    user: User = Depends(require_manager),
 ):
     block = await _get(db, block_id)
+    await _allowed(db, user, block.station_id)
     station_id = block.station_id
     await db.delete(block)
     await db.commit()
