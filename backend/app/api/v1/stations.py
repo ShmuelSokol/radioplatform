@@ -5,14 +5,16 @@ import httpx
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_manager
+from app.core.dependencies import may_operate_station, require_manager
+from app.core.exceptions import ForbiddenError
+from app.models.user import UserRole
+from app.services.station_service import get_station
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.station import StationCreate, StationListResponse, StationResponse, StationUpdate
 from app.services.station_service import (
     create_station,
     delete_station,
-    get_station,
     list_stations,
     update_station,
 )
@@ -100,6 +102,13 @@ async def update(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
+    station = await get_station(db, station_id)
+    if not may_operate_station(_user, station):
+        raise ForbiddenError("Your login is not set up to operate this station")
+    if body.protected is not None and body.protected != station.protected and _user.role != UserRole.ADMIN:
+        raise ForbiddenError("Only an admin can protect or unprotect a station")
+    if body.protected is None:
+        body.model_fields_set.discard("protected")
     return await update_station(db, station_id, body)
 
 
@@ -109,4 +118,9 @@ async def delete(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
+    station = await get_station(db, station_id)
+    if station.protected and _user.role != UserRole.ADMIN:
+        raise ForbiddenError("Only an admin can delete a protected station")
+    if not may_operate_station(_user, station):
+        raise ForbiddenError("Your login is not set up to operate this station")
     await delete_station(db, station_id)

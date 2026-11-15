@@ -16,6 +16,7 @@ class UserCreate(BaseModel):
     photo_url: str | None = None
     is_public: bool = False
     social_links: dict | None = None
+    station_ids: list[str] | None = None
 
 
 class UserUpdate(BaseModel):
@@ -31,6 +32,8 @@ class UserUpdate(BaseModel):
     photo_url: str | None = None
     is_public: bool | None = None
     social_links: dict | None = None
+    # Omit to leave unchanged; null = every unprotected station; a list = only those.
+    station_ids: list[str] | None = None
 
 
 class UserOut(BaseModel):
@@ -50,6 +53,7 @@ class UserOut(BaseModel):
     social_links: dict | None = None
     last_seen_at: datetime | None = None
     last_action: str | None = None
+    station_ids: list[str] | None = None
 
 
 class UserListResponse(BaseModel):

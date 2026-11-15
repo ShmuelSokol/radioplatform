@@ -26,6 +26,8 @@ export interface User {
   social_links: SocialLinks | null;
   last_seen_at: string | null;
   last_action: string | null;
+  /** Stations this person may operate. null = every station that is not protected. */
+  station_ids?: string[] | null;
 }
 
 export interface PublicHost {
@@ -60,6 +62,8 @@ export interface Station {
   description: string | null;
   logo_url: string | null;
   automation_config: Record<string, any> | null;
+  /** Only admins and staff assigned to it may operate a protected station (the FM feed). */
+  protected?: boolean;
   channels: ChannelStream[];
 }
 

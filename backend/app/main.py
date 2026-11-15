@@ -167,6 +167,9 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS intro_seconds DOUBLE PRECISION",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_action VARCHAR(255)",
+        # Per-station staff permissions and the protected (FM) station
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS station_ids JSONB",
+        "ALTER TABLE stations ADD COLUMN IF NOT EXISTS protected BOOLEAN NOT NULL DEFAULT false",
         # Audit log table
         """CREATE TABLE IF NOT EXISTS audit_logs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

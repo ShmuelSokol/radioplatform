@@ -26,3 +26,4 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     display_name: str | None = None
+    station_ids: list[str] | None = None
