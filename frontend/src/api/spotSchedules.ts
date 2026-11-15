@@ -39,12 +39,20 @@ export interface UnplacedSpot {
   reason: string;
 }
 
+export interface OffAirWindow {
+  name: string;
+  start: string;
+  end: string;
+  skipped_plays: number;
+}
+
 export interface SpotPlanPreview {
   station_id: string;
   timezone: string;
   days: number;
   planned: PlannedSpot[];
   unplaced: UnplacedSpot[];
+  off_air?: OffAirWindow[];
 }
 
 export const listSpotSchedules = async (): Promise<SpotSchedule[]> =>

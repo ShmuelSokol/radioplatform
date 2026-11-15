@@ -497,8 +497,14 @@ async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
     await service.replenish()
 
 
-async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry | None:
-    """Core playback engine: check if current track is done and auto-advance."""
+async def _check_advance(
+    db: AsyncSession, station_id: uuid.UUID, early_seconds: float = 0.0
+) -> QueueEntry | None:
+    """Core playback engine: check if current track is done and auto-advance.
+
+    `early_seconds` lets the precise timer advance at the crossfade point instead of
+    the very end of the track (see SchedulerEngine._precise_advance).
+    """
     is_blackout = await _is_blacked_out(db, station_id)
 
     # Hourly jingles and weather are now pre-scheduled via _schedule_hourly_announcements()
@@ -596,7 +602,8 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
 
     else:
         elapsed = (now_utc - current.started_at).total_seconds()
-        if elapsed < duration:
+        # Small tolerance so a timer that fires a few ms early still advances
+        if elapsed < duration - max(0.0, early_seconds) - 0.05:
             return current  # still playing
 
         # Track finished — log it and advance

@@ -1,4 +1,4 @@
-import io
+﻿import io
 import uuid
 from unittest.mock import AsyncMock, patch
 
@@ -189,7 +189,7 @@ async def test_elevenlabs_time_fallback_speaks_the_slot_hour(db_session: AsyncSe
          patch("app.services.weather_spot_service.get_current_weather", new_callable=AsyncMock, side_effect=RuntimeError):
         time_asset, weather_asset = await get_or_create_weather_spot_assets(db_session, "2026-11-17T15")
     assert time_asset is not None and weather_asset is None
-    assert tts.await_args_list[0].args[0].startswith("The time is 3:00 PM")
+    assert tts.await_args_list[0].args[0].startswith("The time is 3 PM on Radio")
 
 
 @pytest.mark.asyncio

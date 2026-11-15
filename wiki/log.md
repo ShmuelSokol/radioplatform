@@ -22,5 +22,8 @@ QUERY 2026-11-15 hourly-slots.md Before changing how ad slots at :15/:30/:45 are
 INGEST 2026-11-15 spot-schedules.md Sponsor spot schedules replace the single hardcoded ad-slot asset once any schedule exists; portal history was always empty (nothing wrote PlaySource.AD) and now matches plays by asset.
 INGEST 2026-11-15 sponsorship-copy-review.md Sponsorship wording rules are data (versioned table, manager-editable), never hardcoded in prompts; copy review reads the version in force. Real Claude call not exercised in tests.
 UPDATE 2026-11-15 spot-schedules.md review follow-ups: legacy spot off switch, DST missing times, validation, audio ownership, preview hides past
+UPDATE 2026-11-15 spot-schedules.md planner now keeps spots out of HolidayWindow blackouts; preview reports off_air windows
 INGEST 2026-11-15 (no page) queue_entries/play_logs had no station indexes in prod path (create_all, not alembic); added via main.py migrations + model __table_args__. Fresh-DB create_all currently fails on playback_mode enum default.
 UPDATE 2026-11-15 hourly-slots.md Reusable uploaded time clips per hour (PUT /time-announcements/{hour}); ElevenLabs optional for the hourly scheduler; fixed time text using generation time instead of the slot hour.
+INGEST 2026-11-15 hourly-slots.md Time announcement text was built from generation time, not the slot hour (clips are made up to 48h ahead; after a restart all 48 said the same wrong time). Now derived from slot_key via _slot_time.
+INGEST 2026-11-15 audio-engine.md Player drifted ~5.5s ahead of server per song after PR 1 (server advanced at full duration + poll; player at cross_start). Fixed: precise timer advances at cross_start; player lead bounded to 1s.

@@ -50,11 +50,18 @@ def _utc_to_eastern(utc_dt: datetime) -> datetime:
     return utc_dt.astimezone(ZoneInfo("America/New_York"))
 
 
+# Station sign-off for the hourly time announcement. Spelled for the voice
+# engine ("Kohl Baramah" is how it pronounces Kol Berama correctly).
+TIME_ANNOUNCEMENT_TEMPLATE = "The time is {time} on Radio {brand}, W M D I 107.9, the highest frequency."
+
+
 def _build_time_text(eastern_now: datetime, brand_name: str = "Kohl Baramah") -> str:
     hour = eastern_now.strftime("%I").lstrip("0")
     minute = eastern_now.strftime("%M")
     ampm = eastern_now.strftime("%p")
-    text = f"The time is {hour}:{minute} {ampm} on {brand_name}."
+    # On the hour say "3 PM", not "3:00 PM".
+    spoken = f"{hour} {ampm}" if minute == "00" else f"{hour}:{minute} {ampm}"
+    text = TIME_ANNOUNCEMENT_TEMPLATE.format(time=spoken, brand=brand_name)
     return _apply_word_replacements(text)
 
 
@@ -89,16 +96,18 @@ def _build_weather_text(weather: dict, city_name: str = "Lakewood") -> str:
     return _apply_word_replacements(text)
 
 
-def _slot_time(slot_key: str) -> datetime | None:
-    """The Eastern hour a slot key like "2024-01-15T15" stands for (None if it has no hour)."""
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-    try:
-        return datetime.strptime(slot_key, "%Y-%m-%dT%H").replace(tzinfo=ZoneInfo("America/New_York"))
-    except ValueError:
-        return None
+def _slot_time(slot_key: str, fallback: datetime) -> datetime:
+    """The Eastern clock time a slot key ("2024-01-15T15") stands for.
+
+    Announcements are generated up to 48 hours before they air, so the spoken
+    time must come from the slot, never from the moment of generation.
+    """
+    for fmt in ("%Y-%m-%dT%H", "%Y-%m-%dT%H:%M", "%Y-%m-%dT%H-%M"):
+        try:
+            return datetime.strptime(slot_key, fmt).replace(tzinfo=fallback.tzinfo)
+        except ValueError:
+            continue
+    return fallback
 
 
 async def find_weather_spot_asset(db: AsyncSession, weather_key: str) -> Asset | None:
@@ -264,13 +273,12 @@ async def get_or_create_weather_spot_assets(
     )
     existing_time = result.scalar_one_or_none()
 
-    # The slot's own hour, not "now": slots are scheduled up to 48 hours ahead,
-    # so the clock time spoken must be the hour the clip will play at.
-    slot_time = _slot_time(slot_key)
-    if slot_time is not None:
-        uploaded_time = await find_time_clip_asset(db, slot_time.hour)
-        if uploaded_time is not None:
-            existing_time = uploaded_time
+    # An uploaded clip for the slot's hour (reused every day) wins over a
+    # per-slot generated one.
+    eastern_now = _utc_to_eastern(datetime.now(timezone.utc))
+    uploaded_time = await find_time_clip_asset(db, _slot_time(slot_key, eastern_now).hour)
+    if uploaded_time is not None:
+        existing_time = uploaded_time
 
     existing_weather = await find_weather_spot_asset(db, weather_key)
 
@@ -279,7 +287,6 @@ async def get_or_create_weather_spot_assets(
     if not settings.elevenlabs_enabled:
         return existing_time, existing_weather
 
-    eastern_now = slot_time or _utc_to_eastern(datetime.now(timezone.utc))
     safe_slot = slot_key.replace(":", "-")
     safe_weather_key = weather_key.replace(":", "-")
 
@@ -287,7 +294,7 @@ async def get_or_create_weather_spot_assets(
     time_asset = existing_time
     if not time_asset:
         try:
-            time_text = _build_time_text(eastern_now)
+            time_text = _build_time_text(_slot_time(slot_key, eastern_now))
             time_bytes, time_duration = await generate_tts(time_text)
             from app.services.audio_analysis_service import normalize_audio_loudness
             time_bytes = normalize_audio_loudness(time_bytes)
