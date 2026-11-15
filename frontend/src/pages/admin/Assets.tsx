@@ -587,7 +587,9 @@ export default function Assets() {
               <th className="hidden md:table-cell w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="w-14 md:w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase"><span className="md:hidden">Len</span><span className="hidden md:inline">Duration</span></th>
               <th className="hidden lg:table-cell w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Format</th>
-              <th className="hidden lg:table-cell w-24 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
+              <th className="hidden lg:table-cell w-12 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" title="Staff vote. Playlist generation can ask for a minimum.">Vote</th>
+              <th className="hidden lg:table-cell w-24 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last played</th>
+              <th className="hidden xl:table-cell w-24 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
               <th className="w-24 md:w-48 px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
             {/* Filter row — inline search per column */}
@@ -636,7 +638,9 @@ export default function Assets() {
                 </div>
               </th>
               <th className="hidden lg:table-cell w-14 px-2 py-1" />
+              <th className="hidden lg:table-cell w-12 px-2 py-1" />
               <th className="hidden lg:table-cell w-24 px-2 py-1" />
+              <th className="hidden xl:table-cell w-24 px-2 py-1" />
               <th className="w-24 md:w-48 px-2 py-1" />
             </tr>
           </thead>
@@ -682,7 +686,9 @@ export default function Assets() {
                 </td>
                 <td className="px-2 py-2 text-xs text-gray-500">{formatDuration(asset.duration)}</td>
                 <td className="hidden lg:table-cell px-2 py-2 text-xs text-gray-400 uppercase">{getFileFormat(asset.file_path)}</td>
-                <td className="hidden lg:table-cell px-2 py-2 text-xs text-gray-500 whitespace-nowrap">{formatDate(asset.created_at)}</td>
+                <td className="hidden lg:table-cell px-2 py-2 text-xs text-gray-500">{asset.vote ? asset.vote : '--'}</td>
+                <td className="hidden lg:table-cell px-2 py-2 text-xs text-gray-500 whitespace-nowrap" title={asset.last_played_at ? new Date(asset.last_played_at).toLocaleString() : 'Never played'}>{asset.last_played_at ? formatDate(asset.last_played_at) : 'Never'}</td>
+                <td className="hidden xl:table-cell px-2 py-2 text-xs text-gray-500 whitespace-nowrap">{formatDate(asset.created_at)}</td>
                 <td className="px-2 py-2 text-right space-x-2 whitespace-nowrap">
                   <PlayButton assetId={asset.id} title={asset.title} audioRef={audioRef} playingId={playingId} setPlayingId={setPlayingId} />
                   <Link to={`/admin/assets/${asset.id}`} className="text-brand-600 hover:text-brand-800 text-xs">View</Link>
@@ -704,7 +710,7 @@ export default function Assets() {
             ))}
             {assets.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-4 py-10 text-center text-gray-500">
+                <td colSpan={13} className="px-4 py-10 text-center text-gray-500">
                   {hasFilters ? 'No assets match the current filters' : 'No assets uploaded yet'}
                 </td>
               </tr>

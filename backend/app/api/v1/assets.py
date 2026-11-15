@@ -857,6 +857,8 @@ async def update_asset(
     # Auto-clear sponsor_id when type changes away from "spot"
     if "asset_type" in updates and updates["asset_type"] != "spot" and "sponsor_id" not in updates:
         updates["sponsor_id"] = None
+    if updates.get("vote", 0) is None:
+        updates.pop("vote")  # the column is never empty
     # Convert release_date string to date object
     if "release_date" in updates:
         rd = updates["release_date"]

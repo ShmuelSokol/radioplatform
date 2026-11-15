@@ -2,6 +2,7 @@
 Scheduling service — resolves what should play at any given time.
 Handles time-based rules, recurrence, priority resolution, and now-playing state.
 """
+
 import logging
 import random
 from datetime import datetime, time, timedelta, timezone
@@ -41,6 +42,7 @@ class SchedulingService:
 
         # Get station for sun calculations
         from app.models.station import Station
+
         stmt_station = select(Station).where(Station.id == station_id)
         station_result = await self.db.execute(stmt_station)
         station = station_result.scalar_one_or_none()
@@ -51,7 +53,9 @@ class SchedulingService:
             .where(Schedule.station_id == station_id, Schedule.is_active == True)
             .options(
                 selectinload(Schedule.blocks).selectinload(ScheduleBlock.playlist_entries),
-                selectinload(Schedule.blocks).selectinload(ScheduleBlock.playlist_template).selectinload(PlaylistTemplate.slots),
+                selectinload(Schedule.blocks)
+                .selectinload(ScheduleBlock.playlist_template)
+                .selectinload(PlaylistTemplate.slots),
             )
             .order_by(Schedule.priority.desc())
         )
@@ -87,6 +91,9 @@ class SchedulingService:
             RecurrenceType.WEEKLY: 1,
             RecurrenceType.DAILY: 0,
         }.get(block.recurrence_type, 0)
+        if getattr(block, "until_next", False):
+            # The running playlist is the base layer: a timed block over it wins a tie.
+            specificity = -1
         length = 0
         if block.start_time is not None and block.end_time is not None:
             start = block.start_time.hour * 60 + block.start_time.minute
@@ -110,10 +117,69 @@ class SchedulingService:
             (schedule, block)
             for schedule in schedules
             for block in schedule.blocks
-            if self._block_matches_time(block, local, station)
+            if not getattr(block, "until_next", False)
+            and self._block_matches_time(block, local, station)
         ]
+        running = self.running_playlist(schedules, local, station)
+        if running is not None:
+            matching.append(running)
         matching.sort(key=lambda sb: self.block_rank(*sb), reverse=True)
         return matching
+
+    def running_playlist(self, schedules, local: datetime, station=None):
+        """The start-only block that started most recently, or None.
+
+        Start-only blocks (until_next) work like playlists in the studio
+        program: each has a start and stays on until another one starts.
+        """
+        best = None
+        for schedule in schedules:
+            for block in schedule.blocks:
+                if not getattr(block, "until_next", False):
+                    continue
+                started = self.last_start(block, local, station)
+                if started is None:
+                    continue
+                key = (started, self.block_rank(schedule, block))
+                if best is None or key > best[0]:
+                    best = (key, (schedule, block))
+        return best[1] if best else None
+
+    def last_start(self, block: ScheduleBlock, local: datetime, station=None) -> datetime | None:
+        """Most recent moment (station time, naive) this block started, within 8 days."""
+        now = local.replace(tzinfo=None)
+        for back in range(9):
+            day = (local - timedelta(days=back)).date()
+            if not self._recurs_on(block, day):
+                continue
+            start = block.start_time
+            if block.start_sun_event and station:
+                start = self._resolve_sun_time(
+                    block.start_sun_event, block.start_sun_offset or 0, station, day
+                )
+            started = datetime.combine(day, start)
+            if started <= now:
+                return started
+        return None
+
+    @staticmethod
+    def _recurs_on(block: ScheduleBlock, day) -> bool:
+        """Does this block's recurrence include the given date?"""
+        if block.recurrence_type == RecurrenceType.WEEKLY:
+            if block.recurrence_pattern:
+                return day.strftime("%A").lower() in [d.lower() for d in block.recurrence_pattern]
+            return True
+        if block.recurrence_type == RecurrenceType.MONTHLY:
+            if block.recurrence_pattern:
+                return day.day in block.recurrence_pattern
+            return True
+        if block.recurrence_type == RecurrenceType.ONE_TIME:
+            if block.start_date and block.end_date:
+                return block.start_date <= day <= block.end_date
+            if block.start_date:
+                return day == block.start_date
+            return True
+        return True
 
     def _resolve_sun_time(self, sun_event: SunEvent, offset_minutes: int, station, at_date) -> time:
         """Resolve a sun-relative time to a concrete time value."""
@@ -131,9 +197,7 @@ class SchedulingService:
         base_time = times.get(sun_event.value, times["sunset"]).time()
         return offset_sun_time(base_time, offset_minutes or 0)
 
-    def _block_matches_time(
-        self, block: ScheduleBlock, at_time: datetime, station=None
-    ) -> bool:
+    def _block_matches_time(self, block: ScheduleBlock, at_time: datetime, station=None) -> bool:
         """Check if a schedule block is active at the given time."""
         current_time = at_time.time()
         current_weekday = at_time.strftime("%A").lower()
@@ -202,7 +266,7 @@ class SchedulingService:
         if not enabled_entries:
             return None
 
-        mode = getattr(block, 'playback_mode', PlaybackMode.SEQUENTIAL)
+        mode = getattr(block, "playback_mode", PlaybackMode.SEQUENTIAL)
 
         if mode == PlaybackMode.SHUFFLE:
             return await self._pick_shuffle(block, enabled_entries, station_id)
@@ -212,7 +276,9 @@ class SchedulingService:
             return await self._pick_sequential(block, enabled_entries, station_id)
 
     async def _pick_sequential(
-        self, block: ScheduleBlock, entries: list[PlaylistEntry],
+        self,
+        block: ScheduleBlock,
+        entries: list[PlaylistEntry],
         station_id: UUID | str | None = None,
     ) -> Optional[UUID]:
         """Pick the next asset in position order, rotating through the list."""
@@ -234,7 +300,9 @@ class SchedulingService:
         return entries[0].asset_id
 
     async def _pick_shuffle(
-        self, block: ScheduleBlock, entries: list[PlaylistEntry],
+        self,
+        block: ScheduleBlock,
+        entries: list[PlaylistEntry],
         station_id: UUID | str | None = None,
     ) -> Optional[UUID]:
         """Pick a random asset, avoiding recently played ones."""
@@ -327,10 +395,7 @@ class SchedulingService:
                 return insertion
 
         # Determine current slot by counting total plays for this station modulo slot count
-        stmt = (
-            select(func.count(PlayLog.id))
-            .where(PlayLog.station_id == station_id)
-        )
+        stmt = select(func.count(PlayLog.id)).where(PlayLog.station_id == station_id)
         result = await self.db.execute(stmt)
         total_plays = result.scalar() or 0
 
@@ -341,9 +406,7 @@ class SchedulingService:
             current_slot.asset_type, current_slot.category, station_id
         )
 
-    async def _check_automation_insertions(
-        self, station_id: UUID | str
-    ) -> Optional[UUID]:
+    async def _check_automation_insertions(self, station_id: UUID | str) -> Optional[UUID]:
         """Check if an automation insertion (station ID jingle, time, weather) is due."""
         from app.models.station import Station
 
@@ -393,6 +456,7 @@ class SchedulingService:
             result = await self.db.execute(stmt)
             if (result.scalar() or 0) == 0:
                 from app.services.weather_spot_service import get_or_create_weather_spot_assets
+
                 slot_key = now.strftime("%Y-%m-%dT%H:%M")[:14] + "00"
                 time_asset, _ = await get_or_create_weather_spot_assets(self.db, slot_key)
                 if time_asset:
@@ -416,6 +480,7 @@ class SchedulingService:
                 result = await self.db.execute(stmt)
                 if (result.scalar() or 0) == 0:
                     from app.services.weather_spot_service import get_or_create_weather_spot_assets
+
                     slot_key = now.strftime("%Y-%m-%dT%H:%M")[:14] + "00"
                     _, weather_asset = await get_or_create_weather_spot_assets(self.db, slot_key)
                     if weather_asset:

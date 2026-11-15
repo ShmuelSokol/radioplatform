@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Column, Date, Float, ForeignKey, String, Table, Text
+from sqlalchemy import Column, Date, Float, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,6 +45,8 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     review_status: Mapped[str | None] = mapped_column(String(50), default="pending", nullable=True)
     release_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Staff rating, 0 (unrated) upward. Playlist generation can ask for a minimum.
+    vote: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     sponsor_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sponsors.id", ondelete="SET NULL"), nullable=True
     )

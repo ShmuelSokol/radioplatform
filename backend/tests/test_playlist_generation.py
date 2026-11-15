@@ -260,3 +260,42 @@ async def test_settings_endpoints_and_queue_fill(
         .all()
     )
     assert len(kept) == 1
+
+
+@pytest.mark.asyncio
+async def test_minimum_vote_keeps_low_voted_songs_out(db_session: AsyncSession):
+    station, songs, *_ = await _setup(db_session)
+    fast = [s for s in songs if s.category == "1 med fast"]
+    liked = {s.id for s in fast[:6]}
+    for s in fast[:6]:
+        s.vote = 3
+    await db_session.commit()
+
+    plan = await generate(db_session, station, MONDAY_7AM, 2, artist_distance=0, min_vote=3)
+    picked_fast = {p.asset_id for p in plan.picks if p.category == "1 med fast"}
+    assert picked_fast and picked_fast <= liked
+    # Types where nothing reaches the minimum still play, and say so.
+    assert any(p.category == "1 Relax" for p in plan.picks)
+    assert any("1 Relax" in n and "minimum vote" in n for n in plan.notes)
+    assert not any("1 med fast" in n and "minimum vote" in n for n in plan.notes)
+
+    # Without a minimum, everything is eligible again.
+    everyone = await generate(db_session, station, MONDAY_7AM, 2, artist_distance=0)
+    assert not {p.asset_id for p in everyone.picks if p.category == "1 med fast"} <= liked
+
+
+@pytest.mark.asyncio
+async def test_vote_can_be_set_and_is_listed(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    _, songs, *_ = await _setup(db_session)
+    song = songs[0]
+    r = await client.patch(f"/api/v1/assets/{song.id}", json={"vote": 4}, headers=auth_headers)
+    assert r.status_code == 200 and r.json()["vote"] == 4
+    r = await client.patch(f"/api/v1/assets/{song.id}", json={"vote": -1}, headers=auth_headers)
+    assert r.status_code == 422
+    listed = await client.get("/api/v1/assets", params={"limit": 500}, headers=auth_headers)
+    assert listed.status_code == 200
+    by_id = {a["id"]: a for a in listed.json()["assets"]}
+    assert by_id[str(song.id)]["vote"] == 4
+    assert by_id[str(songs[1].id)]["vote"] == 0

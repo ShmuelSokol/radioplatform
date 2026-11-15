@@ -21,6 +21,7 @@ class AssetResponse(BaseModel):
     category: str | None = None
     created_at: datetime | None = None
     last_played_at: datetime | None = None
+    vote: int = 0
     release_date: str | None = None
     sponsor_id: uuid.UUID | str | None = None
     sponsor_name: str | None = None
@@ -41,6 +42,7 @@ class AssetUpdate(BaseModel):
     category: str | None = None
     file_path: str | None = None
     release_date: str | None = None
+    vote: int | None = Field(None, ge=0, le=100)
     sponsor_id: uuid.UUID | str | None = None
 
 

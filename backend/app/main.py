@@ -96,6 +96,7 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS review_status VARCHAR(50) DEFAULT 'pending'",
         "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS playlist_template_id UUID REFERENCES playlist_templates(id) ON DELETE SET NULL",
         "ALTER TABLE stations ADD COLUMN IF NOT EXISTS automation_config JSONB",
+        "ALTER TABLE schedule_blocks ADD COLUMN IF NOT EXISTS until_next BOOLEAN NOT NULL DEFAULT false",
         # Sponsor portal columns
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)",
@@ -128,6 +129,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS sponsor_id UUID REFERENCES sponsors(id) ON DELETE SET NULL",
         # Release date for music assets (MusicBrainz auto-detection)
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS release_date DATE",
+        # Staff vote per song, used by playlist generation's minimum vote
+        "ALTER TABLE assets ADD COLUMN IF NOT EXISTS vote INTEGER NOT NULL DEFAULT 0",
         # Preempt mechanism for exact-time playback (time announcements)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS timing_mode VARCHAR(10)",

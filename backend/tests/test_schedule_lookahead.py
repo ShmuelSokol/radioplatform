@@ -128,3 +128,94 @@ async def test_look_ahead_gaps_and_off_air(
     for f in body["findings"]:
         if f["kind"] == "gap":
             assert f["end"] <= off["start"] or f["start"] >= off["end"]
+
+
+@pytest.mark.asyncio
+async def test_start_only_playlists_hand_over_like_the_studio_program(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """'6 am mix 01234 6:00', 'blanks Candle+1', 'motzei 72': each runs until the next starts."""
+    from app.models.schedule_block import SunEvent
+
+    weekdays = ["sunday", "monday", "tuesday", "wednesday", "thursday"]
+    station, (mix, night, candle, motzei, shiur) = await _station(
+        db_session,
+        [
+            {
+                "name": "6 am mix",
+                "start_time": time(6),
+                "end_time": time(6),
+                "until_next": True,
+                "recurrence_type": RecurrenceType.WEEKLY,
+                "recurrence_pattern": weekdays,
+            },
+            {
+                "name": "Night",
+                "start_time": time(22),
+                "end_time": time(22),
+                "until_next": True,
+                "recurrence_type": RecurrenceType.WEEKLY,
+                "recurrence_pattern": weekdays,
+            },
+            {
+                "name": "blanks Candle+1",
+                "start_time": time(16),
+                "end_time": time(16),
+                "until_next": True,
+                "recurrence_type": RecurrenceType.WEEKLY,
+                "recurrence_pattern": ["friday"],
+                "start_sun_event": SunEvent.SUNSET,
+                "start_sun_offset": -17,  # candle lighting (18 before sunset) plus 1 minute
+            },
+            {
+                "name": "motzei 72",
+                "start_time": time(18),
+                "end_time": time(18),
+                "until_next": True,
+                "recurrence_type": RecurrenceType.WEEKLY,
+                "recurrence_pattern": ["saturday"],
+                "start_sun_event": SunEvent.SUNSET,
+                "start_sun_offset": 72,
+            },
+            {"name": "Shiur", "start_time": time(12), "end_time": time(13)},
+        ],
+    )
+    station.latitude, station.longitude = 40.0821, -74.2097  # Lakewood
+    await db_session.commit()
+    svc = SchedulingService(db_session)
+
+    async def on_at(*when):
+        block = await svc.get_active_block_for_station(
+            station.id, datetime(*when, tzinfo=NY).astimezone(UTC)
+        )
+        return block.name if block else None
+
+    # Monday 16 Nov 2026
+    assert await on_at(2026, 11, 16, 7, 0) == "6 am mix"
+    assert await on_at(2026, 11, 16, 12, 30) == "Shiur"  # a timed block sits on top
+    assert await on_at(2026, 11, 16, 13, 0) == "6 am mix"  # and the playlist resumes
+    assert await on_at(2026, 11, 16, 23, 0) == "Night"
+    assert await on_at(2026, 11, 17, 3, 0) == "Night"  # still on after midnight
+    # Friday 20 Nov: Thursday's Night runs through the day (no Friday mix) until candle lighting.
+    # Lakewood sunset that day is about 4:36 PM, so candle lighting plus 1 is about 4:19 PM.
+    assert await on_at(2026, 11, 20, 16, 10) == "Night"
+    assert await on_at(2026, 11, 20, 16, 25) == "blanks Candle+1"
+    assert await on_at(2026, 11, 21, 11, 0) == "blanks Candle+1"  # all Shabbos day
+    # Shabbos ends 72 minutes after sunset, about 5:47 PM
+    assert await on_at(2026, 11, 21, 17, 40) == "blanks Candle+1"
+    assert await on_at(2026, 11, 21, 17, 55) == "motzei 72"
+    assert await on_at(2026, 11, 22, 5, 0) == "motzei 72"
+    assert await on_at(2026, 11, 22, 6, 0) == "6 am mix"  # Sunday morning
+
+    # the look-ahead does not call a timed block over the running playlist a conflict
+    r = await client.get(
+        "/api/v1/schedules/look-ahead",
+        params={"station_id": str(station.id), "days": 7},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert [f for f in r.json()["findings"] if f["kind"] in ("overlap", "gap")] == []
+
+    # and the flag round-trips through the API
+    r = await client.get(f"/api/v1/schedules/blocks/{mix.id}", headers=auth_headers)
+    assert r.status_code == 200 and r.json()["until_next"] is True
