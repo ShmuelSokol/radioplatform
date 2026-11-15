@@ -193,6 +193,7 @@ export default function Dashboard() {
     wsNowPlaying?.next_asset?.replay_gain_db ?? 0,
     null, null,
     serverStartedAt,
+    wsNowPlaying?.change_fade_seconds ?? null,
   );
   useEffect(() => {
     if (dashStreamAudioRef.current) dashStreamAudioRef.current.volume = muted ? 0 : volume;

@@ -32,6 +32,9 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     artist: Mapped[str | None] = mapped_column(String(255), nullable=True)
     album: Mapped[str | None] = mapped_column(String(255), nullable=True)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Length of the intro (before the vocal), in seconds from where the item starts on air
+    # (its cue-in point), not from the start of the file. Set by an operator.
+    intro_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     album_art_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

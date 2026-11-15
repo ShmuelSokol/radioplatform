@@ -152,7 +152,7 @@ async def test_skip_goes_to_engine_and_logs_manual(
 
     resp = await client.post(f"/api/v1/stations/{station.id}/queue/skip", headers=auth_headers)
     assert resp.status_code == 200
-    assert ("/skip", None) in sent
+    assert ("/skip", {"fade": 0.5}) in sent
     # The database only changes when the engine reports the real start
     assert await _status(db_session, entries[0]) == "playing"
 
@@ -307,3 +307,33 @@ async def test_next_catches_up_on_lost_start_report(client, db_session, engine_s
     assert resp.json()["entry_id"] == str(entries[2].id)
     assert await _status(db_session, entries[0]) == "played"
     assert await _status(db_session, entries[1]) == "pending"
+
+
+@pytest.mark.asyncio
+async def test_timing_mode_decides_hard_or_soft(client, db_session, engine_station):
+    """`timing_mode` wins over the older rule (ad_slot = soft, anything else = hard)."""
+    station, entries, sent = engine_station
+    soon = datetime.now(UTC) + timedelta(seconds=20)
+    res = await db_session.execute(
+        select(QueueEntry).where(QueueEntry.id.in_([entries[2].id, entries[3].id]))
+    )
+    rows = {r.id: r for r in res.scalars().all()}
+    # A sponsor slot marked hard: goes to the timed lane, on the second
+    rows[entries[2].id].preempt_at = soon
+    rows[entries[2].id].source = "ad_slot"
+    rows[entries[2].id].timing_mode = "hard"
+    # A scheduled item marked soft: never sent to the timed lane
+    rows[entries[3].id].preempt_at = soon
+    rows[entries[3].id].source = "auto"
+    rows[entries[3].id].timing_mode = "soft"
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+    timed_calls = [p for path, p in sent if path == "/timed"]
+    assert [c["id"] for c in timed_calls] == [str(entries[2].id)]
+
+    # Once its time has come, the soft item is the next thing handed out
+    rows[entries[3].id].preempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+    picked = await playout_engine.pick_next(db_session, station.id, set())
+    assert picked.id == entries[3].id
