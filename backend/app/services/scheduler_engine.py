@@ -5,6 +5,7 @@ This runs continuously and updates now-playing state when blocks change or asset
 import asyncio
 import logging
 import random
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -46,6 +47,9 @@ class SchedulerEngine:
         self._last_readout_check: dict[str, str] = {}
         # Precise advance timers: station_id → TimerHandle
         self._advance_timers: dict[str, asyncio.TimerHandle] = {}
+        # Leadership: only the process holding the lease advances queues.
+        self._instance_id = uuid.uuid4().hex
+        self._leader_until: Optional[datetime] = None
     
     async def start(self):
         """Start the scheduler engine."""
@@ -66,13 +70,77 @@ class SchedulerEngine:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        for timer in self._advance_timers.values():
+            timer.cancel()
+        self._advance_timers.clear()
+        await self._release_lease()
         logger.info("Scheduler engine stopped")
     
+    LEASE_SECONDS = 15
+
+    @property
+    def is_leader(self) -> bool:
+        return self._leader_until is not None and datetime.now(timezone.utc) < self._leader_until
+
+    async def _hold_lease(self, db: AsyncSession) -> bool:
+        """Take or renew the scheduler lease. False while another live process holds it."""
+        from sqlalchemy import text
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(seconds=self.LEASE_SECONDS)
+        params = {"me": self._instance_id, "now": now, "expires": expires}
+        result = await db.execute(
+            text(
+                "UPDATE scheduler_leases SET holder = :me, expires_at = :expires "
+                "WHERE name = 'scheduler' AND (holder = :me OR expires_at < :now)"
+            ),
+            params,
+        )
+        held = result.rowcount == 1
+        if not held:
+            result = await db.execute(
+                text(
+                    "INSERT INTO scheduler_leases (name, holder, expires_at) "
+                    "VALUES ('scheduler', :me, :expires) ON CONFLICT (name) DO NOTHING"
+                ),
+                params,
+            )
+            held = result.rowcount == 1
+        await db.commit()
+        was_leader = self.is_leader
+        self._leader_until = expires if held else None
+        if held and not was_leader:
+            logger.info("Scheduler %s took the lease", self._instance_id[:8])
+        if not held and was_leader:
+            logger.warning("Scheduler %s lost the lease", self._instance_id[:8])
+            for timer in self._advance_timers.values():
+                timer.cancel()
+            self._advance_timers.clear()
+        return held
+
+    async def _release_lease(self):
+        """Hand the lease over at shutdown so the next process takes it at once."""
+        if self._leader_until is None:
+            return
+        self._leader_until = None
+        try:
+            from sqlalchemy import text
+            async for db in get_db():
+                await db.execute(
+                    text("UPDATE scheduler_leases SET expires_at = :now WHERE name = 'scheduler' AND holder = :me"),
+                    {"me": self._instance_id, "now": datetime.now(timezone.utc)},
+                )
+                await db.commit()
+                break
+        except Exception as e:
+            logger.warning("Could not release scheduler lease: %s", e)
+
     async def _run_loop(self):
         """Main scheduler loop."""
         while self.running:
             try:
                 async for db in get_db():
+                    if not await self._hold_lease(db):
+                        break  # another process is running the stations
                     await self._check_all_stations(db)
                     await self._maybe_extend_holidays(db)
                     await self._maybe_generate_weather_readouts(db)
@@ -527,6 +595,8 @@ class SchedulerEngine:
         clients would start every song a few seconds before the server and drift
         further ahead with each track.
         """
+        if not self.is_leader:
+            return  # another process took over between scheduling and firing
         try:
             async for db in get_db():
                 from app.api.v1.queue import _check_advance
