@@ -96,6 +96,13 @@ const SCENARIOS = {
     },
     audibleWithin: 1.4, end: { src: 'c', minT: 6.8, maxT: 8.2 },
   },
+  // Next with the quick fade pressed a few seconds before the crossfade point (a short
+  // looped jingle is nearly always there): the operator's fade wins, not the 3 s crossfade
+  'next-quick-fade-near-the-end': {
+    start: { ...A, nextId: 'b' }, wait: 14.5, watch: 5,
+    change: (set) => set({ ...C, nextId: 'a', startedAt: now(), fade: 0.5 }),
+    audibleWithin: 1, outGoneWithin: 1.2, end: { src: 'c', minT: 4, maxT: 6 },
+  },
 };
 
 const only = process.argv[2];
@@ -126,7 +133,7 @@ async function run(name, sc) {
 
   const t0 = Date.now();
   sc.change(set, startA);
-  let silentFor = 0, longestSilence = 0, firstNew = null, last = [];
+  let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, last = [];
   const target = sc.end.src;
   while (Date.now() - t0 < sc.watch * 1000) {
     last = await page.evaluate(() => window.__snap());
@@ -134,6 +141,7 @@ async function run(name, sc) {
     silentFor = audible.length ? 0 : silentFor + 0.2;
     longestSilence = Math.max(longestSilence, silentFor);
     if (firstNew === null && audible.some((d) => d.src === target && d.t < 4)) firstNew = (Date.now() - t0) / 1000;
+    if (outGone === null && !audible.some((d) => d.src === sc.start.id)) outGone = (Date.now() - t0) / 1000;
     await sleep(200);
   }
   const audible = last.filter((d) => d.playing && d.gain > 0.05);
@@ -144,6 +152,10 @@ async function run(name, sc) {
   if (sc.audibleWithin) {
     check(`${name}: new song audible within ${sc.audibleWithin} s`, firstNew !== null && firstNew <= sc.audibleWithin,
       firstNew === null ? 'never' : `${firstNew.toFixed(2)} s`);
+  }
+  if (sc.outGoneWithin) {
+    check(`${name}: outgoing song gone within ${sc.outGoneWithin} s`, outGone !== null && outGone <= sc.outGoneWithin,
+      outGone === null ? 'never' : `${outGone.toFixed(2)} s`);
   }
   await page.close();
 }

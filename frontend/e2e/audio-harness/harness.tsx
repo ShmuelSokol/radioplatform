@@ -24,6 +24,7 @@ function Harness() {
   useAudioEngine(
     s ? { id: s.id, title: s.id, artist: null, asset_type: 'music', category: null, duration: s.dur } : null,
     0, !!s, null, null, 2000, 0, 0, s?.cross ?? 0, 0, s?.nextId ?? null, 0, 0, null, null, s?.startedAt ?? null,
+    s?.fade ?? null,
   );
   return null;
 }

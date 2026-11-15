@@ -385,9 +385,11 @@ export function useAudioEngine(
     const outDur = outDeck.audio.duration;
     const outEnd = outCross > 0 ? outCross : (isFinite(outDur) && outDur > 0 ? outDur - CROSSFADE_DURATION : 0);
     const naturalEnd = !outDeck.audio.paused && outEnd > 0 && outTime >= outEnd - NATURAL_END_WINDOW_SECONDS;
+    // An operator's Next carries the fade they chose; it wins even near the end of the item
+    // (a short looped jingle is nearly always "near the end").
     const asked = changeFadeRef.current;
-    const manualFade = asked != null && isFinite(asked) ? Math.min(10, Math.max(0.03, asked)) : SKIP_FADE_OUT;
-    const fadeOut = naturalEnd ? CROSSFADE_DURATION : manualFade;
+    const operatorFade = asked != null && isFinite(asked) ? Math.min(10, Math.max(0.03, asked)) : null;
+    const fadeOut = operatorFade ?? (naturalEnd ? CROSSFADE_DURATION : SKIP_FADE_OUT);
     const fadeIn = SKIP_FADE_IN;
 
     let wentLive = false;
