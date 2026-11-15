@@ -3,6 +3,7 @@ import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useSchedulePrevi
 import { useStations } from '../../hooks/useStations';
 import type { ScheduleRule } from '../../types';
 import Spinner from '../../components/Spinner';
+import { useAuth } from '../../hooks/useAuth';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const TYPE_COLORS: Record<string, string> = {
@@ -19,6 +20,8 @@ export default function Rules() {
   const updateMut = useUpdateRule();
   const deleteMut = useDeleteRule();
 
+  const { user } = useAuth();
+  const canEdit = user?.role === 'admin'; // the rules API lets only admins change rules
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<ScheduleRule>>({
@@ -77,10 +80,12 @@ export default function Rules() {
             className="px-3 py-1 bg-purple-700 hover:bg-purple-600 text-white text-sm rounded">
             {showPreview ? 'Hide Preview' : 'Preview Schedule'}
           </button>
-          <button onClick={() => { resetForm(); setShowForm(!showForm); }}
-            className="px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-sm rounded">
-            {showForm ? 'Cancel' : '+ New Rule'}
-          </button>
+          {canEdit && (
+            <button onClick={() => { resetForm(); setShowForm(!showForm); }}
+              className="px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-sm rounded">
+              {showForm ? 'Cancel' : '+ New Rule'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -248,11 +253,11 @@ export default function Rules() {
                     {r.interval_minutes ? `${r.interval_minutes}m` : r.songs_between ? `${r.songs_between} songs` : '—'}
                   </td>
                   <td className="px-3 py-1.5 text-yellow-300 text-[11px]">{r.priority}</td>
-                  <td className="px-3 py-1.5 flex gap-2">
-                    <button onClick={() => startEdit(r)} className="text-yellow-400 hover:text-yellow-300 text-[11px]">Edit</button>
-                    <button onClick={() => { if (confirm('Delete rule?')) deleteMut.mutate(r.id); }}
+                  <td className={`px-3 py-1.5 flex gap-2 ${canEdit ? '' : 'invisible'}`} aria-hidden={!canEdit}>
+                    <button disabled={!canEdit} onClick={() => startEdit(r)} className="text-yellow-400 hover:text-yellow-300 text-[11px]">Edit</button>
+                    <button disabled={!canEdit} onClick={() => { if (confirm('Delete rule?')) deleteMut.mutate(r.id); }}
                       className="text-red-400 hover:text-red-300 text-[11px]">Del</button>
-                    <button onClick={() => updateMut.mutate({ id: r.id, data: { is_active: !r.is_active } })}
+                    <button disabled={!canEdit} onClick={() => updateMut.mutate({ id: r.id, data: { is_active: !r.is_active } })}
                       className={`text-[11px] ${r.is_active ? 'text-orange-400' : 'text-green-400'}`}>
                       {r.is_active ? 'Off' : 'On'}
                     </button>

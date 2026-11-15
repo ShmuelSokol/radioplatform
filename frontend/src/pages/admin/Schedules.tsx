@@ -10,10 +10,14 @@ import {
 } from '../../hooks/useSchedules';
 import { useStations } from '../../hooks/useStations';
 import Spinner from '../../components/Spinner';
+import { useAuth } from '../../hooks/useAuth';
+import { isManager } from '../../auth/access';
 
 const Schedules: React.FC = () => {
   const navigate = useNavigate();
   const [selectedStationId, setSelectedStationId] = useState<string>('');
+  const { user } = useAuth();
+  const canEdit = isManager(user?.role);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
 
@@ -102,12 +106,14 @@ const Schedules: React.FC = () => {
     <div className="w-full">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Schedules</h1>
-        <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          {showCreateForm ? 'Cancel' : 'New Schedule'}
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            {showCreateForm ? 'Cancel' : 'New Schedule'}
+          </button>
+        )}
       </div>
 
       {/* Filter by station */}
@@ -242,24 +248,28 @@ const Schedules: React.FC = () => {
                 )}
               </div>
               <div className="flex gap-2">
-                <button
-                  onClick={() => handleEdit(schedule)}
-                  className="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                >
-                  Edit
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => handleEdit(schedule)}
+                    className="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                  >
+                    Edit
+                  </button>
+                )}
                 <button
                   onClick={() => navigate(`/admin/schedules/${schedule.id}/blocks`)}
                   className="px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
                 >
                   Blocks
                 </button>
-                <button
-                  onClick={() => handleDelete(schedule.id)}
-                  className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
-                >
-                  Delete
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => handleDelete(schedule.id)}
+                    className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
             <div className="flex gap-4 text-sm text-gray-600">
