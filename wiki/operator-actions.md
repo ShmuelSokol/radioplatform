@@ -83,3 +83,5 @@ reads the playing queue entry, which the engine's start reports keep current.
 ## The queue never runs dry
 
 Next (any fade), a song ending on its own, and Start all go through `_refill_for_next` in `api/v1/queue.py` when nothing is left to play: it runs the normal fill (schedule, rules, rotation), and if that still adds nothing it queues up to 20 random music items, or failing that any playable item that is not silence, a spot, a jingle or an announcement (`source="fallback"`). Before 2026-11-15, Next on the last item picked the next entry before refilling, so the station stopped with an empty queue. When the station is stopped, the control room shows 0:00 instead of the old item's countdown.
+
+Random fills (rule fill, gap fill, playlist pools, block slots, the fallback above) never pick `NOT_FOR_FILL_CATEGORIES` from `app/models/asset.py`: dated `weather_spot` and `time_announcement` recordings and `do_not_play`. They air only where they were scheduled. Before this, old "Weather Report <date>" spots (type spot) aired as filler.

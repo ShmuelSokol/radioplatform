@@ -25,6 +25,11 @@ class AssetType(str, enum.Enum):
     ZMANIM = "zmanim"
 
 
+# Categories of generated, dated announcements (weather for one slot, time for one
+# hour). They air only where they were scheduled; random fills must never pick them.
+NOT_FOR_FILL_CATEGORIES = ("weather_spot", "time_announcement", "do_not_play")
+
+
 class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "assets"
 

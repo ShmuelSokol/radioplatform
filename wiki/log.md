@@ -76,3 +76,4 @@ INGEST 2026-11-15 control-room.md Web player: an operator's Next fade (change_fa
 UPDATE 2026-11-15 spot-schedules.md reconcile_spot_slots now adds (never removes) exact-time entries due inside the 2-minute safety margin, once per minute (any status)
 UPDATE 2026-11-15 spot-schedules.md in block mode (breaks) a daypart wholly inside a blackout is reported with blackout set, same as the slot path, so Schedule Check no longer flags Shabbos mornings
 UPDATE 2026-11-15 operator-actions.md Next/Fade/Soft, natural end and Start refill an empty queue (fallback to any music) instead of stopping.
+UPDATE 2026-11-15 operator-actions.md random fills skip NOT_FOR_FILL_CATEGORIES (dated weather/time recordings, do_not_play).

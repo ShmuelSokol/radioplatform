@@ -13,7 +13,7 @@ from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.asset import Asset
+from app.models.asset import NOT_FOR_FILL_CATEGORIES, Asset
 from app.models.now_playing import NowPlaying
 from app.models.play_log import PlayLog
 from app.models.playlist_entry import PlaybackMode, PlaylistEntry
@@ -493,8 +493,9 @@ class SchedulingService:
     ) -> Optional[UUID]:
         """Pick a random asset matching asset_type+category, avoiding recently played and do_not_play."""
         stmt = select(Asset).where(Asset.asset_type == asset_type)
-        # Always exclude "do_not_play" assets
-        stmt = stmt.where((Asset.category != "do_not_play") | (Asset.category.is_(None)))
+        # Never "do_not_play", and never a dated weather/time announcement
+        if not category:
+            stmt = stmt.where((Asset.category.is_(None) | Asset.category.notin_(NOT_FOR_FILL_CATEGORIES)))
         if category:
             stmt = stmt.where(Asset.category == category)
         result = await self.db.execute(stmt)

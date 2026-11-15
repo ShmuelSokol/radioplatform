@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.asset import Asset
+from app.models.asset import NOT_FOR_FILL_CATEGORIES, Asset
 from app.models.play_log import PlayLog
 from app.models.schedule import Schedule
 from app.models.station import Station
@@ -111,7 +111,7 @@ class _Library:
             if category:
                 stmt = stmt.where(Asset.category == category)
             else:
-                stmt = stmt.where((Asset.category != "do_not_play") | (Asset.category.is_(None)))
+                stmt = stmt.where((Asset.category.is_(None) | Asset.category.notin_(NOT_FOR_FILL_CATEGORIES)))
             rows = []
             if self.min_vote:
                 rows = list((await self.db.execute(stmt.where(Asset.vote >= self.min_vote))).all())

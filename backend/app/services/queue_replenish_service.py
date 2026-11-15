@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
 
-from app.models.asset import Asset
+from app.models.asset import NOT_FOR_FILL_CATEGORIES, Asset
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
@@ -374,6 +374,8 @@ class QueueReplenishService:
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
         if rule.category:
             query = query.where(Asset.category == rule.category)
+        else:
+            query = query.where((Asset.category.is_(None) | Asset.category.notin_(NOT_FOR_FILL_CATEGORIES)))
         if self.exclude_ids:
             query = query.where(Asset.id.notin_(self.exclude_ids))
         query = self._apply_oldies_filter(query)
@@ -535,6 +537,8 @@ class QueueReplenishService:
             query = select(Asset).where(Asset.asset_type == asset_type)
             if category:
                 query = query.where(Asset.category == category)
+            else:
+                query = query.where((Asset.category.is_(None) | Asset.category.notin_(NOT_FOR_FILL_CATEGORIES)))
             # Only exclude on first pass; allow repeats on subsequent passes
             if passes == 1 and self.exclude_ids:
                 query = query.where(Asset.id.notin_(self.exclude_ids))
