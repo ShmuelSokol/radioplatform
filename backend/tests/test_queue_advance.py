@@ -120,3 +120,41 @@ async def test_skip_returns_the_new_queue_in_one_call(client, auth_headers, db_s
     assert body["queue"]["now_playing"]["asset_id"] == str(pending.asset_id)
     assert set(body["queue"]) == set(listed)
     assert [e["id"] for e in body["queue"]["entries"]] == [e["id"] for e in listed["entries"]]
+
+
+@pytest.mark.asyncio
+async def test_next_during_an_automatic_change_keeps_the_incoming_song(
+    client, auth_headers, db_session
+):
+    """One press of Next while the next song is already fading in must not skip that song too."""
+    station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=178.0)
+    third_asset = Asset(
+        id=uuid.uuid4(), title="Track 2", duration=180.0,
+        file_path="t2.mp3", asset_type="music", category="lively", created_by=None,
+    )
+    db_session.add(third_asset)
+    await db_session.flush()
+    third = QueueEntry(
+        id=uuid.uuid4(), station_id=station.id, asset_id=third_asset.id, position=3,
+        status="pending", source="auto",
+    )
+    db_session.add(third)
+    await db_session.commit()
+    third_asset_id = str(third_asset.id)
+    pending_asset_id = str(pending.asset_id)
+
+    # The station changes to the second song by itself (crossfade point reached)
+    entry = await queue_module._check_advance(db_session, station.id, early_seconds=3.0)
+    assert entry.id == pending.id
+
+    # Next arrives a moment later: the incoming song stays on air
+    url = f"/api/v1/stations/{station.id}/queue/skip"
+    body = (await client.post(url, headers=auth_headers)).json()
+    assert body["now_playing"] == pending_asset_id
+    assert body.get("kept_incoming") is True
+    assert body["queue"]["now_playing"]["asset_id"] == pending_asset_id
+
+    # A second press is a real Next
+    body = (await client.post(url, headers=auth_headers)).json()
+    assert body["now_playing"] == third_asset_id
+    assert "kept_incoming" not in body

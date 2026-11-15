@@ -49,3 +49,13 @@ Dual-deck Web Audio system (A/B decks) with crossfade support. Used as fallback 
 2. Use pre-loaded inactive deck instantly instead of re-fetching
 
 See also: [streaming-architecture](streaming-architecture.md)
+
+## Next during an automatic change (2026-11-15)
+
+The server advances at the crossfade point, so for about 3 s the "playing" entry is a song that
+is still fading in. A Next in that window used to skip it: listeners heard a blip of it, a gap,
+then a third song. `skip_current` now answers the first Next within
+`NEXT_KEEPS_INCOMING_SECONDS` (4 s) of an automatic change with the incoming song unchanged
+(`kept_incoming: true`); a second press is a normal Next. The marker is in memory
+(`_automatic_change` in `api/v1/queue.py`) and is only set by the automatic advance, so quick
+repeated presses of Next still each skip a song.

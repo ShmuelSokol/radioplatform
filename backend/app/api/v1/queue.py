@@ -255,7 +255,7 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
         playing_entry = playing_q.unique().scalar_one_or_none()
         if playing_entry and playing_entry.started_at and playing_entry.asset:
             dur = playing_entry.asset.duration or DEFAULT_DURATION
-            el = (now - playing_entry.started_at).total_seconds()
+            el = (now - _aware(playing_entry.started_at)).total_seconds()
             cursor += timedelta(seconds=max(0, dur - el))
 
         # Walk through playable pending entries (skip future-preempt silence)
@@ -497,6 +497,33 @@ async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
     await service.replenish()
 
 
+# Next pressed while the automatic change to the next song is still fading in must not
+# skip that song too: for this long after an automatic change, Next keeps the incoming song.
+NEXT_KEEPS_INCOMING_SECONDS = 4.0
+# station id -> (entry that just went on air by itself, monotonic time). In memory: a
+# restart only means one Next in that moment behaves the old way.
+_automatic_change: dict[str, tuple[str, float]] = {}
+
+
+def _note_automatic_change(station_id, entry_id) -> None:
+    _automatic_change[str(station_id)] = (str(entry_id), time.monotonic())
+
+
+def _incoming_from_automatic_change(station_id, entry_id) -> bool:
+    """True once per automatic change, while that change is still fading in."""
+    noted = _automatic_change.pop(str(station_id), None)
+    return bool(
+        noted
+        and noted[0] == str(entry_id)
+        and time.monotonic() - noted[1] < NEXT_KEEPS_INCOMING_SECONDS
+    )
+
+
+def _aware(dt: datetime) -> datetime:
+    """SQLite hands back naive datetimes; they are UTC."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 _advance_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -680,6 +707,8 @@ async def _check_advance_locked(
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
+        if current is not None:
+            _note_automatic_change(station_id, next_entry.id)
 
         # Compact positions: ensure playing entry is at position 1
         # and pending entries follow sequentially (prevents stale position drift)
@@ -867,7 +896,7 @@ async def _get_queue_impl(station_id, limit, db):
     if now_playing_entry and now_playing_entry.started_at:
         asset = now_playing_entry.asset
         duration = asset.duration if asset else 180
-        elapsed = (datetime.now(timezone.utc) - now_playing_entry.started_at).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - _aware(now_playing_entry.started_at)).total_seconds()
         remaining = max(0, duration - elapsed)
         np_data = {
             "id": str(now_playing_entry.id),
@@ -887,7 +916,7 @@ async def _get_queue_impl(station_id, limit, db):
     # Fallback cursor only used if _est_map is missing an entry
     if now_playing_entry and now_playing_entry.started_at:
         asset_dur = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
-        el = (now_utc - now_playing_entry.started_at).total_seconds()
+        el = (now_utc - _aware(now_playing_entry.started_at)).total_seconds()
         cursor = now_utc + timedelta(seconds=max(0, (asset_dur or DEFAULT_DURATION) - el))
     else:
         cursor = now_utc
@@ -1206,6 +1235,15 @@ async def _skip_current_locked(station_id: uuid.UUID, db: AsyncSession):
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
+    if current and _incoming_from_automatic_change(station_id, current.id):
+        # The station is already changing to this song (it is fading in right now).
+        # Skipping it as well would jump two songs on one press: keep it on air.
+        return {
+            "message": "Already changing to the next item",
+            "now_playing": str(current.asset_id),
+            "kept_incoming": True,
+            "queue": await _queue_after_action(db, station_id),
+        }
     # Clean up extras
     for extra in playing_entries[1:]:
         extra.status = "skipped"
