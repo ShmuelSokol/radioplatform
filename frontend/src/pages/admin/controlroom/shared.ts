@@ -10,8 +10,9 @@ export interface CtlAsset {
 }
 
 /** How an asset is sent to air. */
-export type SendHow = 'now' | 'next' | 'end' | 'insert';
-export type FireMode = 'now' | 'next';
+export type SendHow = 'now' | 'next' | 'end' | 'insert' | 'mix';
+/** What a tap on a cart button does. 'mix' plays it over the item on air, which carries on. */
+export type FireMode = 'now' | 'next' | 'mix';
 
 export type SendFn = (asset: CtlAsset, how: SendHow) => void;
 

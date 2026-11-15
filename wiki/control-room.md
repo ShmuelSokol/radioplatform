@@ -45,7 +45,7 @@ Operators come from KBR Studio 1.82 (the desktop program the station runs today)
 
 Queue rows show projected air time to the second (`clockTimeSec`), because that is what the old running log shows.
 
-KBR Studio features the control room does not have yet, and why: Intro countdown (assets have no intro length), Fade and Soft fade (skip has no fade option; engine work), Mix over, Loop, HS, Spots mode, blocks that expand into their items in the log.
+KBR Studio features the control room does not have yet: HS, Spots mode, blocks that expand into their items in the log.
 
 ## PFL (pre-listen) is one shared off-air player
 
@@ -63,4 +63,4 @@ Loop is a toggle in the same group: `liveControl.loopCurrent` posts `queue/loop 
 
 The transport bar is one row from 1280 px (`xl`) and two rows below that (title and clock on top; countdown, Intro, sound and the Loop / Fade / Soft fade / NEXT group underneath). Both rows are in the DOM and one is hidden, so browser checks must pick the `:visible` button.
 
-Mix over exists on the server (`queue/mix-over`, see `operator-actions.md`); the control room has no button for it yet.
+Mix over is the third cart mode (Play now / Play next / Mix over): a tap calls `liveControl.mixOver` (`queue/mix-over`, request id reused on a double tap like play now). The queue does not move, so the Dashboard makes no placeholder row. The browser path (socket `mix_over` message, `kbr-mix-over` event, `useAudioEngine`) is covered by `e2e/control-room.mjs`; it only plays once sound has been started on the page (Listen).

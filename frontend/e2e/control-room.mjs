@@ -101,6 +101,7 @@ function makeBackend(queueSize = 60) {
       return done;
     }
     if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: view() }; }
+    if (path === `${q}/mix-over`) return { message: 'Playing over', asset_id: body.asset_id, on_air: true };
     if (path === `${q}/insert`) {
       const anchor = body.after_entry_id ? queue.find(x => x.id === body.after_entry_id && x.status !== 'skipped') : null;
       const after = anchor ? anchor.position : (playing()?.position ?? 0);
@@ -158,7 +159,8 @@ async function open(browser, contextOpts, queueSize) {
   const push = (data) => sockets.forEach(ws => { try { ws.send(JSON.stringify({ type: 'now_playing', data })); } catch { /* closed */ } });
   await page.goto(`${BASE}/admin/dashboard`);
   await page.getByTestId('queue-row').first().waitFor();
-  return { page, backend, ctx, errors, push };
+  const pushRaw = (msg) => sockets.forEach(ws => { try { ws.send(JSON.stringify(msg)); } catch { /* closed */ } });
+  return { page, backend, ctx, errors, push, pushRaw };
 }
 const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${name}.png` }); } };
 const layout = (page) => page.evaluate(() => {
@@ -168,7 +170,7 @@ const layout = (page) => page.evaluate(() => {
 
 async function desktop(browser, width, height) {
   const tag = `desktop ${width}x${height}`;
-  const { page, backend, ctx, errors, push } = await open(browser, { viewport: { width, height } });
+  const { page, backend, ctx, errors, push, pushRaw } = await open(browser, { viewport: { width, height } });
   let l = await layout(page);
   check(`${tag}: uses the full width`, l.room.left === 0 && l.room.right === l.vw, `${l.room.left}..${l.room.right} of ${l.vw}`);
   check(`${tag}: fills the height with no page scrollbars`, l.docH <= l.vh && l.docW <= l.vw && l.room.bottom === l.vh, `doc ${l.docW}x${l.docH}`);
@@ -238,6 +240,30 @@ async function desktop(browser, width, height) {
   await page.getByTestId('hot-button').filter({ hasText: 'Station ID 5' }).click();
   await page.waitForTimeout(400);
   check(`${tag}: in "Play next" mode the jingle waits for the current item`, backend.nowId() === 'j3' && backend.order()[1] === 'j5');
+
+  // Mix over: the jingle plays on top, nothing on air or in the queue moves
+  const mixBefore = { now: backend.nowId(), order: backend.order().join() };
+  await page.getByRole('radio', { name: 'Mix over' }).click();
+  await page.getByTestId('hot-button').filter({ hasText: 'Station ID 6' }).click();
+  await page.waitForTimeout(300 + DELAY);
+  const mixes = backend.calls.filter(c => c.path.endsWith('/queue/mix-over')).map(c => c.body.asset_id);
+  check(`${tag}: Mix over plays a button on top and leaves the queue alone`, mixes.join() === 'j6' && backend.nowId() === mixBefore.now && backend.order().join() === mixBefore.order, mixes.join());
+  await shot(page, `${width}-8-mix-over`);
+  // The station's answer arrives on the now-playing socket; this browser's audio engine plays it
+  await page.locator('button:visible', { hasText: 'Listen' }).first().click().catch(() => {});
+  let mixFetched = false;
+  await page.route('**/mix-test.wav', (route) => {
+    mixFetched = true;
+    const rate = 8000, n = 800, buf = Buffer.alloc(44 + n);
+    buf.write('RIFF', 0); buf.writeUInt32LE(36 + n, 4); buf.write('WAVEfmt ', 8); buf.writeUInt32LE(16, 16);
+    buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate, 28);
+    buf.writeUInt16LE(1, 32); buf.writeUInt16LE(8, 34); buf.write('data', 36); buf.writeUInt32LE(n, 40); buf.fill(128, 44);
+    return route.fulfill({ status: 200, contentType: 'audio/wav', body: buf });
+  });
+  pushRaw({ type: 'mix_over', data: { url: `${new URL(page.url()).origin}/mix-test.wav`, asset_id: 'j6', title: 'Station ID 6', replay_gain_db: 0 } });
+  await page.waitForTimeout(800);
+  check(`${tag}: a mix-over message from the station is played by this browser`, mixFetched);
+  await page.getByRole('radio', { name: 'Play next' }).click();
 
   // NEXT (button and keyboard)
   await page.getByRole('button', { name: /NEXT/ }).click();
