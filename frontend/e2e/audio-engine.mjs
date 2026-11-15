@@ -1,0 +1,159 @@
+/**
+ * Browser check for the web player (useAudioEngine) around song changes.
+ * Mounts the real hook in a bare page, feeds it now-playing updates the way the
+ * server would, and watches the two audio decks. No backend, no real station.
+ *
+ *   cd frontend && node e2e/audio-engine.mjs        # optional: one scenario name
+ *
+ * Exits non-zero if any check fails. Takes about 90 seconds.
+ */
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { createServer } from 'vite';
+
+const { chromium } = createRequire(import.meta.url)('playwright');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let failures = 0;
+const check = (name, ok, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
+  if (!ok) failures++;
+};
+
+// Test tones: asset id -> [frequency, seconds]
+const TONES = { a: [440, 20], b: [660, 12], c: [880, 12] };
+function wav(freq, seconds) {
+  const rate = 8000, n = rate * seconds, buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * freq * i) / rate)), 44 + i * 2);
+  return buf;
+}
+
+const A = { id: 'a', dur: 20, cross: 17 };
+const B = { id: 'b', dur: 12, cross: 9 };
+const C = { id: 'c', dur: 12, cross: 9 };
+const now = () => new Date().toISOString();
+
+// Each scenario starts with song "a" on air, then calls change() and is watched for `watch` seconds.
+const SCENARIOS = {
+  // The same item queued twice in a row, second play pre-loaded on the idle deck
+  'same-item-twice': {
+    start: { ...A, nextId: 'a' }, wait: 15, watch: 9,
+    change: (set) => setTimeout(() => set({ ...A, nextId: 'b', startedAt: now() }), 2000),
+    end: { src: 'a', minT: 4, maxT: 8 },
+  },
+  // Same, but the player was never told what is next, so nothing is pre-loaded
+  'same-item-twice-cold': {
+    start: { ...A, nextId: null }, wait: 15, watch: 9,
+    change: (set) => setTimeout(() => set({ ...A, nextId: 'b', startedAt: now() }), 2000),
+    end: { src: 'a', minT: 4, maxT: 8 },
+  },
+  // Next pressed mid-song: the new now-playing arrives before its start time, URL lookups are slow
+  'next-with-stale-start-time': {
+    start: { ...A, nextId: 'b' }, wait: 12, watch: 8, urlDelay: 2500,
+    change: (set, startA) => {
+      set({ ...B, nextId: 'b', startedAt: startA });
+      setTimeout(() => set({ ...B, nextId: 'c', startedAt: now() }), 700);
+    },
+    audibleWithin: 1, end: { src: 'b', minT: 6.5, maxT: 9 },
+  },
+  // Next pressed one second into a running natural crossfade, to a third song
+  'next-during-crossfade': {
+    start: { ...A, nextId: 'b' }, wait: 18, watch: 6,
+    change: (set) => set({ ...C, nextId: 'a', startedAt: now() }),
+    audibleWithin: 1, end: { src: 'c', minT: 5, maxT: 7 },
+  },
+  // Next pressed just before the automatic crossfade point: the skip is announced first
+  'next-just-before-crossfade': {
+    start: { ...A, nextId: 'b' }, wait: 16.8, watch: 8,
+    change: (set) => {
+      const at = now();
+      setTimeout(() => set({ ...B, nextId: 'b', startedAt: at }), 150);
+      setTimeout(() => set({ ...B, nextId: 'c', startedAt: at }), 600);
+    },
+    audibleWithin: 1, end: { src: 'b', minT: 7, maxT: 8.5 },
+  },
+  // Same click, but the player's own crossfade has already begun when the skip is announced
+  'next-just-after-crossfade-began': {
+    start: { ...A, nextId: 'b' }, wait: 16.8, watch: 8,
+    change: (set) => {
+      const at = now();
+      setTimeout(() => set({ ...B, nextId: 'b', startedAt: at }), 600);
+      setTimeout(() => set({ ...B, nextId: 'c', startedAt: at }), 1000);
+    },
+    audibleWithin: 1, end: { src: 'b', minT: 7, maxT: 8.5 },
+  },
+  // The server advanced to "b" by itself a moment before Next arrived, so Next lands on "c"
+  'next-right-after-automatic-advance': {
+    start: { ...A, nextId: 'b' }, wait: 17, watch: 8,
+    change: (set) => {
+      set({ ...B, nextId: 'c', startedAt: now() });
+      setTimeout(() => set({ ...C, nextId: 'a', startedAt: now() }), 400);
+    },
+    audibleWithin: 1.4, end: { src: 'c', minT: 6.8, maxT: 8.2 },
+  },
+};
+
+const only = process.argv[2];
+const server = await createServer({ root, logLevel: 'error', server: { port: 5197, strictPort: false } });
+await server.listen();
+const base = server.resolvedUrls.local[0];
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+
+async function run(name, sc) {
+  const page = await browser.newPage();
+  let urlDelay = 30;
+  await page.route('**/__tone/*.wav', (r) => {
+    const id = r.request().url().split('/').pop().replace('.wav', '');
+    return r.fulfill({ contentType: 'audio/wav', body: wav(...TONES[id]) });
+  });
+  await page.route('**/assets/*/audio-url', async (r) => {
+    const id = r.request().url().split('/').slice(-2)[0];
+    await sleep(urlDelay);
+    await r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: `/__tone/${id}.wav` }) });
+  });
+  await page.goto(`${base}e2e/audio-harness/index.html`);
+  await page.waitForFunction(() => typeof window.__set === 'function');
+  const set = (s) => page.evaluate((x) => window.__set(x), s);
+  const startA = now();
+  await set({ ...sc.start, startedAt: startA });
+  await sleep(sc.wait * 1000);
+  if (sc.urlDelay) urlDelay = sc.urlDelay;
+
+  const t0 = Date.now();
+  sc.change(set, startA);
+  let silentFor = 0, longestSilence = 0, firstNew = null, last = [];
+  const target = sc.end.src;
+  while (Date.now() - t0 < sc.watch * 1000) {
+    last = await page.evaluate(() => window.__snap());
+    const audible = last.filter((d) => d.playing && d.gain > 0.05);
+    silentFor = audible.length ? 0 : silentFor + 0.2;
+    longestSilence = Math.max(longestSilence, silentFor);
+    if (firstNew === null && audible.some((d) => d.src === target && d.t < 4)) firstNew = (Date.now() - t0) / 1000;
+    await sleep(200);
+  }
+  const audible = last.filter((d) => d.playing && d.gain > 0.05);
+  const state = last.map((d) => `${d.src || '-'}${d.playing ? '' : '(stopped)'}@${d.t}`).join(' | ');
+  check(`${name}: never silent`, longestSilence < 0.5, `longest gap ${longestSilence.toFixed(1)} s`);
+  check(`${name}: ends with only "${target}" on air, at the right position`,
+    audible.length === 1 && audible[0].src === target && audible[0].t >= sc.end.minT && audible[0].t <= sc.end.maxT, state);
+  if (sc.audibleWithin) {
+    check(`${name}: new song audible within ${sc.audibleWithin} s`, firstNew !== null && firstNew <= sc.audibleWithin,
+      firstNew === null ? 'never' : `${firstNew.toFixed(2)} s`);
+  }
+  await page.close();
+}
+
+try {
+  for (const [name, sc] of Object.entries(SCENARIOS)) {
+    if (!only || only === name) await run(name, sc);
+  }
+} finally {
+  await browser.close();
+  await server.close();
+}
+process.exit(failures ? 1 : 0);

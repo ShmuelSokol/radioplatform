@@ -347,24 +347,49 @@ async def _resume_playback_on_startup():
 
     try:
         async with async_session_factory() as db:
-            # 1. Close any open PlayLog entries (leftover from pre-restart)
+            # A restart is not a reason to cut a song. Find what is still on air:
+            # entries marked playing whose scheduled end is still ahead of us.
+            from datetime import timedelta
+            from app.models.asset import Asset
+
+            playing = (await db.execute(
+                select(QueueEntry, Asset.duration)
+                .outerjoin(Asset, QueueEntry.asset_id == Asset.id)
+                .where(QueueEntry.status == "playing")
+            )).all()
+            on_air: dict = {}  # station_id -> asset_id still playing
+            finished = []
+            for entry, duration in playing:
+                started = entry.started_at
+                if started is not None and started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                still_playing = (
+                    started is not None
+                    and duration
+                    and started + timedelta(seconds=float(duration)) > now + timedelta(seconds=2)
+                    and entry.station_id not in on_air
+                )
+                if still_playing:
+                    on_air[entry.station_id] = entry.asset_id
+                else:
+                    finished.append(entry)
+
+            # 1. Close open PlayLog entries, except the ones for songs still on air
             stale_logs = await db.execute(
                 select(PlayLog).where(PlayLog.end_utc.is_(None))
             )
             stale_count = 0
             for log in stale_logs.scalars().all():
+                if on_air.get(log.station_id) == log.asset_id:
+                    continue
                 log.end_utc = now
                 stale_count += 1
             if stale_count:
                 logger.info("Closed %d stale play log entries from before restart", stale_count)
 
-            # 2. Mark stale "playing" queue entries as "played" and log them
-            stale_playing = await db.execute(
-                select(QueueEntry).where(QueueEntry.status == "playing")
-            )
+            # 2. Entries that ended while the server was down: mark played and log them
             stale_playing_count = 0
-            for entry in stale_playing.scalars().all():
-                # Log the play that was interrupted
+            for entry in finished:
                 play_log = PlayLog(
                     station_id=entry.station_id,
                     asset_id=entry.asset_id,
@@ -377,6 +402,8 @@ async def _resume_playback_on_startup():
                 stale_playing_count += 1
             if stale_playing_count:
                 logger.info("Closed %d stale playing queue entries", stale_playing_count)
+            if on_air:
+                logger.info("Restart left %d station(s) playing their current song", len(on_air))
 
             await db.commit()
 
@@ -391,6 +418,9 @@ async def _resume_playback_on_startup():
                     replenish_svc = QueueReplenishService(db, station.id)
                     await replenish_svc.replenish()
                     await db.commit()
+
+                    if station.id in on_air:
+                        continue  # still playing; the scheduler carries on from here
 
                     # 4b. Start playback — find next pending entry
                     next_result = await db.execute(
