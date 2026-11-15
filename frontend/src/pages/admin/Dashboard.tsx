@@ -299,6 +299,7 @@ export default function Dashboard() {
     setDragOverId(null);
   }, []);
 
+  const { mutate: reorderDnd } = reorderDndMut;
   const handleDrop = useCallback((e: React.DragEvent, targetEntry: any) => {
     e.preventDefault();
     setDragOverId(null);
@@ -307,7 +308,7 @@ export default function Dashboard() {
       setDragEntryId(null);
       return;
     }
-    reorderDndMut.mutate(
+    reorderDnd(
       { entryId: sourceId, newPosition: targetEntry.position },
       {
         onSuccess: (data) => {
@@ -318,7 +319,7 @@ export default function Dashboard() {
       },
     );
     setDragEntryId(null);
-  }, [dragEntryId, reorderDndMut]);
+  }, [dragEntryId, reorderDnd]);
 
   const handleDragEnd = useCallback(() => {
     setDragEntryId(null);
@@ -417,6 +418,113 @@ export default function Dashboard() {
   const vuLevel2 = audioReady && isPlaying
     ? Math.round(vuLevels[1] * 30)
     : (isPlaying ? 20 + Math.floor(Math.cos(realElapsed * 1.7) * 5) : 0);
+
+  // The countdown re-renders this component on every animation frame. The queue
+  // and library lists are memoized so those frames do not rebuild every row.
+  const { mutate: moveUp } = moveUpMut;
+  const { mutate: moveDown } = moveDownMut;
+  const { mutate: removeEntry } = removeMut;
+  const { mutate: addToQueue } = addQueueMut;
+  const { mutate: playNext } = playNextMut;
+
+  // "5m ago" and today/tomorrow labels inside the rows refresh once a minute.
+  const minuteTick = Math.floor(clock.getTime() / 60_000);
+  const queueRows = useMemo(() => filteredQueueEntries.map((entry: any) => {
+      const a = entry.asset;
+      const isCur = entry.status === 'playing';
+      const isDragging = dragEntryId === entry.id;
+      const isDragOver = dragOverId === entry.id && dragEntryId !== entry.id;
+      return (<div key={entry.id + '-wrap'}>
+        <div
+          draggable={!isCur}
+          onDragStart={!isCur ? (e) => handleDragStart(e, entry.id) : undefined}
+          onDragOver={!isCur ? (e) => handleDragOver(e, entry.id) : undefined}
+          onDragLeave={!isCur ? handleDragLeave : undefined}
+          onDrop={!isCur ? (e) => handleDrop(e, entry) : undefined}
+          onDragEnd={handleDragEnd}
+          className={`flex items-center px-2 py-[2px] border-b min-w-[500px] transition-colors
+            ${isCur ? 'bg-[#0000aa] text-yellow-300 border-[#12122e]'
+              : entry.preempt_at ? 'bg-orange-950/30 text-orange-200 border-orange-900/30 hover:bg-orange-900/30'
+              : entry.source === 'ad_slot' ? 'bg-emerald-950/30 text-emerald-200 border-emerald-900/30 hover:bg-emerald-900/30 border-l-2 border-l-emerald-500'
+              : isDragOver ? 'bg-cyan-900/40 border-cyan-500 border-t-2'
+              : isDragging ? 'opacity-40 border-[#12122e]'
+              : 'text-cyan-200 hover:bg-[#14143a] border-[#12122e]'}
+            ${!isCur && !entry.preempt_at ? 'cursor-grab active:cursor-grabbing' : ''}`}
+        >
+          <span className="w-6 text-[11px] shrink-0">
+            {isCur ? '▶' : <span className="text-gray-600 text-[10px]">⠿</span>}
+          </span>
+          <span className="w-[100px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString(undefined, stationTz ? { timeZone: stationTz } : undefined) : ''}>
+            {entry.estimated_start ? (() => {
+              const d = new Date(entry.estimated_start);
+              const tzOpts = stationTz ? { timeZone: stationTz } : {};
+              const dateStr = d.toLocaleDateString('en-CA', tzOpts);
+              const todayStr = new Date().toLocaleDateString('en-CA', tzOpts);
+              const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...tzOpts });
+              return dateStr !== todayStr
+                ? <><span className="text-[8px] text-gray-600">{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...tzOpts })}</span> {time}</>
+                : time;
+            })() : ''}
+          </span>
+          <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
+          <span className="flex-1 truncate text-[12px] min-w-0">
+            {a?.asset_type === 'silence' && entry.blackout_name
+              ? <span className="text-red-400">Scheduled Silence — {entry.blackout_name}</span>
+              : a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
+            {entry.source === 'ad_slot' && (
+              <span className="ml-2 text-[9px] bg-emerald-700/60 text-emerald-200 px-1 py-px rounded font-bold">AD</span>
+            )}
+            {entry.preempt_at && (
+              <span className="ml-2 text-[9px] text-orange-400 font-mono" title={`Preempts at ${new Date(entry.preempt_at).toLocaleString()}`}>
+                ⏰ {new Date(entry.preempt_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })}
+              </span>
+            )}
+          </span>
+          <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[a?.asset_type] ?? 'text-gray-500'}`}>
+            {a?.asset_type === 'silence' ? <span className="text-red-400">silence</span> : a?.asset_type ?? ''}
+          </span>
+          <span className="w-[60px] text-[10px] shrink-0">
+            {a?.id ? <AssetCategoryBadge assetId={a.id} category={a?.category ?? null} dark compact /> : ''}
+          </span>
+          <span className="w-[55px] text-[10px] text-gray-500 shrink-0 tabular-nums" title={a?.id && lastPlayedMap?.last_played?.[a.id] ? new Date(lastPlayedMap.last_played[a.id]).toLocaleString() : ''}>
+            {fmtLastPlayed(a?.id ? lastPlayedMap?.last_played?.[a.id] : null)}
+          </span>
+          <span className="w-[60px] flex gap-1 text-[10px] shrink-0">
+            {!isCur && (
+              <>
+                <button onClick={() => moveUp(entry.id)} className="text-gray-400 hover:text-white p-1" title="Move up">▲</button>
+                <button onClick={() => moveDown(entry.id)} className="text-gray-400 hover:text-white p-1" title="Move down">▼</button>
+                <button onClick={() => removeEntry(entry.id)} className="text-red-400 hover:text-red-300 p-1" title="Remove">✕</button>
+              </>
+            )}
+          </span>
+        </div>
+      </div>);
+    }),
+    [filteredQueueEntries, dragEntryId, dragOverId, stationTz, lastPlayedMap,
+      handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd,
+      moveUp, moveDown, removeEntry, minuteTick],
+  );
+
+  const libraryRows = useMemo(() => filteredAssets.map(asset => (
+      <div key={asset.id} className="flex items-center px-2 py-[2px] border-b border-[#12122e] text-gray-300 hover:bg-[#14143a] hover:text-white group">
+        <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(asset.duration)}</span>
+        <span className="w-[120px] truncate text-[11px] font-bold shrink-0">{asset.artist ?? '—'}</span>
+        <span className="flex-1 truncate text-[11px] min-w-0">{asset.title}</span>
+        <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[asset.asset_type] ?? 'text-gray-500'}`}>{asset.asset_type}</span>
+        <span className="w-[60px] text-[10px] shrink-0">
+          <AssetCategoryBadge assetId={asset.id} category={asset.category} dark compact />
+        </span>
+        <span className="w-[70px] flex gap-2 shrink-0 md:opacity-0 md:group-hover:opacity-100">
+          <button onClick={() => stationId && addToQueue(asset.id)}
+            className="text-green-400 hover:text-green-300 text-[10px] p-1" title="Add to queue">+Q</button>
+          <button onClick={() => stationId && playNextMut.mutate(asset.id)}
+            className="text-yellow-400 hover:text-yellow-300 text-[10px] p-1" title="Play next">Next</button>
+        </span>
+      </div>
+    )),
+    [filteredAssets, stationId, addToQueue, playNext],
+  );
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] h-[calc(100vh-3rem)] flex flex-col select-none overflow-hidden">
@@ -617,78 +725,7 @@ export default function Dashboard() {
                 {queueEntries.length === 0 ? 'Queue empty — add assets from the library below, or press START' : 'No entries for selected date'}
               </div>
             ) : (
-              filteredQueueEntries.map((entry: any) => {
-                const a = entry.asset;
-                const isCur = entry.status === 'playing';
-                const isDragging = dragEntryId === entry.id;
-                const isDragOver = dragOverId === entry.id && dragEntryId !== entry.id;
-                return (<div key={entry.id + '-wrap'}>
-                  <div
-                    draggable={!isCur}
-                    onDragStart={!isCur ? (e) => handleDragStart(e, entry.id) : undefined}
-                    onDragOver={!isCur ? (e) => handleDragOver(e, entry.id) : undefined}
-                    onDragLeave={!isCur ? handleDragLeave : undefined}
-                    onDrop={!isCur ? (e) => handleDrop(e, entry) : undefined}
-                    onDragEnd={handleDragEnd}
-                    className={`flex items-center px-2 py-[2px] border-b min-w-[500px] transition-colors
-                      ${isCur ? 'bg-[#0000aa] text-yellow-300 border-[#12122e]'
-                        : entry.preempt_at ? 'bg-orange-950/30 text-orange-200 border-orange-900/30 hover:bg-orange-900/30'
-                        : entry.source === 'ad_slot' ? 'bg-emerald-950/30 text-emerald-200 border-emerald-900/30 hover:bg-emerald-900/30 border-l-2 border-l-emerald-500'
-                        : isDragOver ? 'bg-cyan-900/40 border-cyan-500 border-t-2'
-                        : isDragging ? 'opacity-40 border-[#12122e]'
-                        : 'text-cyan-200 hover:bg-[#14143a] border-[#12122e]'}
-                      ${!isCur && !entry.preempt_at ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                  >
-                    <span className="w-6 text-[11px] shrink-0">
-                      {isCur ? '▶' : <span className="text-gray-600 text-[10px]">⠿</span>}
-                    </span>
-                    <span className="w-[100px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString(undefined, stationTz ? { timeZone: stationTz } : undefined) : ''}>
-                      {entry.estimated_start ? (() => {
-                        const d = new Date(entry.estimated_start);
-                        const tzOpts = stationTz ? { timeZone: stationTz } : {};
-                        const dateStr = d.toLocaleDateString('en-CA', tzOpts);
-                        const todayStr = new Date().toLocaleDateString('en-CA', tzOpts);
-                        const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...tzOpts });
-                        return dateStr !== todayStr
-                          ? <><span className="text-[8px] text-gray-600">{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...tzOpts })}</span> {time}</>
-                          : time;
-                      })() : ''}
-                    </span>
-                    <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
-                    <span className="flex-1 truncate text-[12px] min-w-0">
-                      {a?.asset_type === 'silence' && entry.blackout_name
-                        ? <span className="text-red-400">Scheduled Silence — {entry.blackout_name}</span>
-                        : a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
-                      {entry.source === 'ad_slot' && (
-                        <span className="ml-2 text-[9px] bg-emerald-700/60 text-emerald-200 px-1 py-px rounded font-bold">AD</span>
-                      )}
-                      {entry.preempt_at && (
-                        <span className="ml-2 text-[9px] text-orange-400 font-mono" title={`Preempts at ${new Date(entry.preempt_at).toLocaleString()}`}>
-                          ⏰ {new Date(entry.preempt_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })}
-                        </span>
-                      )}
-                    </span>
-                    <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[a?.asset_type] ?? 'text-gray-500'}`}>
-                      {a?.asset_type === 'silence' ? <span className="text-red-400">silence</span> : a?.asset_type ?? ''}
-                    </span>
-                    <span className="w-[60px] text-[10px] shrink-0">
-                      {a?.id ? <AssetCategoryBadge assetId={a.id} category={a?.category ?? null} dark compact /> : ''}
-                    </span>
-                    <span className="w-[55px] text-[10px] text-gray-500 shrink-0 tabular-nums" title={a?.id && lastPlayedMap?.last_played?.[a.id] ? new Date(lastPlayedMap.last_played[a.id]).toLocaleString() : ''}>
-                      {fmtLastPlayed(a?.id ? lastPlayedMap?.last_played?.[a.id] : null)}
-                    </span>
-                    <span className="w-[60px] flex gap-1 text-[10px] shrink-0">
-                      {!isCur && (
-                        <>
-                          <button onClick={() => moveUpMut.mutate(entry.id)} className="text-gray-400 hover:text-white p-1" title="Move up">▲</button>
-                          <button onClick={() => moveDownMut.mutate(entry.id)} className="text-gray-400 hover:text-white p-1" title="Move down">▼</button>
-                          <button onClick={() => removeMut.mutate(entry.id)} className="text-red-400 hover:text-red-300 p-1" title="Remove">✕</button>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                </div>);
-              })
+              queueRows
             )}
           </div>
         </div>
@@ -745,23 +782,7 @@ export default function Dashboard() {
                   <span className="w-[50px] shrink-0">Cat</span>
                   <span className="w-[70px] shrink-0">Actions</span>
                 </div>
-                {filteredAssets.map(asset => (
-                  <div key={asset.id} className="flex items-center px-2 py-[2px] border-b border-[#12122e] text-gray-300 hover:bg-[#14143a] hover:text-white group">
-                    <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(asset.duration)}</span>
-                    <span className="w-[120px] truncate text-[11px] font-bold shrink-0">{asset.artist ?? '—'}</span>
-                    <span className="flex-1 truncate text-[11px] min-w-0">{asset.title}</span>
-                    <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[asset.asset_type] ?? 'text-gray-500'}`}>{asset.asset_type}</span>
-                    <span className="w-[60px] text-[10px] shrink-0">
-                      <AssetCategoryBadge assetId={asset.id} category={asset.category} dark compact />
-                    </span>
-                    <span className="w-[70px] flex gap-2 shrink-0 md:opacity-0 md:group-hover:opacity-100">
-                      <button onClick={() => stationId && addQueueMut.mutate(asset.id)}
-                        className="text-green-400 hover:text-green-300 text-[10px] p-1" title="Add to queue">+Q</button>
-                      <button onClick={() => stationId && playNextMut.mutate(asset.id)}
-                        className="text-yellow-400 hover:text-yellow-300 text-[10px] p-1" title="Play next">Next</button>
-                    </span>
-                  </div>
-                ))}
+                {libraryRows}
                 {filteredAssets.length === 0 && (
                   <div className="text-center text-gray-600 py-4 text-[11px]">No assets found.</div>
                 )}
