@@ -106,6 +106,8 @@ export default function Navbar() {
       links: [
         { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
         { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
+        { to: '/admin/spot-schedule', label: 'Spot Schedule', color: 'hover:text-yellow-300' },
+        { to: '/admin/sponsorship-rules', label: 'Sponsorship Rules', color: 'hover:text-yellow-300' },
         { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
         { to: '/admin/stations', label: 'Manage Stations', color: 'hover:text-cyan-300' },
         { to: '/admin/crm', label: 'CRM', color: 'hover:text-pink-300' },
@@ -132,7 +134,7 @@ export default function Navbar() {
   return (
     <nav className={isV2
       ? 'v2-glass-strong sticky top-0 z-50 text-white border-b border-white/10'
-      : 'bg-[#0a0a28] text-white border-b border-[#2a2a5e]'}>
+      : 'sticky top-0 z-50 bg-[#0a0a28] text-white border-b border-[#2a2a5e]'}>
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-12">
           {/* Logo + desktop links */}
@@ -296,7 +298,7 @@ export default function Navbar() {
 
       {/* Mobile dropdown menu */}
       {menuOpen && isAuthenticated && (
-        <div className="md:hidden border-t border-[#2a2a5e] bg-[#0c0c30]">
+        <div className="md:hidden border-t border-[#2a2a5e] bg-[#0c0c30] max-h-[calc(100dvh-3rem)] overflow-y-auto">
           <div className="px-4 py-2 space-y-1">
             {/* Standalone links */}
             {standaloneLinks.map(link => (

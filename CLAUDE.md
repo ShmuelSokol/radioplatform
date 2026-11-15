@@ -113,6 +113,8 @@ radioplatform/
 | HolidayWindow | holiday_window.py | Sabbath/holiday blackouts |
 | ChannelStream | channel_stream.py | Stream configuration |
 | Sponsor | sponsor.py | Sponsor/ad management (linked to User via user_id) |
+| SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
+| SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
 | PlaylistTemplate | playlist_template.py | Rotation pattern templates |
 | TemplateSlot | playlist_template.py | Slots within a template |
@@ -148,6 +150,8 @@ radioplatform/
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
+| spot_schedules | spot_schedules.py | /spot-schedules |
+| copy_review | copy_review.py | /sponsorship (rules + copy review) |
 | campaigns | campaigns.py | /campaigns |
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
@@ -172,6 +176,7 @@ radioplatform/
 | scheduling.py | Schedule resolution logic |
 | scheduler_engine.py | Background scheduling engine |
 | queue_replenish_service.py | Auto-replenish playback queue |
+| spot_schedule_service.py | Plans sponsor spots into clock slots and keeps pending `ad_slot` queue entries in step (see `wiki/spot-schedules.md`) |
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots (ElevenLabs is the fallback) |
@@ -179,6 +184,7 @@ radioplatform/
 | icecast_service.py | Icecast OTA broadcast source client |
 | email_service.py | Resend transactional email (campaign updates, invoices, payments) |
 | ai_email_service.py | Claude API-powered email drafting for manager outreach |
+| copy_review_service.py | Checks a sponsor's proposed wording against the sponsorship rules in force (Claude API, keyword fallback) |
 | alert_service.py | Alert creation, resolution, conflict detection, user notification dispatch |
 | sms_service.py | Twilio SMS and WhatsApp notification delivery |
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
@@ -190,7 +196,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Main control panel with queue, library, cart machine, weather preview
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel. Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
@@ -201,6 +207,8 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsor/ad management
+- SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead
+- SponsorshipRules.tsx — Edit the sponsorship wording rules (versioned) and try the wording check
 - Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
 - Alerts.tsx — Alerts management (filter, resolve, reopen, delete)
@@ -223,6 +231,7 @@ radioplatform/
 - Campaigns.tsx — Campaign list with create form
 - CampaignDetail.tsx — Campaign detail with drafts + comments thread
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
+- CheckWording.tsx — Sponsor proposes wording, gets back what must change and why
 
 ### Hooks (`frontend/src/hooks/`) — 22 hooks
 | Hook | Description |
@@ -267,6 +276,8 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
+- `/admin/spot-schedule` → SpotSchedules (protected)
+- `/admin/sponsorship-rules` → SponsorshipRules (protected)
 - `/admin/playlists` → Playlists (protected)
 - `/admin/alerts` → Alerts (protected)
 - `/admin/analytics` → Analytics (protected)
@@ -283,6 +294,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/sponsor/campaigns` → SponsorCampaigns (sponsor-protected)
 - `/sponsor/campaigns/:id` → CampaignDetail (sponsor-protected)
 - `/sponsor/billing` → SponsorBilling (sponsor-protected)
+- `/sponsor/wording` → CheckWording (sponsor-protected)
 
 ## Telegram Bot (`bot/`)
 Claude Code accessible over Telegram for remote development.
@@ -405,6 +417,9 @@ cd backend && npx vercel --prod --yes
 
 # Deploy frontend to Vercel
 cd frontend && npx vercel --prod --yes
+
+# Browser check of the control room against a fake backend (desktop + phone sizes)
+cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/control-room.mjs
 
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com

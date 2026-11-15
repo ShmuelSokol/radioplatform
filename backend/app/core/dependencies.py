@@ -78,10 +78,10 @@ async def get_current_user(
 
     # Track activity — throttle to avoid DB write on every request (max once per 5s)
     now = datetime.now(timezone.utc)
-    should_update = (
-        user.last_seen_at is None
-        or (now - user.last_seen_at).total_seconds() > 5
-    )
+    last_seen = user.last_seen_at
+    if last_seen is not None and last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)  # SQLite returns naive datetimes
+    should_update = last_seen is None or (now - last_seen).total_seconds() > 5
     if should_update:
         action = _classify_action(request.method, request.url.path)
         user.last_seen_at = now

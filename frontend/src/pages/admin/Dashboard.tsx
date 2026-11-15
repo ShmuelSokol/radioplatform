@@ -1,339 +1,144 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../hooks/useAuth';
 import { useStations } from '../../hooks/useStations';
-import { useAssets } from '../../hooks/useAssets';
 import {
-  useQueue, usePlayLog, useLastPlayed, useSkipCurrent, usePlayNext, useAddToQueue,
-  useRemoveFromQueue, useStartPlayback, useMoveUp, useMoveDown,
-  useWeatherPreview, useReorderDnd,
+  useQueue, useLastPlayed, useSkipCurrent, useRemoveFromQueue, useStartPlayback,
+  useMoveUp, useMoveDown, useWeatherPreview, useReorderDnd,
 } from '../../hooks/useQueue';
-import { useTimelinePreview } from '../../hooks/useSchedules';
+import { useLiveShows } from '../../hooks/useLiveShows';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
+import { fireNow, insertAt, queueEnd, queueNext } from '../../api/liveControl';
 import type { AssetInfo } from '../../types';
-import AssetCategoryBadge from '../../components/AssetCategoryBadge';
-import { useAssetTypes } from '../../hooks/useAssetTypes';
+import TransportBar from './controlroom/TransportBar';
+import QueuePanel from './controlroom/QueuePanel';
+import type { QueueRow } from './controlroom/QueuePanel';
+import LibraryPanel from './controlroom/LibraryPanel';
+import HotButtons from './controlroom/HotButtons';
+import { LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
+import { isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
+import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 
-function fmtDur(sec: number | null): string {
-  if (!sec || sec <= 0) return '0:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
+type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule';
+type SideTab = 'library' | 'live' | 'log' | 'schedule';
 
-function fmtDurMs(sec: number | null): string {
-  if (!sec || sec <= 0) return '0:00.0';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  const ms = Math.floor((sec % 1) * 10);
-  return `${m}:${s.toString().padStart(2, '0')}.${ms}`;
-}
+interface Toast { text: string; type: 'ok' | 'warn' | 'error' }
 
-function isValidTz(tz: string): boolean {
-  try { Intl.DateTimeFormat(undefined, { timeZone: tz }); return true; } catch { return false; }
-}
+const SIDE_TABS: Array<{ id: SideTab; label: string }> = [
+  { id: 'library', label: 'Library' },
+  { id: 'live', label: 'Go live' },
+  { id: 'log', label: 'Played' },
+  { id: 'schedule', label: 'Schedule' },
+];
 
-function fmtClock(d: Date, tz?: string): string {
-  const opts: Intl.DateTimeFormatOptions = { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' };
-  if (tz && isValidTz(tz)) opts.timeZone = tz;
-  return d.toLocaleTimeString('en-US', opts);
-}
-
-function fmtHMS(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = Math.floor(sec % 60);
-  return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-function fmtLastPlayed(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
-
-const TYPE_COLORS: Record<string, string> = {
-  music: 'text-cyan-300', spot: 'text-orange-400', shiur: 'text-purple-300',
-  jingle: 'text-yellow-200', zmanim: 'text-green-300',
-};
-// Bottom panel tabs
-type BottomTab = 'library' | 'cart' | 'log' | 'timeline';
+const MOBILE_TABS: Array<{ id: Pane; label: string; icon: string }> = [
+  { id: 'queue', label: 'Queue', icon: '☰' },
+  { id: 'buttons', label: 'Buttons', icon: '▦' },
+  { id: 'library', label: 'Library', icon: '♪' },
+  { id: 'live', label: 'Go live', icon: '●' },
+  { id: 'log', label: 'More', icon: '⋯' },
+];
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const qc = useQueryClient();
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
   const { data: stationsData } = useStations();
-  const { data: assetsData } = useAssets({ skip: 0, limit: 100 });
-  const { data: assetTypesData } = useAssetTypes();
-  const ASSET_TYPES = ['all', ...(assetTypesData ?? []).map(t => t.name)];
-  const TYPE_LABELS: Record<string, string> = { all: 'All' };
-  for (const t of (assetTypesData ?? [])) TYPE_LABELS[t.name] = t.name.charAt(0).toUpperCase() + t.name.slice(1);
-  const [clock, setClock] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<string>('all');
-  const [librarySearch, setLibrarySearch] = useState('');
-  const [bottomTab, setBottomTab] = useState<BottomTab>('library');
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [bottomHeight, setBottomHeight] = useState(() => {
-    try { const v = localStorage.getItem('radio_panel_h'); return v ? Math.max(120, Math.min(600, parseInt(v))) : 240; }
-    catch { return 240; }
-  });
-  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const stations = useMemo(() => stationsData?.stations ?? [], [stationsData]);
 
-  const stations = stationsData?.stations ?? [];
+  // ── Station selection (remembered in this browser) ─────────
   const [selectedStationId, setSelectedStationId] = useState<string | null>(() => {
     try { return localStorage.getItem('radio_last_station') || null; } catch { return null; }
   });
-  // Auto-select first station when stations load
   useEffect(() => {
-    if (stations.length > 0 && !selectedStationId) {
+    if (stations.length === 0) return;
+    if (!selectedStationId || !stations.some(s => s.id === selectedStationId)) {
       setSelectedStationId(stations[0].id);
     }
   }, [stations, selectedStationId]);
-  // Persist selected station
   useEffect(() => {
     if (selectedStationId) {
-      try { localStorage.setItem('radio_last_station', selectedStationId); } catch {}
+      try { localStorage.setItem('radio_last_station', selectedStationId); } catch { /* private mode */ }
     }
   }, [selectedStationId]);
   const stationId = selectedStationId;
-  const rawTz = stations.find((s: any) => s.id === stationId)?.timezone as string | undefined;
-  const stationTz = rawTz && isValidTz(rawTz) ? rawTz : undefined;
+  const station = stations.find(s => s.id === stationId);
+  const stationTz = station?.timezone && isValidTz(station.timezone) ? station.timezone : undefined;
 
+  // ── Server state ───────────────────────────────────────────
   const { data: queueData } = useQueue(stationId);
   const { nowPlaying: wsNowPlaying } = useNowPlayingWS(stationId ?? '');
   const { data: lastPlayedMap } = useLastPlayed(stationId);
-  const { data: logData } = usePlayLog(stationId, bottomTab === 'log');
+  const { data: liveData } = useLiveShows(stationId ? { station_id: stationId } : undefined);
   const skipMut = useSkipCurrent(stationId ?? '');
-  const playNextMut = usePlayNext(stationId ?? '');
-  const addQueueMut = useAddToQueue(stationId ?? '');
   const removeMut = useRemoveFromQueue(stationId ?? '');
   const startMut = useStartPlayback(stationId ?? '');
   const moveUpMut = useMoveUp(stationId ?? '');
   const moveDownMut = useMoveDown(stationId ?? '');
+  const reorderMut = useReorderDnd(stationId ?? '');
   const weatherPreviewMut = useWeatherPreview(stationId ?? '');
-  const reorderDndMut = useReorderDnd(stationId ?? '');
-  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [previewPlaying, setPreviewPlaying] = useState(false);
-  const [dragEntryId, setDragEntryId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'warn' | 'info' } | null>(null);
-  const [queueDateFilter, setQueueDateFilter] = useState<string>('');  // YYYY-MM-DD or ''
 
-  // Timeline preview — deferred until tab is active
-  const [timelineTime, setTimelineTime] = useState('');
-  const { data: timelineData, isLoading: timelineLoading } = useTimelinePreview(
-    bottomTab === 'timeline' ? (stationId ?? null) : null,
-    timelineTime || null,
-  );
+  const queueEntries: QueueRow[] = queueData?.entries ?? [];
+  const nowPlaying = queueData?.now_playing ?? null;
+  const nowAsset = nowPlaying?.asset ?? null;
+  const isPlaying = !!nowPlaying;
+  const nextAsset = queueEntries.find(e => e.status === 'pending')?.asset ?? null;
+  const liveShow = (liveData?.shows ?? []).find(s => s.status === 'live' && (!stationId || s.station_id === stationId)) ?? null;
 
-  // ── Client-side real-time countdown ────────────────────────
-  // Prefer WS data (real-time) over REST queueData (10s poll) for timing.
+  // ── UI state ───────────────────────────────────────────────
+  const [pane, setPane] = useState<Pane>('queue');
+  const [sideTab, setSideTab] = useStored<SideTab>('kbr_ctl_side_tab', 'library');
+  const [fireMode, setFireMode] = useStored<FireMode>('kbr_ctl_fire_mode', 'now');
+  const [insertBeforeId, setInsertBeforeId] = useState<string | null>(null);
+  const [queueDateFilter, setQueueDateFilter] = useState('');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const { pins, toggle: togglePin } = useHotButtons(stationId);
+  const pinnedIds = useMemo(() => new Set(pins.map(p => p.id)), [pins]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), toast.type === 'ok' ? 2500 : 6000);
+    return () => clearTimeout(t);
+  }, [toast]);
+  useEffect(() => { if (isPlaying) setStatusMessage(null); }, [isPlaying]);
+  // Leaving a station cancels a pending insert on it.
+  useEffect(() => { setInsertBeforeId(null); setQueueDateFilter(''); }, [stationId]);
+
+  // The marked insert point disappears once that item starts playing or is removed.
+  const insertEntry = insertBeforeId ? queueEntries.find(e => e.id === insertBeforeId && e.status === 'pending') : undefined;
+  useEffect(() => {
+    if (insertBeforeId && queueData && !insertEntry) setInsertBeforeId(null);
+  }, [insertBeforeId, insertEntry, queueData]);
+  const insertLabel = insertEntry ? (insertEntry.asset?.title ?? 'this item') : null;
+
+  // ── Countdown driven by the server's start time ────────────
   const [realElapsed, setRealElapsed] = useState(0);
-  const [realRemaining, setRealRemaining] = useState(0);
-  const rafRef = useRef<number>(0);
-  const serverStartedAt = wsNowPlaying?.started_at ?? queueData?.now_playing?.started_at ?? null;
+  const serverStartedAt = wsNowPlaying?.started_at ?? nowPlaying?.started_at ?? null;
   const wsEndsAt = wsNowPlaying?.ends_at ?? null;
   const serverDuration = wsEndsAt && serverStartedAt
     ? Math.max(0, (new Date(wsEndsAt).getTime() - new Date(serverStartedAt).getTime()) / 1000)
-    : (queueData?.now_playing?.asset?.duration ?? 0);
-  const isPlaying = !!queueData?.now_playing;
-
-  // Clear status message when playback starts
+    : (nowAsset?.duration ?? 0);
   useEffect(() => {
-    if (isPlaying) setStatusMessage(null);
-  }, [isPlaying]);
-
-  const updateCountdown = useCallback(() => {
-    if (serverStartedAt && serverDuration > 0) {
-      const startMs = new Date(serverStartedAt).getTime();
-      const nowMs = Date.now();
-      const el = Math.min(Math.max(0, (nowMs - startMs) / 1000), serverDuration);
-      const rem = Math.max(0, serverDuration - el);
-      setRealElapsed(el);
-      setRealRemaining(rem);
-    } else {
-      setRealElapsed(0);
-      setRealRemaining(0);
-    }
-    rafRef.current = requestAnimationFrame(updateCountdown);
-  }, [serverStartedAt, serverDuration]);
-
-  useEffect(() => {
-    rafRef.current = requestAnimationFrame(updateCountdown);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [updateCountdown]);
-
-  // Clock updates every second
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 1000);
+    const tick = () => {
+      if (serverStartedAt && serverDuration > 0) {
+        const el = Math.min(Math.max(0, (Date.now() - new Date(serverStartedAt).getTime()) / 1000), serverDuration);
+        setRealElapsed(el);
+      } else {
+        setRealElapsed(0);
+      }
+    };
+    tick();
+    const t = setInterval(tick, 200);
     return () => clearInterval(t);
-  }, []);
-
-  // ── Bottom panel resize ──────────────────────────────────────
-  const onResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragRef.current = { startY: e.clientY, startH: bottomHeight };
-    let lastH = bottomHeight;
-    const onMove = (ev: MouseEvent) => {
-      if (!dragRef.current) return;
-      const delta = dragRef.current.startY - ev.clientY;
-      lastH = Math.max(120, Math.min(600, dragRef.current.startH + delta));
-      setBottomHeight(lastH);
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      try { localStorage.setItem('radio_panel_h', String(lastH)); } catch {}
-      dragRef.current = null;
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [bottomHeight]);
-
-  const assets = assetsData?.assets ?? [];
-  const queueEntries = queueData?.entries ?? [];
-  const nowPlaying = queueData?.now_playing ?? null;
-  const nowAsset = nowPlaying?.asset ?? null;
-  const remaining = realRemaining;
-  const elapsed = realElapsed;
+  }, [serverStartedAt, serverDuration]);
   const duration = serverDuration || (nowAsset?.duration ?? 0);
-  const progress = duration > 0 ? Math.min(100, (elapsed / duration) * 100) : 0;
+  const remaining = Math.max(0, duration - realElapsed);
 
-  const queueDuration = queueData?.queue_duration_seconds ?? 0;
-  const totalQueueDuration = queueData?.total_queue_duration_seconds ?? 0;
-  const totalQueueEntries = queueData?.total_all ?? 0;
-  const nextEntry = queueEntries.find((e: any) => e.status === 'pending');
-  const nextAsset = nextEntry?.asset ?? null;
-  const playLog = logData?.logs ?? [];
-
-  // Queue date filter: extract available dates and filter entries
-  const queueDates = useMemo(() => {
-    const dates = new Set<string>();
-    for (const e of queueEntries) {
-      const ts = e.estimated_start || e.preempt_at;
-      if (ts) dates.add(new Date(ts).toLocaleDateString('en-CA', stationTz ? { timeZone: stationTz } : undefined)); // YYYY-MM-DD
-    }
-    return Array.from(dates).sort();
-  }, [queueEntries, stationTz]);
-
-  const filteredQueueEntries = useMemo(() => {
-    if (!queueDateFilter) return queueEntries;
-    return queueEntries.filter((e: any) => {
-      const ts = e.estimated_start || e.preempt_at;
-      if (!ts) return false;
-      const d = new Date(ts).toLocaleDateString('en-CA', stationTz ? { timeZone: stationTz } : undefined);
-      return d === queueDateFilter;
-    });
-  }, [queueEntries, queueDateFilter, stationTz]);
-
-  // Filter assets by type tab
-  const filteredAssets = useMemo(() => {
-    let list = assets;
-    if (activeTab !== 'all') list = list.filter(a => a.asset_type === activeTab);
-    if (librarySearch) {
-      const q = librarySearch.toLowerCase();
-      list = list.filter(a =>
-        a.title.toLowerCase().includes(q) ||
-        (a.artist ?? '').toLowerCase().includes(q) ||
-        (a.category ?? '').toLowerCase().includes(q)
-      );
-    }
-    return list;
-  }, [assets, activeTab, librarySearch]);
-
-  const typeCounts = useMemo(() => {
-    const c: Record<string, number> = { all: assets.length };
-    for (const a of assets) c[a.asset_type] = (c[a.asset_type] || 0) + 1;
-    return c;
-  }, [assets]);
-
-  // Cart items (jingles + spots)
-  const cartItems = useMemo(() =>
-    assets.filter(a => a.asset_type === 'jingle' || a.asset_type === 'spot'),
-  [assets]);
-
-  // ── Weather preview handler ─────────────────────────────────
-  const handlePreviewWeather = useCallback(async () => {
-    if (weatherPreviewMut.isPending || previewPlaying) return;
-    try {
-      const data = await weatherPreviewMut.mutateAsync();
-      const urls = [data.time_url, data.weather_url].filter(Boolean) as string[];
-      if (urls.length === 0) return;
-      setPreviewPlaying(true);
-
-      // Play URLs sequentially using promises
-      const playUrl = (url: string): Promise<void> => {
-        return new Promise((resolve, reject) => {
-          const a = new Audio(url);
-          a.onended = () => resolve();
-          a.onerror = () => reject();
-          a.play().catch(reject);
-        });
-      };
-
-      (async () => {
-        try {
-          for (const url of urls) await playUrl(url);
-        } catch { /* audio error */ }
-        setPreviewPlaying(false);
-      })();
-    } catch { setPreviewPlaying(false); }
-  }, [weatherPreviewMut, previewPlaying]);
-
-  // ── Drag-and-drop queue reorder ──────────────────────────────
-  const handleDragStart = useCallback((e: React.DragEvent, entryId: string) => {
-    setDragEntryId(entryId);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', entryId);
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent, entryId: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverId(entryId);
-  }, []);
-
-  const handleDragLeave = useCallback(() => {
-    setDragOverId(null);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent, targetEntry: any) => {
-    e.preventDefault();
-    setDragOverId(null);
-    const sourceId = dragEntryId;
-    if (!sourceId || sourceId === targetEntry.id) {
-      setDragEntryId(null);
-      return;
-    }
-    reorderDndMut.mutate(
-      { entryId: sourceId, newPosition: targetEntry.position },
-      {
-        onSuccess: (data) => {
-          if (data.warnings && data.warnings.length > 0) {
-            setToastMessage({ text: data.warnings.join(' | '), type: 'warn' });
-          }
-        },
-      },
-    );
-    setDragEntryId(null);
-  }, [dragEntryId, reorderDndMut]);
-
-  const handleDragEnd = useCallback(() => {
-    setDragEntryId(null);
-    setDragOverId(null);
-  }, []);
-
-  // Auto-dismiss toast
-  useEffect(() => {
-    if (!toastMessage) return;
-    const t = setTimeout(() => setToastMessage(null), 6000);
-    return () => clearTimeout(t);
-  }, [toastMessage]);
-
-  // ── Audio engine ───────────────────────────────────────────
-  // Prefer WS now-playing (instant on skip/advance) over REST queueData (10s poll).
+  // ── Audio monitor (what the operator hears in this browser) ─
   const audioAsset: AssetInfo | null = wsNowPlaying?.asset_id && wsNowPlaying.asset ? {
     id: wsNowPlaying.asset_id,
     title: wsNowPlaying.asset.title,
@@ -342,31 +147,20 @@ export default function Dashboard() {
     category: nowAsset?.category ?? null,
     duration: nowAsset?.duration ?? null,
   } : nowAsset ? {
-    id: nowAsset.id,
-    title: nowAsset.title,
-    artist: nowAsset.artist,
-    asset_type: nowAsset.asset_type,
-    category: nowAsset.category,
-    duration: nowAsset.duration,
+    id: nowAsset.id, title: nowAsset.title, artist: nowAsset.artist,
+    asset_type: nowAsset.asset_type, category: nowAsset.category, duration: nowAsset.duration,
   } : null;
 
-  // Find next upcoming preempt entry for fade-out scheduling
   const nextPreempt = useMemo(() => {
     const now = Date.now();
-    return queueEntries.find((e: any) => {
-      if (!e.preempt_at || e.status === 'playing') return false;
-      return new Date(e.preempt_at).getTime() > now;
-    });
+    return queueEntries.find(e => e.preempt_at && e.status !== 'playing' && new Date(e.preempt_at).getTime() > now);
   }, [queueEntries]);
+  const preemptFadeMs = queueData?.preempt_fade_ms ?? 2000;
 
-  const preemptFadeMs = (queueData as any)?.preempt_fade_ms ?? 2000;
-
-  // Icecast stream: direct MP3 stream via <audio> element
   const dashStreamUrl = wsNowPlaying?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
   const dashUseStream = !!dashStreamUrl && !streamFailed;
   const dashStreamAudioRef = useRef<HTMLAudioElement>(null);
-
   useEffect(() => {
     const audio = dashStreamAudioRef.current;
     if (!audio || !dashUseStream || !isPlaying) return;
@@ -374,7 +168,6 @@ export default function Dashboard() {
     audio.play().catch(() => setStreamFailed(true));
     return () => { audio.pause(); audio.src = ''; };
   }, [dashUseStream, isPlaying, dashStreamUrl]);
-
   useEffect(() => {
     const audio = dashStreamAudioRef.current;
     if (!audio || !dashUseStream) return;
@@ -383,15 +176,11 @@ export default function Dashboard() {
     return () => audio.removeEventListener('error', onError);
   }, [dashUseStream]);
 
-  const {
-    volume, setVolume, muted, toggleMute,
-    vuLevels, audioReady, initAudio,
-  } = useAudioEngine(
+  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio } = useAudioEngine(
     dashUseStream ? null : audioAsset, realElapsed, dashUseStream ? false : isPlaying,
     nextPreempt?.preempt_at ?? null,
     nextPreempt?.asset_id ?? null,
     preemptFadeMs,
-    // Crossfade params from WS
     wsNowPlaying?.asset?.cue_in ?? 0,
     wsNowPlaying?.asset?.cue_out ?? 0,
     wsNowPlaying?.asset?.cross_start ?? 0,
@@ -402,536 +191,338 @@ export default function Dashboard() {
     null, null,
     serverStartedAt,
   );
-
-  // Sync volume to stream audio element in dashboard
   useEffect(() => {
-    if (dashStreamAudioRef.current) {
-      dashStreamAudioRef.current.volume = muted ? 0 : volume;
-    }
+    if (dashStreamAudioRef.current) dashStreamAudioRef.current.volume = muted ? 0 : volume;
   }, [volume, muted]);
+  const vuL = audioReady && isPlaying ? Math.round(vuLevels[0] * 30) : 0;
+  const vuR = audioReady && isPlaying ? Math.round(vuLevels[1] * 30) : 0;
 
-  // VU meter levels: use real audio data when available, else fallback
-  const vuLevel = audioReady && isPlaying
-    ? Math.round(vuLevels[0] * 30)
-    : (isPlaying ? 22 + Math.floor(Math.sin(realElapsed * 2) * 4) : 0);
-  const vuLevel2 = audioReady && isPlaying
-    ? Math.round(vuLevels[1] * 30)
-    : (isPlaying ? 20 + Math.floor(Math.cos(realElapsed * 1.7) * 5) : 0);
+  // ── Queue derived data ─────────────────────────────────────
+  const queueDates = useMemo(() => {
+    const dates = new Set<string>();
+    for (const e of queueEntries) {
+      const ts = e.estimated_start || e.preempt_at;
+      if (ts) dates.add(new Date(ts).toLocaleDateString('en-CA', stationTz ? { timeZone: stationTz } : undefined));
+    }
+    return Array.from(dates).sort();
+  }, [queueEntries, stationTz]);
+
+  const filteredQueueEntries = useMemo(() => {
+    if (!queueDateFilter) return queueEntries;
+    return queueEntries.filter(e => {
+      const ts = e.estimated_start || e.preempt_at;
+      if (!ts) return false;
+      return new Date(ts).toLocaleDateString('en-CA', stationTz ? { timeZone: stationTz } : undefined) === queueDateFilter;
+    });
+  }, [queueEntries, queueDateFilter, stationTz]);
+
+  // ── Actions ────────────────────────────────────────────────
+  // Latest values for stable callbacks (panels are memoised; the clock ticks 5x a second).
+  const latest = useRef({ stationId, queueEntries, insertBeforeId, busyId, initAudio });
+  latest.current = { stationId, queueEntries, insertBeforeId, busyId, initAudio };
+
+  const refreshQueue = useCallback(() => {
+    const sid = latest.current.stationId;
+    qc.invalidateQueries({ queryKey: ['queue', sid] });
+    qc.invalidateQueries({ queryKey: ['play-log', sid] });
+  }, [qc]);
+
+  const send = useCallback(async (asset: CtlAsset, how: SendHow) => {
+    const { stationId: sid, queueEntries: entries, insertBeforeId: targetId, busyId: busy } = latest.current;
+    if (!sid || busy) return;
+    setBusyId(asset.id);
+    try {
+      if (how === 'insert') {
+        const target = entries.find(e => e.id === targetId && e.status === 'pending');
+        if (target) {
+          const res = await insertAt(sid, asset.id, target.position);
+          setToast(res.warnings.length
+            ? { text: `Inserted “${asset.title}”. Note: ${res.warnings.join(' | ')}`, type: 'warn' }
+            : { text: `Inserted “${asset.title}”`, type: 'ok' });
+        } else {
+          await queueNext(sid, asset.id);
+          setInsertBeforeId(null);
+          setToast({ text: `That spot already passed, so “${asset.title}” will play next.`, type: 'warn' });
+        }
+      } else if (how === 'now') {
+        latest.current.initAudio();
+        await fireNow(sid, asset.id);
+        setToast({ text: `On air now: “${asset.title}”`, type: 'ok' });
+      } else if (how === 'next') {
+        await queueNext(sid, asset.id);
+        setToast({ text: `Playing next: “${asset.title}”`, type: 'ok' });
+      } else {
+        await queueEnd(sid, asset.id);
+        setToast({ text: `Added to the end: “${asset.title}”`, type: 'ok' });
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message;
+      setToast({ text: typeof msg === 'string' ? msg : `Could not send “${asset.title}”. Check the connection and try again.`, type: 'error' });
+    } finally {
+      setBusyId(null);
+      refreshQueue();
+    }
+  }, [refreshQueue]);
+
+  const onMutError = useCallback(() => {
+    setToast({ text: 'That did not go through. Check the connection and try again.', type: 'error' });
+  }, []);
+
+  const handleNext = useCallback(() => {
+    initAudio();
+    skipMut.mutate(undefined, { onError: onMutError });
+  }, [initAudio, skipMut, onMutError]);
+
+  const handleStart = useCallback(() => {
+    if (!stationId) { setStatusMessage('No station available'); return; }
+    setStatusMessage(null);
+    initAudio();
+    startMut.mutate(undefined, {
+      onSuccess: (data: any) => {
+        if (data?.now_playing === null || data?.now_playing === undefined) {
+          setStatusMessage(data?.message || 'The queue is empty. Add something from the library first.');
+        }
+      },
+      onError: (err: any) => setStatusMessage(err?.response?.data?.message || 'Could not start playback'),
+    });
+  }, [stationId, initAudio, startMut]);
+
+  const moveUp = useCallback((id: string) => moveUpMut.mutate(id, { onError: onMutError }), [moveUpMut, onMutError]);
+  const moveDown = useCallback((id: string) => moveDownMut.mutate(id, { onError: onMutError }), [moveDownMut, onMutError]);
+  const remove = useCallback((id: string) => removeMut.mutate(id, { onError: onMutError }), [removeMut, onMutError]);
+  const reorder = useCallback((entryId: string, newPosition: number) => {
+    reorderMut.mutate({ entryId, newPosition }, {
+      onSuccess: (data) => {
+        if (data.warnings?.length) setToast({ text: data.warnings.join(' | '), type: 'warn' });
+      },
+      onError: onMutError,
+    });
+  }, [reorderMut, onMutError]);
+
+  const armInsert = useCallback((entryId: string | null) => {
+    setInsertBeforeId(entryId);
+    if (entryId) {
+      // On a phone the library is a separate tab; on desktop make sure it is showing.
+      setPane('library');
+      setSideTab('library');
+    }
+  }, [setSideTab]);
+  const cancelInsert = useCallback(() => {
+    setInsertBeforeId(null);
+    setPane(p => (p === 'library' || p === 'buttons' ? 'queue' : p));
+  }, []);
+
+  // Off-air time + weather preview
+  const [weatherState, setWeatherState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const previewWeather = useCallback(async () => {
+    if (weatherState !== 'idle') return;
+    setWeatherState('loading');
+    try {
+      const data = await weatherPreviewMut.mutateAsync();
+      const urls = [data.time_url, data.weather_url].filter(Boolean) as string[];
+      if (urls.length === 0) {
+        setToast({ text: 'No weather announcement is available right now.', type: 'warn' });
+        setWeatherState('idle');
+        return;
+      }
+      setWeatherState('playing');
+      for (const url of urls) {
+        await new Promise<void>((resolve) => {
+          const a = new Audio(url);
+          a.onended = () => resolve();
+          a.onerror = () => resolve();
+          a.play().catch(() => resolve());
+        });
+      }
+    } catch {
+      setToast({ text: 'Could not load the weather preview.', type: 'error' });
+    }
+    setWeatherState('idle');
+  }, [weatherState, weatherPreviewMut]);
+
+  // ── Keyboard shortcuts (desktop) ───────────────────────────
+  const keyActions = useRef({ handleNext, cancelInsert, isPlaying });
+  keyActions.current = { handleNext, cancelInsert, isPlaying };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+      if (e.key === 'Escape') {
+        if (typing) (el as HTMLElement).blur();
+        keyActions.current.cancelInsert();
+        return;
+      }
+      if (typing) return;
+      if (e.key === '/') {
+        e.preventDefault();
+        setPane('library');
+        setSideTab('library');
+        // Focus at once when the box is already on screen, so fast typing is not lost.
+        if (searchRef.current) searchRef.current.focus();
+        else setTimeout(() => searchRef.current?.focus(), 0);
+      } else if ((e.key === 'n' || e.key === 'N') && !e.repeat && keyActions.current.isPlaying) {
+        keyActions.current.handleNext();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setSideTab]);
+
+  // ── Panels ─────────────────────────────────────────────────
+  const noStation = !stationId;
+  const queuePanel = (
+    <QueuePanel
+      entries={filteredQueueEntries}
+      loadedCount={queueEntries.length}
+      totalCount={queueData?.total_all ?? queueEntries.length}
+      totalDuration={queueData?.total_queue_duration_seconds ?? queueData?.queue_duration_seconds ?? 0}
+      dates={queueDates}
+      dateFilter={queueDateFilter}
+      onDateFilter={setQueueDateFilter}
+      stationTz={stationTz}
+      insertBeforeId={insertBeforeId}
+      onArmInsert={armInsert}
+      onMoveUp={moveUp}
+      onMoveDown={moveDown}
+      onRemove={remove}
+      onReorder={reorder}
+      lastPlayed={lastPlayedMap?.last_played}
+    />
+  );
+  const hotButtons = (wide: boolean) => (
+    <HotButtons
+      pins={pins}
+      onTogglePin={togglePin}
+      onSend={send}
+      busyId={busyId}
+      fireMode={fireMode}
+      onFireMode={setFireMode}
+      inserting={insertLabel !== null}
+      onCancelInsert={cancelInsert}
+      disabled={noStation}
+      onPreviewWeather={previewWeather}
+      weatherState={weatherState}
+      wide={wide}
+    />
+  );
+  const libraryPanel = (
+    <LibraryPanel
+      insertLabel={insertLabel}
+      onCancelInsert={cancelInsert}
+      onSend={send}
+      busyId={busyId}
+      pinnedIds={pinnedIds}
+      onTogglePin={togglePin}
+      searchRef={searchRef}
+      disabled={noStation}
+    />
+  );
+  const sidePanel = (tab: Pane) =>
+    tab === 'library' ? libraryPanel
+    : tab === 'live' ? <LivePanel stationId={stationId} stationTz={stationTz} />
+    : tab === 'log' ? <LogPanel stationId={stationId} stationTz={stationTz} />
+    : <SchedulePanel stationId={stationId} />;
 
   return (
-    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] h-[calc(100vh-3rem)] flex flex-col select-none overflow-hidden">
-      <audio ref={previewAudioRef} className="hidden" />
+    <div className="h-full flex flex-col bg-[#080820] text-gray-200 font-sans select-none overflow-hidden" data-testid="control-room">
       <audio ref={dashStreamAudioRef} className="hidden" />
 
-      {/* Toast notification for rule warnings */}
-      {toastMessage && (
-        <div className={`fixed top-14 left-1/2 -translate-x-1/2 z-50 max-w-lg px-4 py-2 rounded-lg shadow-lg text-[12px] animate-pulse ${
-          toastMessage.type === 'warn'
-            ? 'bg-amber-900/95 border border-amber-600 text-amber-200'
-            : 'bg-cyan-900/95 border border-cyan-600 text-cyan-200'
-        }`}>
-          <div className="flex items-start gap-2">
-            <span className="shrink-0 mt-0.5">{toastMessage.type === 'warn' ? '⚠' : 'ℹ'}</span>
-            <span>{toastMessage.text}</span>
-            <button onClick={() => setToastMessage(null)} className="shrink-0 ml-2 text-gray-400 hover:text-white">✕</button>
-          </div>
+      {toast && (
+        <div role="status" data-testid="toast"
+          className={`fixed left-1/2 -translate-x-1/2 z-[60] w-[calc(100%-1.5rem)] max-w-md px-3 py-2.5 rounded-lg shadow-xl text-sm flex items-start gap-2
+            bottom-[calc(4.5rem+env(safe-area-inset-bottom))] lg:bottom-10
+            ${toast.type === 'ok' ? 'bg-green-800 border border-green-500 text-green-50'
+              : toast.type === 'warn' ? 'bg-amber-900 border border-amber-500 text-amber-50'
+              : 'bg-red-900 border border-red-500 text-red-50'}`}>
+          <span className="flex-1">{toast.text}</span>
+          <button type="button" onClick={() => setToast(null)} aria-label="Dismiss" className="shrink-0 w-6 h-6 opacity-70 hover:opacity-100">✕</button>
         </div>
       )}
 
-      {/* ═══ Status bar ═══ */}
-      <div className="bg-[#0a0a28] border-b border-[#2a2a5e] px-3 py-1.5 flex items-center gap-2 md:gap-3 flex-wrap shrink-0">
-        {/* Station selector */}
-        {stations.length > 0 && (
-          <select
-            value={selectedStationId ?? ''}
-            onChange={(e) => setSelectedStationId(e.target.value || null)}
-            className="bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-200 text-[11px] px-1.5 py-0.5 rounded-sm focus:outline-none focus:border-cyan-600"
-          >
-            {stations.map((s: any) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        )}
-        {/* Play / Stop */}
-        {isPlaying ? (
-          <span className="bg-green-600 text-white px-2 py-0.5 font-bold text-[11px] rounded-sm tracking-wide animate-pulse">
-            ON AIR
-          </span>
-        ) : (
-          <button onClick={() => {
-            if (!stationId) { setStatusMessage('No station available'); return; }
-            setStatusMessage(null);
-            initAudio();
-            startMut.mutate(undefined, {
-              onSuccess: (data: any) => {
-                if (data?.now_playing === null || data?.now_playing === undefined) {
-                  setStatusMessage(data?.message || 'Queue is empty — add assets from the library first');
-                }
-              },
-              onError: (err: any) => {
-                const msg = err?.response?.data?.message;
-                setStatusMessage(msg || 'Failed to start playback');
-              },
-            });
-          }}
-            disabled={startMut.isPending}
-            className="bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 font-bold text-[11px] rounded-sm tracking-wide disabled:opacity-50">
-            {startMut.isPending ? '⏳ STARTING...' : '▶ START'}
-          </button>
-        )}
+      <TransportBar
+        stations={stations}
+        stationId={stationId}
+        onStation={setSelectedStationId}
+        isPlaying={isPlaying}
+        nowAsset={nowAsset}
+        nextAsset={nextAsset}
+        elapsed={realElapsed}
+        remaining={remaining}
+        duration={duration}
+        onStart={handleStart}
+        starting={startMut.isPending}
+        statusMessage={statusMessage}
+        onNext={handleNext}
+        nextBusy={skipMut.isPending}
+        audio={{ audioReady, initAudio, volume, setVolume, muted, toggleMute, vuL, vuR }}
+        stationTz={stationTz}
+        liveShow={liveShow ? { id: liveShow.id, title: liveShow.title } : null}
+      />
 
-        {/* Status message */}
-        {statusMessage && !isPlaying && (
-          <span className="text-amber-400 text-[11px] animate-pulse">{statusMessage}</span>
-        )}
-
-        {/* Remaining */}
-        <div className="flex items-baseline gap-1">
-          <span className="text-gray-500 text-[11px] hidden sm:inline">Remaining</span>
-          <span className="text-red-400 text-base md:text-lg font-bold tabular-nums leading-none">{fmtDurMs(remaining)}</span>
-        </div>
-
-        {/* Progress bar */}
-        <div className="w-20 md:w-32 h-2 bg-[#111] rounded-sm overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-green-500 to-yellow-400"
-            style={{ width: `${progress}%` }} />
-        </div>
-
-        {/* Elapsed / Duration */}
-        <div className="flex items-baseline gap-1">
-          <span className="text-gray-500 text-[11px] hidden sm:inline">Elapsed</span>
-          <span className="text-white text-sm tabular-nums">{fmtDurMs(elapsed)}</span>
-          <span className="text-gray-600">/</span>
-          <span className="text-gray-400 text-sm tabular-nums">{fmtDur(duration)}</span>
-        </div>
-
-        {/* Skip */}
-        <button onClick={() => { initAudio(); skipMut.mutate(); }} disabled={!isPlaying}
-          className="px-2 py-0.5 bg-[#2a2a5e] hover:bg-[#3a3a7e] text-yellow-300 text-[11px] rounded disabled:opacity-30">
-          SKIP ⏭
-        </button>
-
-        {/* Audio controls */}
-        {!audioReady && isPlaying ? (
-          <button onClick={() => initAudio()}
-            className="px-2 py-0.5 bg-cyan-800 hover:bg-cyan-700 text-cyan-100 text-[11px] rounded animate-pulse">
-            🔊 Enable Audio
-          </button>
-        ) : audioReady ? (
-          <div className="flex items-center gap-1.5">
-            <button onClick={toggleMute}
-              className="text-[13px] w-5 text-center text-gray-300 hover:text-white">
-              {muted ? '🔇' : volume > 0.5 ? '🔊' : volume > 0 ? '🔉' : '🔈'}
-            </button>
-            <input type="range" min="0" max="1" step="0.01" value={volume}
-              onChange={e => setVolume(parseFloat(e.target.value))}
-              className="w-16 md:w-20 h-1 accent-cyan-400 cursor-pointer" />
-          </div>
-        ) : null}
-
-        {/* VU Meters - hidden on small screens */}
-        <div className="hidden md:flex flex-1 min-w-[140px] max-w-[300px] flex-col gap-0.5 mx-1">
-          <div className="flex items-center gap-1">
-            <span className="text-yellow-400 text-[8px] w-5 text-right">L</span>
-            <div className="flex-1 h-[5px] bg-[#111] rounded-sm overflow-hidden flex">
-              {Array.from({ length: 30 }).map((_, i) => (
-                <div key={i} className={`flex-1 mx-px rounded-sm transition-colors duration-150 ${
-                  i < vuLevel
-                    ? (i < 18 ? 'bg-green-500' : i < 24 ? 'bg-yellow-500' : 'bg-red-500')
-                    : (i < 18 ? 'bg-green-900/30' : i < 24 ? 'bg-yellow-900/30' : 'bg-red-900/30')
-                }`} />
+      {isDesktop ? (
+        /* ═══ Desktop: buttons | queue | library ═══ */
+        <div className="flex-1 min-h-0 flex">
+          <aside className="w-56 xl:w-72 2xl:w-80 shrink-0 border-r border-[#2a2a5e] min-h-0">
+            {hotButtons(false)}
+          </aside>
+          <main className="flex-1 min-w-0 min-h-0">{queuePanel}</main>
+          <aside className="w-[340px] xl:w-[440px] 2xl:w-[520px] shrink-0 border-l border-[#2a2a5e] min-h-0 flex flex-col">
+            <div className="shrink-0 flex bg-[#14143c] border-b border-[#2a2a5e]" role="tablist">
+              {SIDE_TABS.map(t => (
+                <button key={t.id} type="button" role="tab" aria-selected={sideTab === t.id} onClick={() => setSideTab(t.id)}
+                  className={`flex-1 h-10 text-sm font-semibold border-b-2 ${
+                    sideTab === t.id ? 'border-cyan-400 text-cyan-200 bg-[#1a1a4e]' : 'border-transparent text-gray-400 hover:text-gray-200'
+                  }`}>
+                  {t.id === 'live' && liveShow ? '● Live' : t.label}
+                </button>
               ))}
             </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-yellow-400 text-[8px] w-5 text-right">R</span>
-            <div className="flex-1 h-[5px] bg-[#111] rounded-sm overflow-hidden flex">
-              {Array.from({ length: 30 }).map((_, i) => (
-                <div key={i} className={`flex-1 mx-px rounded-sm transition-colors duration-150 ${
-                  i < vuLevel2
-                    ? (i < 18 ? 'bg-green-500' : i < 24 ? 'bg-yellow-500' : 'bg-red-500')
-                    : (i < 18 ? 'bg-green-900/30' : i < 24 ? 'bg-yellow-900/30' : 'bg-red-900/30')
-                }`} />
-              ))}
-            </div>
-          </div>
+            <div className="flex-1 min-h-0">{sidePanel(sideTab)}</div>
+          </aside>
         </div>
-
-        {/* Clock */}
-        <div className="flex items-baseline gap-1 ml-auto">
-          <span className="text-red-400 text-lg md:text-xl font-bold tabular-nums leading-none">{fmtClock(clock, stationTz)}</span>
-          {stationTz && <span className="text-gray-500 text-[10px] hidden sm:inline">{stationTz.split('/').pop()?.replace(/_/g, ' ')}</span>}
-        </div>
-      </div>
-
-      {/* ═══ Now Playing + Next ═══ */}
-      <div className="border-b border-[#2a2a5e] shrink-0">
-        <div className="flex items-center bg-[#0c0c2c] px-3 py-1 border-b border-[#1e1e4a] min-h-[30px]">
-          <span className={`text-[11px] w-16 shrink-0 ${isPlaying ? 'text-green-400' : 'text-gray-600'}`}>
-            {isPlaying ? '▶ NOW' : '■ STOP'}
-          </span>
-          <span className="flex-1 text-yellow-300 text-[15px] font-bold truncate tracking-wide">
-            {nowAsset ? `${nowAsset.artist ?? ''} ${nowAsset.artist ? '— ' : ''}${nowAsset.title}` : 'Press START to begin playback'}
-          </span>
-          <span className={`text-[10px] ml-2 px-1.5 py-0.5 rounded ${
-            nowAsset ? 'bg-yellow-900/50 text-yellow-300' : ''}`}>
-            {nowAsset?.asset_type ?? ''}
-          </span>
-          <span className="text-yellow-300/60 text-[11px] ml-2 shrink-0 tabular-nums">{fmtDur(duration)}</span>
-        </div>
-        <div className="flex items-center bg-[#0c0c2c] px-3 py-0.5 min-h-[24px]">
-          <span className="text-gray-500 text-[11px] w-16 shrink-0">NEXT</span>
-          <span className="flex-1 text-green-400 truncate text-[13px]">
-            {nextAsset ? `${nextAsset.artist ?? ''} ${nextAsset.artist ? '— ' : ''}${nextAsset.title}` : '—'}
-          </span>
-          <span className={`text-[10px] ml-2 px-1.5 py-0.5 rounded ${
-            nextAsset ? 'bg-green-900/50 text-green-300' : ''}`}>
-            {nextAsset?.asset_type ?? ''}
-          </span>
-        </div>
-      </div>
-
-      {/* ═══ Main: Queue + Bottom Panel ═══ */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-
-        {/* Top: Queue */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden border-b border-[#2a2a5e]">
-          <div className="bg-[#16163e] px-2 py-0.5 text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-2 shrink-0 border-b border-[#2a2a5e]">
-            <span className="font-bold text-gray-300">Queue</span>
-            <span>({queueDateFilter ? `${filteredQueueEntries.length} shown` : totalQueueEntries > queueEntries.length ? `${queueEntries.length}/${totalQueueEntries}` : queueEntries.length}){totalQueueDuration > 0 ? ` — ${(totalQueueDuration / 86400).toFixed(1)}d total` : queueDuration > 0 ? ` — ${fmtHMS(queueDuration)}` : ''}</span>
-            <select
-              value={queueDateFilter}
-              onChange={(e) => setQueueDateFilter(e.target.value)}
-              className="ml-auto bg-[#0a0a28] border border-[#2a2a5e] text-gray-300 text-[10px] px-1 py-0 rounded-sm focus:outline-none focus:border-cyan-700"
-            >
-              <option value="">All dates</option>
-              {queueDates.map(d => {
-                const label = new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(stationTz ? { timeZone: stationTz } : {}) });
-                return <option key={d} value={d}>{label}</option>;
-              })}
-            </select>
-          </div>
-          <div className="flex-1 overflow-y-auto overflow-x-auto">
-            {filteredQueueEntries.length === 0 ? (
-              <div className="text-center text-gray-600 py-6 text-[12px]">
-                {queueEntries.length === 0 ? 'Queue empty — add assets from the library below, or press START' : 'No entries for selected date'}
-              </div>
-            ) : (
-              filteredQueueEntries.map((entry: any) => {
-                const a = entry.asset;
-                const isCur = entry.status === 'playing';
-                const isDragging = dragEntryId === entry.id;
-                const isDragOver = dragOverId === entry.id && dragEntryId !== entry.id;
-                return (<div key={entry.id + '-wrap'}>
-                  <div
-                    draggable={!isCur}
-                    onDragStart={!isCur ? (e) => handleDragStart(e, entry.id) : undefined}
-                    onDragOver={!isCur ? (e) => handleDragOver(e, entry.id) : undefined}
-                    onDragLeave={!isCur ? handleDragLeave : undefined}
-                    onDrop={!isCur ? (e) => handleDrop(e, entry) : undefined}
-                    onDragEnd={handleDragEnd}
-                    className={`flex items-center px-2 py-[2px] border-b min-w-[500px] transition-colors
-                      ${isCur ? 'bg-[#0000aa] text-yellow-300 border-[#12122e]'
-                        : entry.preempt_at ? 'bg-orange-950/30 text-orange-200 border-orange-900/30 hover:bg-orange-900/30'
-                        : entry.source === 'ad_slot' ? 'bg-emerald-950/30 text-emerald-200 border-emerald-900/30 hover:bg-emerald-900/30 border-l-2 border-l-emerald-500'
-                        : isDragOver ? 'bg-cyan-900/40 border-cyan-500 border-t-2'
-                        : isDragging ? 'opacity-40 border-[#12122e]'
-                        : 'text-cyan-200 hover:bg-[#14143a] border-[#12122e]'}
-                      ${!isCur && !entry.preempt_at ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                  >
-                    <span className="w-6 text-[11px] shrink-0">
-                      {isCur ? '▶' : <span className="text-gray-600 text-[10px]">⠿</span>}
-                    </span>
-                    <span className="w-[100px] tabular-nums text-[10px] shrink-0 text-gray-500" title={entry.estimated_start ? new Date(entry.estimated_start).toLocaleString(undefined, stationTz ? { timeZone: stationTz } : undefined) : ''}>
-                      {entry.estimated_start ? (() => {
-                        const d = new Date(entry.estimated_start);
-                        const tzOpts = stationTz ? { timeZone: stationTz } : {};
-                        const dateStr = d.toLocaleDateString('en-CA', tzOpts);
-                        const todayStr = new Date().toLocaleDateString('en-CA', tzOpts);
-                        const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...tzOpts });
-                        return dateStr !== todayStr
-                          ? <><span className="text-[8px] text-gray-600">{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...tzOpts })}</span> {time}</>
-                          : time;
-                      })() : ''}
-                    </span>
-                    <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(a?.duration)}</span>
-                    <span className="flex-1 truncate text-[12px] min-w-0">
-                      {a?.asset_type === 'silence' && entry.blackout_name
-                        ? <span className="text-red-400">Scheduled Silence — {entry.blackout_name}</span>
-                        : a ? `${a.artist ? a.artist + ' — ' : ''}${a.title}` : '?'}
-                      {entry.source === 'ad_slot' && (
-                        <span className="ml-2 text-[9px] bg-emerald-700/60 text-emerald-200 px-1 py-px rounded font-bold">AD</span>
-                      )}
-                      {entry.preempt_at && (
-                        <span className="ml-2 text-[9px] text-orange-400 font-mono" title={`Preempts at ${new Date(entry.preempt_at).toLocaleString()}`}>
-                          ⏰ {new Date(entry.preempt_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...(stationTz ? { timeZone: stationTz } : {}) })}
-                        </span>
-                      )}
-                    </span>
-                    <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[a?.asset_type] ?? 'text-gray-500'}`}>
-                      {a?.asset_type === 'silence' ? <span className="text-red-400">silence</span> : a?.asset_type ?? ''}
-                    </span>
-                    <span className="w-[60px] text-[10px] shrink-0">
-                      {a?.id ? <AssetCategoryBadge assetId={a.id} category={a?.category ?? null} dark compact /> : ''}
-                    </span>
-                    <span className="w-[55px] text-[10px] text-gray-500 shrink-0 tabular-nums" title={a?.id && lastPlayedMap?.last_played?.[a.id] ? new Date(lastPlayedMap.last_played[a.id]).toLocaleString() : ''}>
-                      {fmtLastPlayed(a?.id ? lastPlayedMap?.last_played?.[a.id] : null)}
-                    </span>
-                    <span className="w-[60px] flex gap-1 text-[10px] shrink-0">
-                      {!isCur && (
-                        <>
-                          <button onClick={() => moveUpMut.mutate(entry.id)} className="text-gray-400 hover:text-white p-1" title="Move up">▲</button>
-                          <button onClick={() => moveDownMut.mutate(entry.id)} className="text-gray-400 hover:text-white p-1" title="Move down">▼</button>
-                          <button onClick={() => removeMut.mutate(entry.id)} className="text-red-400 hover:text-red-300 p-1" title="Remove">✕</button>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                </div>);
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Bottom panel with tabs — resizable */}
-        <div className="flex flex-col shrink-0" style={{ height: bottomHeight }}>
-          {/* Drag handle */}
-          <div onMouseDown={onResizeStart}
-            className="h-1.5 cursor-row-resize bg-[#1a1a4e] hover:bg-cyan-800 border-y border-[#2a2a5e] flex items-center justify-center shrink-0 group">
-            <div className="w-10 h-[2px] rounded bg-gray-600 group-hover:bg-cyan-400" />
-          </div>
-          {/* Tab bar */}
-          <div className="bg-[#12123a] flex items-center gap-0 border-b border-[#2a2a5e] shrink-0 overflow-x-auto">
-            {(['library', 'cart', 'log', 'timeline'] as BottomTab[]).map(t => (
-              <button key={t} onClick={() => setBottomTab(t)}
-                className={`px-3 md:px-4 py-1 text-[11px] border-b-2 transition-colors uppercase tracking-wider whitespace-nowrap ${
-                  bottomTab === t
-                    ? 'border-cyan-400 text-cyan-300 bg-[#1a1a4e]'
-                    : 'border-transparent text-gray-500 hover:text-gray-300'
-                }`}>
-                {t === 'library' ? 'Library' : t === 'cart' ? 'Cart' : t === 'log' ? 'Log' : 'Timeline'}
-              </button>
-            ))}
-            {/* Type filter tabs (only for library) */}
-            {bottomTab === 'library' && (
-              <>
-                <span className="text-gray-600 mx-1 md:mx-2">|</span>
-                {ASSET_TYPES.map(t => (
-                  <button key={t} onClick={() => setActiveTab(t)}
-                    className={`px-1.5 md:px-2 py-1 text-[10px] transition-colors whitespace-nowrap ${
-                      activeTab === t ? 'text-cyan-300' : 'text-gray-600 hover:text-gray-400'
-                    }`}>
-                    {TYPE_LABELS[t]}({typeCounts[t] ?? 0})
+      ) : (
+        /* ═══ Phone / tablet: one pane + bottom tabs ═══ */
+        <>
+          <div className="flex-1 min-h-0 flex flex-col">
+            {(pane === 'log' || pane === 'schedule') && (
+              <div className="shrink-0 flex bg-[#14143c] border-b border-[#2a2a5e]">
+                {(['log', 'schedule'] as Pane[]).map(t => (
+                  <button key={t} type="button" onClick={() => setPane(t)}
+                    className={`flex-1 h-10 text-sm font-semibold border-b-2 ${pane === t ? 'border-cyan-400 text-cyan-200' : 'border-transparent text-gray-400'}`}>
+                    {t === 'log' ? 'Played' : 'Schedule'}
                   </button>
                 ))}
-                <div className="ml-auto mr-2 shrink-0">
-                  <input type="text" placeholder="Search..." value={librarySearch}
-                    onChange={(e) => setLibrarySearch(e.target.value)}
-                    className="bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 text-[10px] px-2 py-0.5 rounded-sm w-24 md:w-36 placeholder-gray-600 focus:outline-none focus:border-cyan-700" />
-                </div>
-              </>
+              </div>
             )}
+            <div className="flex-1 min-h-0">
+              {pane === 'queue' ? queuePanel : pane === 'buttons' ? hotButtons(true) : sidePanel(pane)}
+            </div>
           </div>
-
-          {/* Library panel */}
-          {bottomTab === 'library' && (
-            <div className="flex-1 overflow-y-auto overflow-x-auto bg-[#0a0a28]">
-              <div className="min-w-[550px]">
-                <div className="bg-[#16163e] flex text-[10px] text-gray-500 uppercase border-b border-[#2a2a5e] px-2 py-0.5 sticky top-0">
-                  <span className="w-[50px] shrink-0">Len</span>
-                  <span className="w-[120px] shrink-0">Artist</span>
-                  <span className="flex-1">Title</span>
-                  <span className="w-[50px] shrink-0">Type</span>
-                  <span className="w-[50px] shrink-0">Cat</span>
-                  <span className="w-[70px] shrink-0">Actions</span>
-                </div>
-                {filteredAssets.map(asset => (
-                  <div key={asset.id} className="flex items-center px-2 py-[2px] border-b border-[#12122e] text-gray-300 hover:bg-[#14143a] hover:text-white group">
-                    <span className="w-[50px] tabular-nums text-[11px] shrink-0">{fmtDur(asset.duration)}</span>
-                    <span className="w-[120px] truncate text-[11px] font-bold shrink-0">{asset.artist ?? '—'}</span>
-                    <span className="flex-1 truncate text-[11px] min-w-0">{asset.title}</span>
-                    <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[asset.asset_type] ?? 'text-gray-500'}`}>{asset.asset_type}</span>
-                    <span className="w-[60px] text-[10px] shrink-0">
-                      <AssetCategoryBadge assetId={asset.id} category={asset.category} dark compact />
-                    </span>
-                    <span className="w-[70px] flex gap-2 shrink-0 md:opacity-0 md:group-hover:opacity-100">
-                      <button onClick={() => stationId && addQueueMut.mutate(asset.id)}
-                        className="text-green-400 hover:text-green-300 text-[10px] p-1" title="Add to queue">+Q</button>
-                      <button onClick={() => stationId && playNextMut.mutate(asset.id)}
-                        className="text-yellow-400 hover:text-yellow-300 text-[10px] p-1" title="Play next">Next</button>
-                    </span>
-                  </div>
-                ))}
-                {filteredAssets.length === 0 && (
-                  <div className="text-center text-gray-600 py-4 text-[11px]">No assets found.</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Cart Machine */}
-          {bottomTab === 'cart' && (
-            <div className="flex-1 overflow-y-auto bg-[#0a0a28] p-2">
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-1.5">
-                {/* Preview Weather card */}
-                <button
-                  onClick={handlePreviewWeather}
-                  disabled={weatherPreviewMut.isPending || previewPlaying}
-                  className={`p-2 rounded text-left border transition-colors ${
-                    previewPlaying
-                      ? 'bg-blue-800/50 border-blue-500 text-blue-200 animate-pulse'
-                      : 'bg-blue-900/30 border-blue-800 hover:bg-blue-900/60 text-blue-300'
-                  } disabled:opacity-60`}>
-                  <div className="text-[10px] truncate font-bold">
-                    {weatherPreviewMut.isPending ? '⏳ Loading...' : previewPlaying ? '🔊 Playing...' : '🌤 Preview Weather'}
-                  </div>
-                  <div className="text-[9px] opacity-60">Time + Weather</div>
+          <nav className="shrink-0 flex bg-[#0c0c2c] border-t border-[#2a2a5e] pb-[env(safe-area-inset-bottom)]" aria-label="Control room sections">
+            {MOBILE_TABS.map(t => {
+              const active = pane === t.id || (t.id === 'log' && pane === 'schedule');
+              return (
+                <button key={t.id} type="button" onClick={() => setPane(t.id)} aria-current={active ? 'page' : undefined}
+                  className={`flex-1 h-14 flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold
+                    ${active ? 'text-cyan-300' : 'text-gray-500'}
+                    ${t.id === 'live' && liveShow ? '!text-red-400' : ''}`}>
+                  <span className="text-lg leading-none" aria-hidden="true">{t.icon}</span>
+                  {t.label}
                 </button>
-                {cartItems.map((item) => {
-                  const isJingle = item.asset_type === 'jingle';
-                  return (
-                    <button key={item.id}
-                      onClick={() => stationId && playNextMut.mutate(item.id)}
-                      className={`p-2 rounded text-left border transition-colors ${
-                        isJingle
-                          ? 'bg-yellow-900/30 border-yellow-800 hover:bg-yellow-900/60 text-yellow-300'
-                          : 'bg-orange-900/30 border-orange-800 hover:bg-orange-900/60 text-orange-300'
-                      }`}>
-                      <div className="text-[10px] truncate font-bold">{item.title}</div>
-                      <div className="text-[9px] opacity-60">{fmtDur(item.duration)} | {item.category ?? item.asset_type}</div>
-                    </button>
-                  );
-                })}
-                {cartItems.length === 0 && (
-                  <div className="col-span-full text-center text-gray-600 py-6 text-[11px]">No jingles or spots loaded.</div>
-                )}
-              </div>
-            </div>
-          )}
+              );
+            })}
+          </nav>
+        </>
+      )}
 
-          {/* Play Log */}
-          {bottomTab === 'log' && (
-            <div className="flex-1 overflow-y-auto overflow-x-auto bg-[#0a0a28]">
-              <div className="min-w-[450px]">
-                <div className="bg-[#16163e] flex text-[10px] text-gray-500 uppercase border-b border-[#2a2a5e] px-2 py-0.5 sticky top-0">
-                  <span className="w-[76px] shrink-0">Time</span>
-                  <span className="w-[50px] shrink-0">Type</span>
-                  <span className="flex-1">Title</span>
-                  <span className="w-[80px] shrink-0">Artist</span>
-                  <span className="w-[50px] shrink-0">Source</span>
-                </div>
-                {playLog.map((log: any) => (
-                  <div key={log.id} className="flex items-center px-2 py-[2px] border-b border-[#12122e] text-gray-400">
-                    <span className="w-[76px] tabular-nums text-[11px] shrink-0">
-                      {new Date(log.start_utc).toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', ...(stationTz ? { timeZone: stationTz } : {}) })}
-                    </span>
-                    <span className={`w-[50px] text-[10px] shrink-0 ${TYPE_COLORS[log.asset_type] ?? 'text-gray-500'}`}>
-                      {log.asset_type ?? ''}
-                    </span>
-                    <span className="flex-1 truncate text-[11px] text-gray-300 min-w-0">{log.title ?? 'Unknown'}</span>
-                    <span className="w-[80px] truncate text-[11px] shrink-0">{log.artist ?? '—'}</span>
-                    <span className="w-[50px] text-[10px] shrink-0">{log.source}</span>
-                  </div>
-                ))}
-                {playLog.length === 0 && (
-                  <div className="text-center text-gray-600 py-6 text-[11px]">No play history yet. Start playback to begin logging.</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Timeline Preview */}
-          {bottomTab === 'timeline' && (
-            <div className="flex-1 overflow-y-auto bg-[#0a0a28] p-3">
-              <div className="flex items-center gap-3 mb-3">
-                <input
-                  type="datetime-local"
-                  value={timelineTime}
-                  onChange={e => setTimelineTime(e.target.value)}
-                  className="bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-200 text-[11px] px-2 py-1 rounded-sm focus:outline-none focus:border-cyan-600"
-                />
-                <button
-                  onClick={() => setTimelineTime('')}
-                  className="px-2 py-1 bg-[#2a2a5e] hover:bg-[#3a3a7e] text-cyan-300 text-[11px] rounded-sm"
-                >
-                  Now
-                </button>
-                {timelineLoading && <span className="text-cyan-400 text-[11px] animate-pulse">Loading...</span>}
-              </div>
-
-              {timelineData && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {/* Blackout Status */}
-                  <div className={`rounded-lg border p-3 ${
-                    timelineData.is_blacked_out
-                      ? 'bg-red-900/30 border-red-700'
-                      : 'bg-green-900/20 border-green-800'
-                  }`}>
-                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Blackout Status</div>
-                    <div className={`text-sm font-bold ${timelineData.is_blacked_out ? 'text-red-400' : 'text-green-400'}`}>
-                      {timelineData.is_blacked_out ? 'BLACKED OUT' : 'CLEAR'}
-                    </div>
-                    {timelineData.current_blackout && (
-                      <div className="mt-1 text-[11px] text-red-300">
-                        {timelineData.current_blackout.name}
-                        <div className="text-[10px] text-red-400/70">
-                          {new Date(timelineData.current_blackout.start_datetime).toLocaleString()} — {new Date(timelineData.current_blackout.end_datetime).toLocaleString()}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Active Block */}
-                  <div className="rounded-lg border bg-[#1a1a4e]/50 border-[#3a3a7e] p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Active Block</div>
-                    {timelineData.active_block ? (
-                      <>
-                        <div className="text-sm font-bold text-cyan-300">{timelineData.active_block.name}</div>
-                        <div className="text-[11px] text-gray-400 mt-1">
-                          Schedule: {timelineData.active_block.schedule_name ?? '—'}
-                        </div>
-                        <div className="text-[10px] text-gray-500">
-                          {timelineData.active_block.start_time} — {timelineData.active_block.end_time} | {timelineData.active_block.playback_mode}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="text-sm text-gray-500">No active block</div>
-                    )}
-                  </div>
-
-                  {/* Next Blackout */}
-                  <div className="rounded-lg border bg-yellow-900/20 border-yellow-800/50 p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Next Blackout</div>
-                    {timelineData.next_blackout ? (
-                      <>
-                        <div className="text-sm font-bold text-yellow-300">{timelineData.next_blackout.name}</div>
-                        <div className="text-[10px] text-yellow-400/70 mt-1">
-                          {new Date(timelineData.next_blackout.start_datetime).toLocaleString()} — {new Date(timelineData.next_blackout.end_datetime).toLocaleString()}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="text-sm text-gray-500">None scheduled</div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {!timelineData && !timelineLoading && (
-                <div className="text-center text-gray-600 py-6 text-[11px]">
-                  Select a station to view timeline information.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ═══ Footer ═══ */}
-      <div className="bg-[#12123a] border-t border-[#2a2a5e] px-3 py-0.5 flex items-center justify-between text-[10px] text-gray-500 shrink-0">
-        <span>Assets: {assets.length} | Queue: {queueEntries.length}</span>
-        <span>{stations.find((s: any) => s.id === stationId)?.name ?? ''} | {stations.find((s: any) => s.id === stationId)?.timezone ?? ''}</span>
-        <span>{user?.email ?? ''} ({user?.role ?? ''})</span>
-      </div>
+      {isDesktop && (
+        <footer className="shrink-0 h-6 px-3 flex items-center justify-between gap-4 bg-[#0c0c2c] border-t border-[#2a2a5e] text-[11px] text-gray-500">
+          <span>Shortcuts: <b className="text-gray-400">N</b> next · <b className="text-gray-400">/</b> search · <b className="text-gray-400">Esc</b> cancel insert</span>
+          <span className="truncate">{station?.name ?? ''}{station?.timezone ? ` · ${station.timezone}` : ''}</span>
+          <span className="truncate">{user?.email ?? ''}{user?.role ? ` (${user.role})` : ''}</span>
+        </footer>
+      )}
     </div>
   );
 }

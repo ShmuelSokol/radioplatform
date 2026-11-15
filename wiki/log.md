@@ -17,3 +17,9 @@ INGEST 2026-09-16 song-request-matching.md fuzzy_match_asset BUG: artist nicknam
 INGEST 2026-11-15 audio-engine.md Stale-elapsed bug: new track was seeked to previous track's elapsed (skip + every natural transition re-load). Fixed via started_at positioning, per-deck asset tracking, faded skip, timer-based crossfade check.
 INGEST 2026-11-15 streaming-architecture.md Liquidsoap wiring can't be switched on as-is: _advance_queue re-pushes the current track every 3s poll, two clocks (DB duration vs engine), telnet 1234 open with no auth. Plan: engine pulls next track + reports real starts.
 UPDATE 2026-11-15 hourly-slots.md Uploaded weather spots: PUT /weather-spots/{date} replaces the day's weather asset in place (Shprach voice); ElevenLabs is the fallback.
+INGEST 2026-11-15 control-room.md Dashboard rebuilt as control room: app-shell layout, liveControl.ts is the single seam for fire-now/insert (2 calls, not atomic), insert target tracked by entry id, instant buttons in localStorage (don't PUT automation_config).
+QUERY 2026-11-15 hourly-slots.md Before changing how ad slots at :15/:30/:45 are filled.
+INGEST 2026-11-15 spot-schedules.md Sponsor spot schedules replace the single hardcoded ad-slot asset once any schedule exists; portal history was always empty (nothing wrote PlaySource.AD) and now matches plays by asset.
+INGEST 2026-11-15 sponsorship-copy-review.md Sponsorship wording rules are data (versioned table, manager-editable), never hardcoded in prompts; copy review reads the version in force. Real Claude call not exercised in tests.
+UPDATE 2026-11-15 spot-schedules.md review follow-ups: legacy spot off switch, DST missing times, validation, audio ownership, preview hides past
+INGEST 2026-11-15 (no page) queue_entries/play_logs had no station indexes in prod path (create_all, not alembic); added via main.py migrations + model __table_args__. Fresh-DB create_all currently fails on playback_mode enum default.
