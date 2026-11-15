@@ -31,6 +31,8 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     automation_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Protected (the FM feed): only admins and staff assigned to it by name may operate it.
+    protected: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
     channels = relationship("ChannelStream", back_populates="station", lazy="selectin")
     schedule_entries = relationship("ScheduleEntry", back_populates="station", lazy="noload")

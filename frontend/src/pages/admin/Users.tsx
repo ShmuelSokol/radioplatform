@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '../../hooks/useUsers';
 import Spinner from '../../components/Spinner';
+import { useStations } from '../../hooks/useStations';
 
 function useForceUpdate() {
   const [, setTick] = useState(0);
@@ -45,6 +46,11 @@ export default function Users() {
   const [socialInstagram, setSocialInstagram] = useState('');
   const [socialWebsite, setSocialWebsite] = useState('');
 
+  // null = every station that is not protected
+  const [stationIds, setStationIds] = useState<string[] | null>(null);
+  const { data: stationData } = useStations();
+  const stations = stationData?.stations ?? [];
+
   const [editId, setEditId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -84,6 +90,7 @@ export default function Users() {
         photo_url: photoUrl || undefined,
         is_public: isPublic,
         social_links: socialLinks,
+        station_ids: role === 'admin' || role === 'sponsor' ? null : stationIds,
       }}, { onSuccess: () => resetForm(), onError });
     } else {
       createMut.mutate({ email, password, role,
@@ -95,6 +102,7 @@ export default function Users() {
         photo_url: photoUrl || undefined,
         is_public: isPublic,
         social_links: socialLinks,
+        station_ids: role === 'admin' || role === 'sponsor' ? null : stationIds,
       }, { onSuccess: () => resetForm(), onError });
     }
   };
@@ -117,6 +125,7 @@ export default function Users() {
     setSocialTwitter('');
     setSocialInstagram('');
     setSocialWebsite('');
+    setStationIds(null);
   };
 
   const startEdit = (u: typeof users[0]) => {
@@ -138,6 +147,7 @@ export default function Users() {
     setSocialTwitter(social?.twitter ?? '');
     setSocialInstagram(social?.instagram ?? '');
     setSocialWebsite(social?.website ?? '');
+    setStationIds(u.station_ids ?? null);
     setShowForm(true);
   };
 
@@ -263,6 +273,41 @@ export default function Users() {
               </div>
             </div>
           </div>
+          )}
+
+          {role !== 'admin' && role !== 'sponsor' && (
+            <div className="col-span-2 border-t border-[#2a2a5e] pt-3" data-testid="station-access">
+              <h3 className="text-sm text-cyan-300 mb-1">Stations this person may operate</h3>
+              <label className="flex items-center gap-2 text-sm text-gray-300 mb-1">
+                <input type="radio" name="station-access" checked={stationIds === null}
+                  onChange={() => setStationIds(null)} className="accent-cyan-500" />
+                Every station, except protected ones
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-300 mb-1">
+                <input type="radio" name="station-access" checked={stationIds !== null}
+                  onChange={() => setStationIds(stationIds ?? [])} className="accent-cyan-500" />
+                Only the stations ticked here
+              </label>
+              {stationIds !== null && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
+                  {stations.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2 text-sm text-gray-300">
+                      <input type="checkbox" checked={stationIds.includes(s.id)} className="accent-cyan-500"
+                        onChange={(e) => setStationIds(e.target.checked
+                          ? [...stationIds, s.id]
+                          : stationIds.filter((id) => id !== s.id))} />
+                      {s.name}{s.protected ? ' (protected)' : ''}
+                    </label>
+                  ))}
+                  {stationIds.length === 0 && (
+                    <span className="text-[11px] text-amber-300">Nothing ticked: this person can look but not operate any station.</span>
+                  )}
+                </div>
+              )}
+              <p className="text-[11px] text-gray-500 mt-1">
+                A protected station (the FM feed) can only be operated by admins and by people it is ticked for here.
+              </p>
+            </div>
           )}
 
           <div className="col-span-2">

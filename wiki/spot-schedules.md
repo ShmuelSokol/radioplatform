@@ -34,3 +34,9 @@ Spacing rules between sponsors are still to come.
 ## Shabbos and Yom Tov (blackouts)
 
 The planner reads `HolidayWindow` rows with `is_blackout` for the station (`load_blackouts`). A slot inside a blackout is not a slot: plays in a partly covered daypart are spread over the slots that remain (Friday afternoon before candle lighting, Saturday after it ends); a daypart that is entirely off the air is skipped. Skipped plays come back as `Unplaced` with `blackout` set, and the preview reports them under `off_air` (per window, with a count) instead of `unplaced`, because they are intended, not a problem for a manager to fix. `reconcile_spot_slots` uses the same plan, so queued slots inside a new or changed window are removed on the next refill.
+
+## Exact times and hard / soft timing
+
+A `SpotSchedule` with `fixed_times` ("07:00,13:30", station time) airs at those clock times on its days instead of being spread over dayparts. Exact times are planned first; spread plays skip a slot an exact time already holds, and two schedules asking for the same minute leave the later one unplaced.
+
+Every placement carries `timing_mode`, written to `QueueEntry.timing_mode` next to `preempt_at` (the playout engine and web player read it; see `wiki/operator-actions.md`): `hard` = the item on air fades and the spot starts on the second, `soft` = the item on air finishes first. The schedule's own `timing_mode` wins; otherwise the station default applies: `automation_config.spot_timing = {"on_the_hour": "hard", "other": "soft"}` (edit via `GET/PUT /spot-schedules/timing-defaults`, on the Spot Schedule page). Changing either re-stamps entries already queued, in place.

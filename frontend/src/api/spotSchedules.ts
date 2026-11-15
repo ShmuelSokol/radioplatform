@@ -2,6 +2,13 @@ import apiClient from './client';
 
 export type Daypart = 'morning' | 'afternoon' | 'evening' | 'overnight';
 
+export type TimingMode = 'hard' | 'soft';
+
+export interface TimingDefaults {
+  on_the_hour: TimingMode;
+  other: TimingMode;
+}
+
 export interface SpotSchedule {
   id: string;
   sponsor_id: string;
@@ -14,6 +21,8 @@ export interface SpotSchedule {
   start_date: string | null;
   end_date: string | null;
   is_active: boolean;
+  fixed_times: string | null; // "07:00,13:30" station time; replaces the daypart spread
+  timing_mode: TimingMode | null; // null = the station's default for that slot
   created_at: string;
   updated_at: string;
 }
@@ -24,6 +33,8 @@ export interface PlannedSpot {
   scheduled_at: string;
   local_time: string; // "YYYY-MM-DD HH:MM" in the station's time zone
   daypart: Daypart;
+  timing_mode: TimingMode;
+  fixed: boolean;
   schedule_id: string;
   sponsor_id: string;
   sponsor_name: string;
@@ -76,3 +87,9 @@ export const previewSpotPlan = async (stationId: string, days = 7): Promise<Spot
       params: { station_id: stationId, days },
     })
   ).data;
+
+export const getTimingDefaults = async (stationId: string): Promise<TimingDefaults> =>
+  (await apiClient.get<TimingDefaults>('/spot-schedules/timing-defaults', { params: { station_id: stationId } })).data;
+
+export const setTimingDefaults = async (stationId: string, defaults: TimingDefaults): Promise<TimingDefaults> =>
+  (await apiClient.put<TimingDefaults>('/spot-schedules/timing-defaults', { station_id: stationId, ...defaults })).data;

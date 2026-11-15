@@ -2,11 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useStations, useCreateStation, useUpdateStation, useDeleteStation } from '../../hooks/useStations';
 import apiClient from '../../api/client';
 import Spinner from '../../components/Spinner';
+import { useAuth } from '../../hooks/useAuth';
 
 export default function Stations() {
   const { data, isLoading } = useStations();
   const createMutation = useCreateStation();
   const updateMutation = useUpdateStation();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const deleteMutation = useDeleteStation();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
@@ -161,6 +164,22 @@ export default function Stations() {
                   }`}>
                     {station.is_active ? 'Active' : 'Inactive'}
                   </span>
+                  {isAdmin ? (
+                    <label
+                      onClick={(e) => e.stopPropagation()}
+                      title="Protected: only admins and staff ticked for this station on the Users page can operate it. Use it for the FM feed."
+                      className="ml-3 inline-flex items-center gap-1 text-xs text-gray-700"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!station.protected}
+                        onChange={(e) => updateMutation.mutate({ id: station.id, data: { protected: e.target.checked } })}
+                      />
+                      Protected
+                    </label>
+                  ) : station.protected ? (
+                    <span className="ml-2 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Protected</span>
+                  ) : null}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right">
                   <button

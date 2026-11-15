@@ -22,3 +22,4 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [sponsorship-copy-review](sponsorship-copy-review.md) — LP station sponsorship (not advertising) wording rules as editable data, AI copy review, basic-check fallback
 - [spot-recordings](spot-recordings.md) — Record Spots page: script, wording check, audio (Shprach stub makes placeholder tones), listen, approve into the library
 - [operator-actions](operator-actions.md) — Next with a fade choice, fire-now, insert at a point, intro length, hard/soft timed items (`timing_mode`)
+- [station-permissions.md](station-permissions.md) — who may operate which station; the protected (FM) station

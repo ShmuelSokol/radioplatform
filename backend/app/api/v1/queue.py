@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.core.dependencies import require_dj_or_manager, require_manager, require_staff
+from app.core.dependencies import (
+    require_dj_or_manager,
+    require_manager,
+    require_staff,
+    require_station_operator,
+)
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset
@@ -321,7 +326,11 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
 _last_advance: dict[str, float] = {}
 ADVANCE_THROTTLE = 1.0  # seconds between _check_advance calls per station
 
-router = APIRouter(prefix="/stations/{station_id}/queue", tags=["queue"])
+router = APIRouter(
+    prefix="/stations/{station_id}/queue",
+    tags=["queue"],
+    dependencies=[Depends(require_station_operator)],
+)
 
 
 async def _maybe_insert_hourly_jingle(db: AsyncSession, station_id: uuid.UUID) -> None:
