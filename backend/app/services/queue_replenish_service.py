@@ -686,7 +686,15 @@ class QueueReplenishService:
         playback engine waits for the current song to finish, then plays the
         ad before the next regular song.
         """
-        # Find the ad asset
+        # Stations with sponsor spot schedules: slots follow those schedules.
+        from app.services.spot_schedule_service import reconcile_spot_slots
+
+        reconciled = await reconcile_spot_slots(self.db, self.station_id)
+        if reconciled is not None:
+            self.max_pos = max(self.max_pos, reconciled["max_pos"])
+            return
+
+        # Legacy behaviour (no spot schedules yet): one asset in every slot.
         ad_title = self.automation_config.get("ad_slot_asset_title", "KOL BRAMAH TEST SPONSOR")
         result = await self.db.execute(
             select(Asset).where(Asset.title == ad_title).limit(1)

@@ -113,6 +113,7 @@ radioplatform/
 | HolidayWindow | holiday_window.py | Sabbath/holiday blackouts |
 | ChannelStream | channel_stream.py | Stream configuration |
 | Sponsor | sponsor.py | Sponsor/ad management (linked to User via user_id) |
+| SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
 | PlaylistTemplate | playlist_template.py | Rotation pattern templates |
 | TemplateSlot | playlist_template.py | Slots within a template |
@@ -148,6 +149,7 @@ radioplatform/
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
+| spot_schedules | spot_schedules.py | /spot-schedules |
 | campaigns | campaigns.py | /campaigns |
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
@@ -171,6 +173,7 @@ radioplatform/
 | scheduling.py | Schedule resolution logic |
 | scheduler_engine.py | Background scheduling engine |
 | queue_replenish_service.py | Auto-replenish playback queue |
+| spot_schedule_service.py | Plans sponsor spots into clock slots and keeps pending `ad_slot` queue entries in step (see `wiki/spot-schedules.md`) |
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
 | weather_spot_service.py | Weather/time announcement generation + caching |

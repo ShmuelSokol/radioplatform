@@ -26,9 +26,24 @@ class UpcomingScheduleEntry(BaseModel):
     station_name: str
     time_slot: str
     asset_title: str
+    scheduled_at: datetime | None = None
 
 
 class SponsorStats(BaseModel):
     total_plays_month: int
     total_plays_alltime: int
     next_scheduled: str | None = None
+    next_scheduled_at: datetime | None = None
+    last_played: datetime | None = None
+
+
+class SponsorSpot(BaseModel):
+    """One of the sponsor's spots, with when it last aired and airs next."""
+    asset_id: UUID | str
+    title: str
+    duration_seconds: float | None = None
+    last_played_at: datetime | None = None
+    next_play_at: datetime | None = None
+    plays_month: int = 0
+    plays_alltime: int = 0
+    scheduled: bool = False
