@@ -57,7 +57,7 @@ the site plays the stream). Turn `PLAYOUT_STREAM_LIVE` on last.
 
 ## Server
 
-`infra/streaming/setup.sh <station-id> [domain]` on a fresh Ubuntu 24.04 machine (apt has
+`infra/streaming/setup.sh [station-id] [domain]` (no id = the first station the backend lists) on a fresh Ubuntu 24.04 machine (apt has
 Liquidsoap 2.2.4 there; 22.04 has 2.0 and will not run `radio.liq`). It generates the secrets
 on the machine, prints the backend settings, and gets the certificate once the domain points at
 the server. Safe to run again.
