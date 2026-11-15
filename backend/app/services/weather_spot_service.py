@@ -89,6 +89,18 @@ def _build_weather_text(weather: dict, city_name: str = "Lakewood") -> str:
     return _apply_word_replacements(text)
 
 
+def _slot_time(slot_key: str) -> datetime | None:
+    """The Eastern hour a slot key like "2024-01-15T15" stands for (None if it has no hour)."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+    try:
+        return datetime.strptime(slot_key, "%Y-%m-%dT%H").replace(tzinfo=ZoneInfo("America/New_York"))
+    except ValueError:
+        return None
+
+
 async def find_weather_spot_asset(db: AsyncSession, weather_key: str) -> Asset | None:
     """The weather spot asset for one day (weather_key like "2024-01-15"), if any."""
     result = await db.execute(
@@ -99,6 +111,46 @@ async def find_weather_spot_asset(db: AsyncSession, weather_key: str) -> Asset |
         ).limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def find_time_clip_asset(db: AsyncSession, hour: int) -> Asset | None:
+    """The reusable uploaded "the time is" clip for an hour of the day (0-23), if any."""
+    result = await db.execute(
+        select(Asset).where(
+            Asset.asset_type == "jingle",
+            Asset.category == "time_announcement",
+            Asset.metadata_extra["time_of_day"].astext == f"{hour:02d}",
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _store_upload(audio_bytes: bytes, path_stem: str) -> tuple[str, float]:
+    """Normalize an uploaded recording, store it, return (public_url, duration)."""
+    from app.services.audio_analysis_service import normalize_audio_loudness
+    from app.services.silence_service import get_audio_duration
+
+    audio_bytes = normalize_audio_loudness(audio_bytes)
+    duration = get_audio_duration(audio_bytes)
+    if duration <= 0:
+        raise ValueError("Uploaded file is not readable audio")
+    # A new path on every upload: the public URL is cached, so re-using the
+    # path would keep serving the old recording after a replacement.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    url = await upload_to_supabase(audio_bytes, f"{path_stem}_{stamp}.mp3")
+    return url, duration
+
+
+def _upload_meta(source: str, script: str | None, **keys: str) -> dict:
+    extra = {
+        **keys,
+        "generated": False,
+        "source": source,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if script:
+        extra["script"] = script
+    return extra
 
 
 async def store_uploaded_weather_spot(
@@ -120,29 +172,7 @@ async def store_uploaded_weather_spot(
 
     Returns (asset, replaced) where replaced says an existing spot was overwritten.
     """
-    from app.services.audio_analysis_service import normalize_audio_loudness
-    from app.services.silence_service import get_audio_duration
-
-    audio_bytes = normalize_audio_loudness(audio_bytes)
-    duration = get_audio_duration(audio_bytes)
-    if duration <= 0:
-        raise ValueError("Uploaded file is not readable audio")
-
-    # A new path on every upload: the public URL is cached, so re-using the
-    # path would keep serving the old recording after a same-day replacement.
-    stamp = datetime.now(timezone.utc).strftime("%H%M%S")
-    path = f"weather/{weather_key}_weather_{source}_{stamp}.mp3"
-    url = await upload_to_supabase(audio_bytes, path)
-
-    extra = {
-        "slot_key": weather_key,
-        "generated": False,
-        "source": source,
-        "uploaded_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if script:
-        extra["script"] = script
-
+    url, duration = await _store_upload(audio_bytes, f"weather/{weather_key}_weather_{source}")
     asset = await find_weather_spot_asset(db, weather_key)
     replaced = asset is not None
     if asset is None:
@@ -159,9 +189,46 @@ async def store_uploaded_weather_spot(
     asset.duration = duration
     # Replaced wholesale on purpose: any cached analysis/trim points in the old
     # metadata belong to the old recording.
-    asset.metadata_extra = extra
+    asset.metadata_extra = _upload_meta(source, script, slot_key=weather_key)
     await db.flush()
     logger.info("Stored uploaded %s weather spot for day %s (replaced=%s)", source, weather_key, replaced)
+    return asset, replaced
+
+
+async def store_uploaded_time_clip(
+    db: AsyncSession,
+    hour: int,
+    audio_bytes: bytes,
+    *,
+    source: str = "shprach",
+    script: str | None = None,
+) -> tuple[Asset, bool]:
+    """Store the reusable "the time is" recording for an hour of the day (0-23).
+
+    Unlike the per-slot ElevenLabs clips, one uploaded clip per hour is reused
+    every day. An existing clip for the hour is updated in place, so entries
+    already queued with it play the new recording.
+    """
+    if not 0 <= hour <= 23:
+        raise ValueError("hour must be 0-23")
+    url, duration = await _store_upload(audio_bytes, f"time/{hour:02d}_{source}")
+    asset = await find_time_clip_asset(db, hour)
+    replaced = asset is not None
+    if asset is None:
+        asset = Asset(
+            id=uuid.uuid4(),
+            title=f"Time Announcement - {hour:02d}:00",
+            artist="Kohl Baramah",
+            file_path=url,
+            asset_type="jingle",
+            category="time_announcement",
+        )
+        db.add(asset)
+    asset.file_path = url
+    asset.duration = duration
+    asset.metadata_extra = _upload_meta(source, script, time_of_day=f"{hour:02d}")
+    await db.flush()
+    logger.info("Stored uploaded %s time clip for hour %02d (replaced=%s)", source, hour, replaced)
     return asset, replaced
 
 
@@ -179,6 +246,10 @@ async def get_or_create_weather_spot_assets(
 
     Returns:
         (time_asset, weather_asset) — either may be None on failure.
+
+    Uploaded recordings win: the reusable time clip for the slot's hour and the
+    day's uploaded weather spot are used when they exist. ElevenLabs is only the
+    fallback for what is missing, and only when a key is configured.
     """
     # Weather uses daily key (just the date part)
     weather_key = slot_key.split("T")[0] if "T" in slot_key else slot_key
@@ -193,20 +264,22 @@ async def get_or_create_weather_spot_assets(
     )
     existing_time = result.scalar_one_or_none()
 
-    result = await db.execute(
-        select(Asset).where(
-            Asset.asset_type == "spot",
-            Asset.category == "weather_spot",
-            Asset.metadata_extra["slot_key"].astext == weather_key,
-        ).limit(1)
-    )
-    existing_weather = result.scalar_one_or_none()
+    # The slot's own hour, not "now": slots are scheduled up to 48 hours ahead,
+    # so the clock time spoken must be the hour the clip will play at.
+    slot_time = _slot_time(slot_key)
+    if slot_time is not None:
+        uploaded_time = await find_time_clip_asset(db, slot_time.hour)
+        if uploaded_time is not None:
+            existing_time = uploaded_time
+
+    existing_weather = await find_weather_spot_asset(db, weather_key)
 
     if existing_time and existing_weather:
         return existing_time, existing_weather
+    if not settings.elevenlabs_enabled:
+        return existing_time, existing_weather
 
-    now_utc = datetime.now(timezone.utc)
-    eastern_now = _utc_to_eastern(now_utc)
+    eastern_now = slot_time or _utc_to_eastern(datetime.now(timezone.utc))
     safe_slot = slot_key.replace(":", "-")
     safe_weather_key = weather_key.replace(":", "-")
 

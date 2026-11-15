@@ -94,7 +94,9 @@ async def test_uploaded_spot_is_used_instead_of_elevenlabs(client: AsyncClient, 
         resp = await _put(client, auth_headers)
         assert resp.status_code == 200, resp.text
         tts = AsyncMock(return_value=(b"tts", 3.0))
-        with patch("app.services.weather_spot_service.generate_tts", tts), \
+        with patch("app.services.weather_spot_service.settings.ELEVENLABS_API_KEY", "k"), \
+             patch("app.services.weather_spot_service.settings.ELEVENLABS_VOICE_ID", "v"), \
+             patch("app.services.weather_spot_service.generate_tts", tts), \
              patch("app.services.weather_spot_service.get_current_weather", new_callable=AsyncMock) as weather:
             time_asset, weather_asset = await get_or_create_weather_spot_assets(db_session, f"{DAY}T09")
     assert str(weather_asset.id) == resp.json()["asset_id"]
@@ -133,3 +135,67 @@ async def test_requires_login_and_valid_date(client: AsyncClient, auth_headers: 
     with p1, p2, p3:
         assert (await _put(client, auth_headers, day="not-a-date")).status_code == 422
         assert (await _put(client, auth_headers, source="Bad Source!")).status_code == 422
+
+
+async def _put_time(client: AsyncClient, headers: dict, hour, **data):
+    return await client.put(
+        f"/api/v1/time-announcements/{hour}",
+        files={"file": ("t.mp3", io.BytesIO(b"fake audio"), "audio/mpeg")},
+        data=data,
+        headers=headers,
+    )
+
+
+@pytest.mark.asyncio
+async def test_time_clip_is_reused_every_day_without_elevenlabs(client: AsyncClient, auth_headers: dict, db_session: AsyncSession):
+    """With no ElevenLabs key, an uploaded hour clip and weather spot are still served; nothing is generated."""
+    from app.services.weather_spot_service import get_or_create_weather_spot_assets
+
+    p1, p2, p3 = _patches(duration=3.2)
+    with p1, p2, p3:
+        resp = await _put_time(client, auth_headers, 15, script="The time is three o'clock.")
+        assert resp.status_code == 200, resp.text
+        clip = resp.json()
+        assert clip["hour"] == 15 and clip["replaced"] is False and "time/15_shprach_" in clip["file_url"]
+        again = await _put_time(client, auth_headers, 15)
+        assert again.json()["replaced"] is True and again.json()["asset_id"] == clip["asset_id"]
+        assert (await _put(client, auth_headers)).status_code == 200
+
+    tts = AsyncMock()
+    with patch("app.services.weather_spot_service.generate_tts", tts):
+        t1, w1 = await get_or_create_weather_spot_assets(db_session, f"{DAY}T15")
+        t2, w2 = await get_or_create_weather_spot_assets(db_session, "2026-11-17T15")   # next day, same hour
+        t3, w3 = await get_or_create_weather_spot_assets(db_session, f"{DAY}T16")       # hour with no clip
+    assert str(t1.id) == clip["asset_id"] and str(t2.id) == clip["asset_id"]
+    assert w1 is not None and w2 is None
+    assert t3 is None and w3 is not None
+    tts.assert_not_called()
+
+    listing = await client.get("/api/v1/time-announcements", headers=auth_headers)
+    assert [c["hour"] for c in listing.json()] == [15]
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_time_fallback_speaks_the_slot_hour(db_session: AsyncSession):
+    """A slot scheduled ahead says its own hour, not the time it was generated at."""
+    from app.services.weather_spot_service import get_or_create_weather_spot_assets
+
+    tts = AsyncMock(return_value=(b"tts", 3.0))
+    p1, p2, p3 = _patches()
+    with p1, p2, p3, \
+         patch("app.services.weather_spot_service.settings.ELEVENLABS_API_KEY", "k"), \
+         patch("app.services.weather_spot_service.settings.ELEVENLABS_VOICE_ID", "v"), \
+         patch("app.services.weather_spot_service.generate_tts", tts), \
+         patch("app.services.weather_spot_service.get_current_weather", new_callable=AsyncMock, side_effect=RuntimeError):
+        time_asset, weather_asset = await get_or_create_weather_spot_assets(db_session, "2026-11-17T15")
+    assert time_asset is not None and weather_asset is None
+    assert tts.await_args_list[0].args[0].startswith("The time is 3:00 PM")
+
+
+@pytest.mark.asyncio
+async def test_time_clip_validation(client: AsyncClient, auth_headers: dict):
+    p1, p2, p3 = _patches()
+    with p1, p2, p3:
+        assert (await _put_time(client, auth_headers, 24)).status_code == 422
+    resp = await client.put("/api/v1/time-announcements/3", files={"file": ("t.mp3", io.BytesIO(b"x"), "audio/mpeg")})
+    assert resp.status_code in (401, 403)

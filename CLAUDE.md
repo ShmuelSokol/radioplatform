@@ -160,7 +160,7 @@ radioplatform/
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
-| weather_spots | weather_spots.py | /weather-spots (upload a ready-made daily weather spot, e.g. Shprach voice; replaces the ElevenLabs one for that date) |
+| weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips; ElevenLabs is only the fallback |
 
 ### Services (`backend/app/services/`)
 | Service | Description |

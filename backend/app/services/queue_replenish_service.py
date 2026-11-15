@@ -589,8 +589,11 @@ class QueueReplenishService:
         on the hour — no reliance on scheduler timing.
         """
         from app.config import settings
-        if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
-            logger.info("Skipping hourly announcements: TTS or storage not configured")
+        # ElevenLabs is optional: uploaded time clips and weather spots are used
+        # when they exist (get_or_create_weather_spot_assets returns None for
+        # whatever is missing when no TTS key is set).
+        if not settings.supabase_storage_enabled:
+            logger.info("Skipping hourly announcements: storage not configured")
             return
 
         try:
