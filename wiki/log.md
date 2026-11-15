@@ -23,3 +23,4 @@ INGEST 2026-11-15 sponsorship-copy-review.md Sponsorship wording rules are data 
 UPDATE 2026-11-15 spot-schedules.md review follow-ups: legacy spot off switch, DST missing times, validation, audio ownership, preview hides past
 UPDATE 2026-11-15 spot-schedules.md planner now keeps spots out of HolidayWindow blackouts; preview reports off_air windows
 INGEST 2026-11-15 (no page) queue_entries/play_logs had no station indexes in prod path (create_all, not alembic); added via main.py migrations + model __table_args__. Fresh-DB create_all currently fails on playback_mode enum default.
+INGEST 2026-11-15 schedule-look-ahead.md Engine matched schedule blocks in UTC, not station time (fixed); equal-priority overlaps now have a fixed tie-break; look-ahead page shares the engine's resolver

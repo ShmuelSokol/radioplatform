@@ -6,6 +6,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -471,6 +472,49 @@ async def timeline_preview(
 
 
 # ==================== Schedule by ID (after literal routes) ====================
+# ==================== Look-ahead (before /{schedule_id}) ====================
+
+
+@router.get("/look-ahead")
+async def schedule_look_ahead(
+    station_id: UUID = Query(...),
+    days: int = Query(7, ge=1, le=14),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_manager),
+):
+    """What collides over the coming days, how each collision is settled,
+    and what still needs a person. See wiki/schedule-look-ahead.md."""
+    from app.models.station import Station
+    from app.services.schedule_lookahead_service import look_ahead
+
+    station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+    if not station:
+        raise HTTPException(status_code=404, detail="Station not found")
+    return await look_ahead(db, station, days=days)
+
+
+class SettleOverlap(BaseModel):
+    winner_block_id: UUID
+    other_block_ids: List[UUID]
+
+
+@router.post("/look-ahead/settle")
+async def settle_schedule_overlap(
+    data: SettleOverlap,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_manager),
+):
+    """Choose which of the overlapping blocks plays, by raising its priority above the others."""
+    from app.services.schedule_lookahead_service import settle_overlap
+
+    try:
+        winner = await settle_overlap(db, data.winner_block_id, data.other_block_ids)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Schedule block not found")
+    await db.commit()
+    return {"block_id": str(winner.id), "priority": winner.priority}
+
+
 @router.get("/{schedule_id}", response_model=Schedule)
 async def get_schedule(
     schedule_id: UUID,

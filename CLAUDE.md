@@ -175,6 +175,7 @@ radioplatform/
 | scheduling.py | Schedule resolution logic |
 | scheduler_engine.py | Background scheduling engine |
 | queue_replenish_service.py | Auto-replenish playback queue |
+| schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
 | spot_schedule_service.py | Plans sponsor spots into clock slots and keeps pending `ad_slot` queue entries in step (see `wiki/spot-schedules.md`) |
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
@@ -206,6 +207,7 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsor/ad management
+- ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
 - SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead
 - SponsorshipRules.tsx — Edit the sponsorship wording rules (versioned) and try the wording check
 - Playlists.tsx — Playlist template rotation management
@@ -275,6 +277,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
+- `/admin/schedule-check` → ScheduleCheck (protected)
 - `/admin/spot-schedule` → SpotSchedules (protected)
 - `/admin/sponsorship-rules` → SponsorshipRules (protected)
 - `/admin/playlists` → Playlists (protected)
