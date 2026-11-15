@@ -22,7 +22,6 @@ TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_com
 
 # SQLite compatibility: compile PostgreSQL types to SQLite equivalents
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB, ENUM as PG_ENUM
-from sqlalchemy import String, Text, TypeDecorator
 
 
 @event.listens_for(engine.sync_engine, "connect")
@@ -33,7 +32,6 @@ def _set_sqlite_pragma(dbapi_conn, connection_record):
 
 
 # Monkey-patch the PostgreSQL-specific column types for SQLite
-import sqlalchemy.dialects.postgresql as pg_dialect
 
 _orig_uuid_compile = None
 _orig_jsonb_compile = None

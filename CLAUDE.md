@@ -411,6 +411,10 @@ Claude Code accessible over Telegram for remote development.
 # Run backend tests locally (SQLite, no external services needed)
 cd backend && uv run pytest tests/ -v
 
+# Lint (both run in CI and must stay green; style-only ruff rules are switched off in pyproject.toml)
+cd backend && uv run ruff check app/ tests/
+cd frontend && npm run lint
+
 # Deploy backend to Vercel
 cd backend && npx vercel --prod --yes
 

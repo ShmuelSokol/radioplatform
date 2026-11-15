@@ -1,5 +1,4 @@
 import logging
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -16,9 +15,8 @@ from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
-from app.models.station import Station
 from app.models.user import User
-from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueEntryOut, QueueListResponse, QueueReorder
+from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueReorder
 
 from app.models.holiday_window import HolidayWindow
 
@@ -688,7 +686,6 @@ async def get_queue(
     _user: User = Depends(get_current_user),
 ):
     # Pure read-only — advancement is handled by the background scheduler.
-    from sqlalchemy.orm import joinedload
 
     try:
         return await _get_queue_impl(station_id, limit, db)
@@ -1645,7 +1642,7 @@ async def schedule_hourly(
         )
     )
     count = result.scalar() or 0
-    return {"message": f"Hourly scheduling complete", "preempt_entries": count}
+    return {"message": "Hourly scheduling complete", "preempt_entries": count}
 
 
 @router.post("/force-replenish")

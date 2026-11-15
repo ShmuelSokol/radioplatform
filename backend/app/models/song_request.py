@@ -1,5 +1,5 @@
 import enum
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy import String, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import ENUM, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship

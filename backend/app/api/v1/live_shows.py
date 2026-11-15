@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_admin, require_dj_or_manager, require_manager
-from app.core.exceptions import NotFoundError, ConflictError, BadRequestError
+from app.core.dependencies import get_db, require_admin, require_dj_or_manager
+from app.core.exceptions import NotFoundError
 from app.models.live_show import LiveShow, LiveShowStatus
 from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.user import User
