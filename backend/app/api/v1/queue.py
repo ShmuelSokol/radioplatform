@@ -1140,6 +1140,17 @@ async def skip_current(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    if settings.engine_drives(station_id):
+        # The playout engine fades out and starts the next track itself, then reports
+        # the real start back (which updates the queue and every client).
+        from app.services import playout_engine
+        if await playout_engine.engine_skip(station_id):
+            return {"message": "Skipped", "now_playing": None}
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "The playout engine did not respond. Nothing was skipped."},
+        )
+
     # Same lock as the automatic advance, so Next cannot collide with a song change
     async with advance_lock(station_id):
         return await _skip_current_locked(station_id, db)
@@ -1542,6 +1553,14 @@ async def start_playback(
             current.started_at = datetime.now(timezone.utc)
             await db.commit()
         return {"message": "Already playing", "now_playing": str(current.asset_id)}
+
+    if settings.engine_drives(station_id):
+        # The engine pulls its next track by itself; just make sure there is something to pull.
+        try:
+            await _replenish_queue(db, station_id)
+        except Exception as exc:
+            logger.error("_replenish_queue failed during start: %s", exc, exc_info=True)
+        return {"message": "Playout engine will start the next track", "now_playing": None}
 
     # Auto-fill queue before starting
     try:

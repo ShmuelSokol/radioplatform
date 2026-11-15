@@ -390,6 +390,10 @@ async def _resume_playback_on_startup():
             # 2. Entries that ended while the server was down: mark played and log them
             stale_playing_count = 0
             for entry in finished:
+                # The playout engine keeps playing through a backend restart; it reports
+                # what really aired, so its station's entries are left for it to settle.
+                if settings.engine_drives(entry.station_id):
+                    continue
                 play_log = PlayLog(
                     station_id=entry.station_id,
                     asset_id=entry.asset_id,
@@ -421,6 +425,8 @@ async def _resume_playback_on_startup():
 
                     if station.id in on_air:
                         continue  # still playing; the scheduler carries on from here
+                    if settings.engine_drives(station.id):
+                        continue  # the engine asks for its next track itself
 
                     # 4b. Start playback — find next pending entry
                     next_result = await db.execute(
