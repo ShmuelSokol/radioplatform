@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import func
 
 from app.config import settings
 from app.core.dependencies import get_current_user, require_admin

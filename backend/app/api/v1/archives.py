@@ -1,6 +1,5 @@
 """Show archive + podcast RSS feed API."""
 import uuid
-from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
