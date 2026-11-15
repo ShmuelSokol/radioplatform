@@ -29,3 +29,4 @@ INGEST 2026-11-15 audio-engine.md Player drifted ~5.5s ahead of server per song 
 INGEST 2026-11-15 (no page) lint is now meaningful: ruff keeps F/E/N/UP bug rules, style-only rules (E501, I001, UP017...) ignored in backend/pyproject.toml; frontend has eslint.config.js (flat, ESLint 9) and CI runs npm run lint. GET /stations/{id}/stream was crashing (settings never imported), found by ruff F821.
 QUERY 2026-11-15 control-room.md before making library sends optimistic
 INGEST 2026-11-15 control-room.md library sends (next / end / insert) now put a placeholder row in the cached queue before the request; id starts with optimistic-, replaced on refetch, rolled back on error. e2e: API_DELAY_MS=300 checks it.
+INGEST 2026-11-15 spot-recordings.md Record Spots flow; Shprach generation is a stub (spot_voice_service._shprach) that makes placeholder tones which cannot be approved; upload endpoint matches the weather/time upload shape (file + source)
