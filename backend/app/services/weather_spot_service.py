@@ -50,11 +50,18 @@ def _utc_to_eastern(utc_dt: datetime) -> datetime:
     return utc_dt.astimezone(ZoneInfo("America/New_York"))
 
 
+# Station sign-off for the hourly time announcement. Spelled for the voice
+# engine ("Kohl Baramah" is how it pronounces Kol Berama correctly).
+TIME_ANNOUNCEMENT_TEMPLATE = "The time is {time} on Radio {brand}, W M D I 107.9, the highest frequency."
+
+
 def _build_time_text(eastern_now: datetime, brand_name: str = "Kohl Baramah") -> str:
     hour = eastern_now.strftime("%I").lstrip("0")
     minute = eastern_now.strftime("%M")
     ampm = eastern_now.strftime("%p")
-    text = f"The time is {hour}:{minute} {ampm} on {brand_name}."
+    # On the hour say "3 PM", not "3:00 PM".
+    spoken = f"{hour} {ampm}" if minute == "00" else f"{hour}:{minute} {ampm}"
+    text = TIME_ANNOUNCEMENT_TEMPLATE.format(time=spoken, brand=brand_name)
     return _apply_word_replacements(text)
 
 
