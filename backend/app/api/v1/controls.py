@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_dj_or_manager
+from app.core.dependencies import require_dj_or_manager, require_station_operator
 from app.db.session import get_db
 from app.models.user import User
 from app.services.asset_service import get_asset
@@ -12,7 +12,9 @@ from app.services.playback_service import pause_playback, play_now, start_playba
 from app.services.station_service import get_station
 from app.streaming.playlist_engine import PlaylistEngine
 
-router = APIRouter(prefix="/stations", tags=["controls"])
+router = APIRouter(
+    prefix="/stations", tags=["controls"], dependencies=[Depends(require_station_operator)]
+)
 
 
 class EnqueueRequest(BaseModel):
