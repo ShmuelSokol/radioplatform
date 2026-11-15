@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import AssetCategoryBadge from '../../../components/AssetCategoryBadge';
-import { fmtAgo, fmtDur, fmtHMS, typeStyle } from './shared';
+import { clockTime, dayKey, fmtAgo, fmtDur, fmtHMS, typeStyle, useMediaQuery, weekdayShort } from './shared';
 
 export interface QueueRow {
   id: string;
@@ -35,35 +35,67 @@ interface Props {
   lastPlayed?: Record<string, string | null>;
 }
 
-const PAGE = 150;
+// Only the rows on screen (plus a margin) are drawn, so the list scrolls the
+// same with 50 items or 15,000. That needs every row to have a known height:
+// the classes on the row, the insert marker and the action bar below must
+// match these numbers.
+const ROW_DESKTOP = 40;   // lg:h-10
+const ROW_PHONE = 66;     // h-[66px]
+const MARKER_H = 40;      // h-10
+const ACTIONS_H = 61;     // h-[61px]
+const OVERSCAN = 12;      // extra rows drawn above and below the window
+const STEP = 6;           // redraw only after scrolling this many rows
 
-function fmtStart(iso: string | null | undefined, tz?: string): { time: string; day: string | null } {
+function fmtStart(iso: string | null | undefined, today: string, tz?: string): { time: string; day: string | null } {
   if (!iso) return { time: '', day: null };
   const d = new Date(iso);
-  const tzOpts = tz ? { timeZone: tz } : {};
-  const dateStr = d.toLocaleDateString('en-CA', tzOpts);
-  const todayStr = new Date().toLocaleDateString('en-CA', tzOpts);
-  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...tzOpts });
-  const day = dateStr !== todayStr ? d.toLocaleDateString('en-US', { weekday: 'short', ...tzOpts }) : null;
-  return { time, day };
+  return { time: clockTime(d, tz), day: dayKey(d, tz) !== today ? weekdayShort(d, tz) : null };
 }
 
 function QueuePanel(p: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [limit, setLimit] = useState(PAGE);
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const rowH = isDesktop ? ROW_DESKTOP : ROW_PHONE;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [firstRow, setFirstRow] = useState(0);   // top of the window, in steps of STEP rows
+  const [viewH, setViewH] = useState(800);
 
-  useEffect(() => { setLimit(PAGE); }, [p.dateFilter]);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setViewH(el.clientHeight || 800);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Back to the top when the day changes.
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    setFirstRow(0);
+  }, [p.dateFilter]);
 
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) {
-      setLimit(l => (l < p.entries.length ? l + PAGE : l));
-    }
-  }, [p.entries.length]);
+    const row = Math.floor(e.currentTarget.scrollTop / rowH / STEP) * STEP;
+    setFirstRow(prev => (prev === row ? prev : row));
+  }, [rowH]);
 
-  const shown = p.entries.slice(0, limit);
+  const n = p.entries.length;
+  const start = Math.max(0, Math.min(firstRow - OVERSCAN, n));
+  const end = Math.min(n, firstRow + Math.ceil(viewH / rowH) + STEP + OVERSCAN);
+  const shown = p.entries.slice(start, end);
+  // The insert marker and the action bar add height to one row each.
+  const armedIdx = p.insertBeforeId ? p.entries.findIndex(e => e.id === p.insertBeforeId) : -1;
+  const selIdx = selectedId ? p.entries.findIndex(e => e.id === selectedId && e.status !== 'playing') : -1;
+  const offsetOf = (i: number) =>
+    i * rowH + (armedIdx >= 0 && armedIdx < i ? MARKER_H : 0) + (selIdx >= 0 && selIdx < i ? ACTIONS_H : 0);
+  const padTop = offsetOf(start);
+  const padBottom = offsetOf(n) - offsetOf(end);
+  const today = dayKey(Date.now(), p.stationTz);
   const countLabel = p.dateFilter
     ? `${p.entries.length} shown`
     : p.totalCount > p.loadedCount ? `${p.loadedCount} of ${p.totalCount}` : `${p.loadedCount}`;
@@ -91,8 +123,8 @@ function QueuePanel(p: Props) {
         </select>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain" onScroll={onScroll} data-testid="queue-scroll">
-        {shown.length === 0 && (
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain" onScroll={onScroll} data-testid="queue-scroll">
+        {n === 0 && (
           <div className="text-center text-gray-500 py-10 px-4 text-sm">
             {p.loadedCount === 0
               ? 'The queue is empty. Add songs from the library, or press Start.'
@@ -100,13 +132,14 @@ function QueuePanel(p: Props) {
           </div>
         )}
 
+        {padTop > 0 && <div style={{ height: padTop }} aria-hidden="true" />}
         {shown.map((entry) => {
           const a = entry.asset;
           const isCur = entry.status === 'playing';
           const isSel = selectedId === entry.id;
           const isArmed = p.insertBeforeId === entry.id;
           const isDragOver = dragOverId === entry.id && dragId !== entry.id;
-          const start = fmtStart(entry.estimated_start, p.stationTz);
+          const start = fmtStart(entry.estimated_start, today, p.stationTz);
           const isSilence = a?.asset_type === 'silence';
           const title = isSilence && entry.blackout_name
             ? `Scheduled silence: ${entry.blackout_name}`
@@ -144,7 +177,7 @@ function QueuePanel(p: Props) {
                 } : undefined}
                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                 onClick={() => !isCur && setSelectedId(isSel ? null : entry.id)}
-                className={`relative flex items-center gap-2 pl-1.5 pr-2 lg:pr-3 py-1.5 lg:py-0.5 min-h-[52px] lg:min-h-[40px] border-b cursor-pointer group
+                className={`relative flex items-center gap-2 pl-1.5 pr-2 lg:pr-3 h-[66px] lg:h-10 overflow-hidden border-b cursor-pointer group
                   ${tone}
                   ${isDragOver ? 'border-t-2 border-t-cyan-400' : ''}
                   ${dragId === entry.id ? 'opacity-40' : ''}`}
@@ -179,7 +212,7 @@ function QueuePanel(p: Props) {
                     )}
                     {entry.preempt_at && (
                       <span className="ml-2 align-middle text-[11px] text-orange-300" title="Plays at this exact time">
-                        ⏰ {new Date(entry.preempt_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, ...(p.stationTz ? { timeZone: p.stationTz } : {}) })}
+                        ⏰ {clockTime(entry.preempt_at, p.stationTz)}
                       </span>
                     )}
                   </span>
@@ -212,7 +245,7 @@ function QueuePanel(p: Props) {
 
               {/* Touch-friendly actions for the selected row */}
               {isSel && !isCur && (
-                <div className="flex items-stretch gap-2 px-2 py-2 bg-[#101036] border-b border-[#2a2a5e]" data-testid="row-actions">
+                <div className="flex items-stretch gap-2 px-2 py-2 h-[61px] bg-[#101036] border-b border-[#2a2a5e]" data-testid="row-actions">
                   <button type="button" onClick={() => { p.onArmInsert(entry.id); setSelectedId(null); }}
                     className="flex-1 h-11 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold">
                     + Insert before
@@ -231,12 +264,7 @@ function QueuePanel(p: Props) {
           );
         })}
 
-        {p.entries.length > limit && (
-          <button type="button" onClick={() => setLimit(l => l + PAGE)}
-            className="w-full h-11 text-sm text-cyan-300 hover:bg-white/5">
-            Show more ({p.entries.length - limit} more)
-          </button>
-        )}
+        {padBottom > 0 && <div style={{ height: padBottom }} aria-hidden="true" />}
       </div>
     </section>
   );

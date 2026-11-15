@@ -12,13 +12,13 @@ import { useStations } from '../../hooks/useStations';
 function Bar({ value, max, label, sublabel }: { value: number; max: number; label: string; sublabel?: string }) {
   const pct = max > 0 ? (value / max) * 100 : 0;
   return (
-    <div className="flex items-center gap-3 text-sm">
-      <div className="w-32 truncate text-right text-gray-600" title={label}>{label}</div>
-      <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+    <div className="flex items-center gap-2 sm:gap-3 text-sm min-w-0">
+      <div className="w-20 sm:w-32 shrink-0 truncate text-right text-gray-600" title={label}>{label}</div>
+      <div className="flex-1 min-w-0 bg-gray-100 rounded-full h-5 overflow-hidden">
         <div className="bg-blue-500 h-full rounded-full transition-all" style={{ width: `${pct}%` }} />
       </div>
-      <div className="w-12 text-right font-mono text-gray-700">{value}</div>
-      {sublabel && <div className="w-24 text-xs text-gray-400">{sublabel}</div>}
+      <div className="w-12 shrink-0 text-right font-mono text-gray-700">{value}</div>
+      {sublabel && <div className="hidden sm:block w-24 shrink-0 truncate text-xs text-gray-400">{sublabel}</div>}
     </div>
   );
 }
@@ -62,9 +62,9 @@ export default function Analytics() {
 
   return (
     <div className="w-full">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
         <h1 className="text-3xl font-bold">Analytics</h1>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <select value={stationId} onChange={e => setStationId(e.target.value)}
             className="px-3 py-1.5 border rounded-lg text-sm">
             <option value="">All Stations</option>
@@ -106,7 +106,7 @@ export default function Analytics() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Daily Play Counts */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
+        <div className="bg-white p-4 sm:p-6 rounded-lg shadow-md min-w-0">
           <h2 className="text-lg font-bold mb-4">Daily Plays</h2>
           <div className="space-y-1.5">
             {playCounts?.map(d => (
@@ -119,7 +119,7 @@ export default function Analytics() {
         </div>
 
         {/* Top Assets */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
+        <div className="bg-white p-4 sm:p-6 rounded-lg shadow-md min-w-0">
           <h2 className="text-lg font-bold mb-4">Top Assets</h2>
           <div className="space-y-1.5">
             {topAssets?.slice(0, 10).map(a => (
@@ -133,7 +133,7 @@ export default function Analytics() {
         </div>
 
         {/* Category Breakdown */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
+        <div className="bg-white p-4 sm:p-6 rounded-lg shadow-md min-w-0">
           <h2 className="text-lg font-bold mb-4">By Category</h2>
           <div className="space-y-1.5">
             {categories?.map((c, i) => (
@@ -147,7 +147,7 @@ export default function Analytics() {
         </div>
 
         {/* Hourly Distribution */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
+        <div className="bg-white p-4 sm:p-6 rounded-lg shadow-md min-w-0">
           <h2 className="text-lg font-bold mb-4">By Hour</h2>
           <div className="space-y-1.5">
             {hourly?.map(h => (

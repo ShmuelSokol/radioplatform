@@ -714,7 +714,7 @@ export default function Assets() {
       </div>
 
       {/* Pagination + Rows per page */}
-      <div className="flex items-center justify-between mt-4 px-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 mt-4 px-2">
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500">
             {total > 0 ? `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} of ${total}` : '0 results'}

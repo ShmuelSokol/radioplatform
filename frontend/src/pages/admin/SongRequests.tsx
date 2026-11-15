@@ -125,7 +125,7 @@ export default function SongRequests() {
       </div>
 
       {/* Tab filters */}
-      <div className="flex gap-1 mb-4">
+      <div className="flex flex-wrap gap-1 mb-4">
         {TABS.map(tab => (
           <button
             key={tab.key}
