@@ -213,3 +213,118 @@ async def test_a_block_needs_a_time_and_an_item(
     ):
         res = await client.post("/api/v1/program-blocks", json=bad, headers=auth_headers)
         assert res.status_code == 422, bad
+
+
+def _spot(name, dayparts="evening", plays=1, **kw):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=name, created_at=name, is_active=True, start_date=None, end_date=None,
+        days_of_week="0,1,2,3,4,5,6", dayparts=dayparts, plays_per_daypart=plays,
+        asset_id=f"asset-{name}", sponsor_id=f"sponsor-{name}", name=name,
+        fixed_times=kw.pop("fixed_times", None), timing_mode=None,
+    )
+
+
+def test_sponsorships_fill_the_places_in_blocks():
+    """A sponsorship that wants the evening goes into the first 7:00 / 7:30 block with room."""
+    from datetime import date
+
+    from app.services.spot_schedule_service import Break, plan_spots
+
+    day = date(2026, 11, 16)
+    breaks = [
+        Break(datetime(2026, 11, 16, h, m, tzinfo=NY), 2, "soft", "Sponsors", 3)
+        for h, m in ((19, 0), (19, 30))
+    ]
+    wanting = [_spot(n) for n in ("a", "b", "c", "d", "e")]
+    wanting.append(_spot("pinned", fixed_times="19:30"))
+    placed, unplaced = plan_spots(wanting, NY, day, 1, breaks=breaks)
+
+    assert [(p.local.strftime("%H:%M"), p.seat, p.schedule.name) for p in placed] == [
+        ("19:00", 0, "b"),
+        ("19:00", 1, "c"),
+        ("19:30", 0, "pinned"),  # an exact time that is a block's start takes a place in it
+        ("19:30", 1, "a"),
+    ]
+    assert all(p.block == "Sponsors" and p.timing_mode == "soft" for p in placed)
+    assert all(p.hard_by == p.at + timedelta(minutes=3) for p in placed)
+    assert sorted(u.schedule.name for u in unplaced) == ["d", "e"]
+    assert {u.reason for u in unplaced} == {"no sponsor place left in this time of day's blocks"}
+
+    # The morning has no block with places: said plainly, not spread over clock slots.
+    placed, unplaced = plan_spots([_spot("m", dayparts="morning")], NY, day, 1, breaks=breaks)
+    assert not placed and unplaced[0].reason == "no block with sponsor places in this time of day"
+
+
+@pytest.mark.asyncio
+async def test_block_sponsor_places_reach_the_queue_in_block_order(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    station, made = await _library(db_session)
+    station_id, sponsor_id, id_id = station.id, made["sponsor"].id, made["id"].id
+    await db_session.commit()
+    res = await client.post(
+        "/api/v1/sponsors",
+        json={"name": "Ruvy Tire", "length_seconds": 30.0, "audio_file_path": ""},
+        headers=auth_headers,
+    )
+    assert res.status_code == 201, res.text
+    res = await client.post(
+        "/api/v1/spot-schedules",
+        json={
+            "sponsor_id": res.json()["id"], "asset_id": str(sponsor_id),
+            "station_id": str(station_id), "dayparts": "overnight,morning,afternoon,evening",
+            "plays_per_daypart": 2,
+        },
+        headers=auth_headers,
+    )
+    assert res.status_code == 201, res.text
+
+    body = _block(
+        station, made,
+        times=",".join(f"{h:02d}:30" for h in range(24)),
+        timing_mode="soft",
+        latest_minutes=4,
+        items=[
+            {"kind": "asset", "asset_id": str(id_id)},
+            {"kind": "sponsors", "count": 3},
+            {"kind": "asset", "asset_id": str(id_id)},
+        ],
+    )
+    res = await client.post("/api/v1/program-blocks", json=body, headers=auth_headers)
+    assert res.status_code == 201, res.text
+    assert res.json()["latest_minutes"] == 4
+
+    db_session.expire_all()
+    entries = await _pending(db_session, station_id)
+    by_start: dict = {}
+    for e in entries:
+        by_start.setdefault(e.preempt_at, []).append(e.asset_id)
+    with_sponsor = [v for v in by_start.values() if sponsor_id in v]
+    assert with_sponsor and all(v == [id_id, sponsor_id, id_id] for v in with_sponsor)
+    assert all(e.hard_by is not None for e in entries)
+    assert all(
+        (e.hard_by.replace(tzinfo=None) - e.preempt_at.replace(tzinfo=None)) == timedelta(minutes=4)
+        for e in entries
+    )
+    # Nothing is also queued on the old :15/:30/:45 sponsor clock.
+    ads = await db_session.execute(
+        select(QueueEntry).where(
+            QueueEntry.station_id == station_id, QueueEntry.source == "ad_slot"
+        )
+    )
+    assert not ads.scalars().all()
+
+    preview = await client.get(
+        f"/api/v1/program-blocks/preview?station_id={station_id}&hours=24", headers=auth_headers
+    )
+    labels = {i["label"] for o in preview.json()["occurrences"] for i in o["items"]}
+    assert {"Open sponsor place", "Sponsor: Ruvy Tire"} <= labels
+    assert any(i.get("open_place") for o in preview.json()["occurrences"] for i in o["items"])
+
+    plan = await client.get(
+        f"/api/v1/spot-schedules/preview?station_id={station_id}", headers=auth_headers
+    )
+    assert plan.status_code == 200, plan.text
+    assert {p["block"] for p in plan.json()["planned"]} == {"Weather Sponsors"}

@@ -115,7 +115,7 @@ radioplatform/
 | Sponsor | sponsor.py | Sponsor/ad management (linked to User via user_id) |
 | SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
 | SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
-| ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor, programme) that airs as one event at set clock times, hard or soft |
+| ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
 | PlaylistTemplate | playlist_template.py | Rotation pattern templates |

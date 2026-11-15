@@ -41,6 +41,9 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #   "soft" = the item on air finishes, then this plays
     #   None   = the older rule: source "ad_slot" is soft, anything else is hard
     timing_mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Soft entries only: if the item on air is still playing at this time, fade it
+    # and start (a soft start with a limit). None = wait for the item to finish.
+    hard_by: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     station = relationship("Station", lazy="selectin")
     asset = relationship("Asset", lazy="selectin")

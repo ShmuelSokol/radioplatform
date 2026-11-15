@@ -129,6 +129,7 @@ class PlannedSpot(BaseModel):
     daypart: str
     timing_mode: str = "soft"
     fixed: bool = False
+    block: str | None = None  # the program block whose sponsor place this is
     schedule_id: UUID | str
     sponsor_id: UUID | str
     sponsor_name: str

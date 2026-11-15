@@ -6,7 +6,8 @@ export type BlockItem =
   | { kind: 'asset'; asset_id: string; label?: string }
   | { kind: 'category'; asset_type: string; category?: string; label?: string }
   | { kind: 'time'; label?: string }
-  | { kind: 'weather'; label?: string };
+  | { kind: 'weather'; label?: string }
+  | { kind: 'sponsors'; count: number; label?: string };
 
 export interface ProgramBlock {
   id: string;
@@ -16,6 +17,7 @@ export interface ProgramBlock {
   days_of_week: string; // "0,1,..." 0 = Monday
   times: string; // "07:00,08:00" station time
   timing_mode: BlockTiming;
+  latest_minutes: number | null; // soft only: wait at most this long for the song
   items: BlockItem[];
 }
 
@@ -27,6 +29,7 @@ export interface PreviewItem {
   title: string | null;
   duration: number | null;
   problem: string | null;
+  open_place: boolean;
 }
 
 export interface PreviewOccurrence {
@@ -35,6 +38,7 @@ export interface PreviewOccurrence {
   at: string;
   local_time: string;
   timing_mode: BlockTiming;
+  latest_minutes: number | null;
   seconds: number;
   items: PreviewItem[];
   problems: string[];

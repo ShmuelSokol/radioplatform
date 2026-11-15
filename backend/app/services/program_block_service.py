@@ -6,12 +6,17 @@ station ID, the weather, a PSA, a sponsor spot and a programme segment. A
 ProgramBlock is that line. This module turns blocks into concrete occurrences
 and keeps the station queue's pending entries (source="block") in step.
 
+A "sponsors" item is a number of sponsor places. The spot planner
+(spot_schedule_service) fills them from the sponsorships that want that time
+of day, and this module writes them in the block's order.
+
 Every item of an occurrence is queued with the same preempt_at and the block's
 timing_mode, in order of position: the same convention the hourly time and
 weather entries always used, so playout treats the run as one event.
 """
 
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -26,6 +31,7 @@ from app.models.queue_entry import QueueEntry
 from app.models.station import Station
 from app.services.spot_schedule_service import (
     SAFETY_MARGIN,
+    Break,
     _csv,
     _exists,
     as_utc,
@@ -38,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 SOURCE = "block"
 HORIZON_HOURS = 48  # the same reach as the hourly time and weather it replaces
-KINDS = ("asset", "category", "time", "weather")
+KINDS = ("asset", "category", "time", "weather", "sponsors")
 DEFAULT_DURATION = 30.0
 
 
@@ -50,6 +56,7 @@ class ResolvedItem:
     title: str | None = None
     duration: float | None = None
     problem: str | None = None  # why nothing will play for this item
+    open_place: bool = False  # a sponsor place no sponsorship has taken
 
 
 @dataclass
@@ -74,6 +81,9 @@ def item_label(item: dict) -> str:
         return "Time announcement"
     if kind == "weather":
         return "Weather"
+    if kind == "sponsors":
+        count = int(item.get("count") or 1)
+        return f"{count} sponsor place{'s' if count != 1 else ''}"
     if kind == "category":
         if item.get("category"):
             return f"{item.get('asset_type')} / {item['category']}"
@@ -86,6 +96,37 @@ async def load_blocks(db: AsyncSession, station_id, active_only: bool = True) ->
     if active_only:
         stmt = stmt.where(ProgramBlock.is_active.is_(True))
     return list((await db.execute(stmt.order_by(ProgramBlock.name))).scalars().all())
+
+
+def sponsor_places(block: ProgramBlock) -> int:
+    return sum(
+        max(0, int(i.get("count") or 1)) for i in block.items or [] if i.get("kind") == "sponsors"
+    )
+
+
+async def load_breaks(db: AsyncSession, station: Station, start: datetime, end: datetime):
+    """Every airing of the station's blocks that has sponsor places, or None
+    when no active block has any (the spot planner then uses clock slots)."""
+    blocks = [b for b in await load_blocks(db, station.id) if sponsor_places(b)]
+    if not blocks:
+        return None
+    return [
+        Break(
+            local=o.local,
+            capacity=sponsor_places(o.block),
+            timing_mode=o.block.timing_mode,
+            name=o.block.name,
+            latest_minutes=o.block.latest_minutes,
+        )
+        for o in occurrences_between(blocks, station_tz(station.timezone), start, end)
+    ]
+
+
+def hard_by(block: ProgramBlock, at: datetime) -> datetime | None:
+    """For a soft block with a limit: when to stop waiting for the song."""
+    if block.timing_mode == "soft" and block.latest_minutes:
+        return at + timedelta(minutes=block.latest_minutes)
+    return None
 
 
 def occurrences_between(
@@ -117,8 +158,10 @@ def occurrences_between(
 class _Resolver:
     """Turns a block's items into recordings for one occurrence."""
 
-    def __init__(self, db: AsyncSession, station: Station, dry_run: bool):
+    def __init__(self, db: AsyncSession, station: Station, dry_run: bool, sponsors=None):
         self.db = db
+        # (UTC start, block name) -> the sponsorships planned into its places, in order
+        self.sponsors: dict[tuple, list] = sponsors or {}
         self.station = station
         self.dry_run = dry_run
         self.assets: dict[str, Asset | None] = {}
@@ -198,10 +241,35 @@ class _Resolver:
                 self.announcements[slot_key] = (None, None)
         return self.announcements[slot_key]
 
+    async def _sponsor_items(self, planned: list, count: int) -> list[ResolvedItem]:
+        found = []
+        for _ in range(count):
+            if not planned:
+                found.append(ResolvedItem(kind="sponsors", label="Open sponsor place", open_place=True))
+                continue
+            placement = planned.pop(0)
+            asset = await self._asset(placement.schedule.asset_id)
+            name = placement.schedule.name or (asset.title if asset else "Sponsorship")
+            out = ResolvedItem(kind="sponsor", label=f"Sponsor: {name}")
+            if asset is None:
+                out.problem = f"Sponsor {name}: the spot was removed from the library"
+            else:
+                out.asset_id, out.title = asset.id, asset.title
+                out.duration = float(asset.duration or DEFAULT_DURATION)
+            found.append(out)
+        return found
+
     async def resolve(self, occurrence: Occurrence) -> None:
+        key = (occurrence.at.replace(second=0, microsecond=0), occurrence.block.name)
+        planned = list(self.sponsors.get(key, []))
         for item in occurrence.block.items or []:
             kind = item.get("kind")
             label = item.get("label") or item_label(item)
+            if kind == "sponsors":
+                occurrence.items.extend(
+                    await self._sponsor_items(planned, max(0, int(item.get("count") or 1)))
+                )
+                continue
             out = ResolvedItem(kind=kind, label=label)
             if kind == "asset":
                 asset = await self._asset(item.get("asset_id"))
@@ -254,7 +322,17 @@ async def plan_blocks(
         return []
     blackouts = await load_blackouts(db, station.id, now, end)
     found = occurrences_between(blocks, station_tz(station.timezone), now, end, blackouts)
-    resolver = _Resolver(db, station, dry_run)
+    sponsors: dict[tuple, list] = {}
+    if any(sponsor_places(b) for b in blocks):
+        from app.services.spot_schedule_service import plan_for_station
+
+        placements, _ = await plan_for_station(
+            db, station, days=math.ceil(hours / 24) + 1, now=now
+        )
+        for p in placements:
+            if p.block is not None:
+                sponsors.setdefault((p.at, p.block), []).append(p)
+    resolver = _Resolver(db, station, dry_run, sponsors)
     for occurrence in found:
         await resolver.resolve(occurrence)
     return found
@@ -356,6 +434,7 @@ async def reconcile_block_entries(
                     source=SOURCE,
                     preempt_at=at,
                     timing_mode=occurrence.block.timing_mode,
+                    hard_by=hard_by(occurrence.block, at),
                 )
             )
             added += 1

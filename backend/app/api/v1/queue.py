@@ -724,7 +724,9 @@ async def _check_advance_locked(
             QueueEntry.status == "pending",
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now_utc,
-            hard_timed(),  # ad_slots use soft preempt (wait for song end)
+            # ad_slots use soft preempt (wait for song end), unless they have
+            # waited as long as their block allows (hard_by)
+            or_(hard_timed(), QueueEntry.hard_by <= now_utc),
         )
         .order_by(QueueEntry.preempt_at, QueueEntry.position)
         .limit(1)

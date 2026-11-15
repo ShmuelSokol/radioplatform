@@ -25,6 +25,7 @@ from app.schemas.program_block import (
     ProgramBlockUpdate,
 )
 from app.services.program_block_service import plan_blocks, reconcile_block_entries
+from app.services.spot_schedule_service import reconcile_spot_slots
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,8 @@ async def _allowed(db: AsyncSession, user: User, station_id) -> None:
 async def _requeue(db: AsyncSession, station_id) -> None:
     """Make the queue follow an edit right away."""
     try:
+        # Sponsor places in blocks change where the sponsorships go.
+        await reconcile_spot_slots(db, station_id)
         await reconcile_block_entries(db, station_id, rebuild=True)
         await db.commit()
     except Exception:
@@ -104,6 +107,7 @@ async def preview_program_blocks(
                 at=o.at,
                 local_time=o.local.strftime("%a %d %b %I:%M %p").replace(" 0", " "),
                 timing_mode=o.block.timing_mode,
+                latest_minutes=o.block.latest_minutes,
                 seconds=o.seconds,
                 items=[
                     PreviewItem(
@@ -112,6 +116,7 @@ async def preview_program_blocks(
                         title=i.title,
                         duration=i.duration,
                         problem=i.problem,
+                        open_place=i.open_place,
                     )
                     for i in o.items
                 ],
@@ -136,6 +141,7 @@ async def create_program_block(
         days_of_week=data.days_of_week,
         times=data.times,
         timing_mode=data.timing_mode,
+        latest_minutes=data.latest_minutes if data.timing_mode == "soft" else None,
         items=_items(data.items),
     )
     db.add(block)
@@ -155,10 +161,14 @@ async def update_program_block(
 ):
     block = await _get(db, block_id)
     await _allowed(db, user, block.station_id)
-    changes = data.model_dump(exclude_unset=True, exclude={"items"})
+    changes = data.model_dump(exclude_unset=True, exclude={"items", "latest_minutes"})
     for key, value in changes.items():
         if value is not None:
             setattr(block, key, value.strip() if key == "name" else value)
+    if "latest_minutes" in data.model_fields_set:
+        block.latest_minutes = data.latest_minutes  # None clears the limit
+    if block.timing_mode != "soft":
+        block.latest_minutes = None
     if data.items is not None:
         block.items = _items(data.items)
     station_id = block.station_id

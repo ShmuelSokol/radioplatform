@@ -11,11 +11,12 @@ from app.services.spot_schedule_service import parse_fixed_times
 
 
 class BlockItem(BaseModel):
-    kind: Literal["asset", "category", "time", "weather"]
+    kind: Literal["asset", "category", "time", "weather", "sponsors"]
     asset_id: UUID | None = None
     asset_type: str | None = Field(None, max_length=50)
     category: str | None = Field(None, max_length=100)
     label: str | None = Field(None, max_length=80)
+    count: int | None = Field(None, ge=1, le=10)  # sponsors: how many places
 
     @model_validator(mode="after")
     def _complete(self):
@@ -23,6 +24,8 @@ class BlockItem(BaseModel):
             raise ValueError("choose the recording for this item")
         if self.kind == "category" and not (self.asset_type or "").strip():
             raise ValueError("choose the type of recording for this item")
+        if self.kind == "sponsors" and self.count is None:
+            self.count = 1
         return self
 
 
@@ -41,6 +44,7 @@ class ProgramBlockBase(BaseModel):
     days_of_week: str = "0,1,2,3,4,5,6"
     times: str
     timing_mode: Literal["hard", "soft"] = "hard"
+    latest_minutes: int | None = Field(None, ge=1, le=60)
     items: list[BlockItem] = Field(..., min_length=1, max_length=20)
 
     _days = field_validator("days_of_week")(_clean_days)
@@ -57,6 +61,7 @@ class ProgramBlockUpdate(BaseModel):
     days_of_week: str | None = None
     times: str | None = None
     timing_mode: Literal["hard", "soft"] | None = None
+    latest_minutes: int | None = Field(None, ge=1, le=60)
     items: list[BlockItem] | None = Field(None, min_length=1, max_length=20)
 
     @field_validator("days_of_week")
@@ -80,6 +85,7 @@ class ProgramBlockOut(BaseModel):
     days_of_week: str
     times: str
     timing_mode: str
+    latest_minutes: int | None = None
     items: list[dict]
     created_at: datetime | None = None
 
@@ -90,6 +96,7 @@ class PreviewItem(BaseModel):
     title: str | None = None
     duration: float | None = None
     problem: str | None = None
+    open_place: bool = False
 
 
 class PreviewOccurrence(BaseModel):
@@ -98,6 +105,7 @@ class PreviewOccurrence(BaseModel):
     at: datetime
     local_time: str  # "Mon 16 Nov 3:00 PM" in station time
     timing_mode: str
+    latest_minutes: int | None = None
     seconds: float
     items: list[PreviewItem]
     problems: list[str]

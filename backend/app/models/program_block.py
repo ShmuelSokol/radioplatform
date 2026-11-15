@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,9 +28,12 @@ class ProgramBlock(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     times: Mapped[str] = mapped_column(String(400), nullable=False)
     # hard = the song on air fades and the block starts on the second; soft = the song finishes
     timing_mode: Mapped[str] = mapped_column(String(10), default="hard", nullable=False)
+    # Soft only: wait for the song at most this many minutes, then fade it (None = no limit)
+    latest_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Ordered list of items, each one of:
     #   {"kind": "asset", "asset_id": "..."}                    one particular recording
     #   {"kind": "category", "asset_type": "...", "category": "..."}  the longest-rested of a type
     #   {"kind": "time"}                                        the time announcement for that hour
     #   {"kind": "weather"}                                     that day's weather
+    #   {"kind": "sponsors", "count": 3}                        places the spot planner fills
     items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
