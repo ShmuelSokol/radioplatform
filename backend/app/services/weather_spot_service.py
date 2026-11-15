@@ -89,6 +89,20 @@ def _build_weather_text(weather: dict, city_name: str = "Lakewood") -> str:
     return _apply_word_replacements(text)
 
 
+def _slot_time(slot_key: str, fallback: datetime) -> datetime:
+    """The Eastern clock time a slot key ("2024-01-15T15") stands for.
+
+    Announcements are generated up to 48 hours before they air, so the spoken
+    time must come from the slot, never from the moment of generation.
+    """
+    for fmt in ("%Y-%m-%dT%H", "%Y-%m-%dT%H:%M", "%Y-%m-%dT%H-%M"):
+        try:
+            return datetime.strptime(slot_key, fmt).replace(tzinfo=fallback.tzinfo)
+        except ValueError:
+            continue
+    return fallback
+
+
 async def get_or_create_weather_spot_assets(
     db: AsyncSession, slot_key: str
 ) -> tuple[Asset | None, Asset | None]:
@@ -138,7 +152,7 @@ async def get_or_create_weather_spot_assets(
     time_asset = existing_time
     if not time_asset:
         try:
-            time_text = _build_time_text(eastern_now)
+            time_text = _build_time_text(_slot_time(slot_key, eastern_now))
             time_bytes, time_duration = await generate_tts(time_text)
             from app.services.audio_analysis_service import normalize_audio_loudness
             time_bytes = normalize_audio_loudness(time_bytes)

@@ -22,3 +22,4 @@ INGEST 2026-11-15 spot-schedules.md Sponsor spot schedules replace the single ha
 INGEST 2026-11-15 sponsorship-copy-review.md Sponsorship wording rules are data (versioned table, manager-editable), never hardcoded in prompts; copy review reads the version in force. Real Claude call not exercised in tests.
 UPDATE 2026-11-15 spot-schedules.md review follow-ups: legacy spot off switch, DST missing times, validation, audio ownership, preview hides past
 INGEST 2026-11-15 (no page) queue_entries/play_logs had no station indexes in prod path (create_all, not alembic); added via main.py migrations + model __table_args__. Fresh-DB create_all currently fails on playback_mode enum default.
+INGEST 2026-11-15 hourly-slots.md Time announcement text was built from generation time, not the slot hour (clips are made up to 48h ahead; after a restart all 48 said the same wrong time). Now derived from slot_key via _slot_time.
