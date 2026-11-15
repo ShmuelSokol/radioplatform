@@ -56,6 +56,12 @@ class QueueFireNow(BaseModel):
     client_request_id: str | None = Field(default=None, max_length=100)
 
 
+class QueueLoop(BaseModel):
+    """Loop the item on air (it plays again each time it ends) until switched off or Next."""
+
+    on: bool
+
+
 class QueueInsert(BaseModel):
     """Insert one or more assets, in order, right after `after_entry_id`
     (null = at the top, so they play next)."""

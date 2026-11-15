@@ -138,7 +138,7 @@ radioplatform/
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
-| queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `fire-now`, `insert`; see `wiki/operator-actions.md`) |
+| queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `fire-now`, `insert`, `loop`; see `wiki/operator-actions.md`) |
 | rules | rules.py | /rules |
 | schedules | schedules.py | /schedules |
 | now_playing | now_playing.py | /now-playing |
@@ -333,7 +333,7 @@ Claude Code accessible over Telegram for remote development.
 
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
-- **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`.
+- **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`. `canChange()` there says who may change things on a screen (drives the "View only" marker); any refused action shows an app-wide "not allowed" notice (`components/layout/ViewOnlyNotice.tsx`).
 - **Page layout**: admin and sponsor pages fill the window; no `max-w-* mx-auto` page wrappers. Rules in `wiki/admin-page-layout.md`.
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.

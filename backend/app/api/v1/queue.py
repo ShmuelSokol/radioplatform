@@ -25,6 +25,7 @@ from app.schemas.queue import (
     QueueDndReorder,
     QueueFireNow,
     QueueInsert,
+    QueueLoop,
     QueueReorder,
 )
 
@@ -527,6 +528,94 @@ def _incoming_from_automatic_change(station_id, entry_id) -> bool:
     )
 
 
+# ── Loop: the item on air plays again each time it ends ──────────────────────
+# Kept in the station's automation_config ("loop_asset_id") so it survives a restart.
+# Each repeat is a real queue entry with source "loop", added just before it is needed.
+
+
+async def loop_asset_id(db: AsyncSession, station_id) -> str | None:
+    from app.models.station import Station
+
+    res = await db.execute(select(Station.automation_config).where(Station.id == station_id))
+    config = res.scalar_one_or_none() or {}
+    return config.get("loop_asset_id") or None
+
+
+async def _set_loop(db: AsyncSession, station_id, asset_id) -> None:
+    from app.models.station import Station
+
+    res = await db.execute(select(Station).where(Station.id == station_id))
+    station = res.scalar_one_or_none()
+    if station is None:
+        raise NotFoundError("Station not found")
+    config = dict(station.automation_config or {})
+    if asset_id is None:
+        config.pop("loop_asset_id", None)
+    else:
+        config["loop_asset_id"] = str(asset_id)
+    station.automation_config = config
+
+
+async def add_loop_repeat(db: AsyncSession, station_id, ignore_ids: set[str] | None = None) -> None:
+    """If the station is looping and no repeat is waiting, queue one to play next.
+    `ignore_ids`: repeats already handed to the playout engine (they are on their way to air)."""
+    asset_id = await loop_asset_id(db, station_id)
+    if not asset_id:
+        return
+    res = await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.source == "loop",
+        )
+    )
+    waiting = {str(x) for x in res.scalars().all()} - (ignore_ids or set())
+    if waiting:
+        return
+    res = await db.execute(
+        select(func.min(QueueEntry.position)).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "pending"
+        )
+    )
+    top = res.scalar()
+    if top is None:
+        res = await db.execute(
+            select(func.max(QueueEntry.position)).where(QueueEntry.station_id == station_id)
+        )
+        top = (res.scalar() or 0) + 1
+    else:
+        await db.execute(
+            update(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+            .values(position=QueueEntry.position + 1)
+        )
+    db.add(
+        QueueEntry(
+            id=uuid.uuid4(), station_id=station_id, asset_id=uuid.UUID(asset_id),
+            position=top, status="pending", source="loop",
+        )
+    )
+    await db.flush()
+
+
+async def stop_loop(db: AsyncSession, station_id) -> bool:
+    """Switch looping off and drop a repeat that has not aired. True if it was on."""
+    if not await loop_asset_id(db, station_id):
+        return False
+    await _set_loop(db, station_id, None)
+    res = await db.execute(
+        select(QueueEntry).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.source == "loop",
+        )
+    )
+    for entry in res.scalars().all():
+        await db.delete(entry)
+    await db.flush()
+    return True
+
+
 def _aware(dt: datetime) -> datetime:
     """SQLite hands back naive datetimes; they are UTC."""
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
@@ -701,6 +790,8 @@ async def _check_advance_locked(
         )
         db.add(log)
         current.status = "played"
+        # Looping: the same item goes in again as the next thing to play
+        await add_loop_repeat(db, station_id)
 
     # Check for soft-preempt ad slots first (clock-based :15/:30/:45 ads)
     ad_result = await db.execute(
@@ -1057,6 +1148,8 @@ async def _get_queue_impl(station_id, limit, db):
         "queue_duration_seconds": round(queue_duration, 1),
         "total_queue_duration_seconds": round(total_queue_duration, 1),
         "preempt_fade_ms": 2000,
+        # Set while the operator has Loop on: this asset repeats until Loop off or Next
+        "loop_asset_id": await loop_asset_id(db, station_id),
     }
 
 
@@ -1260,6 +1353,10 @@ async def skip_current(
         # The playout engine fades out and starts the next track itself, then reports
         # the real start back (which updates the queue and every client).
         from app.services import playout_engine
+        # Next ends a loop: the pre-loaded repeat must not come back
+        if await stop_loop(db, station_id):
+            await db.commit()
+            await playout_engine.engine_flush(station_id)
         if await playout_engine.engine_skip(station_id, fade_seconds):
             return {"message": "Skipped", "now_playing": None, "fade_seconds": fade_seconds}
         return JSONResponse(
@@ -1296,6 +1393,8 @@ async def _skip_current_locked(
             "kept_incoming": True,
             "queue": await _queue_after_action(db, station_id),
         }
+    # Next ends a loop
+    await stop_loop(db, station_id)
     # Clean up extras
     for extra in playing_entries[1:]:
         extra.status = "skipped"
@@ -1397,6 +1496,40 @@ async def _broadcast_now_playing_entry(
             )
     except Exception as e:
         logger.warning("Instant now-playing broadcast failed: %s", e)
+
+
+@router.post("/loop")
+async def loop_current(
+    station_id: uuid.UUID,
+    body: QueueLoop,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """Loop on: the item on air plays again each time it ends. Off (or Next) ends it;
+    the play in progress finishes normally."""
+    async with advance_lock(station_id):
+        if body.on:
+            result = await db.execute(
+                select(QueueEntry)
+                .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+                .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
+            )
+            current = result.scalar_one_or_none()
+            if current is None:
+                raise HTTPException(status_code=409, detail="Nothing is on air to loop")
+            await _set_loop(db, station_id, current.asset_id)
+        else:
+            await stop_loop(db, station_id)
+        await db.commit()
+    if settings.engine_drives(station_id):
+        # The engine has the following track pre-loaded: make it ask again
+        from app.services import playout_engine
+        await playout_engine.engine_flush(station_id)
+    return {
+        "loop": body.on,
+        "asset_id": await loop_asset_id(db, station_id),
+        "queue": await _queue_after_action(db, station_id),
+    }
 
 
 @router.post("/insert", status_code=201)

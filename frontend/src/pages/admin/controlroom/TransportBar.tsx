@@ -26,10 +26,13 @@ interface Props {
   elapsed: number;
   remaining: number;
   duration: number;
+  /** Seconds of intro left on the item on air; 0 when there is none or it has passed. */
+  introSeconds: number;
   onStart: () => void;
   starting: boolean;
   statusMessage: string | null;
-  onNext: () => void;
+  /** Go to the next item. No argument is the plain Next (cut); 'fade' and 'soft' fade the item out first. */
+  onNext: (fade?: 'hard' | 'fade' | 'soft') => void;
   nextBusy: boolean;
   audio: TransportAudio;
   stationTz?: string;
@@ -123,7 +126,7 @@ export default function TransportBar(p: Props) {
       aria-label="Station"
       value={p.stationId ?? ''}
       onChange={(e) => p.onStation(e.target.value)}
-      className="h-8 lg:h-9 max-w-[60vw] lg:max-w-[220px] bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-100 text-sm px-2 rounded-md focus:outline-none focus:border-cyan-500"
+      className="h-8 lg:h-9 max-w-[60vw] lg:max-w-[140px] xl:max-w-[220px] bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-100 text-sm px-2 rounded-md focus:outline-none focus:border-cyan-500"
     >
       {p.stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
     </select>
@@ -133,17 +136,34 @@ export default function TransportBar(p: Props) {
     </span>
   );
 
+  const fadeBtn = 'h-11 lg:h-12 px-2.5 lg:px-3 rounded-lg border border-amber-500/60 bg-amber-500/10 hover:bg-amber-500/25 active:bg-amber-500/40 text-amber-200 text-xs lg:text-sm font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed';
   const nextButton = (
-    <button
-      type="button"
-      onClick={p.onNext}
-      disabled={!p.isPlaying || p.nextBusy}
-      title="Go to the next item now (N)"
-      className="h-11 lg:h-12 px-5 rounded-lg bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-black text-base font-extrabold tracking-wide shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-    >
-      {p.nextBusy ? '…' : 'NEXT ⏭'}
-    </button>
+    <div className="flex items-center gap-1.5 shrink-0" role="group" aria-label="Go to the next item">
+      <button type="button" onClick={() => p.onNext('fade')} disabled={!p.isPlaying || p.nextBusy}
+        data-testid="next-fade" title="Fade this item out quickly, then go to the next" className={fadeBtn}>
+        Fade
+      </button>
+      <button type="button" onClick={() => p.onNext('soft')} disabled={!p.isPlaying || p.nextBusy}
+        data-testid="next-soft" title="Fade this item out slowly (3 seconds), then go to the next" className={fadeBtn}>
+        <span className="sm:hidden lg:inline xl:hidden">Soft</span><span className="hidden sm:inline lg:hidden xl:inline">Soft fade</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => p.onNext('hard')}
+        disabled={!p.isPlaying || p.nextBusy}
+        title="Go to the next item now, with no fade (N)"
+        className="h-11 lg:h-12 px-3 sm:px-4 lg:px-5 rounded-lg bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-black text-base font-extrabold tracking-wide shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {p.nextBusy ? '…' : <>NEXT<span className="hidden sm:inline lg:hidden xl:inline"> ⏭</span></>}
+      </button>
+    </div>
   );
+  const intro = p.introSeconds > 0 ? (
+    <div className="text-center leading-none shrink-0" data-testid="intro-countdown" title="Time left before the vocal starts">
+      <div className="text-2xl lg:text-3xl xl:text-4xl font-extrabold tabular-nums text-emerald-300">{fmtCountdown(Math.ceil(p.introSeconds))}</div>
+      <div className="text-[10px] lg:text-[11px] font-bold uppercase tracking-wider text-emerald-500 mt-0.5">Intro</div>
+    </div>
+  ) : null;
 
   const sound = !audio.audioReady ? (
     <button
@@ -152,7 +172,7 @@ export default function TransportBar(p: Props) {
       title="Hear the station in this browser"
       className="h-9 px-3 rounded-md bg-cyan-800 hover:bg-cyan-700 text-cyan-50 text-xs font-semibold shrink-0"
     >
-      🔊 Listen
+      🔊<span className="hidden sm:inline"> Listen</span>
     </button>
   ) : (
     <div className="flex items-center gap-2 shrink-0">
@@ -168,7 +188,7 @@ export default function TransportBar(p: Props) {
         type="range" min="0" max="1" step="0.01" value={audio.volume}
         aria-label="Monitor volume"
         onChange={e => audio.setVolume(parseFloat(e.target.value))}
-        className="hidden sm:block w-20 xl:w-28 h-1 accent-cyan-400 cursor-pointer"
+        className="hidden sm:block lg:hidden 2xl:block w-20 2xl:w-28 h-1 accent-cyan-400 cursor-pointer"
       />
     </div>
   );
@@ -180,7 +200,7 @@ export default function TransportBar(p: Props) {
         {onAir}
         <div className="hidden lg:block shrink-0">{stationSelect}</div>
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 lg:min-w-[9rem]">
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate text-base lg:text-xl font-bold text-yellow-300 leading-tight">
               {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
@@ -208,7 +228,8 @@ export default function TransportBar(p: Props) {
           </Link>
         )}
 
-        <div className="hidden lg:flex items-center gap-3">
+        <div className="hidden lg:flex items-center gap-2 xl:gap-3">
+          {intro}
           <div className="text-right leading-none">
             <div className={`text-3xl xl:text-4xl font-extrabold tabular-nums ${ending ? 'text-red-400 animate-pulse' : 'text-white'}`}>
               -{fmtCountdown(p.remaining)}
@@ -237,14 +258,15 @@ export default function TransportBar(p: Props) {
       </div>
 
       {/* Row 2 (phones and tablets): countdown, Next, sound */}
-      <div className="flex lg:hidden items-center gap-2 px-3 py-2">
+      <div className="flex lg:hidden flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2">
         <div className={`text-3xl font-extrabold tabular-nums leading-none ${ending ? 'text-red-400 animate-pulse' : 'text-white'}`}>
           -{fmtCountdown(p.remaining)}
         </div>
-        <div className="text-[11px] text-gray-500 tabular-nums leading-tight">
+        <div className="hidden sm:block text-[11px] text-gray-500 tabular-nums leading-tight">
           <div>{fmtDur(p.elapsed)}</div>
           <div>{fmtDur(p.duration)}</div>
         </div>
+        {intro}
         <div className="flex-1" />
         {sound}
         {nextButton}
