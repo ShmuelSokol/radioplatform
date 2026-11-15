@@ -86,6 +86,14 @@ async def look_ahead(
             findings.append(open_finding)
         open_key, open_finding = None, None
 
+    def step_end(t: datetime) -> datetime:
+        """End of the step starting at t, cut short where an off-air window begins."""
+        stop = t + STEP
+        for b in blackouts:
+            if t < b.start < stop:
+                stop = b.start
+        return stop
+
     at = start
     while at < end:
         if any(b.covers(at) for b in blackouts):
@@ -118,7 +126,7 @@ async def look_ahead(
                     open_finding = Finding(
                         kind=OVERLAP,
                         start=at,
-                        end=at + STEP,
+                        end=step_end(at),
                         title=f'"{winner[1].name}" overlaps {names}',
                         detail=f'"{winner[1].name}" plays because {_why(winner, losers[0])}.',
                         resolution=f'"{winner[1].name}" plays; {names} waits.',
@@ -141,14 +149,14 @@ async def look_ahead(
                     open_finding = Finding(
                         kind=GAP,
                         start=at,
-                        end=at + STEP,
+                        end=step_end(at),
                         title="Nothing scheduled",
                         detail="No schedule block covers this time.",
                         resolution="The station keeps playing from the automatic queue.",
                         needs_attention=False,
                     )
         elif open_finding is not None:
-            open_finding.end = at + STEP
+            open_finding.end = step_end(at)
         at += STEP
     close()
 
