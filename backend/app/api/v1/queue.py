@@ -1215,10 +1215,24 @@ async def _skip_current_locked(station_id: uuid.UUID, db: AsyncSession):
         next_asset_id = next_entry.asset_id
         await db.commit()
         await _broadcast_now_playing_entry(db, station_id, next_id)
-        return {"message": "Skipped", "now_playing": str(next_asset_id)}
+        return {
+            "message": "Skipped",
+            "now_playing": str(next_asset_id),
+            "queue": await _queue_after_action(db, station_id),
+        }
 
     await db.commit()
-    return {"message": "Queue empty", "now_playing": None}
+    return {"message": "Queue empty", "now_playing": None, "queue": await _queue_after_action(db, station_id)}
+
+
+async def _queue_after_action(db: AsyncSession, station_id) -> dict | None:
+    """The same body as GET /queue, returned with an action's response so the
+    client does not need a second request to show the result."""
+    try:
+        return await _get_queue_impl(station_id, 2000, db)
+    except Exception as exc:
+        logger.warning("Queue snapshot after action failed: %s", exc)
+        return None
 
 
 async def _broadcast_now_playing_entry(db: AsyncSession, station_id, entry_id) -> None:
