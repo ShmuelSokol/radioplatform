@@ -331,6 +331,7 @@ Claude Code accessible over Telegram for remote development.
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
 - **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`.
+- **Page layout**: admin and sponsor pages fill the window; no `max-w-* mx-auto` page wrappers. Rules in `wiki/admin-page-layout.md`.
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
 - **DB Sessions**: Import `get_db` from `app.db.session` (not `get_async_session`).
@@ -435,6 +436,9 @@ cd frontend && npx vercel --prod --yes
 
 # Browser check of the control room against a fake backend (desktop + phone sizes)
 cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/control-room.mjs
+
+# Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
+cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com

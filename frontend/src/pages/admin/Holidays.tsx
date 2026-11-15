@@ -128,7 +128,7 @@ export default function Holidays() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-8">
+    <div className="w-full">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Sabbath & Holiday Blackouts</h1>
         <button

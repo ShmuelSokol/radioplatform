@@ -61,7 +61,7 @@ export default function Analytics() {
   const maxHourly = Math.max(...(hourly?.map(h => h.plays) || [1]));
 
   return (
-    <div className="max-w-6xl mx-auto p-8">
+    <div className="w-full">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Analytics</h1>
         <div className="flex gap-3">

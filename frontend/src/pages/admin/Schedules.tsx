@@ -99,7 +99,7 @@ const Schedules: React.FC = () => {
   if (isLoading) return <div className="p-8">Loading schedules...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto p-8">
+    <div className="w-full">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Schedules</h1>
         <button

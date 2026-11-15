@@ -337,8 +337,8 @@ export default function RecordingStudio() {
   const readouts = readoutsData?.readouts ?? [];
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8">
-      <h1 className="text-2xl font-bold text-white">Recording Studio</h1>
+    <div className="w-full space-y-8">
+      <h1 className="text-2xl font-bold text-gray-900">Recording Studio</h1>
 
       {/* ── Section 1: Weather Readouts ───────────────────────────────── */}
       <section className="bg-[#12123a] border border-[#2a2a5e] rounded-xl p-6 space-y-4">
