@@ -229,6 +229,27 @@ export default function Dashboard() {
     qc.invalidateQueries({ queryKey: ['play-log', sid] });
   }, [qc]);
 
+  // The server pushes a message the moment the track on air changes. Refresh the
+  // queue and played log right then instead of waiting for the next poll.
+  const pushedTrack = wsNowPlaying ? `${wsNowPlaying.asset_id ?? ''}|${wsNowPlaying.started_at ?? ''}` : null;
+  const lastPushedTrack = useRef<{ sid: string | null; track: string | null }>({ sid: null, track: null });
+  useEffect(() => {
+    const last = lastPushedTrack.current;
+    lastPushedTrack.current = { sid: stationId, track: pushedTrack };
+    // The first message after opening a station is the current state, not a change.
+    if (last.sid !== stationId || last.track === null || pushedTrack === null) return;
+    if (last.track === pushedTrack) return;
+    qc.invalidateQueries({ queryKey: ['last-played', stationId] });
+    // After Next, the answer to the click has already put the new queue in place.
+    const cached = qc.getQueryData<{ now_playing?: { asset_id?: string } | null }>(['queue', stationId]);
+    const pushedId = pushedTrack.split('|')[0];
+    if (pushedId && cached?.now_playing?.asset_id === pushedId) {
+      qc.invalidateQueries({ queryKey: ['play-log', stationId] });
+      return;
+    }
+    refreshQueue();
+  }, [pushedTrack, stationId, refreshQueue, qc]);
+
   const send = useCallback(async (asset: CtlAsset, how: SendHow) => {
     const { stationId: sid, queueEntries: entries, insertBeforeId: targetId, busyId: busy } = latest.current;
     if (!sid || busy) return;
