@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { insertEntry, moveEntry, removeEntry, reorderEntry } from './queueOptimistic';
 import type { QueueDataLike } from './queueOptimistic';
 import { getQueue, getPlayLog, addToQueue, playNext, skipCurrent, moveUp, moveDown, removeFromQueue, startPlayback, getLastPlayed, previewWeather, reorderDnd } from '../api/queue';
+import type { SkipFade } from '../api/queue';
 
 export function useQueue(stationId: string | null) {
   return useQuery({
@@ -92,7 +93,7 @@ export function usePlayNext(stationId: string) {
 export function useSkipCurrent(stationId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => skipCurrent(stationId),
+    mutationFn: (fade?: SkipFade) => skipCurrent(stationId, fade),
     onMutate: async () => {
       // A poll already in flight would put the old song back
       await qc.cancelQueries({ queryKey: ['queue', stationId] });
