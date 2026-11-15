@@ -28,15 +28,16 @@ function makeBackend(queueSize = 60) {
   const assets = [];
   const types = ['music', 'jingle', 'spot', 'shiur', 'zmanim'];
   for (let i = 1; i <= 140; i++) {
-    assets.push({ id: `m${i}`, title: i % 7 === 0 ? `Nigun Simcha ${i}` : `Song number ${i} with a fairly long descriptive title`, artist: `Artist ${i % 9}`, album: null, duration: 150 + (i % 90), asset_type: 'music', category: i % 3 ? 'lively' : 'slow' });
+    assets.push({ id: `m${i}`, title: i % 7 === 0 ? `Nigun Simcha ${i}` : `Song number ${i} with a fairly long descriptive title`, artist: `Artist ${i % 9}`, album: null, duration: 150 + (i % 90), asset_type: 'music', category: i % 3 ? 'lively' : 'slow', });
   }
-  for (let i = 1; i <= 9; i++) assets.push({ id: `j${i}`, title: `Station ID ${i}`, artist: null, album: null, duration: 6 + i, asset_type: 'jingle', category: 'ids' });
+  for (let i = 1; i <= 9; i++) assets.push({ id: `j${i}`, title: `Station ID ${i}`, artist: null, album: null, duration: 6 + i, asset_type: 'jingle', category: 'ids', intro_seconds: i === 3 ? 6 : null });
   for (let i = 1; i <= 4; i++) assets.push({ id: `s${i}`, title: `Kol Berama sponsor business ${i}`, artist: null, album: null, duration: 30, asset_type: 'spot', category: null });
   const byId = Object.fromEntries(assets.map(a => [a.id, a]));
   let seq = 0;
   let queue = []; // {id, asset_id, position, status, started_at}
   for (let i = 1; i <= queueSize; i++) queue.push({ id: `q${++seq}`, asset_id: `m${((i - 1) % 140) + 1}`, position: i, status: i === 1 ? 'playing' : 'pending', started_at: i === 1 ? new Date(Date.now() - 20_000).toISOString() : null });
   const calls = [];
+  const fired = new Map();
   const pending = () => queue.filter(e => e.status === 'pending').sort((a, b) => a.position - b.position);
   const playing = () => queue.find(e => e.status === 'playing');
   const view = () => {
@@ -46,7 +47,7 @@ function makeBackend(queueSize = 60) {
       const a = byId[e.asset_id];
       const est = e.status === 'playing' ? e.started_at : new Date(cursor).toISOString();
       cursor += a.duration * 1000;
-      return { id: e.id, station_id: SID, asset_id: e.asset_id, position: e.position, status: e.status, estimated_start: est, source: 'manual', preempt_at: null, asset: { id: a.id, title: a.title, artist: a.artist, duration: a.duration, asset_type: a.asset_type, category: a.category } };
+      return { id: e.id, station_id: SID, asset_id: e.asset_id, position: e.position, status: e.status, estimated_start: est, source: 'manual', preempt_at: null, asset: { id: a.id, title: a.title, artist: a.artist, duration: a.duration, asset_type: a.asset_type, category: a.category, intro_seconds: a.intro_seconds ?? null } };
     });
     const p = entries.find(e => e.status === 'playing');
     return { entries, total: entries.length, total_all: entries.length, now_playing: p ? { ...p, started_at: playing().started_at } : null, queue_duration_seconds: 9000, total_queue_duration_seconds: 9000, preempt_fade_ms: 2000 };
@@ -86,6 +87,25 @@ function makeBackend(queueSize = 60) {
       const e = { id: `q${++seq}`, asset_id: body.asset_id, position: cur ? cur.position + 1 : 1, status: 'pending' };
       queue.push(e);
       return { id: e.id, position: e.position };
+    }
+    if (path === `${q}/fire-now`) {
+      if (body.client_request_id && fired.has(body.client_request_id)) return { ...fired.get(body.client_request_id), duplicate: true };
+      pending().forEach(e => { e.position += 1; });
+      const cur = playing();
+      const e = { id: `q${++seq}`, asset_id: body.asset_id, position: cur ? cur.position + 1 : 1, status: 'playing', started_at: new Date().toISOString() };
+      if (cur) cur.status = 'skipped';
+      queue.push(e);
+      const done = { id: e.id, position: e.position, on_air: true, queue: view() };
+      if (body.client_request_id) fired.set(body.client_request_id, done);
+      return done;
+    }
+    if (path === `${q}/insert`) {
+      const anchor = body.after_entry_id ? queue.find(x => x.id === body.after_entry_id && x.status !== 'skipped') : null;
+      const after = anchor ? anchor.position : (playing()?.position ?? 0);
+      const ids = [...(body.asset_id ? [body.asset_id] : []), ...(body.asset_ids || [])];
+      pending().forEach(x => { if (x.position > after) x.position += ids.length; });
+      const made = ids.map((asset_id, i) => { const e = { id: `q${++seq}`, asset_id, position: after + 1 + i, status: 'pending' }; queue.push(e); return e.id; });
+      return { ids: made, queue: view() };
     }
     if (path === `${q}/skip` || path === `${q}/start`) {
       const cur = playing();
@@ -206,6 +226,9 @@ async function desktop(browser, width, height) {
   await jingle.click();
   await page.waitForFunction(() => /Station ID 3/.test(document.querySelector('[data-testid=control-room] header')?.textContent || ''));
   check(`${tag}: instant button puts the jingle on air immediately`, backend.nowId() === 'j3');
+  check(`${tag}: play now is one request`, backend.calls.filter(c => c.path.endsWith('/queue/fire-now')).length === 1 && !backend.calls.some(c => c.path.endsWith('/queue/skip')));
+  const introText = await page.getByTestId('intro-countdown').first().textContent().catch(() => '');
+  check(`${tag}: intro countdown shows while the intro runs`, /0:0[1-6]\s*Intro/i.test(introText), introText);
   await shot(page, `${width}-3-jingle-on-air`);
 
   // Play-next mode
@@ -220,7 +243,16 @@ async function desktop(browser, width, height) {
   await page.locator('body').click({ position: { x: 5, y: 300 } }).catch(() => {});
   await page.keyboard.press('n');
   await page.waitForTimeout(500);
+  const skips = () => backend.calls.filter(c => c.path.endsWith('/queue/skip')).map(c => c.query.fade);
+  check(`${tag}: NEXT and N cut with no fade`, skips().join() === 'hard,hard', skips().join());
   check(`${tag}: NEXT button and the N key both advance`, backend.nowId() === 'm100', `now ${backend.nowId()}`);
+
+  // Fade and Soft fade
+  await page.getByTestId('next-fade').first().click();
+  await page.waitForTimeout(300 + DELAY);
+  await page.getByTestId('next-soft').first().click();
+  await page.waitForTimeout(300 + DELAY);
+  check(`${tag}: Fade and Soft fade ask for their own fade`, skips().slice(-2).join() === 'fade,soft', skips().join());
 
   // Pin a library item as an instant button
   await page.getByRole('searchbox').fill('Song number 50');
