@@ -187,6 +187,7 @@ async def analytics_summary(
     # Total airtime (seconds)
     stmt = (
         select(func.sum(Asset.duration))
+        .select_from(PlayLog)
         .join(Asset, PlayLog.asset_id == Asset.id)
         .where(*base_filter)
     )
