@@ -106,6 +106,8 @@ export default function Navbar() {
       links: [
         { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
         { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
+        { to: '/admin/spot-schedule', label: 'Spot Schedule', color: 'hover:text-yellow-300' },
+        { to: '/admin/sponsorship-rules', label: 'Sponsorship Rules', color: 'hover:text-yellow-300' },
         { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
         { to: '/admin/stations', label: 'Manage Stations', color: 'hover:text-cyan-300' },
         { to: '/admin/crm', label: 'CRM', color: 'hover:text-pink-300' },
