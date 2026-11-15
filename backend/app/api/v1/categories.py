@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_manager
+from app.core.dependencies import get_db, require_manager, require_staff
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryInDB, CategoryUpdate
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 @router.get("", response_model=list[CategoryInDB])
 async def list_categories(
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_manager),
+    _=Depends(require_staff),
 ):
     stmt = select(Category).order_by(Category.name)
     result = await db.execute(stmt)

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.core.dependencies import get_current_user, require_dj_or_manager, require_manager
+from app.core.dependencies import require_dj_or_manager, require_manager, require_staff
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset
@@ -683,7 +683,7 @@ async def get_queue(
     station_id: uuid.UUID,
     limit: int = Query(2000, ge=1, le=5000),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     # Pure read-only — advancement is handled by the background scheduler.
 
@@ -976,7 +976,7 @@ async def get_play_log(
     station_id: uuid.UUID,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Get recent play history."""
     from sqlalchemy.orm import selectinload
@@ -1010,7 +1010,7 @@ async def get_play_log(
 async def get_last_played(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Get the most recent play time for each asset."""
     result = await db.execute(
@@ -1517,7 +1517,7 @@ async def start_playback(
 async def preview_weather(
     station_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     """Generate (or return cached) weather + time TTS for preview — does NOT insert into queue."""
     if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:

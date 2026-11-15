@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, require_manager
+from app.core.dependencies import require_manager, require_staff
 from app.db.session import get_db
 from app.models.queue_entry import QueueEntry
 from app.models.station import Station
@@ -34,7 +34,7 @@ async def list_readouts(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_staff),
 ):
     stmt = select(WeatherReadout)
     count_stmt = select(func.count(WeatherReadout.id))
@@ -119,7 +119,7 @@ async def template_preview(
     station_id: uuid.UUID = Query(...),
     template: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_staff),
 ):
     station = await db.get(Station, station_id)
     if not station:
@@ -143,7 +143,7 @@ async def template_preview(
 async def get_readout(
     readout_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_staff),
 ):
     readout = await db.get(WeatherReadout, readout_id)
     if not readout:

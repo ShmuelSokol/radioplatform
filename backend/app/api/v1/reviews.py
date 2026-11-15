@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, require_manager
+from app.core.dependencies import require_manager, require_staff
 from app.db.session import get_db
 from app.models.user import User
 from app.models.review_queue import ReviewQueue, ReviewItem
@@ -55,7 +55,7 @@ async def list_queues(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     count_result = await db.execute(select(func.count()).select_from(ReviewQueue))
     total = count_result.scalar() or 0
@@ -70,7 +70,7 @@ async def list_queues(
 async def get_queue(
     queue_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     result = await db.execute(select(ReviewQueue).where(ReviewQueue.id == queue_id))
     queue = result.scalar_one_or_none()
@@ -83,7 +83,7 @@ async def get_queue(
 async def list_queue_items(
     queue_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     result = await db.execute(
         select(ReviewItem)
@@ -98,7 +98,7 @@ async def list_queue_items(
 async def get_next_item(
     queue_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_staff),
 ):
     """Get the next unreviewed item and assign to current user."""
     result = await db.execute(
@@ -122,7 +122,7 @@ async def update_item(
     item_id: uuid.UUID,
     body: ReviewItemUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_staff),
 ):
     result = await db.execute(select(ReviewItem).where(ReviewItem.id == item_id))
     item = result.scalar_one_or_none()
@@ -223,7 +223,7 @@ async def batch_update(
 async def get_asset_history(
     asset_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     from app.models.review_action import ReviewAction
     from app.models.user import User as UserModel
@@ -255,7 +255,7 @@ async def add_comment(
     asset_id: uuid.UUID,
     body: dict,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_staff),
 ):
     from app.models.review_action import ReviewAction
     action = ReviewAction(
@@ -274,7 +274,7 @@ async def add_comment(
 async def get_queue_activity(
     queue_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_staff),
 ):
     from app.models.review_action import ReviewAction
     from app.models.user import User as UserModel
