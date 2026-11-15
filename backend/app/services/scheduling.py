@@ -16,9 +16,9 @@ from app.models.asset import Asset
 from app.models.now_playing import NowPlaying
 from app.models.play_log import PlayLog
 from app.models.playlist_entry import PlaybackMode, PlaylistEntry
-from app.models.playlist_template import PlaylistTemplate, TemplateSlot
+from app.models.playlist_template import PlaylistTemplate
 from app.models.schedule import Schedule
-from app.models.schedule_block import DayOfWeek, RecurrenceType, ScheduleBlock, SunEvent
+from app.models.schedule_block import RecurrenceType, ScheduleBlock, SunEvent
 
 logger = logging.getLogger(__name__)
 
@@ -58,19 +58,62 @@ class SchedulingService:
         result = await self.db.execute(stmt)
         schedules = result.scalars().all()
 
-        # Find matching blocks
-        matching_blocks = []
-        for schedule in schedules:
-            for block in schedule.blocks:
-                if self._block_matches_time(block, at_time, station):
-                    matching_blocks.append((schedule.priority, block.priority, block))
+        ranked = self.rank_matching_blocks(schedules, at_time, station)
+        return ranked[0][1] if ranked else None
 
-        if not matching_blocks:
-            return None
+    @staticmethod
+    def station_local(at_time: datetime, station) -> datetime:
+        """Block times are station wall-clock times, so match them in the station's zone."""
+        from zoneinfo import ZoneInfo
 
-        # Sort by schedule priority (desc), then block priority (desc)
-        matching_blocks.sort(key=lambda x: (x[0], x[1]), reverse=True)
-        return matching_blocks[0][2]
+        if at_time.tzinfo is None:
+            at_time = at_time.replace(tzinfo=timezone.utc)
+        try:
+            return at_time.astimezone(ZoneInfo((station.timezone if station else None) or "UTC"))
+        except Exception:
+            return at_time.astimezone(timezone.utc)
+
+    @staticmethod
+    def block_rank(schedule: Schedule, block: ScheduleBlock) -> tuple:
+        """Sort key for which block wins when several cover the same moment (highest wins).
+
+        Priority decides first. Equal priorities are settled the same way every
+        time: the more specific block wins (one-time over monthly over weekly
+        over daily), then the shorter one, then the newer one.
+        """
+        specificity = {
+            RecurrenceType.ONE_TIME: 3,
+            RecurrenceType.MONTHLY: 2,
+            RecurrenceType.WEEKLY: 1,
+            RecurrenceType.DAILY: 0,
+        }.get(block.recurrence_type, 0)
+        length = 0
+        if block.start_time is not None and block.end_time is not None:
+            start = block.start_time.hour * 60 + block.start_time.minute
+            end = block.end_time.hour * 60 + block.end_time.minute
+            length = (end - start) % (24 * 60) or 24 * 60
+        return (
+            schedule.priority or 0,
+            block.priority or 0,
+            specificity,
+            -length,
+            str(block.created_at or ""),
+            str(block.id),
+        )
+
+    def rank_matching_blocks(
+        self, schedules, at_time: datetime, station=None
+    ) -> list[tuple[Schedule, ScheduleBlock]]:
+        """Every block active at at_time, winner first."""
+        local = self.station_local(at_time, station)
+        matching = [
+            (schedule, block)
+            for schedule in schedules
+            for block in schedule.blocks
+            if self._block_matches_time(block, local, station)
+        ]
+        matching.sort(key=lambda sb: self.block_rank(*sb), reverse=True)
+        return matching
 
     def _resolve_sun_time(self, sun_event: SunEvent, offset_minutes: int, station, at_date) -> time:
         """Resolve a sun-relative time to a concrete time value."""

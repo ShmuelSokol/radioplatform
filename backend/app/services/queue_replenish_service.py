@@ -140,9 +140,7 @@ class QueueReplenishService:
         # Step 2: Fill main content FIRST so interval/rotation entries interleave
         # Use time-aware fill so morning/afternoon/evening rules are respected
         # across the full 7-day queue window, not just the current hour's rule.
-        fill_start_pos = self.max_pos
         await self._fill_content_time_aware(shortfall, rules)
-        fill_end_pos = self.max_pos
 
         # Only insert global sponsors for stations using global rules
         if not station_specific:

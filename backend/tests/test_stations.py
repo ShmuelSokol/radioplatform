@@ -108,3 +108,16 @@ async def test_create_station_unauthorized(client: AsyncClient):
         json={"name": "No Auth Station"},
     )
     assert response.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_stream_info(client: AsyncClient, auth_headers: dict):
+    """The stream endpoint used to crash on an undefined name."""
+    res = await client.post("/api/v1/stations", json={"name": "Stream Station"}, headers=auth_headers)
+    station_id = res.json()["id"]
+
+    res = await client.get(f"/api/v1/stations/{station_id}/stream")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["station_id"] == station_id
+    assert "stream_url" in body

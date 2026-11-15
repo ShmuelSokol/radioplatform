@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import tempfile
 
 from app.config import settings
 

@@ -1,5 +1,4 @@
 import logging
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -16,9 +15,8 @@ from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
-from app.models.station import Station
 from app.models.user import User
-from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueEntryOut, QueueListResponse, QueueReorder
+from app.schemas.queue import QueueAdd, QueueBulkAdd, QueueDndReorder, QueueReorder
 
 from app.models.holiday_window import HolidayWindow
 
@@ -497,8 +495,14 @@ async def _replenish_queue(db: AsyncSession, station_id: uuid.UUID) -> None:
     await service.replenish()
 
 
-async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry | None:
-    """Core playback engine: check if current track is done and auto-advance."""
+async def _check_advance(
+    db: AsyncSession, station_id: uuid.UUID, early_seconds: float = 0.0
+) -> QueueEntry | None:
+    """Core playback engine: check if current track is done and auto-advance.
+
+    `early_seconds` lets the precise timer advance at the crossfade point instead of
+    the very end of the track (see SchedulerEngine._precise_advance).
+    """
     is_blackout = await _is_blacked_out(db, station_id)
 
     # Hourly jingles and weather are now pre-scheduled via _schedule_hourly_announcements()
@@ -596,7 +600,8 @@ async def _check_advance(db: AsyncSession, station_id: uuid.UUID) -> QueueEntry 
 
     else:
         elapsed = (now_utc - current.started_at).total_seconds()
-        if elapsed < duration:
+        # Small tolerance so a timer that fires a few ms early still advances
+        if elapsed < duration - max(0.0, early_seconds) - 0.05:
             return current  # still playing
 
         # Track finished — log it and advance
@@ -681,7 +686,6 @@ async def get_queue(
     _user: User = Depends(require_staff),
 ):
     # Pure read-only — advancement is handled by the background scheduler.
-    from sqlalchemy.orm import joinedload
 
     try:
         return await _get_queue_impl(station_id, limit, db)
@@ -1638,7 +1642,7 @@ async def schedule_hourly(
         )
     )
     count = result.scalar() or 0
-    return {"message": f"Hourly scheduling complete", "preempt_entries": count}
+    return {"message": "Hourly scheduling complete", "preempt_entries": count}
 
 
 @router.post("/force-replenish")

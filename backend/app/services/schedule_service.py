@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schedule_entry import ScheduleEntry
 from app.models.play_log import PlayLog, PlaySource
-from app.models.queue_entry import QueueEntry, QueueStatus
 from app.schemas.schedule import ScheduleEntryCreate, ScheduleEntryUpdate
 
 

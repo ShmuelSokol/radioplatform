@@ -411,8 +411,7 @@ async def bulk_analyze_endpoint(
 ):
     """Batch-analyze all assets missing audio_analysis metadata. Returns job_id to poll."""
     # Find assets missing audio_analysis
-    from sqlalchemy import or_, cast, String
-    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy import or_
 
     result = await db.execute(
         select(AssetModel.id).where(

@@ -1,11 +1,9 @@
 """Now-playing WebSocket endpoint."""
 import asyncio
-import json
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.db.session import get_db
 from app.services.schedule_service import ScheduleService

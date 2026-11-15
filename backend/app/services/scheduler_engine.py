@@ -7,11 +7,9 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import func as sql_func
 
 from app.config import settings
 from app.db.session import get_db
@@ -514,16 +512,25 @@ class SchedulerEngine:
 
         delay = max(0.0, duration_seconds - crossfade_seconds)
         loop = asyncio.get_running_loop()
-        handle = loop.call_later(delay, lambda: loop.create_task(self._precise_advance(station_id)))
+        handle = loop.call_later(
+            delay,
+            lambda: loop.create_task(self._precise_advance(station_id, crossfade_seconds)),
+        )
         self._advance_timers[station_key] = handle
         logger.debug("Scheduled precise advance for station %s in %.1fs", station_id, delay)
 
-    async def _precise_advance(self, station_id):
-        """Called by precise timer to advance playback without waiting for polling."""
+    async def _precise_advance(self, station_id, crossfade_seconds: float = 0.0):
+        """Called by the precise timer, `crossfade_seconds` before the track ends.
+
+        The server changes track at that moment, the same moment clients start their
+        crossfade. If it waited for the full duration (and then for the next poll),
+        clients would start every song a few seconds before the server and drift
+        further ahead with each track.
+        """
         try:
             async for db in get_db():
                 from app.api.v1.queue import _check_advance
-                entry = await _check_advance(db, station_id)
+                entry = await _check_advance(db, station_id, early_seconds=crossfade_seconds)
                 if entry and entry.status == "playing":
                     await self._broadcast_queue_entry(db, station_id, entry)
                 break
@@ -561,14 +568,15 @@ class SchedulerEngine:
                 # Schedule precise timer for this track
                 asset = entry.asset
                 duration = (asset.duration if asset else None) or 180.0
-                # Get crossfade duration from audio analysis if available
+                # Advance where clients start their crossfade: at cross_start
+                # (same default as the now-playing payload: 3s before the end)
                 cross_seconds = 3.0
                 if asset and asset.metadata_extra:
                     analysis = asset.metadata_extra.get("audio_analysis", {})
-                    cue_out = analysis.get("cue_out_seconds")
                     cross_start = analysis.get("cross_start_seconds")
-                    if cue_out and cross_start:
-                        cross_seconds = cue_out - cross_start
+                    if isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
+                        cross_seconds = duration - cross_start
+                cross_seconds = min(cross_seconds, max(0.0, duration / 2))
 
                 # Calculate remaining time from started_at
                 elapsed = (datetime.now(timezone.utc) - entry.started_at).total_seconds()
@@ -877,7 +885,6 @@ class SchedulerEngine:
                 "started_at": now_playing.started_at.isoformat(),
                 "ends_at": now_playing.ends_at.isoformat() if now_playing.ends_at else None,
                 "listener_count": now_playing.listener_count,
-                "stream_url": now_playing.stream_url,
                 "stream_url": settings.ICECAST_STREAM_URL if settings.liquidsoap_enabled else None,
                 "asset": {
                     "title": asset.title,

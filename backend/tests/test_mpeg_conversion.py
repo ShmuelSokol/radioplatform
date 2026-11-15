@@ -89,7 +89,7 @@ class TestMpegConversion:
             mock_run.return_value = tempfile_result
 
             with patch("builtins.open", return_value=io.BytesIO(fake_mp3)):
-                result = _convert_with_ffmpeg(fake_mpeg_data, "mp3", ".mpeg")
+                _convert_with_ffmpeg(fake_mpeg_data, "mp3", ".mpeg")
 
             # Should make exactly one subprocess call (temp file, not pipe)
             assert mock_run.call_count == 1
