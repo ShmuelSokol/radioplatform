@@ -5,7 +5,7 @@
  *
  *   cd frontend && node e2e/audio-engine.mjs        # optional: one scenario name
  *
- * Exits non-zero if any check fails. Takes about 90 seconds.
+ * Exits non-zero if any check fails. Takes about two minutes.
  */
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -103,7 +103,40 @@ const SCENARIOS = {
     change: (set) => set({ ...C, nextId: 'a', startedAt: now(), fade: 0.5 }),
     audibleWithin: 1, outGoneWithin: 1.2, end: { src: 'c', minT: 4, maxT: 6 },
   },
+  // A sponsorship that waits for the song (soft) is due in 3 s: the song must keep playing
+  'soft-timed-item-does-not-fade-the-song': {
+    start: { ...A, nextId: 'b' }, wait: 4, watch: 6,
+    change: (set, startA) => set({ ...A, nextId: 'b', startedAt: startA, queue: [timed({ hard_timed: false })] }),
+    end: { src: 'a', minT: 9, maxT: 11 },
+  },
+  // Same, from a server too old to send hard_timed (sponsor slots were always soft)
+  'soft-sponsor-slot-from-older-server-does-not-fade': {
+    start: { ...A, nextId: 'b' }, wait: 4, watch: 6,
+    change: (set, startA) => set({ ...A, nextId: 'b', startedAt: startA, queue: [timed({ source: 'ad_slot' })] }),
+    end: { src: 'a', minT: 9, maxT: 11 },
+  },
+  // An item set to start on the second: the song fades out by its time
+  'hard-timed-item-fades-the-song': {
+    start: { ...A, nextId: 'b' }, wait: 4, watch: 5,
+    change: (set, startA) => set({ ...A, nextId: 'b', startedAt: startA, queue: [timed({ hard_timed: true })] }),
+    fadesBy: 3,
+  },
+  // A soft item with a limit: the song fades at the limit, not at the item's time
+  'soft-item-fades-only-at-its-limit': {
+    start: { ...A, nextId: 'b' }, wait: 4, watch: 7,
+    change: (set, startA) => set({
+      ...A, nextId: 'b', startedAt: startA,
+      queue: [timed({ hard_timed: false, preempt_at: inSeconds(1), hard_by: inSeconds(5) })],
+    }),
+    fadesBy: 5, notBefore: 2.5,
+  },
 };
+
+function inSeconds(s) { return new Date(Date.now() + s * 1000).toISOString(); }
+// A queued timed item due in 3 s (rows as the queue endpoint sends them)
+function timed(extra) {
+  return { id: 'q-timed', asset_id: 'c', position: 2, status: 'pending', source: 'block', preempt_at: inSeconds(3), ...extra };
+}
 
 const only = process.argv[2];
 const server = await createServer({ root, logLevel: 'error', server: { port: 5197, strictPort: false } });
@@ -133,16 +166,27 @@ async function run(name, sc) {
 
   const t0 = Date.now();
   sc.change(set, startA);
-  let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, last = [];
-  const target = sc.end.src;
+  let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, firstSilent = null, last = [];
+  const target = sc.end?.src;
   while (Date.now() - t0 < sc.watch * 1000) {
     last = await page.evaluate(() => window.__snap());
     const audible = last.filter((d) => d.playing && d.gain > 0.05);
     silentFor = audible.length ? 0 : silentFor + 0.2;
+    if (firstSilent === null && !audible.length) firstSilent = (Date.now() - t0) / 1000;
     longestSilence = Math.max(longestSilence, silentFor);
     if (firstNew === null && audible.some((d) => d.src === target && d.t < 4)) firstNew = (Date.now() - t0) / 1000;
     if (outGone === null && !audible.some((d) => d.src === sc.start.id)) outGone = (Date.now() - t0) / 1000;
     await sleep(200);
+  }
+  if (sc.fadesBy) {
+    check(`${name}: song faded out by ${sc.fadesBy} s`, firstSilent !== null && firstSilent <= sc.fadesBy + 0.5,
+      firstSilent === null ? 'never' : `${firstSilent.toFixed(2)} s`);
+    if (sc.notBefore) {
+      check(`${name}: not before ${sc.notBefore} s`, firstSilent === null || firstSilent >= sc.notBefore,
+        firstSilent === null ? 'never' : `${firstSilent.toFixed(2)} s`);
+    }
+    await page.close();
+    return;
   }
   const audible = last.filter((d) => d.playing && d.gain > 0.05);
   const state = last.map((d) => `${d.src || '-'}${d.playing ? '' : '(stopped)'}@${d.t}`).join(' | ');

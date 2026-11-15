@@ -64,3 +64,7 @@ Loop is a toggle in the same group: `liveControl.loopCurrent` posts `queue/loop 
 The transport bar is one row from 1280 px (`xl`) and two rows below that (title and clock on top; countdown, Intro, sound and the Loop / Fade / Soft fade / NEXT group underneath). Both rows are in the DOM and one is hidden, so browser checks must pick the `:visible` button.
 
 Mix over is the third cart mode (Play now / Play next / Mix over): a tap calls `liveControl.mixOver` (`queue/mix-over`, request id reused on a double tap like play now). The queue does not move, so the Dashboard makes no placeholder row. The browser path (socket `mix_over` message, `kbr-mix-over` event, `useAudioEngine`) is covered by `e2e/control-room.mjs`; it only plays once sound has been started on the page (Listen).
+
+## Timed items: when the control-room player fades
+
+In the browser player (no playout engine), the server decides when a timed item starts, but the control room fades the song's volume itself just before the cut. It must fade only when the server will really cut: a hard item at `preempt_at`, a soft item with a limit at `hard_by`. A soft item with no limit waits for the song to end, so no fade. `controlroom/timing.ts` `cutAt()` reads `hard_timed` and `hard_by` from the queue rows. Before 2026-11-15 it faded for every timed item, so a soft sponsorship at :45 left the song silent until it ended.

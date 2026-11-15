@@ -17,6 +17,7 @@ import type { AssetInfo } from '../../types';
 import TransportBar from './controlroom/TransportBar';
 import QueuePanel from './controlroom/QueuePanel';
 import type { QueueRow } from './controlroom/QueuePanel';
+import { nextCut } from './controlroom/timing';
 import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
 import { usePfl } from './controlroom/pfl';
@@ -158,10 +159,10 @@ export default function Dashboard() {
     asset_type: nowAsset.asset_type, category: nowAsset.category, duration: nowAsset.duration,
   } : null;
 
-  const nextPreempt = useMemo(() => {
-    const now = Date.now();
-    return queueEntries.find(e => e.preempt_at && e.status !== 'playing' && new Date(e.preempt_at).getTime() > now);
-  }, [queueEntries]);
+  // The next moment a timed item cuts the song on air. Only a hard item does that at its
+  // time (and a soft one at its limit); a soft item waits for the song to end, so the
+  // player must not fade for it, or the song goes silent until it would have ended.
+  const nextPreempt = useMemo(() => nextCut(queueEntries), [queueEntries]);
   const preemptFadeMs = queueData?.preempt_fade_ms ?? 2000;
 
   const dashStreamUrl = wsNowPlaying?.stream_url || null;
