@@ -17,3 +17,9 @@ Schedule priority, then block priority, then the more specific recurrence (one-t
 ## Not flagged
 
 Gaps (the automatic queue keeps playing) and off-air windows are listed but never `needs_attention`. Sponsor plays skipped for Shabbos are not findings; plays with no free slot are. See [spot-schedules](spot-schedules.md).
+
+## Start-only blocks (`until_next`), the studio program's playlists
+
+KBR Studio 1.82 schedules playlists by a start only ("6 am mix 01234 6:00", "blanks Candle+1", "motzei 72"); each runs until the next one starts. A `ScheduleBlock` with `until_next=true` works that way: `end_time` is ignored, `SchedulingService.running_playlist` picks the start-only block whose `last_start` (looking back up to 8 days, sun-relative starts resolved per day) is most recent. It joins the ranking as the base layer: a timed block over it wins a priority tie, and the look-ahead does not report that as an overlap.
+
+Candle lighting is not its own sun event: use `sunset` with offset -18 (so "Candle+1" is -17), and "72 after Shabbos" is `sunset` +72 on Saturday. The block form has quick-start buttons for both. Sun times need the station's latitude and longitude; without them the code silently uses Jerusalem.

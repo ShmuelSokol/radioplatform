@@ -9,7 +9,7 @@ import enum
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text, Time, Date
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, Time, Date
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -95,6 +95,13 @@ class ScheduleBlock(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ENUM(SunEvent, name="sun_event", create_type=True), nullable=True
     )
     end_sun_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)  # minutes
+
+    # Start-only block, like a playlist in the studio program: it has a start
+    # (day and time, or a sun-relative time) and runs until the next start-only
+    # block begins. end_time is ignored.
+    until_next: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
 
     # Optional playlist template (rotation mode)
     playlist_template_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -61,6 +61,8 @@ class ScheduleBlockBase(BaseModel):
     end_sun_event: SunEvent | None = None
     end_sun_offset: int | None = None
     playlist_template_id: UUID | str | None = None
+    # Start-only: runs until the next start-only block begins (end_time ignored)
+    until_next: bool = False
 
 
 class ScheduleBlockCreate(ScheduleBlockBase):
@@ -83,6 +85,7 @@ class ScheduleBlockUpdate(BaseModel):
     end_sun_event: SunEvent | None = None
     end_sun_offset: int | None = None
     playlist_template_id: UUID | str | None = None
+    until_next: bool | None = None
 
 
 class ScheduleBlockInDB(ScheduleBlockBase):

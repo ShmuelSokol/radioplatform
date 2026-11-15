@@ -92,9 +92,14 @@ async def look_ahead(
             close()
             at += STEP
             continue
-        ranked = svc.rank_matching_blocks(schedules, at, station)
+        everything = svc.rank_matching_blocks(schedules, at, station)
+        # A timed block over the running playlist is how the schedule is meant
+        # to work, not a collision; only timed blocks can collide with each other.
+        ranked = [sb for sb in everything if not getattr(sb[1], "until_next", False)]
         key = None
-        if len(ranked) > 1:
+        if not ranked and everything:
+            pass
+        elif len(ranked) > 1:
             key = (OVERLAP, tuple(str(b.id) for _, b in ranked))
         elif not ranked:
             key = (GAP,)
