@@ -53,6 +53,14 @@ The weather spot is ONE asset per Eastern day (`asset_type="spot"`, `category="w
 - FIXED 2026-11-15: the ElevenLabs time text used the generation time, not the slot's hour, so clips scheduled ahead all announced the hour they were made. It now speaks the slot's hour.
 - The uploader lives on the voice PC, not in this repo: `C:\shprach\realness\kolberama\daily_station.ps1` (scheduled task "Kol Berama Daily Weather Spot") runs `weekly.py` then `station_upload.py`.
 
+## Rate limits: weather cache and generation pause (2026-11-15)
+
+The OpenWeatherMap key (free plan, 60 calls/min) was blocked on 2026-11-15. Cause: ElevenLabs had been refusing every request since July, so no announcement asset was ever saved; `_schedule_hourly_announcements` runs every few seconds and called `get_or_create_weather_spot_assets` for each of the 48 unfilled slots on every pass, and each call fetched the weather (2 API calls) before failing at TTS.
+
+- `weather_service.get_current_weather` now caches per location for 30 min and remembers a failure (15 min, or 60 min for 401/429) instead of retrying.
+- `get_or_create_weather_spot_assets` pauses all generation for 15 min after a failure; uploaded clips are still returned.
+- Tests reset both through the autouse fixture in `tests/conftest.py`.
+
 ## Hard vs soft preempts
 
 - **Hard** (`source != "ad_slot"`): Interrupts current track immediately at `preempt_at` time
