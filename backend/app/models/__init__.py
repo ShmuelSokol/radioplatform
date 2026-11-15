@@ -33,6 +33,7 @@ from app.models.raffle import Raffle, RaffleEntry
 from app.models.asset_type import AssetTypeModel
 from app.models.audit_log import AuditLog
 from app.models.spot_schedule import SpotSchedule
+from app.models.sponsorship_rules import SponsorshipRules
 
 __all__ = [
     "User", "UserRole",
@@ -70,4 +71,5 @@ __all__ = [
     "AssetTypeModel",
     "AuditLog",
     "SpotSchedule",
+    "SponsorshipRules",
 ]
