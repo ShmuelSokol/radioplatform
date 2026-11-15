@@ -28,6 +28,8 @@ const Schedules = lazy(() => import('./pages/admin/Schedules'));
 const ScheduleBlocks = lazy(() => import('./pages/admin/ScheduleBlocks'));
 const Holidays = lazy(() => import('./pages/admin/Holidays'));
 const Sponsors = lazy(() => import('./pages/admin/Sponsors'));
+const SpotSchedules = lazy(() => import('./pages/admin/SpotSchedules'));
+const SponsorshipRules = lazy(() => import('./pages/admin/SponsorshipRules'));
 const Analytics = lazy(() => import('./pages/admin/Analytics'));
 const AssetDetail = lazy(() => import('./pages/admin/AssetDetail'));
 const ReviewQueues = lazy(() => import('./pages/admin/ReviewQueues'));
@@ -57,6 +59,7 @@ const SponsorDashboard = lazy(() => import('./pages/sponsor/Dashboard'));
 const SponsorCampaigns = lazy(() => import('./pages/sponsor/Campaigns'));
 const SponsorCampaignDetail = lazy(() => import('./pages/sponsor/CampaignDetail'));
 const SponsorBilling = lazy(() => import('./pages/sponsor/Billing'));
+const SponsorCheckWording = lazy(() => import('./pages/sponsor/CheckWording'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -117,6 +120,8 @@ export default function App() {
               <Route path="/admin/schedules/:scheduleId/blocks" element={<ProtectedRoute><ScheduleBlocks /></ProtectedRoute>} />
               <Route path="/admin/holidays" element={<ProtectedRoute><Holidays /></ProtectedRoute>} />
               <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
+              <Route path="/admin/spot-schedule" element={<ProtectedRoute><SpotSchedules /></ProtectedRoute>} />
+              <Route path="/admin/sponsorship-rules" element={<ProtectedRoute><SponsorshipRules /></ProtectedRoute>} />
               <Route path="/admin/playlists" element={<ProtectedRoute><Playlists /></ProtectedRoute>} />
               <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
               <Route path="/admin/asset-types" element={<ProtectedRoute><AssetTypes /></ProtectedRoute>} />
@@ -143,6 +148,7 @@ export default function App() {
               <Route path="/sponsor/campaigns" element={<SponsorCampaigns />} />
               <Route path="/sponsor/campaigns/:id" element={<SponsorCampaignDetail />} />
               <Route path="/sponsor/billing" element={<SponsorBilling />} />
+              <Route path="/sponsor/wording" element={<SponsorCheckWording />} />
             </Route>
           </Routes>
         </Suspense>

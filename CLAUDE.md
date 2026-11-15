@@ -206,6 +206,8 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsor/ad management
+- SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead
+- SponsorshipRules.tsx — Edit the sponsorship wording rules (versioned) and try the wording check
 - Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
 - Alerts.tsx — Alerts management (filter, resolve, reopen, delete)
@@ -228,6 +230,7 @@ radioplatform/
 - Campaigns.tsx — Campaign list with create form
 - CampaignDetail.tsx — Campaign detail with drafts + comments thread
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
+- CheckWording.tsx — Sponsor proposes wording, gets back what must change and why
 
 ### Hooks (`frontend/src/hooks/`) — 22 hooks
 | Hook | Description |
@@ -272,6 +275,8 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
+- `/admin/spot-schedule` → SpotSchedules (protected)
+- `/admin/sponsorship-rules` → SponsorshipRules (protected)
 - `/admin/playlists` → Playlists (protected)
 - `/admin/alerts` → Alerts (protected)
 - `/admin/analytics` → Analytics (protected)
@@ -288,6 +293,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/sponsor/campaigns` → SponsorCampaigns (sponsor-protected)
 - `/sponsor/campaigns/:id` → CampaignDetail (sponsor-protected)
 - `/sponsor/billing` → SponsorBilling (sponsor-protected)
+- `/sponsor/wording` → CheckWording (sponsor-protected)
 
 ## Telegram Bot (`bot/`)
 Claude Code accessible over Telegram for remote development.
