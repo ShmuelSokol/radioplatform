@@ -28,7 +28,7 @@ from sqlalchemy.orm import joinedload
 
 from app.config import settings
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry, hard_timed, soft_timed
+from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, soft_timed
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,8 @@ class EngineState:
     timed_sent: set[str] = field(default_factory=set)
     # A manual skip is in flight: the outgoing entry is logged as skipped
     skip_requested: bool = False
+    # Soft-timed groups (by their time) whose hard_by limit already made us fade the song
+    hard_by_done: set[str] = field(default_factory=set)
     # Monotonic time of the engine's last call to us
     last_contact: float = 0.0
     last_alert: float = 0.0
@@ -209,7 +211,8 @@ async def pick_next(
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now,
         )
-        .order_by(QueueEntry.preempt_at)
+        # A block's items share one time and play in their order
+        .order_by(QueueEntry.preempt_at, QueueEntry.position)
         .limit(len(exclude) + 1)
     )
     entry = usable(ads.unique().scalars().all())
@@ -452,6 +455,49 @@ async def _alert(
         logger.warning("Could not create playout alert: %s", e)
 
 
+async def _enforce_hard_by(db: AsyncSession, station_id, state: EngineState, now: datetime) -> None:
+    """A soft-timed group waits for the item on air to end, but no later than its hard_by.
+
+    Past that, the item on air fades and the group starts. We only fade once the engine has
+    the group's first item pre-loaded (the queue-head check above makes it ask for it), so
+    the group follows straight on.
+    """
+    res = await db.execute(
+        select(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            soft_timed(),
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at <= now,
+            QueueEntry.hard_by.isnot(None),
+            QueueEntry.hard_by <= now,
+        )
+        .order_by(QueueEntry.preempt_at, QueueEntry.position)
+        .limit(1)
+    )
+    head = res.scalars().first()
+    if head is None:
+        return
+    group = head.preempt_at.replace(tzinfo=None).isoformat()
+    if group in state.hard_by_done:
+        return
+    res = await db.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+    )
+    current = res.scalars().first()
+    # Part of the group (or another soft-timed item due before it) is already on air
+    if current is not None and current.preempt_at is not None and is_soft_timed(current):
+        return
+    if state.cued_entry_id != str(head.id):
+        return
+    if await engine_skip(station_id):
+        state.hard_by_done.add(group)
+        if len(state.hard_by_done) > 200:
+            state.hard_by_done.clear()
+        logger.info("Soft-timed group at %s reached its limit: fading the item on air", group)
+
+
 async def tick(db: AsyncSession, station) -> None:
     """Called by the scheduler loop for the engine-driven station."""
     station_id = station.id
@@ -475,7 +521,8 @@ async def tick(db: AsyncSession, station) -> None:
             QueueEntry.preempt_at > now,
             QueueEntry.preempt_at <= horizon,
         )
-        .order_by(QueueEntry.preempt_at)
+        # Handed over in play order: the engine plays a group (same time) in the order received
+        .order_by(QueueEntry.preempt_at, QueueEntry.position)
     )
     for entry in res.unique().scalars().all():
         key = str(entry.id)
@@ -545,7 +592,10 @@ async def tick(db: AsyncSession, station) -> None:
             )
             await engine_flush(station_id)
 
-    # 4. Watchdog
+    # 4. "After the song, but no later than hard_by": the song is still on, so fade it
+    await _enforce_hard_by(db, station_id, state, now)
+
+    # 5. Watchdog
     if state.last_contact and time.monotonic() - state.last_contact > ENGINE_SILENT_ALERT_SECONDS:
         await _alert(
             db,

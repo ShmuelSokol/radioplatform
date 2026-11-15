@@ -73,7 +73,9 @@ spot schedule edit rebuilds the block entries too (`_refresh_queues` in
 
 `QueueEntry.hard_by`: a soft entry that is still waiting at this time is
 treated as hard (the song on air fades). The in-browser path checks it in
-`api/v1/queue.py` (preempt check). The playout engine does not read it yet.
+`api/v1/queue.py` (preempt check). The playout engine honours it too (`_enforce_hard_by` in
+`services/playout_engine.py`): past `hard_by` it fades the item on air once, as soon as the
+engine has the block's first item pre-loaded, and never cuts into a block already on air.
 
 ## Preview
 

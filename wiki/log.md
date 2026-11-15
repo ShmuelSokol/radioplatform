@@ -68,3 +68,5 @@ UPDATE 2026-11-15 control-room.md Mix over is a cart mode wired to queue/mix-ove
 INGEST 2026-11-15 hourly-slots.md OpenWeatherMap key blocked: scheduler retried failed ElevenLabs slots every 3 s, each fetching weather. Weather now cached 30 min with failure back-off; generation pauses 15 min after a failure.
 UPDATE 2026-11-15 station-permissions.md Station permissions now also cover schedules, playlists, spot schedules and live shows through station_write_guard (core/station_guard.py); holidays and station-less objects stay role-only.
 UPDATE 2026-11-15 program-blocks.md Sponsor places in blocks (kind "sponsors", spot planner Break seats replace :15/:30/:45 when any block has places); soft-with-limit via ProgramBlock.latest_minutes -> QueueEntry.hard_by (browser path only, engine not yet).
+INGEST 2026-11-15 streaming-architecture.md Engine timed lane played only the first item of a same-time group; now the lane stays open while the timed queue has items, and items are pushed in the order received.
+UPDATE 2026-11-15 program-blocks.md, streaming-architecture.md Playout engine now honours hard_by and plays block groups in position order.
