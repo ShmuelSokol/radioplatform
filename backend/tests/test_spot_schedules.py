@@ -36,6 +36,15 @@ def _sched(name, dayparts="morning,afternoon,evening", plays=1, days="0,1,2,3,4,
     )
 
 
+def test_spring_forward_skips_missing_times():
+    # 2027-03-14 in New York: 02:00-02:59 does not exist.
+    s = _sched("a", dayparts="overnight", plays=18)
+    placed, unplaced = plan_spots([s], NY, date(2027, 3, 14), 1)
+    assert all(p.local.hour != 2 for p in placed)
+    assert len(placed) == 15 and len(unplaced) == 3
+    assert len({p.at for p in placed}) == 15
+
+
 # ── planner (pure) ──────────────────────────────────────────────────
 
 
@@ -163,7 +172,8 @@ async def test_schedule_fills_queue_and_preview(
     )
     assert r.status_code == 200, r.text
     preview = r.json()
-    assert len(preview["planned"]) == 21 and preview["unplaced"] == []
+    # 3 a day for 7 days, minus whatever already passed today
+    assert 18 <= len(preview["planned"]) <= 21 and preview["unplaced"] == []
     assert preview["planned"][0]["sponsor_name"] == "Acme"
 
     # Evening only → morning/afternoon slots leave the queue
@@ -204,6 +214,47 @@ async def test_validation(client: AsyncClient, auth_headers: dict, db_session: A
         "/api/v1/spot-schedules", json={**base, "asset_id": str(uuid.uuid4())}, headers=auth_headers
     )
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_review_follow_ups(client: AsyncClient, auth_headers: dict, db_session: AsyncSession):
+    station, assets, sponsors = await _setup(db_session, client, auth_headers)
+    base = {"sponsor_id": sponsors[0], "asset_id": str(assets[0].id)}
+    url = "/api/v1/spot-schedules"
+
+    # start after end
+    r = await client.post(
+        url,
+        json={**base, "start_date": "2026-12-10", "end_date": "2026-12-01"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+
+    r = await client.post(url, json={**base, "end_date": "2026-12-31"}, headers=auth_headers)
+    assert r.status_code == 201
+    sid = r.json()["id"]
+
+    # explicit nulls for required fields are refused, not a 500
+    for body in ({"is_active": None}, {"days_of_week": None}, {"asset_id": None}):
+        r = await client.put(f"{url}/{sid}", json=body, headers=auth_headers)
+        assert r.status_code == 422, body
+    # start pushed past the stored end
+    r = await client.put(f"{url}/{sid}", json={"start_date": "2027-01-05"}, headers=auth_headers)
+    assert r.status_code == 422
+    # nullable fields can still be cleared
+    r = await client.put(f"{url}/{sid}", json={"end_date": None}, headers=auth_headers)
+    assert r.status_code == 200 and r.json()["end_date"] is None
+
+    # the audio now belongs to sponsor 0; sponsor 1 cannot schedule it
+    r = await client.post(
+        url, json={"sponsor_id": sponsors[1], "asset_id": str(assets[0].id)}, headers=auth_headers
+    )
+    assert r.status_code == 422
+
+    # preview never lists a time that already passed
+    r = await client.get(f"{url}/preview?station_id={station.id}&days=1", headers=auth_headers)
+    now = datetime.now(UTC)
+    assert all(datetime.fromisoformat(p["scheduled_at"]) > now for p in r.json()["planned"])
 
 
 @pytest.mark.asyncio

@@ -18,3 +18,4 @@ INGEST 2026-11-15 audio-engine.md Stale-elapsed bug: new track was seeked to pre
 INGEST 2026-11-15 streaming-architecture.md Liquidsoap wiring can't be switched on as-is: _advance_queue re-pushes the current track every 3s poll, two clocks (DB duration vs engine), telnet 1234 open with no auth. Plan: engine pulls next track + reports real starts.
 QUERY 2026-11-15 hourly-slots.md Before changing how ad slots at :15/:30/:45 are filled.
 INGEST 2026-11-15 spot-schedules.md Sponsor spot schedules replace the single hardcoded ad-slot asset once any schedule exists; portal history was always empty (nothing wrote PlaySource.AD) and now matches plays by asset.
+UPDATE 2026-11-15 spot-schedules.md review follow-ups: legacy spot off switch, DST missing times, validation, audio ownership, preview hides past

@@ -22,3 +22,11 @@ A `SpotSchedule` row = "air this sponsor's asset N times in each chosen daypart,
 ## Not done yet
 
 Blackout (Shabbos/Yom Tov) awareness, spacing rules between sponsors, and auto-resolve reporting are planned as the conflict look-ahead step.
+
+## Edge rules (added after review, 2026-11-15)
+
+- **Legacy test spot off switch**: `automation_config.ad_slot_legacy_spot = false` on a station stops the old one-spot-in-every-slot fallback, so deleting the last schedule leaves the slots empty instead of bringing "KOL BRAMAH TEST SPONSOR" back. Default is still on.
+- **Clock change nights**: wall-clock times that do not exist on a spring-forward night (02:xx) are not slots. Before this they collided with 03:xx in UTC and were dropped silently.
+- **Validation**: `start_date` after `end_date` is 422 (create and update, including against the stored other date). Explicit `null` for `asset_id`, `days_of_week`, `dayparts`, `plays_per_daypart`, `is_active` on PUT is 422; `name`, `station_id`, `start_date`, `end_date` may be cleared with null.
+- **Audio ownership**: a schedule can only use audio that is unowned or already belongs to the same sponsor (422 otherwise).
+- **Preview** lists only times still ahead.
