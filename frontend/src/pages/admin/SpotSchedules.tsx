@@ -209,6 +209,7 @@ export default function SpotSchedules() {
     });
   };
 
+  const unplacedPlays = (plan?.unplaced ?? []).reduce((n, u) => n + (u.count ?? 1), 0);
   const byDay = useMemo(() => {
     const groups = new Map<string, PlannedSpot[]>();
     for (const p of plan?.planned ?? []) {
@@ -584,16 +585,19 @@ export default function SpotSchedules() {
             {!!plan?.unplaced.length && (
               <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4">
                 <p className="font-semibold">
-                  {plan.unplaced.length} play{plan.unplaced.length === 1 ? '' : 's'} could not be
-                  given a slot
+                  {unplacedPlays} play{unplacedPlays === 1 ? '' : 's'} could not be given a place
                 </p>
                 <ul className="text-sm mt-1 list-disc list-inside">
-                  {plan.unplaced.slice(0, 8).map((u, i) => (
+                  {plan.unplaced.slice(0, 12).map((u, i) => (
                     <li key={i}>
-                      {u.sponsor_name}, {formatDay(u.local_date)} {u.daypart}: {u.reason}
+                      {u.sponsor_name}, {formatDay(u.local_date)} {u.daypart}
+                      {u.count > 1 ? ` (${u.count} plays)` : ''}: {u.reason}
                     </li>
                   ))}
                 </ul>
+                {plan.unplaced.length > 12 && (
+                  <p className="text-sm mt-1">…and {plan.unplaced.length - 12} more.</p>
+                )}
               </div>
             )}
             {!!plan?.off_air?.length && (

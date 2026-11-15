@@ -18,6 +18,7 @@ from app.models.schedule import Schedule
 from app.models.schedule_block import ScheduleBlock
 from app.models.station import Station
 from app.services.scheduling import SchedulingService
+from app.services.spot_schedule_service import DAYPARTS as DAYPART_HOURS
 from app.services.spot_schedule_service import load_blackouts, plan_for_station, station_tz
 
 STEP = timedelta(minutes=15)
@@ -175,24 +176,46 @@ async def look_ahead(
         )
 
     _, unplaced = await plan_for_station(db, station, days=days, now=now)
+    unplaced = [u for u in unplaced if u.blackout is None]
+    sponsor_names: dict[str, str] = {}
+    if unplaced:
+        from app.models.sponsor import Sponsor
+
+        rows = await db.execute(
+            select(Sponsor.id, Sponsor.name).where(
+                Sponsor.id.in_({u.schedule.sponsor_id for u in unplaced})
+            )
+        )
+        sponsor_names = {str(r[0]): r[1] for r in rows.all()}
+    # One line per sponsorship, day, part of the day and reason, with a count.
+    grouped: dict[tuple, list] = {}
     for u in unplaced:
-        if u.blackout is not None:
-            continue
-        h_start, h_end = {
-            "overnight": (0, 6),
-            "morning": (6, 12),
-            "afternoon": (12, 18),
-            "evening": (18, 24),
-        }[u.daypart]
-        day = datetime(u.local_date.year, u.local_date.month, u.local_date.day, tzinfo=tz)
+        key = (str(u.schedule.id), u.local_date, u.daypart, u.reason)
+        grouped.setdefault(key, []).append(u)
+    for (_, local_date, daypart, reason), group in grouped.items():
+        u = group[0]
+        h_start, h_end = DAYPART_HOURS[daypart]
+        day = datetime(local_date.year, local_date.month, local_date.day, tzinfo=tz)
+        who = sponsor_names.get(str(u.schedule.sponsor_id)) or u.schedule.name or "A sponsorship"
+        n = len(group)
+        plays = "1 play" if n == 1 else f"{n} plays"
+        if "sponsor place" in reason:
+            fix = (
+                "Not resolved: add sponsor places to a block in this time of day, "
+                "add another block, or lower the plays."
+            )
+        elif "already taken" in reason:
+            fix = "Not resolved: pick another exact time for one of them."
+        else:
+            fix = "Not resolved: lower the plays in this time of day or add spot times."
         findings.append(
             Finding(
                 kind=SPOT_UNPLACED,
                 start=(day + timedelta(hours=h_start)).astimezone(UTC),
                 end=(day + timedelta(hours=h_end)).astimezone(UTC),
-                title=f"A sponsor play has no slot ({u.daypart})",
-                detail=f'"{u.schedule.name or "Spot schedule"}": {u.reason}.',
-                resolution="Not resolved: lower the plays in this daypart or add slot minutes.",
+                title=f"{who}: {plays} with no place ({daypart})",
+                detail=f"{reason[0].upper()}{reason[1:]}.",
+                resolution=fix,
                 needs_attention=True,
             )
         )

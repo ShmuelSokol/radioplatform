@@ -45,7 +45,10 @@ function clock(hhmm: string) {
 
 function length(seconds: number) {
   const s = Math.round(seconds);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  // 0 means none of the items has a known length yet (e.g. the time and
+  // weather recordings are made shortly before air).
+  if (s <= 0) return 'length not known yet';
+  return `runs ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function itemText(item: BlockItem) {
@@ -600,7 +603,7 @@ export default function ProgramBlocks() {
                           .map((d) => DAYS[Number(d)])
                           .join(', ')}{' '}
                     · {timingText(b.timing_mode, b.latest_minutes)}
-                    {seconds != null && ` · runs ${length(seconds)}`}
+                    {seconds != null && ` · ${length(seconds)}`}
                   </p>
                   <p className="text-sm text-gray-800 mt-1">
                     {b.items.map(itemText).join('  →  ')}
@@ -645,8 +648,7 @@ export default function ProgramBlocks() {
                   <span className="font-mono tabular-nums">{o.local_time}</span>
                   <span className="font-medium">{o.block_name}</span>
                   <span className="text-sm text-gray-600">
-                    {timingText(o.timing_mode, o.latest_minutes, true)} · runs{' '}
-                    {length(o.seconds)}
+                    {timingText(o.timing_mode, o.latest_minutes, true)} · {length(o.seconds)}
                   </span>
                 </div>
                 <p className="text-sm text-gray-700">

@@ -147,16 +147,7 @@ async def preview_spot_plan(
             )
             for p in placements
         ],
-        unplaced=[
-            UnplacedSpot(
-                local_date=u.local_date.isoformat(),
-                daypart=u.daypart,
-                schedule_id=u.schedule.id,
-                sponsor_name=sponsors.get(str(u.schedule.sponsor_id), "Unknown"),
-                reason=u.reason,
-            )
-            for u in unplaced
-        ],
+        unplaced=_grouped_unplaced(unplaced, sponsors),
         off_air=[
             OffAirWindow(name=b.name, start=b.start, end=b.end, skipped_plays=n)
             for b, n in sorted(skipped.items(), key=lambda kv: kv[0].start)
@@ -274,3 +265,24 @@ async def delete_spot_schedule(
     await _refresh_queues(db, affected)
     await db.delete(record)
     await db.commit()
+
+
+def _grouped_unplaced(unplaced, sponsors: dict) -> list[UnplacedSpot]:
+    """One line per sponsorship, day, part of the day and reason, with a count."""
+    grouped: dict[tuple, int] = {}
+    first: dict[tuple, object] = {}
+    for u in unplaced:
+        key = (str(u.schedule.id), u.local_date, u.daypart, u.reason)
+        grouped[key] = grouped.get(key, 0) + 1
+        first.setdefault(key, u)
+    return [
+        UnplacedSpot(
+            local_date=u.local_date.isoformat(),
+            daypart=u.daypart,
+            schedule_id=u.schedule.id,
+            sponsor_name=sponsors.get(str(u.schedule.sponsor_id), "Unknown"),
+            reason=u.reason,
+            count=grouped[key],
+        )
+        for key, u in first.items()
+    ]

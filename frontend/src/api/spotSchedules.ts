@@ -49,6 +49,7 @@ export interface UnplacedSpot {
   schedule_id: string;
   sponsor_name: string;
   reason: string;
+  count: number;
 }
 
 export interface OffAirWindow {
