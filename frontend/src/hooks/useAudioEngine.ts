@@ -358,6 +358,13 @@ export function useAudioEngine(
     const goLive = () => {
       if (wentLive || token !== changeTokenRef.current) return;
       wentLive = true;
+      // A natural crossfade still settling must not flip the decks back afterwards
+      if (crossfadeTimerRef.current) {
+        clearTimeout(crossfadeTimerRef.current);
+        crossfadeTimerRef.current = null;
+      }
+      crossfadingRef.current = false;
+      crossfadeTriggeredRef.current = false;
       const now = ctx.currentTime;
       const targetGain = mutedRef.current ? 0 : volumeRef.current * replayGain;
 
@@ -585,6 +592,10 @@ export function useAudioEngine(
       const activeDeck = getDeck(activeLabel);
       const nextId = nextAssetIdRef.current;
       if (!activeDeck || activeDeck.audio.paused || !nextId) return;
+      // The crossfade point belongs to the track the server says is on air. While a
+      // change is pending (Next was pressed and the new track is not up yet) the active
+      // deck still holds the old track, so that point must not be applied to it.
+      if (deckAssetRef.current[activeLabel] !== lastAssetId.current) return;
       // Only crossfade when the idle deck really holds the next track
       if (deckAssetRef.current[otherDeck(activeLabel)] !== nextId) return;
 
