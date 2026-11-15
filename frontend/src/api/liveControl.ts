@@ -5,7 +5,7 @@
  * "insert at this point". Each is a single request; the server contract is in
  * wiki/operator-actions.md.
  */
-import { addToQueue, playNext, fireNowRequest, insertAfter, setLoop } from './queue';
+import { addToQueue, playNext, fireNowRequest, insertAfter, setLoop, mixOverRequest } from './queue';
 
 /** Two taps on the same button inside this window count as one. */
 const DOUBLE_TAP_MS = 1500;
@@ -20,14 +20,25 @@ const newRequestId = () =>
  * Put the asset on air right away. A second tap on the same item within a moment
  * reuses the request id, and the server answers it without playing the item twice.
  */
-export const fireNow = (stationId: string, assetId: string) => {
-  const key = `${stationId}:${assetId}`;
+/** One request id per tap; a second tap on the same item within a moment reuses it. */
+const tapRequestId = (kind: string, stationId: string, assetId: string) => {
+  const key = `${kind}:${stationId}:${assetId}`;
   const prev = lastFire.get(key);
   const now = Date.now();
   const requestId = prev && now - prev.at < DOUBLE_TAP_MS ? prev.requestId : newRequestId();
   lastFire.set(key, { at: now, requestId });
-  return fireNowRequest(stationId, assetId, requestId);
+  return requestId;
 };
+
+export const fireNow = (stationId: string, assetId: string) =>
+  fireNowRequest(stationId, assetId, tapRequestId('fire', stationId, assetId));
+
+/**
+ * Mix over: play the asset on top of the item on air, which carries on. The queue
+ * does not move. A double tap plays it once, the same way as fireNow.
+ */
+export const mixOver = (stationId: string, assetId: string) =>
+  mixOverRequest(stationId, assetId, tapRequestId('mix', stationId, assetId));
 
 /** Play the asset as soon as the current item ends. */
 export const queueNext = (stationId: string, assetId: string) => playNext(stationId, assetId);

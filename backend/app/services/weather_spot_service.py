@@ -264,6 +264,34 @@ async def store_uploaded_time_clip(
     return asset, replaced
 
 
+# The scheduler asks for up to 48 hourly slots every few seconds. When
+# generation fails (ElevenLabs refusing, weather API blocked), retrying each
+# slot on every pass calls both services in a tight loop; that is how the
+# OpenWeatherMap key got blocked in November 2026. After a failure, generation
+# pauses for a while for every slot; uploaded clips are still returned.
+GENERATION_PAUSE_SECONDS = 15 * 60
+_generation_paused_until = 0.0
+
+
+def _generation_paused() -> bool:
+    import time
+
+    return time.monotonic() < _generation_paused_until
+
+
+def _pause_generation() -> None:
+    import time
+
+    global _generation_paused_until
+    _generation_paused_until = time.monotonic() + GENERATION_PAUSE_SECONDS
+    logger.warning("Announcement generation paused for %d minutes after a failure", GENERATION_PAUSE_SECONDS // 60)
+
+
+def resume_generation() -> None:
+    global _generation_paused_until
+    _generation_paused_until = 0.0
+
+
 async def get_or_create_weather_spot_assets(
     db: AsyncSession, slot_key: str
 ) -> tuple[Asset | None, Asset | None]:
@@ -307,7 +335,7 @@ async def get_or_create_weather_spot_assets(
 
     if existing_time and existing_weather:
         return existing_time, existing_weather
-    if not settings.elevenlabs_enabled:
+    if not settings.elevenlabs_enabled or _generation_paused():
         return existing_time, existing_weather
 
     safe_slot = slot_key.replace(":", "-")
@@ -339,7 +367,8 @@ async def get_or_create_weather_spot_assets(
             logger.info("Created time announcement asset for slot %s", slot_key)
         except Exception:
             logger.warning("Failed to generate time announcement for slot %s", slot_key, exc_info=True)
-            time_asset = None
+            _pause_generation()
+            return None, existing_weather
 
     # Generate weather spot if needed (per-day — reused until midnight)
     weather_asset = existing_weather
@@ -368,6 +397,7 @@ async def get_or_create_weather_spot_assets(
             logger.info("Created weather spot asset for day %s", weather_key)
         except Exception:
             logger.warning("Failed to generate weather spot for day %s", weather_key, exc_info=True)
+            _pause_generation()
             weather_asset = None
 
     return time_asset, weather_asset
