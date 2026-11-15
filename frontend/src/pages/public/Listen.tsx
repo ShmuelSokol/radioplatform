@@ -148,6 +148,7 @@ export default function Listen() {
     // Direct audio URLs from WS (no auth needed for public listeners)
     wsAsset?.audio_url ?? null,
     wsNextAsset?.audio_url ?? null,
+    wsNowPlaying?.started_at ?? null,
   );
 
   // Fetch active live show status (still uses polling — shows don't change often)

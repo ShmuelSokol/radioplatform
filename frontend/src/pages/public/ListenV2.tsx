@@ -151,6 +151,7 @@ export default function ListenV2() {
     wsNextAsset?.replay_gain_db ?? 0,
     wsAsset?.audio_url ?? null,
     wsNextAsset?.audio_url ?? null,
+    wsNowPlaying?.started_at ?? null,
   );
 
   const fetchActiveShow = useCallback(async () => {

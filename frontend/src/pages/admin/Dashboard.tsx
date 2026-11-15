@@ -399,6 +399,8 @@ export default function Dashboard() {
     wsNowPlaying?.next_asset?.id ?? null,
     wsNowPlaying?.next_asset?.cue_in ?? 0,
     wsNowPlaying?.next_asset?.replay_gain_db ?? 0,
+    null, null,
+    serverStartedAt,
   );
 
   // Sync volume to stream audio element in dashboard
