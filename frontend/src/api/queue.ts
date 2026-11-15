@@ -89,3 +89,11 @@ export const setLoop = async (stationId: string, on: boolean) => {
   const res = await apiClient.post(`/stations/${stationId}/queue/loop`, { on });
   return res.data as { loop: boolean; asset_id: string | null; queue?: { entries?: unknown[] } };
 };
+
+/** Play an asset on top of the item on air; the queue does not move. */
+export const mixOverRequest = async (stationId: string, assetId: string, clientRequestId: string) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/mix-over`, {
+    asset_id: assetId, client_request_id: clientRequestId,
+  });
+  return res.data as { on_air: boolean; duplicate?: boolean };
+};

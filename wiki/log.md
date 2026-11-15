@@ -63,3 +63,4 @@ UPDATE 2026-11-15 operator-actions.md, control-room.md Mix over added: POST queu
 INGEST 2026-11-15 streaming-architecture.md Engine did not report natural song changes: add() relays only its first source's titles, so the incoming song must be listed first in the crossfade.
 INGEST 2026-11-15 station-permissions.md Per-station staff permissions (User.station_ids, null = all unprotected) and Station.protected for the FM feed; enforced on queue and controls routers and station edit/delete; routes taking station id in query/body are not covered yet.
 UPDATE 2026-11-15 control-room.md Loop button (queue/loop, lit from loop_asset_id); transport bar is two rows below 1280 px, both rows stay in the DOM.
+UPDATE 2026-11-15 control-room.md Mix over is a cart mode wired to queue/mix-over; browser mix_over path checked in e2e; missing-features list now HS, Spots mode, expandable blocks.
