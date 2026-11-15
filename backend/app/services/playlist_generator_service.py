@@ -128,14 +128,22 @@ class _Library:
             return self.last_used.get(sid, epoch)
 
         ordered = sorted(rows, key=lambda r: (rested(r), random.random()))
+        # The artist rule comes first, as in the studio program: when the only
+        # songs clear of it are already waiting in the queue, one of those is
+        # used again rather than putting an artist back too soon. Songs already
+        # waiting sort last, so they are reached only when nothing else is clear.
         clear = [r for r in ordered if _artist_key(r.artist) not in recent_artists]
         relaxed = not clear
         candidates = clear or ordered
-        # Draw from the most-rested third so the order is not the same every cycle.
+        # Draw from the most-rested third so the order is not the same every cycle...
         window = candidates[: max(1, math.ceil(len(candidates) / 3))]
-        # ...but never reach into songs that are already queued while rested ones remain
-        fresh = [r for r in window if str(r.id) not in self.busy]
-        row = random.choice(fresh or window)
+        # ...but only among songs that have rested about as long as the most
+        # rested one. Without this a song that aired an hour ago could be drawn
+        # ahead of one that has never aired, just for sitting in the same third.
+        longest = at - rested(window[0])
+        if longest > timedelta(0):
+            window = [r for r in window if at - rested(r) >= longest / 2]
+        row = random.choice(window)
         self.last_used[str(row.id)] = at
         self.busy.add(str(row.id))
         return row, relaxed
