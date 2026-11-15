@@ -74,3 +74,4 @@ INGEST 2026-11-15 streaming-architecture.md Engine timed lane played only the fi
 UPDATE 2026-11-15 program-blocks.md, streaming-architecture.md Playout engine now honours hard_by and plays block groups in position order.
 INGEST 2026-11-15 control-room.md Web player: an operator's Next fade (change_fade_seconds) now wins over the near-end heuristic; before, Next within the last ~7 s of an item (short looped jingles always) faded over 3 s. Check: node e2e/audio-engine.mjs next-quick-fade-near-the-end.
 UPDATE 2026-11-15 spot-schedules.md reconcile_spot_slots now adds (never removes) exact-time entries due inside the 2-minute safety margin, once per minute (any status)
+UPDATE 2026-11-15 spot-schedules.md in block mode (breaks) a daypart wholly inside a blackout is reported with blackout set, same as the slot path, so Schedule Check no longer flags Shabbos mornings
