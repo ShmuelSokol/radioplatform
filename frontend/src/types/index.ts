@@ -78,6 +78,8 @@ export interface Asset {
   artist: string | null;
   album: string | null;
   duration: number | null;
+  /** Intro length in seconds, counted from where the item starts on air (cue in) */
+  intro_seconds?: number | null;
   file_path: string;
   album_art_path: string | null;
   metadata_extra: Record<string, unknown> | null;

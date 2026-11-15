@@ -79,7 +79,12 @@ export function useAudioEngine(
   // track; `elapsedSeconds` still belongs to the previous track on the render where
   // the track changes.
   currentStartedAt: string | null = null,
+  // How long the outgoing item fades on an operator's Next (hard 0 / fade 0.5 / soft 3),
+  // sent with the message that announces the change. null = the default quick fade.
+  changeFadeSeconds: number | null = null,
 ): AudioEngineState {
+  const changeFadeRef = useRef<number | null>(changeFadeSeconds);
+  changeFadeRef.current = changeFadeSeconds;
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserLRef = useRef<AnalyserNode | null>(null);
   const analyserRRef = useRef<AnalyserNode | null>(null);
@@ -380,7 +385,9 @@ export function useAudioEngine(
     const outDur = outDeck.audio.duration;
     const outEnd = outCross > 0 ? outCross : (isFinite(outDur) && outDur > 0 ? outDur - CROSSFADE_DURATION : 0);
     const naturalEnd = !outDeck.audio.paused && outEnd > 0 && outTime >= outEnd - NATURAL_END_WINDOW_SECONDS;
-    const fadeOut = naturalEnd ? CROSSFADE_DURATION : SKIP_FADE_OUT;
+    const asked = changeFadeRef.current;
+    const manualFade = asked != null && isFinite(asked) ? Math.min(10, Math.max(0.03, asked)) : SKIP_FADE_OUT;
+    const fadeOut = naturalEnd ? CROSSFADE_DURATION : manualFade;
     const fadeIn = SKIP_FADE_IN;
 
     let wentLive = false;

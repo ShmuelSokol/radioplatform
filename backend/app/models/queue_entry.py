@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, and_, or_
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -44,3 +44,25 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     station = relationship("Station", lazy="selectin")
     asset = relationship("Asset", lazy="selectin")
+
+
+def soft_timed():
+    """SQL condition: a timed entry that waits for the item on air to finish."""
+    return or_(
+        QueueEntry.timing_mode == "soft",
+        and_(QueueEntry.timing_mode.is_(None), QueueEntry.source == "ad_slot"),
+    )
+
+
+def hard_timed():
+    """SQL condition: a timed entry that starts exactly at its time (the item on air fades)."""
+    return or_(
+        QueueEntry.timing_mode == "hard",
+        and_(QueueEntry.timing_mode.is_(None), QueueEntry.source != "ad_slot"),
+    )
+
+
+def is_soft_timed(entry) -> bool:
+    if entry.timing_mode in ("soft", "hard"):
+        return entry.timing_mode == "soft"
+    return entry.source == "ad_slot"

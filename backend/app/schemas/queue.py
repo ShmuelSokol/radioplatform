@@ -2,7 +2,7 @@ import uuid
 from typing import Literal
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.asset import AssetResponse
 
@@ -51,3 +51,15 @@ class QueueFireNow(BaseModel):
 
     asset_id: uuid.UUID
     mode: Literal["fade", "after-current"] = "fade"
+    # Sent by the client per tap: a repeat of the same id within a few seconds is ignored,
+    # so a double tap on an instant button cannot play the item twice.
+    client_request_id: str | None = Field(default=None, max_length=100)
+
+
+class QueueInsert(BaseModel):
+    """Insert one or more assets, in order, right after `after_entry_id`
+    (null = at the top, so they play next)."""
+
+    asset_id: uuid.UUID | None = None
+    asset_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
+    after_entry_id: uuid.UUID | None = None
