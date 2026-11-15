@@ -5,13 +5,10 @@ import asyncio
 import json
 import logging
 from typing import Dict, Set
-from uuid import UUID
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import settings
-from app.core.dependencies import get_db
 from app.services.scheduling import SchedulingService
 
 logger = logging.getLogger(__name__)

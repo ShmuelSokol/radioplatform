@@ -7,7 +7,6 @@ Generates HolidayWindow dicts for:
 """
 import logging
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from pyluach.dates import HebrewDate
 

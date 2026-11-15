@@ -18,7 +18,6 @@ from app.schemas.weather_readout import (
 )
 from app.services.weather_readout_service import (
     DEFAULT_TEMPLATE,
-    generate_readout_for_station,
     render_template,
 )
 from app.services.weather_service import get_current_weather

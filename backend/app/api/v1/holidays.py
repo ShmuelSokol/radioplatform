@@ -70,8 +70,7 @@ async def list_holidays(
 
     # Filter by station_id (check JSONB or NULL = all stations)
     if station_id:
-        from sqlalchemy import or_, cast, String
-        from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+        from sqlalchemy import or_
         stmt = stmt.where(
             or_(
                 HolidayWindow.affected_stations.is_(None),
@@ -142,7 +141,6 @@ async def create_holiday(
     # If this blackout is active now or starting soon, fill affected stations with silence
     from datetime import timezone as _tz
     now = datetime.now(_tz.utc)
-    rec_start = record.start_datetime.replace(tzinfo=_tz.utc) if record.start_datetime.tzinfo is None else record.start_datetime
     rec_end = record.end_datetime.replace(tzinfo=_tz.utc) if record.end_datetime.tzinfo is None else record.end_datetime
     if record.is_blackout and rec_end > now:
         try:
@@ -365,7 +363,7 @@ async def ensure_silence_asset(
         settings.FFMPEG_PATH,
         "-y",
         "-f", "lavfi",
-        "-i", f"anullsrc=r=44100:cl=stereo",
+        "-i", "anullsrc=r=44100:cl=stereo",
         "-t", str(duration_seconds),
         "-c:a", "libmp3lame",
         "-b:a", "128k",

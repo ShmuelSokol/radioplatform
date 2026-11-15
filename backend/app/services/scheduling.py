@@ -16,9 +16,9 @@ from app.models.asset import Asset
 from app.models.now_playing import NowPlaying
 from app.models.play_log import PlayLog
 from app.models.playlist_entry import PlaybackMode, PlaylistEntry
-from app.models.playlist_template import PlaylistTemplate, TemplateSlot
+from app.models.playlist_template import PlaylistTemplate
 from app.models.schedule import Schedule
-from app.models.schedule_block import DayOfWeek, RecurrenceType, ScheduleBlock, SunEvent
+from app.models.schedule_block import RecurrenceType, ScheduleBlock, SunEvent
 
 logger = logging.getLogger(__name__)
 

@@ -6,10 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_manager
-from app.models.user import User
+from app.core.dependencies import require_manager
 from app.services.ai_email_service import draft_email
 from app.services.email_service import send_email
 

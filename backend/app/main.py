@@ -334,7 +334,7 @@ async def _resume_playback_on_startup():
     """
     from datetime import datetime, timezone
 
-    from sqlalchemy import select, update
+    from sqlalchemy import select
 
     from app.db.engine import async_session_factory
     from app.models.play_log import PlayLog
