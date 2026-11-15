@@ -70,8 +70,8 @@ export default function LiveListeners() {
   const { data: regions } = useListenerRegions(regionDays);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-white">Live Listeners</h1>
+    <div className="w-full space-y-6">
+      <h1 className="text-2xl font-bold text-gray-900">Live Listeners</h1>
 
       {/* ── Summary Cards ─────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

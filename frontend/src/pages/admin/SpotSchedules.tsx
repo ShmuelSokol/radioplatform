@@ -178,7 +178,7 @@ export default function SpotSchedules() {
   if (isLoading) return <div className="p-8">Loading...</div>;
 
   return (
-    <div className="max-w-5xl mx-auto p-8 space-y-8">
+    <div className="w-full space-y-8">
       <div className="flex justify-between items-start gap-4">
         <div>
           <h1 className="text-3xl font-bold">Spot Schedule</h1>
