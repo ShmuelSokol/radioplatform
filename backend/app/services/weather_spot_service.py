@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.asset import Asset
 from app.services.supabase_storage_service import upload_to_supabase
 from app.services.tts_service import generate_tts

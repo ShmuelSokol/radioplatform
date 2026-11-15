@@ -1,4 +1,4 @@
-﻿import io
+import io
 import uuid
 from unittest.mock import AsyncMock, patch
 
