@@ -58,8 +58,24 @@ added just before it is needed (`add_loop_repeat` in `api/v1/queue.py`, called a
 advance and when the playout engine asks for its next track). A Next within 4 s of a repeat
 starting is the "kept incoming" case and leaves the loop on.
 
-## Not built yet
+## Mix over
 
-Mix over (a jingle over the current item without ending it). PFL and meters are done in the
-browser, no server part. The RDS text feed needs no hook: it reads the playing queue entry,
-which the engine's start reports keep current.
+`POST queue/mix-over {asset_id, client_request_id?}` plays an asset on top of what is on air.
+The item on air carries on, the queue does not move, and there is no now-playing change.
+Answer: `{message, asset_id, on_air: true}` (`duplicate: true` for a repeated
+`client_request_id` within 5 s). 409 if the asset has no audio file, 503 if the engine did
+not answer. One play-log row is written (source `manual`).
+
+- Engine station: the backend posts `/overlay {uri}` to the engine, which mixes it in after
+  the lanes and before the compressor. Next, timed items and their fades act on the programme
+  only, so a jingle that has started always finishes.
+- Browser playback: the now-playing socket sends `{type: "mix_over", data: {url, asset_id,
+  title, replay_gain_db}}`; `useNowPlayingWS` passes it on as a `kbr-mix-over` window event and
+  `useAudioEngine` plays it through the same audio graph (only once sound has been started on
+  that page). Each browser starts it when the message arrives, so it is not sample-aligned
+  between listeners.
+
+## Notes
+
+PFL and meters are done in the browser, no server part. The RDS text feed needs no hook: it
+reads the playing queue entry, which the engine's start reports keep current.
