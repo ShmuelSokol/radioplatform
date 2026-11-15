@@ -1,6 +1,6 @@
 """The precise timer advances at the crossfade point, not at the very end of the track."""
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -25,7 +25,7 @@ async def _station_with_two_tracks(db_session, elapsed_seconds: float):
     playing = QueueEntry(
         id=uuid.uuid4(), station_id=station.id, asset_id=assets[0].id, position=1,
         status="playing", source="auto",
-        started_at=datetime.now(timezone.utc) - timedelta(seconds=elapsed_seconds),
+        started_at=datetime.now(UTC) - timedelta(seconds=elapsed_seconds),
     )
     pending = QueueEntry(
         id=uuid.uuid4(), station_id=station.id, asset_id=assets[1].id, position=2,
