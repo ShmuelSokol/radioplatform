@@ -32,3 +32,7 @@ Minimum vote: `Asset.vote` is a staff-set whole number (0 = unrated), edited on 
 Not built yet: jingle groups with counts, seasonal and parsha types switched by the calendar, "reset sacks".
 
 Test note: the draw is random, so `tests/test_playlist_generation.py` seeds `random`; in its tiny library some orders legitimately reuse a queued song to keep the artist rule.
+
+## Items no automatic pick may use
+
+`fit_for_random_pick()` (models/asset.py) skips categories do_not_play/test (any case) and one-moment clips. Placeholders listed by title in `NEVER_AUTO_TITLES` (the old "KOL BRAMAH TEST SPONSOR", category "Spots") are skipped by **every** automatic pick through `not_placeholder()`, including rotations, rules and program blocks that name the category. Each refill (and each restart) deletes pending copies an automatic pick queued; operator, request and loop entries stay. Test: `tests/test_placeholder_never_auto.py`.
