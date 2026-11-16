@@ -89,6 +89,19 @@ export default function Listen() {
     return () => { audio.pause(); audio.removeAttribute('src'); };
   }, [useStream, userStarted, streamUrl]);
 
+  // Open the connection to the stream server before Listen is pressed (no audio is
+  // fetched), so the press does not also wait for DNS and TLS
+  useEffect(() => {
+    if (!streamUrl) return;
+    let origin: string;
+    try { origin = new URL(streamUrl).origin; } catch { return; }
+    const link = document.createElement('link');
+    link.rel = 'preconnect';
+    link.href = origin;
+    document.head.appendChild(link);
+    return () => { link.remove(); };
+  }, [streamUrl]);
+
   // Listen for stream errors to trigger fallback
   useEffect(() => {
     const audio = streamAudioRef.current;
@@ -163,12 +176,13 @@ export default function Listen() {
     wsAsset?.cue_out ?? 0,
     wsAsset?.cross_start ?? 0,
     wsAsset?.replay_gain_db ?? 0,
-    wsNextAsset?.id ?? null,
+    // On the server stream the built-in player stays silent: it must not download the next item
+    useStream ? null : wsNextAsset?.id ?? null,
     wsNextAsset?.cue_in ?? 0,
     wsNextAsset?.replay_gain_db ?? 0,
     // Direct audio URLs from WS (no auth needed for public listeners)
     wsAsset?.audio_url ?? null,
-    wsNextAsset?.audio_url ?? null,
+    useStream ? null : wsNextAsset?.audio_url ?? null,
     wsNowPlaying?.started_at ?? null,
     wsNowPlaying?.change_fade_seconds ?? null,
   );
