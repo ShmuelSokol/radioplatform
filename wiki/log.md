@@ -133,3 +133,4 @@ INGEST 2026-11-16 control-room.md meters are RMS dBFS (-40..0, red above -8) wit
 
 INGEST 2026-11-16 operator-actions.md placeholders (NEVER_AUTO_TITLES) are skipped at pick time from every automatic source (_skip_placeholders); short or timed items hand over 0.3 s before their end, not at half their length
 INGEST 2026-11-16 control-room.md Listen is remembered across reloads (localStorage kbr-cr-listen); first click turns sound back on
+INGEST 2026-11-16 audio-engine.md first Listen click plays 50 ms of silence on both decks (Safari refused play() of the item loaded after the click; heard nothing until the volume slider moved); stream play() starts inside the click; Icecast burst 128 KB (~3 s at 320 kbps) for a fast start

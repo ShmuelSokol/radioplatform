@@ -7,7 +7,7 @@
         <sources>40</sources>
         <queue-size>524288</queue-size>
         <burst-on-connect>1</burst-on-connect>
-        <burst-size>65535</burst-size>
+        <burst-size>131072</burst-size>  <!-- ~3 s at 320 kbps: the player starts at once instead of waiting for audio to trickle in -->
     </limits>
     <authentication>
         <source-password>SOURCE_PASSWORD</source-password>
