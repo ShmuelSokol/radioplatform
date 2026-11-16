@@ -307,18 +307,25 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         return
 
     station_id = None
+    started = False
     try:
         async for db in get_async_session():
-            from app.services.live_show_service import get_show
+            from app.services.live_show_service import get_show, start_if_scheduled
             show = await get_show(db, show_id)
             if show is not None:
                 station_id = str(show.station_id)
+                # Broadcasting puts the show on air: pause the station's automation
+                started = await start_if_scheduled(db, show.id, host_user_id=user.id)
+                if started:
+                    await db.commit()
             break
     except Exception as e:
-        logger.error("Audio WS: could not load show %s: %s", show_id, e)
+        logger.error("Audio WS: could not load or start show %s: %s", show_id, e)
     if station_id is None:
         await websocket.close(code=4004)
         return
+    if started:
+        await broadcast_show_event(show_id, "show_started", {"show_id": show_id})
 
     audio_manager.active_connections[show_id] = websocket
     logger.info("Audio WS authed for show %s user %s (station %s)", show_id, user.id, station_id)
