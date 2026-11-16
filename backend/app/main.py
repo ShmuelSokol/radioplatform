@@ -7,6 +7,25 @@ from fastapi import FastAPI
 from app.config import settings
 from app.core.middleware import setup_middleware
 
+
+def _configure_logging() -> None:
+    """Send the app's own log lines to stdout with timestamps.
+
+    Nothing configured logging before, so every app logger used Python's
+    last-resort handler: INFO lines (track changes, timed starts, retries) were
+    dropped, and the scheduler looked silent in the Railway log even while it ran.
+    """
+    app_logger = logging.getLogger("app")
+    if app_logger.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    app_logger.addHandler(handler)
+    app_logger.setLevel(logging.INFO)
+    app_logger.propagate = False
+
+
+_configure_logging()
 logger = logging.getLogger(__name__)
 
 # Initialize Sentry error tracking (if DSN configured)

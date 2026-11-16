@@ -270,6 +270,9 @@ async def upload_asset(
         asset_type=asset_type,
         category=category or None,
     )
+    # Save the row before anything else looks for it: the analysis task opens its
+    # own session and ran before the request's commit ("Asset not found").
+    await db.commit()
     # Dispatch metadata extraction task
     task_extract_metadata.delay(str(asset.id), asset.file_path)
     # Fire background audio analysis (loudness, cue points)

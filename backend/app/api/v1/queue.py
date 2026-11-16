@@ -939,6 +939,11 @@ async def _check_advance_locked(
         next_entry.started_at = datetime.now(timezone.utc)
         if current is not None:
             _note_automatic_change(station_id, next_entry.id)
+        logger.info(
+            "Station %s: started entry %s (asset %s, source %s) after %s",
+            station_id, next_entry.id, next_entry.asset_id, next_entry.source,
+            current.id if current is not None else "nothing",
+        )
 
         # Compact positions: ensure playing entry is at position 1
         # and pending entries follow sequentially (prevents stale position drift)
