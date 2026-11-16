@@ -83,3 +83,5 @@ reads the playing queue entry, which the engine's start reports keep current.
 ## The queue never runs dry
 
 Next (any fade), a song ending on its own, and Start all go through `_refill_for_next` in `api/v1/queue.py` when nothing is left to play: it runs the normal fill (schedule, rules, rotation), and if that still adds nothing it queues up to 20 random music items, or failing that any playable item that is not silence, a spot, a jingle or an announcement (`source="fallback"`). Before 2026-11-15, Next on the last item picked the next entry before refilling, so the station stopped with an empty queue. When the station is stopped, the control room shows 0:00 instead of the old item's countdown.
+
+`GET /stations/{id}/queue` returns `next_entry_id`: the entry Next (or the end of the item on air) will play, by the same rule as `_pick_next_pending` (a due soft slot first, else the lowest position not timed for later). The control room's "Next" line shows that entry, not simply the first waiting row, which can be an item timed for later.

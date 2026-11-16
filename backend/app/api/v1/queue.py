@@ -953,6 +953,19 @@ def _json_default(value):
     return jsonable_encoder(value)
 
 
+def _next_due(entries, now_utc: datetime):
+    """In-memory twin of _pick_next_pending for rows already loaded."""
+    pending = [e for e in entries if e.status == "pending"]
+    soft_due = [
+        e for e in pending
+        if e.preempt_at and is_soft_timed(e) and _aware(e.preempt_at) <= now_utc
+    ]
+    if soft_due:
+        return min(soft_due, key=lambda e: _aware(e.preempt_at))
+    regular = [e for e in pending if not e.preempt_at or _aware(e.preempt_at) <= now_utc]
+    return min(regular, key=lambda e: e.position) if regular else None
+
+
 async def _get_queue_impl(station_id, limit, db):
     from types import SimpleNamespace
 
@@ -1004,6 +1017,9 @@ async def _get_queue_impl(station_id, limit, db):
 
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
+    # What Next (or the end of the item on air) will actually play: the same rule
+    # as _pick_next_pending, so the screen never promises a different item.
+    next_entry = _next_due(entries, datetime.now(timezone.utc))
 
     # Sort entries by simulating actual playback order:
     # - Regular songs play sequentially by position
@@ -1250,6 +1266,7 @@ async def _get_queue_impl(station_id, limit, db):
         "total": len(entries_data),
         "total_all": total_queue_entries,
         "now_playing": np_data,
+        "next_entry_id": str(next_entry.id) if next_entry else None,
         "queue_duration_seconds": round(queue_duration, 1),
         "total_queue_duration_seconds": round(total_queue_duration, 1),
         "preempt_fade_ms": 2000,
