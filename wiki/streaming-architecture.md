@@ -220,3 +220,7 @@ start_utc)`, built CONCURRENTLY in the background after startup
 (`CONCURRENT_INDEXES` in main.py; put indexes on big tables there, not in the
 migration list, where a plain CREATE INDEX blocks writes for the build).
 Test: `backend/tests/test_safe_migrations.py`.
+
+## Listener start time (2026-11-16)
+
+A plain `<audio src=stream>` in Chrome waits for about 200 KB of the 320 kbps stream before it starts (measured on a local Icecast: 5.8 s with a 32 KB burst, 3.4 s with 128 KB, 0.15 s with 256 KB) and then plays 2.3 s behind what it has buffered. The listener page uses `frontend/src/lib/liveStream.ts` instead: it fetches the stream and feeds it to Media Source Extensions, so playback starts on the first data (0.15 s) and is held about 1 s behind the newest audio (it jumps forward after a stall). Browsers without MSE for `audio/mpeg` get the plain element. Icecast's burst (128 KB) gives the first data at once.

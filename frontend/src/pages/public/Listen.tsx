@@ -1,4 +1,5 @@
 import { useParams } from 'react-router-dom';
+import { startLiveStream, type LiveStream } from '../../lib/liveStream';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getStation } from '../../api/stations';
@@ -80,14 +81,24 @@ export default function Listen() {
   const useStream = !!streamUrl && !streamFailed;
   const streamAudioRef = useRef<HTMLAudioElement>(null);
 
-  useEffect(() => {
+  // The stream playing now, and its URL (started inside the Listen click by handlePlay)
+  const liveRef = useRef<{ url: string; stream: LiveStream } | null>(null);
+  const stopLive = useCallback(() => {
+    liveRef.current?.stream.stop();
+    liveRef.current = null;
+  }, []);
+  const startLive = useCallback((url: string) => {
     const audio = streamAudioRef.current;
-    if (!audio || !useStream || !userStarted) return;
-    // Usually already started inside the Listen click (handlePlay); only a new URL restarts it
-    if (audio.src !== streamUrl) audio.src = streamUrl!;
-    if (audio.paused) audio.play().catch(() => setStreamFailed(true));
-    return () => { audio.pause(); audio.removeAttribute('src'); };
-  }, [useStream, userStarted, streamUrl]);
+    if (!audio) return;
+    stopLive();
+    liveRef.current = { url, stream: startLiveStream(audio, url, () => setStreamFailed(true)) };
+  }, [stopLive]);
+
+  useEffect(() => {
+    if (!useStream || !userStarted || !streamUrl) { stopLive(); return; }
+    if (liveRef.current?.url !== streamUrl) startLive(streamUrl);
+  }, [useStream, userStarted, streamUrl, startLive, stopLive]);
+  useEffect(() => stopLive, [stopLive]);
 
   // Open the connection to the stream server before Listen is pressed (no audio is
   // fetched), so the press does not also wait for DNS and TLS
@@ -212,11 +223,7 @@ export default function Listen() {
     live.unlock();
     // Start the stream inside the click: Safari refuses play() that a click did not
     // start, and the page then fell back to a player that was never switched on.
-    const audio = streamAudioRef.current;
-    if (useStream && audio && streamUrl) {
-      audio.src = streamUrl;
-      audio.play().catch(() => {});
-    }
+    if (useStream && streamUrl) startLive(streamUrl);
     setUserStarted(true);
     // Always switch the built-in player on in the click too, so a fallback is heard
     await initAudio();
@@ -227,8 +234,7 @@ export default function Listen() {
 
   const handleStop = () => {
     setUserStarted(false);
-    const audio = streamAudioRef.current;
-    if (audio) { audio.pause(); audio.removeAttribute('src'); }
+    stopLive();
   };
 
   // Cleanup on unmount
