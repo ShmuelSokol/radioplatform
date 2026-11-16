@@ -322,7 +322,7 @@ class SchedulerEngine:
                 if not await is_alive():
                     logger.warning("Liquidsoap not responding — clients will use fallback")
             except Exception:
-                pass
+                logger.warning("Liquidsoap health check failed", exc_info=True)
 
         stmt = select(Station).where(Station.is_active == True)
         result = await db.execute(stmt)
@@ -360,7 +360,7 @@ class SchedulerEngine:
                         station_id=station_id,
                     )
                 except Exception:
-                    pass
+                    logger.warning("Could not record the alert for station %s", station_id, exc_info=True)
     
     async def _get_silence_asset(self, db: AsyncSession) -> Asset | None:
         """Get the silence asset for blackout playback, if one exists."""
@@ -417,7 +417,7 @@ class SchedulerEngine:
                     "show_id": str(live_show_id),
                 })
             except Exception:
-                pass
+                logger.warning("Live show hard-stop broadcast failed", exc_info=True)
 
     async def _check_silence_detection(self, db: AsyncSession, station: Station, has_playing_asset: bool, is_blacked_out: bool):
         """
