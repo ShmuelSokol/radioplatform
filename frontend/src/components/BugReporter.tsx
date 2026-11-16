@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import apiClient from '../api/client';
 import { usePlayerStore } from '../stores/playerStore';
 import { addBreadcrumb, collectContext } from '../lib/diagnostics';
@@ -18,6 +19,9 @@ usePlayerStore.subscribe((s, prev) => {
 });
 
 const IGNORE_ATTR = 'data-bug-reporter';
+
+/** Any part of the app can open the reporter (e.g. the phone menu) with this event. */
+export const REPORT_BUG_EVENT = 'kbr:report-bug';
 
 async function captureScreen(): Promise<string | null> {
   try {
@@ -66,6 +70,12 @@ export default function BugReporter() {
     if (phase === 'open') textRef.current?.focus();
   }, [phase]);
 
+  const { pathname } = useLocation();
+  // On a phone the control room's queue reaches the bottom-left corner, where the
+  // button would cover a row's insert button; there it lives in the menu instead.
+  const hideOnPhone = pathname === '/admin/dashboard';
+  const startRef = useRef<() => void>(() => {});
+
   const start = async () => {
     setPhase('capturing');
     setError(null);
@@ -85,6 +95,16 @@ export default function BugReporter() {
     setShot(await captureScreen());
     setPhase('open');
   };
+
+  startRef.current = () => {
+    // Give a menu that triggered this a moment to close before the screenshot.
+    if (phase === 'closed') setTimeout(start, 250);
+  };
+  useEffect(() => {
+    const onEvent = () => startRef.current();
+    window.addEventListener(REPORT_BUG_EVENT, onEvent);
+    return () => window.removeEventListener(REPORT_BUG_EVENT, onEvent);
+  }, []);
 
   const close = () => {
     setPhase('closed');
@@ -128,7 +148,7 @@ export default function BugReporter() {
           onClick={start}
           title="Report a bug"
           aria-label="Report a bug"
-          className="fixed left-3 bottom-24 z-[60] h-9 w-9 rounded-full bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors flex items-center justify-center text-base print:hidden"
+          className={`fixed left-3 bottom-24 z-[60] h-9 w-9 rounded-full ${hideOnPhone ? 'hidden md:flex' : 'flex'} bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden`}
         >
           <span aria-hidden>🐞</span>
         </button>

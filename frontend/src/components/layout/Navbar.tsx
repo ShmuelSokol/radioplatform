@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { REPORT_BUG_EVENT } from '../BugReporter';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useUnresolvedCount, useAlerts } from '../../hooks/useAlerts';
@@ -341,6 +342,12 @@ export default function Navbar() {
               className="block py-2 px-3 text-sm text-gray-400 hover:text-white transition rounded hover:bg-[#1a1a4e]">
               Stations
             </Link>
+
+            <button type="button"
+              onClick={() => { setMenuOpen(false); window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT)); }}
+              className="w-full text-left py-2 px-3 text-sm text-gray-400 hover:text-white transition rounded hover:bg-[#1a1a4e]">
+              🐞 Report a bug
+            </button>
 
             <div className="border-t border-[#2a2a5e] pt-2 mt-2">
               <span className="block px-3 text-[11px] text-gray-500 mb-1">{user?.email}</span>
