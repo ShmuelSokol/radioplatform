@@ -220,6 +220,21 @@ class QueueReplenishService:
         from app.services.playlist_generator_service import CONFIG_KEY, generate
 
         target = generation.hours * 3600
+        # The song on the air counts only for what is left of it; counting all of
+        # it put every new pick (and a block's first song) early by that much.
+        playing = (
+            await self.db.execute(
+                select(QueueEntry.started_at, Asset.duration)
+                .join(Asset, QueueEntry.asset_id == Asset.id)
+                .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "playing")
+                .limit(1)
+            )
+        ).first()
+        if playing is not None and playing[0] is not None:
+            started = playing[0] if playing[0].tzinfo else playing[0].replace(tzinfo=timezone.utc)
+            length = float(playing[1] or DEFAULT_DURATION)
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+            queued_seconds -= min(max(elapsed, 0.0), length)
         if queued_seconds >= target:
             return True
         station = (
