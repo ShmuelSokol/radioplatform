@@ -226,6 +226,22 @@ async def start_show(
     return show
 
 
+async def start_if_scheduled(
+    db: AsyncSession, show_id: UUID | str, host_user_id: UUID | None = None,
+) -> bool:
+    """Start the show when its host starts broadcasting and it is not live yet.
+
+    The Host Console's "Start Broadcasting" only opens the microphone. Without this
+    the show stayed "scheduled", so the station's automation was never paused and a
+    story under the show was not resumed where it stopped (live test, 2026-11-16).
+    """
+    show = await get_show(db, show_id)
+    if show is None or show.status != LiveShowStatus.SCHEDULED:
+        return False
+    await start_show(db, show.id, host_user_id=host_user_id)
+    return True
+
+
 async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
     """End a live show — set status, clear scheduler signal, end all calls, stop Icecast."""
     result = await db.execute(select(LiveShow).where(LiveShow.id == show_id))

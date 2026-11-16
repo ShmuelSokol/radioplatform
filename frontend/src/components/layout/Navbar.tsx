@@ -121,6 +121,7 @@ export default function Navbar() {
         { to: '/admin/sponsorship-rules', label: 'Sponsorship Rules', color: 'hover:text-yellow-300' },
         { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
         { to: '/admin/bug-reports', label: 'Bug Reports', color: 'hover:text-rose-300' },
+        { to: '/admin/site-updates', label: 'Site Updates', color: 'hover:text-cyan-300' },
         { to: '/admin/stations', label: 'Manage Stations', color: 'hover:text-cyan-300' },
         { to: '/admin/crm', label: 'CRM', color: 'hover:text-pink-300' },
       ],

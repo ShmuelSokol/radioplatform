@@ -12,6 +12,19 @@ Every frontend build writes `dist/version.json` and bakes the same id into the b
 
 A stale lazy chunk (`vite:preloadError`) also triggers a reload unless audio is playing.
 
+## Admin control (Settings > Site Updates, `/admin/site-updates`)
+
+Backend `app/api/v1/site_release.py`, one row in table `site_release`. Every tab keeps a WebSocket to `/api/v1/ws/site`: it reports `{client_id, version, page, playing, browser, user (role), waiting}` (every 30 s and on change) and receives `{"type":"release","data":{mode, push, server_time}}` on connect and the moment an admin changes anything. If the socket is down the tab reads `GET /site-release` every minute.
+
+- `PUT /site-release {mode}` (admin): `auto` = the quiet-moment rules above; `manual` = no tab reloads on its own (navigation and long-away reloads too). A stale lazy chunk still reloads in both modes, or the screen would be broken.
+- `POST /site-release/push {version, at, include_playing}` (admin): tabs take release `version` once it is really served at `/version.json` (so a push made right after a merge waits for Vercel) and the time `at` has come (server clock; tabs correct their own clock from `server_time`). No idle wait. Typing still holds a tab. Tabs playing audio wait until they stop, unless `include_playing`: then they reload within 8 s after the next item change (`noteItemChange()` from `useAudioEngine`), or after 5 min of one long item, and `takeResume()` switches the player back on (`components/audio/ResumeAfterRelease.tsx`, used by Listen and the control room). Chrome/Edge allow that without a tap (same-origin reload keeps the autoplay permission); Safari/iPhone refuse, so the page shows "Tap to keep listening". A push with no version means "whatever is published" and lasts one hour.
+- `DELETE /site-release/push` cancels. `GET /site-release/tabs` (admin) lists open tabs (in-memory, per backend process).
+- A tab never reloads for a release twice within 2 minutes (`kbr_release_reload_at` in sessionStorage), so a CDN still serving the old index cannot cause a loop.
+
+A Claude thread can push with the admin login: `POST https://api.kbrlive.com/api/v1/site-release/push` with `{"version": "<sha from https://kbrlive.com/version.json>"}`.
+
+Browser check: fake site with two builds (v1, v2), Chromium with and without the autoplay gesture rule: manual mode ignores a release; push reloads a silent tab within seconds; a playing listener is left alone unless included, then reloads after the item change and plays on (or shows the tap prompt); a scheduled push waits for its time.
+
 Consequences to remember:
 - A listener who never stops playing stays on the old frontend. **Backend changes must stay compatible with the previous frontend** for at least one release.
 - If the playout engine moves listeners to one stream, the rule still holds: a reload would cut the stream, so it waits.
