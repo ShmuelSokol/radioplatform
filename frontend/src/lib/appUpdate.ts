@@ -9,6 +9,12 @@
  * the background, the person has been idle, or they are moving to another
  * screen anyway. A listener in the middle of a song keeps listening on the
  * version they have and is updated when playback stops.
+ *
+ * A reload silences a listener for good (browsers refuse to start audio again
+ * without a tap), so "audio playing" is read generously: a player that is
+ * switched on holds updates even between items (holdUpdates), and any audio
+ * heard in the last two minutes counts too, which covers the short gap at a
+ * song change or before the hourly time and weather.
  */
 
 declare const __APP_VERSION__: string;
@@ -16,10 +22,13 @@ declare const __APP_VERSION__: string;
 const CHECK_EVERY_MS = 60_000;
 const APPLY_EVERY_MS = 5_000;
 const IDLE_BEFORE_RELOAD_MS = 30_000;
+const AUDIO_GRACE_MS = 120_000;
 
 const media = new Set<HTMLMediaElement>();
 const micStreams = new Set<MediaStream>();
+const holds = new Set<symbol>();
 let lastInput = Date.now();
+let lastAudioAt = 0;
 let pending = false;
 let started = false;
 
@@ -29,6 +38,7 @@ function trackMedia() {
   const originalPlay = proto.play;
   proto.play = function (this: HTMLMediaElement) {
     media.add(this);
+    lastAudioAt = Date.now();
     return originalPlay.call(this);
   };
 
@@ -43,7 +53,19 @@ function trackMedia() {
   }
 }
 
-export function isAudioActive(): boolean {
+/**
+ * Keep this tab on its current release while a player is switched on, even in
+ * the gaps between items. Returns the function that lets updates go again.
+ */
+export function holdUpdates(): () => void {
+  const key = Symbol('hold');
+  holds.add(key);
+  return () => {
+    if (holds.delete(key)) lastAudioAt = Date.now();
+  };
+}
+
+function soundingNow(): boolean {
   for (const el of media) {
     if (!el.paused && !el.ended) return true;
   }
@@ -52,6 +74,14 @@ export function isAudioActive(): boolean {
     micStreams.delete(stream);
   }
   return false;
+}
+
+export function isAudioActive(): boolean {
+  if (holds.size > 0 || soundingNow()) {
+    lastAudioAt = Date.now();
+    return true;
+  }
+  return Date.now() - lastAudioAt < AUDIO_GRACE_MS;
 }
 
 function isTyping(): boolean {
