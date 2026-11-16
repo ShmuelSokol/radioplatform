@@ -39,6 +39,9 @@ export interface NowPlayingData {
  */
 // Back from the background after this long: re-read now-playing and reconnect
 const STALE_AFTER_HIDDEN_MS = 5_000;
+// An item still shown this long after its end means the updates stopped
+const OVERDUE_AFTER_MS = 6_000;
+const OVERDUE_CHECK_MS = 4_000;
 
 export const useNowPlayingWS = (stationId: string) => {
   const [nowPlaying, setNowPlaying] = useState<NowPlayingData | null>(null);
@@ -229,6 +232,36 @@ export const useNowPlayingWS = (stationId: string) => {
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [stationId]);
+
+  // The item shown should have ended a while ago and nothing new came in: the socket
+  // may have died without a close event (a phone in a car, screen locked: the
+  // listener page kept showing the weather long after it ended). Read what is on
+  // air and reconnect. Checked every few seconds while the item is overdue.
+  const endsAt = nowPlaying?.ends_at;
+  useEffect(() => {
+    if (!stationId || !endsAt) return;
+    const end = new Date(endsAt).getTime();
+    if (!isFinite(end)) return;
+    const gen = generation.current;
+    const check = () => {
+      if (Date.now() < end + OVERDUE_AFTER_MS || gen !== generation.current) return;
+      fetch(`${import.meta.env.VITE_API_URL}/now-playing/${stationId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data || gen !== generation.current) return;
+          setNowPlaying((prev) => (prev && prev.started_at === data.started_at && prev.asset_id === data.asset_id ? prev : data));
+        })
+        .catch(() => {});
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        if (ws) { ws.onclose = null; ws.close(); wsRef.current = null; }
+        reconnectAttempts.current = 0;
+        connectFnRef.current();
+      }
+    };
+    const timer = setInterval(check, OVERDUE_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [stationId, endsAt]);
 
   return { nowPlaying, isConnected };
 };

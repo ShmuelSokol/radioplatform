@@ -100,6 +100,21 @@ export default function Listen() {
   }, [useStream, userStarted, streamUrl, startLive, stopLive]);
   useEffect(() => stopLive, [stopLive]);
 
+  // What the phone shows on the lock screen and in the car (CarPlay, Android Auto):
+  // the item on air, kept current as it changes
+  const nowTitle = wsNowPlaying?.asset?.title ?? null;
+  const nowArtist = wsNowPlaying?.asset?.artist ?? null;
+  useEffect(() => {
+    if (!userStarted || !('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: nowTitle || station?.name || "Kol B'ramah",
+        artist: nowArtist || station?.name || '',
+        album: station?.name ?? '',
+      });
+    } catch { /* not supported */ }
+  }, [userStarted, nowTitle, nowArtist, station?.name]);
+
   // Open the connection to the stream server before Listen is pressed (no audio is
   // fetched), so the press does not also wait for DNS and TLS
   useEffect(() => {
