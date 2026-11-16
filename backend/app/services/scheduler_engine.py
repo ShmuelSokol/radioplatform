@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db.session import get_db
+from app.db.engine import async_session_factory
 from app.models.asset import Asset, stored_analysis
 from app.models.holiday_window import HolidayWindow
 from app.models.station import Station
@@ -132,13 +132,12 @@ class SchedulerEngine:
         self._leader_until = None
         try:
             from sqlalchemy import text
-            async for db in get_db():
+            async with async_session_factory() as db:
                 await db.execute(
                     text("UPDATE scheduler_leases SET expires_at = :now WHERE name = 'scheduler' AND holder = :me"),
                     {"me": self._instance_id, "now": datetime.now(timezone.utc)},
                 )
                 await db.commit()
-                break
         except Exception as e:
             logger.warning("Could not release scheduler lease: %s", e)
 
@@ -146,14 +145,20 @@ class SchedulerEngine:
         """Main scheduler loop."""
         while self.running:
             try:
-                async for db in get_db():
-                    if not await self._hold_lease(db):
-                        break  # another process is running the stations
-                    await self._check_all_stations(db)
-                    await self._maybe_extend_holidays(db)
-                    await self._maybe_generate_weather_readouts(db)
-                    await self._maybe_queue_weather_readouts(db)
-                    break
+                # A session of its own per pass, closed (and its transaction ended)
+                # as soon as the pass is done. It used to come from an `async for`
+                # over get_db() left with `break`, which keeps the generator
+                # suspended until garbage collection: the session sat "idle in
+                # transaction" holding locks on the tables it had read, and a
+                # deploy's schema change queued behind it froze every station (see
+                # wiki/streaming-architecture.md, "Deploys must never freeze").
+                async with async_session_factory() as db:
+                    if await self._hold_lease(db):  # False: another process runs the stations
+                        await self._check_all_stations(db)
+                        await self._maybe_extend_holidays(db)
+                        await self._maybe_generate_weather_readouts(db)
+                        await self._maybe_queue_weather_readouts(db)
+                    await _safe_rollback(db)  # end the read transaction now
             except Exception as e:
                 logger.error(f"Scheduler error: {e}", exc_info=True)
 
@@ -518,12 +523,12 @@ class SchedulerEngine:
         if settings.engine_drives(station_id):
             return
         try:
-            async for db in get_db():
+            async with async_session_factory() as db:
                 from app.api.v1.queue import _check_advance
                 entry = await _check_advance(db, station_id, early_seconds=crossfade_seconds)
                 if entry and entry.status == "playing":
                     await self._broadcast_queue_entry(db, station_id, entry)
-                break
+                await _safe_rollback(db)
         except Exception as e:
             logger.error("Precise advance failed for station %s: %s", station_id, e, exc_info=True)
 

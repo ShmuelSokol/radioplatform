@@ -234,7 +234,7 @@ async def _add_missing_columns(engine):
 # during a deploy. So statements whose column or index already exists are not
 # sent at all, and the rest give up after MIGRATION_LOCK_TIMEOUT instead of
 # queueing (see wiki/streaming-architecture.md, "Deploys must never freeze").
-MIGRATION_LOCK_TIMEOUT = "2s"
+MIGRATION_LOCK_TIMEOUT = "3s"
 
 _ADD_COLUMN_RE = re.compile(
     r"^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([\w.]+)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+(\w+)",

@@ -57,3 +57,31 @@ async def test_analysis_holds_no_transaction_while_measuring(db_session, monkeyp
     await db_session.refresh(asset)
     assert asset.metadata_extra["audio_analysis"]["cue_out_seconds"] == 188.0
     assert asset.duration == 190.0
+
+
+@pytest.mark.asyncio
+async def test_bulk_analysis_request_ends_before_the_job(client, auth_headers, db_session, monkeypatch):
+    """The job must not run inside the request (its session would stay open for hours)."""
+    import asyncio
+
+    from app.api.v1 import assets as assets_api
+
+    db_session.add(Asset(id=uuid.uuid4(), title="Song", duration=200.0, asset_type="music",
+                         file_path="https://cdn.example.com/song.mp3"))
+    await db_session.commit()
+
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def slow_job(job_id, asset_ids):
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(assets_api, "_run_bulk_analyze", slow_job)
+    resp = await asyncio.wait_for(
+        client.post("/api/v1/assets/bulk-analyze", headers=auth_headers), timeout=5
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["total"] == 1
+    await asyncio.wait_for(started.wait(), timeout=5)
+    release.set()

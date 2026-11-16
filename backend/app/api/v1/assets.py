@@ -2,7 +2,7 @@ import hashlib
 import logging
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -230,7 +230,6 @@ async def backfill_release_dates(
 
 @router.post("/upload", response_model=AssetResponse, status_code=201)
 async def upload_asset(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str = Form(...),
     format: str = Form("mp3"),
@@ -276,7 +275,7 @@ async def upload_asset(
     # Dispatch metadata extraction task
     task_extract_metadata.delay(str(asset.id), asset.file_path)
     # Fire background audio analysis (loudness, cue points)
-    background_tasks.add_task(_run_analysis_background, str(asset.id))
+    _run_detached(_run_analysis_background(str(asset.id)))
     return asset
 
 
@@ -364,6 +363,22 @@ async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: f
     job["status"] = "completed"
 
 
+
+# Long jobs run as detached tasks, not FastAPI BackgroundTasks. A background task
+# runs before the request's database session is closed, so the request's read
+# transaction stayed "idle in transaction" for the whole job (two hours for the
+# bulk analysis), holding a lock on assets; a deploy's schema change queued
+# behind it and froze every station. Each job opens its own short sessions.
+_detached_tasks: set = set()
+
+
+def _run_detached(coro) -> None:
+    import asyncio
+
+    task = asyncio.create_task(coro)
+    _detached_tasks.add(task)  # keep a reference so the task is not collected mid-run
+    task.add_done_callback(_detached_tasks.discard)
+
 async def _run_analysis_background(asset_id: str):
     """Background task: run audio analysis (loudness + cue points) for a single asset."""
     from app.db.session import async_session_factory
@@ -419,7 +434,6 @@ async def analyze_audio_endpoint(
 
 @router.post("/bulk-analyze")
 async def bulk_analyze_endpoint(
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
     asset_types: str = Query("music", description="Comma-separated asset types to analyse"),
@@ -453,7 +467,8 @@ async def bulk_analyze_endpoint(
         "errors": 0,
     }
 
-    background_tasks.add_task(_run_bulk_analyze, job_id, asset_ids)
+    await db.commit()  # end the read transaction: the job runs for hours
+    _run_detached(_run_bulk_analyze(job_id, asset_ids))
     return {"job_id": job_id, "total": len(asset_ids)}
 
 
@@ -472,7 +487,6 @@ async def bulk_analyze_status(
 @router.post("/bulk-auto-trim")
 async def bulk_auto_trim(
     body: BulkAutoTrimRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
@@ -509,7 +523,8 @@ async def bulk_auto_trim(
         "errors": 0,
     }
 
-    background_tasks.add_task(_run_bulk_auto_trim, job_id, asset_ids, body.threshold_db, body.min_silence)
+    await db.commit()  # end the read transaction: the job runs for a long time
+    _run_detached(_run_bulk_auto_trim(job_id, asset_ids, body.threshold_db, body.min_silence))
     return {"job_id": job_id}
 
 
