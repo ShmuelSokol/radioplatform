@@ -44,13 +44,22 @@ async def uses_block_playlists(db: AsyncSession, station_id) -> bool:
 
 
 def automatic_songs(station_id):
-    """Pending songs the station chose by itself (not timed, not queued by a person)."""
-    return (
+    """Pending songs the station chose by itself (not timed, not queued by a person).
+
+    A song the playout engine already holds as its next track is on its way to air
+    and is left alone: deleting it lost track of what Main was playing."""
+    from app.services.playout_engine import held_entry_ids
+
+    conditions = [
         QueueEntry.station_id == station_id,
         QueueEntry.status == "pending",
         QueueEntry.source == "auto",
         QueueEntry.preempt_at.is_(None),
-    )
+    ]
+    held = held_entry_ids(station_id)
+    if held:
+        conditions.append(QueueEntry.id.notin_(held))
+    return tuple(conditions)
 
 
 async def drop_dated_clips(db: AsyncSession, station_id) -> int:

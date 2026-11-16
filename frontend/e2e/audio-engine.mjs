@@ -393,6 +393,48 @@ async function listenMidItem() {
 // decks are empty during the click. Heard live (2026-11-16): one press of Listen
 // gave no sound until the volume slider was moved.
 async function listenFromCold() {
+  const page = await gesturePage();
+  const startedAt = new Date(Date.now() - 4000).toISOString();
+  await page.evaluate((x) => window.__clickThen(x), { ...A, nextId: 'b', startedAt });
+  await sleep(2500);
+  const audible = (await page.evaluate(() => window.__snap())).filter((d) => d.playing && d.gain > 0.05);
+  check('listen from cold: one press of Listen is heard at once',
+    audible.length === 1 && audible[0].src === 'a',
+    audible.map((d) => `${d.src}@${d.t}`).join(' | ') || JSON.stringify(await page.evaluate(() => window.__snap())));
+  await page.close();
+}
+
+// Stop, then Listen again: heard live from the car, the item went on from where it
+// was stopped, like a pause button. It must join where the station is now.
+async function stopThenListen() {
+  const page = await gesturePage();
+  const t0 = Date.now() - 1000;
+  const startedAt = new Date(t0).toISOString();
+  await page.evaluate((x) => window.__clickThen(x), { ...D, nextId: 'b', startedAt });
+  await sleep(3000);
+  await page.evaluate(() => window.__set(null)); // Stop
+  await sleep(500);
+  const stopped = (await page.evaluate(() => window.__snap())).filter((d) => d.playing && d.gain > 0.05);
+  check('stop then listen: Stop silences the player', stopped.length === 0, stopped.map((d) => `${d.src}@${d.t}`).join(' | '));
+  await sleep(7000);
+  await page.evaluate((x) => window.__clickThen(x), { ...D, nextId: 'b', startedAt });
+  const heard = [];
+  for (let i = 0; i < 10; i++) {
+    await sleep(250);
+    const a = (await page.evaluate(() => window.__snap())).filter((d) => d.playing && d.gain > 0.05);
+    heard.push(...a.map((d) => ({ ...d, live: (Date.now() - t0) / 1000 })));
+  }
+  const behind = heard.filter((d) => d.src === 'd' && d.live - d.t > 2.5);
+  check('stop then listen: never heard from where it was stopped', behind.length === 0,
+    behind.slice(0, 3).map((d) => `${d.src}@${d.t} while live ${d.live.toFixed(1)}`).join(' | '));
+  const last = heard.filter((d) => d.src === 'd').pop();
+  check('stop then listen: joins the station where it is now', !!last && Math.abs(last.live - last.t) < 2.5,
+    last ? `at ${last.t}, live ${last.live.toFixed(1)}` : JSON.stringify(await page.evaluate(() => window.__snap())));
+  await page.close();
+}
+
+// A page where play() and the AudioContext work only inside a click, like Safari
+async function gesturePage() {
   const page = await browser.newPage();
   await page.addInitScript(() => {
     let inGesture = false;
@@ -414,8 +456,16 @@ async function listenFromCold() {
     };
   });
   await page.route('**/__tone/*.wav', (r) => {
+    // With byte ranges, as the real file store sends them, so the player can seek
     const id = r.request().url().split('/').pop().replace('.wav', '');
-    return r.fulfill({ contentType: 'audio/wav', body: wav(...TONES[id]) });
+    const body = wav(...TONES[id]);
+    const m = /bytes=(\d+)-(\d*)/.exec(r.request().headers().range || '');
+    if (!m) return r.fulfill({ contentType: 'audio/wav', body, headers: { 'accept-ranges': 'bytes' } });
+    const from = +m[1], to = m[2] ? Math.min(+m[2], body.length - 1) : body.length - 1;
+    return r.fulfill({
+      status: 206, contentType: 'audio/wav', body: body.subarray(from, to + 1),
+      headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${from}-${to}/${body.length}` },
+    });
   });
   await page.route('**/assets/*/audio-url', (r) => {
     const id = r.request().url().split('/').slice(-2)[0];
@@ -423,14 +473,7 @@ async function listenFromCold() {
   });
   await page.goto(`${base}e2e/audio-harness/index.html`);
   await page.waitForFunction(() => typeof window.__set === 'function');
-  const startedAt = new Date(Date.now() - 4000).toISOString();
-  await page.evaluate((x) => window.__clickThen(x), { ...A, nextId: 'b', startedAt });
-  await sleep(2500);
-  const audible = (await page.evaluate(() => window.__snap())).filter((d) => d.playing && d.gain > 0.05);
-  check('listen from cold: one press of Listen is heard at once',
-    audible.length === 1 && audible[0].src === 'a',
-    audible.map((d) => `${d.src}@${d.t}`).join(' | ') || JSON.stringify(await page.evaluate(() => window.__snap())));
-  await page.close();
+  return page;
 }
 
 // Both speakers: heard live, the player sent everything to the left channel only.
@@ -467,6 +510,7 @@ try {
   if (!only || only === 'stereo') await stereo();
   if (!only || only === 'listen-mid-item') await listenMidItem();
   if (!only || only === 'listen-cold') await listenFromCold();
+  if (!only || only === 'stop-then-listen') await stopThenListen();
   for (const [name, sc] of Object.entries(SCENARIOS)) {
     if (!only || only === name) await run(name, sc);
   }
