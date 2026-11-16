@@ -16,6 +16,7 @@ from app.db.engine import async_session_factory
 from app.models.asset import Asset, stored_analysis
 from app.models.holiday_window import HolidayWindow
 from app.models.station import Station
+from app.models.queue_entry import resume_offset
 
 logger = logging.getLogger(__name__)
 
@@ -726,7 +727,8 @@ class SchedulerEngine:
                 "title": na.title,
                 "artist": na.artist,
                 "audio_url": na_audio_url,
-                "cue_in": na_analysis.get("cue_in_seconds", 0),
+                # A paused shiur coming back starts where it stopped
+                "cue_in": max(na_analysis.get("cue_in_seconds", 0) or 0, resume_offset(next_entry)),
                 "replay_gain_db": na_analysis.get("replay_gain_db", 0),
             }
 
