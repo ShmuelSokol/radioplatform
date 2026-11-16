@@ -224,3 +224,15 @@ Test: `backend/tests/test_safe_migrations.py`.
 ## Listener start time (2026-11-16)
 
 A plain `<audio src=stream>` in Chrome waits for about 200 KB of the 320 kbps stream before it starts (measured on a local Icecast: 5.8 s with a 32 KB burst, 3.4 s with 128 KB, 0.15 s with 256 KB) and then plays 2.3 s behind what it has buffered. The listener page uses `frontend/src/lib/liveStream.ts` instead: it fetches the stream and feeds it to Media Source Extensions, so playback starts on the first data (0.15 s) and is held about 1 s behind the newest audio (it jumps forward after a stall). Browsers without MSE for `audio/mpeg` get the plain element. Icecast's burst (128 KB) gives the first data at once.
+
+## The engine's item must survive a schedule redraw (2026-11-16)
+
+Heard live on Main: the stream kept playing but the site showed nothing on air and the listener page said "Offline". A schedule refresh (`schedule_refresh_service.remove_automatic_songs` / redraw) deleted the unplayed automatic songs, including the one already handed to the engine. Its `/started` report then matched no queue entry, so nothing was marked playing and the queue drifted from what was heard.
+
+- `playout_engine.held_entry_ids(station)` (the cued entry and timed items already sent) are excluded from the refresh.
+- The link remembers the asset of the last 30 entries it handed out (`EngineState.handed`). A start report for one that was deleted some other way puts a fresh entry with that asset on air instead of leaving the station empty.
+- The listener page shows "On Air" whenever the stream is playing, whatever the now-playing record says.
+
+## Stop, Listen and the phone's own controls (2026-11-16)
+
+Stop then Listen on the built-in player went on from where it was stopped: the click restarted the paused deck and the player took it as already on air. Stop now silences both decks and forgets what they hold, so Listen always joins at the station's current position (`e2e/audio-engine.mjs stop-then-listen`, which fails on the old player). The stream player already reconnects on Listen. Lock screen, CarPlay and headphone pause/play are routed to Stop and Listen through `navigator.mediaSession` action handlers; left to the browser they only paused the audio element, and play resumed old audio.

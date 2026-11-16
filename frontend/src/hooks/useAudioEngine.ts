@@ -499,8 +499,26 @@ export function useAudioEngine(
     if (!isPlaying || !nowPlayingAsset) {
       if (lastAssetId.current !== null) {
         changeTokenRef.current++;
-        deckARef.current?.audio.pause();
-        deckBRef.current?.audio.pause();
+        // Stopped: the next start must join the station where it is then, never
+        // carry on from here. A listener pressing Stop then Listen heard the item go on
+        // from where they stopped (the deck was played again in the click and taken as
+        // already on air). So the decks are silenced and forget what they hold.
+        for (const label of ['A', 'B'] as DeckLabel[]) {
+          const deck = label === 'A' ? deckARef.current : deckBRef.current;
+          if (!deck) continue;
+          deck.audio.pause();
+          const ctx = ctxRef.current;
+          if (ctx) {
+            deck.gain.gain.cancelScheduledValues(ctx.currentTime);
+            deck.gain.gain.setValueAtTime(0, ctx.currentTime);
+          }
+          deckAssetRef.current[label] = null;
+        }
+        crossfadingRef.current = false;
+        if (crossfadeTimerRef.current) {
+          clearTimeout(crossfadeTimerRef.current);
+          crossfadeTimerRef.current = null;
+        }
         lastAssetId.current = null;
         lastStartedAtRef.current = null;
         pendingAssetRef.current = null;

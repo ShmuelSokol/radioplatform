@@ -496,3 +496,39 @@ async def test_each_listed_station_has_its_own_engine(engine_station, monkeypatc
     monkeypatch.setattr(playout_engine, "_command", _real_command)
     assert await playout_engine.engine_flush(other)
     assert calls == [f"https://stream.example.com/control/{other}/flush"]
+
+
+@pytest.mark.asyncio
+async def test_a_redraw_never_loses_what_the_engine_plays(client, db_session, engine_station):
+    """Live, 2026-11-16 ~19:50 ET on Main: a schedule redraw deleted the unplayed songs,
+    including the one the engine had loaded. Its start report then matched nothing, the
+    station showed nothing on air and listeners saw "Offline" while the engine played on."""
+    from app.services.schedule_refresh_service import remove_automatic_songs
+
+    station, entries, _ = engine_station
+    first = (await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)).json()
+    assert first["entry_id"] == str(entries[0].id)
+
+    # The redraw keeps the song the engine holds; the rest go
+    await remove_automatic_songs(db_session, station.id)
+    await db_session.commit()
+    left = (await db_session.execute(
+        select(QueueEntry.id).where(QueueEntry.station_id == station.id)
+    )).scalars().all()
+    assert [str(i) for i in left] == [str(entries[0].id)]
+
+    # Even if it is deleted some other way, its start report still puts it on air
+    held = (await db_session.execute(select(QueueEntry).where(QueueEntry.id == entries[0].id))).scalar_one()
+    asset_id = held.asset_id
+    await db_session.delete(held)
+    await db_session.commit()
+    r = await client.post(
+        f"/api/v1/playout/{station.id}/started", headers=HEADERS,
+        json={"entry_id": first["entry_id"], "lane": "main"},
+    )
+    assert r.json() == {"ok": True, "known": True}
+    playing = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "playing")
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    assert len(playing) == 1 and str(playing[0].asset_id) == str(asset_id)

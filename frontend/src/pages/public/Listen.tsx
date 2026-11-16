@@ -148,6 +148,9 @@ export default function Listen() {
 
   // Derive playback state from WS data
   const isWsPlaying = !!wsNowPlaying?.asset_id && !!wsNowPlaying?.asset;
+  // The station's stream is playing here: it is on air whatever the now-playing
+  // record says (a lost record showed "Offline" over a playing stream, 2026-11-16)
+  const streamPlaying = userStarted && useStream;
   const wsAsset = wsNowPlaying?.asset;
   const wsNextAsset = wsNowPlaying?.next_asset;
 
@@ -252,6 +255,33 @@ export default function Listen() {
     stopLive();
   };
 
+  // The phone's own controls (lock screen, CarPlay, headphones) act like the page's
+  // buttons. Left to the browser, their pause only paused the audio, and play then
+  // went on from the moment it was paused instead of where the station is now.
+  const playRef = useRef(handlePlay);
+  const stopRef = useRef(handleStop);
+  playRef.current = handlePlay;
+  stopRef.current = handleStop;
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    const set = (action: MediaSessionAction, fn: MediaSessionActionHandler | null) => {
+      try { ms.setActionHandler(action, fn); } catch { /* action not supported */ }
+    };
+    set('play', () => { void playRef.current(); });
+    set('pause', () => stopRef.current());
+    set('stop', () => stopRef.current());
+    // A live station cannot be wound back or forward
+    set('seekbackward', null);
+    set('seekforward', null);
+    set('seekto', null);
+    return () => { set('play', null); set('pause', null); set('stop', null); };
+  }, []);
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    try { navigator.mediaSession.playbackState = userStarted ? 'playing' : 'paused'; } catch { /* not supported */ }
+  }, [userStarted]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => { /* useAudioEngine handles its own cleanup */ };
@@ -317,9 +347,9 @@ export default function Listen() {
             </button>
           )}
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-            isWsPlaying ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+            isWsPlaying || streamPlaying ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
           }`}>
-            {isWsPlaying ? 'On Air' : wsConnected ? 'Offline' : 'Connecting...'}
+            {isWsPlaying || streamPlaying ? 'On Air' : wsConnected ? 'Offline' : 'Connecting...'}
           </span>
           {userStarted && useStream && (
             <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">LIVE</span>
@@ -365,7 +395,7 @@ export default function Listen() {
           </div>
         )}
 
-        {!isWsPlaying && wsConnected && (
+        {!isWsPlaying && !streamPlaying && wsConnected && (
           <div className="border-t pt-6">
             <p className="text-gray-400">Nothing playing right now</p>
           </div>

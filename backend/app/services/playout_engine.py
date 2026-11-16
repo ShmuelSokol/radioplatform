@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.config import settings
-from app.models.asset import stored_analysis
+from app.models.asset import Asset, stored_analysis
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset, soft_timed
 
@@ -56,6 +56,36 @@ class EngineState:
     last_contact: float = 0.0
     last_alert: float = 0.0
     on_emergency: bool = False
+    # Asset of each entry handed to the engine (newest last), so a start report for an
+    # entry deleted meanwhile (a schedule redraw) still shows what is on air
+    handed: dict[str, str] = field(default_factory=dict)
+
+
+HANDED_KEEP = 30
+
+
+def held_entry_ids(station_id) -> set[uuid.UUID]:
+    """Queue entries the engine holds (cued as next, or in its timed lane): they are on
+    their way to air and must not be deleted or redrawn."""
+    state = _states.get(str(station_id))
+    if state is None:
+        return set()
+    ids = set(state.timed_sent)
+    if state.cued_entry_id:
+        ids.add(state.cued_entry_id)
+    out = set()
+    for raw in ids:
+        try:
+            out.add(uuid.UUID(str(raw)))
+        except ValueError:
+            continue
+    return out
+
+
+def _note_handed(state: "EngineState", entry) -> None:
+    state.handed[str(entry.id)] = str(entry.asset_id)
+    while len(state.handed) > HANDED_KEEP:
+        state.handed.pop(next(iter(state.handed)))
 
 
 _states: dict[str, EngineState] = {}
@@ -320,6 +350,7 @@ async def handle_next(db: AsyncSession, station_id, given: list[str] | None = No
         uri = build_uri(entry, "main")
         if uri:
             state.cued_entry_id = str(entry.id)
+            _note_handed(state, entry)
             logger.info("Engine next -> %s", entry.id)
             return {"uri": uri, "entry_id": str(entry.id)}
         # No playable file for this entry: drop it and try the following one
@@ -378,6 +409,24 @@ async def handle_started(
                 )
             )
         prev.status = "skipped" if skipped else "played"
+
+    if entry is None and entry_id and str(entry_id) in state.handed:
+        # Handed to the engine, then deleted here (a schedule redraw replaced the
+        # unplayed songs): it is on air all the same. Without this, Main showed
+        # nothing playing (listeners saw "Offline") while the engine played on.
+        try:
+            asset_uuid = uuid.UUID(state.handed[str(entry_id)])
+        except ValueError:
+            asset_uuid = None
+        if asset_uuid is not None and await db.get(Asset, asset_uuid) is not None:
+            entry = QueueEntry(
+                id=uuid.uuid4(), station_id=station_id, asset_id=asset_uuid,
+                position=0, status="pending", source="auto",
+            )
+            db.add(entry)
+            await db.flush()
+            await db.refresh(entry, ["asset"])
+            logger.warning("Engine started entry %s that was deleted here; on air as %s", entry_id, entry.id)
 
     if entry is None:
         await db.commit()
@@ -540,6 +589,7 @@ async def tick(db: AsyncSession, station) -> None:
             at = at.replace(tzinfo=UTC)
         if await engine_timed(station_id, uri, at.timestamp(), key):
             state.timed_sent.add(key)
+            _note_handed(state, entry)
             logger.info("Handed timed entry %s to the engine for %s", key, at.isoformat())
 
     # Forget timed entries that no longer exist as pending (played, removed)
