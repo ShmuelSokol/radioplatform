@@ -1015,7 +1015,7 @@ async def _get_queue_impl(station_id, limit, db):
             _np_sa = _np_sa.replace(tzinfo=timezone.utc)
 
         if _np_sa:
-            _ad = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
+            _ad = (now_playing_entry.asset.duration if now_playing_entry.asset else None) or DEFAULT_DURATION
             _el = (now_utc_sort - _np_sa).total_seconds()
             _cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
         else:
@@ -1053,7 +1053,7 @@ async def _get_queue_impl(station_id, limit, db):
                 if hp_pa <= _cursor:
                     _cursor = hp_pa
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = hard_preempts[hi].asset.duration if hard_preempts[hi].asset else DEFAULT_DURATION
+                    _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     hi += 1
                     continue
@@ -1063,7 +1063,7 @@ async def _get_queue_impl(station_id, limit, db):
                 sp_pa = _tz(soft_preempts[si].preempt_at)
                 if sp_pa <= _cursor:
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = soft_preempts[si].asset.duration if soft_preempts[si].asset else DEFAULT_DURATION
+                    _dur = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     si += 1
                     continue
@@ -1093,13 +1093,13 @@ async def _get_queue_impl(station_id, limit, db):
                 if next_hp and (not next_sp or next_hp <= next_sp):
                     _cursor = max(_cursor, next_hp)
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = hard_preempts[hi].asset.duration if hard_preempts[hi].asset else DEFAULT_DURATION
+                    _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     hi += 1
                 elif next_sp:
                     _cursor = max(_cursor, next_sp)
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = soft_preempts[si].asset.duration if soft_preempts[si].asset else DEFAULT_DURATION
+                    _dur = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     si += 1
                 else:
@@ -1116,7 +1116,7 @@ async def _get_queue_impl(station_id, limit, db):
     np_data = None
     if now_playing_entry and now_playing_entry.started_at:
         asset = now_playing_entry.asset
-        duration = asset.duration if asset else 180
+        duration = (asset.duration if asset else None) or DEFAULT_DURATION
         elapsed = (datetime.now(timezone.utc) - _aware(now_playing_entry.started_at)).total_seconds()
         remaining = max(0, duration - elapsed)
         np_data = {
@@ -1136,7 +1136,7 @@ async def _get_queue_impl(station_id, limit, db):
     now_utc = datetime.now(timezone.utc)
     # Fallback cursor only used if _est_map is missing an entry
     if now_playing_entry and now_playing_entry.started_at:
-        asset_dur = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
+        asset_dur = (now_playing_entry.asset.duration if now_playing_entry.asset else None) or DEFAULT_DURATION
         el = (now_utc - _aware(now_playing_entry.started_at)).total_seconds()
         cursor = now_utc + timedelta(seconds=max(0, (asset_dur or DEFAULT_DURATION) - el))
     else:

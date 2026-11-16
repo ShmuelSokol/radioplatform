@@ -14,6 +14,17 @@ const SKIP_FADE_OUT = 0.6; // seconds
 const SKIP_FADE_IN = 0.15; // seconds
 // On a cold load, keep the current track on air until the new one can play (capped)
 const COLD_LOAD_MAX_WAIT_MS = 4000;
+// A change heard less than this far into the new item starts it from the top (no seek)
+const START_FROM_TOP_SECONDS = 1.0;
+// A timed item's lead-in fade ends this long after its due time (see the preempt fade)
+const PREEMPT_FADE_OVERHANG_MS = 400;
+
+/** Seek only when it moves the position: even a seek to where the element already
+ *  is makes Safari re-decode and can repeat a few hundred milliseconds. */
+function seekIfNeeded(audio: HTMLAudioElement, position: number) {
+  if (Math.abs(audio.currentTime - position) < 0.05) return;
+  try { audio.currentTime = position; } catch { /* not seekable yet */ }
+}
 // The player may start a crossfade at most this long before the server reaches the
 // crossfade point. Without this bound the player can run ahead of the server a little
 // more with every song.
@@ -287,7 +298,7 @@ export function useAudioEngine(
     const targetGain = mutedRef.current ? 0 : volumeRef.current * replayGainMultiplier(nextReplayGainDbRef.current);
 
     // Seek inactive deck to cue-in point and play
-    inactiveDeck.audio.currentTime = nextCueInRef.current;
+    seekIfNeeded(inactiveDeck.audio, nextCueInRef.current);
     inactiveDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
     inactiveDeck.gain.gain.setValueAtTime(0, ctx.currentTime);
     inactiveDeck.gain.gain.linearRampToValueAtTime(targetGain, ctx.currentTime + CROSSFADE_DURATION);
@@ -434,7 +445,11 @@ export function useAudioEngine(
       let startPos = livePosition(cueIn);
       const inDur = inDeck.audio.duration;
       if (isFinite(inDur) && inDur > 0 && startPos > inDur - 1) startPos = cueIn;
-      try { inDeck.audio.currentTime = startPos; } catch { /* not seekable yet */ }
+      // Within the item's first moment, start from the top rather than seek a fraction
+      // of a second in: Safari lands an MP3 seek on an earlier frame, so the opening
+      // was heard twice. Being that little behind the server is inaudible.
+      if (startPos - cueIn < START_FROM_TOP_SECONDS) startPos = cueIn;
+      seekIfNeeded(inDeck.audio, startPos);
       inDeck.gain.gain.cancelScheduledValues(now);
       inDeck.gain.gain.setValueAtTime(0, now);
       inDeck.gain.gain.linearRampToValueAtTime(targetGain, now + fadeIn);
@@ -546,7 +561,10 @@ export function useAudioEngine(
     if (!nextPreemptAt || !nextPreemptAssetId || !isPlaying || !audioReady) return;
     if (preemptFadeMs <= 0) return;
 
-    const preemptTime = new Date(nextPreemptAt).getTime();
+    // The fade reaches silence a little after the due time: the timed item is
+    // announced a moment after it (the server starts it at the due time, then the
+    // message travels). Ending at the due time itself left a gap of dead air.
+    const preemptTime = new Date(nextPreemptAt).getTime() + PREEMPT_FADE_OVERHANG_MS;
     const fadeStartTime = preemptTime - preemptFadeMs;
     const msUntilFade = fadeStartTime - Date.now();
 
