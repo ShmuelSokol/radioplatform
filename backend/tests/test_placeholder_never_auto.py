@@ -27,15 +27,16 @@ async def test_no_pick_draws_the_placeholder(db_session):
     real = _spot("Sponsor Grocery")
     placeholder = _spot("KOL BRAMAH TEST SPONSOR")
     lower = _spot(" kol bramah test sponsor ", category=None)
-    sponsor = _spot("Kol bramah sponsor")
-    ad = _spot("KOL BRAMAH AD")
-    db_session.add_all([real, placeholder, lower, sponsor, ad])
+    sponsor = _spot("Kol bramah sponsor ", category=None)  # production title has a trailing space
+    lookalike = _spot("Taking A test", category=None)
+    ad = _spot("Kol bramah ad", category=None)
+    db_session.add_all([real, placeholder, lower, sponsor, ad, lookalike])
     await db_session.commit()
 
     random_ids = set((await db_session.execute(
         select(Asset.id).where(Asset.asset_type == "spot", fit_for_random_pick())
     )).scalars().all())
-    assert random_ids == {real.id}
+    assert random_ids == {real.id, lookalike.id}  # a look-alike title still plays
 
     # A rotation that names the category still never gets it.
     named_ids = set((await db_session.execute(
