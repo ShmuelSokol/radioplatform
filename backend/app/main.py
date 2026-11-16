@@ -198,6 +198,8 @@ async def _add_missing_columns(engine):
         # Per-station staff permissions and the protected (FM) station
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS station_ids JSONB",
         "ALTER TABLE stations ADD COLUMN IF NOT EXISTS protected BOOLEAN NOT NULL DEFAULT false",
+        # A listener who stops leaves the live count at once
+        "ALTER TABLE listener_sessions ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ",
         # Audit log table
         """CREATE TABLE IF NOT EXISTS audit_logs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -488,6 +488,38 @@ async function longQueue(browser, contextOpts, tag, rowH) {
 // Switching station: the first station's now-playing socket must stay closed.
 // Its close handler used to reconnect to the old station a second later, so the
 // control room got both stations and played both (heard live, 2026-11-16).
+// Level meters move with the station without pressing Listen: any click starts the
+// silent player, and the Listen button stays up (nothing is heard on this computer).
+function toneWav(seconds = 600, rate = 8000) {
+  const n = seconds * rate;
+  const buf = Buffer.alloc(44 + n);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n, 4); buf.write('WAVE', 8);
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate, 28); buf.writeUInt16LE(1, 32); buf.writeUInt16LE(8, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n, 40);
+  for (let i = 0; i < n; i++) buf[44 + i] = 128 + Math.round(100 * Math.sin(2 * Math.PI * 440 * i / rate));
+  return buf;
+}
+async function metersWithoutListening(browser) {
+  const tag = 'meters';
+  const { page, ctx, errors } = await open(browser, { viewport: { width: 1440, height: 900 } });
+  const tone = toneWav();
+  await page.route('**/tone.wav', (route) => route.fulfill({ status: 200, contentType: 'audio/wav', body: tone }));
+  await page.route(/\/assets\/[^/]+\/audio-url$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: `${new URL(page.url()).origin}/tone.wav` }) }));
+  await page.reload();
+  await page.getByTestId('queue-row').first().waitFor();
+  const lit = () => page.locator('header .bg-cyan-400, header .bg-red-500').count();
+  await page.waitForTimeout(1500);
+  const before = await lit();
+  await page.getByText('Up next', { exact: true }).first().click();
+  let after = 0;
+  for (let i = 0; i < 20 && after === 0; i++) { await page.waitForTimeout(300); after = await lit(); }
+  check(`${tag}: meters move without pressing Listen`, after > 0, `${before} -> ${after} lit`);
+  check(`${tag}: the Listen button is still offered (not heard here)`, await page.locator('button:visible', { hasText: 'Listen' }).count() > 0);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 async function stationSwitch(browser) {
   const tag = 'station switch';
   const backend = makeBackend();
@@ -518,8 +550,68 @@ async function stationSwitch(browser) {
   await ctx.close();
 }
 
+// Playlist steps change on screen at once, while the save is still on its way.
+async function playlistsInstant(browser) {
+  const tag = 'playlists';
+  const backend = makeBackend();
+  const slot = (id, position, category) => ({ id, template_id: 'tpl-1', position, asset_type: 'music', category, created_at: '', updated_at: '' });
+  let slots = [slot('s1', 0, 'Fast'), slot('s2', 1, 'Relax'), slot('s3', 2, 'Slow')];
+  const SLOW = 3000; // the server takes 3 s to answer a change
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctx.addInitScript(() => { localStorage.setItem('access_token', 'test'); localStorage.setItem('refresh_token', 'test'); });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(String(e)));
+  await page.route('**/api/v1/**', async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const path = url.pathname.replace(/^.*\/api\/v1/, '');
+    const json = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: data === null ? '' : JSON.stringify(data) });
+    if (path === '/playlists' && req.method() === 'GET') {
+      return json([{ id: 'tpl-1', name: 'Afternoon mix', description: null, station_id: null, is_active: true, slots, created_at: '', updated_at: '' }]);
+    }
+    if (path === '/playlists/asset-types') return json([{ asset_type: 'music', category: 'Fast' }, { asset_type: 'music', category: 'Relax' }]);
+    const m = path.match(/^\/playlists\/slots\/(.+)$/);
+    if (m && req.method() === 'DELETE') {
+      await new Promise(r => setTimeout(r, SLOW));
+      slots = slots.filter(x => x.id !== m[1]);
+      return route.fulfill({ status: 204, body: '' });
+    }
+    if (m && req.method() === 'PATCH') {
+      await new Promise(r => setTimeout(r, SLOW));
+      const b = req.postDataJSON();
+      slots = slots.map(x => (x.id === m[1] ? { ...x, ...b } : x));
+      return json(slots.find(x => x.id === m[1]));
+    }
+    let body = null;
+    try { body = req.postDataJSON(); } catch { /* none */ }
+    const data = backend.handle(req.method(), path, Object.fromEntries(url.searchParams), body);
+    return json(data, data === null ? 204 : 200);
+  });
+  await page.goto(`${BASE}/admin/playlists`);
+  await page.getByText('Afternoon mix').first().click();
+  await page.getByText('Relax').first().waitFor();
+  const order = () => page.evaluate(() => [...document.querySelectorAll('span.text-indigo-600')].map(e => e.textContent));
+  let t = Date.now();
+  await page.getByRole('button', { name: 'Remove' }).first().click();
+  await page.waitForFunction(() => ![...document.querySelectorAll('span.text-indigo-600')].some(e => e.textContent === 'Fast'), null, { timeout: 1000 }).catch(() => {});
+  let took = Date.now() - t;
+  check(`${tag}: removing a step shows at once`, !(await order()).includes('Fast') && took < 1000, `${took} ms, ${(await order()).join(',')}`);
+  t = Date.now();
+  await page.getByRole('button', { name: 'Move down' }).first().click();
+  await page.waitForTimeout(300);
+  took = Date.now() - t;
+  check(`${tag}: moving a step shows at once`, (await order()).join(',') === 'Slow,Relax', `${took} ms, ${(await order()).join(',')}`);
+  await page.waitForTimeout(SLOW + 1500);
+  check(`${tag}: the saved order stays after the server answers`, (await order()).join(',') === 'Slow,Relax', (await order()).join(','));
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 const browser = await chromium.launch();
 await stationSwitch(browser);
+await metersWithoutListening(browser);
+await playlistsInstant(browser);
 if (process.env.ONLY === 'station-switch') { await browser.close(); process.exit(failures ? 1 : 0); }
 await desktop(browser, 1440, 900);
 await desktop(browser, 2560, 1440);

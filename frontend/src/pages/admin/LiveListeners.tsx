@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   useLiveListeners,
+  useListenersPush,
   useTodayStats,
   useListenerHistory,
   useListenerRegions,
@@ -64,8 +65,9 @@ export default function LiveListeners() {
   const [historyDays, setHistoryDays] = useState(30);
   const [regionDays, setRegionDays] = useState(7);
 
-  const { data: live } = useLiveListeners();
-  const { data: today } = useTodayStats();
+  useListenersPush(); // counts change the moment someone joins or leaves
+  const { data: live } = useLiveListeners(30_000);
+  const { data: today } = useTodayStats(30_000);
   const { data: history } = useListenerHistory(historyDays);
   const { data: regions } = useListenerRegions(regionDays);
 

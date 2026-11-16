@@ -17,6 +17,10 @@ from app.services import upcoming_analysis
 
 upcoming_analysis.ENABLED = False  # no audio to download in tests
 
+from app.api.v1 import playlists as _playlists
+
+_playlists.REFRESH_INLINE = True  # tests read the rebuilt queue right after a playlist edit
+
 # Use SQLite for testing (no PostgreSQL needed)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 

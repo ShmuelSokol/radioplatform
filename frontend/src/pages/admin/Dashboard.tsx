@@ -239,8 +239,11 @@ export default function Dashboard() {
     return () => audio.removeEventListener('error', onError);
   }, [dashUseStream]);
 
-  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, soundRunning, initAudio: engineInit, releaseAudio, playNextNow } = useAudioEngine(
-    dashUseStream || !musicAllowed ? null : audioAsset, realElapsed, dashUseStream || !musicAllowed ? false : isPlaying,
+  // The engine always follows the station here, silently unless this computer
+  // listens: it drives the level meters. With a stream, the stream is what is heard
+  // and the engine only measures.
+  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, soundRunning, initAudio: engineInit, playNextNow, setMonitor } = useAudioEngine(
+    !musicAllowed ? null : audioAsset, realElapsed, !musicAllowed ? false : isPlaying,
     nextPreempt?.preempt_at ?? null,
     nextPreempt?.asset_id ?? null,
     preemptFadeMs,
@@ -254,12 +257,38 @@ export default function Dashboard() {
     null, null,
     serverStartedAt,
     wsNowPlaying?.change_fade_seconds ?? null,
-    false, // sound only on a click in this tab
+    false, // started below, on the first click or key anywhere in this tab
+    false, // silent until the speaker button: the meters move either way
   );
 
+  // ── Level meters always; sound on this computer only after the speaker button ──
+  // Browsers let audio run only after the person has clicked or typed in the page,
+  // so the silent engine starts on the first click or key anywhere here (or at once
+  // where the browser already allows it).
+  const [listenHere, setListenHere] = useState(false);
+  useEffect(() => {
+    let done = false;
+    const start = () => {
+      if (done) return;
+      done = true;
+      remove();
+      void engineInit().catch(() => {});
+    };
+    const events = ['pointerdown', 'keydown', 'touchstart'] as const;
+    const remove = () => events.forEach(e => window.removeEventListener(e, start, true));
+    events.forEach(e => window.addEventListener(e, start, true));
+    try {
+      const probe = new AudioContext();
+      if (probe.state === 'running') start();
+      void probe.close();
+    } catch { /* no Web Audio */ }
+    return remove;
+  }, [engineInit]);
+  useEffect(() => { setMonitor(listenHere && !dashUseStream); }, [setMonitor, listenHere, dashUseStream]);
+
   // ── One control room tab makes sound at a time ──
-  // A tab that switches sound on tells the others, and they go quiet. Action
-  // buttons (Next, Start, play now) switch sound on only while no other tab has it.
+  // A tab that switches sound on tells the others, and they go quiet (their meters
+  // keep moving).
   const soundElsewhere = useRef(false);
   const holdsSound = useRef(false);
   const soundChannel = useRef<BroadcastChannel | null>(null);
@@ -272,7 +301,7 @@ export default function Dashboard() {
         soundElsewhere.current = true;
         if (holdsSound.current) {
           holdsSound.current = false;
-          releaseAudio();
+          setListenHere(false);
           setStatusMessage('Sound moved to another control room tab. Press the speaker here to hear it in this tab.');
         }
       } else if (e.data?.type === 'released') {
@@ -282,28 +311,31 @@ export default function Dashboard() {
     const onLeave = () => { if (holdsSound.current) ch.postMessage({ type: 'released' }); };
     window.addEventListener('pagehide', onLeave);
     return () => { onLeave(); window.removeEventListener('pagehide', onLeave); ch.close(); soundChannel.current = null; };
-  }, [releaseAudio]);
+  }, []);
   const unlockLive = live.unlock;
   const takeSound = useCallback(async () => {
     soundElsewhere.current = false;
     if (!holdsSound.current) soundChannel.current?.postMessage({ type: 'taken' });
     holdsSound.current = true;
     setStatusMessage(null);
+    setListenHere(true);
     unlockLive();
     await engineInit();
   }, [engineInit, unlockLive]);
   // An admin-pushed release reloaded this control room while it played: sound back on
-  const resume = useResumeAfterRelease(takeSound, dashUseStream ? true : soundRunning);
-  const initAudio = useCallback(async () => {
-    if (soundElsewhere.current) return;
-    await takeSound();
-  }, [takeSound]);
+  const resume = useResumeAfterRelease(takeSound, dashUseStream ? true : soundRunning && listenHere);
+  // Action buttons (Next, Start, play now) count as the click that starts the meters;
+  // they never switch sound on by themselves
+  const initAudio = useCallback(async () => { await engineInit(); }, [engineInit]);
   useEffect(() => {
-    if (dashStreamAudioRef.current) dashStreamAudioRef.current.volume = muted ? 0 : volume;
-  }, [volume, muted]);
+    const el = dashStreamAudioRef.current;
+    if (!el) return;
+    el.muted = !listenHere || muted;
+    el.volume = volume;
+  }, [volume, muted, listenHere]);
   const setLiveLevel = live.setLevel;
   useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
-  useEffect(() => { setLiveEnabled(audioReady); }, [audioReady]);
+  useEffect(() => { setLiveEnabled(audioReady && listenHere); }, [audioReady, listenHere]);
   const vuL = audioReady && isPlaying ? Math.round(vuLevels[0] * 30) : 0;
   const vuR = audioReady && isPlaying ? Math.round(vuLevels[1] * 30) : 0;
 
@@ -591,7 +623,7 @@ export default function Dashboard() {
     looping: looping,
     onLoop: toggleLoop,
     loopBusy: loopBusy,
-    audio: { audioReady, initAudio: takeSound, volume, setVolume, muted, toggleMute, vuL, vuR },
+    audio: { audioReady: listenHere, initAudio: takeSound, volume, setVolume, muted, toggleMute, vuL, vuR },
     stationTz: stationTz,
     liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
   };
