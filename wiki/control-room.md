@@ -64,3 +64,7 @@ Loop is a toggle in the same group: `liveControl.loopCurrent` posts `queue/loop 
 The transport bar is one row from 1280 px (`xl`) and two rows below that (title and clock on top; countdown, Intro, sound and the Loop / Fade / Soft fade / NEXT group underneath). Both rows are in the DOM and one is hidden, so browser checks must pick the `:visible` button.
 
 Mix over is the third cart mode (Play now / Play next / Mix over): a tap calls `liveControl.mixOver` (`queue/mix-over`, request id reused on a double tap like play now). The queue does not move, so the Dashboard makes no placeholder row. The browser path (socket `mix_over` message, `kbr-mix-over` event, `useAudioEngine`) is covered by `e2e/control-room.mjs`; it only plays once sound has been started on the page (Listen).
+
+## No queue data is not "Stopped"
+
+Until the queue has loaded, the bar says "Loading the queue…", and if the request keeps failing "Can't reach the station. Trying again…", in the title line and in the queue panel. Before 2026-11-16 a missing or failed queue showed "Stopped. Press Start to begin." and "The queue is empty", which an operator on a phone reads as the station being off the air.
