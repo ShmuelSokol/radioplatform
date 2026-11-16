@@ -12,6 +12,7 @@ from app.models.holiday_window import HolidayWindow
 from app.models.queue_entry import QueueEntry
 from app.models.station import Station
 from app.services.program_block_service import reconcile_block_entries
+from app.services.spot_schedule_service import SAFETY_MARGIN, as_utc
 
 NY = ZoneInfo("America/New_York")
 
@@ -319,13 +320,16 @@ async def test_block_sponsor_places_reach_the_queue_in_block_order(
         (e.hard_by.replace(tzinfo=None) - e.preempt_at.replace(tzinfo=None)) == timedelta(minutes=4)
         for e in entries
     )
-    # Nothing is also queued on the old :15/:30/:45 sponsor clock.
+    # Nothing is also queued on the old :15/:30/:45 sponsor clock. (A block time less
+    # than 2 minutes away is not queued, so its sponsor play goes out as a plain timed
+    # spot instead of being lost: allow that one when the test runs just before :30.)
+    soon = datetime.now(UTC) + SAFETY_MARGIN + timedelta(seconds=5)
     ads = await db_session.execute(
         select(QueueEntry).where(
             QueueEntry.station_id == station_id, QueueEntry.source == "ad_slot"
         )
     )
-    assert not ads.scalars().all()
+    assert not [a for a in ads.scalars().all() if as_utc(a.preempt_at) > soon]
 
     preview = await client.get(
         f"/api/v1/program-blocks/preview?station_id={station_id}&hours=24", headers=auth_headers

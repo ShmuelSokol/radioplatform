@@ -10,6 +10,8 @@ export interface QueueRow {
   estimated_start?: string | null;
   source?: string | null;
   preempt_at?: string | null;
+  hard_timed?: boolean;          // starts on the second: the song on air fades
+  hard_by?: string | null;       // soft item's limit: the song fades if still on air then
   blackout_name?: string;
   asset: {
     id: string; title: string; artist: string | null; duration: number | null;
