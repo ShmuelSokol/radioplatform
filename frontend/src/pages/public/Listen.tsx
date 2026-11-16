@@ -10,6 +10,7 @@ import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { holdUpdates } from '../../lib/appUpdate';
+import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
 import type { AssetInfo } from '../../types';
 
 interface ActiveShowData {
@@ -150,7 +151,7 @@ export default function Listen() {
   // Audio engine with crossfade support (fallback when HLS is not available)
   const {
     volume, setVolume, muted, toggleMute,
-    audioReady, initAudio,
+    audioReady, initAudio, soundRunning,
   } = useAudioEngine(
     userStarted && !useStream && musicAllowed ? audioAsset : null,
     elapsed,
@@ -200,6 +201,9 @@ export default function Listen() {
     }
   };
 
+  // An admin-pushed release reloaded this page while it played: play on
+  const resume = useResumeAfterRelease(handlePlay, useStream ? userStarted : soundRunning);
+
   const handleStop = () => {
     setUserStarted(false);
     const audio = streamAudioRef.current;
@@ -225,6 +229,7 @@ export default function Listen() {
     <div className="max-w-2xl mx-auto">
       {/* Hidden audio element for Icecast stream playback */}
       <audio ref={streamAudioRef} className="hidden" />
+      {resume.asking && <ResumePrompt onTap={resume.tap} />}
       <div className="bg-white shadow rounded-lg p-8">
         <div className="flex items-center gap-6 mb-8">
           <div className="w-24 h-24 bg-brand-50 rounded-lg flex items-center justify-center text-5xl text-brand-600">

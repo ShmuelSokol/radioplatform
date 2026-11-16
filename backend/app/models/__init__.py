@@ -38,6 +38,7 @@ from app.models.spot_recording import SpotRecording
 from app.models.program_block import ProgramBlock
 
 from app.models.scheduler_lease import SchedulerLease
+from app.models.site_release import SiteRelease
 from app.models.bug_report import BugReport
 
 __all__ = [
@@ -78,6 +79,7 @@ __all__ = [
     "SpotSchedule",
     "SponsorshipRules",
     "SchedulerLease",
+    "SiteRelease",
     "SpotRecording",
     "ProgramBlock",
     "BugReport",

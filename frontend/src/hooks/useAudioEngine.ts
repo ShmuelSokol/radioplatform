@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAssetAudioUrl } from '../api/assets';
-import { holdUpdates } from '../lib/appUpdate';
+import { holdUpdates, noteItemChange } from '../lib/appUpdate';
 import type { AssetInfo } from '../types';
 
 const VOLUME_KEY = 'radio_volume';
@@ -82,6 +82,8 @@ export interface AudioEngineState {
   toggleMute: () => void;
   vuLevels: [number, number];
   audioReady: boolean;
+  /** Sound can actually come out (the browser let the audio context start). */
+  soundRunning: boolean;
   initAudio: () => Promise<void>;
   /** Stop making sound in this tab (another tab took over). A later initAudio brings it back. */
   releaseAudio: () => void;
@@ -363,6 +365,11 @@ export function useAudioEngine(
     if (!isPlaying || !ctxRunning) return;
     return holdUpdates();
   }, [isPlaying, ctxRunning]);
+
+  // A pushed release that includes playing tabs reloads right after an item change
+  useEffect(() => {
+    if (isPlaying && ctxRunning && nowPlayingAsset?.id) noteItemChange();
+  }, [nowPlayingAsset?.id, currentStartedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-init when playback is active ──
   useEffect(() => {
@@ -891,5 +898,5 @@ export function useAudioEngine(
     });
   }, []);
 
-  return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio, playNextNow, releaseAudio };
+  return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, soundRunning: ctxRunning, initAudio, playNextNow, releaseAudio };
 }
