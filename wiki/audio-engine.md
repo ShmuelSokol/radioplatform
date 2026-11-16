@@ -67,3 +67,14 @@ A change heard less than 1 s into the new item starts it from the top with no se
 Safari lands MP3 seeks on an earlier frame, so the first fraction of a second was heard twice.
 Checked by `e2e/audio-engine.mjs` scenarios `next-starts-clean` and `next-starts-clean-cold`
 (the harness records `seeking` events). Not yet checked in real Safari.
+
+## Listen mid-item (Safari, 2026-11-16)
+
+Safari refuses `play()` that a click did not start, and leaves `AudioContext.resume()`
+unsettled until a click. The control room auto-inits the player on load (no click), so the deck
+holding the item on air was loaded and refused; Listen then gave no sound until the next item.
+`initAudio` now builds the graph before awaiting `resume()` (a second call can no longer
+replace the decks with empty ones) and, still inside the click, starts the on-air deck at its
+live position and starts-then-pauses the idle deck so it may play later. If the deck is still
+paused after the click, `listenTick` brings the item on air up again. Checked by
+`e2e/audio-engine.mjs listen-mid-item`, which acts out Safari's rules in Chromium.

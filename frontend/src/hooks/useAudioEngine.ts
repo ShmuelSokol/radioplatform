@@ -148,6 +148,10 @@ export function useAudioEngine(
   const changeTokenRef = useRef(0);
   // Bumped after the decks swap so the pre-loader re-runs for the new idle deck
   const [swapTick, setSwapTick] = useState(0);
+  // Bumped when sound is switched on mid-item, so the item on air is brought up again
+  const [listenTick, setListenTick] = useState(0);
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
   // Assigned during render so effects in the same pass see the new track's start time
   const startedAtRef = useRef(currentStartedAt);
   startedAtRef.current = currentStartedAt;
@@ -207,15 +211,48 @@ export function useAudioEngine(
   // ── Init audio context + dual decks ──
   const initAudio = useCallback(async () => {
     if (ctxRef.current && deckARef.current && deckBRef.current) {
+      // Still inside the click: start the decks now. Safari refuses play() that a
+      // click did not start, so a deck loaded before Listen stayed silent until a
+      // later item; one started (or started and paused) here may play from now on.
+      for (const label of ['A', 'B'] as DeckLabel[]) {
+        const deck = label === 'A' ? deckARef.current : deckBRef.current;
+        if (!deck.audio.src || !deck.audio.paused) continue;
+        const onAir = label === activeDeckRef.current && isPlayingRef.current
+          && deckAssetRef.current[label] != null && deckAssetRef.current[label] === lastAssetId.current;
+        if (onAir) {
+          const pos = livePosition(0);
+          if (isFinite(deck.audio.duration) && pos < deck.audio.duration - 1 && Math.abs(deck.audio.currentTime - pos) > 1) {
+            try { deck.audio.currentTime = pos; } catch { /* not seekable yet */ }
+          }
+          deck.audio.play().catch(() => {});
+        } else {
+          deck.audio.play().then(() => {
+            if (label !== activeDeckRef.current && !crossfadingRef.current) deck.audio.pause();
+          }).catch(() => {});
+        }
+      }
       if (ctxRef.current.state === 'suspended') await ctxRef.current.resume();
+      // Sound switched on mid-item: the browser refused to start the deck before
+      // this click, so nothing is playing. Bring the item on air up again now
+      // instead of waiting for the next item.
+      const deck = activeDeckRef.current === 'A' ? deckARef.current : deckBRef.current;
+      if (isPlayingRef.current && deck.audio.paused && !crossfadingRef.current) {
+        lastAssetId.current = null;
+        lastStartedAtRef.current = null;
+        deckAssetRef.current[activeDeckRef.current] = null;
+        setListenTick((t) => t + 1);
+      }
       setAudioReady(true);
       return;
     }
 
+    // Build the whole graph before waiting on anything. Without a click Safari never
+    // settles resume(), and a later Listen click used to build a second graph that
+    // the first call then replaced with empty decks: no sound until the next item.
     const ctx = new AudioContext();
     ctx.onstatechange = () => setCtxRunning(ctx.state === 'running');
-    if (ctx.state === 'suspended') await ctx.resume();
     ctxRef.current = ctx;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     setCtxRunning(ctx.state === 'running');
 
     // Create merger → splitter → analysers → destination
@@ -248,7 +285,7 @@ export function useAudioEngine(
     activeDeckRef.current = 'A';
 
     setAudioReady(true);
-  }, [createDeck]);
+  }, [createDeck, livePosition]);
 
   // ── A release never reloads this tab while the player is on ──
   // "On" means sound can actually come out: the audio context is running. On
@@ -508,7 +545,7 @@ export function useAudioEngine(
       }
     };
     run();
-  }, [nowPlayingAsset?.id, currentStartedAt, isPlaying, audioReady, currentCueIn, currentReplayGainDb, audioUrlOverride, getDeck, livePosition, replayGainMultiplier]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nowPlayingAsset?.id, currentStartedAt, isPlaying, audioReady, listenTick, currentCueIn, currentReplayGainDb, audioUrlOverride, getDeck, livePosition, replayGainMultiplier]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Pre-load next track on the idle deck ──
   // Declared after the track-change effect so a track change claims its deck first.
