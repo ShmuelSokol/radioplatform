@@ -44,6 +44,10 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Soft entries only: if the item on air is still playing at this time, fade it
     # and start (a soft start with a limit). None = wait for the item to finish.
     hard_by: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Automatic songs drawn from a schedule block's playlist: that block's id. When
+    # unplayed songs are drawn again, the block's place in its playlist goes back
+    # by as many, so the playlist carries on from the right step.
+    block_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     station = relationship("Station", lazy="selectin")
     asset = relationship("Asset", lazy="selectin")

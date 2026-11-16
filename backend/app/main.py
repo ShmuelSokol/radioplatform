@@ -156,6 +156,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS preempt_at TIMESTAMPTZ",
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS timing_mode VARCHAR(10)",
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS hard_by TIMESTAMPTZ",
+        # Schedule block an automatic song was drawn for (playlist place on redraw)
+        "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS block_id VARCHAR(36)",
         "ALTER TABLE program_blocks ADD COLUMN IF NOT EXISTS latest_minutes INTEGER",
         # Source tracking: 'request', 'manual', 'auto' (replenish)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'auto'",

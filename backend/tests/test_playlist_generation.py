@@ -109,7 +109,8 @@ async def test_sequence_artist_distance_and_block_change(db_session: AsyncSessio
     random.seed(7)
     plan = await generate(db_session, station, MONDAY_7AM, 2, artist_distance=2)
     picks = plan.picks
-    assert len(picks) == 30  # two hours of four-minute songs
+    # two hours of four-minute songs, each on the air until 3 s before its end
+    assert len(picks) == 31
     # the sequence repeats in order
     assert [p.category for p in picks[:8]] == [
         "1 med fast",
@@ -125,13 +126,13 @@ async def test_sequence_artist_distance_and_block_change(db_session: AsyncSessio
     fast = [p.asset_id for p in picks if p.category == "1 med fast"]
     assert len(set(fast[:12])) == 12
     # the cursor says where to carry on
-    assert plan.cursor[str(morning.id)] == 30 % 4
+    assert plan.cursor[str(morning.id)] == 31 % 4
 
     # carrying on gives the next type in the sequence, not the first again
     more = await generate(
         db_session, station, picks[-1].at, 0.1, artist_distance=2, cursor=plan.cursor
     )
-    assert more.picks[0].category == "1 med fast"  # position 2 of the sequence
+    assert more.picks[0].category == "1 Relax"  # position 4 of the sequence
 
     # across 6 PM the evening block's own sequence takes over
     five_thirty = datetime(2026, 11, 16, 17, 30, tzinfo=NY).astimezone(UTC)
@@ -226,7 +227,7 @@ async def test_settings_endpoints_and_queue_fill(
         .scalars()
         .all()
     )
-    assert len(entries) == 30  # two hours, not seven days
+    assert len(entries) == 31  # two hours, not seven days
     by_id = {s.id: s for s in songs}
     assert [by_id[e.asset_id].category for e in entries[:4]] == [
         "1 med fast",
@@ -235,7 +236,7 @@ async def test_settings_endpoints_and_queue_fill(
         "1 Relax",
     ]
     await db_session.refresh(station)
-    assert station.automation_config["playlist_generation"]["cursor"][str(morning.id)] == 2
+    assert station.automation_config["playlist_generation"]["cursor"][str(morning.id)] == 31 % 4
 
     # a second run adds nothing: the queue already reaches two hours
     await QueueReplenishService(db_session, station.id).replenish()
@@ -246,7 +247,7 @@ async def test_settings_endpoints_and_queue_fill(
             )
         ).all()
     )
-    assert count == 30
+    assert count == 31
 
     # regenerate keeps what a person queued and replaces the rest
     entries[0].source = "manual"
@@ -255,7 +256,7 @@ async def test_settings_endpoints_and_queue_fill(
         f"{url}/regenerate", params={"station_id": str(station.id)}, headers=auth_headers
     )
     assert r.status_code == 200, r.text
-    assert r.json()["removed"] == 29
+    assert r.json()["removed"] == 30
     kept = (
         (await db_session.execute(select(QueueEntry).where(QueueEntry.source == "manual")))
         .scalars()

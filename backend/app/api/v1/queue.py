@@ -421,13 +421,10 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
     if now.minute > 5:
         return
 
-    # Build slot key in Eastern time (hourly for time, daily for weather)
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-    eastern_now = now.astimezone(ZoneInfo("America/New_York"))
-    slot_key = eastern_now.strftime("%Y-%m-%dT%H")
+    # Slot key in the station's own time (hourly for time, daily for weather)
+    from app.services.weather_spot_service import slot_key_for, station_announcement_zone
+
+    slot_key = slot_key_for(now, await station_announcement_zone(db, station_id))
 
     logger.info("Weather spot check for station %s at %s (slot %s)", station_id, now.isoformat(), slot_key)
 
@@ -2179,15 +2176,12 @@ async def preview_weather(
     if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
         return JSONResponse({"error": "ElevenLabs or Supabase storage not configured"}, status_code=503)
 
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
+    from app.services.weather_spot_service import slot_key_for, station_announcement_zone
 
     now = datetime.now(timezone.utc)
-    eastern_now = now.astimezone(ZoneInfo("America/New_York"))
-    # Round down to current hour
-    slot_key = eastern_now.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H")
+    # The station's own time
+    eastern_now = now.astimezone(await station_announcement_zone(db, station_id))
+    slot_key = slot_key_for(now, eastern_now.tzinfo)
 
     from app.services.weather_spot_service import get_or_create_weather_spot_assets, _build_time_text, _build_weather_text
     from app.services.weather_service import get_current_weather
@@ -2221,14 +2215,10 @@ async def insert_weather_now(
     if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
         return JSONResponse({"error": "ElevenLabs or Supabase storage not configured"}, status_code=503)
 
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
+    from app.services.weather_spot_service import slot_key_for, station_announcement_zone
 
     now = datetime.now(timezone.utc)
-    eastern_now = now.astimezone(ZoneInfo("America/New_York"))
-    slot_key = eastern_now.strftime("%Y-%m-%dT%H")
+    slot_key = slot_key_for(now, await station_announcement_zone(db, station_id))
 
     from app.services.weather_spot_service import get_or_create_weather_spot_assets
     time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key)

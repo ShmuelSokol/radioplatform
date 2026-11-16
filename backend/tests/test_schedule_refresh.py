@@ -113,11 +113,13 @@ async def test_new_block_with_a_playlist_replaces_the_old_queue(
     assert not [e for e in auto[15:] if category[e.asset_id] == "Old"]
     assert 60 <= len(auto) <= 95
     assert any(e.id == person_id for e in entries)
-    # From 8:00 the block's playlist plays in order. Fifteen four-minute songs
-    # fill 7:00 to 8:00; the person's song comes first, so the block starts
-    # with the fifteenth automatic one.
+    # From 8:00 the block's playlist plays in order. Each song holds the air for
+    # 237 s (until its crossfade); the person's song and 15 automatic ones fill
+    # 7:00 to 7:59:15, so the block starts with the sixteenth automatic one.
+    first = next(i for i, e in enumerate(auto) if e.block_id)
+    assert first == 15
     cats = [category[e.asset_id] for e in auto]
-    assert cats[14:20] == ["Fast", "Relax"] * 3
+    assert cats[15:21] == ["Fast", "Relax"] * 3
 
     # Changing the playlist regenerates again: now it is Relax only
     slots = (await db_session.execute(select(TemplateSlot).where(TemplateSlot.template_id == mix_id))).scalars().all()
@@ -127,7 +129,7 @@ async def test_new_block_with_a_playlist_replaces_the_old_queue(
     db_session.expire_all()
     auto = [e for e in await _pending(db_session, station_id) if e.source == "auto"]
     cats = [category[e.asset_id] for e in auto]
-    assert cats[14:20] == ["Relax"] * 6
+    assert cats[15:21] == ["Relax"] * 6
 
     # The schedule check says which block plays
     r = await client.get(

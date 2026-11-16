@@ -455,9 +455,13 @@ class SchedulingService:
             )
             result = await self.db.execute(stmt)
             if (result.scalar() or 0) == 0:
-                from app.services.weather_spot_service import get_or_create_weather_spot_assets
+                from app.services.weather_spot_service import (
+                    announcement_zone,
+                    get_or_create_weather_spot_assets,
+                    slot_key_for,
+                )
 
-                slot_key = now.strftime("%Y-%m-%dT%H:%M")[:14] + "00"
+                slot_key = slot_key_for(now, announcement_zone(station.timezone))
                 time_asset, _ = await get_or_create_weather_spot_assets(self.db, slot_key)
                 if time_asset:
                     return time_asset.id
@@ -479,9 +483,13 @@ class SchedulingService:
                 )
                 result = await self.db.execute(stmt)
                 if (result.scalar() or 0) == 0:
-                    from app.services.weather_spot_service import get_or_create_weather_spot_assets
+                    from app.services.weather_spot_service import (
+                        announcement_zone,
+                        get_or_create_weather_spot_assets,
+                        slot_key_for,
+                    )
 
-                    slot_key = now.strftime("%Y-%m-%dT%H:%M")[:14] + "00"
+                    slot_key = slot_key_for(now, announcement_zone(station.timezone))
                     _, weather_asset = await get_or_create_weather_spot_assets(self.db, slot_key)
                     if weather_asset:
                         return weather_asset.id
