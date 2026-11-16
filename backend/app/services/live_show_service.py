@@ -2,7 +2,7 @@
 Live show lifecycle management — create, start, end, hard stop.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import select, func
@@ -96,6 +96,13 @@ async def delete_show(db: AsyncSession, show_id: UUID | str) -> bool:
     return True
 
 
+
+def _aware(t):
+    if t is None:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
 async def start_show(
     db: AsyncSession,
     show_id: UUID | str,
@@ -110,6 +117,13 @@ async def start_show(
     now = datetime.now(timezone.utc)
     show.status = LiveShowStatus.LIVE
     show.actual_start = now
+    # Started after its planned end (or with none): give it its planned length from
+    # now, else one hour. A show started late used to be hard-stopped at once.
+    end = _aware(show.scheduled_end)
+    if end is None or end <= now:
+        start = _aware(show.scheduled_start)
+        planned = (end - start) if (end and start and end > start) else timedelta(hours=1)
+        show.scheduled_end = now + planned
     if host_user_id:
         show.host_user_id = host_user_id
 
