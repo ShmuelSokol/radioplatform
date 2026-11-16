@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
 
-from app.models.asset import ONE_MOMENT_CATEGORIES, Asset, fit_for_random_pick
+from app.models.asset import ONE_MOMENT_CATEGORIES, Asset, fit_for_random_pick, not_placeholder
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
@@ -414,7 +414,7 @@ class QueueReplenishService:
     async def _find_assets_for_rule(self, rule: ScheduleRule) -> Sequence[Asset]:
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
         if rule.category:
-            query = query.where(Asset.category == rule.category)
+            query = query.where(Asset.category == rule.category, not_placeholder())
         else:
             query = query.where(fit_for_random_pick())
         if self.exclude_ids:
@@ -577,7 +577,7 @@ class QueueReplenishService:
 
             query = select(Asset).where(Asset.asset_type == asset_type)
             if category:
-                query = query.where(Asset.category == category)
+                query = query.where(Asset.category == category, not_placeholder())
             else:
                 query = query.where(fit_for_random_pick())
             # Only exclude on first pass; allow repeats on subsequent passes
@@ -857,6 +857,9 @@ class QueueReplenishService:
         playback engine waits for the current song to finish, then plays the
         ad before the next regular song.
         """
+        legacy = self.automation_config.get("ad_slot_legacy_spot", False) is True
+        await self._purge_placeholders(keep_ad_slots=legacy)
+
         # Stations with sponsor spot schedules: slots follow those schedules.
         from app.services.spot_schedule_service import reconcile_spot_slots
 
@@ -874,17 +877,7 @@ class QueueReplenishService:
         )
         ad_asset = result.scalar_one_or_none()
         now = datetime.now(timezone.utc)
-        if self.automation_config.get("ad_slot_legacy_spot", False) is not True:
-            if ad_asset:
-                # Take the placeholder out of the queue (only slots not yet on air)
-                await self.db.execute(
-                    delete(QueueEntry).where(
-                        QueueEntry.station_id == self.station_id,
-                        QueueEntry.status == "pending",
-                        QueueEntry.source == "ad_slot",
-                        QueueEntry.asset_id == ad_asset.id,
-                    )
-                )
+        if not legacy:
             return
         if not ad_asset:
             logger.warning("Ad asset '%s' not found", ad_title)
@@ -934,6 +927,27 @@ class QueueReplenishService:
 
         if inserted:
             logger.info("Scheduled %d clock-based ad slots for station %s", inserted, self.station_id)
+
+    async def _purge_placeholders(self, keep_ad_slots: bool) -> None:
+        """Take placeholder items (NEVER_AUTO_TITLES) out of the queue wherever an
+        automatic pick put them; only entries not yet on air, never an operator's own."""
+        ids = (await self.db.execute(select(Asset.id).where(~not_placeholder()))).scalars().all()
+        if not ids:
+            return
+        # What an operator or listener chose stays; everything automatic goes.
+        kept = ["manual", "request", "loop"]
+        if keep_ad_slots:
+            kept.append("ad_slot")
+        result = await self.db.execute(
+            delete(QueueEntry).where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.asset_id.in_(ids),
+                QueueEntry.source.notin_(kept),
+            )
+        )
+        if result.rowcount:
+            logger.info("Station %s: removed %d placeholder entries", self.station_id, result.rowcount)
 
     # Backwards-compat alias
     async def _fill_random_music(self, shortfall: float) -> None:

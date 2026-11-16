@@ -67,12 +67,31 @@ ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
 NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing")
 
 
-def fit_for_random_pick():
-    """SQL condition: an asset that may be drawn at random (not do-not-play, not a
-    test item, not a one-moment clip). Category case does not matter."""
+# Placeholder items that must never be drawn by any automatic pick, even by a
+# rotation that names their category (the old "KOL BRAMAH TEST SPONSOR" sits in
+# category "Spots" and kept airing from "spots every 3 songs"). Lower case.
+NEVER_AUTO_TITLES = ("kol bramah test sponsor",)
+
+
+def not_placeholder():
+    """SQL condition: the asset is not a placeholder that no automatic pick may use."""
     from sqlalchemy import func, or_
 
     return or_(
-        Asset.category.is_(None),
-        func.lower(Asset.category).notin_((*NEVER_RANDOM_CATEGORIES, *ONE_MOMENT_CATEGORIES)),
+        Asset.title.is_(None),
+        func.lower(func.trim(Asset.title)).notin_(NEVER_AUTO_TITLES),
+    )
+
+
+def fit_for_random_pick():
+    """SQL condition: an asset that may be drawn at random (not do-not-play, not a
+    test item, not a one-moment clip, not a placeholder). Category case does not matter."""
+    from sqlalchemy import and_, func, or_
+
+    return and_(
+        or_(
+            Asset.category.is_(None),
+            func.lower(Asset.category).notin_((*NEVER_RANDOM_CATEGORIES, *ONE_MOMENT_CATEGORIES)),
+        ),
+        not_placeholder(),
     )
