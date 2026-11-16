@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.asset import Asset, fit_for_random_pick, not_placeholder
+from app.models.asset import Asset, fit_for_random_pick, not_placeholder, stored_analysis
 from app.models.play_log import PlayLog
 from app.models.schedule import Schedule
 from app.models.station import Station
@@ -83,7 +83,7 @@ def on_air_seconds(duration: float | None, metadata_extra: dict | None) -> float
     first song early by about 3 s for every song queued before it."""
     length = float(duration or DEFAULT_DURATION)
     cross = 3.0
-    analysis = (metadata_extra or {}).get("audio_analysis") or {}
+    analysis = stored_analysis(metadata_extra)
     cross_start = analysis.get("cross_start_seconds")
     if isinstance(cross_start, (int, float)) and 0 < cross_start < length:
         cross = length - cross_start

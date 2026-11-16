@@ -5,10 +5,10 @@ import re
 import subprocess
 
 from app.config import settings
+from app.models.asset import ANALYSIS_VERSION
 from app.services.silence_service import detect_silence, get_audio_duration
 
 logger = logging.getLogger(__name__)
-
 
 def analyze_audio_bytes(file_data: bytes) -> dict:
     """Analyze audio bytes and return loudness + cue point data.
@@ -40,7 +40,9 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
     # 2. Get total duration
     total_duration = get_audio_duration(file_data)
     if total_duration <= 0:
-        total_duration = 180.0  # fallback
+        # Never guess: a made-up 180 s length put every item's cue and crossfade
+        # points at 177-180 s whatever its real length.
+        raise ValueError("Could not measure the length of the audio")
 
     # 3. Detect silence for cue points
     regions = detect_silence(file_data, threshold_db=-30, min_duration=0.5)
@@ -71,6 +73,7 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
         "cross_start_seconds": round(cross_start, 3),
         "replay_gain_db": round(replay_gain_db, 2),
         "duration": round(total_duration, 3),
+        "version": ANALYSIS_VERSION,
     }
 
 
@@ -86,15 +89,18 @@ async def analyze_audio(db, asset_id: str):
     # Download audio
     if file_path.startswith("http://") or file_path.startswith("https://"):
         import httpx
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.get(file_path, follow_redirects=True)
+            resp.raise_for_status()
             data = resp.content
     else:
         from app.services.storage_service import download_file
         data = await download_file(file_path)
 
-    # Analyze
-    analysis = analyze_audio_bytes(data)
+    # Analyse off the event loop: ffmpeg decodes the whole file three times, and the
+    # scheduler and every listener's connection share this loop.
+    import asyncio
+    analysis = await asyncio.to_thread(analyze_audio_bytes, data)
 
     # Store in metadata_extra
     extra = dict(asset.metadata_extra or {})

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.session import get_db
+from app.models.asset import stored_analysis
 from app.models.queue_entry import QueueEntry
 from app.services.playback_service import get_now_playing
 from app.services.station_service import get_station
@@ -68,7 +69,7 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     # Audio analysis data (defaults if missing)
     analysis = {}
     if asset.metadata_extra:
-        analysis = asset.metadata_extra.get("audio_analysis", {})
+        analysis = stored_analysis(asset.metadata_extra)
 
     duration = asset.duration or 180.0
     cue_in = analysis.get("cue_in_seconds", 0)
@@ -85,7 +86,7 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         na = next_entry.asset
         na_analysis = {}
         if na.metadata_extra:
-            na_analysis = na.metadata_extra.get("audio_analysis", {})
+            na_analysis = stored_analysis(na.metadata_extra)
 
         na_file_path = na.file_path
         na_audio_url = None

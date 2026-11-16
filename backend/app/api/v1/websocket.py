@@ -11,6 +11,7 @@ from typing import Dict, Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import settings
+from app.models.asset import stored_analysis
 from app.services.scheduling import SchedulingService
 
 logger = logging.getLogger(__name__)
@@ -162,7 +163,7 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                     supabase_bucket = getattr(settings, "SUPABASE_STORAGE_BUCKET", None)
                     if asset:
                         if getattr(asset, "metadata_extra", None):
-                            analysis = asset.metadata_extra.get("audio_analysis", {})
+                            analysis = stored_analysis(asset.metadata_extra)
                         file_path = asset.file_path or ""
                         if file_path.startswith("http://") or file_path.startswith("https://"):
                             audio_url = file_path
@@ -189,7 +190,7 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                         na = next_entry.asset
                         na_analysis = {}
                         if getattr(na, "metadata_extra", None):
-                            na_analysis = na.metadata_extra.get("audio_analysis", {})
+                            na_analysis = stored_analysis(na.metadata_extra)
                         na_file_path = getattr(na, "file_path", "") or ""
                         na_audio_url = None
                         if na_file_path.startswith("http://") or na_file_path.startswith("https://"):

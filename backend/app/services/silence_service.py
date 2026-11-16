@@ -10,13 +10,24 @@ logger = logging.getLogger(__name__)
 
 
 def get_audio_duration(file_data: bytes) -> float:
-    """Probe audio duration using FFmpeg."""
+    """Length of the audio in seconds, from decoding it to the end.
+
+    The file arrives on a pipe, where ffmpeg usually cannot read a length from the
+    header ("Duration: N/A" for MP3), so the decoder's last "time=" is the length.
+    Before this, every analysed item got the 180 s fallback as its length.
+    """
     cmd = [
         settings.FFMPEG_PATH, "-i", "pipe:0",
         "-f", "null", "-",
     ]
-    result = subprocess.run(cmd, input=file_data, capture_output=True, timeout=60)
+    result = subprocess.run(cmd, input=file_data, capture_output=True, timeout=120)
     stderr = result.stderr.decode("utf-8", errors="replace")
+    times = re.findall(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", stderr)
+    if times:
+        h, m, s = times[-1]
+        decoded = int(h) * 3600 + int(m) * 60 + float(s)
+        if decoded > 0:
+            return decoded
     match = re.search(r"Duration:\s*(\d+):(\d+):(\d+)\.(\d+)", stderr)
     if match:
         h, m, s, cs = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))

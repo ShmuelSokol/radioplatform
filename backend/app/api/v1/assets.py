@@ -423,19 +423,14 @@ async def bulk_analyze_endpoint(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    """Batch-analyze all assets missing audio_analysis metadata. Returns job_id to poll."""
-    # Find assets missing audio_analysis
-    from sqlalchemy import or_
+    """Batch-analyze all assets with no analysis or one older than ANALYSIS_VERSION
+    (those measured every item as 180 s). Returns job_id to poll."""
+    from app.models.asset import needs_analysis
 
     result = await db.execute(
-        select(AssetModel.id).where(
-            or_(
-                AssetModel.metadata_extra.is_(None),
-                ~AssetModel.metadata_extra.has_key("audio_analysis"),
-            )
-        )
+        select(AssetModel).where(AssetModel.file_path.isnot(None), AssetModel.file_path != "")
     )
-    asset_ids = [str(row[0]) for row in result.all()]
+    asset_ids = [str(a.id) for a in result.scalars().all() if needs_analysis(a)]
 
     if not asset_ids:
         return {"message": "All assets already analyzed", "total": 0}
