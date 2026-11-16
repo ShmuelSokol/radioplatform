@@ -18,7 +18,10 @@ def _configure_logging() -> None:
     dropped, and the scheduler looked silent in the Railway log even while it ran.
     """
     app_logger = logging.getLogger("app")
-    if app_logger.handlers:
+    # Also keep recent lines in memory so a bug report can carry them.
+    from app.core import log_buffer
+    log_buffer.install()
+    if any(not isinstance(h, log_buffer.RingBufferHandler) for h in app_logger.handlers):
         return
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
@@ -670,8 +673,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.services.duration_backfill import backfill_on_startup
     backfill_task = _asyncio.get_running_loop().create_task(backfill_on_startup())
     index_task = _asyncio.get_running_loop().create_task(_build_concurrent_indexes())
+    # Bug reports: push "fix ready" to ntfy (see wiki/bug-reports.md)
+    from app.services.bug_report_service import notify_loop
+    bug_task = _asyncio.get_running_loop().create_task(notify_loop())
 
     yield
+
+    bug_task.cancel()
 
     backfill_task.cancel()
     index_task.cancel()

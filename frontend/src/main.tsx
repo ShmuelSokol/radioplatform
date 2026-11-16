@@ -3,7 +3,9 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 import { startAppUpdates } from './lib/appUpdate';
+import { installDiagnostics } from './lib/diagnostics';
 
+installDiagnostics();
 startAppUpdates();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -5,6 +5,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 ## Pages
 
 - [streaming-architecture](streaming-architecture.md) — The playout engine (Liquidsoap + Icecast): pull next / report started, flags, server setup, outage behaviour
+- [bug-reports](bug-reports.md) — 🐞 Report a bug: what a report carries, private GitHub copy, hourly Claude triage, ntfy push
 - [audio-engine](audio-engine.md) — Client-side dual-deck Web Audio engine, crossfade, pre-loading, gap fixes
 - [hourly-slots](hourly-slots.md) — Station ID, time announcements, weather, ad slots at :00/:15/:30/:45
 - [admin-page-layout](admin-page-layout.md) — Full-width rule for every admin page, the padding the dark pages depend on, phone tables, the layout audit script

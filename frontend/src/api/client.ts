@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { newRequestId, recordRequest } from '../lib/diagnostics';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -12,16 +13,38 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // The server logs each request under this id; a bug report carries the ids
+  // of recent calls so the two logs can be matched (see lib/diagnostics.ts).
+  const rid = newRequestId();
+  config.headers['X-Request-ID'] = rid;
+  (config as unknown as { _diag: { rid: string; t0: number } })._diag = { rid, t0: performance.now() };
   return config;
 });
+
+function recordAxios(config: unknown, status?: number, error?: string) {
+  const c = config as { method?: string; url?: string; _diag?: { rid: string; t0: number } } | undefined;
+  if (!c?._diag) return;
+  recordRequest({
+    method: (c.method || 'get').toUpperCase(),
+    url: (c.url || '').slice(0, 200),
+    status,
+    ms: Math.round(performance.now() - c._diag.t0),
+    rid: c._diag.rid,
+    error,
+  });
+}
 
 /** Fired on window when the server refuses an action this login may not take. */
 export const FORBIDDEN_EVENT = 'kbr:forbidden';
 
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    recordAxios(response.config, response.status);
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
+    recordAxios(originalRequest, error.response?.status, error.response ? undefined : String(error.message || error));
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
       const refreshToken = localStorage.getItem('refresh_token');

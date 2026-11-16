@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid as uuid_mod
 
 from fastapi import FastAPI, Request
@@ -7,6 +8,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
+from app.core import log_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +31,26 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     """Generate a unique request ID for every request, include in response and logs."""
 
     async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or str(uuid_mod.uuid4())[:8]
+        request_id = (request.headers.get("X-Request-ID") or str(uuid_mod.uuid4())[:8])[:40]
         request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+        token = log_buffer.request_id_var.set(request_id)
+        started = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            ms = (time.perf_counter() - started) * 1000
+            path = request.url.path
+            if path != "/health" and request.method != "OPTIONS":
+                # Kept in memory for bug reports (see core/log_buffer.py);
+                # only failures and slow calls also go to the server log.
+                log_buffer.record_request(request.method, path, status, ms, request_id)
+                if status >= 500 or ms > 3000:
+                    logger.warning("%s %s -> %s in %.0f ms [rid %s]", request.method, path, status, ms, request_id)
+            log_buffer.request_id_var.reset(token)
 
 
 def setup_middleware(app: FastAPI) -> None:

@@ -160,6 +160,15 @@ class Settings(BaseSettings):
     def anthropic_enabled(self) -> bool:
         return bool(self.ANTHROPIC_API_KEY)
 
+    # Bug reports (optional). Reports are always saved in the database; with a
+    # token they are also copied to a PRIVATE GitHub repo, where a scheduled
+    # Claude routine triages them. ntfy pushes "fix ready" to the owner's phone.
+    # See wiki/bug-reports.md.
+    BUG_REPORTS_GITHUB_TOKEN: str = ""
+    BUG_REPORTS_REPO: str = "ShmuelSokol/kbr-bug-reports"
+    NTFY_TOPIC: str = ""
+    NTFY_SERVER: str = "https://ntfy.sh"
+
     # Sentry (optional — set DSN to enable error tracking)
     SENTRY_DSN: str = ""
 
