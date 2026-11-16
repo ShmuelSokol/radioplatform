@@ -94,6 +94,17 @@ listeners heard 3 s of that song, then jumped into the sponsorship 3 s late (liv
 2026-11-16). The scheduler rebuilds the message every poll, so a slot added mid-song reaches
 listeners within 3 s. Test: `tests/test_next_follows_soft_slot.py`.
 
+## A change that loses its item retries
+
+Refills, schedule changes and operator deletes remove pending rows outside the advance lock
+(the placeholder-sponsor purge in `queue_replenish_service._schedule_ad_slots`, for one). If one
+removes the item an advance is starting, the advance's commit hits `StaleDataError`.
+`_check_advance` now rolls back and starts over from the saved state (up to 3 tries), so the
+next song plays instead. The scheduler also rolls back after any station's error and re-reads
+each station: its one session is shared by every station in a pass, and an un-rolled-back
+failure used to fail all the stations after it. Live case 2026-11-16: 29 s of silence until a
+manual Next. Test: `tests/test_due_slot_deleted.py`.
+
 ## Items with no length
 
 `Asset.duration` can be NULL (some KBR Jerusalem items). Every duration sum must use

@@ -98,3 +98,4 @@ UPDATE 2026-11-16 schedule-look-ahead.md new "plays" findings say which block is
 INGEST 2026-11-16 control-room.md one tab holds sound (BroadcastChannel, no auto-start); cart/Library hide dated weather spots; tap targets need real 44px boxes, not ::after
 INGEST 2026-11-16 audio-engine.md control room Next plays the next item locally on click (playNextNow), confirmed or overridden by the server's announcement
 INGEST 2026-11-16 streaming-architecture.md next_asset is the queue's pick at the hand-over time (predict_next_entry), so a soft sponsorship due mid-song is pre-loaded instead of the next song
+INGEST 2026-11-16 streaming-architecture.md an advance whose item is deleted mid-change retries (StaleDataError); scheduler rolls back per station so one failure no longer fails the whole pass

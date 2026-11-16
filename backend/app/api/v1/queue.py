@@ -785,7 +785,22 @@ async def _check_advance(
     `early_seconds` lets the precise timer advance at the crossfade point instead of
     the very end of the track (see SchedulerEngine._precise_advance).
     """
+    from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
+
     async with advance_lock(station_id):
+        # Another request (a refill, a schedule change, an operator's delete) can
+        # remove the item this advance is starting between reading and committing
+        # it. Start over from the committed state instead of giving up: giving up
+        # left the station idle until someone pressed Next.
+        for attempt in range(3):
+            try:
+                return await _check_advance_locked(db, station_id, early_seconds)
+            except (StaleDataError, ObjectDeletedError) as exc:
+                await db.rollback()
+                logger.warning(
+                    "Advance for station %s lost a row to another change (%s); retrying",
+                    station_id, exc,
+                )
         return await _check_advance_locked(db, station_id, early_seconds)
 
 
