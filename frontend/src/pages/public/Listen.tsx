@@ -83,9 +83,10 @@ export default function Listen() {
   useEffect(() => {
     const audio = streamAudioRef.current;
     if (!audio || !useStream || !userStarted) return;
-    audio.src = streamUrl!;
-    audio.play().catch(() => setStreamFailed(true));
-    return () => { audio.pause(); audio.src = ''; };
+    // Usually already started inside the Listen click (handlePlay); only a new URL restarts it
+    if (audio.src !== streamUrl) audio.src = streamUrl!;
+    if (audio.paused) audio.play().catch(() => setStreamFailed(true));
+    return () => { audio.pause(); audio.removeAttribute('src'); };
   }, [useStream, userStarted, streamUrl]);
 
   // Listen for stream errors to trigger fallback
@@ -195,10 +196,16 @@ export default function Listen() {
 
   const handlePlay = async () => {
     live.unlock();
-    setUserStarted(true);
-    if (!useStream) {
-      await initAudio();
+    // Start the stream inside the click: Safari refuses play() that a click did not
+    // start, and the page then fell back to a player that was never switched on.
+    const audio = streamAudioRef.current;
+    if (useStream && audio && streamUrl) {
+      audio.src = streamUrl;
+      audio.play().catch(() => {});
     }
+    setUserStarted(true);
+    // Always switch the built-in player on in the click too, so a fallback is heard
+    await initAudio();
   };
 
   // An admin-pushed release reloaded this page while it played: play on
@@ -207,7 +214,7 @@ export default function Listen() {
   const handleStop = () => {
     setUserStarted(false);
     const audio = streamAudioRef.current;
-    if (audio) { audio.pause(); audio.src = ''; }
+    if (audio) { audio.pause(); audio.removeAttribute('src'); }
   };
 
   // Cleanup on unmount
