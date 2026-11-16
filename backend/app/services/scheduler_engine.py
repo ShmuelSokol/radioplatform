@@ -20,6 +20,13 @@ from app.models.station import Station
 logger = logging.getLogger(__name__)
 
 
+async def _safe_rollback(db: AsyncSession) -> None:
+    try:
+        await db.rollback()
+    except Exception as exc:
+        logger.warning("Rollback after a station error failed: %s", exc)
+
+
 class SchedulerEngine:
     """
     Background scheduler that:
@@ -319,9 +326,15 @@ class SchedulerEngine:
 
         stmt = select(Station).where(Station.is_active == True)
         result = await db.execute(stmt)
-        stations = result.scalars().all()
+        station_ids = [s.id for s in result.scalars().all()]
 
-        for station in stations:
+        for station_id in station_ids:
+            # Re-read each station: a rollback after another station's error expires
+            # every loaded object, and touching an expired one here would fail
+            station = await db.get(Station, station_id)
+            if station is None:
+                continue
+            station_name = station.name
             try:
                 if settings.engine_drives(station.id):
                     # The playout engine owns the clock for this station: it asks for the
@@ -330,19 +343,21 @@ class SchedulerEngine:
                     await playout_engine.tick(db, station)
                 else:
                     # Run queue-based playback advancement (handles silence entries during blackout too)
-                    await self._advance_queue(db, station.id)
+                    await self._advance_queue(db, station_id)
+                station = await db.get(Station, station_id)  # fresh if the advance rolled back
                 await self._check_station(db, station)
             except Exception as e:
-                logger.error(f"Error checking station {station.id}: {e}", exc_info=True)
+                logger.error(f"Error checking station {station_id}: {e}", exc_info=True)
+                await _safe_rollback(db)
                 try:
                     from app.services.alert_service import create_alert
                     await create_alert(
                         db,
                         alert_type="system",
                         severity="critical",
-                        title=f"Station check failed: {station.name}",
+                        title=f"Station check failed: {station_name}",
                         message=str(e),
-                        station_id=station.id,
+                        station_id=station_id,
                     )
                 except Exception:
                     pass
@@ -568,6 +583,9 @@ class SchedulerEngine:
                 await self._broadcast_queue_entry(db, station_id, entry)
         except Exception as e:
             logger.error("Queue advance failed for station %s: %s", station_id, e, exc_info=True)
+            # The session is shared by every station in this tick: a failed flush
+            # left unrolled-back would fail all of them until the next tick
+            await _safe_rollback(db)
         try:
             await self._arm_timed_start(db, station_id)
         except Exception as e:
