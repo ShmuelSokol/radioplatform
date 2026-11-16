@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { assetLabel, fmtDur, typeStyle } from './shared';
+import { assetLabel, fmtDur } from './shared';
+import './classic.css';
 import type { CtlAsset } from './shared';
 
 interface StationOption { id: string; name: string }
@@ -51,19 +52,22 @@ function Clock({ tz }: { tz?: string }) {
   }, []);
   const opts: Intl.DateTimeFormatOptions = { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' };
   if (tz) opts.timeZone = tz;
-  return <>{now.toLocaleTimeString('en-US', opts)}</>;
+  const [time, ampm] = now.toLocaleTimeString('en-US', opts).split(' ');
+  return <>{time}<span className="text-[0.45em] ml-1 not-italic">{ampm}</span></>;
 }
 
-function VuBar({ level }: { level: number }) {
+/** A level meter in the style operators know: cyan segments, red near the top. */
+function VuBar({ level, label }: { level: number; label: string }) {
   return (
-    <div className="flex-1 h-1.5 bg-black/60 rounded-sm overflow-hidden flex">
-      {Array.from({ length: 30 }).map((_, i) => (
-        <div key={i} className={`flex-1 mx-px rounded-sm ${
-          i < level
-            ? (i < 18 ? 'bg-green-500' : i < 24 ? 'bg-yellow-500' : 'bg-red-500')
-            : (i < 18 ? 'bg-green-900/30' : i < 24 ? 'bg-yellow-900/30' : 'bg-red-900/30')
-        }`} />
-      ))}
+    <div className="flex items-center gap-1">
+      <span className="w-9 text-[9px] italic text-cyan-200 leading-none">{label}</span>
+      <div className="flex-1 h-2.5 flex gap-px bg-black">
+        {Array.from({ length: 30 }).map((_, i) => (
+          <div key={i} className={`flex-1 ${
+            i < level ? (i < 24 ? 'bg-cyan-400' : 'bg-red-500') : (i < 24 ? 'bg-cyan-950' : 'bg-red-950')
+          }`} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -86,7 +90,7 @@ function FullscreenButton() {
       }}
       title={on ? 'Exit full screen' : 'Full screen'}
       aria-label={on ? 'Exit full screen' : 'Full screen'}
-      className="hidden lg:flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:text-white hover:bg-white/10"
+      className="qn-btn hidden lg:flex h-8 w-8 items-center justify-center"
     >
       <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
         {on
@@ -104,23 +108,44 @@ function fmtCountdown(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+/** Loop, Go next, Fade, Soft fade: the transport buttons, stacked on a desktop, in a row on a phone. */
+export function TransportButtons({ p, stacked }: { p: Props; stacked: boolean }) {
+  const btn = `qn-btn shrink-0 ${stacked ? 'w-full h-9 text-sm' : 'h-11 px-2.5 text-xs'}`;
+  return (
+    <div className={stacked ? 'flex flex-col gap-1' : 'flex items-center gap-1 shrink-0'} role="group" aria-label="Go to the next item">
+      <button type="button" onClick={p.onLoop} disabled={!p.isPlaying || p.loopBusy}
+        data-testid="loop" aria-pressed={p.looping}
+        title={p.looping ? 'Loop is on: this item repeats. Press to switch it off.' : 'Repeat this item until you switch Loop off or press Next'}
+        className={`${btn} ${p.looping ? '!bg-fuchsia-300' : ''}`}>
+        Loop
+      </button>
+      <button type="button" onClick={() => p.onNext('hard')} disabled={!p.isPlaying || p.nextBusy}
+        title="Go to the next item now, with no fade (N)"
+        className={`${btn} ${stacked ? '!h-11 !text-base' : '!px-3 !text-sm'} font-bold`}>
+        {p.nextBusy ? '…' : <><u>G</u>o next</>}
+      </button>
+      <button type="button" onClick={() => p.onNext('fade')} disabled={!p.isPlaying || p.nextBusy}
+        data-testid="next-fade" title="Fade this item out quickly, then go to the next" className={btn}>
+        Fade
+      </button>
+      <button type="button" onClick={() => p.onNext('soft')} disabled={!p.isPlaying || p.nextBusy}
+        data-testid="next-soft" title="Fade this item out slowly (3 seconds), then go to the next" className={btn}>
+        Soft fade
+      </button>
+    </div>
+  );
+}
+
 export default function TransportBar(p: Props) {
   const progress = p.duration > 0 ? Math.min(100, (p.elapsed / p.duration) * 100) : 0;
   const ending = p.isPlaying && p.remaining > 0 && p.remaining <= 10;
   const { audio } = p;
 
-  const onAir = p.isPlaying ? (
-    <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-red-600 text-white text-xs font-extrabold tracking-wider shrink-0">
-      <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-      ON AIR
-    </span>
+  const status = p.isPlaying ? (
+    <span className="text-red-500 font-bold text-xs tracking-wide">PLAYING</span>
   ) : (
-    <button
-      type="button"
-      onClick={p.onStart}
-      disabled={p.starting || !p.stationId}
-      className="h-9 px-4 rounded-md bg-green-600 hover:bg-green-500 text-white text-sm font-bold shrink-0 disabled:opacity-50"
-    >
+    <button type="button" onClick={p.onStart} disabled={p.starting || !p.stationId}
+      className="qn-btn h-8 px-3 text-sm font-bold shrink-0">
       {p.starting ? 'Starting…' : '▶ Start'}
     </button>
   );
@@ -130,174 +155,137 @@ export default function TransportBar(p: Props) {
       aria-label="Station"
       value={p.stationId ?? ''}
       onChange={(e) => p.onStation(e.target.value)}
-      className="h-8 lg:h-9 max-w-[60vw] lg:max-w-[220px] bg-[#1a1a4e] border border-[#3a3a7e] text-cyan-100 text-sm px-2 rounded-md focus:outline-none focus:border-cyan-500"
+      className="qn-field h-7 max-w-[60vw] lg:max-w-[200px] text-sm px-1.5"
     >
       {p.stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
     </select>
   ) : (
-    <span className="text-sm font-semibold text-cyan-200 truncate max-w-[42vw] lg:max-w-[220px]">
+    <span className="text-sm font-bold text-[var(--qn-digit)] truncate max-w-[42vw] lg:max-w-[200px]">
       {p.stations[0]?.name ?? 'No station'}
     </span>
   );
 
-  const fadeBtn = 'h-11 lg:h-12 px-2.5 lg:px-3 rounded-lg border border-amber-500/60 bg-amber-500/10 hover:bg-amber-500/25 active:bg-amber-500/40 text-amber-200 text-xs lg:text-sm font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed';
-  const nextButton = (
-    <div className="flex items-center gap-1.5 shrink-0" role="group" aria-label="Go to the next item">
-      <button type="button" onClick={p.onLoop} disabled={!p.isPlaying || p.loopBusy}
-        data-testid="loop" aria-pressed={p.looping}
-        title={p.looping ? 'Loop is on: this item repeats. Press to switch it off.' : 'Repeat this item until you switch Loop off or press Next'}
-        className={`h-11 lg:h-12 px-2.5 lg:px-3 rounded-lg border text-xs lg:text-sm font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed
-          ${p.looping ? 'bg-fuchsia-500 border-fuchsia-300 text-white animate-pulse' : 'border-fuchsia-400/50 bg-fuchsia-500/10 hover:bg-fuchsia-500/25 text-fuchsia-200'}`}>
-        Loop
-      </button>
-      <button type="button" onClick={() => p.onNext('fade')} disabled={!p.isPlaying || p.nextBusy}
-        data-testid="next-fade" title="Fade this item out quickly, then go to the next" className={fadeBtn}>
-        Fade
-      </button>
-      <button type="button" onClick={() => p.onNext('soft')} disabled={!p.isPlaying || p.nextBusy}
-        data-testid="next-soft" title="Fade this item out slowly (3 seconds), then go to the next" className={fadeBtn}>
-        <span className="sm:hidden">Soft</span><span className="hidden sm:inline">Soft fade</span>
-      </button>
-      <button
-        type="button"
-        onClick={() => p.onNext('hard')}
-        disabled={!p.isPlaying || p.nextBusy}
-        title="Go to the next item now, with no fade (N)"
-        className="h-11 lg:h-12 px-3 sm:px-4 lg:px-5 rounded-lg bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-black text-base font-extrabold tracking-wide shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        {p.nextBusy ? '…' : <>NEXT<span className="hidden sm:inline"> ⏭</span></>}
-      </button>
+  const remainingText = p.isPlaying ? fmtCountdown(p.remaining) : '0:00';
+  const remainingCls = ending ? '!text-red-500 animate-pulse' : !p.isPlaying ? '!text-green-900' : '';
+  const intro = p.introSeconds > 0 ? (
+    <div className="leading-none shrink-0" data-testid="intro-countdown" title="Time left before the vocal starts">
+      <div className="qn-lcd-label">Intro</div>
+      <div className="qn-digits text-2xl lg:text-3xl !text-yellow-300">{fmtCountdown(Math.ceil(p.introSeconds))}</div>
+    </div>
+  ) : (
+    <div className="hidden lg:block leading-none shrink-0 w-14" aria-hidden="true">
+      <div className="qn-lcd-label">Intro</div>
+      <div className="qn-digits text-3xl !text-green-900">&nbsp;</div>
     </div>
   );
-  const intro = p.introSeconds > 0 ? (
-    <div className="text-center leading-none shrink-0" data-testid="intro-countdown" title="Time left before the vocal starts">
-      <div className="text-2xl lg:text-3xl xl:text-4xl font-extrabold tabular-nums text-emerald-300">{fmtCountdown(Math.ceil(p.introSeconds))}</div>
-      <div className="text-[10px] lg:text-[11px] font-bold uppercase tracking-wider text-emerald-500 mt-0.5">Intro</div>
-    </div>
-  ) : null;
 
   const sound = !audio.audioReady ? (
-    <button
-      type="button"
-      onClick={audio.initAudio}
-      title="Hear the station in this browser"
-      className="h-9 px-3 rounded-md bg-cyan-800 hover:bg-cyan-700 text-cyan-50 text-xs font-semibold shrink-0"
-    >
+    <button type="button" onClick={audio.initAudio} title="Hear the station in this browser"
+      className="qn-btn h-8 px-2.5 text-xs shrink-0">
       🔊<span className="hidden sm:inline"> Listen</span>
     </button>
   ) : (
-    <div className="flex items-center gap-2 shrink-0">
-      <button
-        type="button"
-        onClick={audio.toggleMute}
-        aria-label={audio.muted ? 'Unmute' : 'Mute'}
-        className="h-9 w-9 flex items-center justify-center rounded-md text-lg hover:bg-white/10"
-      >
+    <div className="flex items-center gap-1.5 shrink-0">
+      <button type="button" onClick={audio.toggleMute} aria-label={audio.muted ? 'Unmute' : 'Mute'}
+        className="qn-btn h-8 w-8 flex items-center justify-center text-base">
         {audio.muted ? '🔇' : audio.volume > 0.5 ? '🔊' : '🔉'}
       </button>
-      <input
-        type="range" min="0" max="1" step="0.01" value={audio.volume}
-        aria-label="Monitor volume"
+      <input type="range" min="0" max="1" step="0.01" value={audio.volume} aria-label="Monitor volume"
         onChange={e => audio.setVolume(parseFloat(e.target.value))}
-        className="hidden sm:block xl:hidden 2xl:block w-20 2xl:w-28 h-1 accent-cyan-400 cursor-pointer"
-      />
+        className="hidden 2xl:block w-24 h-1 accent-cyan-400 cursor-pointer" />
     </div>
   );
 
-  return (
-    <header className="shrink-0 bg-[#0c0c2c] border-b border-[#2a2a5e] text-gray-200">
-      {/* Row 1: status, title, clock */}
-      <div className="flex items-center gap-2 lg:gap-4 px-3 lg:px-4 pt-2 xl:py-2">
-        {onAir}
-        <div className="hidden lg:block shrink-0">{stationSelect}</div>
+  const nowType = p.nowAsset?.category || p.nowAsset?.asset_type || '';
+  const nextType = p.nextAsset?.category || p.nextAsset?.asset_type || '';
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="truncate text-base lg:text-xl font-bold text-yellow-300 leading-tight">
-              {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
-            </span>
-            {p.nowAsset?.asset_type && (
-              <span className={`hidden sm:inline text-[11px] px-1.5 py-0.5 rounded shrink-0 ${typeStyle(p.nowAsset.asset_type).chip}`}>
-                {p.nowAsset.asset_type}
-              </span>
-            )}
-          </div>
-          <div className="truncate text-xs lg:text-sm text-gray-400 leading-tight">
-            <span className="text-gray-500">Next: </span>
-            <span className="text-green-300">{p.nextAsset ? assetLabel(p.nextAsset) : 'nothing queued'}</span>
+  return (
+    <header className="shrink-0 qn-lcd border-b-2 border-[#808080]">
+      {/* LCD strip: status, remaining, intro, on air, levels, clock */}
+      <div className="flex items-center gap-3 lg:gap-5 px-2 lg:px-3 py-1.5 bg-black">
+        <div className="flex flex-col items-start gap-1 shrink-0 min-w-[70px]">
+          {status}
+          <span className="hidden lg:block">{stationSelect}</span>
+        </div>
+        <div className="leading-none shrink-0">
+          <div className="qn-lcd-label">Remaining</div>
+          <div className={`qn-digits text-3xl lg:text-[44px] ${remainingCls}`} data-testid="remaining">{remainingText}</div>
+        </div>
+        {intro}
+        <div className="hidden sm:block leading-none shrink-0">
+          <div className="qn-lcd-label">On air</div>
+          <div className={`qn-digits text-2xl lg:text-[34px] ${p.isPlaying ? '' : '!text-green-900'}`}>{fmtDur(p.elapsed)}<span className="text-base lg:text-xl opacity-70"> / {fmtDur(p.duration)}</span></div>
+        </div>
+        <div className="hidden lg:flex flex-1 min-w-[160px] max-w-[420px] flex-col gap-1" aria-hidden="true"
+          title={audio.audioReady ? 'Level of what you are hearing' : 'Press Listen to see levels'}>
+          <VuBar level={audio.vuL} label="LEFT" />
+          <VuBar level={audio.vuR} label="RIGHT" />
+          <div className="flex justify-between pl-10 text-[9px] italic text-cyan-200 leading-none">
+            <span>-40</span><span>-30</span><span>-24</span><span>-18</span><span>-12</span><span>-9</span><span>-6</span><span>-3</span><span>0</span>
           </div>
         </div>
-
+        <div className="flex-1 lg:hidden" />
         {p.liveShow && (
-          <Link
-            to={`/admin/live/${p.liveShow.id}/host`}
-            className="hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-red-900/70 border border-red-500 text-red-100 text-xs font-bold shrink-0 max-w-[200px]"
-            title="A live show is on. Open the host console."
-          >
-            <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse shrink-0" />
+          <Link to={`/admin/live/${p.liveShow.id}/host`}
+            className="hidden md:inline-flex items-center gap-1.5 h-8 px-2 bg-red-700 text-white text-xs font-bold shrink-0 max-w-[180px]"
+            title="A live show is on. Open the host console.">
+            <span className="w-2 h-2 rounded-full bg-white animate-pulse shrink-0" />
             <span className="truncate">LIVE: {p.liveShow.title}</span>
           </Link>
         )}
-
-        <div className="hidden xl:flex items-center gap-3">
-          {intro}
-          <div className="text-right leading-none">
-            <div className={`text-3xl xl:text-4xl font-extrabold tabular-nums ${ending ? 'text-red-400 animate-pulse' : p.isPlaying ? 'text-white' : 'text-gray-600'}`}>
-              {p.isPlaying ? `-${fmtCountdown(p.remaining)}` : '0:00'}
-            </div>
-            <div className="text-[11px] text-gray-500 tabular-nums mt-0.5">
-              {fmtDur(p.elapsed)} / {fmtDur(p.duration)}
-            </div>
-          </div>
-          {nextButton}
+        <div className="leading-none shrink-0 text-right">
+          <div className="qn-lcd-label">Clock</div>
+          <div className="qn-digits text-xl lg:text-[34px]"><Clock tz={p.stationTz} /></div>
+        </div>
+        <div className="hidden lg:flex items-center gap-1.5 shrink-0">
           {sound}
-          <div className="hidden xl:flex w-32 2xl:w-56 flex-col gap-1" aria-hidden="true" title={audio.audioReady ? 'Level of what you are hearing' : 'Press Listen to see levels'}>
-            <VuBar level={audio.vuL} />
-            <VuBar level={audio.vuR} />
-          </div>
+          <FullscreenButton />
         </div>
-
-        <div className="text-right shrink-0 leading-none">
-          <div className="text-base lg:text-2xl font-bold tabular-nums text-red-300"><Clock tz={p.stationTz} /></div>
-          {p.stationTz && (
-            <div className="hidden lg:block text-[10px] text-gray-500 mt-0.5">
-              {p.stationTz.split('/').pop()?.replace(/_/g, ' ')}
-            </div>
-          )}
-        </div>
-        <FullscreenButton />
       </div>
 
-      {/* Row 2 (phones and tablets): countdown, Next, sound */}
-      <div className="flex xl:hidden flex-wrap items-center gap-x-2 gap-y-1.5 px-3 lg:px-4 py-2">
-        <div className={`text-3xl font-extrabold tabular-nums leading-none ${ending ? 'text-red-400 animate-pulse' : p.isPlaying ? 'text-white' : 'text-gray-600'}`}>
-          {p.isPlaying ? `-${fmtCountdown(p.remaining)}` : '0:00'}
+      {/* On air and next, as on the old program */}
+      <div className="px-1 lg:px-2 pb-1 space-y-[3px] bg-[#1c1c1c] pt-1">
+        <div className="flex gap-[3px]">
+          <div className="flex-1 min-w-0 bg-black qn-sunken px-2 h-8 lg:h-9 flex items-center">
+            <span className="truncate text-lg lg:text-2xl font-bold text-[var(--qn-digit)] leading-none">
+              {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
+            </span>
+          </div>
+          <div className="hidden sm:flex w-32 lg:w-44 shrink-0 bg-black qn-sunken px-2 items-center">
+            <span className="truncate text-base lg:text-xl font-bold text-[var(--qn-digit)]">{nowType}</span>
+          </div>
         </div>
-        <div className="hidden sm:block text-[11px] text-gray-500 tabular-nums leading-tight">
-          <div>{fmtDur(p.elapsed)}</div>
-          <div>{fmtDur(p.duration)}</div>
+        <div className="flex gap-[3px]">
+          <div className="flex-1 min-w-0 bg-black qn-sunken px-2 h-7 lg:h-8 flex items-center">
+            <span className="truncate text-base lg:text-xl font-bold text-[var(--qn-yellow)] leading-none">
+              <span className="sr-only">Next: </span>{p.nextAsset ? assetLabel(p.nextAsset) : 'nothing queued'}
+            </span>
+          </div>
+          <div className="hidden sm:flex w-32 lg:w-44 shrink-0 bg-black qn-sunken px-2 items-center">
+            <span className="truncate text-sm lg:text-lg font-bold text-[var(--qn-yellow)]">{nextType}</span>
+          </div>
         </div>
-        {intro}
-        <div className="flex-1" />
-        {sound}
-        {nextButton}
       </div>
 
       {/* Progress */}
-      <div className="h-1.5 bg-black/60" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
-        <div
-          className={`h-full ${ending ? 'bg-red-500' : 'bg-gradient-to-r from-green-500 to-yellow-400'}`}
-          style={{ width: `${progress}%` }}
-        />
+      <div className="h-1 bg-black" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
+        <div className={`h-full ${ending ? 'bg-red-500' : 'bg-[var(--qn-digit)]'}`} style={{ width: `${progress}%` }} />
       </div>
 
-      {/* Station picker on small screens, only when there is a choice */}
+      {/* Phones and tablets: buttons and sound under the titles */}
+      <div className="lg:hidden flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#c0c0c0]">
+        {sound}
+        <div className="flex-1" />
+        <TransportButtons p={p} stacked={false} />
+      </div>
       {p.stations.length > 1 && (
-        <div className="lg:hidden px-3 py-1 border-t border-[#1e1e4a] flex items-center gap-2">
-          <span className="text-[11px] text-gray-500">Station</span>
+        <div className="lg:hidden px-2 py-1 bg-[#c0c0c0] border-t border-[#808080] flex items-center gap-2 text-black">
+          <span className="text-[11px]">Station</span>
           {stationSelect}
         </div>
       )}
     </header>
   );
 }
+
+export type { Props as TransportProps };

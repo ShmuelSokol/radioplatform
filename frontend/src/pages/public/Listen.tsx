@@ -266,7 +266,7 @@ export default function Listen() {
         {/* Volume control */}
         {userStarted && (audioReady || useStream) && (
           <div className="flex items-center gap-3 mb-6">
-            <button onClick={toggleMute} className="text-gray-400 text-sm w-8">
+            <button onClick={toggleMute} className="text-gray-400 text-sm min-w-[44px] min-h-[44px]" aria-label={muted ? 'Unmute' : 'Mute'}>
               {muted ? 'Mute' : 'Vol'}
             </button>
             <input
