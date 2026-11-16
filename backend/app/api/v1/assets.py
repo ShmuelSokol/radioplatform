@@ -371,7 +371,7 @@ async def _run_analysis_background(asset_id: str):
 
     try:
         async with async_session_factory() as db:
-            await analyze_audio(db, asset_id)
+            await analyze_audio(db, asset_id, full=True)
             await db.commit()
     except Exception as e:
         logger.error("Background audio analysis failed for asset %s: %s", asset_id, e, exc_info=True)
@@ -412,7 +412,7 @@ async def analyze_audio_endpoint(
 ):
     """Manually trigger audio analysis for a single asset."""
     from app.services.audio_analysis_service import analyze_audio
-    analysis = await analyze_audio(db, str(asset_id))
+    analysis = await analyze_audio(db, str(asset_id), full=True)
     await db.commit()
     return {"analysis": analysis}
 
@@ -422,15 +422,24 @@ async def bulk_analyze_endpoint(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
+    asset_types: str = Query("music", description="Comma-separated asset types to analyse"),
+    limit: int = Query(0, ge=0, description="At most this many items (0 = all)"),
 ):
-    """Batch-analyze all assets with no analysis or one older than ANALYSIS_VERSION
-    (those measured every item as 180 s). Returns job_id to poll."""
+    """Batch-analyse items with no analysis or one older than ANALYSIS_VERSION (those
+    measured every item as 180 s). Reads only a few ranges of each file (about 1 MB a
+    song, see services/tail_analysis.py), music only by default. Returns job_id to poll."""
     from app.models.asset import needs_analysis
 
+    types = [t.strip() for t in asset_types.split(",") if t.strip()]
     result = await db.execute(
-        select(AssetModel).where(AssetModel.file_path.isnot(None), AssetModel.file_path != "")
+        select(AssetModel.id, AssetModel.metadata_extra).where(
+            AssetModel.file_path.isnot(None), AssetModel.file_path != "",
+            AssetModel.asset_type.in_(types),
+        )
     )
-    asset_ids = [str(a.id) for a in result.scalars().all() if needs_analysis(a)]
+    asset_ids = [str(row.id) for row in result.all() if needs_analysis(row)]
+    if limit:
+        asset_ids = asset_ids[:limit]
 
     if not asset_ids:
         return {"message": "All assets already analyzed", "total": 0}

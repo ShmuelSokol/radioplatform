@@ -77,8 +77,13 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
     }
 
 
-async def analyze_audio(db, asset_id: str):
-    """Download asset, analyze, and store results in metadata_extra['audio_analysis']."""
+async def analyze_audio(db, asset_id: str, full: bool = False):
+    """Analyse an item and store the result in metadata_extra['audio_analysis'].
+
+    By default only a few ranges of the file are read (services/tail_analysis.py:
+    header, last seconds, and the start only if no start cue is stored), keeping
+    stored loudness. `full=True` downloads and measures the whole file; the upload
+    path uses it, since that file was just sent to us anyway."""
     from uuid import UUID
     from app.services.asset_service import get_asset
 
@@ -86,21 +91,30 @@ async def analyze_audio(db, asset_id: str):
     asset = await get_asset(db, aid)
     file_path = asset.file_path
 
-    # Download audio
-    if file_path.startswith("http://") or file_path.startswith("https://"):
-        import httpx
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.get(file_path, follow_redirects=True)
-            resp.raise_for_status()
-            data = resp.content
-    else:
-        from app.services.storage_service import download_file
-        data = await download_file(file_path)
+    if not full:
+        from app.services.tail_analysis import analyze_by_range, public_audio_url
 
-    # Analyse off the event loop: ffmpeg decodes the whole file three times, and the
-    # scheduler and every listener's connection share this loop.
-    import asyncio
-    analysis = await asyncio.to_thread(analyze_audio_bytes, data)
+        url = public_audio_url(file_path or "")
+        if not url:
+            raise ValueError(f"No public URL for asset {asset_id}")
+        previous = (asset.metadata_extra or {}).get("audio_analysis") if isinstance(asset.metadata_extra, dict) else None
+        analysis = await analyze_by_range(url, previous if isinstance(previous, dict) else None)
+    else:
+        # Download audio
+        if file_path.startswith("http://") or file_path.startswith("https://"):
+            import httpx
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.get(file_path, follow_redirects=True)
+                resp.raise_for_status()
+                data = resp.content
+        else:
+            from app.services.storage_service import download_file
+            data = await download_file(file_path)
+
+        # Analyse off the event loop: ffmpeg decodes the whole file three times, and the
+        # scheduler and every listener's connection share this loop.
+        import asyncio
+        analysis = await asyncio.to_thread(analyze_audio_bytes, data)
 
     # Store in metadata_extra
     extra = dict(asset.metadata_extra or {})

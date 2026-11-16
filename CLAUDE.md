@@ -202,6 +202,7 @@ radioplatform/
 | liquidsoap_client.py | Old telnet push client for Liquidsoap. Superseded by playout_engine.py; keep `LIQUIDSOAP_ENABLED` off |
 | duration_backfill.py | Measures the length of items that have none (they broke queue reads and restarts); runs once in the background after each start, and on demand via `POST /assets/backfill-durations` |
 | upcoming_analysis.py | Analyses the item on air and the next one in the background when their audio analysis is missing or older than `ANALYSIS_VERSION`, so song changes use real end and crossfade points (see `wiki/audio-engine.md`) |
+| tail_analysis.py | Song end and crossfade point from HTTP range reads (MP3 header + last 20 s), so re-analysis does not download whole files |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details
