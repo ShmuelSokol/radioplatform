@@ -38,6 +38,7 @@ from app.models.spot_recording import SpotRecording
 from app.models.program_block import ProgramBlock
 
 from app.models.scheduler_lease import SchedulerLease
+from app.models.bug_report import BugReport
 
 __all__ = [
     "User", "UserRole",
@@ -79,4 +80,5 @@ __all__ = [
     "SchedulerLease",
     "SpotRecording",
     "ProgramBlock",
+    "BugReport",
 ]

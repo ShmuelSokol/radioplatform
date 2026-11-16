@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/layout/Layout';
 import SponsorLayout from './components/layout/SponsorLayout';
 import ErrorBoundary from './components/ErrorBoundary';
+import BugReporter from './components/BugReporter';
+import { setQueryClient } from './lib/diagnostics';
 import { useAuth } from './hooks/useAuth';
 import { canAccess, homeFor } from './auth/access';
 import { applyUpdateOnNavigation } from './lib/appUpdate';
@@ -43,6 +45,7 @@ const Playlists = lazy(() => import('./pages/admin/Playlists'));
 const Categories = lazy(() => import('./pages/admin/Categories'));
 const AssetTypes = lazy(() => import('./pages/admin/AssetTypes'));
 const Alerts = lazy(() => import('./pages/admin/Alerts'));
+const BugReports = lazy(() => import('./pages/admin/BugReports'));
 const LiveShows = lazy(() => import('./pages/admin/LiveShows'));
 const HostConsole = lazy(() => import('./pages/admin/HostConsole'));
 const CallScreener = lazy(() => import('./pages/admin/CallScreener'));
@@ -71,6 +74,7 @@ const queryClient = new QueryClient({
     queries: { staleTime: 60_000, retry: 1, refetchOnWindowFocus: false },
   },
 });
+setQueryClient(queryClient);
 
 /**
  * Gate for signed-in screens. Sends anonymous visitors to the right login page
@@ -130,6 +134,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <UpdateOnNavigation />
+        <BugReporter />
         <ErrorBoundary>
         <Suspense fallback={<Loading />}>
           <Routes>
@@ -168,6 +173,7 @@ export default function App() {
               <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
               <Route path="/admin/asset-types" element={<ProtectedRoute><AssetTypes /></ProtectedRoute>} />
               <Route path="/admin/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
+              <Route path="/admin/bug-reports" element={<ProtectedRoute><BugReports /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
               <Route path="/admin/live" element={<ProtectedRoute><LiveShows /></ProtectedRoute>} />
               <Route path="/admin/live/:showId/host" element={<ProtectedRoute><HostConsole /></ProtectedRoute>} />

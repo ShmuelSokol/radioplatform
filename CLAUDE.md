@@ -115,6 +115,7 @@ radioplatform/
 | Sponsor | sponsor.py | Sponsor/ad management (linked to User via user_id) |
 | SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
 | SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
+| BugReport | bug_report.py | Report from the 🐞 button: words, screenshot, browser state, server log slice, GitHub issue and fix link (see `wiki/bug-reports.md`) |
 | ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
@@ -165,6 +166,7 @@ radioplatform/
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
 | playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login) |
+| bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
 | weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips; ElevenLabs is only the fallback |
 
 ### Services (`backend/app/services/`)
@@ -205,6 +207,7 @@ radioplatform/
 | last_played.py | When each item last aired per station, kept in memory: one full read per station per process (and hourly), then only new plays are fetched. Used by playlist and program-block rotation and `GET /queue/last-played` |
 | long_items.py | What a hard timed item does to a shiur or story on air: station `automation_config.timed_during_long_items` = pause (default; it resumes where it stopped), wait or cut (see `wiki/hourly-slots.md`) |
 | tail_analysis.py | Song end and crossfade point from HTTP range reads (MP3 header + last 20 s), so re-analysis does not download whole files |
+| bug_report_service.py | Copies bug reports to the private GitHub repo and sends the ntfy "fix ready" push (see `wiki/bug-reports.md`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details
@@ -229,6 +232,7 @@ radioplatform/
 - SponsorshipRules.tsx — Edit the sponsorship wording rules (versioned) and try the wording check
 - Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
+- BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
 - Alerts.tsx — Alerts management (filter, resolve, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
 - HostConsole.tsx — Full-screen host broadcasting console with countdown, mic controls, caller queue
@@ -400,6 +404,9 @@ Claude Code accessible over Telegram for remote development.
 | `PLAYOUT_ENGINE_STATION_ID` | The station the engine plays | For the engine |
 | `PLAYOUT_ENGINE_URL` | Engine control URL (e.g., https://stream.kbrlive.com/control) | For the engine |
 | `PLAYOUT_ENGINE_TOKEN` | Shared secret sent both ways in `X-Playout-Token` | For the engine |
+| `BUG_REPORTS_GITHUB_TOKEN` | Fine-grained token for the private bug-report repo (Contents + Issues write); unset = reports stay in the database only | For bug triage |
+| `BUG_REPORTS_REPO` | Private repo for bug reports (default ShmuelSokol/kbr-bug-reports) | No |
+| `NTFY_TOPIC` | Secret ntfy topic for "fix ready" pushes; never commit it | For bug triage |
 | `PLAYOUT_STREAM_LIVE` | true = the site plays the engine's stream instead of the in-browser player | For the engine |
 
 ### Frontend (Vercel)
