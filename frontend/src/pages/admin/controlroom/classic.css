@@ -77,6 +77,8 @@
 .qn-row:hover { background: #1a1a1a; }
 .qn-row-cur, .qn-row-cur:hover { background: var(--qn-cur-bg); color: var(--qn-cur-fg); }
 .qn-row-timed { color: var(--qn-orange); }
+/* Items of one timed block (time check, weather, sponsors) share a bar on the left */
+.qn-row-block { box-shadow: inset 3px 0 0 #00ffff; }
 .qn-row-sel { background: #303030; }
 
 /* Title bars of the panes */
