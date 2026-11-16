@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.asset import Asset, fit_for_random_pick
+from app.models.asset import Asset, fit_for_random_pick, not_placeholder
 from app.models.play_log import PlayLog
 from app.models.schedule import Schedule
 from app.models.station import Station
@@ -109,7 +109,7 @@ class _Library:
                 Asset.asset_type == asset_type
             )
             if category:
-                stmt = stmt.where(Asset.category == category)
+                stmt = stmt.where(Asset.category == category, not_placeholder())
             else:
                 stmt = stmt.where(fit_for_random_pick())
             rows = []

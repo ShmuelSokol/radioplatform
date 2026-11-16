@@ -13,7 +13,7 @@ from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.asset import Asset, fit_for_random_pick
+from app.models.asset import Asset, fit_for_random_pick, not_placeholder
 from app.models.now_playing import NowPlaying
 from app.models.play_log import PlayLog
 from app.models.playlist_entry import PlaybackMode, PlaylistEntry
@@ -494,7 +494,9 @@ class SchedulingService:
         """Pick a random asset matching asset_type+category, avoiding recently played and do_not_play."""
         stmt = select(Asset).where(Asset.asset_type == asset_type)
         if category:
-            stmt = stmt.where(Asset.category == category, Asset.category != "do_not_play")
+            stmt = stmt.where(
+                Asset.category == category, Asset.category != "do_not_play", not_placeholder()
+            )
         else:
             # never do-not-play, a dated weather report or an hour's time check
             stmt = stmt.where(fit_for_random_pick())
