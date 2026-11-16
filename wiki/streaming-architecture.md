@@ -143,8 +143,11 @@ engines for new stations and removes unlisted ones. A station added later needs 
 and the new list on Railway; never list a station that has no engine, because the backend
 stops advancing an engine station itself.
 
-Each engine uses about 150 MB (measured 2026-11-16, three engines in the local rig), so a
-1 GB server holds about four or five stations. In the rig, Next on one station moved only
+Each engine uses about 150 MB and 6-7% of one CPU core in steady play (measured 2026-11-16,
+three engines in the local rig), so a 1 GB server holds about four or five stations. The
+stream is MP3 320 kbps, 44.1 kHz stereo, encoder quality 0 (best; Shmuel asked for top
+quality); quality 2 saves only about 2% CPU. At 320 kbps a listener uses about 144 MB an
+hour, so a 1 TB monthly transfer allowance covers about 7,000 listener-hours. In the rig, Next on one station moved only
 that station. The backend always sends a JSON body; a bare empty POST through nginx once
 got a 502 from harbor.
 

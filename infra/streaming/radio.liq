@@ -302,7 +302,8 @@ end
 
 # ── Out to Icecast ───────────────────────────────────────────────────────────
 output.icecast(
-  %mp3(bitrate=192),
+  # Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting
+  %mp3(bitrate=320, samplerate=44100, stereo=true, internal_quality=0),
   host=icecast_host,
   port=icecast_port,
   password=icecast_pass,
