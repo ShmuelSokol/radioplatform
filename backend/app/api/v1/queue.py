@@ -984,12 +984,12 @@ async def _check_advance_locked(
             entry.position = idx + 1
 
         await db.commit()
-        # Replenish AFTER commit so the next song starts immediately (skip during blackout)
+        # Top the queue up afterwards, not here: the caller announces the new item
+        # first. A refill that took long (one did at the top of an hour) used to
+        # hold the announcement, so listeners heard the next song from their own
+        # pre-load and then the item that had really started, minutes late.
         if not is_blackout:
-            try:
-                await _replenish_queue(db, station_id)
-            except Exception as e:
-                logger.warning("Queue replenish failed (non-critical): %s", e)
+            _replenish_soon(station_id, rebroadcast=True)
         return next_entry
 
     await db.commit()
@@ -1705,19 +1705,49 @@ async def _skip_current_locked(
 _background: set[asyncio.Task] = set()
 
 
-def _replenish_soon(station_id) -> None:
-    """Top the queue up after the response, in its own session, under the same
-    lock as every track change. Failures are logged; the scheduler's next fill
-    covers them."""
+# A refill slower than this is logged, to find what makes it slow
+SLOW_REFILL_SECONDS = 5.0
+_refill_locks: dict[str, asyncio.Lock] = {}
+
+
+def _refill_lock(station_id) -> asyncio.Lock:
+    key = str(station_id)
+    lock = _refill_locks.get(key)
+    if lock is None:
+        lock = _refill_locks[key] = asyncio.Lock()
+    return lock
+
+
+def _replenish_soon(station_id, rebroadcast: bool = False) -> None:
+    """Top the queue up after the change, in its own session. Not under the track
+    change lock: a slow refill held there would also hold the next change (a short
+    time check would end into silence). Refills of one station run one at a time,
+    and the refill's deletes filter on status in SQL, so an item a change has just
+    started is never removed. With `rebroadcast`, the item on air is announced again
+    afterwards, so what listeners pre-load as "next" includes anything the refill
+    added (an hourly time check, a block). Failures are logged; the scheduler's
+    next fill covers them."""
     async def run():
         from app.db.engine import async_session_factory
+        started = time.monotonic()
         try:
-            async with advance_lock(station_id):
+            async with _refill_lock(station_id):
                 async with async_session_factory() as session:
                     await _replenish_queue(session, station_id)
                     await session.commit()
+                    took = time.monotonic() - started
+                    if took > SLOW_REFILL_SECONDS:
+                        logger.warning("Station %s: queue refill took %.1f s", station_id, took)
+                    if rebroadcast:
+                        playing = (await session.execute(
+                            select(QueueEntry.id).where(
+                                QueueEntry.station_id == station_id, QueueEntry.status == "playing"
+                            ).order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
+                        )).scalar_one_or_none()
+                        if playing is not None:
+                            await _broadcast_now_playing_entry(session, station_id, playing)
         except Exception as exc:
-            logger.warning("Queue top-up after Next failed for station %s: %s", station_id, exc)
+            logger.warning("Queue top-up failed for station %s: %s", station_id, exc)
 
     task = asyncio.get_running_loop().create_task(run())
     _background.add(task)
