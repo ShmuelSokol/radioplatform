@@ -1,5 +1,5 @@
 [Unit]
-Description=KBR Live playout engine (Liquidsoap)
+Description=KBR Live playout engine (Liquidsoap) for station %i
 After=network-online.target icecast2.service
 Wants=network-online.target
 Requires=icecast2.service
@@ -8,7 +8,9 @@ Requires=icecast2.service
 Type=simple
 User=liquidsoap
 Group=liquidsoap
+# Shared settings, then this station's own (id, control port, mount)
 EnvironmentFile=/etc/kbr-engine/env
+EnvironmentFile=/etc/kbr-engine/stations/%i.env
 ExecStart=/usr/bin/liquidsoap /etc/kbr-engine/radio.liq
 Restart=always
 RestartSec=3

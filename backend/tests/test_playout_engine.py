@@ -14,6 +14,8 @@ from app.models.queue_entry import QueueEntry
 from app.models.station import Station
 from app.services import playout_engine
 
+_real_command = playout_engine._command
+
 TOKEN = "test-playout-token"
 HEADERS = {"X-Playout-Token": TOKEN}
 
@@ -57,7 +59,7 @@ async def engine_station(db_session, monkeypatch):
 
     sent = []
 
-    async def fake_command(path, payload=None):
+    async def fake_command(path, payload=None, **_kw):
         sent.append((path, payload))
         return True
 
@@ -177,7 +179,7 @@ async def test_skip_goes_to_engine_and_logs_manual(
 async def test_skip_reports_engine_down(client, auth_headers, engine_station, monkeypatch):
     station, _, _ = engine_station
 
-    async def down(path, payload=None):
+    async def down(path, payload=None, **_kw):
         return False
 
     monkeypatch.setattr(playout_engine, "_command", down)
@@ -257,7 +259,7 @@ async def test_stream_url_only_when_live(engine_station, monkeypatch):
     monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", False)
     assert settings.public_stream_url(station.id) is None
     monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", True)
-    assert settings.public_stream_url(station.id) == "https://stream.example.com/live"
+    assert settings.public_stream_url(station.id) == f"https://stream.example.com/live-{station.id}"
     assert settings.public_stream_url(uuid.uuid4()) is None
 
 
@@ -457,3 +459,40 @@ async def test_hard_by_fades_the_song_once_when_the_wait_runs_out(client, db_ses
     sent.clear()
     await playout_engine.tick(db_session, station)
     assert "/skip" not in [path for path, _ in sent]
+
+
+@pytest.mark.asyncio
+async def test_each_listed_station_has_its_own_engine(engine_station, monkeypatch):
+    """One engine per station: commands and streams are addressed by station."""
+    station, _, _ = engine_station
+    other, unlisted = uuid.uuid4(), uuid.uuid4()
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", f"{station.id}, {other}")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "https://stream.example.com/control/")
+    assert settings.engine_drives(station.id) and settings.engine_drives(other)
+    assert not settings.engine_drives(unlisted)
+    assert settings.engine_control_url(other) == f"https://stream.example.com/control/{other}"
+
+    calls = []
+
+    class FakeResp:
+        status_code = 200
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            calls.append(url)
+            return FakeResp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(playout_engine, "_command", _real_command)
+    assert await playout_engine.engine_flush(other)
+    assert calls == [f"https://stream.example.com/control/{other}/flush"]

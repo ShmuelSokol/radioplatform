@@ -4,7 +4,7 @@
     <hostname>STREAM_DOMAIN</hostname>
     <limits>
         <clients>1000</clients>
-        <sources>2</sources>
+        <sources>40</sources>
         <queue-size>524288</queue-size>
         <burst-on-connect>1</burst-on-connect>
         <burst-size>65535</burst-size>
@@ -19,11 +19,6 @@
         <port>8000</port>
         <bind-address>127.0.0.1</bind-address>
     </listen-socket>
-    <mount>
-        <mount-name>/live</mount-name>
-        <type>audio/mpeg</type>
-        <stream-name>Kol Bramah Live</stream-name>
-    </mount>
     <paths>
         <basedir>/usr/share/icecast2</basedir>
         <logdir>/var/log/icecast2</logdir>

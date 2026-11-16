@@ -404,10 +404,10 @@ Claude Code accessible over Telegram for remote development.
 | `LIQUIDSOAP_ENABLED` | Enable Liquidsoap (remote VPS) | For streaming |
 | `LIQUIDSOAP_HOST` | VPS hostname for Liquidsoap telnet | For streaming |
 | `LIQUIDSOAP_TELNET_PORT` | Liquidsoap telnet port (default: 1234) | For streaming |
-| `ICECAST_STREAM_URL` | Public Icecast stream URL (e.g., https://stream.kbrlive.com/live) | For streaming |
-| `PLAYOUT_ENGINE_ENABLED` | Let the playout engine drive one station (default false) | For the engine |
-| `PLAYOUT_ENGINE_STATION_ID` | The station the engine plays | For the engine |
-| `PLAYOUT_ENGINE_URL` | Engine control URL (e.g., https://stream.kbrlive.com/control) | For the engine |
+| `ICECAST_STREAM_URL` | Stream base URL (e.g., https://stream.kbrlive.com/live); an engine station streams at `<base>-<station id>` | For streaming |
+| `PLAYOUT_ENGINE_ENABLED` | Let the playout engine drive the listed stations (default false) | For the engine |
+| `PLAYOUT_ENGINE_STATION_ID` | Comma-separated stations the engine plays (one engine each; setup.sh prints the list) | For the engine |
+| `PLAYOUT_ENGINE_URL` | Engine control base (e.g., https://stream.kbrlive.com/control); commands go to `<base>/<station id>/...` | For the engine |
 | `PLAYOUT_ENGINE_TOKEN` | Shared secret sent both ways in `X-Playout-Token` | For the engine |
 | `BUG_REPORTS_GITHUB_TOKEN` | Fine-grained token for the private bug-report repo (Contents + Issues write); unset = reports stay in the database only | For bug triage |
 | `BUG_REPORTS_REPO` | Private repo for bug reports (default ShmuelSokol/kbr-bug-reports) | No |
