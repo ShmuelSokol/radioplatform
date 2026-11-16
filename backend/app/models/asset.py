@@ -69,8 +69,15 @@ NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing")
 
 # Placeholder items that must never be drawn by any automatic pick, even by a
 # rotation that names their category (the old "KOL BRAMAH TEST SPONSOR" sits in
-# category "Spots" and kept airing from "spots every 3 songs"). Lower case.
-NEVER_AUTO_TITLES = ("kol bramah test sponsor",)
+# category "Spots" and kept airing from "spots every 3 songs"). Shmuel confirmed
+# "Kol bramah sponsor" and "Kol bramah ad" are placeholders too. Lower case.
+NEVER_AUTO_TITLES = (
+    "kol bramah test sponsor",
+    "kol bramah sponsor",
+    "kol bramah ad",
+    "kol b'ramah sponsor",
+    "kol b'ramah ad",
+)
 
 
 def not_placeholder():
