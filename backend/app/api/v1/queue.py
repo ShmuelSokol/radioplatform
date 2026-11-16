@@ -1584,23 +1584,49 @@ async def _skip_current_locked(
         except Exception:
             pass
 
-    if not refilled:
-        await _replenish_queue(db, station_id)
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
         next_id = next_entry.id
         next_asset_id = next_entry.asset_id
         await db.commit()
+        # Listeners first: the new item goes out before anything else is done
         await _broadcast_now_playing_entry(db, station_id, next_id, fade_seconds)
+        if not refilled:
+            # Topping the queue up to 24 hours took most of Next's 2 s; it can wait
+            _replenish_soon(station_id)
         return {
             "message": "Skipped",
             "now_playing": str(next_asset_id),
             "queue": await _queue_after_action(db, station_id),
         }
 
+    if not refilled:
+        await _replenish_queue(db, station_id)
     await db.commit()
     return {"message": "Queue empty", "now_playing": None, "queue": await _queue_after_action(db, station_id)}
+
+
+_background: set[asyncio.Task] = set()
+
+
+def _replenish_soon(station_id) -> None:
+    """Top the queue up after the response, in its own session, under the same
+    lock as every track change. Failures are logged; the scheduler's next fill
+    covers them."""
+    async def run():
+        from app.db.engine import async_session_factory
+        try:
+            async with advance_lock(station_id):
+                async with async_session_factory() as session:
+                    await _replenish_queue(session, station_id)
+                    await session.commit()
+        except Exception as exc:
+            logger.warning("Queue top-up after Next failed for station %s: %s", station_id, exc)
+
+    task = asyncio.get_running_loop().create_task(run())
+    _background.add(task)
+    task.add_done_callback(_background.discard)
 
 
 async def _queue_after_action(db: AsyncSession, station_id) -> dict | None:
