@@ -162,7 +162,7 @@ export function useAudioEngine(
   const analyserRRef = useRef<AnalyserNode | null>(null);
   const analyserDataLRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const analyserDataRRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
-  const mergerRef = useRef<ChannelMergerNode | null>(null);
+  const busRef = useRef<GainNode | null>(null);
   const splitterRef = useRef<ChannelSplitterNode | null>(null);
 
   const deckARef = useRef<AudioDeck | null>(null);
@@ -314,20 +314,27 @@ export function useAudioEngine(
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     setCtxRunning(ctx.state === 'running');
 
-    // Create merger → splitter → analysers → destination
-    const merger = ctx.createChannelMerger(2);
+    // decks → stereo bus → speakers, and bus → splitter → left/right meters.
+    // The bus used to be a ChannelMerger: each merger input is mono, so a deck
+    // connected to input 0 was mixed down to mono and came out of the LEFT
+    // speaker only (heard by Shmuel, 2026-11-16).
+    const bus = ctx.createGain();
+    // Always two channels out: a mono file is spread to both speakers (and meters)
+    bus.channelCount = 2;
+    bus.channelCountMode = 'explicit';
+    bus.channelInterpretation = 'speakers';
     const splitter = ctx.createChannelSplitter(2);
     const analyserL = ctx.createAnalyser();
     analyserL.fftSize = 256;
     const analyserR = ctx.createAnalyser();
     analyserR.fftSize = 256;
 
-    merger.connect(splitter);
+    bus.connect(splitter);
     splitter.connect(analyserL, 0);
     splitter.connect(analyserR, 1);
-    merger.connect(ctx.destination);
+    bus.connect(ctx.destination);
 
-    mergerRef.current = merger;
+    busRef.current = bus;
     splitterRef.current = splitter;
     analyserLRef.current = analyserL;
     analyserRRef.current = analyserR;
@@ -337,8 +344,8 @@ export function useAudioEngine(
     // Create two decks
     const deckA = createDeck(ctx);
     const deckB = createDeck(ctx);
-    deckA.gain.connect(merger);
-    deckB.gain.connect(merger);
+    deckA.gain.connect(bus);
+    deckB.gain.connect(bus);
     deckARef.current = deckA;
     deckBRef.current = deckB;
     activeDeckRef.current = 'A';
@@ -844,7 +851,7 @@ export function useAudioEngine(
         url?: string; replay_gain_db?: number | null; _taken?: boolean;
       };
       const ctx = ctxRef.current;
-      const out = mergerRef.current;
+      const out = busRef.current;
       if (!data?.url || data._taken || !ctx || !out || ctx.state !== 'running') return;
       data._taken = true;
       fetch(data.url)

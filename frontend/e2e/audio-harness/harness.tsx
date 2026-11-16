@@ -19,8 +19,29 @@ w.Audio = function (...args: any[]) {
   }));
   return a;
 };
+// Each deck's gain is the gain made right after its media source (other gains, such
+// as the output bus, are not decks)
+let deckGainNext = false;
+const createSource = AudioContext.prototype.createMediaElementSource;
+AudioContext.prototype.createMediaElementSource = function (el: HTMLMediaElement) {
+  deckGainNext = true;
+  return createSource.call(this, el);
+};
 const createGain = AudioContext.prototype.createGain;
-AudioContext.prototype.createGain = function () { const g = createGain.call(this); gains.push(g); return g; };
+AudioContext.prototype.createGain = function () {
+  const g = createGain.call(this);
+  if (deckGainNext) { gains.push(g); deckGainNext = false; }
+  return g;
+};
+// The engine's left and right meters (the first two analysers it makes)
+const analysers: AnalyserNode[] = [];
+const createAnalyser = AudioContext.prototype.createAnalyser;
+AudioContext.prototype.createAnalyser = function () { const n = createAnalyser.call(this); analysers.push(n); return n; };
+w.__levels = () => analysers.slice(0, 2).map((n) => {
+  const d = new Float32Array(n.fftSize);
+  n.getFloatTimeDomainData(d);
+  return +Math.sqrt(d.reduce((sum, v) => sum + v * v, 0) / d.length).toFixed(4);
+});
 w.__held = () => updatesHeld();
 w.__snap = () => audios.map((a, i) => ({
   src: (a.src.split('/').pop() || '').replace('.wav', ''),

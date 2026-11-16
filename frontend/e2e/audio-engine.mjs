@@ -22,7 +22,7 @@ const check = (name, ok, detail = '') => {
 };
 
 // Test tones: asset id -> [frequency, seconds]
-const TONES = { a: [440, 20], b: [660, 12], c: [880, 12] };
+const TONES = { a: [440, 20], b: [660, 12], c: [880, 12], d: [550, 40] };
 function wav(freq, seconds) {
   const rate = 8000, n = rate * seconds, buf = Buffer.alloc(44 + n * 2);
   buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
@@ -36,6 +36,7 @@ function wav(freq, seconds) {
 const A = { id: 'a', dur: 20, cross: 17 };
 const B = { id: 'b', dur: 12, cross: 9 };
 const C = { id: 'c', dur: 12, cross: 9 };
+const D = { id: 'd', dur: 40, cross: 37 };
 const now = () => new Date().toISOString();
 
 // Each scenario starts with song "a" on air, then calls change() and is watched for `watch` seconds.
@@ -181,8 +182,39 @@ const SCENARIOS = {
     change: (set) => set({ ...C, nextId: 'a', startedAt: now(), fade: 0.6 }),
     audibleWithin: 1.5, noSeekOn: 'c', end: { src: 'c', minT: 3, maxT: 5 },
   },
+  // Switching the control room to another station: the other station's item has been
+  // on air for a while. Only it may be heard (heard live: both stations at once)
+  'switch-station': {
+    start: { ...A, nextId: 'b' }, wait: 5, watch: 4,
+    change: (set) => set({ ...C, nextId: 'a', startedAt: secondsAgo(3) }),
+    // (the test server sends whole files without ranges, so the joining position is not checked)
+    audibleWithin: 1.5, end: { src: 'c', minT: 0, maxT: 8 },
+  },
+  // After the switch, the first station's own song change (its crossfade point and
+  // its pre-loaded next item) must not start under the new station
+  'switch-station-then-old-crossfade-time': {
+    start: { ...A, nextId: 'b' }, wait: 5, watch: 16,
+    change: (set) => set({ ...D, nextId: 'c', startedAt: now() }),
+    end: { src: 'd', minT: 14, maxT: 17.5 },
+  },
+  // Switching on, then straight back before the first switch has settled
+  'switch-station-and-back': {
+    start: { ...A, nextId: 'b' }, wait: 5, watch: 4,
+    change: (set) => {
+      set({ ...C, nextId: 'a', startedAt: secondsAgo(3) });
+      setTimeout(() => set({ ...B, nextId: 'c', startedAt: secondsAgo(2) }), 300);
+    },
+    end: { src: 'b', minT: 0, maxT: 7 },
+  },
+  // Switching while the station's own crossfade is under way
+  'switch-station-during-crossfade': {
+    start: { ...A, nextId: 'b' }, wait: 17.5, watch: 4,
+    change: (set) => set({ ...C, nextId: 'a', startedAt: secondsAgo(3) }),
+    end: { src: 'c', minT: 0, maxT: 8 },
+  },
 };
 
+function secondsAgo(s) { return new Date(Date.now() - s * 1000).toISOString(); }
 function inSeconds(s) { return new Date(Date.now() + s * 1000).toISOString(); }
 // A queued timed item due in 3 s (rows as the queue endpoint sends them)
 function timed(extra) {
@@ -357,7 +389,38 @@ async function listenMidItem() {
   await page.close();
 }
 
+// Both speakers: heard live, the player sent everything to the left channel only.
+// Plays a stereo file with a different tone on each side and a mono file, and
+// reads the engine's left and right meters.
+async function stereo() {
+  for (const [label, body] of [['stereo file', wavStereo(440, 660, 6)], ['mono file', wav(440, 6)]]) {
+    const page = await browser.newPage();
+    await page.route('**/__tone/*.wav', (r) => r.fulfill({ contentType: 'audio/wav', body }));
+    await page.route('**/assets/*/audio-url', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/__tone/a.wav' }) }));
+    await page.goto(`${base}e2e/audio-harness/index.html`);
+    await page.waitForFunction(() => typeof window.__set === 'function');
+    await page.evaluate((x) => window.__set(x), { ...A, startedAt: now() });
+    await sleep(2500);
+    const [l, r] = await page.evaluate(() => window.__levels());
+    check(`stereo: ${label} reaches both speakers`, l > 0.01 && r > 0.01 && Math.abs(l - r) / Math.max(l, r) < 0.5, `left ${l}, right ${r}`);
+    await page.close();
+  }
+}
+function wavStereo(fl, fr, seconds) {
+  const rate = 8000, n = rate * seconds, buf = Buffer.alloc(44 + n * 4);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 4, 4); buf.write('WAVEfmt ', 8);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(2, 22);
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 4, 28); buf.writeUInt16LE(4, 32);
+  buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 4, 40);
+  for (let i = 0; i < n; i++) {
+    buf.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * fl * i) / rate)), 44 + i * 4);
+    buf.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * fr * i) / rate)), 46 + i * 4);
+  }
+  return buf;
+}
+
 try {
+  if (!only || only === 'stereo') await stereo();
   if (!only || only === 'listen-mid-item') await listenMidItem();
   for (const [name, sc] of Object.entries(SCENARIOS)) {
     if (!only || only === name) await run(name, sc);
