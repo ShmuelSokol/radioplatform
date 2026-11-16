@@ -88,3 +88,9 @@ The jingle wall and the Library's Jingle tab ask `/assets` for `hide_generated=t
 The control room never starts sound by itself when it loads (`useAudioEngine(..., autoInit=false)`); sound starts only on a click in that tab. Tabs talk over the `kbr-control-room-sound` BroadcastChannel: the tab that takes the sound posts `taken`, and any other tab that had it goes quiet and says so. Action buttons (Next, Start, play now, mix) do not grab the sound while another tab holds it; only the speaker button moves it. The cart and the Library pass `hide_generated` so dated "Weather Report - …" and "Time Announcement - …" items stay out (they are type `spot`, not jingle).
 
 Tap targets on public pages need a real 44 px box (`min-h-[44px]`): checkers measure the element's bounding box, so an invisible `::after` hit area does not count.
+
+## Coming back from the background
+
+Safari throttles timers in a hidden tab and can leave its socket dead with no close event, so a control room left behind a locked screen showed an item that had ended minutes earlier. On `visibilitychange` back to visible after more than 5 s, `useNowPlayingWS` reads `/now-playing` at once and opens a fresh socket, and the Dashboard refetches the queue. `lib/appUpdate.ts` also takes a waiting release on return after 10 minutes away if nothing is actually sounding, even while a player is switched on (otherwise a held player kept an old release for hours).
+
+Native `<select>` on iPhone Safari ignores CSS height; the public station pickers use `.kbr-select` (`appearance: none`, 44 px, own arrow). The cloud test machine has no WebKit, so only the Mac can confirm it.

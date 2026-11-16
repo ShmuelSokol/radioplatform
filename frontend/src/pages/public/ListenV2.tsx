@@ -451,14 +451,14 @@ export default function ListenV2() {
                   try { await crm.login(crmPinInput); setCrmPinInput(''); setCrmLoginError(''); }
                   catch { setCrmLoginError('Invalid PIN'); }
                 }}
-                className="bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white px-5 py-2 rounded-xl text-sm font-semibold transition"
+                className="min-h-[44px] bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white px-5 py-2 rounded-xl text-sm font-semibold transition"
               >
                 Login
               </button>
               <span className="text-gray-600 text-sm">or</span>
               <button
                 onClick={() => setCrmRegOpen(!crmRegOpen)}
-                className="text-violet-300 hover:text-violet-200 text-sm font-semibold transition"
+                className="inline-flex items-center min-h-[44px] px-2 text-violet-300 hover:text-violet-200 text-sm font-semibold transition"
               >
                 Register
               </button>
@@ -492,7 +492,7 @@ export default function ListenV2() {
                       setCrmRegName(''); setCrmRegPhone(''); setCrmRegEmail(''); setCrmRegError('');
                     } catch { setCrmRegError('Registration failed. Please try again.'); }
                   }}
-                  className="bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white px-6 py-2 rounded-xl text-sm font-semibold transition"
+                  className="min-h-[44px] bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white px-6 py-2 rounded-xl text-sm font-semibold transition"
                 >
                   Register
                 </button>

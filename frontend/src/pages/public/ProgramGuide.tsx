@@ -102,7 +102,7 @@ export default function ProgramGuide() {
           <select
             value={selectedStation}
             onChange={(e) => setSelectedStation(e.target.value)}
-            className="flex-1 min-h-[44px] bg-[#12123a] border border-[#2a2a5e] text-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 transition"
+            className="kbr-select flex-1 h-11 bg-[#12123a] border border-[#2a2a5e] text-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 transition"
           >
             {stationsLoading && <option value="">Loading stations...</option>}
             {!stationsLoading && stations.length === 0 && <option value="">No stations available</option>}
