@@ -140,10 +140,13 @@ function reloadedRecently(): boolean {
 }
 
 /** A screen's code could not load because a newer release replaced it (the old
- *  files are gone). Reload onto the new release now unless audio is playing or a
- *  reload just happened. Returns true when a reload was started. */
+ *  files are gone). Reload onto the new release now unless audio is sounding right
+ *  now or a reload just happened. Returns true when a reload was started.
+ *  Only sound playing NOW counts, not the grace after audio stopped: the person
+ *  usually hits this by leaving the Listen page for another screen, which stops the
+ *  player, so the grace would leave them on an error box for nothing. */
 export function reloadForStaleCode(): boolean {
-  if (isAudioActive() || reloadedRecently()) return false;
+  if (holds.size > 0 || soundingNow() || reloadedRecently()) return false;
   reloadForRelease(false);
   return true;
 }

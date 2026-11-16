@@ -10,7 +10,7 @@ Every frontend build writes `dist/version.json` and bakes the same id into the b
 - not while a form field has focus;
 - then: tab hidden, or 30s without input, or the person changes route (`UpdateOnNavigation` in `App.tsx`).
 
-A stale lazy chunk (`vite:preloadError`) also triggers a reload unless audio is playing.
+A stale lazy chunk (`vite:preloadError`) also triggers a reload unless audio is playing. If the screen errors anyway, the error box reloads 300 ms later unless sound is playing at that moment (leaving Listen stops it, so the 2-min audio grace does not apply here).
 
 ## Admin control (Settings > Site Updates, `/admin/site-updates`)
 

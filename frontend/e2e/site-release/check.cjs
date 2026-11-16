@@ -97,6 +97,27 @@ async function listen(policyArg) {
     check('scheduled push: reloaded after its time', loads === 2, `loads=${loads}`);
     await browser.close();
   }
+  // 5. Listening, then opening a screen whose code file is gone (a release came out
+  // meanwhile): leaving Listen stops the sound, so the tab reloads onto the new
+  // release instead of showing "The site was updated" (bug report 3, 2026-11-16)
+  await reset();
+  {
+    const { browser, page, loads } = await listen('no-user-gesture-required');
+    check('stale screen: listener playing', await sound(page));
+    let failed = 0;
+    await page.route(/\/assets\/Archives-[^/]*\.js$/, (route) => {
+      if (failed++ === 0) return route.fulfill({ status: 404, body: 'gone' });
+      return route.continue();
+    });
+    await page.locator('nav a[href="/archives"]').first().click();
+    await sleep(4000);
+    const box = await page.locator('[data-testid=error-boundary]').count();
+    check('stale screen: the missing file was asked for', failed >= 1, `requests=${failed}`);
+    check('stale screen: reloaded onto the new release', loads() === 2, `loads=${loads()}`);
+    check('stale screen: Archives shows, no error box', box === 0 && page.url().endsWith('/archives'), `box=${box} url=${page.url()}`);
+    await browser.close();
+  }
+
   console.log(fails ? `${fails} FAILED` : 'ALL PASSED');
   process.exit(fails ? 1 : 0);
 })();
