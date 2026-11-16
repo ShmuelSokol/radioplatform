@@ -57,7 +57,7 @@ function makeBackend(queueSize = 60) {
     calls.push({ method, path, query, body });
     const q = `/stations/${SID}/queue`;
     if (path === '/auth/me') return { id: 'u1', email: 'operator@example.com', role: 'admin', is_active: true };
-    if (path === '/stations') return { stations: [{ id: SID, name: 'Kol Berama', timezone: 'America/New_York', is_active: true, channels: [] }, { id: 'st-2', name: 'Second Feed', timezone: 'America/New_York', is_active: true, channels: [] }], total: 2 };
+    if (path === '/stations') return { stations: [{ id: SID, name: 'Kol Berama', timezone: 'America/New_York', is_active: true, channels: [] }, { id: 'st-2', name: 'Second Feed', timezone: 'America/New_York', is_active: true, channels: [] }, { id: 'st-down', name: 'Unreachable Feed', timezone: 'America/New_York', is_active: true, channels: [] }], total: 3 };
     if (path === '/asset-types') return types.map((name, i) => ({ id: `t${i}`, name }));
     if (path === '/categories') return [];
     if (/^\/assets\/[^/]+\/audio-url$/.test(path)) return { url: 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=' };
@@ -149,6 +149,7 @@ async function open(browser, contextOpts, queueSize) {
     const path = url.pathname.replace(/^.*\/api\/v1/, '');
     let body = null;
     try { body = req.postDataJSON(); } catch { /* none */ }
+    if (path.startsWith('/stations/st-down/')) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"down"}' });
     const data = backend.handle(req.method(), path, Object.fromEntries(url.searchParams), body);
     if (DELAY) await new Promise(r => setTimeout(r, DELAY));
     await route.fulfill({ status: data === null ? 204 : 200, contentType: 'application/json', body: data === null ? '' : JSON.stringify(data) });
@@ -357,6 +358,13 @@ async function desktop(browser, width, height) {
   await page.getByRole('tab', { name: 'Schedule' }).click();
   await page.getByText('Afternoon music').first().waitFor({ timeout: 5000 }).catch(() => {});
   check(`${tag}: schedule status shows`, await page.getByText('Afternoon music').count() === 1);
+  // A station whose queue cannot be loaded is not shown as stopped with an empty queue
+  await page.getByLabel('Station').first().selectOption({ label: 'Unreachable Feed' });
+  await page.getByText(/Can't reach the station|Loading the queue/).first().waitFor({ timeout: 5000 }).catch(() => {});
+  check(`${tag}: an unreachable queue is not shown as stopped`, await page.getByText(/Can't reach the station|Loading the queue/).count() > 0 && await page.getByText('Stopped. Press Start to begin.').count() === 0 && await page.getByText('The queue is empty.', { exact: false }).count() === 0);
+  await page.getByText("Can't reach the station").first().waitFor({ timeout: 20000 }).catch(() => {});
+  check(`${tag}: then says it cannot reach the station`, await page.getByText("Can't reach the station", { exact: false }).count() > 0);
+  await page.getByLabel('Station').first().selectOption({ label: 'Kol Berama' });
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 }

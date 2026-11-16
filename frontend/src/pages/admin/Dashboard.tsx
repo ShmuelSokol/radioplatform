@@ -71,7 +71,7 @@ export default function Dashboard() {
   const stationTz = station?.timezone && isValidTz(station.timezone) ? station.timezone : undefined;
 
   // ── Server state ───────────────────────────────────────────
-  const { data: queueData } = useQueue(stationId);
+  const { data: queueData, isError: queueFailed } = useQueue(stationId);
   const { nowPlaying: wsNowPlaying } = useNowPlayingWS(stationId ?? '');
   const { data: lastPlayedMap } = useLastPlayed(stationId);
   const { data: liveData } = useLiveShows(stationId ? { station_id: stationId } : undefined);
@@ -84,6 +84,10 @@ export default function Dashboard() {
   const weatherPreviewMut = useWeatherPreview(stationId ?? '');
 
   const queueEntries: QueueRow[] = queueData?.entries ?? [];
+  // No queue yet is not the same as an empty queue: say so rather than "Stopped"
+  const queueNotice = stationId && !queueData
+    ? (queueFailed ? "Can't reach the station. Trying again…" : 'Loading the queue…')
+    : null;
   const nowPlaying = queueData?.now_playing ?? null;
   const nowAsset = nowPlaying?.asset ?? null;
   const isPlaying = !!nowPlaying;
@@ -455,6 +459,7 @@ export default function Dashboard() {
   const queuePanel = (
     <QueuePanel
       entries={filteredQueueEntries}
+      notice={queueNotice}
       loadedCount={queueEntries.length}
       totalCount={queueData?.total_all ?? queueEntries.length}
       totalDuration={queueData?.total_queue_duration_seconds ?? queueData?.queue_duration_seconds ?? 0}
@@ -545,7 +550,7 @@ export default function Dashboard() {
         introSeconds={introSeconds}
         onStart={handleStart}
         starting={startMut.isPending}
-        statusMessage={statusMessage}
+        statusMessage={queueNotice ?? statusMessage}
         onNext={handleNext}
         nextBusy={skipMut.isPending}
         looping={looping}

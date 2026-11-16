@@ -199,6 +199,8 @@ async def _add_missing_columns(engine):
         # Without these every lookup scans all played history for all stations.
         "CREATE INDEX IF NOT EXISTS ix_queue_entries_station_status_position ON queue_entries (station_id, status, position)",
         "CREATE INDEX IF NOT EXISTS ix_play_logs_station_start ON play_logs (station_id, start_utc)",
+        # Last played per item (control room library): answered from the index alone
+        "CREATE INDEX IF NOT EXISTS ix_play_logs_station_asset_start ON play_logs (station_id, asset_id, start_utc)",
     ]
     for sql in migrations:
         try:

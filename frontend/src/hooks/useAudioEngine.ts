@@ -87,6 +87,7 @@ export function useAudioEngine(
   const changeFadeRef = useRef<number | null>(changeFadeSeconds);
   changeFadeRef.current = changeFadeSeconds;
   const ctxRef = useRef<AudioContext | null>(null);
+  const [ctxRunning, setCtxRunning] = useState(false);
   const analyserLRef = useRef<AnalyserNode | null>(null);
   const analyserRRef = useRef<AnalyserNode | null>(null);
   const analyserDataLRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
@@ -201,8 +202,10 @@ export function useAudioEngine(
     }
 
     const ctx = new AudioContext();
+    ctx.onstatechange = () => setCtxRunning(ctx.state === 'running');
     if (ctx.state === 'suspended') await ctx.resume();
     ctxRef.current = ctx;
+    setCtxRunning(ctx.state === 'running');
 
     // Create merger → splitter → analysers → destination
     const merger = ctx.createChannelMerger(2);
@@ -237,10 +240,15 @@ export function useAudioEngine(
   }, [createDeck]);
 
   // ── A release never reloads this tab while the player is on ──
+  // "On" means sound can actually come out: the audio context is running. On
+  // the control room the station is nearly always playing, so holding on
+  // isPlaying alone kept operator tabs on an old release forever, even when
+  // the operator never switched audio on (the context stays suspended until a
+  // click). Listener pages hold separately from the moment Listen is pressed.
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying || !ctxRunning) return;
     return holdUpdates();
-  }, [isPlaying]);
+  }, [isPlaying, ctxRunning]);
 
   // ── Auto-init when playback is active ──
   useEffect(() => {
