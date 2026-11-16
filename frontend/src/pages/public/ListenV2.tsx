@@ -8,6 +8,7 @@ import { useListenerHeartbeat } from '../../hooks/useListeners';
 import { useCrmAuth, useRateSong, useActiveRaffles, useEnterRaffle } from '../../hooks/useCrm';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
+import { holdUpdates } from '../../lib/appUpdate';
 import type { AssetInfo } from '../../types';
 
 interface ActiveShowData {
@@ -99,6 +100,12 @@ export default function ListenV2() {
   }, [useStream]);
 
   useListenerHeartbeat(stationId, userStarted);
+
+  // Once Listen is pressed, a new release must not reload the page and silence it
+  useEffect(() => {
+    if (!userStarted) return;
+    return holdUpdates();
+  }, [userStarted]);
 
   const isWsPlaying = !!wsNowPlaying?.asset_id && !!wsNowPlaying?.asset;
   const wsAsset = wsNowPlaying?.asset;

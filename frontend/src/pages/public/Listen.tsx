@@ -8,6 +8,7 @@ import { useListenerHeartbeat } from '../../hooks/useListeners';
 import { useCrmAuth, useRateSong, useActiveRaffles, useEnterRaffle } from '../../hooks/useCrm';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
+import { holdUpdates } from '../../lib/appUpdate';
 import type { AssetInfo } from '../../types';
 
 interface ActiveShowData {
@@ -93,6 +94,12 @@ export default function Listen() {
     audio.addEventListener('error', onError);
     return () => audio.removeEventListener('error', onError);
   }, [useStream]);
+
+  // Once Listen is pressed, a new release must not reload the page and silence it
+  useEffect(() => {
+    if (!userStarted) return;
+    return holdUpdates();
+  }, [userStarted]);
 
   // Track listener session (heartbeat every 30s while listening)
   useListenerHeartbeat(stationId, userStarted);
