@@ -7,6 +7,8 @@ import logging
 import uuid
 from typing import Dict, Set
 
+import numpy as np
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
@@ -95,10 +97,56 @@ audio_manager = AudioConnectionManager()
 LIVE_SAMPLE_RATE = 24000
 
 
+# Web callers (see wiki/live-shows.md). A caller's microphone comes in on its own
+# socket in the same format. The host's frames are the clock: each one is mixed
+# with the same number of samples from every caller on air, and that mix is what
+# listeners get, so listener pages need nothing new. The host hears the callers
+# (sent back down the host's own socket) and each caller hears the host and the
+# other callers, never themselves.
+CALLER_PRIME_SAMPLES = int(LIVE_SAMPLE_RATE * 0.12)  # buffered before a caller is mixed in
+CALLER_MAX_SAMPLES = int(LIVE_SAMPLE_RATE * 0.6)     # beyond this, the oldest audio is dropped
+
+
+class CallerLine:
+    def __init__(self, ws: WebSocket, call_id: str, show_id: str, station_id: str):
+        self.ws = ws
+        self.call_id = call_id
+        self.show_id = show_id
+        self.station_id = station_id
+        self.on_air = False
+        self.buf = np.zeros(0, dtype=np.int16)
+        self.primed = False
+
+    def add(self, frame: bytes) -> None:
+        if not self.on_air or len(frame) < 2:
+            return
+        pcm = np.frombuffer(frame[: len(frame) // 2 * 2], dtype="<i2")
+        self.buf = np.concatenate((self.buf, pcm))[-CALLER_MAX_SAMPLES:]
+        if len(self.buf) >= CALLER_PRIME_SAMPLES:
+            self.primed = True
+
+    def take(self, n: int) -> np.ndarray:
+        out = np.zeros(n, dtype=np.int32)
+        if not self.on_air or not self.primed:
+            return out
+        got = self.buf[:n]
+        out[: len(got)] = got
+        self.buf = self.buf[n:]
+        if len(self.buf) == 0:
+            self.primed = False  # ran dry: wait for a little audio again before mixing
+        return out
+
+
+def _pcm(samples: np.ndarray) -> bytes:
+    return np.clip(samples, -32768, 32767).astype("<i2").tobytes()
+
+
 class StationLiveRelay:
     def __init__(self):
         self.listeners: Dict[str, Set[WebSocket]] = {}  # station_id -> listener sockets
         self.on_air: Dict[str, str] = {}  # station_id -> show_id whose host is sending
+        self.hosts: Dict[str, WebSocket] = {}  # station_id -> host audio socket
+        self.callers: Dict[str, CallerLine] = {}  # call_id -> caller line
 
     def state(self, station_id: str) -> dict:
         show_id = self.on_air.get(station_id)
@@ -122,8 +170,54 @@ class StationLiveRelay:
         message = json.dumps(self.state(station_id))
         await self._send_all(station_id, lambda ws: ws.send_text(message))
 
+    def station_callers(self, station_id: str) -> list[CallerLine]:
+        return [c for c in self.callers.values() if c.station_id == station_id]
+
     async def audio(self, station_id: str, frame: bytes) -> None:
-        await self._send_all(station_id, lambda ws: asyncio.wait_for(ws.send_bytes(frame), 2.0))
+        """A frame of the host's microphone: mix in the callers on air and send it on."""
+        lines = self.station_callers(station_id)
+        if not lines:
+            await self._send_all(station_id, lambda ws: asyncio.wait_for(ws.send_bytes(frame), 2.0))
+            return
+        host = np.frombuffer(frame[: len(frame) // 2 * 2], dtype="<i2").astype(np.int32)
+        parts = {c.call_id: c.take(len(host)) for c in lines}
+        callers_sum = np.zeros(len(host), dtype=np.int32)
+        for part in parts.values():
+            callers_sum += part
+        mixed = _pcm(host + callers_sum)
+        sends = [self._send_all(station_id, lambda ws: asyncio.wait_for(ws.send_bytes(mixed), 2.0))]
+        host_ws = self.hosts.get(station_id)
+        if host_ws is not None and any(c.on_air for c in lines):
+            sends.append(self._send_quiet(host_ws, _pcm(callers_sum)))
+        for c in lines:
+            sends.append(self._send_quiet(c.ws, _pcm(host + callers_sum - parts[c.call_id])))
+        await asyncio.gather(*sends)
+
+    @staticmethod
+    async def _send_quiet(ws: WebSocket, data: bytes | str) -> None:
+        try:
+            if isinstance(data, str):
+                await asyncio.wait_for(ws.send_text(data), 2.0)
+            else:
+                await asyncio.wait_for(ws.send_bytes(data), 2.0)
+        except Exception:
+            pass  # its own socket handler notices the close
+
+    async def caller_status(self, call_id: str, status: str) -> None:
+        """The screener moved a web caller: mix them in (on air) or not, and tell them."""
+        line = self.callers.get(call_id)
+        if line is None:
+            return
+        line.on_air = status == "on_air"
+        if not line.on_air:
+            line.buf = np.zeros(0, dtype=np.int16)
+            line.primed = False
+        await self._send_quiet(line.ws, json.dumps({"type": "call_status", "status": status}))
+        if status in ("rejected", "completed"):
+            try:
+                await line.ws.close(code=1000)
+            except Exception:
+                pass
 
 
 live_relay = StationLiveRelay()
@@ -328,6 +422,7 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         await broadcast_show_event(show_id, "show_started", {"show_id": show_id})
 
     audio_manager.active_connections[show_id] = websocket
+    live_relay.hosts[station_id] = websocket  # hears the callers on air
     logger.info("Audio WS authed for show %s user %s (station %s)", show_id, user.id, station_id)
     await live_relay.set_on_air(station_id, show_id)
 
@@ -349,8 +444,75 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         logger.error("Audio WS error for show %s: %s", show_id, e)
     finally:
         audio_manager.disconnect(show_id)
+        if live_relay.hosts.get(station_id) is websocket:
+            live_relay.hosts.pop(station_id, None)
         if live_relay.on_air.get(station_id) == show_id:
             await live_relay.set_on_air(station_id, None)
+
+
+@router.websocket("/ws/live/call/{call_id}")
+async def websocket_web_caller(websocket: WebSocket, call_id: str):
+    """A web caller (public page): first message {"type":"auth","token":...} with the
+    token the call-in request returned, then the caller's microphone as PCM frames.
+    The caller hears the show here; their audio reaches listeners only while on air."""
+    from app.services.call_in import call_token_ok, caller_left
+
+    await websocket.accept()
+    try:
+        msg = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=15.0))
+    except Exception:
+        await websocket.close(code=4001)
+        return
+    if msg.get("type") != "auth" or not call_token_ok(call_id, str(msg.get("token", ""))):
+        await websocket.close(code=4001)
+        return
+
+    from app.models.call_in_request import CallInRequest, CallStatus
+    from app.models.live_show import LiveShow
+    line = None
+    status = None
+    try:
+        async for db in get_async_session():
+            call = await db.get(CallInRequest, uuid.UUID(call_id))
+            show = await db.get(LiveShow, call.live_show_id) if call else None
+            if call is not None and show is not None:
+                line = CallerLine(websocket, call_id, str(show.id), str(show.station_id))
+                status = call.status.value if hasattr(call.status, "value") else str(call.status)
+                line.on_air = status == CallStatus.ON_AIR.value
+            break
+    except Exception as e:
+        logger.error("Caller WS: could not load call %s: %s", call_id, e)
+    if line is None or status in ("rejected", "completed", "abandoned"):
+        await websocket.close(code=4004)
+        return
+
+    old = live_relay.callers.get(call_id)
+    live_relay.callers[call_id] = line  # a reconnect replaces the earlier socket
+    if old is not None:
+        try:
+            await old.ws.close(code=1000)
+        except Exception:
+            pass
+    logger.info("Web caller %s connected (show %s)", call_id, line.show_id)
+    try:
+        await websocket.send_text(json.dumps({
+            "type": "call_status", "status": status, "sample_rate": LIVE_SAMPLE_RATE,
+        }))
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            if data:
+                line.add(data)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Caller WS %s ended: %s", call_id, e)
+    finally:
+        if live_relay.callers.get(call_id) is line:
+            live_relay.callers.pop(call_id, None)
+            await caller_left(call_id, line.show_id)
 
 
 # --- Broadcast helpers ---

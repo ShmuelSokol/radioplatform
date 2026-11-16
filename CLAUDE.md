@@ -168,6 +168,7 @@ radioplatform/
 | archives | archives.py | /archives |
 | playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
+| call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
 | weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); ElevenLabs is only the fallback |
 
@@ -209,6 +210,7 @@ radioplatform/
 | last_played.py | When each item last aired per station, kept in memory: one full read per station per process (and hourly), then only new plays are fetched. Used by playlist and program-block rotation and `GET /queue/last-played` |
 | long_items.py | What a hard timed item does to a shiur or story on air: station `automation_config.timed_during_long_items` = pause (default; it resumes where it stopped), wait or cut (see `wiki/hourly-slots.md`) |
 | tail_analysis.py | Song end and crossfade point from HTTP range reads (MP3 header + last 20 s), so re-analysis does not download whole files |
+| call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
@@ -249,6 +251,7 @@ radioplatform/
 - ProgramGuide.tsx — Public EPG with station/date picker and timeline
 - Hosts.tsx — Public DJ/host profile cards
 - Archives.tsx — Public show archive browser with playback
+- CallIn.tsx — Call the live show from the browser: name and topic, mic, hear the show while waiting, on-air status, Hang up
 
 **Sponsor Portal** (`frontend/src/pages/sponsor/`):
 - Login.tsx — Sponsor login (separate from admin, indigo-themed)
@@ -279,7 +282,7 @@ radioplatform/
 | useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
 | useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
 | useLiveShowWS.ts | Live show WebSocket (real-time callers, countdown, with polling fallback) |
-| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter |
+| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter; plays the callers on air sent back by the server |
 | useLiveAudio.ts | Plays a station's live show (host mic relayed by the server) and tells the page to silence the music meanwhile |
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |
@@ -319,6 +322,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/guide` → ProgramGuide
 - `/hosts` → Hosts
 - `/archives` → Archives
+- `/call/:stationId` → CallIn
 - `/sponsor/login` → SponsorLogin
 - `/sponsor/dashboard` → SponsorDashboard (sponsor-protected, SponsorLayout)
 - `/sponsor/campaigns` → SponsorCampaigns (sponsor-protected)

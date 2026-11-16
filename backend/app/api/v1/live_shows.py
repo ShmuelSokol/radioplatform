@@ -165,6 +165,15 @@ async def time_remaining(
 
 # --- Call management ---
 
+async def _tell_web_caller(call_id, status: str) -> None:
+    """A web caller's page and audio follow the screener (on air = mixed in)."""
+    try:
+        from app.api.v1.live_shows_ws import live_relay
+        await live_relay.caller_status(str(call_id), status)
+    except Exception as e:
+        logger.warning("Could not update web caller %s: %s", call_id, e)
+
+
 @router.get("/{show_id}/calls", response_model=CallInRequestListResponse)
 async def list_calls(
     show_id: uuid.UUID,
@@ -187,6 +196,7 @@ async def approve_call(
     call = await live_show_service.approve_call(db, call_id, screened_by=user.id)
     if not call:
         raise NotFoundError("Call not found")
+    await _tell_web_caller(call_id, "approved")
 
     try:
         from app.api.v1.live_shows_ws import broadcast_show_event
@@ -210,6 +220,7 @@ async def reject_call(
     call = await live_show_service.reject_call(db, call_id, screened_by=user.id)
     if not call:
         raise NotFoundError("Call not found")
+    await _tell_web_caller(call_id, "rejected")
 
     try:
         from app.api.v1.live_shows_ws import broadcast_show_event
@@ -233,6 +244,7 @@ async def put_on_air(
     call = await live_show_service.put_caller_on_air(db, show_id, call_id)
     if not call:
         raise NotFoundError("Call not found")
+    await _tell_web_caller(call_id, "on_air")
 
     try:
         from app.api.v1.live_shows_ws import broadcast_show_event
@@ -256,6 +268,7 @@ async def end_active_call(
     call = await live_show_service.end_call(db, call_id)
     if not call:
         raise NotFoundError("Call not found")
+    await _tell_web_caller(call_id, "completed")
 
     try:
         from app.api.v1.live_shows_ws import broadcast_show_event

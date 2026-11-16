@@ -17,6 +17,7 @@ import SponsorLogin from './pages/sponsor/Login';
 // Public pages (lazy-loaded)
 const StationList = lazy(() => import('./pages/public/StationList'));
 const Listen = lazy(() => import('./pages/public/Listen'));
+const CallIn = lazy(() => import('./pages/public/CallIn'));
 
 // Admin pages (lazy-loaded - code split)
 const Dashboard = lazy(() => import('./pages/admin/Dashboard'));
@@ -141,6 +142,7 @@ export default function App() {
               <Route path="/" element={<Navigate to="/stations" replace />} />
               <Route path="/stations" element={<StationList />} />
               <Route path="/listen/:stationId" element={<Listen />} />
+              <Route path="/call/:stationId" element={<CallIn />} />
               <Route path="/guide" element={<ProgramGuide />} />
               <Route path="/hosts" element={<Hosts />} />
               <Route path="/archives" element={<Archives />} />
