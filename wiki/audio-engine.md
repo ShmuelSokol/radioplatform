@@ -78,3 +78,11 @@ replace the decks with empty ones) and, still inside the click, starts the on-ai
 live position and starts-then-pauses the idle deck so it may play later. If the deck is still
 paused after the click, `listenTick` brings the item on air up again. Checked by
 `e2e/audio-engine.mjs listen-mid-item`, which acts out Safari's rules in Chromium.
+
+## Hard timed items are loaded ahead (2026-11-16)
+
+The idle deck normally holds the next track. When a hard timed item (program block, hard
+sponsorship) is due before the song on air ends, it is loaded on the idle deck 60 s ahead
+(`TIMED_PRELOAD_AHEAD_MS`) instead, so the change at its time is instant. A cold load there
+left about half a second of silence in the control room. Scenario
+`hard-timed-item-has-no-hole` in `e2e/audio-engine.mjs`.
