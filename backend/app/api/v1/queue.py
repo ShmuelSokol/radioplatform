@@ -940,8 +940,9 @@ async def get_queue(
         return Response(json.dumps(body, default=_json_default), media_type="application/json")
     except Exception as exc:
         logger.exception("Queue GET error for station %s: %s", station_id, exc)
-        return {"entries": [], "total": 0, "now_playing": None,
-                "queue_duration_seconds": 0, "preempt_fade_ms": 2000}
+        # Never answer a failed read with an empty queue: the control room would
+        # show the station as stopped with nothing queued while it is playing.
+        return JSONResponse(status_code=503, content={"detail": "The queue could not be read. Try again."})
 
 
 def _json_default(value):
