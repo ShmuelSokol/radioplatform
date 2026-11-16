@@ -170,7 +170,7 @@ the deploy failed its health check (so that release never went live). Now:
 `_run_migrations` in `backend/app/main.py` reads `information_schema.columns` and
 `pg_indexes` once and does not send statements whose column or index already exists
 (`migrations_to_run`), and every statement it does send runs with
-`SET LOCAL lock_timeout = '3s'` (the enum connection uses the same timeout), so a busy
+`SET LOCAL lock_timeout = '1s'` (the enum connection uses the same timeout), so a busy
 table means a logged "Migration skipped", never a frozen station. `analyze_audio`
 commits its read before the range reads and FFmpeg and re-reads the row to write the
 result, so no transaction is open during the slow part. When adding a migration, keep
@@ -182,4 +182,10 @@ start as detached tasks (`_run_detached` in `api/v1/assets.py`) after a commit, 
 scheduler opens a fresh session per pass (`async with async_session_factory()`, never
 `async for db in get_db(): ... break`, which leaves the session open until garbage
 collection). Do not use BackgroundTasks for anything long.
+The first deploy with this (6092aa1, 10:02Z) still showed queries on assets and
+play_logs taking about 15 s. The three statements that ran then (the holiday reason
+UPDATE, `ALTER TYPE user_role ADD VALUE 'dj'` and `CREATE TABLE IF NOT EXISTS
+audit_logs`) take no lock on either table, so that stall has another cause, not yet
+found (candidates: two containers' pools overlapping on the Supabase pooler, or the
+startup tasks). Existing tables are now skipped too and the timeout is 1 s.
 Test: `backend/tests/test_safe_migrations.py`.
