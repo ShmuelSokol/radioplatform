@@ -1,6 +1,8 @@
 import { Component, type ReactNode } from 'react';
 import { reloadForStaleCode } from '../lib/appUpdate';
 
+const STALE_RELOAD_DELAY_MS = 300;
+
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
@@ -30,7 +32,9 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('ErrorBoundary caught:', error, errorInfo.componentStack);
-    if (isStaleCodeError(error)) reloadForStaleCode();
+    // Wait for the screen being left (often Listen) to finish unmounting: its player
+    // stops and lets updates go in effect cleanups that run after this commit.
+    if (isStaleCodeError(error)) setTimeout(() => reloadForStaleCode(), STALE_RELOAD_DELAY_MS);
   }
 
   componentDidUpdate(prev: Props) {
