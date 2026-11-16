@@ -5,6 +5,7 @@ import { useStations } from '../../hooks/useStations';
 import {
   useQueue, useLastPlayed, useSkipCurrent, useRemoveFromQueue, useStartPlayback,
   useMoveUp, useMoveDown, useWeatherPreview, useReorderDnd,
+  QUEUE_ALL_ROWS, QUEUE_FIRST_ROWS,
 } from '../../hooks/useQueue';
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
@@ -73,7 +74,12 @@ export default function Dashboard() {
   const stationTz = station?.timezone && isValidTz(station.timezone) ? station.timezone : undefined;
 
   // ── Server state ───────────────────────────────────────────
-  const { data: queueData, isError: queueFailed } = useQueue(stationId);
+  // Load a few hours of the queue; the rest only when asked for (scroll to the end, pick a day)
+  const [queueAllFor, setQueueAllFor] = useState<string | null>(null);
+  const queueAll = !!stationId && queueAllFor === stationId;
+  const { data: queueData, isError: queueFailed } = useQueue(stationId, queueAll ? QUEUE_ALL_ROWS : QUEUE_FIRST_ROWS);
+  const loadWholeQueue = useCallback(() => { if (stationId) setQueueAllFor(stationId); }, [stationId]);
+  const loadFirstHours = useCallback(() => setQueueAllFor(null), []);
   const { nowPlaying: wsNowPlaying } = useNowPlayingWS(stationId ?? '');
   const { data: lastPlayedMap } = useLastPlayed(stationId);
   const { data: liveData } = useLiveShows(stationId ? { station_id: stationId } : undefined);
@@ -107,6 +113,7 @@ export default function Dashboard() {
   const [fireMode, setFireMode] = useStored<FireMode>('kbr_ctl_fire_mode', 'now');
   const [insertBeforeId, setInsertBeforeId] = useState<string | null>(null);
   const [queueDateFilter, setQueueDateFilter] = useState('');
+  useEffect(() => { if (queueDateFilter) loadWholeQueue(); }, [queueDateFilter, loadWholeQueue]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -491,6 +498,8 @@ export default function Dashboard() {
       dates={queueDates}
       dateFilter={queueDateFilter}
       onDateFilter={setQueueDateFilter}
+      onNeedAll={loadWholeQueue}
+      onAtTop={loadFirstHours}
       stationTz={stationTz}
       insertBeforeId={insertBeforeId}
       onArmInsert={armInsert}

@@ -41,7 +41,7 @@ function makeBackend(queueSize = 60) {
   let loopId = null;
   const pending = () => queue.filter(e => e.status === 'pending').sort((a, b) => a.position - b.position);
   const playing = () => queue.find(e => e.status === 'playing');
-  const view = () => {
+  const view = (limit = Infinity) => {
     const list = [playing(), ...pending()].filter(Boolean);
     let cursor = Date.now();
     const entries = list.map(e => {
@@ -51,7 +51,7 @@ function makeBackend(queueSize = 60) {
       return { id: e.id, station_id: SID, asset_id: e.asset_id, position: e.position, status: e.status, estimated_start: est, source: 'manual', preempt_at: null, asset: { id: a.id, title: a.title, artist: a.artist, duration: a.duration, asset_type: a.asset_type, category: a.category, intro_seconds: a.intro_seconds ?? null } };
     });
     const p = entries.find(e => e.status === 'playing');
-    return { loop_asset_id: loopId, entries, total: entries.length, total_all: entries.length, now_playing: p ? { ...p, started_at: playing().started_at } : null, queue_duration_seconds: 9000, total_queue_duration_seconds: 9000, preempt_fade_ms: 2000 };
+    return { loop_asset_id: loopId, entries: entries.slice(0, limit), total: Math.min(limit, entries.length), total_all: entries.length, now_playing: p ? { ...p, started_at: playing().started_at } : null, queue_duration_seconds: 9000, total_queue_duration_seconds: 9000, preempt_fade_ms: 2000 };
   };
   const handle = (method, path, query, body) => {
     calls.push({ method, path, query, body });
@@ -73,7 +73,7 @@ function makeBackend(queueSize = 60) {
       return { assets: list.slice(skip, skip + limit), total: list.length };
     }
     if (path.startsWith('/stations/st-2/')) return path.endsWith('/queue') ? { entries: [], total: 0, total_all: 0, now_playing: null, queue_duration_seconds: 0 } : {};
-    if (path === q && method === 'GET') return view();
+    if (path === q && method === 'GET') return view(+(query.limit || Infinity));
     if (path === `${q}/log`) return { logs: [{ id: 'l1', start_utc: new Date(Date.now() - 300e3).toISOString(), title: 'Earlier song', artist: 'Artist 2', asset_type: 'music', source: 'auto' }] };
     if (path === `${q}/last-played`) return { last_played: {} };
     if (path === `${q}/add`) {
@@ -429,6 +429,13 @@ async function longQueue(browser, contextOpts, tag, rowH) {
   if (tag.startsWith('phone')) await page.getByRole('button', { name: 'Queue', exact: true }).tap().catch(() => {});
   const scroller = page.getByTestId('queue-scroll');
   const rows = () => page.getByTestId('queue-row').count();
+  // Only the first hours come with each poll; the rest when the operator scrolls to the end.
+  const queueGets = () => backend.calls.filter(c => c.method === 'GET' && c.path.endsWith('/queue')).map(c => +c.query.limit);
+  check(`${tag}: long queue polls only the first rows`, queueGets().length > 0 && queueGets().every(l => l <= 200), `${queueGets()}`);
+  await scroller.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await page.waitForFunction(n => document.querySelector('[data-testid=queue-scroll]').scrollHeight >= n, N * rowH, { timeout: 5000 }).catch(() => {});
+  check(`${tag}: scrolling to the end loads the rest`, queueGets().some(l => l >= N), `${queueGets()}`);
+  await page.waitForTimeout(150);
   const drawn = await rows();
   check(`${tag}: long queue draws only the rows near the screen`, drawn > 5 && drawn < 120, `${drawn} of ${N}`);
   const h = await scroller.evaluate(el => el.scrollHeight);
