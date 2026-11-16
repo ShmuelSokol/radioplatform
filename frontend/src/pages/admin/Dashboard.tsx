@@ -27,6 +27,7 @@ import { usePfl } from './controlroom/pfl';
 import { LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
+import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
 
 type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule';
 type SideTab = 'library' | 'live' | 'log' | 'schedule';
@@ -232,7 +233,7 @@ export default function Dashboard() {
     return () => audio.removeEventListener('error', onError);
   }, [dashUseStream]);
 
-  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio: engineInit, releaseAudio, playNextNow } = useAudioEngine(
+  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, soundRunning, initAudio: engineInit, releaseAudio, playNextNow } = useAudioEngine(
     dashUseStream || !musicAllowed ? null : audioAsset, realElapsed, dashUseStream || !musicAllowed ? false : isPlaying,
     nextPreempt?.preempt_at ?? null,
     nextPreempt?.asset_id ?? null,
@@ -285,6 +286,8 @@ export default function Dashboard() {
     unlockLive();
     await engineInit();
   }, [engineInit, unlockLive]);
+  // An admin-pushed release reloaded this control room while it played: sound back on
+  const resume = useResumeAfterRelease(takeSound, dashUseStream ? true : soundRunning);
   const initAudio = useCallback(async () => {
     if (soundElsewhere.current) return;
     await takeSound();
@@ -646,6 +649,7 @@ export default function Dashboard() {
 
   return (
     <div className="qn h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
+      {resume.asking && <ResumePrompt onTap={resume.tap} />}
       <audio ref={dashStreamAudioRef} className="hidden" />
 
       {toast && (
