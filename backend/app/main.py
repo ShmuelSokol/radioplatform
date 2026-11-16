@@ -466,7 +466,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Studio Kol Bramah API",
+        title="Studio Kol B'ramah API",
         version="0.1.0",
         description="Multi-channel radio streaming platform",
         debug=settings.APP_DEBUG,

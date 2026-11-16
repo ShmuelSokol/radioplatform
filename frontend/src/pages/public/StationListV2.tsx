@@ -8,7 +8,7 @@ export default function StationListV2() {
     <div className="py-4">
       <div className="mb-10 text-center">
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-violet-200 via-white to-fuchsia-200 bg-clip-text text-transparent">
-          Kol Bramah Radio
+          Kol B'ramah Radio
         </h1>
         <p className="mt-3 text-gray-400 text-lg">Live Jewish music, Torah &amp; community — around the clock</p>
       </div>

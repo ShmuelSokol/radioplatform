@@ -52,7 +52,7 @@ Purpose: {purpose}
 The email should be:
 - Professional but friendly
 - Concise (2-3 short paragraphs max)
-- From "Kol Bramah Radio" station
+- From "Kol B'ramah Radio" station
 - Include specific data if provided
 - End with a clear call to action
 
@@ -76,10 +76,10 @@ def _fallback_draft(context: dict) -> str:
     purpose = context.get("purpose", "general")
 
     templates = {
-        "welcome": f"Welcome to Kol Bramah Radio! We're excited to have {name} as a sponsor. Your ad will reach our dedicated listeners across multiple stations. We look forward to a successful partnership.",
-        "renewal": "We hope you've been pleased with the results of your sponsorship with Kol Bramah Radio. We'd love to continue our partnership. Please let us know if you'd like to renew your campaign.",
-        "follow_up": f"Just following up on your recent campaign with Kol Bramah Radio. We'd love to hear your feedback and discuss how we can continue to help {name} reach your audience.",
-        "general": f"Thank you for your continued partnership with Kol Bramah Radio. We value {name} as a sponsor and are always looking for ways to deliver the best results for your campaigns.",
+        "welcome": f"Welcome to Kol B'ramah Radio! We're excited to have {name} as a sponsor. Your ad will reach our dedicated listeners across multiple stations. We look forward to a successful partnership.",
+        "renewal": "We hope you've been pleased with the results of your sponsorship with Kol B'ramah Radio. We'd love to continue our partnership. Please let us know if you'd like to renew your campaign.",
+        "follow_up": f"Just following up on your recent campaign with Kol B'ramah Radio. We'd love to hear your feedback and discuss how we can continue to help {name} reach your audience.",
+        "general": f"Thank you for your continued partnership with Kol B'ramah Radio. We value {name} as a sponsor and are always looking for ways to deliver the best results for your campaigns.",
     }
 
     return templates.get(purpose, templates["general"])

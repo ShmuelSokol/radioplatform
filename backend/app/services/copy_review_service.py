@@ -1,7 +1,7 @@
 """
 Sponsorship copy review.
 
-Kol Berama is a low-power station: it may air sponsorship announcements, not
+Kol B'ramah is a low-power station: it may air sponsorship announcements, not
 advertisements. A sponsor proposes wording; this service checks it against the
 station's rules and explains what has to change and why, with a compliant
 rewrite. The rules are data (the sponsorship_rules table), editable by managers
@@ -30,12 +30,12 @@ MAX_SPOT_SECONDS = 45
 # Starting rules, as dictated by the station owner on 2026-11-15. Used until a
 # manager saves an edited version in the admin site.
 DEFAULT_RULES = """\
-Kol Berama is a low-power (LP) radio station. It is not allowed to air \
+Kol B'ramah is a low-power (LP) radio station. It is not allowed to air \
 advertisements. It may air sponsorship announcements, which inform the public \
 about a sponsor.
 
 1. Identify the business as a sponsor of the station, in the form \
-"Kol Berama sponsor <business name>".
+"Kol B'ramah sponsor <business name>".
 2. The announcement may give information about the sponsor: what they offer \
 (for example catering for birthdays and events), where they are, when they \
 are open or available, and news such as a recent grand opening.
@@ -172,7 +172,7 @@ def basic_review(script_text: str, sponsor_name: str | None) -> dict:
             {
                 "quote": script_text.strip()[:60],
                 "problem": "The announcement does not identify the business as a sponsor.",
-                "suggestion": 'Open with "Kol Berama sponsor '
+                "suggestion": "Open with \"Kol B'ramah sponsor "
                 + (sponsor_name or "<business name>")
                 + '".',
             }
