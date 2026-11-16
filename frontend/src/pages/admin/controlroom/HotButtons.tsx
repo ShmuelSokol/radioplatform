@@ -91,7 +91,7 @@ function HotButtons(p: Props) {
     setPflOn(v => !v);
   };
   const { data: jingleData } = useAssets({ asset_type: 'jingle', skip: 0, limit: 60, hide_generated: true });
-  const { data: spotData } = useAssets({ asset_type: 'spot', skip: 0, limit: 60 });
+  const { data: spotData } = useAssets({ asset_type: 'spot', skip: 0, limit: 60, hide_generated: true });
   const pinnedIds = new Set(p.pins.map(x => x.id));
   const jingles = (jingleData?.assets ?? []).filter(a => !pinnedIds.has(a.id));
   const spots = (spotData?.assets ?? []).filter(a => !pinnedIds.has(a.id));
