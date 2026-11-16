@@ -93,3 +93,18 @@ On KBR Jerusalem the hard :00 time check cut a shiur 14 minutes in and the rest 
 Also fixed then: the weather (same `preempt_at`, hard) used to cut the time check that had just started; `_same_timed_group` lets the group play in order. Due soft items with the same time now go by position (time check before weather).
 
 The engine path (`playout_engine.py` timed commands) does not yet queue a resume itself; do that when the engine is switched on.
+
+## The top-of-hour block plays as one (2026-11-16)
+
+At 1 PM ET on Main a song played for 1.1 s between the time check and the weather, and
+the time check played twice. Two causes:
+- The weather is due at the same moment as the time check but is queued at the end of
+  the queue. When the time check ended, the next pick went by position and started a
+  song; the weather then cut it. Now any timed item whose time has come (hard or soft)
+  is picked first, ordered by time then position (`_pick_next_pending` and its in-memory
+  twin `_next_due`, which also gained the early-start step), so Up next shows the weather
+  while the time check plays.
+- Two refills raced and queued the 13:00 time check twice. When a timed item starts,
+  `_drop_timed_twins` marks any pending copy (same item, same time) "skipped".
+The control room marks timed items due at the same moment with a cyan bar and a
+"BLOCK · N ITEMS" tag on the first. Test: `backend/tests/test_top_of_hour_block.py`.

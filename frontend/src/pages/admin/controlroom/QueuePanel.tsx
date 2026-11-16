@@ -102,6 +102,7 @@ function QueuePanel(p: Props) {
   const n = p.entries.length;
   const start = Math.max(0, Math.min(firstRow - OVERSCAN, n));
   const end = Math.min(n, firstRow + Math.ceil(viewH / rowH) + STEP + OVERSCAN);
+  const shownFrom = start;
   const shown = p.entries.slice(start, end);
   // The insert marker and the action bar add height to one row each.
   const armedIdx = p.insertBeforeId ? p.entries.findIndex(e => e.id === p.insertBeforeId) : -1;
@@ -158,7 +159,18 @@ function QueuePanel(p: Props) {
         )}
 
         {padTop > 0 && <div style={{ height: padTop }} aria-hidden="true" />}
-        {shown.map((entry) => {
+        {shown.map((entry, i) => {
+          // Timed items due at the same moment (time check, weather, sponsors) are
+          // one block: they play straight after each other, nothing in between
+          const idx = shownFrom + i;
+          const prevE = p.entries[idx - 1];
+          const nextE = p.entries[idx + 1];
+          const sameBlock = (o?: typeof entry) => !!(o && entry.preempt_at && o.preempt_at === entry.preempt_at);
+          const inBlock = sameBlock(prevE) || sameBlock(nextE);
+          const blockFirst = inBlock && !sameBlock(prevE);
+          const blockSize = blockFirst
+            ? p.entries.slice(idx).findIndex((o) => o.preempt_at !== entry.preempt_at)
+            : 0;
           const a = entry.asset;
           const isCur = entry.status === 'playing';
           const isSel = selectedId === entry.id;
@@ -175,6 +187,7 @@ function QueuePanel(p: Props) {
           if (isCur) tone = 'qn-row-cur';
           else if (entry.preempt_at || entry.source === 'ad_slot' || entry.source === 'block') tone = 'qn-row qn-row-timed';
           if (isSel && !isCur) tone += ' qn-row-sel';
+          if (inBlock) tone += ' qn-row-block';
 
           return (
             <div key={entry.id} data-testid="queue-row" data-entry-id={entry.id}>
@@ -244,6 +257,13 @@ function QueuePanel(p: Props) {
                     {entry.preempt_at && (
                       <span className="ml-2 align-middle text-[11px]" title="Plays at this exact time">
                         ⏰ {clockTime(entry.preempt_at, p.stationTz)}
+                      </span>
+                    )}
+                    {blockFirst && (
+                      <span className="ml-2 align-middle text-[10px] bg-[#00ffff] text-black px-1 py-px font-bold"
+                        data-testid="block-badge"
+                        title="These items play one after another as a block">
+                        BLOCK · {blockSize > 0 ? blockSize : p.entries.length - idx} ITEMS
                       </span>
                     )}
                   </span>
