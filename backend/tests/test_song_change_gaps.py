@@ -100,3 +100,74 @@ async def test_upcoming_items_are_queued_once(monkeypatch):
         upcoming_analysis.request(done)
     await upcoming_analysis._worker
     assert ran == [str(fresh.id)]
+
+
+def _range_server(data: bytes, served: list):
+    import httpx
+
+    def handler(request):
+        rng = request.headers.get("range")
+        if not rng:
+            served.append(len(data))
+            return httpx.Response(200, content=data, headers={"content-length": str(len(data))})
+        start, end = rng.split("=")[1].split("-")
+        start, end = int(start), min(int(end), len(data) - 1)
+        body = data[start:end + 1]
+        served.append(len(body))
+        return httpx.Response(206, content=body, headers={
+            "content-range": f"bytes {start}-{end}/{len(data)}", "content-length": str(len(body))})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def _with_big_cover(mp3: bytes) -> bytes:
+    import tempfile
+
+    from mutagen.id3 import APIC, ID3
+    with tempfile.NamedTemporaryFile(suffix=".mp3") as f:
+        f.write(mp3)
+        f.flush()
+        tags = ID3()
+        tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="cover", data=b"\xff" * 300_000))
+        tags.save(f.name)
+        return open(f.name, "rb").read()
+
+
+@needs_ffmpeg
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cover", [False, True])
+async def test_end_found_from_a_few_ranges(cover):
+    """Version-2 points without downloading the file: header, last seconds, start."""
+    from app.services.tail_analysis import analyze_by_range
+
+    song = _song_mp3(60, 3)  # 67 s: fade 60-64, silent 64-67
+    if cover:
+        song = _with_big_cover(song)
+    served = []
+    async with _range_server(song, served) as client:
+        a = await analyze_by_range("https://cdn.example.com/s.mp3",
+                                   {"cue_in_seconds": 0.0, "loudness_lufs": -15.0, "replay_gain_db": -3.0},
+                                   client=client)
+    assert a["version"] == ANALYSIS_VERSION
+    assert 66 < a["duration"] < 68
+    assert 62 < a["cue_out_seconds"] < 64.5
+    assert a["cross_start_seconds"] == pytest.approx(a["cue_out_seconds"] - 3, abs=0.01)
+    # stored loudness kept; only a small part of the file read
+    assert a["replay_gain_db"] == -3.0 and a["loudness_lufs"] == -15.0
+    assert sum(served) < 0.5 * len(song)
+
+
+@needs_ffmpeg
+@pytest.mark.asyncio
+async def test_start_cue_measured_when_none_stored():
+    from app.services.tail_analysis import analyze_by_range
+
+    lead = subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+         "anullsrc=r=44100:cl=mono:d=1.5", "-f", "lavfi", "-i", "anoisesrc=c=pink:a=0.3:d=40",
+         "-filter_complex", "[0][1]concat=n=2:v=0:a=1", "-b:a", "128k", "-f", "mp3", "pipe:1"],
+        capture_output=True, check=True).stdout
+    async with _range_server(lead, []) as client:
+        a = await analyze_by_range("https://cdn.example.com/s.mp3", None, client=client)
+    assert 1.2 < a["cue_in_seconds"] < 1.8
+    assert a["replay_gain_db"] == 0.0

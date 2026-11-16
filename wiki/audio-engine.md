@@ -109,8 +109,13 @@ The Mac's listener heard 2 to 3 s of near silence at song changes. Causes on our
   cue and loudness from older ones, and every reader of `audio_analysis` goes through it.
 - Most of the library has no analysis, so the hand-over came 3 s before the stored end,
   over the song's quiet tail. `services/upcoming_analysis.py` analyses the item on air
-  and the next one in the background (one at a time, off the event loop) when the
-  analysis is missing or old. `POST /assets/bulk-analyze` also redoes old analyses.
+  and the next one in the background (one at a time) when the analysis is missing or
+  old. Re-analysis reads only parts of the file (`services/tail_analysis.py`): the MP3
+  header (length from it and the file size), the last 20 s, and the first 8 s only when
+  no start cue is stored; stored loudness is kept. About 0.5 MB a song instead of the
+  whole file: downloading all ~10,600 items would have been ~100 GB of storage egress.
+  `POST /assets/bulk-analyze?asset_types=music&limit=N` uses the same path (music only by
+  default). Only the upload path and the single-item `analyze-audio` route read whole files.
 - The player faded the incoming song in over 3 s. Now it comes up in 0.4 s
   (`CROSSFADE_FADE_IN`); only the outgoing song fades over 3 s.
 - The player hands over at `handOverPoint()`: the crossfade point, but never later than
