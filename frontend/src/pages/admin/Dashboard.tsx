@@ -47,6 +47,9 @@ const MOBILE_TABS: Array<{ id: Pane; label: string; icon: string }> = [
   { id: 'log', label: 'More', icon: '⋯' },
 ];
 
+// Fade lengths the server uses for each Next button (queue.py SKIP_FADE_SECONDS)
+const SKIP_FADE_SECONDS: Record<SkipFade, number> = { hard: 0, fade: 0.5, soft: 3 };
+
 export default function Dashboard() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -203,7 +206,7 @@ export default function Dashboard() {
     return () => audio.removeEventListener('error', onError);
   }, [dashUseStream]);
 
-  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio: engineInit, releaseAudio } = useAudioEngine(
+  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio: engineInit, releaseAudio, playNextNow } = useAudioEngine(
     dashUseStream ? null : audioAsset, realElapsed, dashUseStream ? false : isPlaying,
     nextPreempt?.preempt_at ?? null,
     nextPreempt?.asset_id ?? null,
@@ -376,10 +379,25 @@ export default function Dashboard() {
     setToast({ text: 'That did not go through. Check the connection and try again.', type: 'error' });
   }, []);
 
+  // Next is heard here at once: the item the server will move to (it says which) is
+  // brought up before the answer arrives; listeners change when the server announces it.
+  const nextNow = useRef({ nextAsset, nextEntryId, serverStartedAt });
+  nextNow.current = { nextAsset, nextEntryId, serverStartedAt };
   const handleNext = useCallback((fade?: SkipFade) => {
     initAudio();
+    const { nextAsset: upNext, nextEntryId: upNextId, serverStartedAt: onAirSince } = nextNow.current;
+    // Right after an automatic change the server keeps the incoming item (it is still
+    // fading in), so nothing is played ahead then.
+    const justChanged = onAirSince ? Date.now() - new Date(onAirSince).getTime() < 4500 : true;
+    if (upNext && upNextId && !justChanged) {
+      playNextNow(
+        { id: upNext.id, title: upNext.title, artist: upNext.artist ?? null, asset_type: upNext.asset_type,
+          category: upNext.category ?? null, duration: upNext.duration ?? null },
+        fade ? SKIP_FADE_SECONDS[fade] : SKIP_FADE_SECONDS.fade,
+      );
+    }
     skipMut.mutate(fade, { onError: onMutError });
-  }, [initAudio, skipMut, onMutError]);
+  }, [initAudio, skipMut, onMutError, playNextNow]);
 
   // Loop: the item on air repeats until Loop is switched off, Next, or a play-now.
   const looping = !!(queueData as { loop_asset_id?: string | null } | undefined)?.loop_asset_id;

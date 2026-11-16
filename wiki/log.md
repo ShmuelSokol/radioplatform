@@ -94,3 +94,4 @@ UPDATE 2026-11-16 audio-engine.md hard timed items preloaded on the idle deck 60
 INGEST 2026-11-16 control-room.md queue polls only the first 150 rows; whole queue on scroll-to-end or day pick, back to 150 at the top
 INGEST 2026-11-16 control-room.md station name is spelled Kol B'ramah in all UI text (Shmuel); TTS keeps the phonetic Kohl Baramah; station/asset names in the database are data, renamed there
 INGEST 2026-11-16 control-room.md one tab holds sound (BroadcastChannel, no auto-start); cart/Library hide dated weather spots; tap targets need real 44px boxes, not ::after
+INGEST 2026-11-16 audio-engine.md control room Next plays the next item locally on click (playNextNow), confirmed or overridden by the server's announcement

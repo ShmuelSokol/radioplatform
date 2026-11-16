@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 # ── Customizable sign-in / sign-out texts ──
 # Only these should be edited for branding. The weather body is automated.
+# How the station's name is written wherever people read it (Library artist, titles).
+# The spoken texts below keep the voice spelling "Kohl Baramah".
+STATION_DISPLAY_NAME = "Kol B'ramah"
+
 WEATHER_SIGN_IN = "Here's your Kohl Baramah weather update."
 WEATHER_SIGN_OUT = (
     "And have a great day, and stay safe, "
@@ -211,7 +215,7 @@ async def store_uploaded_weather_spot(
         asset = Asset(
             id=uuid.uuid4(),
             title=f"Weather Report - {weather_key}",
-            artist="Kohl Baramah",
+            artist=STATION_DISPLAY_NAME,
             file_path=url,
             asset_type="spot",
             category="weather_spot",
@@ -250,7 +254,7 @@ async def store_uploaded_time_clip(
         asset = Asset(
             id=uuid.uuid4(),
             title=f"Time Announcement - {hour:02d}:00",
-            artist="Kohl Baramah",
+            artist=STATION_DISPLAY_NAME,
             file_path=url,
             asset_type="jingle",
             category="time_announcement",
@@ -355,7 +359,7 @@ async def get_or_create_weather_spot_assets(
             time_asset = Asset(
                 id=uuid.uuid4(),
                 title=f"Time Announcement - {slot_key}",
-                artist="Kohl Baramah",
+                artist=STATION_DISPLAY_NAME,
                 duration=time_duration,
                 file_path=time_url,
                 asset_type="jingle",
@@ -385,7 +389,7 @@ async def get_or_create_weather_spot_assets(
             weather_asset = Asset(
                 id=uuid.uuid4(),
                 title=f"Weather Report - {weather_key}",
-                artist="Kohl Baramah",
+                artist=STATION_DISPLAY_NAME,
                 duration=weather_duration,
                 file_path=weather_url,
                 asset_type="spot",
