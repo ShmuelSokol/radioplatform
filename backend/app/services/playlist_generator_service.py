@@ -213,16 +213,34 @@ async def generate(
             at = off.end
             continue
         ranked = svc.rank_matching_blocks(schedules, at, station)
-        if not ranked:
-            note("Some of this time has no schedule block, so nothing is generated for it.")
-            at += SKIP
-            continue
-        _, block = ranked[0]
-        template = block.playlist_template if block.playlist_template_id else None
+        block = ranked[0][1] if ranked else None
+        template = block.playlist_template if block is not None and block.playlist_template_id else None
         slots = list(template.slots) if template and template.is_active else []
         if not slots:
-            note(f'Block "{block.name}" has no playlist sequence, so nothing is generated for it.')
-            at += SKIP
+            # Keep the station on the air: plain music until a block with a playlist starts
+            if block is None:
+                note("Some of this time has no schedule block, so any music plays then.")
+            else:
+                note(f'Block "{block.name}" has no playlist sequence, so any music plays then.')
+            row, relaxed = await library.draw(
+                "music", None, set(recent) if artist_distance else set(), at
+            )
+            if row is None:
+                at += SKIP
+                continue
+            duration = float(row.duration or DEFAULT_DURATION)
+            picks.append(
+                Pick(
+                    at=at, block_id="", block_name=block.name if block is not None else "No block",
+                    asset_type="music", category=None, asset_id=row.id, title=row.title,
+                    artist=row.artist, duration=duration,
+                    artist_rule_relaxed=relaxed and bool(_artist_key(row.artist)),
+                )
+            )
+            artist = _artist_key(row.artist)
+            if artist and artist_distance:
+                recent.append(artist)
+            at += timedelta(seconds=duration)
             continue
 
         key = str(block.id)

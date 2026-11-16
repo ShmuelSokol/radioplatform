@@ -29,6 +29,7 @@ GAP = "gap"  # no block covers this time
 SPOT_UNPLACED = "spot_unplaced"  # a sponsor play has no free slot
 OFF_AIR = "off_air"  # Shabbos / Yom Tov
 BLOCK_ITEM = "block_item"  # a program block has an item with nothing to play
+PLAYS = "plays"  # which block is on the air (one line per run of a block)
 
 
 @dataclass
@@ -76,6 +77,15 @@ async def look_ahead(
         .all()
     )
     blackouts = await load_blackouts(db, station.id, start, end)
+    from app.models.playlist_template import PlaylistTemplate
+
+    template_ids = {b.playlist_template_id for sc in schedules for b in sc.blocks if b.playlist_template_id}
+    playlist_names = {}
+    if template_ids:
+        rows = await db.execute(
+            select(PlaylistTemplate.id, PlaylistTemplate.name).where(PlaylistTemplate.id.in_(template_ids))
+        )
+        playlist_names = {str(r[0]): r[1] for r in rows.all()}
     svc = SchedulingService(db)
 
     findings: list[Finding] = []
@@ -96,13 +106,49 @@ async def look_ahead(
                 stop = b.start
         return stop
 
+    # What is on the air: a run of the same winning block is one line.
+    playing: Finding | None = None
+    playing_id = None
+
+    def close_playing():
+        nonlocal playing, playing_id
+        if playing is not None:
+            findings.append(playing)
+        playing, playing_id = None, None
+
     at = start
     while at < end:
         if any(b.covers(at) for b in blackouts):
             close()
+            close_playing()
             at += STEP
             continue
         everything = svc.rank_matching_blocks(schedules, at, station)
+        top = everything[0] if everything else None
+        if (str(top[1].id) if top else None) != playing_id:
+            close_playing()
+            if top is not None:
+                s, b = top
+                playlist = playlist_names.get(str(b.playlist_template_id))
+                playing_id = str(b.id)
+                playing = Finding(
+                    kind=PLAYS,
+                    start=at,
+                    end=step_end(at),
+                    title=f'"{b.name}"',
+                    detail=(
+                        f'Plays the playlist "{playlist}".'
+                        if playlist
+                        else "Plays its own songs." if b.playlist_template_id is None
+                        else "Plays its playlist."
+                    ),
+                    resolution=f'Schedule "{s.name}".',
+                    needs_attention=False,
+                    blocks=[{"id": str(b.id), "name": b.name, "schedule": s.name,
+                             "schedule_id": str(s.id), "priority": b.priority or 0, "wins": True}],
+                )
+        elif playing is not None:
+            playing.end = step_end(at)
         # A timed block over the running playlist is how the schedule is meant
         # to work, not a collision; only timed blocks can collide with each other.
         ranked = [sb for sb in everything if not getattr(sb[1], "until_next", False)]
@@ -161,6 +207,7 @@ async def look_ahead(
             open_finding.end = step_end(at)
         at += STEP
     close()
+    close_playing()
 
     for b in blackouts:
         findings.append(

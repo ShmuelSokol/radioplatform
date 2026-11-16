@@ -1,6 +1,6 @@
 import apiClient from "./client";
 
-export type FindingKind = "overlap" | "gap" | "spot_unplaced" | "off_air" | "block_item";
+export type FindingKind = "overlap" | "gap" | "spot_unplaced" | "off_air" | "block_item" | "plays";
 
 export interface FindingBlock {
   id: string;

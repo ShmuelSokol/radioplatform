@@ -122,6 +122,22 @@ async def get_epg(
     }
 
 
+async def _queue_follows_schedule(db: AsyncSession, schedule_id, *, had_playlists: bool = False) -> None:
+    """After a schedule or block change, regenerate the songs not yet played (see
+    schedule_refresh_service) so the change is on the air from its start time."""
+    from app.services.schedule_refresh_service import refresh_station, station_of_schedule
+
+    try:
+        station_id = await station_of_schedule(db, schedule_id)
+        if station_id is not None:
+            await refresh_station(db, station_id, had_playlists=had_playlists)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Queue refresh after schedule change failed")
+        await db.rollback()
+
+
 # ==================== Schedules ====================
 @router.post("/", response_model=Schedule, status_code=status.HTTP_201_CREATED)
 async def create_schedule(
@@ -160,7 +176,10 @@ async def create_schedule_block(
     current_user: User = Depends(require_manager),
 ):
     """Create a new schedule block."""
-    block = ScheduleBlockModel(**data.model_dump())
+    values = data.model_dump()
+    if isinstance(values.get("playlist_template_id"), str):
+        values["playlist_template_id"] = UUID(values["playlist_template_id"])
+    block = ScheduleBlockModel(**values)
     db.add(block)
     await db.commit()
     await db.refresh(block)
@@ -173,6 +192,8 @@ async def create_schedule_block(
     except Exception:
         pass  # Don't fail block creation if conflict detection errors
 
+    await _queue_follows_schedule(db, block.schedule_id)
+    await db.refresh(block)
     return block
 
 
@@ -228,7 +249,10 @@ async def update_schedule_block(
     if not block:
         raise HTTPException(status_code=404, detail="Schedule block not found")
 
+    had_playlist = block.playlist_template_id is not None
     for key, value in data.model_dump(exclude_unset=True).items():
+        if key == "playlist_template_id" and isinstance(value, str):
+            value = UUID(value)
         setattr(block, key, value)
 
     await db.commit()
@@ -242,6 +266,8 @@ async def update_schedule_block(
     except Exception:
         pass
 
+    await _queue_follows_schedule(db, block.schedule_id, had_playlists=had_playlist)
+    await db.refresh(block)
     return block
 
 
@@ -258,8 +284,10 @@ async def delete_schedule_block(
     if not block:
         raise HTTPException(status_code=404, detail="Schedule block not found")
 
+    schedule_id, had_playlist = block.schedule_id, block.playlist_template_id is not None
     await db.delete(block)
     await db.commit()
+    await _queue_follows_schedule(db, schedule_id, had_playlists=had_playlist)
 
 
 @router.post("/blocks/{block_id}/set-prerecorded", status_code=200)
@@ -564,10 +592,14 @@ async def update_schedule(
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
+    from app.services.schedule_refresh_service import uses_block_playlists
+
+    had = await uses_block_playlists(db, schedule.station_id)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(schedule, key, value)
 
     await db.commit()
+    await _queue_follows_schedule(db, schedule_id, had_playlists=had)
     await db.refresh(schedule)
     return schedule
 
@@ -585,5 +617,16 @@ async def delete_schedule(
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
+    from app.services.schedule_refresh_service import refresh_station, uses_block_playlists
+
+    station_id = schedule.station_id
+    had = await uses_block_playlists(db, station_id)
     await db.delete(schedule)
     await db.commit()
+    try:
+        await refresh_station(db, station_id, had_playlists=had)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Queue refresh after schedule delete failed")
+        await db.rollback()

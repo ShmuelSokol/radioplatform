@@ -79,7 +79,7 @@ export default function ScheduleCheck() {
       queryClient.invalidateQueries({ queryKey: ["schedule-look-ahead"] }),
   });
 
-  const { attention, resolved, offAir, gaps } = useMemo(() => {
+  const { attention, resolved, offAir, gaps, plays } = useMemo(() => {
     const all = data?.findings ?? [];
     return {
       attention: group(all.filter((f) => f.needs_attention)),
@@ -88,6 +88,7 @@ export default function ScheduleCheck() {
       ),
       offAir: all.filter((f) => f.kind === "off_air"),
       gaps: group(all.filter((f) => f.kind === "gap")),
+      plays: group(all.filter((f) => f.kind === "plays")),
     };
   }, [data]);
 
@@ -240,6 +241,24 @@ export default function ScheduleCheck() {
                   {dayLabel(f.local_end)} {clock(f.local_end)}
                 </div>
               ))}
+            </section>
+          )}
+
+          {!!plays.length && (
+            <section className="space-y-2">
+              <h2 className="font-semibold text-gray-900">What plays</h2>
+              <p className="text-sm text-gray-600">
+                The block on the air at each time. A change you make here
+                takes over at its start time.
+              </p>
+              <ul className="bg-white border rounded-lg p-4 text-sm text-gray-800 space-y-1">
+                {plays.map((g, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{g.first.title.replace(/^"|"$/g, "")}</span>
+                    : {when(g)}. <span className="text-gray-500">{g.first.detail}</span>
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
 
