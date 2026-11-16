@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../../api/client';
 import { useAssets } from '../../hooks/useAssets';
 import type { ScheduleBlock, CreateScheduleBlockData } from '../../hooks/useSchedules';
-import { useCreateScheduleBlock, useDeleteScheduleBlock, useCreatePlaylistEntry, useDeletePlaylistEntry } from '../../hooks/useSchedules';
+import { useCreateScheduleBlock, useUpdateScheduleBlock, useDeleteScheduleBlock, useCreatePlaylistEntry, useDeletePlaylistEntry } from '../../hooks/useSchedules';
 import { usePlaylistTemplates } from '../../hooks/usePlaylists';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
 
@@ -30,13 +30,15 @@ export default function ScheduleBlocks() {
 
   const { data: playlistTemplates } = usePlaylistTemplates();
   const createBlock = useCreateScheduleBlock();
+  const updateBlock = useUpdateScheduleBlock();
   const deleteBlock = useDeleteScheduleBlock();
   const createEntry = useCreatePlaylistEntry();
   const deleteEntry = useDeletePlaylistEntry();
 
   const [showBlockForm, setShowBlockForm] = useState(false);
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [expandedBlock, setExpandedBlock] = useState<string | null>(null);
-  const [blockForm, setBlockForm] = useState<CreateScheduleBlockData>({
+  const emptyBlock = (): CreateScheduleBlockData => ({
     schedule_id: scheduleId || '',
     name: '',
     start_time: '08:00',
@@ -45,6 +47,39 @@ export default function ScheduleBlocks() {
     priority: 0,
     playback_mode: 'sequential',
   });
+  const [blockForm, setBlockForm] = useState<CreateScheduleBlockData>(emptyBlock);
+
+  const closeBlockForm = () => {
+    setShowBlockForm(false);
+    setEditingBlockId(null);
+    setFormError('');
+    setBlockForm(emptyBlock());
+  };
+
+  const startEdit = (block: ScheduleBlock) => {
+    setEditingBlockId(block.id);
+    setFormError('');
+    setBlockForm({
+      schedule_id: block.schedule_id,
+      name: block.name,
+      start_time: block.start_time?.slice(0, 5) || '08:00',
+      end_time: block.end_time?.slice(0, 5) || '12:00',
+      recurrence_type: block.recurrence_type,
+      recurrence_pattern: block.recurrence_pattern || undefined,
+      priority: block.priority,
+      playback_mode: block.playback_mode,
+      start_date: block.start_date ?? null,
+      end_date: block.end_date ?? null,
+      start_sun_event: block.start_sun_event ?? undefined,
+      start_sun_offset: block.start_sun_offset ?? 0,
+      end_sun_event: block.end_sun_event ?? undefined,
+      end_sun_offset: block.end_sun_offset ?? 0,
+      playlist_template_id: block.playlist_template_id ?? null,
+      until_next: !!block.until_next,
+    });
+    setShowBlockForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const [addingEntryTo, setAddingEntryTo] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState('');
@@ -60,19 +95,31 @@ export default function ScheduleBlocks() {
     }
     setFormError('');
     const startOnly = !!blockForm.until_next;
+    const payload = {
+      ...blockForm,
+      schedule_id: scheduleId || '',
+      // days only mean something on a weekly block
+      recurrence_pattern: weekly ? blockForm.recurrence_pattern : undefined,
+      // a start-only block has no end; the server ignores it
+      end_time: startOnly ? blockForm.start_time : blockForm.end_time,
+      // null (not undefined) so an edit clears a sun time that was taken off
+      start_sun_event: blockForm.start_sun_event || null,
+      start_sun_offset: blockForm.start_sun_event ? blockForm.start_sun_offset ?? 0 : null,
+      end_sun_event: startOnly ? null : blockForm.end_sun_event || null,
+      end_sun_offset: startOnly || !blockForm.end_sun_event ? null : blockForm.end_sun_offset ?? 0,
+    };
     try {
-      await createBlock.mutateAsync({
-        ...blockForm,
-        schedule_id: scheduleId || '',
-        // days only mean something on a weekly block
-        recurrence_pattern: weekly ? blockForm.recurrence_pattern : undefined,
-        // a start-only block has no end; the server ignores it
-        end_time: startOnly ? blockForm.start_time : blockForm.end_time,
-        end_sun_event: startOnly ? null : blockForm.end_sun_event,
-        end_sun_offset: startOnly ? null : blockForm.end_sun_offset,
-      });
-      setShowBlockForm(false);
-      setBlockForm({ schedule_id: scheduleId || '', name: '', start_time: '08:00', end_time: '12:00', recurrence_type: 'daily', priority: 0, playback_mode: 'sequential' });
+      if (editingBlockId) {
+        const { schedule_id: _ignored, ...changes } = payload;
+        void _ignored;
+        await updateBlock.mutateAsync({
+          id: editingBlockId,
+          data: { ...changes, recurrence_pattern: weekly ? changes.recurrence_pattern : [] },
+        });
+      } else {
+        await createBlock.mutateAsync(payload);
+      }
+      closeBlockForm();
     } catch (err) {
       console.error('Failed to create block:', err);
       setFormError('Could not save the block. Check the fields and try again.');
@@ -153,17 +200,23 @@ export default function ScheduleBlocks() {
 
   return (
     <div className="w-full">
-      <div className="flex items-center gap-4 mb-6">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
         <button onClick={() => navigate('/admin/schedules')} className="text-blue-600 hover:text-blue-800">&larr; Schedules</button>
-        <h1 className="text-3xl font-bold">{schedule?.name || 'Schedule'} — Blocks</h1>
-        <button onClick={() => setShowBlockForm(!showBlockForm)}
+        <h1 className="text-2xl sm:text-3xl font-bold">{schedule?.name || 'Schedule'}: blocks</h1>
+        <button onClick={() => (showBlockForm ? closeBlockForm() : setShowBlockForm(true))}
           className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
           {showBlockForm ? 'Cancel' : 'New Block'}
         </button>
       </div>
+      <p className="text-sm text-gray-600 mb-4 max-w-3xl">
+        A block says when a playlist plays: which days, and what time it starts. Pick a playlist
+        (a repeating order of song types, made on the Playlists page) and the station keeps playing
+        it until the block ends, or until the next block starts.
+      </p>
 
       {showBlockForm && (
         <form onSubmit={handleCreateBlock} className="bg-white p-6 rounded-lg shadow-md mb-6 space-y-4">
+          <h2 className="text-lg font-semibold">{editingBlockId ? `Edit "${blockForm.name}"` : 'New block'}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Block Name</label>
@@ -172,16 +225,27 @@ export default function ScheduleBlocks() {
                 className="w-full px-3 py-2 border rounded-lg" placeholder="Morning Show" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Recurrence</label>
+              <label className="block text-sm font-medium mb-1">Repeats</label>
               <select value={blockForm.recurrence_type}
                 onChange={e => setBlockForm({ ...blockForm, recurrence_type: e.target.value as any, recurrence_pattern: e.target.value === 'weekly' ? blockForm.recurrence_pattern : undefined })}
                 className="w-full px-3 py-2 border rounded-lg">
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
-                <option value="one_time">One-Time</option>
+                <option value="one_time">One time (dates)</option>
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Playlist</label>
+            <select value={blockForm.playlist_template_id || ''}
+              onChange={e => setBlockForm({ ...blockForm, playlist_template_id: e.target.value || null })}
+              className="w-full px-3 py-2 border rounded-lg">
+              <option value="">None: I'll pick specific songs for this block</option>
+              {playlistTemplates?.map(t => (
+                <option key={t.id} value={t.id}>{t.name} ({t.slots.length} steps)</option>
+              ))}
+            </select>
           </div>
           {blockForm.recurrence_type === 'weekly' && (
             <div>
@@ -245,13 +309,13 @@ export default function ScheduleBlocks() {
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Priority</label>
+              <label className="block text-sm font-medium mb-1" title="When two blocks overlap, the higher number plays">Priority (higher wins)</label>
               <input type="number" value={blockForm.priority} min={0} max={100}
                 onChange={e => setBlockForm({ ...blockForm, priority: parseInt(e.target.value) || 0 })}
                 className="w-full px-3 py-2 border rounded-lg" />
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Playback Mode</label>
+            <div className={blockForm.playlist_template_id ? 'hidden' : ''}>
+              <label className="block text-sm font-medium mb-1">Order of songs</label>
               <select value={blockForm.playback_mode}
                 onChange={e => setBlockForm({ ...blockForm, playback_mode: e.target.value as any })}
                 className="w-full px-3 py-2 border rounded-lg">
@@ -261,20 +325,9 @@ export default function ScheduleBlocks() {
               </select>
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Playlist Template (optional — overrides specific assets)</label>
-            <select value={blockForm.playlist_template_id || ''}
-              onChange={e => setBlockForm({ ...blockForm, playlist_template_id: e.target.value || null })}
-              className="w-full px-3 py-2 border rounded-lg">
-              <option value="">Use specific assets</option>
-              {playlistTemplates?.map(t => (
-                <option key={t.id} value={t.id}>{t.name} ({t.slots.length} slots)</option>
-              ))}
-            </select>
-          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Start Sun Event</label>
+              <label className="block text-sm font-medium mb-1">Or start by the sun</label>
               <select value={blockForm.start_sun_event || ''}
                 onChange={e => setBlockForm({ ...blockForm, start_sun_event: e.target.value as any || undefined })}
                 className="w-full px-3 py-2 border rounded-lg">
@@ -282,13 +335,13 @@ export default function ScheduleBlocks() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Start Offset (min)</label>
+              <label className="block text-sm font-medium mb-1">Minutes after (− before)</label>
               <input type="number" value={blockForm.start_sun_offset || 0}
                 onChange={e => setBlockForm({ ...blockForm, start_sun_offset: parseInt(e.target.value) || 0 })}
                 className="w-full px-3 py-2 border rounded-lg" />
             </div>
             <div className={blockForm.until_next ? 'hidden' : ''}>
-              <label className="block text-sm font-medium mb-1">End Sun Event</label>
+              <label className="block text-sm font-medium mb-1">Or end by the sun</label>
               <select value={blockForm.end_sun_event || ''}
                 onChange={e => setBlockForm({ ...blockForm, end_sun_event: e.target.value as any || undefined })}
                 className="w-full px-3 py-2 border rounded-lg">
@@ -296,7 +349,7 @@ export default function ScheduleBlocks() {
               </select>
             </div>
             <div className={blockForm.until_next ? 'hidden' : ''}>
-              <label className="block text-sm font-medium mb-1">End Offset (min)</label>
+              <label className="block text-sm font-medium mb-1">Minutes after (− before)</label>
               <input type="number" value={blockForm.end_sun_offset || 0}
                 onChange={e => setBlockForm({ ...blockForm, end_sun_offset: parseInt(e.target.value) || 0 })}
                 className="w-full px-3 py-2 border rounded-lg" />
@@ -324,12 +377,21 @@ export default function ScheduleBlocks() {
               ? (blockForm.recurrence_pattern || []).length
                 ? ` on ${(blockForm.recurrence_pattern || []).map((d: string) => dayShort(d)).join(', ')}`
                 : ' (no days picked yet)'
-              : blockForm.recurrence_type === 'daily' ? ' every day' : ''}.
+              : blockForm.recurrence_type === 'daily' ? ' every day' : ''}
+            {(() => {
+              const tpl = playlistTemplates?.find(t => t.id === blockForm.playlist_template_id);
+              return tpl ? <>, playing <strong>{tpl.name}</strong></> : '';
+            })()}.
           </p>
           {formError && <p className="text-sm text-red-600" role="alert">{formError}</p>}
-                    <button type="submit" disabled={createBlock.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {createBlock.isPending ? 'Creating...' : 'Create Block'}
-          </button>
+          <div className="flex gap-2">
+            <button type="submit" disabled={createBlock.isPending || updateBlock.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {editingBlockId
+                ? (updateBlock.isPending ? 'Saving…' : 'Save changes')
+                : (createBlock.isPending ? 'Creating…' : 'Create Block')}
+            </button>
+            <button type="button" onClick={closeBlockForm} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
+          </div>
         </form>
       )}
 
@@ -352,21 +414,25 @@ export default function ScheduleBlocks() {
                       : clockText(block.end_time?.slice(0, 5));
                     return `${from} — ${to}`;
                   })()}
-                  {' '}&middot; {block.recurrence_type}
-                  {block.recurrence_type === 'weekly' && block.recurrence_pattern?.length
-                    ? ` (${block.recurrence_pattern.map((d: string) => dayShort(String(d))).join(', ')})` : ''}
-                  {' '}&middot; {block.playback_mode}
+                  {' '}&middot; {block.recurrence_type === 'weekly' && block.recurrence_pattern?.length
+                    ? block.recurrence_pattern.map((d: string) => dayShort(String(d))).join(', ')
+                    : ({ daily: 'every day', weekly: 'weekly', monthly: 'monthly', one_time: 'one time' } as Record<string, string>)[block.recurrence_type] ?? block.recurrence_type}
+                  {!block.playlist_template_id && <> &middot; {block.playback_mode}</>}
                   {' '}&middot; Priority {block.priority}
                   {block.start_sun_event && ` · Start: ${block.start_sun_event}${block.start_sun_offset ? ` (${block.start_sun_offset > 0 ? '+' : ''}${block.start_sun_offset}min)` : ''}`}
                   {block.end_sun_event && ` · End: ${block.end_sun_event}${block.end_sun_offset ? ` (${block.end_sun_offset > 0 ? '+' : ''}${block.end_sun_offset}min)` : ''}`}
                   {block.playlist_template_id && (() => {
                     const tpl = playlistTemplates?.find(t => t.id === block.playlist_template_id);
-                    return tpl ? ` · Template: ${tpl.name}` : ' · Template assigned';
+                    return tpl ? ` · Playlist: ${tpl.name}` : ' · Playlist assigned';
                   })()}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">{block.playlist_entries?.length || 0} entries</span>
+                {!block.playlist_template_id && (
+                  <span className="text-sm text-gray-400 hidden sm:inline">{block.playlist_entries?.length || 0} songs</span>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); startEdit(block); }}
+                  className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200">Edit</button>
                 <button onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id); }}
                   className="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">Delete</button>
                 <span className="text-gray-400">{expandedBlock === block.id ? '▲' : '▼'}</span>
@@ -379,7 +445,7 @@ export default function ScheduleBlocks() {
                   const tpl = playlistTemplates?.find(t => t.id === block.playlist_template_id);
                   return (
                     <div className="mb-3">
-                      <h4 className="text-sm font-bold text-gray-700 uppercase mb-2">Template: {tpl?.name || 'Unknown'}</h4>
+                      <h4 className="text-sm font-bold text-gray-700 uppercase mb-2">Playlist: {tpl?.name || 'Unknown'}</h4>
                       {tpl && tpl.slots.length > 0 && (
                         <div className="space-y-1">
                           {tpl.slots.sort((a, b) => a.position - b.position).map((slot, idx) => (
@@ -392,16 +458,16 @@ export default function ScheduleBlocks() {
                           ))}
                         </div>
                       )}
-                      {(!tpl || tpl.slots.length === 0) && <p className="text-gray-400 text-sm">Template has no slots</p>}
+                      {(!tpl || tpl.slots.length === 0) && <p className="text-gray-400 text-sm">This playlist has no steps yet. Add them on the Playlists page.</p>}
                     </div>
                   );
                 })() : (
                 <>
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="text-sm font-bold text-gray-700 uppercase">Playlist Entries</h4>
+                  <h4 className="text-sm font-bold text-gray-700 uppercase">Songs in this block</h4>
                   <button onClick={() => setAddingEntryTo(addingEntryTo === block.id ? null : block.id)}
                     className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
-                    + Add Asset
+                    + Add song
                   </button>
                 </div>
 
@@ -409,7 +475,7 @@ export default function ScheduleBlocks() {
                   <div className="flex gap-2 mb-3">
                     <select value={selectedAssetId} onChange={e => setSelectedAssetId(e.target.value)}
                       className="flex-1 px-3 py-2 border rounded-lg text-sm">
-                      <option value="">Select an asset...</option>
+                      <option value="">Pick a song…</option>
                       {assets.map((a: any) => (
                         <option key={a.id} value={a.id}>{a.title} {a.artist ? `— ${a.artist}` : ''}</option>
                       ))}

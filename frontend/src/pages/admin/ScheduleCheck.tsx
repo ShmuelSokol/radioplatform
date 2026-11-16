@@ -248,8 +248,8 @@ export default function ScheduleCheck() {
             <section className="space-y-2">
               <h2 className="font-semibold text-gray-900">What plays</h2>
               <p className="text-sm text-gray-600">
-                The block on the air at each time. A change you make here
-                takes over at its start time.
+                The block on the air at each time. When you change a block
+                or a playlist, the change takes over at its start time.
               </p>
               <ul className="bg-white border rounded-lg p-4 text-sm text-gray-800 space-y-1">
                 {plays.map((g, i) => (

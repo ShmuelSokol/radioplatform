@@ -6,6 +6,7 @@ import {
   useDeletePlaylistTemplate,
   useCreateTemplateSlot,
   useDeleteTemplateSlot,
+  useUpdateTemplateSlot,
   useAssetTypes,
 } from '../../hooks/usePlaylists';
 import PlaylistGenerationPanel from './PlaylistGenerationPanel';
@@ -22,6 +23,7 @@ export default function Playlists() {
   const deleteTemplate = useDeletePlaylistTemplate();
   const createSlot = useCreateTemplateSlot();
   const deleteSlot = useDeleteTemplateSlot();
+  const updateSlot = useUpdateTemplateSlot();
 
   const [showForm, setShowForm] = useState(false);
   const [formName, setFormName] = useState('');
@@ -60,13 +62,21 @@ export default function Playlists() {
     const existing = templates?.find(t => t.id === templateId)?.slots || [];
     await createSlot.mutateAsync({
       template_id: templateId,
-      position: existing.length,
+      position: existing.length ? Math.max(...existing.map(x => x.position)) + 1 : 0,
       asset_type: slotAssetType,
       category: slotCategory || null,
     });
-    setSlotAssetType('music');
-    setSlotCategory('');
-    setAddingSlotTo(null);
+    // keep the form open with the same kind, so a sequence can be typed in quickly
+  };
+
+  // Move a step up or down; renumbers every step so positions stay 0..n-1
+  const moveSlot = async (templateId: string, index: number, delta: number) => {
+    const slots = [...(templates?.find(t => t.id === templateId)?.slots || [])].sort((a, b) => a.position - b.position);
+    const to = index + delta;
+    if (to < 0 || to >= slots.length) return;
+    [slots[index], slots[to]] = [slots[to], slots[index]];
+    await Promise.all(slots.map((slot, i) =>
+      slot.position === i ? null : updateSlot.mutateAsync({ id: slot.id, data: { position: i } })));
   };
 
   const handleDeleteSlot = async (slotId: string) => {
@@ -78,12 +88,17 @@ export default function Playlists() {
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Playlist Templates</h1>
+        <h1 className="text-2xl font-bold">Playlists</h1>
         <button onClick={() => setShowForm(!showForm)}
           className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-          {showForm ? 'Cancel' : 'New Template'}
+          {showForm ? 'Cancel' : 'New playlist'}
         </button>
       </div>
+      <p className="text-sm text-gray-600 mb-4 max-w-3xl">
+        A playlist is an order of song types that repeats, for example Lively, Medium fast,
+        Station ID, Relax. The station draws a song of each type in turn. Choose when each
+        playlist plays on the Schedules page.
+      </p>
 
       {/* Station filter */}
       <div className="mb-4">
@@ -103,7 +118,7 @@ export default function Playlists() {
         <form onSubmit={handleCreateTemplate} className="bg-white p-6 rounded-lg shadow-md mb-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Template Name</label>
+              <label className="block text-sm font-medium mb-1">Playlist name</label>
               <input required type="text" value={formName} onChange={e => setFormName(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg" placeholder="Morning Rotation" />
             </div>
@@ -125,14 +140,14 @@ export default function Playlists() {
           </div>
           <button type="submit" disabled={createTemplate.isPending}
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-            Create Template
+            Create playlist
           </button>
         </form>
       )}
 
       {/* Template list */}
       <div className="space-y-4">
-        {templates?.length === 0 && <p className="text-gray-500 text-center py-8">No templates yet. Create one to get started.</p>}
+        {templates?.length === 0 && <p className="text-gray-500 text-center py-8">No playlists yet. Press "New playlist" to make one.</p>}
         {templates?.map(template => (
           <div key={template.id} className="bg-white rounded-lg shadow-md overflow-hidden">
             <div className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50"
@@ -140,7 +155,7 @@ export default function Playlists() {
               <div>
                 <h3 className="font-bold text-lg">{template.name}</h3>
                 <p className="text-sm text-gray-600">
-                  {template.slots.length} slot{template.slots.length !== 1 ? 's' : ''}
+                  {template.slots.length} step{template.slots.length !== 1 ? 's' : ''}
                   {template.description && ` · ${template.description}`}
                   {template.station_id && ` · Station: ${stations.find((s: any) => s.id === template.station_id)?.name || 'Unknown'}`}
                   {!template.station_id && ' · Any station'}
@@ -159,17 +174,17 @@ export default function Playlists() {
             {expandedTemplate === template.id && (
               <div className="border-t p-4 bg-gray-50">
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="text-sm font-bold text-gray-700 uppercase">Rotation Slots</h4>
+                  <h4 className="text-sm font-bold text-gray-700 uppercase">Steps (played in order, then repeated)</h4>
                   <button onClick={() => setAddingSlotTo(addingSlotTo === template.id ? null : template.id)}
                     className="px-3 py-1 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700">
-                    + Add Slot
+                    {addingSlotTo === template.id ? 'Done' : '+ Add step'}
                   </button>
                 </div>
 
                 {addingSlotTo === template.id && (
-                  <div className="flex gap-2 mb-3 items-end">
+                  <div className="flex flex-wrap gap-2 mb-3 items-end">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Asset Type</label>
+                      <label className="block text-xs text-gray-500 mb-1">Kind</label>
                       <select value={slotAssetType} onChange={e => { setSlotAssetType(e.target.value); setSlotCategory(''); }}
                         className="px-3 py-2 border rounded-lg text-sm">
                         {uniqueAssetTypes.length > 0 ? uniqueAssetTypes.map(t => (
@@ -186,7 +201,7 @@ export default function Playlists() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Category (optional)</label>
+                      <label className="block text-xs text-gray-500 mb-1">Song type</label>
                       <select value={slotCategory} onChange={e => setSlotCategory(e.target.value)}
                         className="px-3 py-2 border rounded-lg text-sm">
                         <option value="">Any</option>
@@ -203,7 +218,7 @@ export default function Playlists() {
                 )}
 
                 {template.slots.length === 0 ? (
-                  <p className="text-gray-400 text-sm">No slots yet — add slots to define the rotation pattern</p>
+                  <p className="text-gray-400 text-sm">No steps yet. Press "+ Add step" and add the song types in the order they should play.</p>
                 ) : (
                   <div className="space-y-1">
                     {template.slots
@@ -216,8 +231,14 @@ export default function Playlists() {
                             {slot.category && <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">{slot.category}</span>}
                             {!slot.category && <span className="text-xs text-gray-400">(any)</span>}
                           </div>
-                          <button onClick={() => handleDeleteSlot(slot.id)}
-                            className="text-red-500 hover:text-red-700 text-xs">Remove</button>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => moveSlot(template.id, idx, -1)} disabled={idx === 0}
+                              aria-label="Move up" className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30">↑</button>
+                            <button onClick={() => moveSlot(template.id, idx, 1)} disabled={idx === template.slots.length - 1}
+                              aria-label="Move down" className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30">↓</button>
+                            <button onClick={() => handleDeleteSlot(slot.id)}
+                              className="ml-1 text-red-500 hover:text-red-700 text-xs">Remove</button>
+                          </div>
                         </div>
                       ))}
                   </div>

@@ -139,6 +139,10 @@ async def _queue_follows_schedule(db: AsyncSession, schedule_id, *, had_playlist
 
 
 # ==================== Schedules ====================
+# Also answered without the trailing slash: the site calls /schedules, and the
+# automatic redirect to /schedules/ points at http:// behind the proxy, which the
+# browser blocks, so "Create" silently did nothing.
+@router.post("", response_model=Schedule, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 @router.post("/", response_model=Schedule, status_code=status.HTTP_201_CREATED)
 async def create_schedule(
     data: ScheduleCreate,
@@ -153,6 +157,7 @@ async def create_schedule(
     return schedule
 
 
+@router.get("", response_model=List[Schedule], include_in_schema=False)
 @router.get("/", response_model=List[Schedule])
 async def list_schedules(
     station_id: UUID | None = None,
