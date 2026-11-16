@@ -399,21 +399,36 @@ class SchedulerEngine:
         """Check if a live show has reached its hard stop time."""
         from app.models.live_show import LiveShow, LiveShowStatus
 
-        result = await db.execute(select(LiveShow).where(LiveShow.id == live_show_id))
-        show = result.scalar_one_or_none()
+        try:
+            show_uuid = uuid.UUID(str(live_show_id))
+        except ValueError:
+            show_uuid = None
+        show = None
+        if show_uuid is not None:
+            result = await db.execute(select(LiveShow).where(LiveShow.id == show_uuid))
+            show = result.scalar_one_or_none()
 
         if not show or show.status != LiveShowStatus.LIVE:
             # Stale reference — clear it
             config = dict(station.automation_config or {})
             config.pop("live_show_id", None)
             station.automation_config = config
+            # Each pass ends with a rollback (it closes the read transaction), so a
+            # change made here must be committed here or it is lost
+            await db.commit()
             logger.info("Cleared stale live_show_id from station %s", station.id)
             return
 
-        if show.scheduled_end and show.scheduled_end <= now:
+        end = show.scheduled_end
+        if end is not None and end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)  # SQLite returns naive datetimes
+        if end and end <= now:
             # Hard stop
             from app.services.live_show_service import hard_stop_show
-            await hard_stop_show(db, live_show_id)
+            await hard_stop_show(db, show_uuid)
+            # Committed here: the pass's closing rollback used to undo it, so the show
+            # stayed live and was "hard stopped" again every few seconds (2026-11-16)
+            await db.commit()
             logger.warning("Hard stopped live show %s on station %s", live_show_id, station.id)
 
             # Broadcast WS event
@@ -478,6 +493,7 @@ class SchedulerEngine:
                     message=f"Station '{station.name}' has had no audio for {int(elapsed_seconds)}s",
                     station_id=station.id,
                 )
+                await db.commit()
             except Exception as e:
                 logger.error("Failed to create silence alert for station %s: %s", station.id, e)
 

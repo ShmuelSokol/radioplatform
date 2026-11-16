@@ -575,7 +575,8 @@ def switch_time(entry) -> datetime | None:
     asset = entry.asset
     duration = (asset.duration if asset else None) or DEFAULT_DURATION
     cross_seconds = 3.0
-    analysis = stored_analysis(asset.metadata_extra) if asset else {}
+    extra = getattr(asset, "metadata_extra", None) if asset else None
+    analysis = stored_analysis(extra) if extra else {}
     cross_start = analysis.get("cross_start_seconds")
     if isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
         cross_seconds = duration - cross_start
@@ -1184,9 +1185,14 @@ async def _get_queue_impl(station_id, limit, db):
 
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
-    # What Next (or the end of the item on air) will actually play: the same rule
-    # as _pick_next_pending, so the screen never promises a different item.
-    next_entry = _next_due(entries, datetime.now(timezone.utc))
+    # What Next will actually play now (the same rule as _pick_next_pending), and
+    # what really follows the item on air when it ends. They differ when a timed
+    # item comes due before the hand-over: the :30 weather was due by the end of
+    # the song, but "Up next" showed the song after it (Shmuel, 2026-11-16).
+    now_q = datetime.now(timezone.utc)
+    skip_entry = _next_due(entries, now_q)
+    hand_over = switch_time(now_playing_entry) if now_playing_entry else None
+    next_entry = _next_due(entries, max(hand_over, now_q)) if hand_over else skip_entry
 
     # Sort entries by simulating actual playback order:
     # - Regular songs play sequentially by position
@@ -1440,6 +1446,8 @@ async def _get_queue_impl(station_id, limit, db):
         "total_all": total_queue_entries,
         "now_playing": np_data,
         "next_entry_id": str(next_entry.id) if next_entry else None,
+        # What the Next button plays right now (timed items not yet due are skipped)
+        "skip_entry_id": str(skip_entry.id) if skip_entry else None,
         "queue_duration_seconds": round(queue_duration, 1),
         "total_queue_duration_seconds": round(total_queue_duration, 1),
         "preempt_fade_ms": 2000,

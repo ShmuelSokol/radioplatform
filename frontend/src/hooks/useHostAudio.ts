@@ -43,16 +43,15 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
 
     const wsBase = import.meta.env.VITE_WS_URL;
     const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
-    const token = localStorage.getItem('access_token') || '';
     let wsUrl: string;
 
     if (wsBase) {
-      wsUrl = `${wsBase}/api/v1/ws/live/${showId}/audio?token=${token}`;
+      wsUrl = `${wsBase}/api/v1/ws/live/${showId}/audio`;
     } else if (apiUrl.startsWith('http')) {
-      wsUrl = apiUrl.replace(/^http/, 'ws') + `/ws/live/${showId}/audio?token=${token}`;
+      wsUrl = apiUrl.replace(/^http/, 'ws') + `/ws/live/${showId}/audio`;
     } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      wsUrl = `${protocol}//${window.location.host}${apiUrl}/ws/live/${showId}/audio?token=${token}`;
+      wsUrl = `${protocol}//${window.location.host}${apiUrl}/ws/live/${showId}/audio`;
     }
 
     const ws = new WebSocket(wsUrl);
@@ -83,6 +82,10 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
       if (!ws) return;
 
       ws.onopen = () => {
+        // The server reads a text auth message first, then audio. The token used to go
+        // in the address instead: the server dropped the socket at once (no host
+        // audio ever arrived) and the address, token included, was written to the logs.
+        ws.send(JSON.stringify({ type: 'auth', token: localStorage.getItem('access_token') || '' }));
         // Start MediaRecorder
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus'
