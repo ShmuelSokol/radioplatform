@@ -82,3 +82,9 @@ Until the queue has loaded, the bar says "Loading the queue…", and if the requ
 The control room copies the station's old program (KBR Studio 1.82): grey bevelled buttons, a black LCD strip with green italic digits (Remaining, Intro, On air, Clock) and LEFT/RIGHT meters, a green "now" and yellow "next" title box, and the running log in bold yellow on black (current row blue with magenta text, timed rows orange). Desktop layout: log over the lower pane (Songs / other tabs), Go next / Fade / Soft fade and the pane tabs in a grey column on the right, cart pages 1 to 10 along the bottom. The styles are scoped under `.qn` in `controlroom/classic.css`; the virtualized log's row heights (`ROW_*` in QueuePanel) must match the CSS row heights or the scrollbar drifts.
 
 The jingle wall and the Library's Jingle tab ask `/assets` for `hide_generated=true`, which leaves out the time and weather service's own recordings ("Time Announcement - …", "Weather Report - …"). Fired from the cart they would air the wrong hour or day.
+
+## One tab holds the sound
+
+The control room never starts sound by itself when it loads (`useAudioEngine(..., autoInit=false)`); sound starts only on a click in that tab. Tabs talk over the `kbr-control-room-sound` BroadcastChannel: the tab that takes the sound posts `taken`, and any other tab that had it goes quiet and says so. Action buttons (Next, Start, play now, mix) do not grab the sound while another tab holds it; only the speaker button moves it. The cart and the Library pass `hide_generated` so dated "Weather Report - …" and "Time Announcement - …" items stay out (they are type `spot`, not jingle).
+
+Tap targets on public pages need a real 44 px box (`min-h-[44px]`): checkers measure the element's bounding box, so an invisible `::after` hit area does not count.

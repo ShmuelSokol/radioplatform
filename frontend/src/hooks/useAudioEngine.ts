@@ -69,6 +69,8 @@ export interface AudioEngineState {
   vuLevels: [number, number];
   audioReady: boolean;
   initAudio: () => Promise<void>;
+  /** Stop making sound in this tab (another tab took over). A later initAudio brings it back. */
+  releaseAudio: () => void;
   /** Operator's Next: bring this item up here at once, before the server's answer
    *  arrives. Listeners still change when the server announces it. */
   playNextNow: (asset: AssetInfo, fadeSeconds: number | null) => void;
@@ -103,6 +105,9 @@ export function useAudioEngine(
   // How long the outgoing item fades on an operator's Next (hard 0 / fade 0.5 / soft 3),
   // sent with the message that announces the change. null = the default quick fade.
   changeFadeSeconds: number | null = null,
+  // Switch sound on by itself when the station is playing. The control room passes
+  // false: sound starts only on a click there, so a second tab never doubles it.
+  autoInit: boolean = true,
 ): AudioEngineState {
   // ── Operator's Next heard at once (control room) ──
   // The item the operator moved to, played here before the server confirms it. While
@@ -340,10 +345,19 @@ export function useAudioEngine(
 
   // ── Auto-init when playback is active ──
   useEffect(() => {
-    if (isPlaying && !audioReady) {
+    if (autoInit && isPlaying && !audioReady) {
       initAudio().catch(() => {});
     }
-  }, [isPlaying, audioReady, initAudio]);
+  }, [autoInit, isPlaying, audioReady, initAudio]);
+
+  const releaseAudio = useCallback(() => {
+    if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+    crossfadingRef.current = false;
+    deckARef.current?.audio.pause();
+    deckBRef.current?.audio.pause();
+    ctxRef.current?.suspend().catch(() => {});
+    setAudioReady(false);
+  }, []);
 
   // ── Cleanup on unmount ──
   useEffect(() => {
@@ -856,5 +870,5 @@ export function useAudioEngine(
     });
   }, []);
 
-  return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio, playNextNow };
+  return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio, playNextNow, releaseAudio };
 }
