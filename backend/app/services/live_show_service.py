@@ -269,6 +269,20 @@ async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
     except Exception as e:
         logger.warning("Failed to end calls for show %s: %s", show_id, e)
 
+    # Web callers: their calls end with the show
+    try:
+        from app.api.v1.live_shows_ws import live_relay
+        for line in [c for c in live_relay.callers.values() if c.show_id == str(show.id)]:
+            call = await get_call(db, line.call_id)
+            if call is not None and call.status in (CallStatus.WAITING, CallStatus.SCREENING,
+                                                    CallStatus.APPROVED, CallStatus.ON_AIR):
+                if call.status == CallStatus.ON_AIR:
+                    call.air_end = now
+                call.status = CallStatus.COMPLETED
+            await live_relay.caller_status(line.call_id, "completed")
+    except Exception as e:
+        logger.warning("Failed to end web calls for show %s: %s", show_id, e)
+
     # Stop Icecast stream
     if show.broadcast_mode == "webrtc":
         try:

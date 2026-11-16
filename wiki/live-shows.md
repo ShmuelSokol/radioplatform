@@ -15,3 +15,12 @@ How a host goes on air (built 2026-11-16, after Shmuel's first test shows never 
 - If the host closes the page without ending the show, listeners hear silence until the show is ended or reaches its hard stop.
 
 Checks: `tests/test_live_show_on_air.py` and `tests/test_live_show_lifecycle.py`. A browser check (fake mic → Listen page) was run by hand on 2026-11-16.
+
+## Web call-ins (2026-11-16, Shmuel chose these over phone lines for now)
+A listener calls from `/call/<station id>` (linked from the Listen page's live banner when the show takes calls). No Twilio.
+1. **Join** (`POST /call-in/{station_id}`, public, 5 per address per 10 min): creates a normal `CallInRequest` (`caller_phone` "Web caller", name, topic in `notes`) for the station's LIVE show with `calls_enabled`, and sends the screener a `caller_queued` event carrying the whole call. It returns a token, an HMAC of the call id with the JWT secret (`services/call_in.py`), so nothing new is stored.
+2. **Caller socket** `/ws/live/call/{call_id}`: auth message with that token first, then the caller's mic in the host's format (24 kHz 16-bit mono PCM). The caller hears the show on the same socket the whole time.
+3. **Mixing** (`StationLiveRelay.audio`): the host's frames are the clock. Each one is mixed with the same number of samples from every caller on air (each caller has a small buffer: 0.12 s before mixing in, 0.6 s at most). Listeners get host plus callers, so listener pages and the protocol are unchanged. The host gets the callers only, back down the host's own audio socket (`useHostAudio` plays them). Each caller gets everyone but themselves. Waiting and approved callers are never mixed in. If the host stops sending, nobody hears the callers.
+4. **Screener**: approve, on air, end call and reject also call `live_relay.caller_status`, which mixes the caller in or out and updates their page. Ending the show ends every web call. A caller whose socket drops has 15 s to reconnect; after that the call is marked abandoned, or completed if they were on air.
+- Echo: callers and the host should use headphones. Both use the browser's echo cancellation, but a speaker next to the mic feeds the show back in.
+- Check: `frontend/e2e/web-call-in.cjs` (two Chromium browsers with fake mics at different tones, plus a listener socket; 13 checks) and `tests/test_web_call_in.py`.

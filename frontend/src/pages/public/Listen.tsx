@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { startLiveStream, type LiveStream } from '../../lib/liveStream';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -324,7 +324,10 @@ export default function Listen() {
                 <p className="text-sm text-red-600 mt-0.5">{activeShow.show.description}</p>
               )}
               {activeShow.show.calls_enabled && (
-                <p className="text-xs text-red-500 mt-1">Call-ins are open!</p>
+                <p className="text-xs text-red-500 mt-1">
+                  Call-ins are open!{' '}
+                  <Link to={`/call/${stationId}`} className="underline font-semibold">Call in from here</Link>
+                </p>
               )}
             </div>
           </div>

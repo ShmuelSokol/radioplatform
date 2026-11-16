@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { makeResampler, PcmPlayer } from '../lib/pcm';
 
 interface UseHostAudioReturn {
   isRecording: boolean;
@@ -15,27 +16,8 @@ interface UseHostAudioReturn {
  * Audio. That works in every browser, Safari on iPhone included; the earlier
  * webm/opus chunks could only have been played through a broadcast server.
  */
-const LIVE_RATE = 24000;
-
-/** Mono float samples at `from` Hz to 16-bit samples at LIVE_RATE (linear interpolation). */
-function makeResampler(from: number) {
-  const step = from / LIVE_RATE;
-  let pos = 0; // position in the current input block, carried across blocks
-  return (input: Float32Array): Int16Array => {
-    const out: number[] = [];
-    while (pos < input.length) {
-      const i = Math.floor(pos);
-      const frac = pos - i;
-      const a = input[i];
-      const b = i + 1 < input.length ? input[i + 1] : input[i];
-      const v = Math.max(-1, Math.min(1, a + (b - a) * frac));
-      out.push(v < 0 ? v * 0x8000 : v * 0x7fff);
-      pos += step;
-    }
-    pos -= input.length;
-    return Int16Array.from(out);
-  };
-}
+// The format and resampler are shared with web callers (lib/pcm.ts). The server
+// sends the callers on air back down this socket, so the host hears them.
 export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -122,6 +104,10 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
         processorRef.current = processor;
         setIsRecording(true);
       };
+
+      // Callers on air, heard by the host (use headphones, or they go out again on the mic)
+      const callers = new PcmPlayer(ctx);
+      ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) callers.push(e.data); };
 
       ws.onerror = () => setError('Audio WebSocket connection failed');
       ws.onclose = () => {
