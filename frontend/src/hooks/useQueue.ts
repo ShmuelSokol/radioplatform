@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { insertEntry, moveEntry, removeEntry, reorderEntry } from './queueOptimistic';
@@ -5,13 +6,30 @@ import type { QueueDataLike } from './queueOptimistic';
 import { getQueue, getPlayLog, addToQueue, playNext, skipCurrent, moveUp, moveDown, removeFromQueue, startPlayback, getLastPlayed, previewWeather, reorderDnd } from '../api/queue';
 import type { SkipFade } from '../api/queue';
 
-export function useQueue(stationId: string | null) {
-  return useQuery({
+/** The first rows of the queue: a few hours ahead. Enough for the screen, and
+ *  about a tenth of a days-long queue on every 10-second poll (Mac test: 1,451
+ *  rows were 708 KB a poll, 4 MB a minute on an iPhone). */
+export const QUEUE_FIRST_ROWS = 150;
+export const QUEUE_ALL_ROWS = 5000; // the server's most
+
+/** `limit` grows to QUEUE_ALL_ROWS only when the operator scrolls to the end of
+ *  what is loaded or picks a day. The key stays ['queue', stationId] so the
+ *  optimistic updates elsewhere keep working. */
+export function useQueue(stationId: string | null, limit: number = QUEUE_FIRST_ROWS) {
+  const q = useQuery({
     queryKey: ['queue', stationId],
-    queryFn: () => getQueue(stationId!),
+    queryFn: () => getQueue(stationId!, limit),
     enabled: !!stationId,
     refetchInterval: 10_000,
   });
+  const { refetch } = q;
+  const shown = useRef(limit);
+  useEffect(() => {
+    if (shown.current === limit) return;
+    shown.current = limit;
+    if (stationId) refetch();
+  }, [limit, stationId, refetch]);
+  return q;
 }
 
 export function usePlayLog(stationId: string | null, enabled = true) {

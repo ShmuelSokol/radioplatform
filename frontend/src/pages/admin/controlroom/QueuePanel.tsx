@@ -28,6 +28,10 @@ interface Props {
   dates: string[];
   dateFilter: string;
   onDateFilter: (d: string) => void;
+  /** Only the first hours are loaded: ask for the rest (scrolled to the end, opened the day list) */
+  onNeedAll?: () => void;
+  /** Back at the top with no day picked: the first hours are enough again */
+  onAtTop?: () => void;
   stationTz?: string;
   insertBeforeId: string | null;
   onArmInsert: (entryId: string | null) => void;
@@ -84,10 +88,16 @@ function QueuePanel(p: Props) {
     setFirstRow(0);
   }, [p.dateFilter]);
 
+  const moreOnServer = p.totalCount > p.loadedCount;
+  const onNeedAll = p.onNeedAll;
+  const onAtTop = p.dateFilter ? undefined : p.onAtTop;
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const row = Math.floor(e.currentTarget.scrollTop / rowH / STEP) * STEP;
+    const el = e.currentTarget;
+    const row = Math.floor(el.scrollTop / rowH / STEP) * STEP;
     setFirstRow(prev => (prev === row ? prev : row));
-  }, [rowH]);
+    if (moreOnServer && el.scrollTop + el.clientHeight > el.scrollHeight - 20 * rowH) onNeedAll?.();
+    else if (el.scrollTop === 0) onAtTop?.();
+  }, [rowH, moreOnServer, onNeedAll, onAtTop]);
 
   const n = p.entries.length;
   const start = Math.max(0, Math.min(firstRow - OVERSCAN, n));
@@ -117,6 +127,8 @@ function QueuePanel(p: Props) {
           aria-label="Show day"
           value={p.dateFilter}
           onChange={(e) => p.onDateFilter(e.target.value)}
+          onFocus={p.onNeedAll}
+          onPointerDown={p.onNeedAll}
           className="qn-field ml-auto h-6 text-xs px-1"
         >
           <option value="">All days</option>
