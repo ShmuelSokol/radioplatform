@@ -64,3 +64,49 @@ async def test_joining_listener_gets_the_queue_song(client: AsyncClient, db_sess
     assert r.status_code == 200
     assert r.json()["asset_id"] == str(playing.id)
     assert r.json()["next_asset"]["title"] == "Up next"
+
+
+@pytest.mark.asyncio
+async def test_an_older_song_is_never_announced_after_a_newer_one(monkeypatch):
+    """Kol Bramah Main: a tick read "Taanis 26" just before the change to the next
+    story and announced it 4 s after the story, so listeners jumped back."""
+    sent = []
+
+    async def fake_broadcast(station_id, message):
+        sent.append(message["data"]["asset_id"])
+
+    monkeypatch.setattr(ws.manager, "broadcast_to_station", fake_broadcast)
+    station = str(uuid.uuid4())
+    t0 = datetime(2026, 11, 15, 23, 50, 55, tzinfo=timezone.utc)
+    t1 = t0 + timedelta(minutes=4, seconds=26)
+    await ws.broadcast_now_playing_update(station, {"asset_id": "taanis", "started_at": t0.isoformat()})
+    await ws.broadcast_now_playing_update(station, {"asset_id": "story", "started_at": t1.isoformat()})
+    await ws.broadcast_now_playing_update(station, {"asset_id": "taanis", "started_at": t0.isoformat()})
+    assert sent == ["taanis", "story"]
+    # the same item again (a new fade length, a heartbeat) still goes out
+    await ws.broadcast_now_playing_update(
+        station, {"asset_id": "story", "started_at": t1.isoformat(), "change_fade_seconds": 0.5}
+    )
+    assert sent == ["taanis", "story", "story"]
+
+
+@pytest.mark.asyncio
+async def test_join_cache_does_not_keep_a_read_that_raced_a_change(monkeypatch):
+    station = str(uuid.uuid4())
+    ws._join_cache.clear()
+
+    async def no_send(station_id, message):
+        return None
+
+    monkeypatch.setattr(ws.manager, "broadcast_to_station", no_send)
+
+    async def slow_read(db, station_id):
+        # the song changes (and is announced) while this read is under way
+        await ws.broadcast_now_playing_update(
+            station_id, {"asset_id": "new", "started_at": datetime.now(timezone.utc).isoformat()}
+        )
+        return {"asset_id": "old"}
+
+    monkeypatch.setattr(ws, "_queue_now_playing", slow_read)
+    await ws._cached_queue_now_playing(station, db=object())
+    assert station not in ws._join_cache
