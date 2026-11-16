@@ -82,3 +82,14 @@ Weather reports and time checks are made for one moment. `fit_for_random_pick()`
 
 ## On the second only at :00
 Automatic time and weather entries get `timing_mode` from `spot_schedule_service.default_timing` (station `automation_config.spot_timing`, default hard at :00 and soft otherwise). Null timing on anything but `ad_slot` still counts as hard (operator timed inserts rely on it), so `_schedule_hourly_announcements` also fills in timing for pending time/weather entries queued before 2026-11-16.
+
+## A shiur is paused, not cut (2026-11-16)
+On KBR Jerusalem the hard :00 time check cut a shiur 14 minutes in and the rest was lost. A hard timed item now treats a long item (asset type shiur/story/lecture/program, or 12 min or longer; `services/long_items.py`) by the station's `automation_config["timed_during_long_items"]`, set on Stations → Automation Config:
+
+- `pause` (default): `_check_advance_locked` cuts as before, but first `_queue_resume` queues the same asset straight after the timed group (pending entries with the same `preempt_at`), with `source="resume@<seconds>"` (3 s before the stop point; not resumed with under 30 s left). The offset lives in `source` so the busy queue table needed no new column. `mark_started` sets `started_at = now - offset`, so every player's live position, `ends_at` and the queue times are right; `queue_entry_payload` gives the next item `cue_in = offset` so the local hand-over starts there; the playout engine's `build_uri` sets `liq_cue_in` the same way. Every place that starts an entry uses `mark_started`.
+- `wait`: while the long item plays, hard items due before it ends (and soft ones with a `hard_by`) become plain soft, so they play after it and no control room fades it.
+- `cut`: the old behaviour. Songs are always cut.
+
+Also fixed then: the weather (same `preempt_at`, hard) used to cut the time check that had just started; `_same_timed_group` lets the group play in order. Due soft items with the same time now go by position (time check before weather).
+
+The engine path (`playout_engine.py` timed commands) does not yet queue a resume itself; do that when the engine is switched on.

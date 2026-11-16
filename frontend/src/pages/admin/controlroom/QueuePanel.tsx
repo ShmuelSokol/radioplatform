@@ -235,6 +235,12 @@ function QueuePanel(p: Props) {
                     {entry.source === 'ad_slot' && (
                       <span className="ml-2 align-middle text-[10px] bg-[#ffa64d] text-black px-1 py-px font-bold">SPONSOR</span>
                     )}
+                    {entry.source?.startsWith('resume@') && (
+                      <span className="ml-2 align-middle text-[10px] bg-[#8fd18f] text-black px-1 py-px font-bold"
+                        title="Paused for a timed item; carries on from here">
+                        RESUMES {fmtDur(Number(entry.source.slice(7)))}
+                      </span>
+                    )}
                     {entry.preempt_at && (
                       <span className="ml-2 align-middle text-[11px]" title="Plays at this exact time">
                         ⏰ {clockTime(entry.preempt_at, p.stationTz)}

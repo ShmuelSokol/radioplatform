@@ -73,3 +73,35 @@ def is_soft_timed(entry) -> bool:
     if entry.timing_mode in ("soft", "hard"):
         return entry.timing_mode == "soft"
     return entry.source == "ad_slot"
+
+
+# ── Resuming an item that a timed item paused ──
+# A shiur cut by the hourly time check is queued again right after it, marked with
+# source "resume@<seconds>": where it was stopped. Encoded in `source` so no new
+# column is needed (a schema change on this busy table is what froze a deploy).
+RESUME_PREFIX = "resume@"
+
+
+def resume_source(seconds: float) -> str:
+    return f"{RESUME_PREFIX}{int(max(0.0, seconds))}"
+
+
+def resume_offset(entry) -> float:
+    """Seconds into the item where this entry starts (0 for anything but a resume)."""
+    source = getattr(entry, "source", None) or ""
+    if not source.startswith(RESUME_PREFIX):
+        return 0.0
+    try:
+        return max(0.0, float(source[len(RESUME_PREFIX):]))
+    except ValueError:
+        return 0.0
+
+
+def mark_started(entry, now) -> None:
+    """Put an entry on air. A resumed item counts as started `offset` seconds ago, so
+    everything timed from started_at (its end, a listener's position) continues where
+    it was paused."""
+    from datetime import timedelta
+
+    entry.status = "playing"
+    entry.started_at = now - timedelta(seconds=resume_offset(entry))

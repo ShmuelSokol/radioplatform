@@ -29,7 +29,7 @@ from sqlalchemy.orm import joinedload
 from app.config import settings
 from app.models.asset import stored_analysis
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, soft_timed
+from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset, soft_timed
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,9 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
         "artist": asset.artist or "",
     }
     cue_in = analysis.get("cue_in_seconds")
+    # A shiur paused by a timed item carries on where it stopped
+    if resume_offset(entry) > 0:
+        cue_in = max(float(cue_in or 0.0), resume_offset(entry))
     cue_out = analysis.get("cue_out_seconds")
     if isinstance(cue_in, (int, float)) and cue_in > 0:
         fields["liq_cue_in"] = f"{float(cue_in):.3f}"
@@ -404,8 +407,7 @@ async def handle_started(
     state.timed_sent.discard(str(entry.id))
 
     if entry.status != "playing":
-        entry.status = "playing"
-        entry.started_at = now
+        mark_started(entry, now)
 
     # Keep positions compact: playing first, then pending in order
     compact = await db.execute(

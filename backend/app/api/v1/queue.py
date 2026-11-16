@@ -24,7 +24,7 @@ from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset, fit_for_random_pick, stored_analysis
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, soft_timed
+from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset, soft_timed
 from app.models.user import User
 from app.schemas.queue import (
     QueueAdd,
@@ -528,7 +528,7 @@ async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) ->
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now_utc,
         )
-        .order_by(QueueEntry.preempt_at)
+        .order_by(QueueEntry.preempt_at, QueueEntry.position)
         .limit(1)
     )
     entry = ad_result.scalar_one_or_none()
@@ -827,6 +827,89 @@ async def _check_advance(
         return await _check_advance_locked(db, station_id, early_seconds)
 
 
+def _same_timed_group(current: QueueEntry, entry: QueueEntry) -> bool:
+    return (
+        current.preempt_at is not None
+        and entry.preempt_at is not None
+        and _aware(current.preempt_at) == _aware(entry.preempt_at)
+    )
+
+
+async def _long_item_policy(db: AsyncSession, station_id, current: QueueEntry) -> str | None:
+    """What a hard timed item does to the item on air: None for music (it is cut),
+    else the station's choice for a shiur or story ("pause", "wait" or "cut")."""
+    from app.models.station import Station
+    from app.services import long_items
+
+    if not long_items.is_long_form(current.asset):
+        return None
+    station = await db.get(Station, station_id)
+    return long_items.policy(station)
+
+
+async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntry) -> None:
+    """Hard timed items due before the shiur on air ends become soft: they play
+    straight after it, and no player fades it for them."""
+    from app.services import long_items
+
+    end = long_items.ends_at(current)
+    if end is None:
+        return
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at <= end,
+            or_(hard_timed(), QueueEntry.hard_by.isnot(None)),
+        )
+        .values(timing_mode="soft", hard_by=None)
+        .execution_options(synchronize_session=False)
+    )
+
+
+async def _queue_resume(
+    db: AsyncSession, station_id, current: QueueEntry, timed: QueueEntry, now_utc: datetime
+) -> None:
+    """Queue the shiur on air again, straight after the timed group that pauses it,
+    to carry on from where it stops."""
+    from app.models.queue_entry import resume_source
+    from app.services import long_items
+
+    at = long_items.resume_point(current, now_utc)
+    if at is None:
+        return
+    group_end = (
+        await db.execute(
+            select(func.max(QueueEntry.position)).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at == timed.preempt_at,
+            )
+        )
+    ).scalar() or timed.position
+    position = group_end + 1
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.position >= position,
+        )
+        .values(position=QueueEntry.position + 1)
+        .execution_options(synchronize_session=False)
+    )
+    db.add(QueueEntry(
+        id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
+        position=position, status="pending", source=resume_source(at),
+    ))
+    logger.info(
+        "Station %s: paused %s at %.0f s for timed entry %s; it resumes after",
+        station_id, current.asset_id, at, timed.id,
+    )
+
+
 async def _check_advance_locked(
     db: AsyncSession, station_id: uuid.UUID, early_seconds: float = 0.0
 ) -> QueueEntry | None:
@@ -859,12 +942,16 @@ async def _check_advance_locked(
 
     # If no started_at, set it now
     if not current.started_at:
-        current.started_at = datetime.now(timezone.utc)
+        mark_started(current, datetime.now(timezone.utc))
         await db.commit()
         return current
 
     # Check if a pending entry needs to preempt the current track (exact-time playback)
     now_utc = datetime.now(timezone.utc)
+    long_policy = await _long_item_policy(db, station_id, current)
+    if long_policy == "wait":
+        # The station lets a shiur finish: timed items due before its end wait for it
+        await _defer_hard_until_end(db, station_id, current)
     preempt_result = await db.execute(
         select(QueueEntry)
         .where(
@@ -880,9 +967,15 @@ async def _check_advance_locked(
         .limit(1)
     )
     preempt_entry = preempt_result.scalar_one_or_none()
+    if preempt_entry and _same_timed_group(current, preempt_entry):
+        # The item on air belongs to the same timed group (time check, then weather):
+        # the rest of the group follows it, it does not cut it
+        preempt_entry = None
     if preempt_entry:
         # Don't preempt silence with more silence — let it finish naturally
         if current.asset_id != preempt_entry.asset_id:
+            if long_policy == "pause":
+                await _queue_resume(db, station_id, current, preempt_entry, now_utc)
             # Stop current track and start the preempt entry immediately
             if current.started_at:
                 log = PlayLog(
@@ -891,8 +984,7 @@ async def _check_advance_locked(
                 )
                 db.add(log)
             current.status = "played"
-            preempt_entry.status = "playing"
-            preempt_entry.started_at = now_utc
+            mark_started(preempt_entry, now_utc)
             await db.commit()
             # Skip in Liquidsoap to sync with preempt
             if settings.liquidsoap_enabled:
@@ -958,8 +1050,7 @@ async def _check_advance_locked(
         # The queue ran out: fill it and carry on rather than going silent
         next_entry = await _refill_for_next(db, station_id)
     if next_entry:
-        next_entry.status = "playing"
-        next_entry.started_at = datetime.now(timezone.utc)
+        mark_started(next_entry, datetime.now(timezone.utc))
         if current is not None:
             _note_automatic_change(station_id, next_entry.id)
         logger.info(
@@ -1037,7 +1128,7 @@ def _next_due(entries, now_utc: datetime):
         if e.preempt_at and is_soft_timed(e) and _aware(e.preempt_at) <= now_utc
     ]
     if soft_due:
-        return min(soft_due, key=lambda e: _aware(e.preempt_at))
+        return min(soft_due, key=lambda e: (_aware(e.preempt_at), e.position))
     regular = [e for e in pending if not e.preempt_at or _aware(e.preempt_at) <= now_utc]
     return min(regular, key=lambda e: e.position) if regular else None
 
@@ -1165,6 +1256,7 @@ async def _get_queue_impl(station_id, limit, db):
             if ri < len(regulars):
                 song = regulars[ri]
                 song_dur = song.asset.duration if song.asset and song.asset.duration else DEFAULT_DURATION
+                song_dur = max(1.0, song_dur - resume_offset(song))  # a paused shiur's remainder
                 song_end = _cursor + timedelta(seconds=song_dur)
 
                 # Check if hard preempt fires during this song
@@ -1277,6 +1369,8 @@ async def _get_queue_impl(station_id, limit, db):
 
     for e in entries:
         dur = (e.asset.duration if e.asset and e.asset.duration else DEFAULT_DURATION)
+        if e.status != "playing":
+            dur = max(1.0, dur - resume_offset(e))  # a paused shiur's remainder
         queue_duration += dur
         is_now = e.status == "playing"
         is_silence = e.asset and e.asset.asset_type == "silence"
@@ -1674,8 +1768,7 @@ async def _skip_current_locked(
             pass
 
     if next_entry:
-        next_entry.status = "playing"
-        next_entry.started_at = datetime.now(timezone.utc)
+        mark_started(next_entry, datetime.now(timezone.utc))
         next_id = next_entry.id
         next_asset_id = next_entry.asset_id
         await db.commit()
@@ -2163,7 +2256,7 @@ async def start_playback(
 
     if current:
         if not current.started_at:
-            current.started_at = datetime.now(timezone.utc)
+            mark_started(current, datetime.now(timezone.utc))
             await db.commit()
         return {"message": "Already playing", "now_playing": str(current.asset_id)}
 
@@ -2203,8 +2296,7 @@ async def _start_next_locked(db: AsyncSession, station_id) -> QueueEntry | None:
     if not next_entry:
         await db.commit()
         return None
-    next_entry.status = "playing"
-    next_entry.started_at = datetime.now(timezone.utc)
+    mark_started(next_entry, datetime.now(timezone.utc))
     started_id = next_entry.id
     await db.commit()
     await _broadcast_now_playing_entry(db, station_id, started_id)

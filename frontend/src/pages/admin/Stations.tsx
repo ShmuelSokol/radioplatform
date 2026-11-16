@@ -356,9 +356,12 @@ function AutomationConfig({ config, onSave, saving }: {
   const [hourlyTime, setHourlyTime] = useState(config.hourly_time_announcement ?? false);
   const [weatherOn, setWeatherOn] = useState(config.weather_enabled ?? false);
   const [weatherInterval, setWeatherInterval] = useState(config.weather_interval_minutes ?? 30);
+  const [longItems, setLongItems] = useState<string>(config.timed_during_long_items ?? 'pause');
 
   const handleSave = () => {
     onSave({
+      ...config, // keep settings made elsewhere (program clock, weather region)
+      timed_during_long_items: longItems,
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
       weather_enabled: weatherOn,
@@ -389,6 +392,16 @@ function AutomationConfig({ config, onSave, saving }: {
             className="w-20 px-2 py-1 border rounded" disabled={!weatherOn} />
         </div>
       </div>
+      <label className="mt-4 block max-w-lg text-sm">
+        <span className="block font-medium text-gray-700">When the time check comes during a shiur or story</span>
+        <select value={longItems} onChange={e => setLongItems(e.target.value)}
+          className="mt-1 w-full px-2 py-1 border rounded" data-testid="timed-during-long-items">
+          <option value="pause">Pause it, then carry on where it stopped</option>
+          <option value="wait">Wait until it ends</option>
+          <option value="cut">Cut it (the time check takes over)</option>
+        </select>
+        <span className="block mt-1 text-xs text-gray-500">Songs are always faded for the time check as before.</span>
+      </label>
       <button onClick={handleSave} disabled={saving}
         className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm disabled:opacity-50">
         {saving ? 'Saving...' : 'Save Automation Config'}

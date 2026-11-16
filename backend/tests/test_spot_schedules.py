@@ -17,7 +17,12 @@ from app.models.sponsor import Sponsor
 from app.models.station import Station
 from app.models.user import User, UserRole
 from app.services.queue_replenish_service import QueueReplenishService
-from app.services.spot_schedule_service import Blackout, plan_spots, reconcile_spot_slots
+from app.services.spot_schedule_service import (
+    SAFETY_MARGIN,
+    Blackout,
+    plan_spots,
+    reconcile_spot_slots,
+)
 
 NY = ZoneInfo("America/New_York")
 
@@ -123,7 +128,11 @@ async def test_exact_time_spot_reaches_the_queue_with_its_timing(
     db_session.expire_all()
     slots = await _ad_slots(db_session, station_id)
     assert sorted(str(s.id) for s in slots) == before
-    assert {s.timing_mode for s in slots} == {"soft"}
+    # A slot about to air is left as it was (SAFETY_MARGIN): run at 7:59 AM New York,
+    # today's 8:00 slot kept "hard" and failed this test
+    cutoff = datetime.now(UTC) + SAFETY_MARGIN
+    later = [s for s in slots if s.preempt_at.replace(tzinfo=UTC) > cutoff]
+    assert later and {s.timing_mode for s in later} == {"soft"}
 
     r = await client.get(
         f"/api/v1/spot-schedules/preview?station_id={station_id}&days=2", headers=auth_headers
