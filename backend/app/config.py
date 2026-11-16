@@ -207,24 +207,38 @@ class Settings(BaseSettings):
     # Playout engine (Liquidsoap on the stream server). The engine asks the backend
     # what plays next and reports what really went on air. See app/services/playout_engine.py.
     PLAYOUT_ENGINE_ENABLED: bool = False
-    PLAYOUT_ENGINE_STATION_ID: str = ""  # the one station the engine plays
-    PLAYOUT_ENGINE_URL: str = ""  # engine control URL, e.g. "https://stream.kbrlive.com/control"
+    # Stations the engine plays, comma-separated (one engine per station on the stream
+    # server; setup.sh prints the list). A station not listed keeps the in-browser player.
+    PLAYOUT_ENGINE_STATION_ID: str = ""
+    PLAYOUT_ENGINE_URL: str = ""  # control base, e.g. "https://stream.kbrlive.com/control" (+ /<station id>)
     PLAYOUT_ENGINE_TOKEN: str = ""  # shared secret, sent both ways in X-Playout-Token
-    # When true, listeners and the dashboard play ICECAST_STREAM_URL instead of the in-browser player
+    # When true, listeners and the dashboard play the station's stream instead of the in-browser player
     PLAYOUT_STREAM_LIVE: bool = False
+
+    @property
+    def engine_station_ids(self) -> set[str]:
+        return {s.strip() for s in self.PLAYOUT_ENGINE_STATION_ID.split(",") if s.strip()}
 
     @property
     def playout_engine_enabled(self) -> bool:
         return bool(
             self.PLAYOUT_ENGINE_ENABLED
-            and self.PLAYOUT_ENGINE_STATION_ID
+            and self.engine_station_ids
             and self.PLAYOUT_ENGINE_URL
             and self.PLAYOUT_ENGINE_TOKEN
         )
 
     def engine_drives(self, station_id) -> bool:
         """True when this station's playback is driven by the playout engine."""
-        return self.playout_engine_enabled and str(station_id) == self.PLAYOUT_ENGINE_STATION_ID
+        return self.playout_engine_enabled and str(station_id) in self.engine_station_ids
+
+    def engine_control_url(self, station_id) -> str:
+        """Where this station's engine takes commands (nginx routes it to that engine)."""
+        return f"{self.PLAYOUT_ENGINE_URL.rstrip('/')}/{station_id}"
+
+    def engine_stream_url(self, station_id) -> str:
+        """This station's stream: Icecast mount /live-<station id>."""
+        return f"{self.ICECAST_STREAM_URL.rstrip('/')}-{station_id}"
 
     def public_stream_url(self, station_id) -> str | None:
         """Stream URL clients should play for this station, or None for the in-browser player."""
@@ -233,7 +247,7 @@ class Settings(BaseSettings):
         if self.liquidsoap_enabled:
             return self.ICECAST_STREAM_URL
         if self.engine_drives(station_id) and self.PLAYOUT_STREAM_LIVE:
-            return self.ICECAST_STREAM_URL
+            return self.engine_stream_url(station_id)
         return None
 
 

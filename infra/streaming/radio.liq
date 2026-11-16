@@ -307,7 +307,7 @@ output.icecast(
   port=icecast_port,
   password=icecast_pass,
   mount=icecast_mount,
-  name="Kol Bramah Live",
+  name=environment.get(default="Kol B'ramah", "KBR_STATION_NAME"),
   genre="Jewish Radio",
   url="https://kbrlive.com",
   radio

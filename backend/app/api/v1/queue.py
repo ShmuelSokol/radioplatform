@@ -1610,7 +1610,7 @@ async def fire_now(
         uri = playout_engine.build_uri(entry, "timed")
         state = playout_engine.get_state(station_id)
         state.timed_sent.add(str(entry.id))
-        if uri and await playout_engine.engine_timed(uri, time.time(), str(entry.id)):
+        if uri and await playout_engine.engine_timed(station_id, uri, time.time(), str(entry.id)):
             done = {**queued, "message": "Going on air", "on_air": True}
             _remember_fire_request(station_id, body.client_request_id, done)
             return done
@@ -1654,7 +1654,7 @@ async def mix_over(
         raise HTTPException(status_code=409, detail="This item has no audio file to play")
 
     if settings.engine_drives(station_id):
-        if not await playout_engine.engine_overlay(asset):
+        if not await playout_engine.engine_overlay(station_id, asset):
             raise HTTPException(status_code=503, detail="The playout engine did not respond")
     else:
         # Browser playback: every open player mixes it in on top of its own audio

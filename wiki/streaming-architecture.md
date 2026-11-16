@@ -123,17 +123,30 @@ played instead of skipped.
 
 ## Flags (backend)
 
-`PLAYOUT_ENGINE_ENABLED`, `PLAYOUT_ENGINE_STATION_ID` (one station), `PLAYOUT_ENGINE_URL`,
+`PLAYOUT_ENGINE_ENABLED`, `PLAYOUT_ENGINE_STATION_ID` (comma-separated stations), `PLAYOUT_ENGINE_URL`,
 `PLAYOUT_ENGINE_TOKEN`, `ICECAST_STREAM_URL`, and `PLAYOUT_STREAM_LIVE` (false = engine runs
 and can be listened to at the stream URL, but the site keeps the in-browser player; true =
 the site plays the stream). Turn `PLAYOUT_STREAM_LIVE` on last.
 
 ## Server
 
-`infra/streaming/setup.sh [station-id] [domain]` (no id = the first station the backend lists) on a fresh Ubuntu 24.04 machine (apt has
-Liquidsoap 2.2.4 there; 22.04 has 2.0 and will not run `radio.liq`). It generates the secrets
-on the machine, prints the backend settings, and gets the certificate once the domain points at
-the server. Safe to run again.
+`infra/streaming/setup.sh [stations] [domain]` on a fresh Ubuntu 24.04 machine (apt has
+Liquidsoap 2.2.4 there; 22.04 has 2.0 and will not run `radio.liq`). `stations` is `all`
+(default: every station the backend lists) or comma-separated ids. It runs one engine per
+station (systemd `kbr-engine@<id>`, env in `/etc/kbr-engine/stations/<id>.env`): control
+port 8081, 8082, ... behind nginx at `/control/<id>/`, Icecast mount `/live-<id>`. The
+backend addresses each one by station (`settings.engine_control_url`, `engine_stream_url`).
+It generates the secrets on the machine, prints the backend settings (the station list for
+`PLAYOUT_ENGINE_STATION_ID`), and gets the certificate once the domain points at the server.
+Safe to run again: it rewrites the nginx site (certbot reinstalls the certificate), adds
+engines for new stations and removes unlisted ones. A station added later needs a rerun
+and the new list on Railway; never list a station that has no engine, because the backend
+stops advancing an engine station itself.
+
+Each engine uses about 150 MB (measured 2026-11-16, three engines in the local rig), so a
+1 GB server holds about four or five stations. In the rig, Next on one station moved only
+that station. The backend always sends a JSON body; a bare empty POST through nginx once
+got a 502 from harbor.
 
 ## Tested off-air
 

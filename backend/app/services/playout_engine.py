@@ -80,8 +80,8 @@ def token_ok(presented: str | None) -> bool:
 # ── Commands to the engine ───────────────────────────────────────────────────
 
 
-async def _command(path: str, payload: dict | None = None) -> bool:
-    url = settings.PLAYOUT_ENGINE_URL.rstrip("/") + path
+async def _command(path: str, payload: dict | None = None, *, station_id) -> bool:
+    url = settings.engine_control_url(station_id) + path
     try:
         async with httpx.AsyncClient(timeout=4.0) as client:
             resp = await client.post(
@@ -102,7 +102,7 @@ async def engine_skip(station_id, fade_seconds: float | None = None) -> bool:
     `fade_seconds` None = the engine's own default (KBR_SKIP_FADE_SECONDS)."""
     state = get_state(station_id)
     state.skip_requested = True
-    ok = await _command("/skip", None if fade_seconds is None else {"fade": fade_seconds})
+    ok = await _command("/skip", None if fade_seconds is None else {"fade": fade_seconds}, station_id=station_id)
     if not ok:
         state.skip_requested = False
     return ok
@@ -111,19 +111,19 @@ async def engine_skip(station_id, fade_seconds: float | None = None) -> bool:
 async def engine_flush(station_id) -> bool:
     """Drop the engine's pre-loaded next track so it asks again."""
     get_state(station_id).cued_entry_id = None
-    return await _command("/flush")
+    return await _command("/flush", station_id=station_id)
 
 
-async def engine_timed(uri: str, at_epoch: float, entry_id: str = "") -> bool:
+async def engine_timed(station_id, uri: str, at_epoch: float, entry_id: str = "") -> bool:
     """Load an item now and put it on air at `at_epoch` (music fades under it).
 
     The engine ignores an `entry_id` it already holds, so handing the same item over twice
     (after a backend restart, when our own record of it is gone) does not air it twice.
     """
-    return await _command("/timed", {"uri": uri, "at": at_epoch, "id": entry_id})
+    return await _command("/timed", {"uri": uri, "at": at_epoch, "id": entry_id}, station_id=station_id)
 
 
-async def engine_overlay(asset) -> bool:
+async def engine_overlay(station_id, asset) -> bool:
     """Play an asset on top of what is on air (Mix over). The item on air carries on."""
     url = audio_url(asset)
     if not url:
@@ -134,7 +134,7 @@ async def engine_overlay(asset) -> bool:
     if isinstance(gain, (int, float)) and gain != 0:
         fields["liq_amplify"] = f"{float(gain):.2f} dB"
     annotations = ",".join(f"{k}={_quote(v)}" for k, v in fields.items())
-    return await _command("/overlay", {"uri": f"annotate:{annotations}:{url}"})
+    return await _command("/overlay", {"uri": f"annotate:{annotations}:{url}"}, station_id=station_id)
 
 
 # ── Building what the engine plays ───────────────────────────────────────────
@@ -538,7 +538,7 @@ async def tick(db: AsyncSession, station) -> None:
         at = entry.preempt_at
         if at.tzinfo is None:
             at = at.replace(tzinfo=UTC)
-        if await engine_timed(uri, at.timestamp(), key):
+        if await engine_timed(station_id, uri, at.timestamp(), key):
             state.timed_sent.add(key)
             logger.info("Handed timed entry %s to the engine for %s", key, at.isoformat())
 

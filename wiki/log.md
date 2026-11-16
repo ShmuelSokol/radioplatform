@@ -121,3 +121,4 @@ INGEST 2026-11-16 audio-engine.md left speaker only (ChannelMerger input is mono
 INGEST 2026-11-16 live-shows.md live shows go on air with no broadcast server: host mic as 24 kHz PCM over /ws/live/{show}/audio (auth message first), relayed to /ws/live/station/{station}/listen; queue paused at start (resume@ entry) and restarted at end; scheduler pass rollback had undone hard stops
 UPDATE 2026-11-16 live-shows.md Start Broadcasting (mic socket) now starts a scheduled show, so the station pauses and resumes
 UPDATE 2026-11-16 release-pickup.md admin control of releases: Site Updates screen, /site-release (auto/manual mode, push now or at a time, optionally including playing tabs, which reload after the next item change and play on), /ws/site tab presence
+UPDATE 2026-11-16 streaming-architecture.md engine plays every listed station: one engine per station (kbr-engine@id, port 8081+, mount /live-id, nginx /control/id/); ~150 MB each

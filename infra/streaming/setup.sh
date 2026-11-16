@@ -1,22 +1,26 @@
 #!/bin/bash
 # Sets up the KBR Live playout engine (Liquidsoap 2.2 + Icecast + nginx) on a fresh
-# Ubuntu 24.04 server. Safe to run again: it keeps the secrets it made the first time.
+# Ubuntu 24.04 server: one engine per station, each with its own stream
+# (https://<domain>/live-<station id>). Safe to run again: it keeps the secrets it
+# made the first time, adds engines for new stations and removes ones no longer listed.
 #
 #   curl -fsSL https://raw.githubusercontent.com/ShmuelSokol/radioplatform/main/infra/streaming/setup.sh \
-#     | bash -s -- [station-id] [stream-domain] [backend-url]
+#     | bash -s -- [stations] [stream-domain] [backend-url]
 #
-# With no station id it takes the first station the backend lists.
+# stations: "all" (default: every station the backend lists) or comma-separated ids.
 #
 # At the end it prints the settings the backend needs. No password is ever written
 # to the repository; they are generated here and stay on this machine.
 set -euo pipefail
 
-STATION_ID="${1:-}"
+STATIONS="${1:-all}"
 DOMAIN="${2:-stream.kbrlive.com}"
 BACKEND_URL="${3:-https://api.kbrlive.com/api/v1}"
 REF="${KBR_SETUP_REF:-main}"
 RAW="https://raw.githubusercontent.com/ShmuelSokol/radioplatform/${REF}/infra/streaming"
 ENV_FILE=/etc/kbr-engine/env
+STATION_DIR=/etc/kbr-engine/stations
+FIRST_PORT=8081
 
 [ "$(id -u)" = 0 ] || { echo "Run as root."; exit 1; }
 . /etc/os-release
@@ -26,17 +30,21 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q liquidsoap icecast2 nginx certbot python3-certbot-nginx curl ufw openssl
 
-if [ -z "$STATION_ID" ]; then
-  STATION_ID="$(curl -fsSL "$BACKEND_URL/stations" | python3 -c '
-import json, sys
+# "<id>|<name>" per line, for the stations to play
+STATION_LINES="$(curl -fsSL "$BACKEND_URL/stations?limit=100" | WANT="$STATIONS" python3 -c '
+import json, os, sys
 data = json.load(sys.stdin)
 rows = data.get("stations", data) if isinstance(data, dict) else data
-print(rows[0]["id"] if rows else "")')"
-  [ -n "$STATION_ID" ] || { echo "Could not find a station at $BACKEND_URL/stations. Pass the station id as the first argument."; exit 1; }
-  echo "Using station $STATION_ID"
-fi
+want = os.environ["WANT"].strip()
+ids = None if want in ("", "all") else {w.strip() for w in want.split(",") if w.strip()}
+for r in rows:
+    if ids is None or r["id"] in ids:
+        print(r["id"] + "|" + (r.get("name") or "Kol B\x27ramah").replace("|", " ").replace(chr(34), "").replace(chr(92), ""))
+')"
+[ -n "$STATION_LINES" ] || { echo "No stations found at $BACKEND_URL/stations for '$STATIONS'."; exit 1; }
+echo "Stations:"; echo "$STATION_LINES" | sed 's/^/  /'
 
-mkdir -p /etc/kbr-engine /var/lib/kbr-engine/emergency
+mkdir -p /etc/kbr-engine "$STATION_DIR" /var/lib/kbr-engine/emergency
 chown -R liquidsoap:liquidsoap /var/lib/kbr-engine
 
 secret() { openssl rand -hex 24; }
@@ -45,21 +53,18 @@ TOKEN="$(old KBR_PLAYOUT_TOKEN)";            TOKEN="${TOKEN:-$(secret)}"
 SOURCE_PW="$(old KBR_ICECAST_SOURCE_PASSWORD)"; SOURCE_PW="${SOURCE_PW:-$(secret)}"
 
 curl -fsSL "$RAW/radio.liq" -o /etc/kbr-engine/radio.liq
-curl -fsSL "$RAW/kbr-engine.service" -o /etc/systemd/system/kbr-engine.service
+curl -fsSL "$RAW/kbr-engine@.service" -o /etc/systemd/system/kbr-engine@.service
 curl -fsSL "$RAW/nginx-stream.conf" -o /tmp/kbr-nginx.conf
 curl -fsSL "$RAW/icecast.xml" -o /tmp/kbr-icecast.xml
 
 umask 077
 cat > "$ENV_FILE" <<ENV
 KBR_BACKEND_URL=${BACKEND_URL}
-KBR_STATION_ID=${STATION_ID}
 KBR_PLAYOUT_TOKEN=${TOKEN}
-KBR_CONTROL_PORT=8081
 KBR_EMERGENCY_DIR=/var/lib/kbr-engine/emergency
 KBR_ICECAST_HOST=127.0.0.1
 KBR_ICECAST_PORT=8000
 KBR_ICECAST_SOURCE_PASSWORD=${SOURCE_PW}
-KBR_ICECAST_MOUNT=/live
 KBR_SKIP_FADE_SECONDS=0.5
 ENV
 chown root:liquidsoap "$ENV_FILE"; chmod 640 "$ENV_FILE"
@@ -71,10 +76,33 @@ sed -e "s/STREAM_DOMAIN/${DOMAIN}/" -e "s/SOURCE_PASSWORD/${SOURCE_PW}/" \
 chown icecast2:icecast /etc/icecast2/icecast.xml; chmod 640 /etc/icecast2/icecast.xml
 sed -i 's/^ENABLE=.*/ENABLE=true/' /etc/default/icecast2 2>/dev/null || true
 
-# Keep an existing nginx site: certbot has already added the certificate to it
-if [ ! -f /etc/nginx/sites-available/kbr-stream ]; then
-  sed "s/STREAM_DOMAIN/${DOMAIN}/" /tmp/kbr-nginx.conf > /etc/nginx/sites-available/kbr-stream
-fi
+# One engine per station: its own control port, stream mount and nginx route
+CONTROL_INC=/etc/nginx/kbr-control.inc
+: > "$CONTROL_INC"
+PORT=$FIRST_PORT
+WANTED=""
+while IFS='|' read -r SID SNAME; do
+  [ -n "$SID" ] || continue
+  cat > "$STATION_DIR/$SID.env" <<SENV
+KBR_STATION_ID=${SID}
+KBR_STATION_NAME="${SNAME}"
+KBR_CONTROL_PORT=${PORT}
+KBR_ICECAST_MOUNT=/live-${SID}
+SENV
+  chown root:liquidsoap "$STATION_DIR/$SID.env"; chmod 640 "$STATION_DIR/$SID.env"
+  cat >> "$CONTROL_INC" <<LOC
+location /control/${SID}/ {
+    limit_except POST { deny all; }
+    proxy_pass http://127.0.0.1:${PORT}/;
+    proxy_read_timeout 10;
+}
+LOC
+  WANTED="$WANTED $SID"
+  PORT=$((PORT + 1))
+done <<< "$STATION_LINES"
+
+# Rewritten every run (certbot puts the certificate back below)
+sed "s/STREAM_DOMAIN/${DOMAIN}/" /tmp/kbr-nginx.conf > /etc/nginx/sites-available/kbr-stream
 ln -sf /etc/nginx/sites-available/kbr-stream /etc/nginx/sites-enabled/kbr-stream
 rm -f /etc/nginx/sites-enabled/default /tmp/kbr-nginx.conf /tmp/kbr-icecast.xml
 
@@ -83,33 +111,55 @@ ufw --force enable >/dev/null
 
 systemctl daemon-reload
 systemctl disable --now liquidsoap 2>/dev/null || true
-systemctl enable icecast2 nginx kbr-engine >/dev/null
+systemctl disable --now kbr-engine 2>/dev/null || true   # the old single-station engine
+rm -f /etc/systemd/system/kbr-engine.service
+# Engines for stations no longer listed
+for f in "$STATION_DIR"/*.env; do
+  [ -e "$f" ] || continue
+  SID="$(basename "$f" .env)"
+  case " $WANTED " in *" $SID "*) ;; *)
+    systemctl disable --now "kbr-engine@$SID" 2>/dev/null || true
+    rm -f "$f"; echo "Removed engine for $SID";;
+  esac
+done
+systemctl enable icecast2 nginx >/dev/null
 systemctl restart icecast2
 nginx -t && systemctl reload nginx
-systemctl restart kbr-engine
+for SID in $WANTED; do
+  systemctl enable "kbr-engine@$SID" >/dev/null 2>&1
+  systemctl restart "kbr-engine@$SID"
+done
 
 # HTTPS needs the domain to point at this machine already
 MY_IP="$(curl -fsS4 https://api.ipify.org || true)"
 DNS_IP="$(getent ahostsv4 "$DOMAIN" | awk 'NR==1{print $1}' || true)"
 TLS=no
 if [ -n "$MY_IP" ] && [ "$MY_IP" = "$DNS_IP" ]; then
-  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect && TLS=yes
+  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect --keep-until-expiring && TLS=yes
 fi
 
-sleep 4
+sleep 5
+IDS="$(echo $WANTED | tr ' ' ',')"
 echo
 echo "================ KBR playout engine ================"
-systemctl is-active --quiet kbr-engine && echo "Engine:  running" || echo "Engine:  NOT running (journalctl -u kbr-engine -n 50)"
-systemctl is-active --quiet icecast2  && echo "Icecast: running" || echo "Icecast: NOT running"
+RUNNING=0; TOTAL=0
+for SID in $WANTED; do
+  TOTAL=$((TOTAL + 1))
+  if systemctl is-active --quiet "kbr-engine@$SID"; then RUNNING=$((RUNNING + 1))
+  else echo "Engine NOT running for $SID (journalctl -u kbr-engine@$SID -n 50)"; fi
+done
+echo "Engines: ${RUNNING} of ${TOTAL} running"
+systemctl is-active --quiet icecast2 && echo "Icecast: running" || echo "Icecast: NOT running"
+echo "Memory:  $(free -m | awk '/^Mem:/{print $3" MB used of "$2" MB"}')"
 if [ "$TLS" = yes ]; then
-  echo "HTTPS:   ready at https://${DOMAIN}/live"
+  echo "HTTPS:   ready (streams at https://${DOMAIN}/live-<station id>)"
 else
   echo "HTTPS:   NOT set up yet. Point ${DOMAIN} (DNS A record) at ${MY_IP:-this server}, then run this script again."
 fi
 echo
 echo "Backend settings (Railway):"
 echo "  PLAYOUT_ENGINE_ENABLED=true"
-echo "  PLAYOUT_ENGINE_STATION_ID=${STATION_ID}"
+echo "  PLAYOUT_ENGINE_STATION_ID=${IDS}"
 echo "  PLAYOUT_ENGINE_URL=https://${DOMAIN}/control"
 echo "  PLAYOUT_ENGINE_TOKEN=${TOKEN}"
 echo "  ICECAST_STREAM_URL=https://${DOMAIN}/live"

@@ -212,7 +212,7 @@ async def test_mix_over_plays_on_top_and_leaves_the_queue_alone(
     # On an engine station the engine gets it instead, as an overlay
     commands = []
 
-    async def fake_command(path, payload=None):
+    async def fake_command(path, payload=None, **_kw):
         commands.append((path, payload))
         return True
 
