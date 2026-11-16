@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
 
-from app.models.asset import Asset, fit_for_random_pick
+from app.models.asset import ONE_MOMENT_CATEGORIES, Asset, fit_for_random_pick
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
@@ -688,6 +688,32 @@ class QueueReplenishService:
         on the hour — no reliance on scheduler timing.
         """
         from app.config import settings
+        from app.services.spot_schedule_service import default_timing
+
+        station_timing = self.automation_config.get("spot_timing")
+
+        def timing_for(at: datetime) -> str:
+            # Station default: on the second at :00, after the song otherwise
+            return default_timing(at.minute, station_timing)
+
+        # Time and weather queued before timing_mode existed had none, which counted as
+        # "on the second", so a :30 weather cut the song. Give them the station default.
+        undecided = await self.db.execute(
+            select(QueueEntry)
+            .join(Asset, Asset.id == QueueEntry.asset_id)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.timing_mode.is_(None),
+                or_(QueueEntry.source.is_(None), QueueEntry.source != "ad_slot"),
+                Asset.category.in_(ONE_MOMENT_CATEGORIES),
+            )
+        )
+        for entry in undecided.scalars().all():
+            at = entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=timezone.utc)
+            entry.timing_mode = timing_for(at)
+
         # ElevenLabs is optional: uploaded time clips and weather spots are used
         # when they exist (get_or_create_weather_spot_assets returns None for
         # whatever is missing when no TTS key is set).
@@ -761,6 +787,7 @@ class QueueReplenishService:
                         position=self.max_pos,
                         status="pending",
                         preempt_at=hour_boundary,  # ALL entries get preempt_at so weather follows time
+                        timing_mode=timing_for(hour_boundary),
                     ))
                 if assets_to_insert:
                     hours_scheduled += 1
@@ -776,6 +803,7 @@ class QueueReplenishService:
                     position=self.max_pos,
                     status="pending",
                     preempt_at=half_boundary,
+                    timing_mode=timing_for(half_boundary),
                 ))
                 logger.info("Scheduled :30 weather for %s", half_boundary.isoformat())
 
