@@ -59,3 +59,11 @@ then a third song. `skip_current` now answers the first Next within
 (`kept_incoming: true`); a second press is a normal Next. The marker is in memory
 (`_automatic_change` in `api/v1/queue.py`) and is only set by the automatic advance, so quick
 repeated presses of Next still each skip a song.
+
+## Clean item starts (2026-11-16)
+
+A change heard less than 1 s into the new item starts it from the top with no seek
+(`START_FROM_TOP_SECONDS`), and `seekIfNeeded` skips seeks to where the deck already is.
+Safari lands MP3 seeks on an earlier frame, so the first fraction of a second was heard twice.
+Checked by `e2e/audio-engine.mjs` scenarios `next-starts-clean` and `next-starts-clean-cold`
+(the harness records `seeking` events). Not yet checked in real Safari.

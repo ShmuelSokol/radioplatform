@@ -73,6 +73,25 @@ Jerusalem, "Night Chill" block): stops after Fade and songs faded early. `_check
 reason. Test: `tests/test_one_player_per_station.py`. Schedule blocks still matter: they
 feed the queue through replenish.
 
+## Timed items start on time
+
+The 3 s poll and the song-end timer used to be the only things that advanced, so a hard
+timed item (hard sponsorship, hourly time) started up to 3 s late while the control room had
+already faded the song out: dead air. Each poll now arms an exact timer
+(`SchedulerEngine._arm_timed_start`) for the next item due within 10 s: a hard item at
+`preempt_at`, a soft one at `hard_by` (soft items with no limit wait for the song end). The
+web player's lead-in fade ends 400 ms after the due time (`PREEMPT_FADE_OVERHANG_MS`) so the
+announcement lands before silence. Test: `tests/test_timed_start_on_time.py`.
+
+## Items with no length
+
+`Asset.duration` can be NULL (some KBR Jerusalem items). Every duration sum must use
+`or DEFAULT_DURATION`: `GET /queue` once did `duration - elapsed` and failed for minutes after
+a Next onto such an item, and a restart treated it as finished and cut it. Missing lengths are
+measured in the background after each start (`services/duration_backfill.py`). A restart now
+starts the next item through `start_from_queue`, so an item timed for later is not pulled
+forward. Test: `tests/test_items_without_length.py`.
+
 ## Backend restarts and two processes
 
 `EngineState` is in memory, per process. It is safe to lose: the pre-loaded entry is covered
