@@ -3,7 +3,7 @@ Alerts API — list, resolve, reopen, delete alerts.
 """
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_db, require_admin, require_manager
@@ -28,10 +28,13 @@ async def list_alerts(
     _user: User = Depends(require_manager),
 ):
     """List alerts with optional filters."""
-    alerts, total, unresolved_count = await alert_service.list_alerts(
-        db, skip=skip, limit=limit, severity=severity,
-        alert_type=alert_type, is_resolved=is_resolved,
-    )
+    try:
+        alerts, total, unresolved_count = await alert_service.list_alerts(
+            db, skip=skip, limit=limit, severity=severity,
+            alert_type=alert_type, is_resolved=is_resolved,
+        )
+    except ValueError:
+        raise HTTPException(422, "unknown severity or alert type")
     return AlertListResponse(alerts=alerts, total=total, unresolved_count=unresolved_count)
 
 
@@ -43,6 +46,17 @@ async def unresolved_count(
     """Get unresolved alert count for notification badge."""
     count = await alert_service.get_unresolved_count(db)
     return {"unresolved_count": count}
+
+
+@router.post("/resolve-all")
+async def resolve_all_alerts(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_manager),
+):
+    """Resolve every open alert (a fresh start)."""
+    resolved = await alert_service.resolve_all(db, user.id)
+    await db.commit()
+    return {"resolved": resolved}
 
 
 @router.patch("/{alert_id}/resolve", response_model=AlertInDB)

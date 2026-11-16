@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useAlerts, useResolveAlert, useReopenAlert, useDeleteAlert } from '../../hooks/useAlerts';
+import { useEffect, useState } from 'react';
+import { useAlerts, useResolveAlert, useReopenAlert, useDeleteAlert, useResolveAllAlerts } from '../../hooks/useAlerts';
 import { useAuthStore } from '../../stores/authStore';
 import Spinner from '../../components/Spinner';
 
@@ -26,6 +26,8 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
+const PAGE_SIZE = 100;
+
 export default function Alerts() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
@@ -35,22 +37,29 @@ export default function Alerts() {
   const [statusFilter, setStatusFilter] = useState<string>('unresolved');
 
   const is_resolved = statusFilter === 'resolved' ? true : statusFilter === 'unresolved' ? false : undefined;
+  const [page, setPage] = useState(0);
+  // A new filter starts again at the first page
+  useEffect(() => { setPage(0); }, [severityFilter, typeFilter, statusFilter]);
 
-  const { data, isLoading } = useAlerts({
+  const { data, isLoading, isError, refetch } = useAlerts({
     severity: severityFilter || undefined,
     alert_type: typeFilter || undefined,
     is_resolved,
-    limit: 100,
+    skip: page * PAGE_SIZE,
+    limit: PAGE_SIZE,
   });
+  const resolveAllMut = useResolveAllAlerts();
   const resolveMut = useResolveAlert();
   const reopenMut = useReopenAlert();
   const deleteMut = useDeleteAlert();
 
   const alerts = data?.alerts ?? [];
   const unresolvedCount = data?.unresolved_count ?? 0;
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] min-h-[calc(100vh-4rem)] flex flex-col text-white p-4">
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] h-[calc(100vh-4rem)] flex flex-col text-white p-4">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-cyan-300">
           Alerts
@@ -60,6 +69,15 @@ export default function Alerts() {
             </span>
           )}
         </h1>
+        {unresolvedCount > 0 && (
+          <button
+            data-testid="resolve-all"
+            onClick={() => { if (confirm(`Resolve all ${unresolvedCount} open alerts?`)) resolveAllMut.mutate(); }}
+            disabled={resolveAllMut.isPending}
+            className="px-3 py-1.5 bg-green-800 hover:bg-green-700 text-white rounded text-[12px] disabled:opacity-50 min-h-[36px]">
+            {resolveAllMut.isPending ? 'Resolving…' : 'Resolve all'}
+          </button>
+        )}
       </div>
 
       {/* Filters */}
@@ -102,6 +120,11 @@ export default function Alerts() {
 
       {isLoading ? (
         <div className="text-gray-500 text-center py-8">Loading alerts...</div>
+      ) : isError ? (
+        <div className="text-center py-8 text-red-300">
+          Could not load the alerts.{' '}
+          <button onClick={() => refetch()} className="underline text-cyan-300">Try again</button>
+        </div>
       ) : alerts.length === 0 ? (
         <div className="text-center py-12 text-gray-600">
           <svg className="w-12 h-12 mx-auto mb-3 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -111,7 +134,8 @@ export default function Alerts() {
           No alerts found
         </div>
       ) : (
-        <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-x-auto">
+        <>
+        <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-auto flex-1 min-h-0" data-testid="alerts-list">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">
@@ -173,6 +197,19 @@ export default function Alerts() {
             </tbody>
           </table>
         </div>
+        <div className="flex items-center justify-between mt-3 text-[12px] text-gray-400" data-testid="alerts-pager">
+          <span>
+            {page * PAGE_SIZE + 1}–{Math.min(total, (page + 1) * PAGE_SIZE)} of {total}
+          </span>
+          <div className="flex gap-2">
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              className="px-3 py-1 border border-[#2a2a5e] rounded disabled:opacity-30 min-h-[36px]">Newer</button>
+            <span className="self-center">Page {page + 1} of {pages}</span>
+            <button onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}
+              className="px-3 py-1 border border-[#2a2a5e] rounded disabled:opacity-30 min-h-[36px]">Older</button>
+          </div>
+        </div>
+        </>
       )}
     </div>
   );
