@@ -655,8 +655,6 @@ class SchedulerEngine:
         """The now_playing message for a queue entry: analysis data + next track.
         Also what a listener gets on connecting, so both always agree.
         `push` also pre-queues the next track in Liquidsoap (broadcasts only)."""
-        from sqlalchemy.orm import joinedload
-        from app.models.queue_entry import QueueEntry
 
         asset = entry.asset
         if not asset:
@@ -672,21 +670,10 @@ class SchedulerEngine:
         cross_start = analysis.get("cross_start_seconds", (asset.duration or 180.0) - 3.0)
         replay_gain_db = analysis.get("replay_gain_db", 0)
 
-        # Peek at next pending entry
-        from sqlalchemy import or_
-        now_utc = datetime.now(timezone.utc)
-        next_result = await db.execute(
-            select(QueueEntry)
-            .options(joinedload(QueueEntry.asset))
-            .where(
-                QueueEntry.station_id == station_id,
-                QueueEntry.status == "pending",
-                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
-            )
-            .order_by(QueueEntry.position)
-            .limit(1)
-        )
-        next_entry = next_result.unique().scalar_one_or_none()
+        # What follows this item: the queue's own pick at the hand-over, so a soft
+        # sponsorship due by then is pre-loaded instead of the next song
+        from app.api.v1.queue import predict_next_entry
+        next_entry = await predict_next_entry(db, station_id, entry)
 
         next_asset_data = None
         if next_entry and next_entry.asset:

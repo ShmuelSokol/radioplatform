@@ -83,6 +83,17 @@ already faded the song out: dead air. Each poll now arms an exact timer
 web player's lead-in fade ends 400 ms after the due time (`PREEMPT_FADE_OVERHANG_MS`) so the
 announcement lands before silence. Test: `tests/test_timed_start_on_time.py`.
 
+## "Next" names what the queue will really pick
+
+Every now-playing message (scheduler broadcast, `/streams/.../now-playing`) carries `next_asset`,
+which listeners pre-load and crossfade into at `cross_start`. It comes from
+`queue.predict_next_entry`: the same `_pick_next_pending` rule, evaluated at the hand-over time
+(`switch_time`: `started_at + cross_start`, default 3 s before the end), not at "now". Picking by
+"now" with position order named the next song while a soft sponsorship had come due mid-song:
+listeners heard 3 s of that song, then jumped into the sponsorship 3 s late (live check
+2026-11-16). The scheduler rebuilds the message every poll, so a slot added mid-song reaches
+listeners within 3 s. Test: `tests/test_next_follows_soft_slot.py`.
+
 ## Items with no length
 
 `Asset.duration` can be NULL (some KBR Jerusalem items). Every duration sum must use
