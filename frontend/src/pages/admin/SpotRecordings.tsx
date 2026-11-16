@@ -353,7 +353,7 @@ export default function SpotRecordings() {
           value={form.script_text}
           onChange={(e) => setForm({ ...form, script_text: e.target.value })}
           rows={4}
-          placeholder="Kol Berama sponsor ..."
+          placeholder="Kol B'ramah sponsor ..."
           className="w-full border rounded-lg p-2"
         />
         {error && <p className="text-sm text-red-700">{error}</p>}

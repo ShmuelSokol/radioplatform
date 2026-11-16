@@ -44,7 +44,7 @@ async def send_campaign_status_update(
         <p>Log in to your <a href="{settings.FRONTEND_URL}/sponsor/dashboard"
         style="color: #4f46e5;">Sponsor Portal</a> for details.</p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
-        <p style="color: #9ca3af; font-size: 12px;">Kol Bramah Radio</p>
+        <p style="color: #9ca3af; font-size: 12px;">Kol B'ramah Radio</p>
     </div>
     """
     return await send_email(sponsor_email, subject, html)
@@ -64,7 +64,7 @@ async def send_new_comment_notification(
         <p><a href="{settings.FRONTEND_URL}/sponsor/dashboard"
         style="color: #4f46e5;">View in Portal</a></p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
-        <p style="color: #9ca3af; font-size: 12px;">Kol Bramah Radio</p>
+        <p style="color: #9ca3af; font-size: 12px;">Kol B'ramah Radio</p>
     </div>
     """
     return await send_email(sponsor_email, subject, html)
@@ -84,7 +84,7 @@ async def send_invoice_created(
         style="color: #4f46e5; text-decoration: none; background: #4f46e5; color: white; padding: 10px 20px; border-radius: 6px; display: inline-block;">
         View & Pay</a></p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
-        <p style="color: #9ca3af; font-size: 12px;">Kol Bramah Radio</p>
+        <p style="color: #9ca3af; font-size: 12px;">Kol B'ramah Radio</p>
     </div>
     """
     return await send_email(sponsor_email, subject, html)
@@ -102,7 +102,7 @@ async def send_payment_confirmation(
         <p><a href="{settings.FRONTEND_URL}/sponsor/billing"
         style="color: #4f46e5;">View Billing History</a></p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
-        <p style="color: #9ca3af; font-size: 12px;">Kol Bramah Radio</p>
+        <p style="color: #9ca3af; font-size: 12px;">Kol B'ramah Radio</p>
     </div>
     """
     return await send_email(sponsor_email, subject, html)

@@ -14,7 +14,7 @@ export default function CheckWording() {
       <div>
         <h1 className="text-2xl font-bold text-gray-800">Check your wording</h1>
         <p className="text-gray-600 mt-1">
-          Kol Berama airs sponsorship announcements, not advertisements. Write what you would like
+          Kol B'ramah airs sponsorship announcements, not advertisements. Write what you would like
           said and we will show you what can stay, what has to change, and why.
         </p>
       </div>

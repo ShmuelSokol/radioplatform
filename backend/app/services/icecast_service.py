@@ -42,7 +42,7 @@ class IcecastSourceClient:
     def source_url(self) -> str:
         return f"http://{self.host}:{self.port}{self.mount}"
 
-    async def start(self, station_name: str = "Kol Bramah"):
+    async def start(self, station_name: str = "Kol B'ramah"):
         """Start streaming to Icecast server."""
         if self._running:
             logger.warning("Icecast source already running")

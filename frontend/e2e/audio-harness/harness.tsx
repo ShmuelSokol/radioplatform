@@ -34,11 +34,12 @@ function Harness() {
   w.__set = set;
   // Timed items in the queue, picked the way the control room picks them
   const cut = s?.queue ? nextCut(s.queue) : null;
-  useAudioEngine(
+  const engine = useAudioEngine(
     s ? { id: s.id, title: s.id, artist: null, asset_type: 'music', category: null, duration: s.dur } : null,
     0, !!s, cut?.preempt_at ?? null, cut?.asset_id ?? null, 2000, 0, 0, s?.cross ?? 0, 0, s?.nextId ?? null, 0, 0, null, null, s?.startedAt ?? null,
     s?.fade ?? null,
   );
+  w.__listen = engine.initAudio;
   return null;
 }
 createRoot(document.getElementById('root')!).render(<Harness />);

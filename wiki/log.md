@@ -87,5 +87,8 @@ UPDATE 2026-11-16 release-pickup.md useAudioEngine holds releases only while its
 INGEST 2026-11-16 multi-station-load.md now_playing announcements never go backwards (stale tick after the precise advance made listeners jump back); join cache ignores raced reads
 INGEST 2026-11-16 streaming-architecture.md timed items get an exact timer (hard at preempt_at, soft at hard_by); items with NULL duration (queue read, restart cut, background backfill); restart starts via start_from_queue
 UPDATE 2026-11-16 audio-engine.md item starts within 1 s play from the top without a seek (Safari repeated the opening)
+UPDATE 2026-11-16 hourly-slots.md automatic time/weather entries now get timing_mode from the station default (default_timing: hard at :00, soft otherwise); pending ones with no timing are backfilled on refill. Before, null timing on a non-ad_slot counted as hard, so the :30 weather cut songs.
+UPDATE 2026-11-16 audio-engine.md Listen mid-item in Safari: decks started inside the click, graph built before resume()
 INGEST 2026-11-16 control-room.md KBR Studio look (classic.css, desktop layout, row heights tied to ROW_*); jingle cart hides dated time/weather recordings via hide_generated
 INGEST 2026-11-16 control-room.md queue polls only the first 150 rows; whole queue on scroll-to-end or day pick, back to 150 at the top
+INGEST 2026-11-16 control-room.md station name is spelled Kol B'ramah in all UI text (Shmuel); TTS keeps the phonetic Kohl Baramah; station/asset names in the database are data, renamed there

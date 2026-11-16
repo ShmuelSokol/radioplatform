@@ -1,4 +1,4 @@
-"""Ready-made daily weather spots (e.g. the Shprach Kol Berama voice report).
+"""Ready-made daily weather spots (e.g. the Shprach Kol B'ramah voice report).
 
 The hourly scheduler plays one weather spot asset per day and only asks
 ElevenLabs for one when that day has none. Uploading a recording here makes it
