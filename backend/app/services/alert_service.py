@@ -2,7 +2,7 @@
 Alert service — create, resolve, query alerts and dispatch notifications.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -12,6 +12,10 @@ from app.models.alert import Alert, AlertSeverity, AlertType
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+# A repeat of an open alert within this many hours of its last report updates it
+# instead of adding a row (see create_alert).
+REPEAT_WINDOW_HOURS = 24
 
 # Severity threshold for SMS/WhatsApp notifications
 _SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
@@ -26,11 +30,41 @@ async def create_alert(
     station_id: UUID | str | None = None,
     context: dict | None = None,
 ) -> Alert:
-    """Create an alert, notify users, and broadcast via WebSocket."""
+    """Create an alert, notify users, and broadcast via WebSocket.
+
+    The same problem reported again (same type, title and station) while an
+    earlier report of it is still open and recent only updates that report: it
+    counts the repeat in context["repeats"] and notifies nobody. Before this,
+    every scheduler pass and every restart added a row (20,000 open alerts in
+    November 2026, nearly all "Empty block", "Dead air" and "Server restarted").
+    """
+    a_type = alert_type if isinstance(alert_type, AlertType) else AlertType(alert_type)
+    a_sev = severity if isinstance(severity, AlertSeverity) else AlertSeverity(severity)
+    since = datetime.now(timezone.utc) - timedelta(hours=REPEAT_WINDOW_HOURS)
+    existing = (await db.execute(
+        select(Alert).where(
+            Alert.alert_type == a_type,
+            Alert.title == title,
+            Alert.station_id == station_id if station_id is not None else Alert.station_id.is_(None),
+            Alert.is_resolved == False,  # noqa: E712
+            Alert.updated_at >= since,
+        ).order_by(Alert.updated_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if existing is not None:
+        ctx = dict(existing.context or {})
+        ctx["repeats"] = int(ctx.get("repeats") or 1) + 1
+        ctx["last_message"] = message
+        existing.context = ctx
+        existing.updated_at = datetime.now(timezone.utc)
+        if _SEVERITY_ORDER.get(a_sev.value, 0) > _SEVERITY_ORDER.get(existing.severity.value, 0):
+            existing.severity = a_sev
+        await db.flush()
+        return existing
+
     alert = Alert(
         station_id=station_id,
-        alert_type=alert_type if isinstance(alert_type, AlertType) else AlertType(alert_type),
-        severity=severity if isinstance(severity, AlertSeverity) else AlertSeverity(severity),
+        alert_type=a_type,
+        severity=a_sev,
         title=title,
         message=message,
         context=context,
@@ -98,6 +132,20 @@ async def reopen_alert(db: AsyncSession, alert_id: UUID | str) -> Alert:
     return alert
 
 
+async def resolve_all(db: AsyncSession, user_id: UUID | str | None) -> int:
+    """Resolve every open alert. Returns how many were resolved."""
+    from sqlalchemy import update
+
+    result = await db.execute(
+        update(Alert)
+        .where(Alert.is_resolved == False)  # noqa: E712
+        .values(is_resolved=True, resolved_at=datetime.now(timezone.utc), resolved_by=user_id)
+        .execution_options(synchronize_session=False)
+    )
+    await db.flush()
+    return result.rowcount or 0
+
+
 async def get_unresolved_count(db: AsyncSession) -> int:
     """Return count of unresolved alerts."""
     result = await db.execute(
@@ -118,12 +166,16 @@ async def list_alerts(
     query = select(Alert)
     count_query = select(func.count(Alert.id))
 
+    # The page sends "warning" / "queue_empty"; compare as the enum (a bare string
+    # would be matched against the stored enum names and fail).
     if severity is not None:
-        query = query.where(Alert.severity == severity)
-        count_query = count_query.where(Alert.severity == severity)
+        sev = AlertSeverity(severity.lower())
+        query = query.where(Alert.severity == sev)
+        count_query = count_query.where(Alert.severity == sev)
     if alert_type is not None:
-        query = query.where(Alert.alert_type == alert_type)
-        count_query = count_query.where(Alert.alert_type == alert_type)
+        typ = AlertType(alert_type.lower())
+        query = query.where(Alert.alert_type == typ)
+        count_query = count_query.where(Alert.alert_type == typ)
     if is_resolved is not None:
         query = query.where(Alert.is_resolved == is_resolved)
         count_query = count_query.where(Alert.is_resolved == is_resolved)

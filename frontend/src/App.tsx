@@ -119,6 +119,12 @@ function UpdateOnNavigation() {
   return null;
 }
 
+/** Errors are cleared when the person moves to another screen. */
+function RouteErrorBoundary({ children }: { children: React.ReactNode }) {
+  const { pathname } = useLocation();
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
+}
+
 const Loading = () => <div className="text-center py-10 text-gray-400">Loading...</div>;
 
 export default function App() {
@@ -127,7 +133,7 @@ export default function App() {
       <BrowserRouter>
         <UpdateOnNavigation />
         <BugReporter />
-        <ErrorBoundary>
+        <RouteErrorBoundary>
         <Suspense fallback={<Loading />}>
           <Routes>
             <Route element={<Layout />}>
@@ -193,7 +199,7 @@ export default function App() {
             </Route>
           </Routes>
         </Suspense>
-        </ErrorBoundary>
+        </RouteErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>
   );

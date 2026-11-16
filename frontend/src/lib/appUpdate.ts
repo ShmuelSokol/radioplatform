@@ -139,6 +139,15 @@ function reloadedRecently(): boolean {
   }
 }
 
+/** A screen's code could not load because a newer release replaced it (the old
+ *  files are gone). Reload onto the new release now unless audio is playing or a
+ *  reload just happened. Returns true when a reload was started. */
+export function reloadForStaleCode(): boolean {
+  if (isAudioActive() || reloadedRecently()) return false;
+  reloadForRelease(false);
+  return true;
+}
+
 function reloadForRelease(resume: boolean) {
   if (reloadedRecently()) return;
   try {

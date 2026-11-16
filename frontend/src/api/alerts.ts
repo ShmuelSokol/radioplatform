@@ -50,3 +50,8 @@ export const reopenAlert = async (id: string): Promise<AlertData> => {
 export const deleteAlert = async (id: string): Promise<void> => {
   await apiClient.delete(`/alerts/${id}`);
 };
+
+export const resolveAllAlerts = async (): Promise<number> => {
+  const res = await apiClient.post<{ resolved: number }>('/alerts/resolve-all');
+  return res.data.resolved;
+};

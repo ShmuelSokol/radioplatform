@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getAlerts, getUnresolvedCount, resolveAlert, reopenAlert, deleteAlert } from '../api/alerts';
+import { getAlerts, getUnresolvedCount, resolveAlert, reopenAlert, deleteAlert, resolveAllAlerts } from '../api/alerts';
 
 export function useAlerts(filters?: {
   skip?: number;
@@ -49,6 +49,16 @@ export function useDeleteAlert() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteAlert(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['alerts'] });
+    },
+  });
+}
+
+export function useResolveAllAlerts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => resolveAllAlerts(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['alerts'] });
     },

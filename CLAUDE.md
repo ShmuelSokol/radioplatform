@@ -161,7 +161,7 @@ radioplatform/
 | campaigns | campaigns.py | /campaigns |
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
-| alerts | alerts.py | /alerts |
+| alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
 | live_shows | live_shows.py | /live-shows |
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
@@ -236,7 +236,7 @@ radioplatform/
 - Analytics.tsx — Analytics & reporting dashboard
 - SiteUpdates.tsx — Choose when open browsers move to a new release: automatic or only on push, push now or at a time, optionally including tabs that are playing; live list of open tabs
 - BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
-- Alerts.tsx — Alerts management (filter, resolve, reopen, delete)
+- Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
 - HostConsole.tsx — Full-screen host broadcasting console with countdown, mic controls, caller queue
 - CallScreener.tsx — Two-column call screener (waiting/approved/on-air management)
