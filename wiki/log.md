@@ -126,3 +126,5 @@ UPDATE 2026-11-16 release-pickup.md admin control of releases: Site Updates scre
 UPDATE 2026-11-16 streaming-architecture.md engine plays every listed station: one engine per station (kbr-engine@id, port 8081+, mount /live-id, nginx /control/id/); ~150 MB each
 INGEST 2026-11-16 operator-actions.md Next never skips a timed item on air (time, weather, sponsorship): protected:true; rapid-Next test
 INGEST 2026-11-16 hourly-slots.md hourly time clips per region (?region= on /time-announcements, falls back to the default set; queued checks realigned each hourly pass)
+
+INGEST 2026-11-16 operator-actions.md placeholders (NEVER_AUTO_TITLES) are skipped at pick time from every automatic source (_skip_placeholders); short or timed items hand over 0.3 s before their end, not at half their length
