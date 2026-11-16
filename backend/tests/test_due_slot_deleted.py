@@ -26,7 +26,7 @@ def _no_replenish(monkeypatch):
 @pytest.mark.asyncio
 async def test_slot_deleted_while_starting_falls_through_to_the_next_song(db_session, monkeypatch):
     station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=181)
-    spot = Asset(id=uuid.uuid4(), title="KOL BRAMAH TEST SPONSOR", duration=30.0,
+    spot = Asset(id=uuid.uuid4(), title="Kol B'ramah sponsor Lakewood Bakery", duration=30.0,
                  file_path="https://cdn.example.com/spot.mp3", asset_type="spot")
     db_session.add(spot)
     await db_session.flush()

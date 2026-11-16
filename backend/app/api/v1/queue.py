@@ -516,6 +516,31 @@ TIMED_EARLY_START_SECONDS = 8.0
 _NOT_FILLER_TYPES = ("silence", "spot", "jingle", "sweeper", "station_id", "time", "weather")
 
 
+# What an operator or listener chose themselves; a placeholder they pick still plays.
+OPERATOR_SOURCES = ("manual", "request", "loop")
+
+
+async def _skip_placeholders(db: AsyncSession, station_id) -> None:
+    """Placeholder items ("KOL BRAMAH TEST SPONSOR", "Kol bramah ad"...) never air from
+    any automatic path. Rotations already avoid them; this catches every other way in
+    (a playlist or block naming the item, a spot schedule, old queue rows): three of
+    them aired on KBR Jerusalem at 18:56 ET on 2026-11-16."""
+    from app.models.asset import not_placeholder
+
+    ids = select(Asset.id).where(~not_placeholder()).scalar_subquery()
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.asset_id.in_(ids),
+            or_(QueueEntry.source.is_(None), QueueEntry.source.notin_(OPERATOR_SOURCES)),
+        )
+        .values(status="skipped")
+        .execution_options(synchronize_session=False)
+    )
+
+
 async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) -> QueueEntry | None:
     """The next queue entry due to play: a timed item whose time has come (soft or
     hard), otherwise the first pending entry by position (future timed entries wait).
@@ -524,6 +549,7 @@ async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) ->
     the same moment but sits at the end of the queue by position. Picking by
     position started the next song when the time check ended, and the weather then
     cut it a moment later (heard live at 13:00 ET, 2026-11-16)."""
+    await _skip_placeholders(db, station_id)
     ad_result = await db.execute(
         select(QueueEntry)
         .where(
@@ -570,6 +596,11 @@ async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) ->
     return result.scalar_one_or_none()
 
 
+# Items this short (station IDs, time checks) hand over at their end, not with a crossfade
+SHORT_ITEM_SECONDS = 20.0
+SHORT_ITEM_HANDOVER_SECONDS = 0.3
+
+
 def switch_time(entry) -> datetime | None:
     """When the item on air hands over to the next one: where listeners start
     their crossfade (cross_start, default 3 s before the end). The scheduler
@@ -584,6 +615,13 @@ def switch_time(entry) -> datetime | None:
     cross_start = analysis.get("cross_start_seconds")
     if isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
         cross_seconds = duration - cross_start
+    elif duration < SHORT_ITEM_SECONDS or (
+        getattr(entry, "preempt_at", None) is not None or getattr(entry, "source", None) in ("ad_slot", "block")
+    ):
+        # A time check, weather or sponsorship is not crossfaded: handing over at
+        # half its length cut a 5 s time check after 2.5 s and the shiur it had
+        # paused started over it (Main, 15:00 ET 2026-11-16).
+        cross_seconds = SHORT_ITEM_HANDOVER_SECONDS
     cross_seconds = min(cross_seconds, max(0.0, duration / 2))
     return _aware(entry.started_at) + timedelta(seconds=duration - cross_seconds)
 
