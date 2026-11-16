@@ -389,6 +389,50 @@ async function listenMidItem() {
   await page.close();
 }
 
+// The listener page passes the item on air only after Listen is pressed, so the
+// decks are empty during the click. Heard live (2026-11-16): one press of Listen
+// gave no sound until the volume slider was moved.
+async function listenFromCold() {
+  const page = await browser.newPage();
+  await page.addInitScript(() => {
+    let inGesture = false;
+    const unlocked = new WeakSet();
+    const Real = window.AudioContext;
+    window.AudioContext = class extends Real {
+      constructor(...a) { super(...a); if (!inGesture) void Real.prototype.suspend.call(this); }
+    };
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      if (inGesture) unlocked.add(this);
+      if (!unlocked.has(this)) return Promise.reject(new DOMException('not allowed', 'NotAllowedError'));
+      return play.call(this);
+    };
+    window.__clickThen = (state) => {
+      inGesture = true;
+      try { window.__listen(); } finally { inGesture = false; }
+      window.__set(state);
+    };
+  });
+  await page.route('**/__tone/*.wav', (r) => {
+    const id = r.request().url().split('/').pop().replace('.wav', '');
+    return r.fulfill({ contentType: 'audio/wav', body: wav(...TONES[id]) });
+  });
+  await page.route('**/assets/*/audio-url', (r) => {
+    const id = r.request().url().split('/').slice(-2)[0];
+    return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: `/__tone/${id}.wav` }) });
+  });
+  await page.goto(`${base}e2e/audio-harness/index.html`);
+  await page.waitForFunction(() => typeof window.__set === 'function');
+  const startedAt = new Date(Date.now() - 4000).toISOString();
+  await page.evaluate((x) => window.__clickThen(x), { ...A, nextId: 'b', startedAt });
+  await sleep(2500);
+  const audible = (await page.evaluate(() => window.__snap())).filter((d) => d.playing && d.gain > 0.05);
+  check('listen from cold: one press of Listen is heard at once',
+    audible.length === 1 && audible[0].src === 'a',
+    audible.map((d) => `${d.src}@${d.t}`).join(' | ') || JSON.stringify(await page.evaluate(() => window.__snap())));
+  await page.close();
+}
+
 // Both speakers: heard live, the player sent everything to the left channel only.
 // Plays a stereo file with a different tone on each side and a mono file, and
 // reads the engine's left and right meters.
@@ -422,6 +466,7 @@ function wavStereo(fl, fr, seconds) {
 try {
   if (!only || only === 'stereo') await stereo();
   if (!only || only === 'listen-mid-item') await listenMidItem();
+  if (!only || only === 'listen-cold') await listenFromCold();
   for (const [name, sc] of Object.entries(SCENARIOS)) {
     if (!only || only === name) await run(name, sc);
   }
