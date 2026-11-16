@@ -125,3 +125,4 @@ UPDATE 2026-11-16 live-shows.md Start Broadcasting (mic socket) now starts a sch
 UPDATE 2026-11-16 release-pickup.md admin control of releases: Site Updates screen, /site-release (auto/manual mode, push now or at a time, optionally including playing tabs, which reload after the next item change and play on), /ws/site tab presence
 UPDATE 2026-11-16 streaming-architecture.md engine plays every listed station: one engine per station (kbr-engine@id, port 8081+, mount /live-id, nginx /control/id/); ~150 MB each
 INGEST 2026-11-16 operator-actions.md Next never skips a timed item on air (time, weather, sponsorship): protected:true; rapid-Next test
+INGEST 2026-11-16 hourly-slots.md hourly time clips per region (?region= on /time-announcements, falls back to the default set; queued checks realigned each hourly pass)

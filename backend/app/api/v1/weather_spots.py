@@ -16,7 +16,7 @@ from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.user import User
 from app.services.weather_spot_service import (
-    find_time_clip_asset,
+    find_own_time_clip,
     find_weather_spot_asset,
     normalize_region,
     store_uploaded_time_clip,
@@ -118,19 +118,21 @@ async def _read_upload(file: UploadFile, source: str) -> bytes:
 
 
 class TimeClipResponse(BaseModel):
-    hour: int  # 0-23, Eastern
+    hour: int  # 0-23, the station's local time
     asset_id: str
     file_url: str
     duration: float | None
     source: str
     script: str | None = None
     replaced: bool = False
+    region: str = "lakewood"
 
 
 def _time_response(hour: int, asset: Asset, replaced: bool = False) -> TimeClipResponse:
     extra = asset.metadata_extra or {}
     return TimeClipResponse(
         hour=hour,
+        region=normalize_region(extra.get("region")),
         asset_id=str(asset.id),
         file_url=asset.file_path,
         duration=asset.duration,
@@ -142,13 +144,19 @@ def _time_response(hour: int, asset: Asset, replaced: bool = False) -> TimeClipR
 
 @time_router.get("", response_model=list[TimeClipResponse])
 async def list_time_clips(
+    region: str | None = Query(None, description="Region, e.g. jerusalem (default: lakewood)"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    """The uploaded clips, by hour. Hours not listed fall back to ElevenLabs (if configured)."""
+    """The region's own uploaded clips, by hour.
+
+    A station in another region plays the default region's clip for an hour its
+    own set lacks; with neither, ElevenLabs (if configured).
+    """
+    region = _region(region)
     clips = []
     for hour in range(24):
-        asset = await find_time_clip_asset(db, hour)
+        asset = await find_own_time_clip(db, hour, region)
         if asset is not None:
             clips.append(_time_response(hour, asset))
     return clips
@@ -160,15 +168,22 @@ async def upload_time_clip(
     file: UploadFile = File(...),
     script: str | None = Form(None),
     source: str = Form("shprach"),
+    region: str | None = Query(None, description="Region, e.g. jerusalem (default: lakewood)"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    """Upload the recording played at the top of this hour (0-23, Eastern) every day."""
+    """Upload the recording played at the top of this hour (0-23, the station's local time) every day.
+
+    Stations play the clips of their own region (automation_config.weather_region).
+    """
     if not 0 <= hour <= 23:
         raise HTTPException(422, "hour must be 0-23")
+    region = _region(region)
     data = await _read_upload(file, source)
     try:
-        asset, replaced = await store_uploaded_time_clip(db, hour, data, source=source, script=(script or None))
+        asset, replaced = await store_uploaded_time_clip(
+            db, hour, data, source=source, script=(script or None), region=region
+        )
     except ValueError as e:
         raise HTTPException(422, str(e))
     return _time_response(hour, asset, replaced)

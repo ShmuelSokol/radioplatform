@@ -70,6 +70,10 @@ Each station plays its own city's weather. `automation_config["weather_region"]`
 - `QueueReplenishService._realign_weather_region` runs with the hourly pass: queued weather of another region is moved to the station's own spot for that day, or removed when there is none.
 - The Kol B'ramah Jerusalem spot comes from the voice PC like Lakewood's (`daily_station.ps1`), uploaded with `region=jerusalem`.
 
+### Time clips per region
+
+The 24 reusable hourly time clips follow the same regions. `PUT|GET /api/v1/time-announcements/{hour}?region=jerusalem` (no region = lakewood; clips without `metadata_extra.region` belong to lakewood). Unlike weather, a station falls back to the default set for an hour its own region has no clip (`find_time_clip_asset`), since the hour is local either way; `find_own_time_clip` is the exact lookup. `_realign_time_clips` runs with the hourly pass and moves queued uploaded time checks to the clip the station should play now, so a new Jerusalem upload takes over checks already queued.
+
 ## Hard vs soft preempts
 
 - **Hard** (`source != "ad_slot"`): Interrupts current track immediately at `preempt_at` time
