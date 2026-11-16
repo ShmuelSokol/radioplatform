@@ -116,6 +116,11 @@ const Schedules: React.FC = () => {
         )}
       </div>
 
+      <p className="text-sm text-gray-600 mb-4 max-w-3xl">
+        A schedule holds a station's blocks: which playlist plays on which days and from what
+        time. One schedule per station is usually enough. Press <strong>Blocks</strong> to set the times.
+      </p>
+
       {/* Filter by station */}
       <div className="mb-6">
         <label className="block text-sm font-medium mb-2">Filter by Station</label>

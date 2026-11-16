@@ -91,8 +91,10 @@ export default function PlaylistGenerationPanel({
         <div>
           <h2 className="text-lg font-semibold">Generate the playlist ahead</h2>
           <p className="text-sm text-gray-600 max-w-2xl">
-            Each schedule block plays its template as a repeating sequence of
-            song types. Songs that have rested longest are drawn first.
+            Each schedule block with a playlist plays it, one song type after
+            another, and the queue is rebuilt whenever you change a block or a
+            playlist. Songs that have rested longest are drawn first. Here you
+            set how far ahead to fill and how far apart an artist must be.
           </p>
         </div>
         {data && (
@@ -235,8 +237,8 @@ export default function PlaylistGenerationPanel({
         </div>
       ) : (
         <p className="text-sm text-gray-500">
-          Nothing to generate yet. Give a schedule block a template with a
-          sequence.
+          Nothing to generate yet. Give a schedule block a playlist on the
+          Schedules page.
         </p>
       )}
     </section>

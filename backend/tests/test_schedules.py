@@ -183,3 +183,16 @@ async def test_schedules_unauthorized(client: AsyncClient):
         json={"name": "No Auth", "station_id": str(uuid.uuid4())},
     )
     assert response.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_schedules_answer_without_trailing_slash(client, auth_headers, db_session):
+    """The site calls /schedules (no slash); a redirect to /schedules/ broke Create."""
+    res = await client.post("/api/v1/stations", json={"name": "S"}, headers=auth_headers)
+    sid = res.json()["id"]
+    res = await client.post("/api/v1/schedules", json={"station_id": sid, "name": "Weekdays"},
+                            headers=auth_headers)
+    assert res.status_code == 201, res.text
+    res = await client.get("/api/v1/schedules", params={"station_id": sid}, headers=auth_headers)
+    assert res.status_code == 200
+    assert [s["name"] for s in res.json()] == ["Weekdays"]
