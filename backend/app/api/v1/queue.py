@@ -1396,18 +1396,10 @@ async def get_last_played(
     _user: User = Depends(require_staff),
 ):
     """Get the most recent play time for each asset."""
-    result = await db.execute(
-        select(PlayLog.asset_id, func.max(PlayLog.start_utc))
-        .where(PlayLog.station_id == station_id, PlayLog.asset_id.isnot(None))
-        .group_by(PlayLog.asset_id)
-    )
-    rows = result.all()
-    return {
-        "last_played": {
-            str(asset_id): ts.isoformat() if ts else None
-            for asset_id, ts in rows
-        }
-    }
+    from app.services.last_played import last_played
+
+    rows = await last_played(db, station_id)
+    return {"last_played": {asset_id: ts.isoformat() for asset_id, ts in rows.items()}}
 
 
 @router.post("/add", status_code=201)

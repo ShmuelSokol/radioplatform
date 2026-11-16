@@ -152,3 +152,12 @@ async def admin_token(client: AsyncClient, admin_user: User) -> str:
 @pytest_asyncio.fixture
 async def auth_headers(admin_token: str) -> dict:
     return {"Authorization": f"Bearer {admin_token}"}
+
+
+@pytest.fixture(autouse=True)
+def reset_last_played():
+    """Each test starts with an empty in-memory last-played map."""
+    from app.services import last_played
+    last_played.reset()
+    yield
+    last_played.reset()

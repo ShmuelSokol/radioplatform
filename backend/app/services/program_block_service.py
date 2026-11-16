@@ -25,7 +25,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset, not_placeholder
-from app.models.play_log import PlayLog
 from app.models.program_block import ProgramBlock
 from app.models.queue_entry import QueueEntry
 from app.models.station import Station
@@ -189,14 +188,10 @@ class _Resolver:
             # before `at` count, so a preview of hours that are already queued
             # shows the same turn-taking as the queue.
             self.last_used = {}
-            rows = await self.db.execute(
-                select(PlayLog.asset_id, func.max(PlayLog.start_utc))
-                .where(PlayLog.station_id == self.station.id, PlayLog.asset_id.isnot(None))
-                .group_by(PlayLog.asset_id)
-            )
-            for asset_id, when in rows.all():
-                if when is not None:
-                    self.last_used.setdefault(str(asset_id), []).append(as_utc(when))
+            from app.services.last_played import last_played
+
+            for asset_id, when in (await last_played(self.db, self.station.id)).items():
+                self.last_used.setdefault(asset_id, []).append(when)
             queued = await self.db.execute(
                 select(QueueEntry.asset_id, QueueEntry.preempt_at).where(
                     QueueEntry.station_id == self.station.id,
