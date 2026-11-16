@@ -61,11 +61,18 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
 
 
+# Items that must never be drawn at random: marked do-not-play, or made for tests
+# (a listening-test spot uploaded as music once landed in KBR Jerusalem's live queue).
+# A rule or block that names one of these categories still gets it.
+NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing")
+
+
 def fit_for_random_pick():
-    """SQL condition: an asset that may be drawn at random (not do-not-play, not a one-moment clip)."""
-    from sqlalchemy import or_
+    """SQL condition: an asset that may be drawn at random (not do-not-play, not a
+    test item, not a one-moment clip). Category case does not matter."""
+    from sqlalchemy import func, or_
 
     return or_(
         Asset.category.is_(None),
-        Asset.category.notin_(("do_not_play", *ONE_MOMENT_CATEGORIES)),
+        func.lower(Asset.category).notin_((*NEVER_RANDOM_CATEGORIES, *ONE_MOMENT_CATEGORIES)),
     )

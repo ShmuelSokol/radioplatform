@@ -102,3 +102,4 @@ INGEST 2026-11-16 streaming-architecture.md an advance whose item is deleted mid
 INGEST 2026-11-16 streaming-architecture.md app logging is configured in main.py (logger "app", INFO, stdout); before that every INFO line was dropped and the scheduler looked silent in Railway logs
 INGEST 2026-11-16 control-room.md hidden tab goes stale (Safari throttling): refetch now-playing/queue and reconnect on visibilitychange; appUpdate reloads after 10 min away if silent; iOS select needs appearance:none for 44px
 UPDATE 2026-11-16 playlist-generation.md the song on the air counts only its remaining time, so a block no longer starts early
+INGEST 2026-11-16 playlist-generation.md random picks (fit_for_random_pick) skip categories do_not_play/test (any case) and one-moment clips; the emergency refill uses it too
