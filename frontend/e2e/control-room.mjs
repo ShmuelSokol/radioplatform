@@ -466,7 +466,42 @@ async function longQueue(browser, contextOpts, tag, rowH) {
   await ctx.close();
 }
 
+// Switching station: the first station's now-playing socket must stay closed.
+// Its close handler used to reconnect to the old station a second later, so the
+// control room got both stations and played both (heard live, 2026-11-16).
+async function stationSwitch(browser) {
+  const tag = 'station switch';
+  const backend = makeBackend();
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await ctx.addInitScript(() => { localStorage.setItem('access_token', 'test'); localStorage.setItem('refresh_token', 'test'); localStorage.removeItem('radio_last_station'); });
+  const page = await ctx.newPage();
+  await page.route('**/api/v1/**', async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const path = url.pathname.replace(/^.*\/api\/v1/, '');
+    let body = null;
+    try { body = req.postDataJSON(); } catch { /* none */ }
+    const data = backend.handle(req.method(), path, Object.fromEntries(url.searchParams), body);
+    await route.fulfill({ status: data === null ? 204 : 200, contentType: 'application/json', body: data === null ? '' : JSON.stringify(data) });
+  });
+  const opened = [];
+  await page.routeWebSocket(/\/ws\/now-playing\//, (ws) => { opened.push({ url: ws.url(), at: Date.now() }); });
+  await page.goto(`${BASE}/admin/dashboard`);
+  await page.getByTestId('queue-row').first().waitFor();
+  await page.waitForTimeout(500);
+  const switchedAt = Date.now();
+  await page.getByLabel('Station').first().selectOption('st-2');
+  await page.waitForTimeout(4000);
+  const after = opened.filter(o => o.at >= switchedAt);
+  const toOld = after.filter(o => o.url.endsWith(`/now-playing/${SID}`));
+  check(`${tag}: no socket to the old station after the switch`, toOld.length === 0, after.map(o => o.url.split('/').pop()).join(', '));
+  check(`${tag}: a socket to the new station`, after.some(o => o.url.endsWith('/now-playing/st-2')));
+  await ctx.close();
+}
+
 const browser = await chromium.launch();
+await stationSwitch(browser);
+if (process.env.ONLY === 'station-switch') { await browser.close(); process.exit(failures ? 1 : 0); }
 await desktop(browser, 1440, 900);
 await desktop(browser, 2560, 1440);
 await desktop(browser, 1024, 768);

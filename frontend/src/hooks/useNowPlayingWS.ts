@@ -51,10 +51,17 @@ export const useNowPlayingWS = (stationId: string) => {
   // Stable ref to the connect function — updated each render but only called on stationId change
   const connectFnRef = useRef<() => void>(() => {});
   const maxReconnectAttempts = 5;
+  // Bumped on every station change. A socket, poll or reconnect timer from an
+  // earlier station checks it and stops: the old socket's close handler used to
+  // reconnect to the OLD station a second after a switch, so the control room got
+  // both stations' now-playing and played both (heard live, 2026-11-16).
+  const generation = useRef(0);
 
   // Keep connectFnRef up-to-date without causing effect re-runs
   connectFnRef.current = () => {
     if (!stationId) return;
+    const myGeneration = generation.current;
+    const current = () => generation.current === myGeneration;
 
     const clearTimers = () => {
       if (reconnectTimer.current) {
@@ -72,12 +79,14 @@ export const useNowPlayingWS = (stationId: string) => {
       usingPolling.current = true;
 
       const poll = async () => {
+        if (!current()) return;
         try {
           const response = await fetch(
             `${import.meta.env.VITE_API_URL}/now-playing/${stationId}`
           );
           if (response.ok) {
             const data = await response.json();
+            if (!current()) return;
             setNowPlaying(data);
             setIsConnected(true);
           }
@@ -91,6 +100,7 @@ export const useNowPlayingWS = (stationId: string) => {
     };
 
     const connect = () => {
+      if (!current()) return;
       // Use dedicated WS URL if set, otherwise derive from API URL
       const wsBase = import.meta.env.VITE_WS_URL;
       const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
@@ -109,6 +119,7 @@ export const useNowPlayingWS = (stationId: string) => {
         const ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
+          if (!current()) { ws.close(); return; }
           setIsConnected(true);
           reconnectAttempts.current = 0;
           usingPolling.current = false;
@@ -119,6 +130,7 @@ export const useNowPlayingWS = (stationId: string) => {
         };
 
         ws.onmessage = (event) => {
+          if (!current()) return;
           try {
             const message = JSON.parse(event.data);
             if (message.type === 'now_playing' && message.data) {
@@ -137,12 +149,13 @@ export const useNowPlayingWS = (stationId: string) => {
         };
 
         ws.onerror = () => {
-          setIsConnected(false);
+          if (current()) setIsConnected(false);
         };
 
         ws.onclose = () => {
+          if (!current()) return; // a socket of a station no longer shown
           setIsConnected(false);
-          wsRef.current = null;
+          if (wsRef.current === ws) wsRef.current = null;
 
           if (reconnectAttempts.current < maxReconnectAttempts) {
             const delay = Math.min(1000 * 2 ** reconnectAttempts.current, 30000);
@@ -166,10 +179,15 @@ export const useNowPlayingWS = (stationId: string) => {
   useEffect(() => {
     if (!stationId) return;
 
+    generation.current++;
     reconnectAttempts.current = 0;
     connectFnRef.current();
 
     return () => {
+      generation.current++;
+      // What was on air on the previous station is not on air on the next one
+      setNowPlaying(null);
+      setIsConnected(false);
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
         reconnectTimer.current = null;
@@ -179,6 +197,7 @@ export const useNowPlayingWS = (stationId: string) => {
         pollTimer.current = null;
       }
       if (wsRef.current) {
+        wsRef.current.onclose = null;
         wsRef.current.close();
         wsRef.current = null;
       }
@@ -197,9 +216,10 @@ export const useNowPlayingWS = (stationId: string) => {
       const away = hiddenAt ? Date.now() - hiddenAt : 0;
       hiddenAt = 0;
       if (away < STALE_AFTER_HIDDEN_MS) return;
+      const gen = generation.current;
       fetch(`${import.meta.env.VITE_API_URL}/now-playing/${stationId}`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((data) => { if (data) setNowPlaying(data); })
+        .then((data) => { if (data && gen === generation.current) setNowPlaying(data); })
         .catch(() => {});
       const old = wsRef.current;
       if (old) { old.onclose = null; old.close(); wsRef.current = null; }

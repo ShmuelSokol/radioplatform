@@ -130,3 +130,9 @@ Checks: `backend/tests/test_song_change_gaps.py`, `e2e/audio-engine.mjs stored-l
 for the clock or starting a song that would be cut seconds later. Live: a block at
 08:35:00 waited 3.3 s after the song before it ended. Test:
 `backend/tests/test_timed_item_starts_early.py`.
+
+## Output is a stereo bus (2026-11-16)
+Both decks (and mix-over jingles) go into one GainNode bus fixed at 2 channels ('speakers' interpretation), then to the speakers and through a ChannelSplitter to the left/right meters. It used to be a ChannelMerger: each merger input is mono, so the whole station came out of the left speaker only. Checked by `e2e/audio-engine.mjs stereo` (stereo and mono files must reach both meters).
+
+## Station switch (2026-11-16)
+`useNowPlayingWS` bumps a generation on every station change; the old socket, its close handler, poll and reconnect timer check it and stop. Before, the old socket's close handler reconnected to the old station a second after a switch, so the control room got both stations' now-playing and played both. Checked by `e2e/control-room.mjs` (station switch) and `e2e/audio-engine.mjs switch-station*`.

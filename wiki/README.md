@@ -11,7 +11,6 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [control-room](control-room.md) — Operator screen layout, liveControl.ts seam, insert-by-entry-id, where instant buttons are stored
 - [dashboard-timing](dashboard-timing.md) — Elapsed timer overflow fix, WS vs REST data sources
 - [skip-latency](skip-latency.md) — Instant skip rule: now-playing changes must WS-broadcast
-- [v2-ui](v2-ui.md) — V1/V2 UI toggle, V2 design system, dev-against-prod proxy
 - [lint-workflow](lint-workflow.md) — Wiki housekeeping procedure
 - [release-pickup](release-pickup.md) — open tabs reload themselves onto a new release, never while audio plays
 - [playlist-generation](playlist-generation.md) — queue generated ahead from sequences of song types, artist distance, longest-rested first
