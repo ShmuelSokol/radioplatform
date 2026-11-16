@@ -86,3 +86,14 @@ sponsorship) is due before the song on air ends, it is loaded on the idle deck 6
 (`TIMED_PRELOAD_AHEAD_MS`) instead, so the change at its time is instant. A cold load there
 left about half a second of silence in the control room. Scenario
 `hard-timed-item-has-no-hole` in `e2e/audio-engine.mjs`.
+
+## Control room Next is heard at once (2026-11-16)
+
+Next took 0.5 to 0.8 s from click to sound in the live control room, nearly all of it the server
+round trip. `useAudioEngine.playNextNow(asset, fade)` brings the item the server will move to
+(`next_entry_id` from `GET /queue`) up locally on the click; `Dashboard.handleNext` calls it
+before `skip`. The player follows that local item until the server announces a change made after
+the click (the same item: kept, no restart, since the start times are within 1 s; another item:
+followed), or for at most 4 s. Not done within 4.5 s of an automatic change, when the server
+keeps the incoming item. Listeners still change when the server announces it. Scenarios
+`next-heard-before-the-server-answers` and `next-ahead-then-server-differs`.
