@@ -23,9 +23,11 @@ def test_existing_columns_and_indexes_are_not_touched():
         "CREATE TABLE IF NOT EXISTS audit_logs (id UUID PRIMARY KEY)",
         "UPDATE holiday_windows SET reason = 'Manual' WHERE reason IS NULL",
     ]
-    cols = {("assets", "metadata_extra"), ("users", "last_seen_at")}
+    cols = {("assets", "metadata_extra"), ("users", "last_seen_at"), ("audit_logs", "id")}
     idx = {"ix_play_logs_station_start"}
-    assert migrations_to_run(stmts, cols, idx) == [stmts[1], stmts[4], stmts[5], stmts[6]]
+    assert migrations_to_run(stmts, cols, idx) == [stmts[1], stmts[4], stmts[6]]
+    # a table that is not there yet is created
+    assert stmts[5] in migrations_to_run(stmts, cols - {("audit_logs", "id")}, idx)
 
 
 def test_unknown_schema_runs_everything():

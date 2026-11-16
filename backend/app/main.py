@@ -235,11 +235,14 @@ async def _add_missing_columns(engine):
 # during a deploy. So statements whose column or index already exists are not
 # sent at all, and the rest give up after MIGRATION_LOCK_TIMEOUT instead of
 # queueing (see wiki/streaming-architecture.md, "Deploys must never freeze").
-MIGRATION_LOCK_TIMEOUT = "3s"
+MIGRATION_LOCK_TIMEOUT = "1s"
 
 _ADD_COLUMN_RE = re.compile(
     r"^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([\w.]+)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+(\w+)",
     re.IGNORECASE,
+)
+_CREATE_TABLE_RE = re.compile(
+    r"^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([\w.]+)", re.IGNORECASE,
 )
 _CREATE_INDEX_RE = re.compile(
     r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?IF\s+NOT\s+EXISTS\s+(\w+)",
@@ -262,6 +265,9 @@ def migrations_to_run(
                 continue
         m = _CREATE_INDEX_RE.match(sql)
         if m and m.group(1).lower() in existing_indexes:
+            continue
+        m = _CREATE_TABLE_RE.match(sql)
+        if m and m.group(1).split(".")[-1].lower() in {t for t, _ in existing_columns}:
             continue
         todo.append(sql)
     return todo
