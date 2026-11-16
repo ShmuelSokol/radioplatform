@@ -1,0 +1,88 @@
+/*
+ * The KBR Studio look (the station's program before this one): grey window
+ * buttons with a raised edge, black LCD panels with green digits, and a black
+ * running log in bold yellow. Scoped to the control room.
+ */
+.qn {
+  --qn-face: #c0c0c0;
+  --qn-light: #ffffff;
+  --qn-shadow: #808080;
+  --qn-dark: #000000;
+  --qn-lcd: #000000;
+  --qn-digit: #2bff4a;
+  --qn-yellow: #ffff40;
+  --qn-orange: #ffa64d;
+  --qn-cur-bg: #0000ff;
+  --qn-cur-fg: #ff4dff;
+  --qn-label: #d0d0d0;
+  font-family: Tahoma, Verdana, "Segoe UI", system-ui, sans-serif;
+  background: #808080;
+  color: #000;
+}
+
+/* Raised grey button */
+.qn-btn {
+  background: var(--qn-face);
+  color: #000;
+  border: 0;
+  box-shadow: inset -1px -1px 0 var(--qn-dark), inset 1px 1px 0 var(--qn-light),
+    inset -2px -2px 0 var(--qn-shadow), inset 2px 2px 0 #dfdfdf;
+  font-weight: 600;
+  line-height: 1.15;
+}
+.qn-btn:hover:not(:disabled) { background: #cdcdcd; }
+.qn-btn:active:not(:disabled), .qn-btn[aria-pressed="true"], .qn-btn[aria-checked="true"], .qn-btn[aria-selected="true"] {
+  box-shadow: inset 1px 1px 0 var(--qn-dark), inset -1px -1px 0 var(--qn-light),
+    inset 2px 2px 0 var(--qn-shadow), inset -2px -2px 0 #dfdfdf;
+  background: #b4b4b4;
+}
+.qn-btn:disabled { color: #808080; text-shadow: 1px 1px 0 #fff; cursor: not-allowed; }
+.qn-btn:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
+
+/* Sunken field (inputs, selects, panels) */
+.qn-field {
+  background: #fff;
+  color: #000;
+  border: 0;
+  box-shadow: inset 1px 1px 0 var(--qn-shadow), inset -1px -1px 0 var(--qn-light),
+    inset 2px 2px 0 var(--qn-dark), inset -2px -2px 0 #dfdfdf;
+}
+.qn-field:focus { outline: none; }
+.qn-sunken {
+  box-shadow: inset 1px 1px 0 var(--qn-shadow), inset -1px -1px 0 var(--qn-light),
+    inset 2px 2px 0 var(--qn-dark), inset -2px -2px 0 #dfdfdf;
+}
+
+/* LCD panel with green digits */
+.qn-lcd { background: var(--qn-lcd); color: var(--qn-digit); }
+.qn-digits {
+  font-family: "DSEG7 Classic", "Consolas", "Lucida Console", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--qn-digit);
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.qn-lcd-label { color: var(--qn-label); font-size: 11px; line-height: 1; }
+
+/* The running log and library: black, bold yellow */
+.qn-log { background: #000; color: var(--qn-yellow); font-weight: 700; }
+.qn-log-head {
+  background: var(--qn-face);
+  color: #000;
+  font-weight: 400;
+  font-size: 12px;
+}
+.qn-log-head > * { box-shadow: inset -1px -1px 0 var(--qn-shadow), inset 1px 1px 0 var(--qn-light); padding: 0 4px; }
+.qn-row:hover { background: #1a1a1a; }
+.qn-row-cur, .qn-row-cur:hover { background: var(--qn-cur-bg); color: var(--qn-cur-fg); }
+.qn-row-timed { color: var(--qn-orange); }
+.qn-row-sel { background: #303030; }
+
+/* Title bars of the panes */
+.qn-title {
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+}

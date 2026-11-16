@@ -9,7 +9,7 @@ export default function VersionToggle() {
     <button
       onClick={toggleVersion}
       title={isV2 ? 'Switch back to classic UI' : 'Try the new V2 UI'}
-      className={`relative flex items-center gap-1.5 rounded-full px-1 py-0.5 text-[11px] font-semibold transition-all duration-300 select-none ${
+      className={`relative flex items-center gap-1.5 rounded-full px-1 py-0.5 after:content-[''] after:absolute after:-inset-y-2.5 text-[11px] font-semibold transition-all duration-300 select-none ${
         isV2
           ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.5)]'
           : 'bg-gray-700/60 text-gray-300 hover:bg-gray-600/60'
