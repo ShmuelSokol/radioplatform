@@ -39,6 +39,10 @@ Consequences: a row far from the screen is not in the DOM (tests must scroll to 
 
 Not done: the queue request still returns up to 2,000 entries (about 930 KB at that size) every refresh. Paging it needs the day filter and insert-by-id to work on entries that are not loaded.
 
+## The queue loads a few hours at a time
+
+Each 10-second poll asks `/queue?limit=150` (`QUEUE_FIRST_ROWS` in `hooks/useQueue.ts`), a few hours ahead. A days-long queue (1,451 rows on KBR Jerusalem) was 708 KB a poll. Scrolling to the end of what is loaded, opening the day list, or picking a day switches that station to the whole queue (`QUEUE_ALL_ROWS`, 5000, the server's most); scrolling back to the top with no day picked drops back to the first rows. The query key stays `['queue', stationId]` so the optimistic updates are untouched; a change of limit just refetches.
+
 ## Instant buttons are a cart: named sets of ten pages
 
 Operators come from KBR Studio 1.82 (the desktop program the station runs today), whose jingle cart has pages 1 to 10 and named sets. `useHotButtons` in `shared.ts` stores `{ sets: [{ name, pages: CtlAsset[][10] }], set, page }` under the same localStorage key as before (`kbr_hot_buttons_<stationId>`); an old flat array is read as page 1 of "Default". The ☆ in the library adds to, or removes from, the page on screen. Still per browser, not shared between operators.
