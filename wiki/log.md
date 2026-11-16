@@ -101,3 +101,4 @@ INGEST 2026-11-16 streaming-architecture.md next_asset is the queue's pick at th
 INGEST 2026-11-16 streaming-architecture.md an advance whose item is deleted mid-change retries (StaleDataError); scheduler rolls back per station so one failure no longer fails the whole pass
 INGEST 2026-11-16 streaming-architecture.md app logging is configured in main.py (logger "app", INFO, stdout); before that every INFO line was dropped and the scheduler looked silent in Railway logs
 UPDATE 2026-11-16 playlist-generation.md the song on the air counts only its remaining time, so a block no longer starts early
+INGEST 2026-11-16 playlist-generation.md random picks (fit_for_random_pick) skip categories do_not_play/test (any case) and one-moment clips; the emergency refill uses it too

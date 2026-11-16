@@ -22,7 +22,7 @@ from app.core.dependencies import (
 )
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
-from app.models.asset import Asset
+from app.models.asset import Asset, fit_for_random_pick
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, soft_timed
 from app.models.user import User
@@ -593,7 +593,9 @@ async def _refill_for_next(db: AsyncSession, station_id) -> QueueEntry | None:
         return entry
 
     for only_music in (True, False):
-        query = select(Asset).where(Asset.file_path.isnot(None), Asset.file_path != "")
+        query = select(Asset).where(
+            Asset.file_path.isnot(None), Asset.file_path != "", fit_for_random_pick()
+        )
         if only_music:
             query = query.where(Asset.asset_type == "music")
         else:
