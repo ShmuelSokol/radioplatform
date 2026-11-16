@@ -130,6 +130,17 @@ const SCENARIOS = {
     }),
     fadesBy: 5, notBefore: 2.5,
   },
+  // A hard block due in 3 s, announced 0.25 s after its time, with slow URL lookups
+  // (a cold load): the block item must already be loaded, so there is no hole
+  'hard-timed-item-has-no-hole': {
+    start: { ...A, nextId: 'b' }, wait: 4, watch: 6, urlDelay: 700,
+    change: (set, startA) => {
+      const q = [timed({ hard_timed: true })];
+      set({ ...A, nextId: 'b', startedAt: startA, queue: q });
+      setTimeout(() => set({ ...C, nextId: 'b', startedAt: q[0].preempt_at }), 3250);
+    },
+    end: { src: 'c', minT: 2, maxT: 3.5 },
+  },
   // Next mid-song with the next item pre-loaded, announced straight away: the new item
   // starts from its top with no seek (a small seek repeated the opening in Safari)
   'next-starts-clean': {

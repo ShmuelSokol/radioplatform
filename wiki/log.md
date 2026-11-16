@@ -89,3 +89,4 @@ INGEST 2026-11-16 streaming-architecture.md timed items get an exact timer (hard
 UPDATE 2026-11-16 audio-engine.md item starts within 1 s play from the top without a seek (Safari repeated the opening)
 UPDATE 2026-11-16 audio-engine.md Listen mid-item in Safari: decks started inside the click, graph built before resume()
 INGEST 2026-11-16 control-room.md KBR Studio look (classic.css, desktop layout, row heights tied to ROW_*); jingle cart hides dated time/weather recordings via hide_generated
+UPDATE 2026-11-16 audio-engine.md hard timed items preloaded on the idle deck 60 s ahead

@@ -18,6 +18,8 @@ const COLD_LOAD_MAX_WAIT_MS = 4000;
 const START_FROM_TOP_SECONDS = 1.0;
 // A timed item's lead-in fade ends this long after its due time (see the preempt fade)
 const PREEMPT_FADE_OVERHANG_MS = 400;
+// A hard timed item is loaded on the idle deck this long before its time
+const TIMED_PRELOAD_AHEAD_MS = 60_000;
 
 /** Seek only when it moves the position: even a seek to where the element already
  *  is makes Safari re-decode and can repeat a few hundred milliseconds. */
@@ -547,9 +549,33 @@ export function useAudioEngine(
     run();
   }, [nowPlayingAsset?.id, currentStartedAt, isPlaying, audioReady, listenTick, currentCueIn, currentReplayGainDb, audioUrlOverride, getDeck, livePosition, replayGainMultiplier]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── What the idle deck should hold: normally the next track, but a hard timed
+  // item (program block, hard sponsorship) that cuts in before the song ends is
+  // what comes next, so it is loaded a minute ahead. A cold load at its due time
+  // left half a second of silence in the control room.
+  const [timedSoon, setTimedSoon] = useState(false);
+  useEffect(() => {
+    setTimedSoon(false);
+    if (!nextPreemptAt || !nextPreemptAssetId) return;
+    const due = new Date(nextPreemptAt).getTime();
+    if (!isFinite(due)) return;
+    const startMs = currentStartedAt ? new Date(currentStartedAt).getTime() : NaN;
+    const dur = nowPlayingAsset?.duration ?? null;
+    // Due after the song on air ends by itself: the next track comes first
+    if (isFinite(startMs) && dur && due >= startMs + dur * 1000 - CROSSFADE_DURATION * 1000) return;
+    const wait = due - TIMED_PRELOAD_AHEAD_MS - Date.now();
+    if (wait <= 0) { setTimedSoon(true); return; }
+    const t = setTimeout(() => setTimedSoon(true), wait);
+    return () => clearTimeout(t);
+  }, [nextPreemptAt, nextPreemptAssetId, currentStartedAt, nowPlayingAsset?.duration]);
+  const preloadId = timedSoon && nextPreemptAssetId ? nextPreemptAssetId : nextAssetId;
+  const preloadUrlOverride = preloadId === nextAssetId ? nextAudioUrlOverride : null;
+
   // ── Pre-load next track on the idle deck ──
   // Declared after the track-change effect so a track change claims its deck first.
   useEffect(() => {
+    const nextAssetId = preloadId;
+    const nextAudioUrlOverride = preloadUrlOverride;
     if (!audioReady || !nextAssetId) return;
     const currentId = nowPlayingAsset?.id ?? null;
 
@@ -591,7 +617,7 @@ export function useAudioEngine(
     };
     loadNext();
     return () => { cancelled = true; };
-  }, [nextAssetId, nextAudioUrlOverride, audioReady, swapTick, nowPlayingAsset?.id, getDeck]);
+  }, [preloadId, preloadUrlOverride, audioReady, swapTick, nowPlayingAsset?.id, getDeck]);
 
   // ── Preempt fade-out: schedule precise fade before hourly announcements ──
   useEffect(() => {
