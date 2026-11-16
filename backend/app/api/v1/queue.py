@@ -545,6 +545,39 @@ async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) ->
     return result.scalar_one_or_none()
 
 
+def switch_time(entry) -> datetime | None:
+    """When the item on air hands over to the next one: where listeners start
+    their crossfade (cross_start, default 3 s before the end). The scheduler
+    advances the queue at this moment (SchedulerEngine._advance_queue)."""
+    if not entry or not entry.started_at:
+        return None
+    asset = entry.asset
+    duration = (asset.duration if asset else None) or DEFAULT_DURATION
+    cross_seconds = 3.0
+    analysis = ((asset.metadata_extra or {}).get("audio_analysis") or {}) if asset else {}
+    cross_start = analysis.get("cross_start_seconds")
+    if isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
+        cross_seconds = duration - cross_start
+    cross_seconds = min(cross_seconds, max(0.0, duration / 2))
+    return _aware(entry.started_at) + timedelta(seconds=duration - cross_seconds)
+
+
+async def predict_next_entry(db: AsyncSession, station_id, playing_entry) -> QueueEntry | None:
+    """What will follow the item on air when it ends: the pick the queue will make
+    at the hand-over (a soft sponsorship due by then wins over the next song).
+    Listeners pre-load this, so it must match the server's choice exactly;
+    picking by 'now' sent them the next song while a sponsorship was waiting."""
+    now_utc = datetime.now(timezone.utc)
+    at = switch_time(playing_entry) or now_utc
+    picked = await _pick_next_pending(db, station_id, max(at, now_utc))
+    if picked is None:
+        return None
+    from sqlalchemy.orm import joinedload
+    return (await db.execute(
+        select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == picked.id)
+    )).unique().scalar_one_or_none()
+
+
 async def _refill_for_next(db: AsyncSession, station_id) -> QueueEntry | None:
     """Nothing is left to play: fill the queue (schedule, rotation, rules) and
     return what should go on air now. A station must never stop just because

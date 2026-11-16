@@ -97,3 +97,4 @@ INGEST 2026-11-16 playlist-generation.md schedule/block/playlist changes regener
 UPDATE 2026-11-16 schedule-look-ahead.md new "plays" findings say which block is on the air
 INGEST 2026-11-16 control-room.md one tab holds sound (BroadcastChannel, no auto-start); cart/Library hide dated weather spots; tap targets need real 44px boxes, not ::after
 INGEST 2026-11-16 audio-engine.md control room Next plays the next item locally on click (playNextNow), confirmed or overridden by the server's announcement
+INGEST 2026-11-16 streaming-architecture.md next_asset is the queue's pick at the hand-over time (predict_next_entry), so a soft sponsorship due mid-song is pre-loaded instead of the next song

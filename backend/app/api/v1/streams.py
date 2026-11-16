@@ -76,20 +76,9 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     cross_start = analysis.get("cross_start_seconds", duration - 3.0)
     replay_gain_db = analysis.get("replay_gain_db", 0)
 
-    # Peek at next pending entry for pre-loading
-    from sqlalchemy import or_
-    now_utc = datetime.now(timezone.utc)
-    next_result = await db.execute(
-        select(QueueEntry)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
-        )
-        .order_by(QueueEntry.position)
-        .limit(1)
-    )
-    next_entry = next_result.scalar_one_or_none()
+    # What follows this item (the queue's pick at the hand-over), for pre-loading
+    from app.api.v1.queue import predict_next_entry
+    next_entry = await predict_next_entry(db, station_id, entry)
 
     next_asset_data = None
     if next_entry and next_entry.asset:
