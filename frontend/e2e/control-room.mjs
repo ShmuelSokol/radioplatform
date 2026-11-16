@@ -515,7 +515,26 @@ async function metersWithoutListening(browser) {
   let after = 0;
   for (let i = 0; i < 20 && after === 0; i++) { await page.waitForTimeout(300); after = await lit(); }
   check(`${tag}: meters move without pressing Listen`, after > 0, `${before} -> ${after} lit`);
+  // The tone is a sine at 0.78 of full scale: RMS -5.1 dBFS, so 26 of 30
+  // segments per side on the -40..0 dBFS scale (both sides together: 52)
+  await page.waitForTimeout(1000);
+  const steady = await lit();
+  check(`${tag}: meter reads the real level (-5 dBFS tone)`, steady >= 48 && steady <= 54, `${steady} of 60 lit`);
   check(`${tag}: the Listen button is still offered (not heard here)`, await page.locator('button:visible', { hasText: 'Listen' }).count() > 0);
+  // Listening here, then muted: the meters keep moving (mute only silences this computer)
+  await page.locator('button:visible', { hasText: 'Listen' }).first().click();
+  await page.waitForTimeout(500);
+  await page.getByRole('button', { name: 'Mute' }).first().click();
+  await page.waitForTimeout(800);
+  const mutedLit = await lit();
+  check(`${tag}: meters keep the same level while muted`, mutedLit >= 48 && mutedLit <= 54, `${mutedLit} lit`);
+  // Reload while muted (mute is remembered): moving again after the first click
+  await page.reload();
+  await page.getByTestId('queue-row').first().waitFor();
+  await page.getByText('Up next', { exact: true }).first().click();
+  let reloadLit = 0;
+  for (let i = 0; i < 20 && reloadLit < 48; i++) { await page.waitForTimeout(300); reloadLit = await lit(); }
+  check(`${tag}: meters move after a reload while muted`, reloadLit >= 48, `${reloadLit} lit`);
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 }
