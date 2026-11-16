@@ -132,3 +132,4 @@ INGEST 2026-11-16 hourly-slots.md hourly time clips per region (?region= on /tim
 INGEST 2026-11-16 control-room.md meters are RMS dBFS (-40..0, red above -8) with ballistics; mute and Listen never change them
 
 INGEST 2026-11-16 operator-actions.md placeholders (NEVER_AUTO_TITLES) are skipped at pick time from every automatic source (_skip_placeholders); short or timed items hand over 0.3 s before their end, not at half their length
+INGEST 2026-11-16 control-room.md Listen is remembered across reloads (localStorage kbr-cr-listen); first click turns sound back on
