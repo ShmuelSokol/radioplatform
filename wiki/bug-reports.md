@@ -13,6 +13,7 @@ Same pattern as his supplier-item-database project (`wiki/bug-autofix.md` there)
   ones not in the page: found by wrapping `HTMLMediaElement.play`) and every
   AudioContext (channels, state), React Query data whose key mentions queue / now
   playing / station / schedule (trimmed), localStorage minus anything token-like.
+- **Button**: bottom left on every page, except the control room at phone width (it covered a queue row's insert button); there it is "🐞 Report a bug" in the phone menu (event `kbr:report-bug`).
 - **Screenshot**: `html2canvas` (lazy-loaded) of the visible viewport, taken BEFORE
   the form opens; JPEG, about 20-150 KB. The reporter can untick it.
 - **Server** (`backend/app/core/log_buffer.py`): the app keeps its last 3000 log lines
