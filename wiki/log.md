@@ -101,3 +101,4 @@ INGEST 2026-11-16 streaming-architecture.md next_asset is the queue's pick at th
 INGEST 2026-11-16 streaming-architecture.md an advance whose item is deleted mid-change retries (StaleDataError); scheduler rolls back per station so one failure no longer fails the whole pass
 INGEST 2026-11-16 streaming-architecture.md app logging is configured in main.py (logger "app", INFO, stdout); before that every INFO line was dropped and the scheduler looked silent in Railway logs
 INGEST 2026-11-16 control-room.md hidden tab goes stale (Safari throttling): refetch now-playing/queue and reconnect on visibilitychange; appUpdate reloads after 10 min away if silent; iOS select needs appearance:none for 44px
+UPDATE 2026-11-16 playlist-generation.md the song on the air counts only its remaining time, so a block no longer starts early

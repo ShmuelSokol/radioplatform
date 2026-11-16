@@ -196,3 +196,53 @@ async def test_dated_weather_already_queued_as_a_song_is_cleared(db_session: Asy
     await db_session.commit()
     ids = {r[0] for r in (await db_session.execute(select(QueueEntry.id))).all()}
     assert plain.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_block_does_not_start_early_while_a_song_is_on_the_air(db_session: AsyncSession, monkeypatch):
+    """The song on the air counts only for what is left of it (live test: the
+    block's pattern began 1.5 minutes early)."""
+    from datetime import time
+
+    from app.models.schedule_block import RecurrenceType, ScheduleBlock
+
+    _pin_clock(monkeypatch)
+    station = Station(id=uuid.uuid4(), name="KBR 4", timezone="America/New_York", is_active=True)
+    db_session.add(station)
+    await db_session.flush()
+    schedule = Schedule(id=uuid.uuid4(), station_id=station.id, name="Main", is_active=True)
+    talk = PlaylistTemplate(id=uuid.uuid4(), name="Shiurim", station_id=station.id, is_active=True)
+    db_session.add_all([schedule, talk])
+    await db_session.flush()
+    db_session.add(TemplateSlot(id=uuid.uuid4(), template_id=talk.id, position=0, asset_type="shiur", category="Halacha"))
+    # The block starts at 7:03; the song on the air started at 6:57 and ends at 7:01
+    db_session.add(
+        ScheduleBlock(
+            id=uuid.uuid4(), schedule_id=schedule.id, name="Shiurim", start_time=time(7, 3),
+            end_time=time(18), recurrence_type=RecurrenceType.DAILY, playlist_template_id=talk.id,
+        )
+    )
+    music = [_song("Music", n) for n in range(30)]
+    shiurim = [
+        Asset(id=uuid.uuid4(), title=f"Shiur {n}", artist=f"Rav {n}", duration=240.0,
+              file_path=f"{uuid.uuid4().hex}.mp3", asset_type="shiur", category="Halacha")
+        for n in range(30)
+    ]
+    db_session.add_all(music + shiurim)
+    await db_session.flush()
+    db_session.add(
+        QueueEntry(
+            id=uuid.uuid4(), station_id=station.id, asset_id=music[0].id, position=0, status="playing",
+            source="auto", started_at=MONDAY_7AM - timedelta(minutes=3),
+        )
+    )
+    station_id = station.id
+    kinds = {a.id: a.asset_type for a in music + shiurim}
+    await db_session.commit()
+
+    await QueueReplenishService(db_session, station_id).replenish()
+    await db_session.commit()
+    pending = [e for e in await _pending(db_session, station_id) if e.source == "auto"]
+    # 7:01 is before the block: a song. From 7:05 the block plays.
+    assert kinds[pending[0].asset_id] == "music"
+    assert kinds[pending[1].asset_id] == "shiur"
