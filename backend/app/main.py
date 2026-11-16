@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import re
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
@@ -289,7 +290,23 @@ async def _run_migrations(engine, statements: list[str]) -> None:
 
     todo = migrations_to_run(statements, existing_columns, existing_indexes)
     logger.info("Migrations: %d of %d need running", len(todo), len(statements))
-    for sql in todo:
+    failed = await _execute_migrations(engine, todo, is_pg)
+    if failed and is_pg:
+        # A busy table made these give up; try again in the background rather than
+        # wait now (a new column the code needs would otherwise stay missing)
+        task = asyncio.create_task(_retry_migrations(engine, failed))
+        _migration_retry_tasks.add(task)
+        task.add_done_callback(_migration_retry_tasks.discard)
+
+
+_migration_retry_tasks: set = set()
+
+
+async def _execute_migrations(engine, statements: list[str], is_pg: bool) -> list[str]:
+    from sqlalchemy import text
+
+    failed = []
+    for sql in statements:
         try:
             async with engine.begin() as conn:
                 if is_pg:
@@ -297,6 +314,18 @@ async def _run_migrations(engine, statements: list[str]) -> None:
                 await conn.execute(text(sql))
         except Exception as e:
             logger.warning(f"Migration skipped ({sql[:50]}...): {e}")
+            failed.append(sql)
+    return failed
+
+
+async def _retry_migrations(engine, statements: list[str], attempts: int = 40, every: float = 30.0) -> None:
+    for _ in range(attempts):
+        await asyncio.sleep(every)
+        statements = await _execute_migrations(engine, statements, True)
+        if not statements:
+            logger.info("Migrations that had to wait have now run")
+            return
+    logger.error("MIGRATIONS STILL NOT RUN after %d tries: %s", attempts, [s[:60] for s in statements])
 
 
 async def _seed_default_categories():
