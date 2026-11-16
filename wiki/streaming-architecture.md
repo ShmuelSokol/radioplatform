@@ -188,4 +188,12 @@ UPDATE, `ALTER TYPE user_role ADD VALUE 'dj'` and `CREATE TABLE IF NOT EXISTS
 audit_logs`) take no lock on either table, so that stall has another cause, not yet
 found (candidates: two containers' pools overlapping on the Supabase pooler, or the
 startup tasks). Existing tables are now skipped too and the timeout is 1 s.
+The PC's capture of the next deploy found no lock or pooler stall but a heavy cold
+start, now fixed: the restart's "close open play logs" read all of play history (now
+recent rows per station, `STARTUP_OPEN_LOG_DAYS`), new connections cost ~2 s each on
+the first burst (`_warm_connection_pool` opens the pool before the app serves, so the
+health check waits for it), and `users.last_seen_at` was written every 5 s by every
+request (now at most once a minute per user per process; the Users page shows
+"Online" for 2 minutes). The `pg_timezone_names` query seen then is not ours (no code
+issues it; the Supabase dashboard does). Test: `backend/tests/test_cold_start.py`.
 Test: `backend/tests/test_safe_migrations.py`.

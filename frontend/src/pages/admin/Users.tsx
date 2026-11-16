@@ -14,8 +14,8 @@ function useForceUpdate() {
 function formatLastSeen(iso: string | null): { text: string; isOnline: boolean } {
   if (!iso) return { text: 'Never', isOnline: false };
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 12) return { text: 'Online', isOnline: true };
-  if (diff < 60) return { text: `${Math.floor(diff)}s ago`, isOnline: false };
+  // The server records activity at most once a minute per user
+  if (diff < 120) return { text: 'Online', isOnline: true };
   if (diff < 3600) return { text: `${Math.floor(diff / 60)}m ago`, isOnline: false };
   if (diff < 86400) return { text: `${Math.floor(diff / 3600)}h ago`, isOnline: false };
   return { text: `${Math.floor(diff / 86400)}d ago`, isOnline: false };
