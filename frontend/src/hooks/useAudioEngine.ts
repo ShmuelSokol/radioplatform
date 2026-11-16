@@ -5,6 +5,18 @@ import type { AssetInfo } from '../types';
 
 const VOLUME_KEY = 'radio_volume';
 const MUTE_KEY = 'radio_muted';
+
+// Meters: RMS level in dBFS. The bar spans METER_FLOOR_DB to 0 dBFS; the red
+// part (last 6 of 30 segments) starts at -8 dBFS, where only very hot audio goes.
+export const METER_FLOOR_DB = -40;
+const METER_FALL_DB_PER_FRAME = 0.35; // ~20 dB/s at 60 frames a second
+
+function dbfs(samples: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  const rms = Math.sqrt(sum / samples.length);
+  return rms > 0 ? Math.max(-100, 20 * Math.log10(rms)) : -100;
+}
 const SYNC_INTERVAL = 10000;
 const SYNC_THRESHOLD = 5;
 const TRACK_CHANGE_COOLDOWN = 15000;
@@ -169,8 +181,9 @@ export function useAudioEngine(
   const [ctxRunning, setCtxRunning] = useState(false);
   const analyserLRef = useRef<AnalyserNode | null>(null);
   const analyserRRef = useRef<AnalyserNode | null>(null);
-  const analyserDataLRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
-  const analyserDataRRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const analyserDataLRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const analyserDataRRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const meterDbRef = useRef<[number, number]>([METER_FLOOR_DB, METER_FLOOR_DB]);
   const busRef = useRef<GainNode | null>(null);
   const splitterRef = useRef<ChannelSplitterNode | null>(null);
 
@@ -345,9 +358,10 @@ export function useAudioEngine(
     bus.channelInterpretation = 'speakers';
     const splitter = ctx.createChannelSplitter(2);
     const analyserL = ctx.createAnalyser();
-    analyserL.fftSize = 256;
+    // 2048 samples is about 46 ms at 44.1 kHz: one meter reading per window
+    analyserL.fftSize = 2048;
     const analyserR = ctx.createAnalyser();
-    analyserR.fftSize = 256;
+    analyserR.fftSize = 2048;
 
     bus.connect(splitter);
     splitter.connect(analyserL, 0);
@@ -362,8 +376,8 @@ export function useAudioEngine(
     splitterRef.current = splitter;
     analyserLRef.current = analyserL;
     analyserRRef.current = analyserR;
-    analyserDataLRef.current = new Uint8Array(analyserL.frequencyBinCount) as Uint8Array<ArrayBuffer>;
-    analyserDataRRef.current = new Uint8Array(analyserR.frequencyBinCount) as Uint8Array<ArrayBuffer>;
+    analyserDataLRef.current = new Float32Array(analyserL.fftSize) as Float32Array<ArrayBuffer>;
+    analyserDataRRef.current = new Float32Array(analyserR.fftSize) as Float32Array<ArrayBuffer>;
 
     // Create two decks
     const deckA = createDeck(ctx);
@@ -817,14 +831,21 @@ export function useAudioEngine(
       const dL = analyserDataLRef.current;
       const dR = analyserDataRRef.current;
       if (aL && aR && dL && dR) {
-        aL.getByteFrequencyData(dL);
-        aR.getByteFrequencyData(dR);
-        let sumL = 0, sumR = 0;
-        for (let i = 0; i < dL.length; i++) sumL += dL[i];
-        for (let i = 0; i < dR.length; i++) sumR += dR[i];
-        const l = sumL / (dL.length * 255);
-        const r = sumR / (dR.length * 255);
-        setVuLevels([Math.min(1, l * 2.5), Math.min(1, r * 2.5)]);
+        // Real level of what goes on air (after replay gain, before the local
+        // speaker gain, so Listen and Mute never change it): RMS in dBFS over
+        // the last ~46 ms, with a quick rise and a ~20 dB/s fall like a
+        // hardware meter. 0..1 maps METER_FLOOR_DB..0 dBFS.
+        aL.getFloatTimeDomainData(dL);
+        aR.getFloatTimeDomainData(dR);
+        const prev = meterDbRef.current;
+        const next = [dbfs(dL), dbfs(dR)].map((db, i) =>
+          db >= prev[i] ? prev[i] + (db - prev[i]) * 0.6 : Math.max(db, prev[i] - METER_FALL_DB_PER_FRAME),
+        ) as [number, number];
+        meterDbRef.current = next;
+        const frac = (db: number) => Math.min(1, Math.max(0, (db - METER_FLOOR_DB) / -METER_FLOOR_DB));
+        const l = frac(next[0]);
+        const r = frac(next[1]);
+        setVuLevels(v => (Math.abs(v[0] - l) < 0.005 && Math.abs(v[1] - r) < 0.005 ? v : [l, r]));
       }
 
       rafRef.current = requestAnimationFrame(poll);
