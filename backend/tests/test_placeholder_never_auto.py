@@ -27,7 +27,9 @@ async def test_no_pick_draws_the_placeholder(db_session):
     real = _spot("Sponsor Grocery")
     placeholder = _spot("KOL BRAMAH TEST SPONSOR")
     lower = _spot(" kol bramah test sponsor ", category=None)
-    db_session.add_all([real, placeholder, lower])
+    sponsor = _spot("Kol bramah sponsor")
+    ad = _spot("KOL BRAMAH AD")
+    db_session.add_all([real, placeholder, lower, sponsor, ad])
     await db_session.commit()
 
     random_ids = set((await db_session.execute(
