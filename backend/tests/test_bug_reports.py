@@ -143,7 +143,45 @@ async def test_github_copy_and_one_push_per_fix(client: AsyncClient, auth_header
     state["labels"] = [{"name": "bug-report"}, {"name": "auto-fix-ready"}]
     assert (await svc.check_github_once())["pushed"] == 1
     assert (await svc.check_github_once())["pushed"] == 0  # only once
-    title, body, click = pushes[0]
+    ready = [p for p in pushes if "fix ready" in (p[0] or "")]
+    assert len(ready) == 1
+    title, body, click = ready[0]
     assert "fix ready" in title and click.endswith("/pull/99") and "Plays both stations" in body
     detail = (await client.get(f"/api/v1/bug-reports/{r.json()['id']}", headers=auth_headers)).json()
     assert detail["status"] == "fix_ready" and detail["github_url"].endswith("/issues/3")
+
+
+@pytest.mark.asyncio
+async def test_new_report_pushes_received(client: AsyncClient, monkeypatch):
+    """Shmuel expected a push the moment he sent a report, not only when a fix is ready."""
+    import uuid as _uuid
+
+    import httpx
+
+    import app.db.engine as eng
+    from tests.conftest import TestSessionLocal
+
+    monkeypatch.setattr(eng, "async_session_factory", TestSessionLocal)
+    monkeypatch.setattr(svc.settings, "BUG_REPORTS_GITHUB_TOKEN", "")
+    monkeypatch.setattr(svc.settings, "NTFY_TOPIC", "secret-topic")
+    pushes = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        pushes.append((req.headers.get("Title"), req.content.decode(), req.headers.get("Click")))
+        return httpx.Response(200, json={})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(svc.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    real_received = svc.report_received
+    calls = []
+
+    async def capture(report_id):
+        calls.append(report_id)
+
+    monkeypatch.setattr(svc, "report_received", capture)  # run it inline below instead
+    r = await client.post("/api/v1/bug-reports", json={"description": "offline?!"})
+    assert len(calls) == 1
+    await real_received(_uuid.UUID(r.json()["id"]))
+    assert len(pushes) == 1
+    title, body, click = pushes[0]
+    assert title == f"Bug {r.json()['number']} received" and "offline?!" in body and click.endswith("/admin/bug-reports")

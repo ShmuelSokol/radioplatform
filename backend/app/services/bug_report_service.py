@@ -190,6 +190,30 @@ async def mirror_to_github(report_id) -> None:
         await db.commit()
 
 
+async def report_received(report_id) -> None:
+    """New report: copy it to GitHub, then push "bug N received" so the owner
+    knows it arrived (Shmuel expected a push the moment he sent one). Never raises."""
+    try:
+        await mirror_to_github(report_id)
+        from app.db.engine import async_session_factory
+        from app.models.bug_report import BugReport
+
+        async with async_session_factory() as db:
+            report = (await db.execute(select(BugReport).where(BugReport.id == report_id))).scalar_one_or_none()
+        if report is None:
+            return
+        who = report.reporter_name or "a listener"
+        triage = "Claude will look at it at the next hourly check." if report.github_issue else "It is saved in Bug Reports."
+        await send_ntfy(
+            f"{_short(report.description, 160)}\nFrom {who}. {triage}",
+            title=f"Bug {report.number} received",
+            click=report.github_url or "https://kbrlive.com/admin/bug-reports",
+            tags="beetle",
+        )
+    except Exception as e:
+        logger.warning("Bug report received push failed: %s", e)
+
+
 async def send_ntfy(message: str, title: str, click: str = "", tags: str = "", priority: str = "default") -> bool:
     if not settings.NTFY_TOPIC:
         return False
