@@ -8,6 +8,7 @@ import {
   QUEUE_ALL_ROWS, QUEUE_FIRST_ROWS,
 } from '../../hooks/useQueue';
 import { useLiveShows } from '../../hooks/useLiveShows';
+import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { fireNow, insertAt, loopCurrent, mixOver, queueEnd, queueNext } from '../../api/liveControl';
@@ -184,6 +185,16 @@ export default function Dashboard() {
   const introSeconds = isPlaying && introLength > realElapsed ? introLength - realElapsed : 0;
 
   // ── Audio monitor (what the operator hears in this browser) ─
+  // A live show on air: the host is heard here instead of the music (the station's
+  // queue is paused), and only in the tab that holds the sound.
+  const [liveEnabled, setLiveEnabled] = useState(false);
+  const live = useLiveAudio(stationId, liveEnabled);
+  const staleNowPlaying = useRef<typeof wsNowPlaying | undefined>(undefined);
+  if (live.onAir && staleNowPlaying.current === undefined) staleNowPlaying.current = wsNowPlaying;
+  if (!live.onAir && staleNowPlaying.current !== undefined && staleNowPlaying.current !== wsNowPlaying) {
+    staleNowPlaying.current = undefined;
+  }
+  const musicAllowed = !live.onAir && staleNowPlaying.current === undefined;
   const audioAsset: AssetInfo | null = wsNowPlaying?.asset_id && wsNowPlaying.asset ? {
     id: wsNowPlaying.asset_id,
     title: wsNowPlaying.asset.title,
@@ -222,7 +233,7 @@ export default function Dashboard() {
   }, [dashUseStream]);
 
   const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio: engineInit, releaseAudio, playNextNow } = useAudioEngine(
-    dashUseStream ? null : audioAsset, realElapsed, dashUseStream ? false : isPlaying,
+    dashUseStream || !musicAllowed ? null : audioAsset, realElapsed, dashUseStream || !musicAllowed ? false : isPlaying,
     nextPreempt?.preempt_at ?? null,
     nextPreempt?.asset_id ?? null,
     preemptFadeMs,
@@ -265,13 +276,15 @@ export default function Dashboard() {
     window.addEventListener('pagehide', onLeave);
     return () => { onLeave(); window.removeEventListener('pagehide', onLeave); ch.close(); soundChannel.current = null; };
   }, [releaseAudio]);
+  const unlockLive = live.unlock;
   const takeSound = useCallback(async () => {
     soundElsewhere.current = false;
     if (!holdsSound.current) soundChannel.current?.postMessage({ type: 'taken' });
     holdsSound.current = true;
     setStatusMessage(null);
+    unlockLive();
     await engineInit();
-  }, [engineInit]);
+  }, [engineInit, unlockLive]);
   const initAudio = useCallback(async () => {
     if (soundElsewhere.current) return;
     await takeSound();
@@ -279,6 +292,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (dashStreamAudioRef.current) dashStreamAudioRef.current.volume = muted ? 0 : volume;
   }, [volume, muted]);
+  const setLiveLevel = live.setLevel;
+  useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
+  useEffect(() => { setLiveEnabled(audioReady); }, [audioReady]);
   const vuL = audioReady && isPlaying ? Math.round(vuLevels[0] * 30) : 0;
   const vuR = audioReady && isPlaying ? Math.round(vuLevels[1] * 30) : 0;
 

@@ -162,7 +162,7 @@ radioplatform/
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts |
 | live_shows | live_shows.py | /live-shows |
-| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket) |
+| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
 | playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login) |
@@ -276,7 +276,8 @@ radioplatform/
 | useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
 | useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
 | useLiveShowWS.ts | Live show WebSocket (real-time callers, countdown, with polling fallback) |
-| useHostAudio.ts | Browser mic capture, MediaRecorder, binary WS streaming, VU meter |
+| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter |
+| useLiveAudio.ts | Plays a station's live show (host mic relayed by the server) and tells the page to silence the music meanwhile |
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |
 

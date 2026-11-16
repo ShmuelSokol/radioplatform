@@ -8,6 +8,7 @@ import { useListenerHeartbeat } from '../../hooks/useListeners';
 import { useCrmAuth, useRateSong, useActiveRaffles, useEnterRaffle } from '../../hooks/useCrm';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
+import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { holdUpdates } from '../../lib/appUpdate';
 import type { AssetInfo } from '../../types';
 
@@ -135,14 +136,25 @@ export default function Listen() {
     duration: null,
   } : null;
 
+  // A live show on air: the host is heard instead of the music. The now-playing
+  // message held when the show began is stale afterwards (the station's queue was
+  // paused), so the music waits for a fresh one.
+  const live = useLiveAudio(stationId ?? null, userStarted);
+  const staleNowPlaying = useRef<typeof wsNowPlaying | undefined>(undefined);
+  if (live.onAir && staleNowPlaying.current === undefined) staleNowPlaying.current = wsNowPlaying;
+  if (!live.onAir && staleNowPlaying.current !== undefined && staleNowPlaying.current !== wsNowPlaying) {
+    staleNowPlaying.current = undefined;
+  }
+  const musicAllowed = !live.onAir && staleNowPlaying.current === undefined;
+
   // Audio engine with crossfade support (fallback when HLS is not available)
   const {
     volume, setVolume, muted, toggleMute,
     audioReady, initAudio,
   } = useAudioEngine(
-    userStarted && !useStream ? audioAsset : null,
+    userStarted && !useStream && musicAllowed ? audioAsset : null,
     elapsed,
-    userStarted && isWsPlaying && !useStream,
+    userStarted && isWsPlaying && !useStream && musicAllowed,
     null, null, 2000,
     // Crossfade params from WS
     wsAsset?.cue_in ?? 0,
@@ -177,7 +189,11 @@ export default function Listen() {
     return () => clearInterval(timer);
   }, [stationId, fetchActiveShow]);
 
+  const setLiveLevel = live.setLevel;
+  useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
+
   const handlePlay = async () => {
+    live.unlock();
     setUserStarted(true);
     if (!useStream) {
       await initAudio();
