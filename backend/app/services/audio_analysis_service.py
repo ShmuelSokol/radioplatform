@@ -90,6 +90,11 @@ async def analyze_audio(db, asset_id: str, full: bool = False):
     aid = UUID(asset_id)
     asset = await get_asset(db, aid)
     file_path = asset.file_path
+    stored_extra = asset.metadata_extra
+    # End the read transaction before the slow part (network reads, FFmpeg). An
+    # open transaction keeps a lock on the assets table, and a schema change
+    # queued behind it then blocks every other query (froze a deploy once).
+    await db.commit()
 
     if not full:
         from app.services.tail_analysis import analyze_by_range, public_audio_url
@@ -97,7 +102,7 @@ async def analyze_audio(db, asset_id: str, full: bool = False):
         url = public_audio_url(file_path or "")
         if not url:
             raise ValueError(f"No public URL for asset {asset_id}")
-        previous = (asset.metadata_extra or {}).get("audio_analysis") if isinstance(asset.metadata_extra, dict) else None
+        previous = stored_extra.get("audio_analysis") if isinstance(stored_extra, dict) else None
         analysis = await analyze_by_range(url, previous if isinstance(previous, dict) else None)
     else:
         # Download audio
@@ -116,7 +121,9 @@ async def analyze_audio(db, asset_id: str, full: bool = False):
         import asyncio
         analysis = await asyncio.to_thread(analyze_audio_bytes, data)
 
-    # Store in metadata_extra
+    # Store in metadata_extra, in a short transaction of its own (re-read, since the
+    # row may have changed while we were measuring)
+    asset = await get_asset(db, aid)
     extra = dict(asset.metadata_extra or {})
     extra["audio_analysis"] = analysis
     asset.metadata_extra = extra

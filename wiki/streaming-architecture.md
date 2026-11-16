@@ -159,3 +159,27 @@ under a per-station refill lock, not the change lock (a slow refill must not hol
 next change), and the item on air is announced again when it finishes, so "next"
 includes anything the refill added. Refills over 5 s log "queue refill took". Test:
 `backend/tests/test_announce_before_refill.py`.
+
+## Deploys must never freeze the live backend (2026-11-16)
+
+The 09:00 freeze on 2026-11-16 (08:58:51 to 09:02:51) was the new container's startup
+migrations, not only a slow refill. `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` takes an
+ACCESS EXCLUSIVE lock even when the column exists; it queued behind the bulk analysis's
+open transactions on `assets`, every other query queued behind it, the pool ran out and
+the deploy failed its health check (so that release never went live). Now:
+`_run_migrations` in `backend/app/main.py` reads `information_schema.columns` and
+`pg_indexes` once and does not send statements whose column or index already exists
+(`migrations_to_run`), and every statement it does send runs with
+`SET LOCAL lock_timeout = '3s'` (the enum connection uses the same timeout), so a busy
+table means a logged "Migration skipped", never a frozen station. `analyze_audio`
+commits its read before the range reads and FFmpeg and re-reads the row to write the
+result, so no transaction is open during the slow part. When adding a migration, keep
+the `ADD COLUMN IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` form so the skip works.
+The lock holder that day was `POST /assets/bulk-analyze`: it read the asset list in
+the request's session and handed the job to FastAPI `BackgroundTasks`, which run before
+that session is closed, so its transaction sat idle for the two-hour run. Long jobs now
+start as detached tasks (`_run_detached` in `api/v1/assets.py`) after a commit, and the
+scheduler opens a fresh session per pass (`async with async_session_factory()`, never
+`async for db in get_db(): ... break`, which leaves the session open until garbage
+collection). Do not use BackgroundTasks for anything long.
+Test: `backend/tests/test_safe_migrations.py`.
