@@ -58,6 +58,8 @@ const SPLIT_DEFAULT = 0.6;
 const SPLIT_MIN = 0.15;
 const SPLIT_MAX = 0.85;
 
+const LISTEN_KEY = 'kbr-cr-listen';
+
 export default function Dashboard() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -265,14 +267,21 @@ export default function Dashboard() {
   // Browsers let audio run only after the person has clicked or typed in the page,
   // so the silent engine starts on the first click or key anywhere here (or at once
   // where the browser already allows it).
-  const [listenHere, setListenHere] = useState(false);
+  // Listening is remembered across reloads (like Mute): the header keeps its
+  // speaker controls, and the first click turns the sound back on.
+  const [listenHere, setListenHere] = useState(() => {
+    try { return localStorage.getItem(LISTEN_KEY) === '1'; } catch { return false; }
+  });
+  const takeSoundRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     let done = false;
     const start = () => {
       if (done) return;
       done = true;
       remove();
-      void engineInit().catch(() => {});
+      let wanted = false;
+      try { wanted = localStorage.getItem(LISTEN_KEY) === '1'; } catch { /* none */ }
+      void (wanted ? takeSoundRef.current() : engineInit()).catch(() => {});
     };
     const events = ['pointerdown', 'keydown', 'touchstart'] as const;
     const remove = () => events.forEach(e => window.removeEventListener(e, start, true));
@@ -301,7 +310,7 @@ export default function Dashboard() {
         soundElsewhere.current = true;
         if (holdsSound.current) {
           holdsSound.current = false;
-          setListenHere(false);
+          setListenHere(false); // the other tab now remembers listening
           setStatusMessage('Sound moved to another control room tab. Press the speaker here to hear it in this tab.');
         }
       } else if (e.data?.type === 'released') {
@@ -319,9 +328,11 @@ export default function Dashboard() {
     holdsSound.current = true;
     setStatusMessage(null);
     setListenHere(true);
+    try { localStorage.setItem(LISTEN_KEY, '1'); } catch { /* none */ }
     unlockLive();
     await engineInit();
   }, [engineInit, unlockLive]);
+  takeSoundRef.current = takeSound;
   // An admin-pushed release reloaded this control room while it played: sound back on
   const resume = useResumeAfterRelease(takeSound, dashUseStream ? true : soundRunning && listenHere);
   // Action buttons (Next, Start, play now) count as the click that starts the meters;

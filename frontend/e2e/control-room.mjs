@@ -535,6 +535,8 @@ async function metersWithoutListening(browser) {
   let reloadLit = 0;
   for (let i = 0; i < 20 && reloadLit < 48; i++) { await page.waitForTimeout(300); reloadLit = await lit(); }
   check(`${tag}: meters move after a reload while muted`, reloadLit >= 48, `${reloadLit} lit`);
+  check(`${tag}: listening and mute are remembered after a reload`, await page.getByRole('button', { name: 'Unmute' }).count() > 0
+    && await page.locator('button:visible', { hasText: 'Listen' }).count() === 0);
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 }
