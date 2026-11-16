@@ -68,3 +68,7 @@ Mix over is the third cart mode (Play now / Play next / Mix over): a tap calls `
 ## Timed items: when the control-room player fades
 
 In the browser player (no playout engine), the server decides when a timed item starts, but the control room fades the song's volume itself just before the cut. It must fade only when the server will really cut: a hard item at `preempt_at`, a soft item with a limit at `hard_by`. A soft item with no limit waits for the song to end, so no fade. `controlroom/timing.ts` `cutAt()` reads `hard_timed` and `hard_by` from the queue rows. Before 2026-11-15 it faded for every timed item, so a soft sponsorship at :45 left the song silent until it ended.
+
+## No queue data is not "Stopped"
+
+Until the queue has loaded, the bar says "Loading the queue…", and if the request keeps failing "Can't reach the station. Trying again…", in the title line and in the queue panel. Before 2026-11-16 a missing or failed queue showed "Stopped. Press Start to begin." and "The queue is empty", which an operator on a phone reads as the station being off the air.

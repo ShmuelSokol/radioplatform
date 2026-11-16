@@ -21,6 +21,8 @@ export interface QueueRow {
 
 interface Props {
   entries: QueueRow[];          // already date-filtered
+  /** Shown instead of "empty" while the queue has not loaded or cannot be reached */
+  notice?: string | null;
   loadedCount: number;          // entries loaded from the server
   totalCount: number;           // entries the server has in total
   totalDuration: number;
@@ -130,7 +132,7 @@ function QueuePanel(p: Props) {
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain" onScroll={onScroll} data-testid="queue-scroll">
         {n === 0 && (
           <div className="text-center text-gray-500 py-10 px-4 text-sm">
-            {p.loadedCount === 0
+            {p.notice ? p.notice : p.loadedCount === 0
               ? 'The queue is empty. Add songs from the library, or press Start.'
               : 'Nothing scheduled for that day.'}
           </div>

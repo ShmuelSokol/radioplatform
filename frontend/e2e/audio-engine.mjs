@@ -130,6 +130,19 @@ const SCENARIOS = {
     }),
     fadesBy: 5, notBefore: 2.5,
   },
+  // Next mid-song with the next item pre-loaded, announced straight away: the new item
+  // starts from its top with no seek (a small seek repeated the opening in Safari)
+  'next-starts-clean': {
+    start: { ...A, nextId: 'b' }, wait: 6, watch: 4,
+    change: (set) => set({ ...B, nextId: 'c', startedAt: now(), fade: 0.6 }),
+    audibleWithin: 1, noSeekOn: 'b', end: { src: 'b', minT: 3, maxT: 5 },
+  },
+  // Same, cold: the next item was never pre-loaded
+  'next-starts-clean-cold': {
+    start: { ...A, nextId: null }, wait: 6, watch: 4,
+    change: (set) => set({ ...C, nextId: 'a', startedAt: now(), fade: 0.6 }),
+    audibleWithin: 1.5, noSeekOn: 'c', end: { src: 'c', minT: 3, maxT: 5 },
+  },
 };
 
 function inSeconds(s) { return new Date(Date.now() + s * 1000).toISOString(); }
@@ -165,6 +178,7 @@ async function run(name, sc) {
   if (sc.urlDelay) urlDelay = sc.urlDelay;
 
   const t0 = Date.now();
+  await page.evaluate(() => { window.__seeks.length = 0; });
   sc.change(set, startA);
   let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, firstSilent = null, last = [];
   const target = sc.end?.src;
@@ -196,6 +210,11 @@ async function run(name, sc) {
   if (sc.audibleWithin) {
     check(`${name}: new song audible within ${sc.audibleWithin} s`, firstNew !== null && firstNew <= sc.audibleWithin,
       firstNew === null ? 'never' : `${firstNew.toFixed(2)} s`);
+  }
+  if (sc.noSeekOn) {
+    const seeks = (await page.evaluate(() => window.__seeks)).filter((x) => x.src === sc.noSeekOn);
+    check(`${name}: "${sc.noSeekOn}" starts from the top without a seek`, seeks.length === 0,
+      seeks.map((x) => `seek to ${x.to} at +${((x.at - t0) / 1000).toFixed(2)} s`).join(', '));
   }
   if (sc.outGoneWithin) {
     check(`${name}: outgoing song gone within ${sc.outGoneWithin} s`, outGone !== null && outGone <= sc.outGoneWithin,

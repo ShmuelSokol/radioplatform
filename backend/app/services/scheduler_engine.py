@@ -44,6 +44,8 @@ class SchedulerEngine:
         self._last_readout_check: dict[str, str] = {}
         # Precise advance timers: station_id → TimerHandle
         self._advance_timers: dict[str, asyncio.TimerHandle] = {}
+        # station -> (due time, timer) for the next timed item (hard start or hard_by)
+        self._timed_timers: dict[str, tuple[datetime, asyncio.TimerHandle]] = {}
         # Leadership: only the process holding the lease advances queues.
         self._instance_id = uuid.uuid4().hex
         self._leader_until: Optional[datetime] = None
@@ -70,6 +72,7 @@ class SchedulerEngine:
         for timer in self._advance_timers.values():
             timer.cancel()
         self._advance_timers.clear()
+        self._cancel_timed_timers()
         await self._release_lease()
         logger.info("Scheduler engine stopped")
     
@@ -112,6 +115,7 @@ class SchedulerEngine:
             for timer in self._advance_timers.values():
                 timer.cancel()
             self._advance_timers.clear()
+            self._cancel_timed_timers()
         return held
 
     async def _release_lease(self):
@@ -564,6 +568,72 @@ class SchedulerEngine:
                 await self._broadcast_queue_entry(db, station_id, entry)
         except Exception as e:
             logger.error("Queue advance failed for station %s: %s", station_id, e, exc_info=True)
+        try:
+            await self._arm_timed_start(db, station_id)
+        except Exception as e:
+            logger.warning("Timed start timer failed for station %s: %s", station_id, e)
+
+    # How far ahead the 3 s poll arms an exact timer for a timed item
+    TIMED_LOOKAHEAD_SECONDS = 10.0
+
+    def _cancel_timed_timers(self):
+        for _, timer in self._timed_timers.values():
+            timer.cancel()
+        self._timed_timers.clear()
+
+    async def _arm_timed_start(self, db: AsyncSession, station_id):
+        """Arm an exact timer for the next timed item due within a few seconds.
+
+        The poll runs every 3 s and the song-end timer only covers natural ends, so
+        a hard item (hard sponsorship, the hourly time) used to start up to 3 s
+        late while the control room had already faded the song out at its time:
+        dead air before every hard item. A soft item whose wait runs out (hard_by)
+        is due then too.
+        """
+        from app.models.queue_entry import QueueEntry, is_soft_timed
+        now = datetime.now(timezone.utc)
+        horizon = now + timedelta(seconds=self.TIMED_LOOKAHEAD_SECONDS)
+        rows = (await db.execute(
+            select(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at <= horizon,
+            )
+            .order_by(QueueEntry.preempt_at, QueueEntry.position)
+            .limit(20)
+        )).scalars().all()
+        due = None
+        for entry in rows:
+            at = _aware(entry.preempt_at)
+            if is_soft_timed(entry):
+                if entry.hard_by is None:
+                    continue  # waits for the song to end: the song-end timer covers it
+                at = max(at, _aware(entry.hard_by))
+            if at <= horizon and (due is None or at < due):
+                due = at
+        key = str(station_id)
+        armed = self._timed_timers.get(key)
+        if due is None or due <= now:
+            return  # nothing soon, or already due: this tick's advance handles it
+        if armed and abs((armed[0] - due).total_seconds()) < 0.01:
+            return
+        if armed:
+            armed[1].cancel()
+        loop = asyncio.get_running_loop()
+        # A hair after the due time, so the advance's "due <= now" check holds
+        delay = (due - now).total_seconds() + 0.005
+        handle = loop.call_later(
+            delay, lambda: loop.create_task(self._timed_fire(station_id, due))
+        )
+        self._timed_timers[key] = (due, handle)
+
+    async def _timed_fire(self, station_id, due):
+        current = self._timed_timers.get(str(station_id))
+        if current and current[0] == due:
+            self._timed_timers.pop(str(station_id), None)
+        await self._precise_advance(station_id, 0.0)
 
     async def _broadcast_queue_entry(
         self, db: AsyncSession, station_id, entry, change_fade_seconds: float | None = None
@@ -731,6 +801,10 @@ class SchedulerEngine:
         await self._check_silence_detection(
             db, station, has_playing_asset=playing.first() is not None, is_blacked_out=False
         )
+
+
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 # Global scheduler instance

@@ -181,6 +181,17 @@ async def refresh_requested_category_endpoint(
     return {"tagged": count}
 
 
+@router.post("/backfill-durations")
+async def backfill_durations(
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Measure the length of items that have none (they broke the queue view)."""
+    from app.services.duration_backfill import backfill_missing_durations
+    return await backfill_missing_durations(db, limit=max(1, min(limit, 500)))
+
+
 @router.post("/backfill-release-dates")
 async def backfill_release_dates(
     db: AsyncSession = Depends(get_db),

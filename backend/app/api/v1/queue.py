@@ -940,8 +940,9 @@ async def get_queue(
         return Response(json.dumps(body, default=_json_default), media_type="application/json")
     except Exception as exc:
         logger.exception("Queue GET error for station %s: %s", station_id, exc)
-        return {"entries": [], "total": 0, "now_playing": None,
-                "queue_duration_seconds": 0, "preempt_fade_ms": 2000}
+        # Never answer a failed read with an empty queue: the control room would
+        # show the station as stopped with nothing queued while it is playing.
+        return JSONResponse(status_code=503, content={"detail": "The queue could not be read. Try again."})
 
 
 def _json_default(value):
@@ -950,6 +951,19 @@ def _json_default(value):
     if isinstance(value, uuid.UUID):
         return str(value)
     return jsonable_encoder(value)
+
+
+def _next_due(entries, now_utc: datetime):
+    """In-memory twin of _pick_next_pending for rows already loaded."""
+    pending = [e for e in entries if e.status == "pending"]
+    soft_due = [
+        e for e in pending
+        if e.preempt_at and is_soft_timed(e) and _aware(e.preempt_at) <= now_utc
+    ]
+    if soft_due:
+        return min(soft_due, key=lambda e: _aware(e.preempt_at))
+    regular = [e for e in pending if not e.preempt_at or _aware(e.preempt_at) <= now_utc]
+    return min(regular, key=lambda e: e.position) if regular else None
 
 
 async def _get_queue_impl(station_id, limit, db):
@@ -1003,6 +1017,9 @@ async def _get_queue_impl(station_id, limit, db):
 
     # Find now-playing from the fetched entries (no extra query)
     now_playing_entry = next((e for e in entries if e.status == "playing"), None)
+    # What Next (or the end of the item on air) will actually play: the same rule
+    # as _pick_next_pending, so the screen never promises a different item.
+    next_entry = _next_due(entries, datetime.now(timezone.utc))
 
     # Sort entries by simulating actual playback order:
     # - Regular songs play sequentially by position
@@ -1015,7 +1032,7 @@ async def _get_queue_impl(station_id, limit, db):
             _np_sa = _np_sa.replace(tzinfo=timezone.utc)
 
         if _np_sa:
-            _ad = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
+            _ad = (now_playing_entry.asset.duration if now_playing_entry.asset else None) or DEFAULT_DURATION
             _el = (now_utc_sort - _np_sa).total_seconds()
             _cursor = now_utc_sort + timedelta(seconds=max(0, (_ad or DEFAULT_DURATION) - _el))
         else:
@@ -1053,7 +1070,7 @@ async def _get_queue_impl(station_id, limit, db):
                 if hp_pa <= _cursor:
                     _cursor = hp_pa
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = hard_preempts[hi].asset.duration if hard_preempts[hi].asset else DEFAULT_DURATION
+                    _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     hi += 1
                     continue
@@ -1063,7 +1080,7 @@ async def _get_queue_impl(station_id, limit, db):
                 sp_pa = _tz(soft_preempts[si].preempt_at)
                 if sp_pa <= _cursor:
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = soft_preempts[si].asset.duration if soft_preempts[si].asset else DEFAULT_DURATION
+                    _dur = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     si += 1
                     continue
@@ -1093,13 +1110,13 @@ async def _get_queue_impl(station_id, limit, db):
                 if next_hp and (not next_sp or next_hp <= next_sp):
                     _cursor = max(_cursor, next_hp)
                     _est_map[hard_preempts[hi].id] = _cursor
-                    _dur = hard_preempts[hi].asset.duration if hard_preempts[hi].asset else DEFAULT_DURATION
+                    _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     hi += 1
                 elif next_sp:
                     _cursor = max(_cursor, next_sp)
                     _est_map[soft_preempts[si].id] = _cursor
-                    _dur = soft_preempts[si].asset.duration if soft_preempts[si].asset else DEFAULT_DURATION
+                    _dur = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
                     _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
                     si += 1
                 else:
@@ -1116,7 +1133,7 @@ async def _get_queue_impl(station_id, limit, db):
     np_data = None
     if now_playing_entry and now_playing_entry.started_at:
         asset = now_playing_entry.asset
-        duration = asset.duration if asset else 180
+        duration = (asset.duration if asset else None) or DEFAULT_DURATION
         elapsed = (datetime.now(timezone.utc) - _aware(now_playing_entry.started_at)).total_seconds()
         remaining = max(0, duration - elapsed)
         np_data = {
@@ -1136,7 +1153,7 @@ async def _get_queue_impl(station_id, limit, db):
     now_utc = datetime.now(timezone.utc)
     # Fallback cursor only used if _est_map is missing an entry
     if now_playing_entry and now_playing_entry.started_at:
-        asset_dur = now_playing_entry.asset.duration if now_playing_entry.asset else DEFAULT_DURATION
+        asset_dur = (now_playing_entry.asset.duration if now_playing_entry.asset else None) or DEFAULT_DURATION
         el = (now_utc - _aware(now_playing_entry.started_at)).total_seconds()
         cursor = now_utc + timedelta(seconds=max(0, (asset_dur or DEFAULT_DURATION) - el))
     else:
@@ -1252,6 +1269,7 @@ async def _get_queue_impl(station_id, limit, db):
         "total": len(entries_data),
         "total_all": total_queue_entries,
         "now_playing": np_data,
+        "next_entry_id": str(next_entry.id) if next_entry else None,
         "queue_duration_seconds": round(queue_duration, 1),
         "total_queue_duration_seconds": round(total_queue_duration, 1),
         "preempt_fade_ms": 2000,

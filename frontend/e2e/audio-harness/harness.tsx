@@ -10,7 +10,15 @@ const audios: HTMLAudioElement[] = [];
 const gains: GainNode[] = [];
 const w = window as any;
 const NativeAudio = window.Audio;
-w.Audio = function (...args: any[]) { const a = new (NativeAudio as any)(...args); audios.push(a); return a; };
+w.__seeks = [] as { src: string; to: number; at: number }[];
+w.Audio = function (...args: any[]) {
+  const a = new (NativeAudio as any)(...args);
+  audios.push(a);
+  a.addEventListener('seeking', () => w.__seeks.push({
+    src: (a.src.split('/').pop() || '').replace('.wav', ''), to: +a.currentTime.toFixed(2), at: Date.now(),
+  }));
+  return a;
+};
 const createGain = AudioContext.prototype.createGain;
 AudioContext.prototype.createGain = function () { const g = createGain.call(this); gains.push(g); return g; };
 w.__held = () => updatesHeld();
