@@ -18,6 +18,30 @@ export const sendDisconnect = async (stationId: string, sessionKey: string) => {
   return res.data;
 };
 
+function apiBase(): string {
+  return import.meta.env.VITE_API_URL || '/api/v1';
+}
+
+// For pagehide: sent as text/plain so a cross-origin beacon needs no preflight
+export const sendLeaveBeacon = (stationId: string, sessionKey: string) => {
+  const body = JSON.stringify({ station_id: stationId, session_key: sessionKey });
+  try {
+    const blob = new Blob([body], { type: 'text/plain' });
+    if (navigator.sendBeacon?.(`${apiBase()}/listeners/leave`, blob)) return;
+  } catch { /* fall through */ }
+  sendDisconnect(stationId, sessionKey).catch(() => {});
+};
+
+// Socket that says "listeners changed" (no listener data on it)
+export function listenersSocketUrl(): string {
+  const wsBase = import.meta.env.VITE_WS_URL;
+  const apiUrl = apiBase();
+  if (wsBase) return `${wsBase}/api/v1/listeners/ws`;
+  if (apiUrl.startsWith('http')) return apiUrl.replace(/^http/, 'ws') + '/listeners/ws';
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}${apiUrl}/listeners/ws`;
+}
+
 // ── Admin (require_manager) ──
 
 export interface LiveListenerStation {

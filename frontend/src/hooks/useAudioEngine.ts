@@ -87,6 +87,9 @@ export interface AudioEngineState {
   initAudio: () => Promise<void>;
   /** Stop making sound in this tab (another tab took over). A later initAudio brings it back. */
   releaseAudio: () => void;
+  /** This computer is playing the sound out loud (the meters move either way) */
+  monitoring: boolean;
+  setMonitor: (on: boolean) => void;
   /** Operator's Next: bring this item up here at once, before the server's answer
    *  arrives. Listeners still change when the server announces it. */
   playNextNow: (asset: AssetInfo, fadeSeconds: number | null) => void;
@@ -124,6 +127,10 @@ export function useAudioEngine(
   // Switch sound on by itself when the station is playing. The control room passes
   // false: sound starts only on a click there, so a second tab never doubles it.
   autoInit: boolean = true,
+  // Whether this tab plays the sound out loud from the start. The control room
+  // passes false: the engine runs silently so the level meters always move, and
+  // the speaker button turns the sound on for this computer only.
+  monitorDefault: boolean = true,
 ): AudioEngineState {
   // ── Operator's Next heard at once (control room) ──
   // The item the operator moved to, played here before the server confirms it. While
@@ -188,6 +195,17 @@ export function useAudioEngine(
   const elapsedRef = useRef(elapsedSeconds);
   const volumeRef = useRef(volume);
   const mutedRef = useRef(muted);
+  // Local monitoring: volume and mute live on one output gain after the meters,
+  // so the meters show the station's level whatever this computer hears
+  const [monitoring, setMonitoringState] = useState(monitorDefault);
+  const monitoringRef = useRef(monitorDefault);
+  const outGainRef = useRef<GainNode | null>(null);
+  const outLevel = () => (monitoringRef.current && !mutedRef.current ? volumeRef.current : 0);
+  const applyOut = useCallback(() => {
+    const ctx = ctxRef.current; const out = outGainRef.current;
+    const level = monitoringRef.current && !mutedRef.current ? volumeRef.current : 0;
+    if (ctx && out) out.gain.setTargetAtTime(level, ctx.currentTime, 0.02);
+  }, []);
   const trackChangeTimeRef = useRef<number>(0);
 
   // Crossfade tracking
@@ -334,7 +352,11 @@ export function useAudioEngine(
     bus.connect(splitter);
     splitter.connect(analyserL, 0);
     splitter.connect(analyserR, 1);
-    bus.connect(ctx.destination);
+    const outGain = ctx.createGain();
+    outGain.gain.value = outLevel();
+    bus.connect(outGain);
+    outGain.connect(ctx.destination);
+    outGainRef.current = outGain;
 
     busRef.current = bus;
     splitterRef.current = splitter;
@@ -362,13 +384,13 @@ export function useAudioEngine(
   // the operator never switched audio on (the context stays suspended until a
   // click). Listener pages hold separately from the moment Listen is pressed.
   useEffect(() => {
-    if (!isPlaying || !ctxRunning) return;
+    if (!isPlaying || !ctxRunning || !monitoring) return;
     return holdUpdates();
-  }, [isPlaying, ctxRunning]);
+  }, [isPlaying, ctxRunning, monitoring]);
 
   // A pushed release that includes playing tabs reloads right after an item change
   useEffect(() => {
-    if (isPlaying && ctxRunning && nowPlayingAsset?.id) noteItemChange();
+    if (isPlaying && ctxRunning && monitoringRef.current && nowPlayingAsset?.id) noteItemChange();
   }, [nowPlayingAsset?.id, currentStartedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-init when playback is active ──
@@ -414,7 +436,7 @@ export function useAudioEngine(
 
     crossfadingRef.current = true;
 
-    const targetGain = mutedRef.current ? 0 : volumeRef.current * replayGainMultiplier(nextReplayGainDbRef.current);
+    const targetGain = replayGainMultiplier(nextReplayGainDbRef.current);
 
     // Seek inactive deck to cue-in point and play
     seekIfNeeded(inactiveDeck.audio, nextCueInRef.current);
@@ -550,7 +572,7 @@ export function useAudioEngine(
       crossfadingRef.current = false;
       crossfadeTriggeredRef.current = false;
       const now = ctx.currentTime;
-      const targetGain = mutedRef.current ? 0 : volumeRef.current * replayGain;
+      const targetGain = replayGain;
 
       // Quick fade-out of whatever is on air (no hard cut)
       outDeck.gain.gain.cancelScheduledValues(now);
@@ -722,7 +744,7 @@ export function useAudioEngine(
     const fadeTimer = setTimeout(() => {
       const activeDeck = getActiveDeck();
       const ctx = ctxRef.current;
-      if (!activeDeck || !ctx || mutedRef.current) return;
+      if (!activeDeck || !ctx) return;
 
       activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
       activeDeck.gain.gain.setValueAtTime(activeDeck.gain.gain.value, ctx.currentTime);
@@ -764,31 +786,27 @@ export function useAudioEngine(
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolumeState(clamped);
-    const ctx = ctxRef.current;
-    const activeDeck = getActiveDeck();
-    if (activeDeck && ctx && !crossfadingRef.current) {
-      const rg = replayGainMultiplier(currentReplayGainDb);
-      activeDeck.gain.gain.setTargetAtTime(clamped * rg, ctx.currentTime, 0.02);
-    }
+    volumeRef.current = clamped;
+    applyOut();
     try { localStorage.setItem(VOLUME_KEY, String(clamped)); } catch {}
-  }, [getActiveDeck, replayGainMultiplier, currentReplayGainDb]);
+  }, [applyOut]);
+
+  /** Hear the station on this computer (true) or only watch the meters (false). */
+  const setMonitor = useCallback((on: boolean) => {
+    monitoringRef.current = on;
+    setMonitoringState(on);
+    applyOut();
+  }, [applyOut]);
 
   const toggleMute = useCallback(() => {
     setMuted(prev => {
       const next = !prev;
-      const ctx = ctxRef.current;
-      const activeDeck = getActiveDeck();
-      if (activeDeck && ctx && !crossfadingRef.current) {
-        const rg = replayGainMultiplier(currentReplayGainDb);
-        activeDeck.gain.gain.setTargetAtTime(
-          next ? 0 : loadVolume() * rg,
-          ctx.currentTime, 0.02
-        );
-      }
+      mutedRef.current = next;
+      applyOut();
       try { localStorage.setItem(MUTE_KEY, String(next)); } catch {}
       return next;
     });
-  }, [getActiveDeck, replayGainMultiplier, currentReplayGainDb]);
+  }, [applyOut]);
 
   // ── VU meter polling (~30fps) + client-driven crossfade check ──
   useEffect(() => {
@@ -868,9 +886,7 @@ export function useAudioEngine(
           const source = ctx.createBufferSource();
           source.buffer = buffer;
           const gain = ctx.createGain();
-          gain.gain.value = mutedRef.current
-            ? 0
-            : volumeRef.current * replayGainMultiplier(data.replay_gain_db ?? 0);
+          gain.gain.value = replayGainMultiplier(data.replay_gain_db ?? 0);
           source.connect(gain);
           gain.connect(out);
           source.onended = () => gain.disconnect();
@@ -898,5 +914,5 @@ export function useAudioEngine(
     });
   }, []);
 
-  return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, soundRunning: ctxRunning, initAudio, playNextNow, releaseAudio };
+  return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, soundRunning: ctxRunning, initAudio, playNextNow, releaseAudio, monitoring, setMonitor };
 }

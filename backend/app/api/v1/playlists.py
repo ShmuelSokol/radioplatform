@@ -266,13 +266,58 @@ async def get_template(
     return template
 
 
+# The queue rebuild after a playlist edit takes seconds on a long queue. The
+# edit answers at once and the rebuild runs just after, in its own session, so
+# removing or moving a step feels instant; edits made within REFRESH_DELAY of
+# each other (a reorder sends one per moved step) share one rebuild per station.
+REFRESH_INLINE = False  # tests set True to see the rebuilt queue in the response
+REFRESH_DELAY = 1.5
+_refresh_waiting: set[str] = set()
+_refresh_tasks: set = set()
+
+
+async def _refresh_later(station_id) -> None:
+    import asyncio
+    import logging
+
+    from app.db.engine import async_session_factory
+    from app.services.schedule_refresh_service import refresh_station
+
+    try:
+        await asyncio.sleep(REFRESH_DELAY)
+    finally:
+        _refresh_waiting.discard(str(station_id))
+    try:
+        async with async_session_factory() as db:
+            await refresh_station(db, station_id, had_playlists=True)
+    except Exception:
+        logging.getLogger(__name__).exception("Queue refresh after playlist change failed")
+
+
+def _schedule_refresh(station_id) -> None:
+    import asyncio
+
+    key = str(station_id)
+    if key in _refresh_waiting:
+        return  # a rebuild is already waiting and will read this edit too
+    _refresh_waiting.add(key)
+    task = asyncio.get_running_loop().create_task(_refresh_later(station_id))
+    _refresh_tasks.add(task)  # keep a reference so the task is not collected mid-run
+    task.add_done_callback(_refresh_tasks.discard)
+
+
 async def _queue_follows_playlist(db: AsyncSession, template_id, stations=None) -> None:
     """A playlist used by a schedule block changed: regenerate the songs not yet played."""
     from app.services.schedule_refresh_service import refresh_station, stations_using_template
 
     try:
-        for station_id in stations if stations is not None else await stations_using_template(db, template_id):
-            await refresh_station(db, station_id, had_playlists=True)
+        if stations is None:
+            stations = await stations_using_template(db, template_id)
+        for station_id in stations:
+            if REFRESH_INLINE:
+                await refresh_station(db, station_id, had_playlists=True)
+            else:
+                _schedule_refresh(station_id)
     except Exception:
         import logging
 

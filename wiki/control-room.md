@@ -100,3 +100,7 @@ Native `<select>` on iPhone Safari ignores CSS height; the public station picker
 On a computer, a drag bar (`data-testid="split-handle"`) sits between Up next and the lower pane (Songs, Played, Schedule, Live). Up next gets 15-85 % of the height. The choice is saved in localStorage `kbr-cr-split`; a double-click resets it to 60 %, and the arrow keys move it. Pointer events with `touch-action: none` make it work by touch (iPad). A phone shows one pane at a time, so there is nothing to split there.
 
 Every `select.qn-field` in the control room is drawn grey with a raised arrow (`appearance: none`; Safari shows its own white or blue control otherwise). The floating 🐞 button is hidden on the control room because it covered the cart's buttons; Report a bug sits in the status bar (computer) and the menu (phone).
+
+## Meters move without Listen
+
+The audio engine always runs silently for the LEFT/RIGHT meters once the page has had any click or key (browsers need one gesture). Decks feed a bus; the bus feeds the meter analysers and an output gain to the speakers. Listen (`listenHere`, `setMonitor`) only opens that output gain on this computer; volume and mute act on it too, and deck gains carry replay gain only. In stream mode the engine still runs silently for the meters while the stream element makes the sound, so the meters lead the heard audio by the stream delay.

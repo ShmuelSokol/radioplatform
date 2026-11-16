@@ -36,3 +36,7 @@ Test note: the draw is random, so `tests/test_playlist_generation.py` seeds `ran
 ## Items no automatic pick may use
 
 `fit_for_random_pick()` (models/asset.py) skips categories do_not_play/test (any case) and one-moment clips. Placeholders listed by title in `NEVER_AUTO_TITLES` (the old "KOL BRAMAH TEST SPONSOR", category "Spots"; also "Kol bramah sponsor" and "Kol bramah ad", confirmed placeholders by Shmuel 2026-11-16; exact title match, any case) are skipped by **every** automatic pick through `not_placeholder()`, including rotations, rules and program blocks that name the category. Each refill (and each restart) deletes pending copies an automatic pick queued; operator, request and loop entries stay. Test: `tests/test_placeholder_never_auto.py`.
+
+## Editing steps is instant
+
+Adding, removing or moving a step changes the cached playlists before the server answers (`usePlaylists.ts`, optimistic with rollback on error). The server answers at once too: the queue rebuild after a playlist edit runs 1.5 s later in its own session (`_schedule_refresh` in `api/v1/playlists.py`), and edits within that window share one rebuild per station. Tests set `REFRESH_INLINE = True` (conftest) to see the rebuilt queue in the response.

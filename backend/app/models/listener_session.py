@@ -27,3 +27,6 @@ class ListenerSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Set when the listener stops or closes the page, so they leave the live count
+    # at once instead of after ACTIVE_THRESHOLD_SECONDS without a heartbeat
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

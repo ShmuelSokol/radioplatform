@@ -1,10 +1,12 @@
 """Listener tracking endpoints — heartbeat (public) + analytics (admin)."""
 
+import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,9 +25,35 @@ router = APIRouter(prefix="/listeners", tags=["listeners"])
 ACTIVE_THRESHOLD_SECONDS = 90
 
 
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)  # SQLite returns naive times
+
+
 class HeartbeatRequest(BaseModel):
     station_id: str
     session_key: str
+
+
+# ── Live push: admin pages hear "listeners changed" the moment someone joins or
+# leaves, then fetch the count (the socket itself carries no listener data).
+_watchers: set[WebSocket] = set()
+WATCH_PING_SECONDS = 25
+
+
+async def _notify_watchers() -> None:
+    async def send(ws: WebSocket) -> None:
+        try:
+            await asyncio.wait_for(ws.send_text('{"type":"listeners"}'), timeout=2)
+        except Exception:
+            _watchers.discard(ws)
+
+    await asyncio.gather(*(send(ws) for ws in list(_watchers)))
+
+
+def _live():
+    """Sessions that count as listening now."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=ACTIVE_THRESHOLD_SECONDS)
+    return (ListenerSession.last_heartbeat >= cutoff) & ListenerSession.ended_at.is_(None)
 
 
 def _get_client_ip(request: Request) -> str | None:
@@ -83,10 +111,17 @@ async def heartbeat(
 
     if session:
         # Update existing session
-        elapsed = (now - session.started_at).total_seconds()
+        elapsed = (now - _aware(session.started_at)).total_seconds()
+        rejoined = (
+            session.ended_at is not None
+            or (now - _aware(session.last_heartbeat)).total_seconds() > ACTIVE_THRESHOLD_SECONDS
+        )
         session.last_heartbeat = now
         session.duration_seconds = elapsed
-        await db.flush()
+        session.ended_at = None
+        await db.commit()
+        if rejoined:
+            await _notify_watchers()
         return {"status": "ok", "duration": elapsed}
     else:
         # Create new session with geo lookup
@@ -107,8 +142,26 @@ async def heartbeat(
             user_agent=ua,
         )
         db.add(session)
-        await db.flush()
+        await db.commit()
+        await _notify_watchers()
         return {"status": "created"}
+
+
+async def _end_session(db: AsyncSession, station_id: uuid.UUID, session_key: str) -> None:
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(ListenerSession).where(
+            ListenerSession.station_id == station_id,
+            ListenerSession.session_key == session_key,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if session and session.ended_at is None:
+        session.last_heartbeat = now
+        session.duration_seconds = (now - _aware(session.started_at)).total_seconds()
+        session.ended_at = now
+        await db.commit()
+        await _notify_watchers()
 
 
 @router.post("/disconnect")
@@ -116,22 +169,42 @@ async def disconnect(
     body: HeartbeatRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Called when a listener stops — finalizes the session duration."""
-    station_id = uuid.UUID(body.station_id)
-    now = datetime.now(timezone.utc)
-
-    result = await db.execute(
-        select(ListenerSession).where(
-            ListenerSession.station_id == station_id,
-            ListenerSession.session_key == body.session_key,
-        )
-    )
-    session = result.scalar_one_or_none()
-    if session:
-        session.last_heartbeat = now
-        session.duration_seconds = (now - session.started_at).total_seconds()
-        await db.flush()
+    """Called when a listener stops — finalizes the session and drops it from the live count."""
+    await _end_session(db, uuid.UUID(body.station_id), body.session_key)
     return {"status": "ok"}
+
+
+@router.post("/leave")
+async def leave(request: Request, db: AsyncSession = Depends(get_db)):
+    """Same as /disconnect, for navigator.sendBeacon when the page closes.
+
+    A beacon cannot send application/json across origins without a preflight it
+    never makes, so it sends the same body as text/plain.
+    """
+    try:
+        body = HeartbeatRequest(**json.loads(await request.body()))
+        station_id = uuid.UUID(body.station_id)
+    except Exception:
+        return {"status": "ignored"}
+    await _end_session(db, station_id, body.session_key)
+    return {"status": "ok"}
+
+
+@router.websocket("/ws")
+async def watch_listeners(websocket: WebSocket):
+    """Admin pages keep this open and refetch /live when told something changed."""
+    await websocket.accept()
+    _watchers.add(websocket)
+    try:
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=WATCH_PING_SECONDS)
+            except asyncio.TimeoutError:
+                await websocket.send_text('{"type":"ping"}')  # keeps proxies from closing it
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        _watchers.discard(websocket)
 
 
 # ── Admin Analytics Endpoints ──────────────────────────────────────────
@@ -143,7 +216,6 @@ async def get_live_listeners(
     _user: User = Depends(require_manager),
 ):
     """Current active listeners across all stations, grouped by station + region."""
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=ACTIVE_THRESHOLD_SECONDS)
 
     # Active sessions (heartbeat within threshold)
     result = await db.execute(
@@ -156,7 +228,7 @@ async def get_live_listeners(
             func.count(ListenerSession.id).label("count"),
         )
         .join(Station, ListenerSession.station_id == Station.id)
-        .where(ListenerSession.last_heartbeat >= cutoff)
+        .where(_live())
         .group_by(
             ListenerSession.station_id,
             Station.name,
@@ -203,7 +275,6 @@ async def get_today_stats(
     """Today's listener stats: total sessions, unique listeners, total minutes."""
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    cutoff = now - timedelta(seconds=ACTIVE_THRESHOLD_SECONDS)
 
     result = await db.execute(
         select(
@@ -218,7 +289,7 @@ async def get_today_stats(
     # Current active count
     active_result = await db.execute(
         select(func.count(ListenerSession.id))
-        .where(ListenerSession.last_heartbeat >= cutoff)
+        .where(_live())
     )
     active_count = active_result.scalar() or 0
 

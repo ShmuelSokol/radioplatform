@@ -58,9 +58,9 @@ export default function Playlists() {
     }
   };
 
-  const handleAddSlot = async (templateId: string) => {
+  const handleAddSlot = (templateId: string) => {
     const existing = templates?.find(t => t.id === templateId)?.slots || [];
-    await createSlot.mutateAsync({
+    createSlot.mutate({
       template_id: templateId,
       position: existing.length ? Math.max(...existing.map(x => x.position)) + 1 : 0,
       asset_type: slotAssetType,
@@ -70,17 +70,19 @@ export default function Playlists() {
   };
 
   // Move a step up or down; renumbers every step so positions stay 0..n-1
-  const moveSlot = async (templateId: string, index: number, delta: number) => {
+  // Edits show at once and save in the background (see usePlaylists).
+  const moveSlot = (templateId: string, index: number, delta: number) => {
     const slots = [...(templates?.find(t => t.id === templateId)?.slots || [])].sort((a, b) => a.position - b.position);
     const to = index + delta;
     if (to < 0 || to >= slots.length) return;
     [slots[index], slots[to]] = [slots[to], slots[index]];
-    await Promise.all(slots.map((slot, i) =>
-      slot.position === i ? null : updateSlot.mutateAsync({ id: slot.id, data: { position: i } })));
+    slots.forEach((slot, i) => {
+      if (slot.position !== i) updateSlot.mutate({ id: slot.id, data: { position: i } });
+    });
   };
 
-  const handleDeleteSlot = async (slotId: string) => {
-    await deleteSlot.mutateAsync(slotId);
+  const handleDeleteSlot = (slotId: string) => {
+    deleteSlot.mutate(slotId);
   };
 
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
@@ -221,9 +223,12 @@ export default function Playlists() {
                   <p className="text-gray-400 text-sm">No steps yet. Press "+ Add step" and add the song types in the order they should play.</p>
                 ) : (
                   <div className="space-y-1">
-                    {template.slots
+                    {[...template.slots]
                       .sort((a, b) => a.position - b.position)
-                      .map((slot, idx) => (
+                      .map((slot, idx, sorted) => {
+                        // A step just added has no id until the server answers (a moment)
+                        const saving = sorted.some(s => s.id.startsWith('pending-'));
+                        return (
                         <div key={slot.id} className="flex items-center justify-between bg-white p-2 rounded border">
                           <div className="flex items-center gap-3">
                             <span className="text-xs text-gray-400 w-6 text-right">{idx + 1}</span>
@@ -232,15 +237,16 @@ export default function Playlists() {
                             {!slot.category && <span className="text-xs text-gray-400">(any)</span>}
                           </div>
                           <div className="flex items-center gap-1">
-                            <button onClick={() => moveSlot(template.id, idx, -1)} disabled={idx === 0}
+                            <button onClick={() => moveSlot(template.id, idx, -1)} disabled={idx === 0 || saving}
                               aria-label="Move up" className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30">↑</button>
-                            <button onClick={() => moveSlot(template.id, idx, 1)} disabled={idx === template.slots.length - 1}
+                            <button onClick={() => moveSlot(template.id, idx, 1)} disabled={idx === template.slots.length - 1 || saving}
                               aria-label="Move down" className="px-2 py-1 text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30">↓</button>
-                            <button onClick={() => handleDeleteSlot(slot.id)}
-                              className="ml-1 text-red-500 hover:text-red-700 text-xs">Remove</button>
+                            <button onClick={() => handleDeleteSlot(slot.id)} disabled={slot.id.startsWith('pending-')}
+                              className="ml-1 text-red-500 hover:text-red-700 text-xs disabled:opacity-30">Remove</button>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                   </div>
                 )}
               </div>
