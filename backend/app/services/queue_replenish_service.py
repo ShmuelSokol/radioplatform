@@ -5,6 +5,7 @@ global rules (station_id IS NULL).  If a station has ANY station-specific
 rules, global rules are completely ignored for that station — allowing
 dedicated content streams like "stories only" without affecting other stations.
 """
+import dataclasses
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -64,6 +65,34 @@ class QueueReplenishService:
             await self._replenish_requests_only()
             return
 
+        from app.services.playlist_generator_service import settings_for
+        from app.services.schedule_refresh_service import (
+            automatic_songs,
+            drop_dated_clips,
+            uses_block_playlists,
+        )
+
+        # A weather report or time check queued as an ordinary song is out of date
+        await drop_dated_clips(self.db, self.station_id)
+
+        # A station whose schedule blocks have playlists fills from them, a few hours
+        # ahead, whether or not "Generate from sequences" was switched on. A week of
+        # ordinary fill left from before is replaced, or the blocks would wait for it.
+        generation = settings_for(self.automation_config)
+        by_schedule = not generation.enabled and await uses_block_playlists(self.db, self.station_id)
+        if by_schedule:
+            generation = dataclasses.replace(generation, enabled=True)
+            queued_auto = await self.db.execute(
+                select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
+                .select_from(QueueEntry)
+                .join(Asset, QueueEntry.asset_id == Asset.id)
+                .where(*automatic_songs(self.station_id))
+            )
+            if float(queued_auto.scalar() or 0) > 2 * generation.hours * 3600:
+                await self.db.execute(delete(QueueEntry).where(*automatic_songs(self.station_id)))
+                logger.info("Station %s now fills from its schedule blocks: old fill replaced", self.station_id)
+        await self.db.flush()
+
         result = await self.db.execute(
             select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
             .select_from(QueueEntry)
@@ -104,9 +133,6 @@ class QueueReplenishService:
 
         # Playlist generation: fill a few hours ahead from the schedule blocks'
         # playlist sequences instead of the rule-based 7-day fill.
-        from app.services.playlist_generator_service import settings_for
-
-        generation = settings_for(self.automation_config)
         if generation.enabled:
             if await self._fill_from_playlists(generation, total_seconds):
                 return

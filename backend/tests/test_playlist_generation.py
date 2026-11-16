@@ -180,7 +180,9 @@ async def test_longest_rested_songs_come_first_and_gaps_are_reported(db_session:
     # midnight to 6 AM has no block
     night = datetime(2026, 11, 17, 1, 0, tzinfo=NY).astimezone(UTC)
     empty = await generate(db_session, station, night, 1)
-    assert empty.picks == [] and any("no schedule block" in n for n in empty.notes)
+    # Time with no block still plays: any music, so the station never goes quiet
+    assert empty.picks and all(p.asset_type == "music" and p.block_name == "No block" for p in empty.picks)
+    assert any("no schedule block" in n for n in empty.notes)
 
 
 @pytest.mark.asyncio

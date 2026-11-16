@@ -181,6 +181,7 @@ radioplatform/
 | scheduling.py | Schedule resolution logic |
 | scheduler_engine.py | Background scheduling engine: advances each station's queue (or ticks the playout engine), live-show hard stops, blackout silence, dead-air recovery through the queue. Never plays anything beside the queue (see `wiki/streaming-architecture.md`, one player per station) |
 | queue_replenish_service.py | Auto-replenish playback queue |
+| schedule_refresh_service.py | After a schedule, block or playlist change, replaces the unplayed automatic songs so the change takes over on time; drops dated weather/time queued as songs (see `wiki/playlist-generation.md`) |
 | schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
 | spot_schedule_service.py | Plans sponsor spots into clock slots and keeps pending `ad_slot` queue entries in step (see `wiki/spot-schedules.md`) |
 | spot_voice_service.py | Makes spot audio from a script; Shprach call is a stub, placeholder tones until wired (see `wiki/spot-recordings.md`) |

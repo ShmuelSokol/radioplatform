@@ -93,3 +93,5 @@ INGEST 2026-11-16 control-room.md KBR Studio look (classic.css, desktop layout, 
 UPDATE 2026-11-16 audio-engine.md hard timed items preloaded on the idle deck 60 s ahead
 INGEST 2026-11-16 control-room.md queue polls only the first 150 rows; whole queue on scroll-to-end or day pick, back to 150 at the top
 INGEST 2026-11-16 control-room.md station name is spelled Kol B'ramah in all UI text (Shmuel); TTS keeps the phonetic Kohl Baramah; station/asset names in the database are data, renamed there
+INGEST 2026-11-16 playlist-generation.md schedule/block/playlist changes regenerate unplayed automatic songs (schedule_refresh_service); blocks with playlists turn generation on; gaps play any music
+UPDATE 2026-11-16 schedule-look-ahead.md new "plays" findings say which block is on the air

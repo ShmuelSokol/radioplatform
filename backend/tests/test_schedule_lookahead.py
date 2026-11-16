@@ -67,7 +67,12 @@ async def test_look_ahead_reports_and_settles_overlaps(
     overlaps = [f for f in body["findings"] if f["kind"] == "overlap"]
 
     # Higher priority: settled by priority, nothing to do
-    special_f = next(f for f in overlaps if '"Special"' in f["title"].split(" overlaps ")[0])
+    # (a whole occurrence: today's may have started before now)
+    special_f = next(
+        f
+        for f in overlaps
+        if '"Special"' in f["title"].split(" overlaps ")[0] and f["local_start"].endswith("20:00")
+    )
     assert special_f["needs_attention"] is False
     assert [b["name"] for b in special_f["blocks"] if b["wins"]] == ["Special"]
     assert special_f["local_start"].endswith("20:00") and special_f["local_end"].endswith("21:00")

@@ -23,3 +23,7 @@ Gaps (the automatic queue keeps playing) and off-air windows are listed but neve
 KBR Studio 1.82 schedules playlists by a start only ("6 am mix 01234 6:00", "blanks Candle+1", "motzei 72"); each runs until the next one starts. A `ScheduleBlock` with `until_next=true` works that way: `end_time` is ignored, `SchedulingService.running_playlist` picks the start-only block whose `last_start` (looking back up to 8 days, sun-relative starts resolved per day) is most recent. It joins the ranking as the base layer: a timed block over it wins a priority tie, and the look-ahead does not report that as an overlap.
 
 Candle lighting is not its own sun event: use `sunset` with offset -18 (so "Candle+1" is -17), and "72 after Shabbos" is `sunset` +72 on Saturday. The block form has quick-start buttons for both. Sun times need the station's latitude and longitude; without them the code silently uses Jerusalem.
+
+## What plays (`kind="plays"`)
+
+One finding per run of the winning block (`rank_matching_blocks(...)[0]`, start-only blocks included), with the playlist name in `detail`, `needs_attention=False`. Added 2026-11-16 because a lone block that collided with nothing never appeared, so a Mac test could not tell a new block was scheduled. Schedule Check shows these under "What plays".

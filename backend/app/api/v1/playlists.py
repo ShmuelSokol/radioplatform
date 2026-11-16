@@ -271,6 +271,20 @@ async def get_template(
     return template
 
 
+async def _queue_follows_playlist(db: AsyncSession, template_id, stations=None) -> None:
+    """A playlist used by a schedule block changed: regenerate the songs not yet played."""
+    from app.services.schedule_refresh_service import refresh_station, stations_using_template
+
+    try:
+        for station_id in stations if stations is not None else await stations_using_template(db, template_id):
+            await refresh_station(db, station_id, had_playlists=True)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Queue refresh after playlist change failed")
+        await db.rollback()
+
+
 @router.patch("/{template_id}", response_model=PlaylistTemplateInDB)
 async def update_template(
     template_id: UUID,
@@ -293,6 +307,7 @@ async def update_template(
         setattr(template, key, value)
 
     await db.commit()
+    await _queue_follows_playlist(db, template_id)
     await db.refresh(template)
     return template
 
@@ -309,8 +324,12 @@ async def delete_template(
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
+    from app.services.schedule_refresh_service import stations_using_template
+
+    stations = await stations_using_template(db, template_id)
     await db.delete(template)
     await db.commit()
+    await _queue_follows_playlist(db, template_id, stations)
 
 
 # ==================== Slots ====================
@@ -329,6 +348,7 @@ async def create_slot(
     )
     db.add(slot)
     await db.commit()
+    await _queue_follows_playlist(db, data.template_id)
     await db.refresh(slot)
     return slot
 
@@ -351,6 +371,7 @@ async def update_slot(
         setattr(slot, key, value)
 
     await db.commit()
+    await _queue_follows_playlist(db, slot.template_id)
     await db.refresh(slot)
     return slot
 
@@ -367,5 +388,7 @@ async def delete_slot(
     if not slot:
         raise HTTPException(status_code=404, detail="Slot not found")
 
+    template_id = slot.template_id
     await db.delete(slot)
     await db.commit()
+    await _queue_follows_playlist(db, template_id)
