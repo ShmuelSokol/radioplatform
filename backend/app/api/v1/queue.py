@@ -666,6 +666,11 @@ def _note_automatic_change(station_id, entry_id) -> None:
     _automatic_change[str(station_id)] = (str(entry_id), time.monotonic())
 
 
+def _is_timed_entry(entry) -> bool:
+    """Time check, weather, sponsorship or program block: items that air at a set time."""
+    return entry.preempt_at is not None or entry.source in ("ad_slot", "block")
+
+
 def _incoming_from_automatic_change(station_id, entry_id) -> bool:
     """True once per automatic change, while that change is still fading in."""
     noted = _automatic_change.pop(str(station_id), None)
@@ -1730,6 +1735,13 @@ async def skip_current(
         # The playout engine fades out and starts the next track itself, then reports
         # the real start back (which updates the queue and every client).
         from app.services import playout_engine
+        on_air = (await db.execute(
+            select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+            .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
+        )).scalar_one_or_none()
+        if on_air is not None and _is_timed_entry(on_air):
+            return {"message": "Timed item plays to the end", "now_playing": str(on_air.asset_id),
+                    "kept_incoming": True, "protected": True, "fade_seconds": fade_seconds}
         # Next ends a loop: the pre-loaded repeat must not come back
         if await stop_loop(db, station_id):
             await db.commit()
@@ -1761,6 +1773,17 @@ async def _skip_current_locked(
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
+    if current and _is_timed_entry(current):
+        # Next never skips a time check, weather or sponsorship: it plays to the end and
+        # Next works again after it (Shmuel, 2026-11-16: a burst of Nexts skipped the
+        # Jerusalem weather 3.2 s in). Play-now still puts something else on air.
+        return {
+            "message": "Timed item plays to the end",
+            "now_playing": str(current.asset_id),
+            "kept_incoming": True,
+            "protected": True,
+            "queue": await _queue_after_action(db, station_id),
+        }
     if current and keep_incoming and _incoming_from_automatic_change(station_id, current.id):
         # The station is already changing to this song (it is fading in right now).
         # Skipping it as well would jump two songs on one press: keep it on air.
