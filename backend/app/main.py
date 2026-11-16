@@ -237,6 +237,9 @@ async def _add_missing_columns(engine):
 # queueing (see wiki/streaming-architecture.md, "Deploys must never freeze").
 MIGRATION_LOCK_TIMEOUT = "1s"
 
+# A restart closes the play log rows it left open; only rows this recent are looked at.
+STARTUP_OPEN_LOG_DAYS = 2
+
 _ADD_COLUMN_RE = re.compile(
     r"^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([\w.]+)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+(\w+)",
     re.IGNORECASE,
@@ -333,6 +336,46 @@ async def _retry_migrations(engine, statements: list[str], attempts: int = 40, e
             return
     logger.error("MIGRATIONS STILL NOT RUN after %d tries: %s", attempts, [s[:60] for s in statements])
 
+
+
+async def _warm_connection_pool(timeout: float = 20.0) -> None:
+    """Open the pool's connections before the first request does.
+
+    A new connection costs about 2 s (connect, then asyncpg looking up the JSON,
+    UUID and enum types on first use). Without this the first burst of requests
+    after a deploy opened them one by one and waited 4 to 5 s. Runs before the app
+    starts serving, so the health check (and with it the switch-over) waits for it.
+    """
+    from sqlalchemy import text
+
+    from app.db.engine import engine
+
+    if engine.dialect.name != "postgresql":
+        return
+    size = getattr(engine.pool, "size", lambda: 5)()
+
+    async def warm_one() -> None:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+            # Touch the column types the app uses so their codecs are set up now
+            await conn.execute(text("SELECT id, metadata_extra FROM assets LIMIT 1"))
+            await conn.execute(text("SELECT role FROM users LIMIT 1"))
+            # Hold this connection until the others are open, so each is a new one
+            await asyncio.sleep(0.2)
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(warm_one() for _ in range(size)), return_exceptions=True), timeout
+        )
+        failed = [r for r in results if isinstance(r, Exception)]
+        if failed:
+            logger.warning("Warming %d database connection(s) failed: %s", len(failed), failed[0])
+        logger.info("Database pool warmed: %d connections in %.1f s",
+                    size - len(failed), loop.time() - started)
+    except Exception as e:
+        logger.warning("Database pool warm-up skipped: %s", e)
 
 async def _seed_default_categories():
     """Insert default categories if the categories table is empty."""
@@ -453,11 +496,20 @@ async def _resume_playback_on_startup():
                     finished.append(entry)
 
             # 1. Close open PlayLog entries, except the ones for songs still on air
+            # Only recent rows, station by station, so the (station_id, start_utc)
+            # index answers it: the open rows a restart leaves are minutes old,
+            # and an unbounded "end_utc IS NULL" read all of play history (6.5 s
+            # per container at a deploy, slowing everything else).
+            station_ids = (await db.execute(select(Station.id))).scalars().all()
             stale_logs = await db.execute(
-                select(PlayLog).where(PlayLog.end_utc.is_(None))
-            )
+                select(PlayLog).where(
+                    PlayLog.station_id.in_(station_ids),
+                    PlayLog.start_utc >= now - timedelta(days=STARTUP_OPEN_LOG_DAYS),
+                    PlayLog.end_utc.is_(None),
+                )
+            ) if station_ids else None
             stale_count = 0
-            for log in stale_logs.scalars().all():
+            for log in (stale_logs.scalars().all() if stale_logs is not None else []):
                 if on_air.get(log.station_id) == log.asset_id:
                     continue
                 log.end_utc = now
@@ -553,6 +605,7 @@ async def _resume_playback_on_startup():
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup — create tables and start the scheduler engine
     await ensure_tables()
+    await _warm_connection_pool()
     await _seed_default_categories()
     await _seed_default_asset_types()
     await _refresh_requested_category()

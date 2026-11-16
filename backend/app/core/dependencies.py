@@ -53,6 +53,9 @@ def _classify_action(method: str, path: str) -> str:
     return "Active"
 
 
+LAST_SEEN_EVERY_SECONDS = 60
+_last_seen_written: dict = {}  # user id -> when this process last wrote last_seen_at
+
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
@@ -81,8 +84,14 @@ async def get_current_user(
     last_seen = user.last_seen_at
     if last_seen is not None and last_seen.tzinfo is None:
         last_seen = last_seen.replace(tzinfo=timezone.utc)  # SQLite returns naive datetimes
-    should_update = last_seen is None or (now - last_seen).total_seconds() > 5
+    # At most once a minute per user, and only one request per process does it:
+    # simultaneous requests used to update the same row and wait on each other.
+    should_update = last_seen is None or (now - last_seen).total_seconds() > LAST_SEEN_EVERY_SECONDS
+    previous_write = _last_seen_written.get(user.id)
+    if should_update and previous_write is not None and (now - previous_write).total_seconds() < LAST_SEEN_EVERY_SECONDS:
+        should_update = False
     if should_update:
+        _last_seen_written[user.id] = now
         action = _classify_action(request.method, request.url.path)
         user.last_seen_at = now
         user.last_action = action
