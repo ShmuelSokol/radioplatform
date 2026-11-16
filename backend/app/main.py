@@ -1,4 +1,5 @@
 import logging
+import re
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -71,7 +72,6 @@ async def ensure_tables():
 
 async def _add_missing_columns(engine):
     """Add columns that were added to models but missing from existing DB tables."""
-    from sqlalchemy import text
 
     # ALTER TYPE ADD VALUE cannot run inside a transaction — use autocommit
     enum_migrations = [
@@ -93,6 +93,7 @@ async def _add_missing_columns(engine):
     try:
         raw_conn = await asyncpg.connect(dsn, statement_cache_size=0)
         try:
+            await raw_conn.execute(f"SET lock_timeout = '{MIGRATION_LOCK_TIMEOUT}'")
             for sql in enum_migrations:
                 try:
                     await raw_conn.execute(sql)
@@ -223,9 +224,76 @@ async def _add_missing_columns(engine):
         # Last played per item (control room library): answered from the index alone
         "CREATE INDEX IF NOT EXISTS ix_play_logs_station_asset_start ON play_logs (station_id, asset_id, start_utc)",
     ]
-    for sql in migrations:
+    await _run_migrations(engine, migrations)
+
+
+# A schema change needs an exclusive lock on its table, and Postgres takes it
+# even for "ADD COLUMN IF NOT EXISTS" on a column that is already there (and a
+# share lock for "CREATE INDEX IF NOT EXISTS" on an index that exists). Waiting
+# for that lock behind a long transaction froze the live backend for 4 minutes
+# during a deploy. So statements whose column or index already exists are not
+# sent at all, and the rest give up after MIGRATION_LOCK_TIMEOUT instead of
+# queueing (see wiki/streaming-architecture.md, "Deploys must never freeze").
+MIGRATION_LOCK_TIMEOUT = "2s"
+
+_ADD_COLUMN_RE = re.compile(
+    r"^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([\w.]+)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+(\w+)",
+    re.IGNORECASE,
+)
+_CREATE_INDEX_RE = re.compile(
+    r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?IF\s+NOT\s+EXISTS\s+(\w+)",
+    re.IGNORECASE,
+)
+
+
+def migrations_to_run(
+    statements: list[str],
+    existing_columns: set[tuple[str, str]],
+    existing_indexes: set[str],
+) -> list[str]:
+    """Drop the statements whose column or index already exists."""
+    todo = []
+    for sql in statements:
+        m = _ADD_COLUMN_RE.match(sql)
+        if m:
+            table = m.group(1).split(".")[-1].lower()
+            if (table, m.group(2).lower()) in existing_columns:
+                continue
+        m = _CREATE_INDEX_RE.match(sql)
+        if m and m.group(1).lower() in existing_indexes:
+            continue
+        todo.append(sql)
+    return todo
+
+
+async def _run_migrations(engine, statements: list[str]) -> None:
+    from sqlalchemy import text
+
+    is_pg = engine.dialect.name == "postgresql"
+    existing_columns: set[tuple[str, str]] = set()
+    existing_indexes: set[str] = set()
+    if is_pg:
+        try:
+            async with engine.connect() as conn:
+                rows = await conn.execute(text(
+                    "SELECT table_name, column_name FROM information_schema.columns "
+                    "WHERE table_schema = current_schema()"
+                ))
+                existing_columns = {(t.lower(), c.lower()) for t, c in rows.fetchall()}
+                rows = await conn.execute(text(
+                    "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()"
+                ))
+                existing_indexes = {r[0].lower() for r in rows.fetchall()}
+        except Exception as e:
+            logger.warning("Could not read the schema, running every migration: %s", e)
+
+    todo = migrations_to_run(statements, existing_columns, existing_indexes)
+    logger.info("Migrations: %d of %d need running", len(todo), len(statements))
+    for sql in todo:
         try:
             async with engine.begin() as conn:
+                if is_pg:
+                    await conn.execute(text(f"SET LOCAL lock_timeout = '{MIGRATION_LOCK_TIMEOUT}'"))
                 await conn.execute(text(sql))
         except Exception as e:
             logger.warning(f"Migration skipped ({sql[:50]}...): {e}")

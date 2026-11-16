@@ -85,6 +85,7 @@ UPDATE 2026-11-16 release-pickup.md a release no longer reloads a listener in th
 UPDATE 2026-11-16 operator-actions.md GET queue returns next_entry_id (same rule as the Next pick); the control room's Next line uses it.
 UPDATE 2026-11-16 release-pickup.md useAudioEngine holds releases only while its audio context is running, so a control room with sound off still updates; browser check e2e/audio-engine.mjs release-hold
 INGEST 2026-11-16 multi-station-load.md now_playing announcements never go backwards (stale tick after the precise advance made listeners jump back); join cache ignores raced reads
+INGEST 2026-11-16 streaming-architecture.md startup migrations skip existing columns/indexes and use a 2 s lock timeout (an ADD COLUMN IF NOT EXISTS froze the backend 4 min during a deploy); analysis holds no transaction during range reads/FFmpeg
 INGEST 2026-11-16 streaming-architecture.md timed items get an exact timer (hard at preempt_at, soft at hard_by); items with NULL duration (queue read, restart cut, background backfill); restart starts via start_from_queue
 UPDATE 2026-11-16 audio-engine.md item starts within 1 s play from the top without a seek (Safari repeated the opening)
 UPDATE 2026-11-16 hourly-slots.md automatic time/weather entries now get timing_mode from the station default (default_timing: hard at :00, soft otherwise); pending ones with no timing are backfilled on refill. Before, null timing on a non-ad_slot counted as hard, so the :30 weather cut songs.
