@@ -107,5 +107,6 @@ INGEST 2026-11-16 playlist-generation.md block started 39 s early: songs counted
 INGEST 2026-11-16 hourly-slots.md time announcements used New York's hour on every station; now each station's own time zone (UTC default = New York), and wrong-hour queued time checks are replaced on refill
 INGEST 2026-11-16 audio-engine.md quiet song changes: length probe gave every analysed item 180 s (fixed, ANALYSIS_VERSION 2, stored_analysis), upcoming items analysed in background, incoming fade-in 0.4 s, player hands over before its file ends
 INGEST 2026-11-16 audio-engine.md re-analysis reads only ranges (tail_analysis.py, header + last 20 s, about 0.5 MB a song); bulk-analyze music only; whole files only on upload or single analyse
+INGEST 2026-11-16 audio-engine.md a timed item due within 8 s of a song change starts at the change (TIMED_EARLY_START_SECONDS in _pick_next_pending)
 INGEST 2026-11-16 playlist-generation.md placeholder titles (NEVER_AUTO_TITLES, not_placeholder) are excluded from every automatic pick incl. category-named rotations; refill purges queued automatic copies
 INGEST 2026-11-16 playlist-generation.md start-only blocks were "on" from the moment they were saved (yesterday's start counted); last_start now ignores starts before created_at. Refill gave the new first song the on-air song's position; position counters now include the playing entry
