@@ -109,3 +109,37 @@ async def test_start_on_an_empty_queue_plays(client, auth_headers, db_session):
     body = (await client.post(f"/api/v1/stations/{station.id}/queue/start", headers=auth_headers)).json()
     assert body["message"] == "Started"
     assert body["now_playing"] is not None
+
+
+@pytest.mark.asyncio
+async def test_next_answers_before_the_queue_top_up(client, auth_headers, db_session, monkeypatch):
+    """Next used to top the queue up to 24 hours before announcing the new item
+    (1.6 to 2 s on KBR Jerusalem). Now the item goes out first and the top-up runs after."""
+    import asyncio
+    import time as _time
+
+    import app.api.v1.websocket as ws_module
+
+    station, playing, pending = await _station_with_two_tracks(db_session, 10.0)
+    order = []
+
+    async def slow_replenish(db, station_id):
+        order.append("top-up start")
+        await asyncio.sleep(1.0)
+        order.append("top-up done")
+
+    async def record(station_id, data):
+        order.append("announced")
+
+    monkeypatch.setattr(queue_module, "_replenish_queue", slow_replenish)
+    monkeypatch.setattr(ws_module, "broadcast_now_playing_update", record)
+    began = _time.monotonic()
+    res = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade=fade", headers=auth_headers)
+    took = _time.monotonic() - began
+    assert res.status_code == 200
+    assert res.json()["now_playing"] == str(pending.asset_id)
+    assert took < 0.8
+    assert order[0] == "announced"
+    await asyncio.wait_for(asyncio.gather(*queue_module._background), timeout=5)
+    assert order[-1] == "top-up done"
+

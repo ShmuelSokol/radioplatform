@@ -12,6 +12,8 @@ export interface ListAssetsParams {
   album_search?: string;
   duration_min?: number;
   duration_max?: number;
+  /** Leave out the dated time and weather recordings (wrong at any other hour) */
+  hide_generated?: boolean;
 }
 
 export const listAssets = async (
@@ -28,6 +30,7 @@ export const listAssets = async (
   if (params.album_search) query.album_search = params.album_search;
   if (params.duration_min != null) query.duration_min = params.duration_min;
   if (params.duration_max != null) query.duration_max = params.duration_max;
+  if (params.hide_generated) query.hide_generated = true;
   const res = await apiClient.get<AssetListResponse>('/assets', { params: query });
   return res.data;
 };

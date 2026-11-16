@@ -92,7 +92,12 @@ export default function Dashboard() {
   const nowPlaying = queueData?.now_playing ?? null;
   const nowAsset = nowPlaying?.asset ?? null;
   const isPlaying = !!nowPlaying;
-  const nextAsset = queueEntries.find(e => e.status === 'pending')?.asset ?? null;
+  // What Next will really play: the server says which entry (it skips items timed
+  // for later). Older servers do not, so fall back to the first waiting row.
+  const nextEntryId = (queueData as { next_entry_id?: string | null } | undefined)?.next_entry_id;
+  const nextAsset = (nextEntryId !== undefined
+    ? queueEntries.find(e => e.id === nextEntryId)
+    : queueEntries.find(e => e.status === 'pending'))?.asset ?? null;
   const liveShow = (liveData?.shows ?? []).find(s => s.status === 'live' && (!stationId || s.station_id === stationId)) ?? null;
 
   // ── UI state ───────────────────────────────────────────────

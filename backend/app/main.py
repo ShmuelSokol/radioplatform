@@ -199,6 +199,8 @@ async def _add_missing_columns(engine):
         # Without these every lookup scans all played history for all stations.
         "CREATE INDEX IF NOT EXISTS ix_queue_entries_station_status_position ON queue_entries (station_id, status, position)",
         "CREATE INDEX IF NOT EXISTS ix_play_logs_station_start ON play_logs (station_id, start_utc)",
+        # Last played per item (control room library): answered from the index alone
+        "CREATE INDEX IF NOT EXISTS ix_play_logs_station_asset_start ON play_logs (station_id, asset_id, start_utc)",
     ]
     for sql in migrations:
         try:
@@ -314,10 +316,11 @@ async def _resume_playback_on_startup():
                 started = entry.started_at
                 if started is not None and started.tzinfo is None:
                     started = started.replace(tzinfo=timezone.utc)
+                # An item with no recorded length is timed like the queue times it (3 min)
+                length = float(duration or 180.0)
                 still_playing = (
                     started is not None
-                    and duration
-                    and started + timedelta(seconds=float(duration)) > now + timedelta(seconds=2)
+                    and started + timedelta(seconds=length) > now + timedelta(seconds=2)
                     and entry.station_id not in on_air
                 )
                 if still_playing:
@@ -379,21 +382,12 @@ async def _resume_playback_on_startup():
                     if settings.engine_drives(station.id):
                         continue  # the engine asks for its next track itself
 
-                    # 4b. Start playback — find next pending entry
-                    next_result = await db.execute(
-                        select(QueueEntry)
-                        .where(
-                            QueueEntry.station_id == station.id,
-                            QueueEntry.status == "pending",
-                        )
-                        .order_by(QueueEntry.position)
-                        .limit(1)
-                    )
-                    next_entry = next_result.scalar_one_or_none()
+                    # 4b. Start playback the same way Start does: the next item by the
+                    # queue's own rule (an item timed for later stays where it is), and
+                    # nothing if another process already started one.
+                    from app.api.v1.queue import start_from_queue
+                    next_entry = await start_from_queue(db, station.id)
                     if next_entry:
-                        next_entry.status = "playing"
-                        next_entry.started_at = now
-                        await db.commit()
                         logger.info(
                             "Station %s (%s): resumed playback with asset %s",
                             station.name, station.id, next_entry.asset_id,
@@ -453,8 +447,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:
         logger.warning(f"Scheduler engine failed to start: {e}")
 
+    # Items with no length break timing; measure them in the background
+    import asyncio as _asyncio
+    from app.services.duration_backfill import backfill_on_startup
+    backfill_task = _asyncio.get_running_loop().create_task(backfill_on_startup())
+
     yield
 
+    backfill_task.cancel()
     # Shutdown — stop the scheduler cleanly
     try:
         from app.services.scheduler_engine import stop_scheduler

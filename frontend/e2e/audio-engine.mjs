@@ -103,6 +103,19 @@ const SCENARIOS = {
     change: (set) => set({ ...C, nextId: 'a', startedAt: now(), fade: 0.5 }),
     audibleWithin: 1, outGoneWithin: 1.2, end: { src: 'c', minT: 4, maxT: 6 },
   },
+  // Next mid-song with the next item pre-loaded, announced straight away: the new item
+  // starts from its top with no seek (a small seek repeated the opening in Safari)
+  'next-starts-clean': {
+    start: { ...A, nextId: 'b' }, wait: 6, watch: 4,
+    change: (set) => set({ ...B, nextId: 'c', startedAt: now(), fade: 0.6 }),
+    audibleWithin: 1, noSeekOn: 'b', end: { src: 'b', minT: 3, maxT: 5 },
+  },
+  // Same, cold: the next item was never pre-loaded
+  'next-starts-clean-cold': {
+    start: { ...A, nextId: null }, wait: 6, watch: 4,
+    change: (set) => set({ ...C, nextId: 'a', startedAt: now(), fade: 0.6 }),
+    audibleWithin: 1.5, noSeekOn: 'c', end: { src: 'c', minT: 3, maxT: 5 },
+  },
 };
 
 const only = process.argv[2];
@@ -132,6 +145,7 @@ async function run(name, sc) {
   if (sc.urlDelay) urlDelay = sc.urlDelay;
 
   const t0 = Date.now();
+  await page.evaluate(() => { window.__seeks.length = 0; });
   sc.change(set, startA);
   let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, last = [];
   const target = sc.end.src;
@@ -153,6 +167,11 @@ async function run(name, sc) {
     check(`${name}: new song audible within ${sc.audibleWithin} s`, firstNew !== null && firstNew <= sc.audibleWithin,
       firstNew === null ? 'never' : `${firstNew.toFixed(2)} s`);
   }
+  if (sc.noSeekOn) {
+    const seeks = (await page.evaluate(() => window.__seeks)).filter((x) => x.src === sc.noSeekOn);
+    check(`${name}: "${sc.noSeekOn}" starts from the top without a seek`, seeks.length === 0,
+      seeks.map((x) => `seek to ${x.to} at +${((x.at - t0) / 1000).toFixed(2)} s`).join(', '));
+  }
   if (sc.outGoneWithin) {
     check(`${name}: outgoing song gone within ${sc.outGoneWithin} s`, outGone !== null && outGone <= sc.outGoneWithin,
       outGone === null ? 'never' : `${outGone.toFixed(2)} s`);
@@ -160,10 +179,44 @@ async function run(name, sc) {
   await page.close();
 }
 
+// A new release must never reload a tab whose audio is really playing (the
+// browser would not restart it without a click), but a control room that only
+// shows the station, with sound never switched on, must still pick it up.
+async function releaseHold() {
+  for (const [label, gesture, expectHeld] of [
+    ['audio playing', true, true],
+    ['station on air, sound never switched on', false, false],
+  ]) {
+    const page = await browser.newPage();
+    // Headless Chromium lets audio start without a click, so act out the real
+    // rule: with no click, the page's audio context stays suspended.
+    if (!gesture) {
+      await page.addInitScript(() => {
+        const Real = window.AudioContext;
+        window.AudioContext = class extends Real {
+          constructor(...a) { super(...a); void this.suspend(); }
+          resume() { return Promise.resolve(); }
+        };
+      });
+    }
+    await page.route('**/__tone/*.wav', (r) => r.fulfill({ contentType: 'audio/wav', body: wav(...TONES.a) }));
+    await page.route('**/assets/*/audio-url', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/__tone/a.wav' }) }));
+    await page.goto(`${base}e2e/audio-harness/index.html`);
+    await page.waitForFunction(() => typeof window.__set === 'function');
+    await page.evaluate((x) => window.__set(x), { ...A, startedAt: now() });
+    await sleep(3000);
+    const held = await page.evaluate(() => window.__held());
+    const sounding = (await page.evaluate(() => window.__snap())).some((d) => d.playing);
+    check(`release hold: ${label}`, held === expectHeld, `held=${held}, deck playing=${sounding}`);
+    await page.close();
+  }
+}
+
 try {
   for (const [name, sc] of Object.entries(SCENARIOS)) {
     if (!only || only === name) await run(name, sc);
   }
+  if (!only || only === 'release-hold') await releaseHold();
 } finally {
   await browser.close();
   await server.close();

@@ -292,7 +292,7 @@ export default function Navbar() {
               </>
             ) : (
               <Link to="/admin/login"
-                className="text-[11px] bg-[#2a2a5e] hover:bg-[#3a3a7e] text-cyan-300 px-2 py-0.5 rounded transition">
+                className="relative text-[11px] bg-[#2a2a5e] hover:bg-[#3a3a7e] text-cyan-300 px-2 py-0.5 rounded transition after:content-[''] after:absolute after:-inset-x-1 after:-inset-y-3">
                 Admin Login
               </Link>
             )}

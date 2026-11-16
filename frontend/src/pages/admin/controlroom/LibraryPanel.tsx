@@ -36,6 +36,7 @@ function LibraryPanel(p: Props) {
     limit,
     search: debounced || undefined,
     asset_type: type === 'all' ? undefined : type,
+    hide_generated: type === 'jingle',
   });
   const assets = data?.assets ?? [];
   const total = data?.total ?? 0;

@@ -32,8 +32,15 @@ interface Props {
   bar?: boolean;
 }
 
-function Wall({ title, items, p, editing, pflOn }: { title: string; items: CtlAsset[]; p: Props; editing: boolean; pflOn: boolean }) {
-  if (items.length === 0) return null;
+function Wall({ title, items, p, editing, pflOn, emptyHint }: { title: string; items: CtlAsset[]; p: Props; editing: boolean; pflOn: boolean; emptyHint?: string }) {
+  if (items.length === 0) {
+    return emptyHint ? (
+      <div>
+        <div className="px-0.5 pb-0.5 text-[11px] text-black">{title}</div>
+        <p className="px-0.5 text-xs text-[#404040]" data-testid="wall-empty">{emptyHint}</p>
+      </div>
+    ) : null;
+  }
   const how = p.inserting ? 'insert' : p.fireMode;
   const cols = p.bar
     ? 'grid-cols-3 xl:grid-cols-5 2xl:grid-cols-7'
@@ -83,7 +90,7 @@ function HotButtons(p: Props) {
     else if (pfl.canChooseOutput && pfl.outputs.length === 0 && pfl.outputId) pfl.loadOutputs();
     setPflOn(v => !v);
   };
-  const { data: jingleData } = useAssets({ asset_type: 'jingle', skip: 0, limit: 60 });
+  const { data: jingleData } = useAssets({ asset_type: 'jingle', skip: 0, limit: 60, hide_generated: true });
   const { data: spotData } = useAssets({ asset_type: 'spot', skip: 0, limit: 60 });
   const pinnedIds = new Set(p.pins.map(x => x.id));
   const jingles = (jingleData?.assets ?? []).filter(a => !pinnedIds.has(a.id));
@@ -202,7 +209,8 @@ function HotButtons(p: Props) {
       {p.pins.length === 0 && (
         <p className="px-0.5 text-[11px] text-black">Page {p.pageIndex + 1} is empty. Tap the ☆ next to anything in the library to put a button here.</p>
       )}
-      <Wall title="Jingles" items={jingles} p={p} editing={false} pflOn={pflOn} />
+      <Wall title="Jingles" items={jingles} p={p} editing={false} pflOn={pflOn}
+        emptyHint="No station IDs or sweepers yet. Upload them in Assets with the type Jingle and they appear here." />
       <Wall title="Sponsor spots" items={spots} p={p} editing={false} pflOn={pflOn} />
     </>
   );

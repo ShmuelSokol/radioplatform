@@ -181,6 +181,17 @@ async def refresh_requested_category_endpoint(
     return {"tagged": count}
 
 
+@router.post("/backfill-durations")
+async def backfill_durations(
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Measure the length of items that have none (they broke the queue view)."""
+    from app.services.duration_backfill import backfill_missing_durations
+    return await backfill_missing_durations(db, limit=max(1, min(limit, 500)))
+
+
 @router.post("/backfill-release-dates")
 async def backfill_release_dates(
     db: AsyncSession = Depends(get_db),
@@ -551,6 +562,7 @@ async def list_all(
     album_search: str | None = Query(None, description="Search by album"),
     duration_min: float | None = Query(None, description="Minimum duration in seconds"),
     duration_max: float | None = Query(None, description="Maximum duration in seconds"),
+    hide_generated: bool = Query(False, description="Leave out dated time and weather recordings"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_staff),
 ):
@@ -560,6 +572,7 @@ async def list_all(
         title_search=title_search, artist_search=artist_search,
         album_search=album_search,
         duration_min=duration_min, duration_max=duration_max,
+        hide_generated=hide_generated,
     )
     return AssetListResponse(assets=assets, total=total)
 

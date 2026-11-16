@@ -68,3 +68,9 @@ Mix over is the third cart mode (Play now / Play next / Mix over): a tap calls `
 ## No queue data is not "Stopped"
 
 Until the queue has loaded, the bar says "Loading the queue…", and if the request keeps failing "Can't reach the station. Trying again…", in the title line and in the queue panel. Before 2026-11-16 a missing or failed queue showed "Stopped. Press Start to begin." and "The queue is empty", which an operator on a phone reads as the station being off the air.
+
+## The KBR Studio look (classic.css)
+
+The control room copies the station's old program (KBR Studio 1.82): grey bevelled buttons, a black LCD strip with green italic digits (Remaining, Intro, On air, Clock) and LEFT/RIGHT meters, a green "now" and yellow "next" title box, and the running log in bold yellow on black (current row blue with magenta text, timed rows orange). Desktop layout: log over the lower pane (Songs / other tabs), Go next / Fade / Soft fade and the pane tabs in a grey column on the right, cart pages 1 to 10 along the bottom. The styles are scoped under `.qn` in `controlroom/classic.css`; the virtualized log's row heights (`ROW_*` in QueuePanel) must match the CSS row heights or the scrollbar drifts.
+
+The jingle wall and the Library's Jingle tab ask `/assets` for `hide_generated=true`, which leaves out the time and weather service's own recordings ("Time Announcement - …", "Weather Report - …"). Fired from the cart they would air the wrong hour or day.
