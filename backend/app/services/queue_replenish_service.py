@@ -114,7 +114,7 @@ class QueueReplenishService:
         # Always schedule hourly announcements + ad slots, even if queue is "full"
         result2 = await self.db.execute(
             select(func.coalesce(func.max(QueueEntry.position), 0))
-            .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "pending")
+            .where(QueueEntry.station_id == self.station_id, QueueEntry.status.in_(["pending", "playing"]))
         )
         self.max_pos = result2.scalar() or 0
 
@@ -162,7 +162,7 @@ class QueueReplenishService:
 
         result = await self.db.execute(
             select(func.coalesce(func.max(QueueEntry.position), 0))
-            .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "pending")
+            .where(QueueEntry.station_id == self.station_id, QueueEntry.status.in_(["pending", "playing"]))
         )
         self.max_pos = result.scalar() or 0
 
@@ -350,7 +350,7 @@ class QueueReplenishService:
             return False
         result = await self.db.execute(
             select(func.coalesce(func.max(QueueEntry.position), 0)).where(
-                QueueEntry.station_id == self.station_id, QueueEntry.status == "pending"
+                QueueEntry.station_id == self.station_id, QueueEntry.status.in_(["pending", "playing"])
             )
         )
         position = result.scalar() or 0
@@ -726,7 +726,7 @@ class QueueReplenishService:
 
         result = await self.db.execute(
             select(func.coalesce(func.max(QueueEntry.position), 0))
-            .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "pending")
+            .where(QueueEntry.station_id == self.station_id, QueueEntry.status.in_(["pending", "playing"]))
         )
         self.max_pos = result.scalar() or 0
 

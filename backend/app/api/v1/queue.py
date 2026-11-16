@@ -605,7 +605,7 @@ async def _refill_for_next(db: AsyncSession, station_id) -> QueueEntry | None:
         return None
     top = (await db.execute(
         select(func.coalesce(func.max(QueueEntry.position), 0))
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
     )).scalar() or 0
     for i, asset in enumerate(assets, start=1):
         db.add(QueueEntry(
@@ -1395,7 +1395,7 @@ async def add_to_queue(
 ):
     result = await db.execute(
         select(func.max(QueueEntry.position))
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
     )
     max_pos = result.scalar() or 0
     entry = QueueEntry(
@@ -1417,7 +1417,7 @@ async def bulk_add_to_queue(
 ):
     result = await db.execute(
         select(func.max(QueueEntry.position))
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
     )
     max_pos = result.scalar() or 0
     count = 0
@@ -2266,7 +2266,7 @@ async def schedule_hourly(
     # Set max_pos
     result = await db.execute(
         select(func.coalesce(func.max(QueueEntry.position), 0))
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
     )
     service.max_pos = result.scalar() or 0
 

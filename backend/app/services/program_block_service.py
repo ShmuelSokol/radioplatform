@@ -406,7 +406,7 @@ async def reconcile_block_entries(
     max_pos = (
         await db.execute(
             select(func.coalesce(func.max(QueueEntry.position), 0)).where(
-                QueueEntry.station_id == station_id, QueueEntry.status == "pending"
+                QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"])
             )
         )
     ).scalar() or 0

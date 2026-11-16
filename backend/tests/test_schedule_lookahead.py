@@ -186,6 +186,10 @@ async def test_start_only_playlists_hand_over_like_the_studio_program(
         ],
     )
     station.latitude, station.longitude = 40.0821, -74.2097  # Lakewood
+    # A start-only block runs only from starts after it was made: these were
+    # made long ago
+    for block in (mix, night, candle, motzei, shiur):
+        block.created_at = datetime.now(UTC) - timedelta(days=60)
     await db_session.commit()
     svc = SchedulingService(db_session)
 

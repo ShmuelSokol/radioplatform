@@ -146,8 +146,18 @@ class SchedulingService:
         return best[1] if best else None
 
     def last_start(self, block: ScheduleBlock, local: datetime, station=None) -> datetime | None:
-        """Most recent moment (station time, naive) this block started, within 8 days."""
+        """Most recent moment (station time, naive) this block started, within 8 days.
+
+        Only starts after the block was made count: a block saved at 6:40 to start
+        at 6:52 has not started yet, even though yesterday's 6:52 is in the past
+        (it used to take over the moment it was saved).
+        """
         now = local.replace(tzinfo=None)
+        made = getattr(block, "created_at", None)
+        if made is not None:
+            if made.tzinfo is None:
+                made = made.replace(tzinfo=timezone.utc)
+            made = made.astimezone(local.tzinfo).replace(tzinfo=None) if local.tzinfo else made.replace(tzinfo=None)
         for back in range(9):
             day = (local - timedelta(days=back)).date()
             if not self._recurs_on(block, day):
@@ -158,6 +168,8 @@ class SchedulingService:
                     block.start_sun_event, block.start_sun_offset or 0, station, day
                 )
             started = datetime.combine(day, start)
+            if made is not None and started < made:
+                return None
             if started <= now:
                 return started
         return None
