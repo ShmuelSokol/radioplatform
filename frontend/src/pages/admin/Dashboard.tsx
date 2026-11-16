@@ -421,22 +421,33 @@ export default function Dashboard() {
 
   // Next is heard here at once: the item the server will move to (it says which) is
   // brought up before the answer arrives; listeners change when the server announces it.
-  const nextNow = useRef({ nextAsset: skipAsset, nextEntryId: skipEntryId, serverStartedAt });
-  nextNow.current = { nextAsset: skipAsset, nextEntryId: skipEntryId, serverStartedAt };
+  // Next never skips a time check, weather or sponsorship on air (the server keeps it)
+  const onAirEntry = queueEntries.find(e => e.status === 'playing');
+  const onAirTimed = !!onAirEntry && (!!onAirEntry.preempt_at || onAirEntry.source === 'ad_slot' || onAirEntry.source === 'block');
+  const nextNow = useRef({ nextAsset: skipAsset, nextEntryId: skipEntryId, serverStartedAt, onAirTimed });
+  nextNow.current = { nextAsset: skipAsset, nextEntryId: skipEntryId, serverStartedAt, onAirTimed };
   const handleNext = useCallback((fade?: SkipFade) => {
     initAudio();
-    const { nextAsset: upNext, nextEntryId: upNextId, serverStartedAt: onAirSince } = nextNow.current;
+    const { nextAsset: upNext, nextEntryId: upNextId, serverStartedAt: onAirSince, onAirTimed: timedOnAir } = nextNow.current;
     // Right after an automatic change the server keeps the incoming item (it is still
     // fading in), so nothing is played ahead then.
     const justChanged = onAirSince ? Date.now() - new Date(onAirSince).getTime() < 4500 : true;
-    if (upNext && upNextId && !justChanged) {
+    if (upNext && upNextId && !justChanged && !timedOnAir) {
       playNextNow(
         { id: upNext.id, title: upNext.title, artist: upNext.artist ?? null, asset_type: upNext.asset_type,
           category: upNext.category ?? null, duration: upNext.duration ?? null },
         fade ? SKIP_FADE_SECONDS[fade] : SKIP_FADE_SECONDS.fade,
       );
     }
-    skipMut.mutate(fade, { onError: onMutError });
+    skipMut.mutate(fade, {
+      onError: onMutError,
+      onSuccess: (data: any) => {
+        // The server keeps an item that has only just started (a timed item such as the
+        // weather, or the song an automatic change is fading in): one press, one change
+        if (data?.protected) setToast({ text: 'The time, weather and sponsorships always play to the end. Next works again after it.', type: 'warn' });
+        else if (data?.kept_incoming) setToast({ text: 'That item just started, so it keeps playing. Press Next again to skip it.', type: 'warn' });
+      },
+    });
   }, [initAudio, skipMut, onMutError, playNextNow]);
 
   // Loop: the item on air repeats until Loop is switched off, Next, or a play-now.
