@@ -193,7 +193,70 @@ async function releaseHold() {
   }
 }
 
+// Safari: until the person clicks, resume() never settles and media will not play.
+// Pressing Listen mid-item must bring up the item already on air, at its position.
+async function listenMidItem() {
+  const page = await browser.newPage();
+  // Act out Safari: media plays only when play() is called inside a click, or on an
+  // element that has already played that way; resume() made before any click
+  // settles only once the person clicks.
+  await page.addInitScript(() => {
+    let clicked = false, inGesture = false;
+    const unlocked = new WeakSet();
+    const waiting = [];
+    const Real = window.AudioContext;
+    window.AudioContext = class extends Real {
+      constructor(...a) { super(...a); void Real.prototype.suspend.call(this); }
+      resume() {
+        if (!clicked && !inGesture) {
+          return new Promise((ok) => waiting.push(() => Real.prototype.resume.call(this).then(ok)));
+        }
+        return Real.prototype.resume.call(this);
+      }
+    };
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      if (inGesture) unlocked.add(this);
+      if (!unlocked.has(this)) return Promise.reject(new DOMException('not allowed', 'NotAllowedError'));
+      return play.call(this);
+    };
+    window.__click = () => {
+      clicked = true;
+      inGesture = true;
+      try { window.__listen(); } finally { inGesture = false; }
+      setTimeout(() => waiting.splice(0).forEach((go) => go()), 300);
+    };
+  });
+  await page.route('**/__tone/*.wav', (r) => {
+    const id = r.request().url().split('/').pop().replace('.wav', '');
+    return r.fulfill({ contentType: 'audio/wav', body: wav(...TONES[id]) });
+  });
+  await page.route('**/assets/*/audio-url', (r) => {
+    const id = r.request().url().split('/').slice(-2)[0];
+    return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: `/__tone/${id}.wav` }) });
+  });
+  await page.goto(`${base}e2e/audio-harness/index.html`);
+  await page.waitForFunction(() => typeof window.__set === 'function');
+  await page.evaluate((x) => window.__set(x), { ...A, nextId: 'b', startedAt: now() });
+  await sleep(4000);
+  await page.evaluate(() => window.__click());
+  await sleep(2000);
+  const audible = (await page.evaluate(() => window.__snap())).filter((d) => d.playing && d.gain > 0.05);
+  // (The test server sends whole files without ranges, so the position itself is not checked here)
+  check('listen mid-item: the item on air is heard at once, not after the next item',
+    audible.length === 1 && audible[0].src === 'a',
+    audible.map((d) => `${d.src}@${d.t}`).join(' | ') || 'silent');
+  // and the items after it play without another click
+  await page.evaluate((x) => window.__set(x), { ...B, nextId: 'c', startedAt: now() });
+  await sleep(2500);
+  const after = (await page.evaluate(() => window.__snap())).filter((d) => d.playing && d.gain > 0.05);
+  check('listen mid-item: the next item plays too', after.length === 1 && after[0].src === 'b',
+    after.map((d) => `${d.src}@${d.t}`).join(' | ') || 'silent');
+  await page.close();
+}
+
 try {
+  if (!only || only === 'listen-mid-item') await listenMidItem();
   for (const [name, sc] of Object.entries(SCENARIOS)) {
     if (!only || only === name) await run(name, sc);
   }

@@ -23,11 +23,12 @@ w.__snap = () => audios.map((a, i) => ({
 function Harness() {
   const [s, set] = useState<any>(null);
   w.__set = set;
-  useAudioEngine(
+  const engine = useAudioEngine(
     s ? { id: s.id, title: s.id, artist: null, asset_type: 'music', category: null, duration: s.dur } : null,
     0, !!s, null, null, 2000, 0, 0, s?.cross ?? 0, 0, s?.nextId ?? null, 0, 0, null, null, s?.startedAt ?? null,
     s?.fade ?? null,
   );
+  w.__listen = engine.initAudio;
   return null;
 }
 createRoot(document.getElementById('root')!).render(<Harness />);
