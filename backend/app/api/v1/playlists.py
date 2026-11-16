@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -239,18 +239,13 @@ async def regenerate(
     station = await _station(db, station_id)
     if not settings_for(station.automation_config).enabled:
         raise HTTPException(status_code=409, detail="Playlist generation is switched off")
-    removed = await db.execute(
-        delete(QueueEntry).where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            QueueEntry.source == "auto",
-            QueueEntry.preempt_at.is_(None),
-        )
-    )
+    from app.services.schedule_refresh_service import remove_automatic_songs
+
+    removed = await remove_automatic_songs(db, station_id)
     await db.commit()
     await QueueReplenishService(db, station_id).replenish()
     await db.commit()
-    return {"removed": removed.rowcount, "queued_hours": round(await _queued_seconds(db, station_id) / 3600, 1)}
+    return {"removed": removed, "queued_hours": round(await _queued_seconds(db, station_id) / 3600, 1)}
 
 
 @router.get("/{template_id}", response_model=PlaylistTemplateInDB)

@@ -2,6 +2,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,11 +48,44 @@ def _apply_word_replacements(text: str) -> str:
 
 def _utc_to_eastern(utc_dt: datetime) -> datetime:
     """Convert UTC datetime to US/Eastern (handles EST/EDT)."""
+    return utc_dt.astimezone(ZoneInfo(HOME_TIMEZONE))
+
+
+# The station's home. A station whose time zone was never set (left at the
+# default "UTC") announces this time, as every station did before time zones.
+HOME_TIMEZONE = "America/New_York"
+
+
+def announcement_zone(timezone_name: str | None) -> ZoneInfo:
+    """The clock a station's time announcements read: its own time zone."""
+    if not timezone_name or timezone_name.upper() in ("UTC", "ETC/UTC"):
+        return ZoneInfo(HOME_TIMEZONE)
     try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-    return utc_dt.astimezone(ZoneInfo("America/New_York"))
+        return ZoneInfo(timezone_name)
+    except Exception:
+        return ZoneInfo(HOME_TIMEZONE)
+
+
+async def station_announcement_zone(db: AsyncSession, station_id) -> ZoneInfo:
+    from app.models.station import Station
+
+    name = (await db.execute(select(Station.timezone).where(Station.id == station_id))).scalar_one_or_none()
+    return announcement_zone(name)
+
+
+def slot_key_for(at_utc: datetime, zone: ZoneInfo) -> str:
+    """The hourly announcement key ("2026-11-16T08") for a moment, in the station's own time."""
+    return at_utc.astimezone(zone).strftime("%Y-%m-%dT%H")
+
+
+def clip_hour(asset: Asset) -> int | None:
+    """The hour of the day a time announcement says (uploaded or generated clip)."""
+    meta = asset.metadata_extra or {}
+    raw = meta.get("time_of_day") or (meta.get("slot_key") or "")[11:13]
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 # Station sign-off for the hourly time announcement. Spelled for the voice

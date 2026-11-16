@@ -76,6 +76,57 @@ class Plan:
     notes: list[str]
 
 
+def on_air_seconds(duration: float | None, metadata_extra: dict | None) -> float:
+    """How long an item holds the air: up to where the next one crossfades in
+    (cross_start, default 3 s before the end), the same rule the scheduler uses
+    to change songs (queue.switch_time). Counting full lengths put a block's
+    first song early by about 3 s for every song queued before it."""
+    length = float(duration or DEFAULT_DURATION)
+    cross = 3.0
+    analysis = (metadata_extra or {}).get("audio_analysis") or {}
+    cross_start = analysis.get("cross_start_seconds")
+    if isinstance(cross_start, (int, float)) and 0 < cross_start < length:
+        cross = length - cross_start
+    return length - min(cross, max(0.0, length / 2))
+
+
+@dataclass
+class TimedItem:
+    """Something queued for a set time (time check, weather, sponsor place)."""
+
+    at: datetime  # UTC
+    seconds: float  # how long it holds the air
+    hard: bool  # True: the item on air is faded at `at`; False: it waits for the item to end
+
+
+class Clock:
+    """Walks the expected air time forward, the way the queue really plays:
+    a soft timed item goes on after the item on air whose end passes its time,
+    a hard one cuts the item on air at its time."""
+
+    def __init__(self, at: datetime, timed: list[TimedItem] | None = None):
+        self.at = at
+        self.timed = sorted(timed or [], key=lambda t: t.at)
+
+    def _due(self) -> None:
+        while self.timed and self.timed[0].at <= self.at:
+            item = self.timed.pop(0)
+            self.at = max(self.at, item.at) + timedelta(seconds=item.seconds)
+
+    def start(self) -> datetime:
+        """When the next ordinary item goes on air."""
+        self._due()
+        return self.at
+
+    def play(self, seconds: float) -> None:
+        """An ordinary item that starts now and holds the air for `seconds`."""
+        self._due()
+        end = self.at + timedelta(seconds=seconds)
+        cut = next((t for t in self.timed if t.hard and self.at < t.at < end), None)
+        self.at = cut.at if cut is not None else end
+        self._due()
+
+
 def _artist_key(artist: str | None) -> str | None:
     key = (artist or "").strip().lower()
     return key or None
@@ -121,6 +172,14 @@ class _Library:
                     self.below_vote.add(key)
             self.pools[key] = rows
         return self.pools[key]
+
+    async def on_air(self, row) -> float:
+        """How long a drawn item holds the air (its crossfade point). The pools
+        leave out the audio analysis, so it is read for the drawn item only."""
+        meta = (
+            await self.db.execute(select(Asset.metadata_extra).where(Asset.id == row.id))
+        ).scalar_one_or_none()
+        return on_air_seconds(row.duration, meta if isinstance(meta, dict) else None)
 
     async def draw(self, asset_type, category, recent_artists, at: datetime):
         """Return (row, relaxed) or (None, False) when the type has no songs."""
@@ -172,7 +231,10 @@ async def generate(
     cursor: dict | None = None,
     recent_artists: list[str | None] | None = None,
     busy_ids: set | None = None,
+    timed: list[TimedItem] | None = None,
 ) -> Plan:
+    """`timed`: items already queued for set times after `start`, so each pick's
+    expected start (and so its block) allows for them."""
     start = as_utc(start)
     end = start + timedelta(hours=hours)
     cursor = dict(cursor or {})
@@ -204,13 +266,14 @@ async def generate(
             notes.append(text)
 
     picks: list[Pick] = []
-    at = start
+    clock = Clock(start, timed)
     misses = 0
-    while at < end and len(picks) < MAX_PICKS:
+    while clock.start() < end and len(picks) < MAX_PICKS:
+        at = clock.start()
         off = next((b for b in blackouts if b.covers(at)), None)
         if off is not None:
             note(f"Off the air for {off.name}: nothing generated for that time.")
-            at = off.end
+            clock.at = off.end
             continue
         ranked = svc.rank_matching_blocks(schedules, at, station)
         block = ranked[0][1] if ranked else None
@@ -226,7 +289,7 @@ async def generate(
                 "music", None, set(recent) if artist_distance else set(), at
             )
             if row is None:
-                at += SKIP
+                clock.at = at + SKIP
                 continue
             duration = float(row.duration or DEFAULT_DURATION)
             picks.append(
@@ -240,7 +303,7 @@ async def generate(
             artist = _artist_key(row.artist)
             if artist and artist_distance:
                 recent.append(artist)
-            at += timedelta(seconds=duration)
+            clock.play(await library.on_air(row))
             continue
 
         key = str(block.id)
@@ -256,7 +319,7 @@ async def generate(
             misses += 1
             if misses >= len(slots):
                 misses = 0
-                at += SKIP
+                clock.at = at + SKIP
             continue
         misses = 0
         duration = float(row.duration or DEFAULT_DURATION)
@@ -277,7 +340,7 @@ async def generate(
         artist = _artist_key(row.artist)
         if artist and artist_distance:
             recent.append(artist)
-        at += timedelta(seconds=duration)
+        clock.play(await library.on_air(row))
 
     for asset_type, category in sorted(library.below_vote, key=str):
         name = f"{asset_type} / {category}" if category else asset_type

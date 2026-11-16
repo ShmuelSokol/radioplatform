@@ -69,6 +69,8 @@ class QueueReplenishService:
         from app.services.schedule_refresh_service import (
             automatic_songs,
             drop_dated_clips,
+            realign_before_block_change,
+            remove_automatic_songs,
             uses_block_playlists,
         )
 
@@ -89,8 +91,13 @@ class QueueReplenishService:
                 .where(*automatic_songs(self.station_id))
             )
             if float(queued_auto.scalar() or 0) > 2 * generation.hours * 3600:
-                await self.db.execute(delete(QueueEntry).where(*automatic_songs(self.station_id)))
+                await remove_automatic_songs(self.db, self.station_id)
                 logger.info("Station %s now fills from its schedule blocks: old fill replaced", self.station_id)
+        if by_schedule or (generation.enabled and await uses_block_playlists(self.db, self.station_id)):
+            # Shortly before a block's playlist takes over, draw the songs again from
+            # the real time on air so the block starts on time, not early
+            station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
+            await realign_before_block_change(self.db, station, datetime.now(timezone.utc))
         await self.db.flush()
 
         result = await self.db.execute(
@@ -212,6 +219,90 @@ class QueueReplenishService:
         await self.db.commit()
         logger.info("Queue replenishment complete")
 
+    async def _drop_wrong_hour_announcements(self, zone) -> int:
+        """Remove queued hourly time checks that say another clock's hour.
+
+        Entries queued before stations announced their own time said New York's
+        hour everywhere. The time check and the weather queued with it (same
+        time) are removed, and the hourly pass queues the right ones again.
+        """
+        from app.services.weather_spot_service import clip_hour
+
+        rows = await self.db.execute(
+            select(QueueEntry.preempt_at, Asset)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                or_(QueueEntry.source.is_(None), QueueEntry.source == "auto"),
+                Asset.category == "time_announcement",
+            )
+        )
+        wrong = set()
+        for at, asset in rows.all():
+            at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+            hour = clip_hour(asset)
+            if hour is not None and hour != at.astimezone(zone).hour:
+                wrong.add(at)
+        if not wrong:
+            return 0
+        result = await self.db.execute(
+            delete(QueueEntry)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.in_(wrong),
+                or_(QueueEntry.source.is_(None), QueueEntry.source == "auto"),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await self.db.flush()
+        logger.info("Station %s: replaced %d time checks queued with another clock's hour", self.station_id, len(wrong))
+        return result.rowcount or 0
+
+    async def _air_timeline(self, now: datetime):
+        """When newly drawn songs would start, and the timed items still ahead then.
+
+        Walks the queue the way it plays: the item on air until its crossfade
+        point, each waiting item for its own on-air length, and items queued for
+        set times where they fall (a hard one cuts the item on air).
+        """
+        from app.models.queue_entry import is_soft_timed
+        from app.services.playlist_generator_service import Clock, TimedItem, on_air_seconds
+
+        rows = (
+            await self.db.execute(
+                select(QueueEntry, Asset.duration, Asset.metadata_extra)
+                .join(Asset, QueueEntry.asset_id == Asset.id)
+                .where(
+                    QueueEntry.station_id == self.station_id,
+                    QueueEntry.status.in_(["pending", "playing"]),
+                )
+                .order_by(QueueEntry.position)
+            )
+        ).all()
+
+        def aware(dt: datetime) -> datetime:
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+        start = now
+        timed: list = []
+        waiting: list[float] = []
+        for entry, duration, meta in rows:
+            seconds = on_air_seconds(duration, meta if isinstance(meta, dict) else None)
+            if entry.status == "playing":
+                if entry.started_at is not None:
+                    start = max(start, aware(entry.started_at) + timedelta(seconds=seconds))
+            elif entry.preempt_at is not None:
+                timed.append(TimedItem(max(aware(entry.preempt_at), now), seconds, not is_soft_timed(entry)))
+            else:
+                waiting.append(seconds)
+        clock = Clock(start, timed)
+        for seconds in waiting:
+            clock.play(seconds)
+        return clock.start(), clock.timed
+
     async def _fill_from_playlists(self, generation, queued_seconds: float) -> bool:
         """Top the queue up to `generation.hours` from playlist sequences.
 
@@ -220,21 +311,9 @@ class QueueReplenishService:
         from app.services.playlist_generator_service import CONFIG_KEY, generate
 
         target = generation.hours * 3600
-        # The song on the air counts only for what is left of it; counting all of
-        # it put every new pick (and a block's first song) early by that much.
-        playing = (
-            await self.db.execute(
-                select(QueueEntry.started_at, Asset.duration)
-                .join(Asset, QueueEntry.asset_id == Asset.id)
-                .where(QueueEntry.station_id == self.station_id, QueueEntry.status == "playing")
-                .limit(1)
-            )
-        ).first()
-        if playing is not None and playing[0] is not None:
-            started = playing[0] if playing[0].tzinfo else playing[0].replace(tzinfo=timezone.utc)
-            length = float(playing[1] or DEFAULT_DURATION)
-            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-            queued_seconds -= min(max(elapsed, 0.0), length)
+        now = datetime.now(timezone.utc)
+        fill_start, timed = await self._air_timeline(now)
+        queued_seconds = (fill_start - now).total_seconds()
         if queued_seconds >= target:
             return True
         station = (
@@ -257,13 +336,14 @@ class QueueReplenishService:
         plan = await generate(
             self.db,
             station,
-            datetime.now(timezone.utc) + timedelta(seconds=queued_seconds),
+            fill_start,
             (target - queued_seconds) / 3600,
             artist_distance=generation.artist_distance,
             min_vote=generation.min_vote,
             cursor=saved.get("cursor") or {},
             recent_artists=[row[1] for row in pending][-20:],
             busy_ids=set(self.queued_ids),
+            timed=timed,
         )
         if not plan.picks:
             logger.info("Playlist generation produced nothing: %s", "; ".join(plan.notes))
@@ -283,6 +363,7 @@ class QueueReplenishService:
                     asset_id=pick.asset_id,
                     position=position,
                     status="pending",
+                    block_id=pick.block_id or None,
                 )
             )
         saved["cursor"] = plan.cursor
@@ -762,15 +843,16 @@ class QueueReplenishService:
             logger.info("Skipping hourly announcements: storage not configured")
             return
 
-        try:
-            from zoneinfo import ZoneInfo
-        except ImportError:
-            from backports.zoneinfo import ZoneInfo
-
-        from app.services.weather_spot_service import get_or_create_weather_spot_assets
+        from app.services.weather_spot_service import (
+            get_or_create_weather_spot_assets,
+            slot_key_for,
+            station_announcement_zone,
+        )
 
         now = datetime.now(timezone.utc)
-        eastern_tz = ZoneInfo("America/New_York")
+        # Each station announces its own time (Jerusalem said New York's 1 AM at 8 AM)
+        zone = await station_announcement_zone(self.db, self.station_id)
+        await self._drop_wrong_hour_announcements(zone)
 
         # Check which exact slot times already have scheduled ANNOUNCEMENT entries.
         # CRITICAL: exclude ad_slot entries and compare exact minutes — the old code
@@ -808,8 +890,7 @@ class QueueReplenishService:
             if not need_hour and not need_half:
                 continue
 
-            eastern_time = hour_boundary.astimezone(eastern_tz)
-            slot_key = eastern_time.strftime("%Y-%m-%dT%H")
+            slot_key = slot_key_for(hour_boundary, zone)
 
             try:
                 time_asset, weather_asset = await get_or_create_weather_spot_assets(self.db, slot_key)
