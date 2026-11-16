@@ -194,16 +194,35 @@ async def find_weather_spot_asset(
     return result.scalar_one_or_none()
 
 
-async def find_time_clip_asset(db: AsyncSession, hour: int) -> Asset | None:
-    """The reusable uploaded "the time is" clip for an hour of the day (0-23), if any."""
+async def find_own_time_clip(db: AsyncSession, hour: int, region: str | None = None) -> Asset | None:
+    """The uploaded "the time is" clip recorded for this region and hour (0-23), if any.
+
+    Regions are the same as the weather's (automation_config.weather_region), so
+    KBR Jerusalem can have its own set; clips made before regions existed belong
+    to the default region.
+    """
     result = await db.execute(
         select(Asset).where(
             Asset.asset_type == "jingle",
             Asset.category == "time_announcement",
             Asset.metadata_extra["time_of_day"].astext == f"{hour:02d}",
+            _region_filter(normalize_region(region)),
         ).limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def find_time_clip_asset(db: AsyncSession, hour: int, region: str | None = None) -> Asset | None:
+    """The clip a station of this region plays at this hour: its own, else the default set's.
+
+    Unlike weather, the default set is a fair fallback: the hour is the station's
+    own local hour either way, only the recording is shared.
+    """
+    region = normalize_region(region)
+    own = await find_own_time_clip(db, hour, region)
+    if own is None and region != DEFAULT_WEATHER_REGION:
+        own = await find_own_time_clip(db, hour, DEFAULT_WEATHER_REGION)
+    return own
 
 
 def _decoded_duration(audio_bytes: bytes) -> float:
@@ -311,8 +330,9 @@ async def store_uploaded_time_clip(
     *,
     source: str = "shprach",
     script: str | None = None,
+    region: str | None = None,
 ) -> tuple[Asset, bool]:
-    """Store the reusable "the time is" recording for an hour of the day (0-23).
+    """Store the reusable "the time is" recording for an hour of the day (0-23) and region.
 
     Unlike the per-slot ElevenLabs clips, one uploaded clip per hour is reused
     every day. An existing clip for the hour is updated in place, so entries
@@ -320,13 +340,17 @@ async def store_uploaded_time_clip(
     """
     if not 0 <= hour <= 23:
         raise ValueError("hour must be 0-23")
-    url, duration = await _store_upload(audio_bytes, f"time/{hour:02d}_{source}")
-    asset = await find_time_clip_asset(db, hour)
+    region = normalize_region(region)
+    own = region != DEFAULT_WEATHER_REGION
+    url, duration = await _store_upload(
+        audio_bytes, f"time/{region + '_' if own else ''}{hour:02d}_{source}"
+    )
+    asset = await find_own_time_clip(db, hour, region)
     replaced = asset is not None
     if asset is None:
         asset = Asset(
             id=uuid.uuid4(),
-            title=f"Time Announcement - {hour:02d}:00",
+            title=f"Time Announcement - {hour:02d}:00" + (f" ({region.title()})" if own else ""),
             artist=STATION_DISPLAY_NAME,
             file_path=url,
             asset_type="jingle",
@@ -335,9 +359,9 @@ async def store_uploaded_time_clip(
         db.add(asset)
     asset.file_path = url
     asset.duration = duration
-    asset.metadata_extra = _upload_meta(source, script, time_of_day=f"{hour:02d}")
+    asset.metadata_extra = _upload_meta(source, script, time_of_day=f"{hour:02d}", region=region)
     await db.flush()
-    logger.info("Stored uploaded %s time clip for hour %02d (replaced=%s)", source, hour, replaced)
+    logger.info("Stored uploaded %s time clip for %s, hour %02d (replaced=%s)", source, region, hour, replaced)
     return asset, replaced
 
 
@@ -409,7 +433,7 @@ async def get_or_create_weather_spot_assets(
     # An uploaded clip for the slot's hour (reused every day) wins over a
     # per-slot generated one.
     eastern_now = _utc_to_eastern(datetime.now(timezone.utc))
-    uploaded_time = await find_time_clip_asset(db, _slot_time(slot_key, eastern_now).hour)
+    uploaded_time = await find_time_clip_asset(db, _slot_time(slot_key, eastern_now).hour, region)
     if uploaded_time is not None:
         existing_time = uploaded_time
 

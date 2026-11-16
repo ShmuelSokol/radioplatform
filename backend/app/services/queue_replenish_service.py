@@ -257,6 +257,42 @@ class QueueReplenishService:
             logger.info("Station %s: %d queued weather spots moved to its own region (%s)", self.station_id, changed, region)
         return changed
 
+    async def _realign_time_clips(self, region: str) -> int:
+        """Point queued uploaded time checks at the best clip for the station's region.
+
+        A station plays its own region's clip for an hour, else the default set's.
+        Time checks queued before the region's clip was uploaded (or before the
+        station had a region) are moved to the clip it should play now.
+        """
+        from app.services.weather_spot_service import find_time_clip_asset
+
+        rows = await self.db.execute(
+            select(QueueEntry, Asset)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                Asset.category == "time_announcement",
+            )
+        )
+        changed = 0
+        best: dict[str, Asset | None] = {}
+        for entry, asset in rows.all():
+            meta = asset.metadata_extra if isinstance(asset.metadata_extra, dict) else {}
+            hour = meta.get("time_of_day")
+            if not hour:
+                continue  # a generated per-slot clip, not an uploaded set
+            if hour not in best:
+                best[hour] = await find_time_clip_asset(self.db, int(hour), region)
+            clip = best[hour]
+            if clip is not None and clip.id != asset.id:
+                entry.asset_id = clip.id
+                changed += 1
+        if changed:
+            await self.db.flush()
+            logger.info("Station %s: %d queued time checks moved to its region's clips (%s)", self.station_id, changed, region)
+        return changed
+
     async def _drop_wrong_hour_announcements(self, zone) -> int:
         """Remove queued hourly time checks that say another clock's hour.
 
@@ -895,6 +931,7 @@ class QueueReplenishService:
         # ...and plays its own city's weather
         region = station_weather_region(self.automation_config)
         await self._realign_weather_region(region)
+        await self._realign_time_clips(region)
 
         # Check which exact slot times already have scheduled ANNOUNCEMENT entries.
         # CRITICAL: exclude ad_slot entries and compare exact minutes — the old code

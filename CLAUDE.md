@@ -169,7 +169,7 @@ radioplatform/
 | playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
-| weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips; ElevenLabs is only the fallback |
+| weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); ElevenLabs is only the fallback |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
