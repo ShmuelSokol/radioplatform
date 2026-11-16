@@ -65,6 +65,11 @@ export function holdUpdates(): () => void {
   };
 }
 
+/** True while some player on this page holds updates (used by the browser checks). */
+export function updatesHeld(): boolean {
+  return holds.size > 0;
+}
+
 function soundingNow(): boolean {
   for (const el of media) {
     if (!el.paused && !el.ended) return true;

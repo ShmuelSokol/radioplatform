@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useAudioEngine } from '../../src/hooks/useAudioEngine';
+import { updatesHeld } from '../../src/lib/appUpdate';
 
 const audios: HTMLAudioElement[] = [];
 const gains: GainNode[] = [];
@@ -11,6 +12,7 @@ const NativeAudio = window.Audio;
 w.Audio = function (...args: any[]) { const a = new (NativeAudio as any)(...args); audios.push(a); return a; };
 const createGain = AudioContext.prototype.createGain;
 AudioContext.prototype.createGain = function () { const g = createGain.call(this); gains.push(g); return g; };
+w.__held = () => updatesHeld();
 w.__snap = () => audios.map((a, i) => ({
   src: (a.src.split('/').pop() || '').replace('.wav', ''),
   playing: !a.paused && !a.ended,
