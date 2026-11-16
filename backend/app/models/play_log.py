@@ -18,7 +18,10 @@ class PlaySource(str, enum.Enum):
 
 class PlayLog(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "play_logs"
-    __table_args__ = (Index("ix_play_logs_station_start", "station_id", "start_utc"),)
+    __table_args__ = (
+        Index("ix_play_logs_station_start", "station_id", "start_utc"),
+        Index("ix_play_logs_station_asset_start", "station_id", "asset_id", "start_utc"),
+    )
 
     station_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("stations.id", ondelete="CASCADE"), nullable=False
