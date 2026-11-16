@@ -127,3 +127,5 @@ UPDATE 2026-11-16 streaming-architecture.md engine plays every listed station: o
 INGEST 2026-11-16 control-room.md meters run silently without Listen; Listen only opens this computer's output gain
 INGEST 2026-11-16 playlist-generation.md step edits optimistic; queue rebuild after a playlist edit runs in the background, coalesced per station
 INGEST 2026-11-16 live-listeners.md listeners leave the live count at once (ended_at, sendBeacon /listeners/leave); admin pages refetch on /listeners/ws pushes
+INGEST 2026-11-16 operator-actions.md Next never skips a timed item on air (time, weather, sponsorship): protected:true; rapid-Next test
+INGEST 2026-11-16 hourly-slots.md hourly time clips per region (?region= on /time-announcements, falls back to the default set; queued checks realigned each hourly pass)
