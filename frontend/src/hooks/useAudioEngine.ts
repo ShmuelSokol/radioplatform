@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAssetAudioUrl } from '../api/assets';
+import { holdUpdates } from '../lib/appUpdate';
 import type { AssetInfo } from '../types';
 
 const VOLUME_KEY = 'radio_volume';
@@ -234,6 +235,12 @@ export function useAudioEngine(
 
     setAudioReady(true);
   }, [createDeck]);
+
+  // ── A release never reloads this tab while the player is on ──
+  useEffect(() => {
+    if (!isPlaying) return;
+    return holdUpdates();
+  }, [isPlaying]);
 
   // ── Auto-init when playback is active ──
   useEffect(() => {
