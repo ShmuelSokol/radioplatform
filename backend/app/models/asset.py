@@ -64,7 +64,8 @@ ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
 # Items that must never be drawn at random: marked do-not-play, or made for tests
 # (a listening-test spot uploaded as music once landed in KBR Jerusalem's live queue).
 # A rule or block that names one of these categories still gets it.
-NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing")
+# "carlebach": Shmuel, 2026-11-16: his songs are kept in the library but off the air for now.
+NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing", "carlebach")
 
 
 # Placeholder items that must never be drawn by any automatic pick, even by a
