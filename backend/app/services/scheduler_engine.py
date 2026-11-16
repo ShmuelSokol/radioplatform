@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.session import get_db
-from app.models.asset import Asset
+from app.models.asset import Asset, stored_analysis
 from app.models.holiday_window import HolidayWindow
 from app.models.station import Station
 
@@ -562,7 +562,7 @@ class SchedulerEngine:
                 # (same default as the now-playing payload: 3s before the end)
                 cross_seconds = 3.0
                 if asset and asset.metadata_extra:
-                    analysis = asset.metadata_extra.get("audio_analysis", {})
+                    analysis = stored_analysis(asset.metadata_extra)
                     cross_start = analysis.get("cross_start_seconds")
                     if isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
                         cross_seconds = duration - cross_start
@@ -681,7 +681,7 @@ class SchedulerEngine:
         # Get audio analysis data (defaults if missing)
         analysis = {}
         if asset.metadata_extra:
-            analysis = asset.metadata_extra.get("audio_analysis", {})
+            analysis = stored_analysis(asset.metadata_extra)
 
         cue_in = analysis.get("cue_in_seconds", 0)
         cue_out = analysis.get("cue_out_seconds", asset.duration or 180.0)
@@ -693,12 +693,18 @@ class SchedulerEngine:
         from app.api.v1.queue import predict_next_entry
         next_entry = await predict_next_entry(db, station_id, entry)
 
+        # Items without a usable analysis get one now, before their hand-over
+        from app.services import upcoming_analysis
+        upcoming_analysis.request(asset)
+        if next_entry is not None:
+            upcoming_analysis.request(next_entry.asset)
+
         next_asset_data = None
         if next_entry and next_entry.asset:
             na = next_entry.asset
             na_analysis = {}
             if na.metadata_extra:
-                na_analysis = na.metadata_extra.get("audio_analysis", {})
+                na_analysis = stored_analysis(na.metadata_extra)
 
             # Build audio URL for next asset
             from app.config import settings as app_settings

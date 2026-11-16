@@ -9,11 +9,25 @@ const SYNC_INTERVAL = 10000;
 const SYNC_THRESHOLD = 5;
 const TRACK_CHANGE_COOLDOWN = 15000;
 const CROSSFADE_DURATION = 3.0; // seconds
+// At a song-to-song crossfade the incoming item comes up this fast; only the outgoing one
+// fades over CROSSFADE_DURATION. A 3 s fade-in of the incoming song over the quiet tail of
+// the outgoing one was heard as 2 to 3 s of near silence at every change.
+const CROSSFADE_FADE_IN = 0.4; // seconds
 // Manual track change (skip / play-now): quick fade instead of a hard cut
 const SKIP_FADE_OUT = 0.6; // seconds
 const SKIP_FADE_IN = 0.15; // seconds
 // On a cold load, keep the current track on air until the new one can play (capped)
 const COLD_LOAD_MAX_WAIT_MS = 4000;
+/** Where the song on air hands over: its analysed crossfade point, but never later than
+ *  3 s before the end of the file actually loaded. A stored length or analysis can be
+ *  longer than the file (the old analysis gave every item 180 s); then the song ran out
+ *  and the listener heard silence until the server caught up. */
+function handOverPoint(crossStart: number, fileDuration: number): number {
+  const fileEnd = isFinite(fileDuration) && fileDuration > CROSSFADE_DURATION
+    ? fileDuration - CROSSFADE_DURATION : 0;
+  if (crossStart > 0 && fileEnd > 0) return Math.min(crossStart, fileEnd);
+  return crossStart > 0 ? crossStart : fileEnd;
+}
 // A change heard less than this far into the new item starts it from the top (no seek)
 const START_FROM_TOP_SECONDS = 1.0;
 // A timed item's lead-in fade ends this long after its due time (see the preempt fade)
@@ -392,7 +406,7 @@ export function useAudioEngine(
     seekIfNeeded(inactiveDeck.audio, nextCueInRef.current);
     inactiveDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
     inactiveDeck.gain.gain.setValueAtTime(0, ctx.currentTime);
-    inactiveDeck.gain.gain.linearRampToValueAtTime(targetGain, ctx.currentTime + CROSSFADE_DURATION);
+    inactiveDeck.gain.gain.linearRampToValueAtTime(targetGain, ctx.currentTime + CROSSFADE_FADE_IN);
     inactiveDeck.audio.play().catch(() => {});
 
     // Fade out active deck
@@ -500,7 +514,7 @@ export function useAudioEngine(
     // manual change (Next / play-now)?
     const outTime = outDeck.audio.currentTime;
     const outDur = outDeck.audio.duration;
-    const outEnd = outCross > 0 ? outCross : (isFinite(outDur) && outDur > 0 ? outDur - CROSSFADE_DURATION : 0);
+    const outEnd = handOverPoint(outCross, outDur);
     const naturalEnd = !outDeck.audio.paused && outEnd > 0 && outTime >= outEnd - NATURAL_END_WINDOW_SECONDS;
     // An operator's Next carries the fade they chose; it wins even near the end of the item
     // (a short looped jingle is nearly always "near the end").
@@ -713,6 +727,10 @@ export function useAudioEngine(
       const activeDeck = getActiveDeck();
       if (!activeDeck || activeDeck.audio.paused || !isFinite(activeDeck.audio.currentTime)) return;
       if (Date.now() - trackChangeTimeRef.current < TRACK_CHANGE_COOLDOWN) return;
+      // The server's elapsed time belongs to the item it says is on air. When the player
+      // has already handed over to the next item (its file ended before the stored
+      // length), that time must not be applied to the new item.
+      if (deckAssetRef.current[activeDeckRef.current] !== lastAssetId.current) return;
 
       const serverElapsed = elapsedRef.current;
       if (serverElapsed <= 0) return;
@@ -801,18 +819,14 @@ export function useAudioEngine(
 
       const ct = activeDeck.audio.currentTime;
       const dur = activeDeck.audio.duration;
-      const cs = crossStartRef.current;
-      const atCrossStart = cs > 0 && ct >= cs;
-      // No cross_start set — crossfade 3s before end to avoid a gap
-      const nearEnd = cs <= 0 && isFinite(dur) && dur > 0 && ct >= dur - CROSSFADE_DURATION;
-      if (atCrossStart || nearEnd) {
+      const crossPoint = handOverPoint(crossStartRef.current, dur);
+      if (crossPoint > 0 && ct >= crossPoint) {
         // Do not run ahead of the server: wait until it is (nearly) at the crossfade
         // point too. It announces the next track there, which brings it on air anyway.
         const startedAt = startedAtRef.current;
         const startMs = startedAt ? new Date(startedAt).getTime() : NaN;
         if (isFinite(startMs)) {
           const serverPos = (Date.now() - startMs) / 1000;
-          const crossPoint = cs > 0 ? cs : dur - CROSSFADE_DURATION;
           if (serverPos < crossPoint - MAX_LEAD_SECONDS) return;
         }
         crossfadeTriggeredRef.current = true;

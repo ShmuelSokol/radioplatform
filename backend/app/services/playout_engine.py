@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.config import settings
+from app.models.asset import stored_analysis
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, soft_timed
 
@@ -128,7 +129,7 @@ async def engine_overlay(asset) -> bool:
     if not url:
         return False
     fields = {"kbr_lane": "overlay", "title": asset.title or ""}
-    analysis = (asset.metadata_extra or {}).get("audio_analysis", {}) if asset.metadata_extra else {}
+    analysis = stored_analysis(asset.metadata_extra)
     gain = analysis.get("replay_gain_db")
     if isinstance(gain, (int, float)) and gain != 0:
         fields["liq_amplify"] = f"{float(gain):.2f} dB"
@@ -164,7 +165,7 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
     if not url:
         return None
     analysis = (
-        (asset.metadata_extra or {}).get("audio_analysis", {}) if asset.metadata_extra else {}
+        stored_analysis(asset.metadata_extra)
     )
     fields = {
         "kbr_entry": str(entry.id),

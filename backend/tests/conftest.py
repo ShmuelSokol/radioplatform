@@ -13,6 +13,9 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
 from app.models.user import User, UserRole
+from app.services import upcoming_analysis
+
+upcoming_analysis.ENABLED = False  # no audio to download in tests
 
 # Use SQLite for testing (no PostgreSQL needed)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"

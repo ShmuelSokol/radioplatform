@@ -95,3 +95,26 @@ def fit_for_random_pick():
         ),
         not_placeholder(),
     )
+
+
+# Analyses made before this version measured every item as 180 s long (the length
+# probe failed on piped audio), so their end, crossfade point and length are wrong.
+ANALYSIS_VERSION = 2
+
+
+def stored_analysis(metadata_extra) -> dict:
+    """An item's audio analysis as far as it can be trusted. From an analysis older
+    than ANALYSIS_VERSION only the start cue and loudness are kept; the end and
+    crossfade points fall back to the defaults (3 s before the end)."""
+    analysis = (metadata_extra or {}).get("audio_analysis") if isinstance(metadata_extra, dict) else None
+    if not isinstance(analysis, dict):
+        return {}
+    if analysis.get("version", 1) >= ANALYSIS_VERSION:
+        return analysis
+    return {k: analysis[k] for k in ("cue_in_seconds", "replay_gain_db", "loudness_lufs") if k in analysis}
+
+
+def needs_analysis(asset) -> bool:
+    """True when the item has no analysis, or one older than ANALYSIS_VERSION."""
+    analysis = (asset.metadata_extra or {}).get("audio_analysis") if isinstance(asset.metadata_extra, dict) else None
+    return not isinstance(analysis, dict) or analysis.get("version", 1) < ANALYSIS_VERSION

@@ -22,7 +22,7 @@ from app.core.dependencies import (
 )
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
-from app.models.asset import Asset, fit_for_random_pick
+from app.models.asset import Asset, fit_for_random_pick, stored_analysis
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, soft_timed
 from app.models.user import User
@@ -551,7 +551,7 @@ def switch_time(entry) -> datetime | None:
     asset = entry.asset
     duration = (asset.duration if asset else None) or DEFAULT_DURATION
     cross_seconds = 3.0
-    analysis = ((asset.metadata_extra or {}).get("audio_analysis") or {}) if asset else {}
+    analysis = stored_analysis(asset.metadata_extra) if asset else {}
     cross_start = analysis.get("cross_start_seconds")
     if isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
         cross_seconds = duration - cross_start
@@ -1542,7 +1542,7 @@ async def mix_over(
         # Browser playback: every open player mixes it in on top of its own audio
         from app.api.v1.websocket import manager as ws_manager
 
-        analysis = (asset.metadata_extra or {}).get("audio_analysis", {}) if asset.metadata_extra else {}
+        analysis = stored_analysis(asset.metadata_extra)
         await ws_manager.broadcast_to_station(str(station_id), {
             "type": "mix_over",
             "data": {

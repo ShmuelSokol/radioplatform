@@ -97,3 +97,23 @@ the click (the same item: kept, no restart, since the start times are within 1 s
 followed), or for at most 4 s. Not done within 4.5 s of an automatic change, when the server
 keeps the incoming item. Listeners still change when the server announces it. Scenarios
 `next-heard-before-the-server-answers` and `next-ahead-then-server-differs`.
+
+## Quiet gaps at song changes (2026-11-16)
+
+The Mac's listener heard 2 to 3 s of near silence at song changes. Causes on our side:
+- `silence_service.get_audio_duration` read "Duration:" from ffmpeg on a pipe, which is
+  "N/A" for MP3, so `analyze_audio_bytes` fell back to 180 s for every item: cue_out 180,
+  cross_start 177, and `asset.duration` overwritten with 180. It now takes the decoder's
+  last `time=` and analysis refuses to guess a length. Analyses carry `version`
+  (`ANALYSIS_VERSION = 2` in `models/asset.py`); `stored_analysis()` keeps only the start
+  cue and loudness from older ones, and every reader of `audio_analysis` goes through it.
+- Most of the library has no analysis, so the hand-over came 3 s before the stored end,
+  over the song's quiet tail. `services/upcoming_analysis.py` analyses the item on air
+  and the next one in the background (one at a time, off the event loop) when the
+  analysis is missing or old. `POST /assets/bulk-analyze` also redoes old analyses.
+- The player faded the incoming song in over 3 s. Now it comes up in 0.4 s
+  (`CROSSFADE_FADE_IN`); only the outgoing song fades over 3 s.
+- The player hands over at `handOverPoint()`: the crossfade point, but never later than
+  3 s before the end of the file it actually loaded. The periodic sync no longer applies
+  the server's elapsed time to a deck that holds a different item.
+Checks: `backend/tests/test_song_change_gaps.py`, `e2e/audio-engine.mjs stored-length-longer-than-file`.
