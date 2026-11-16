@@ -24,7 +24,7 @@ from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset, fit_for_random_pick, stored_analysis
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset, soft_timed
+from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset
 from app.models.user import User
 from app.schemas.queue import (
     QueueAdd,
@@ -517,14 +517,18 @@ _NOT_FILLER_TYPES = ("silence", "spot", "jingle", "sweeper", "station_id", "time
 
 
 async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) -> QueueEntry | None:
-    """The next queue entry due to play: a soft-timed slot whose time has come,
-    otherwise the first pending entry by position (future timed entries wait)."""
+    """The next queue entry due to play: a timed item whose time has come (soft or
+    hard), otherwise the first pending entry by position (future timed entries wait).
+
+    Hard items count too: the weather that follows the hourly time check is due at
+    the same moment but sits at the end of the queue by position. Picking by
+    position started the next song when the time check ended, and the weather then
+    cut it a moment later (heard live at 13:00 ET, 2026-11-16)."""
     ad_result = await db.execute(
         select(QueueEntry)
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            soft_timed(),
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now_utc,
         )
@@ -828,6 +832,26 @@ async def _check_advance(
         return await _check_advance_locked(db, station_id, early_seconds)
 
 
+async def _drop_timed_twins(db: AsyncSession, entry: QueueEntry) -> None:
+    """A timed item that starts takes any pending copy of itself (same item, same
+    time) out of the queue. Two refills racing queued the 1 PM time check twice on
+    Main (2026-11-16) and both played, the second over the start of the next one."""
+    if entry is None or entry.preempt_at is None:
+        return
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == entry.station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.asset_id == entry.asset_id,
+            QueueEntry.preempt_at == entry.preempt_at,
+            QueueEntry.id != entry.id,
+        )
+        .values(status="skipped")
+        .execution_options(synchronize_session=False)
+    )
+
+
 def _same_timed_group(current: QueueEntry, entry: QueueEntry) -> bool:
     return (
         current.preempt_at is not None
@@ -986,6 +1010,7 @@ async def _check_advance_locked(
                 db.add(log)
             current.status = "played"
             mark_started(preempt_entry, now_utc)
+            await _drop_timed_twins(db, preempt_entry)
             await db.commit()
             # Skip in Liquidsoap to sync with preempt
             if settings.liquidsoap_enabled:
@@ -1052,6 +1077,7 @@ async def _check_advance_locked(
         next_entry = await _refill_for_next(db, station_id)
     if next_entry:
         mark_started(next_entry, datetime.now(timezone.utc))
+        await _drop_timed_twins(db, next_entry)
         if current is not None:
             _note_automatic_change(station_id, next_entry.id)
         logger.info(
@@ -1124,12 +1150,16 @@ def _json_default(value):
 def _next_due(entries, now_utc: datetime):
     """In-memory twin of _pick_next_pending for rows already loaded."""
     pending = [e for e in entries if e.status == "pending"]
-    soft_due = [
+    timed_due = [e for e in pending if e.preempt_at and _aware(e.preempt_at) <= now_utc]
+    if timed_due:
+        return min(timed_due, key=lambda e: (_aware(e.preempt_at), e.position))
+    soon = [
         e for e in pending
-        if e.preempt_at and is_soft_timed(e) and _aware(e.preempt_at) <= now_utc
+        if e.preempt_at
+        and now_utc < _aware(e.preempt_at) <= now_utc + timedelta(seconds=TIMED_EARLY_START_SECONDS)
     ]
-    if soft_due:
-        return min(soft_due, key=lambda e: (_aware(e.preempt_at), e.position))
+    if soon:
+        return min(soon, key=lambda e: (_aware(e.preempt_at), e.position))
     regular = [e for e in pending if not e.preempt_at or _aware(e.preempt_at) <= now_utc]
     return min(regular, key=lambda e: e.position) if regular else None
 
@@ -1777,6 +1807,7 @@ async def _skip_current_locked(
 
     if next_entry:
         mark_started(next_entry, datetime.now(timezone.utc))
+        await _drop_timed_twins(db, next_entry)
         next_id = next_entry.id
         next_asset_id = next_entry.asset_id
         await db.commit()
