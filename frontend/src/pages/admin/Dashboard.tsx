@@ -81,6 +81,14 @@ export default function Dashboard() {
   const [queueAllFor, setQueueAllFor] = useState<string | null>(null);
   const queueAll = !!stationId && queueAllFor === stationId;
   const { data: queueData, isError: queueFailed } = useQueue(stationId, queueAll ? QUEUE_ALL_ROWS : QUEUE_FIRST_ROWS);
+  // Back from the background: throttled timers may have left the queue minutes old
+  useEffect(() => {
+    const onVisible = () => {
+      if (!document.hidden && stationId) void qc.invalidateQueries({ queryKey: ['queue', stationId] });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [qc, stationId]);
   const loadWholeQueue = useCallback(() => { if (stationId) setQueueAllFor(stationId); }, [stationId]);
   const loadFirstHours = useCallback(() => setQueueAllFor(null), []);
   const { nowPlaying: wsNowPlaying } = useNowPlayingWS(stationId ?? '');

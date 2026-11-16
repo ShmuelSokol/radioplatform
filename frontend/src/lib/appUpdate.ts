@@ -23,6 +23,8 @@ const CHECK_EVERY_MS = 60_000;
 const APPLY_EVERY_MS = 5_000;
 const IDLE_BEFORE_RELOAD_MS = 30_000;
 const AUDIO_GRACE_MS = 120_000;
+// Hidden this long and silent: take the new release on return even if a player is switched on
+const LONG_AWAY_MS = 10 * 60_000;
 
 const media = new Set<HTMLMediaElement>();
 const micStreams = new Set<MediaStream>();
@@ -149,7 +151,19 @@ export function startAppUpdates() {
   }
   window.setInterval(check, CHECK_EVERY_MS);
   window.setInterval(applyIfQuiet, APPLY_EVERY_MS);
-  document.addEventListener('visibilitychange', () => { void check().then(applyIfQuiet); });
+  let hiddenAt = document.hidden ? Date.now() : 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { hiddenAt = Date.now(); void check().then(applyIfQuiet); return; }
+    const away = hiddenAt ? Date.now() - hiddenAt : 0;
+    hiddenAt = 0;
+    void check().then(() => {
+      // Back after a long time away (screen locked for hours): the browser has
+      // throttled this tab and nothing is actually sounding, so a switched-on
+      // player alone does not hold the update. Reload onto the new release now.
+      if (pending && away >= LONG_AWAY_MS && !soundingNow()) window.location.reload();
+      else applyIfQuiet();
+    });
+  });
   window.addEventListener('online', () => { void check(); });
 
   // A screen whose code was replaced by a newer release fails to load in an

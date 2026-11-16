@@ -37,6 +37,9 @@ export interface NowPlayingData {
  * Connects via WebSocket with automatic reconnection.
  * Falls back to REST polling if WebSocket fails repeatedly.
  */
+// Back from the background after this long: re-read now-playing and reconnect
+const STALE_AFTER_HIDDEN_MS = 5_000;
+
 export const useNowPlayingWS = (stationId: string) => {
   const [nowPlaying, setNowPlaying] = useState<NowPlayingData | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -181,6 +184,31 @@ export const useNowPlayingWS = (stationId: string) => {
       }
     };
   }, [stationId]); // Only re-run when stationId changes
+
+  // A tab left in the background (screen locked, another tab in front) has its
+  // timers throttled and its socket may have died without a close event. When it
+  // comes back after more than a few seconds, read what is playing at once and
+  // open a fresh connection, so it never shows an item that ended long ago.
+  useEffect(() => {
+    if (!stationId) return;
+    let hiddenAt = document.hidden ? Date.now() : 0;
+    const onVisibility = () => {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      if (away < STALE_AFTER_HIDDEN_MS) return;
+      fetch(`${import.meta.env.VITE_API_URL}/now-playing/${stationId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => { if (data) setNowPlaying(data); })
+        .catch(() => {});
+      const old = wsRef.current;
+      if (old) { old.onclose = null; old.close(); wsRef.current = null; }
+      reconnectAttempts.current = 0;
+      connectFnRef.current();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [stationId]);
 
   return { nowPlaying, isConnected };
 };

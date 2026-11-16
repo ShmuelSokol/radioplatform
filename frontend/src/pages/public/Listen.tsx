@@ -447,14 +447,14 @@ export default function Listen() {
                     try { await crm.login(crmPinInput); setCrmPinInput(''); setCrmLoginError(''); }
                     catch { setCrmLoginError('Invalid PIN'); }
                   }}
-                  className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+                  className="min-h-[44px] bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
                 >
                   Login
                 </button>
                 <span className="text-gray-400 text-sm">or</span>
                 <button
                   onClick={() => setCrmRegOpen(!crmRegOpen)}
-                  className="text-brand-600 hover:text-brand-700 text-sm font-medium transition"
+                  className="inline-flex items-center min-h-[44px] px-2 text-brand-600 hover:text-brand-700 text-sm font-medium transition"
                 >
                   Register
                 </button>
@@ -501,7 +501,7 @@ export default function Listen() {
                         setCrmRegName(''); setCrmRegPhone(''); setCrmRegEmail(''); setCrmRegError('');
                       } catch { setCrmRegError('Registration failed. Please try again.'); }
                     }}
-                    className="bg-brand-600 hover:bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition"
+                    className="min-h-[44px] bg-brand-600 hover:bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition"
                   >
                     Register
                   </button>

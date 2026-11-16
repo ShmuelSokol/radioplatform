@@ -165,3 +165,16 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; a
   border-radius: 1rem;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
 }
+
+/* Station pickers on public pages. Safari on iPhone keeps a native select at its
+   own small height whatever the CSS says, so draw it ourselves at a full 44 px
+   finger size, with our own arrow. */
+.kbr-select {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 44px;
+  padding-right: 2.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23888' stroke-width='2'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+}
