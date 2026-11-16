@@ -14,7 +14,8 @@ import type { SkipFade } from '../../api/queue';
 import { insertEntry as addQueuePlaceholder } from '../../hooks/queueOptimistic';
 import type { QueueDataLike } from '../../hooks/queueOptimistic';
 import type { AssetInfo } from '../../types';
-import TransportBar from './controlroom/TransportBar';
+import TransportBar, { TransportButtons } from './controlroom/TransportBar';
+import type { TransportProps } from './controlroom/TransportBar';
 import QueuePanel from './controlroom/QueuePanel';
 import type { QueueRow } from './controlroom/QueuePanel';
 import LibraryPanel from './controlroom/LibraryPanel';
@@ -30,7 +31,7 @@ type SideTab = 'library' | 'live' | 'log' | 'schedule';
 interface Toast { text: string; type: 'ok' | 'warn' | 'error' }
 
 const SIDE_TABS: Array<{ id: SideTab; label: string }> = [
-  { id: 'library', label: 'Library' },
+  { id: 'library', label: 'Songs' },
   { id: 'live', label: 'Go live' },
   { id: 'log', label: 'Played' },
   { id: 'schedule', label: 'Schedule' },
@@ -450,6 +451,29 @@ export default function Dashboard() {
   }, [setSideTab]);
 
   // ── Panels ─────────────────────────────────────────────────
+  const transport: TransportProps = {
+    stations: stations,
+    stationId: stationId,
+    onStation: setSelectedStationId,
+    isPlaying: isPlaying,
+    nowAsset: nowAsset,
+    nextAsset: nextAsset,
+    elapsed: shownElapsed,
+    remaining: remaining,
+    duration: duration,
+    introSeconds: introSeconds,
+    onStart: handleStart,
+    starting: startMut.isPending,
+    statusMessage: queueNotice ?? statusMessage,
+    onNext: handleNext,
+    nextBusy: skipMut.isPending,
+    looping: looping,
+    onLoop: toggleLoop,
+    loopBusy: loopBusy,
+    audio: { audioReady, initAudio, volume, setVolume, muted, toggleMute, vuL, vuR },
+    stationTz: stationTz,
+    liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
+  };
   const noStation = !stationId;
   const queuePanel = (
     <QueuePanel
@@ -471,7 +495,7 @@ export default function Dashboard() {
       lastPlayed={lastPlayedMap?.last_played}
     />
   );
-  const hotButtons = (wide: boolean) => (
+  const hotButtons = (wide: boolean, bar = false) => (
     <HotButtons
       pins={pins}
       sets={cart.sets}
@@ -494,6 +518,7 @@ export default function Dashboard() {
       weatherState={weatherState}
       pfl={pfl}
       wide={wide}
+      bar={bar}
     />
   );
   const libraryPanel = (
@@ -517,7 +542,7 @@ export default function Dashboard() {
     : <SchedulePanel stationId={stationId} />;
 
   return (
-    <div className="h-full flex flex-col bg-[#080820] text-gray-200 font-sans select-none overflow-hidden" data-testid="control-room">
+    <div className="qn h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
       <audio ref={dashStreamAudioRef} className="hidden" />
 
       {toast && (
@@ -532,60 +557,40 @@ export default function Dashboard() {
         </div>
       )}
 
-      <TransportBar
-        stations={stations}
-        stationId={stationId}
-        onStation={setSelectedStationId}
-        isPlaying={isPlaying}
-        nowAsset={nowAsset}
-        nextAsset={nextAsset}
-        elapsed={shownElapsed}
-        remaining={remaining}
-        duration={duration}
-        introSeconds={introSeconds}
-        onStart={handleStart}
-        starting={startMut.isPending}
-        statusMessage={queueNotice ?? statusMessage}
-        onNext={handleNext}
-        nextBusy={skipMut.isPending}
-        looping={looping}
-        onLoop={toggleLoop}
-        loopBusy={loopBusy}
-        audio={{ audioReady, initAudio, volume, setVolume, muted, toggleMute, vuL, vuR }}
-        stationTz={stationTz}
-        liveShow={liveShow ? { id: liveShow.id, title: liveShow.title } : null}
-      />
+      <TransportBar {...transport} />
 
       {isDesktop ? (
-        /* ═══ Desktop: buttons | queue | library ═══ */
-        <div className="flex-1 min-h-0 flex">
-          <aside className="w-56 xl:w-72 2xl:w-80 shrink-0 border-r border-[#2a2a5e] min-h-0">
-            {hotButtons(false)}
-          </aside>
-          <main className="flex-1 min-w-0 min-h-0">{queuePanel}</main>
-          <aside className="w-[340px] xl:w-[440px] 2xl:w-[520px] shrink-0 border-l border-[#2a2a5e] min-h-0 flex flex-col">
-            <div className="shrink-0 flex bg-[#14143c] border-b border-[#2a2a5e]" role="tablist">
-              {SIDE_TABS.map(t => (
-                <button key={t.id} type="button" role="tab" aria-selected={sideTab === t.id} onClick={() => setSideTab(t.id)}
-                  className={`flex-1 h-10 text-sm font-semibold border-b-2 ${
-                    sideTab === t.id ? 'border-cyan-400 text-cyan-200 bg-[#1a1a4e]' : 'border-transparent text-gray-400 hover:text-gray-200'
-                  }`}>
-                  {t.id === 'live' && liveShow ? '● Live' : t.label}
-                </button>
-              ))}
+        /* ═══ Desktop, laid out like the old program: log over songs, buttons on the right, cart along the bottom ═══ */
+        <>
+          <div className="flex-1 min-h-0 flex">
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+              <main className="flex-[3] min-h-0">{queuePanel}</main>
+              <div className="flex-[2] min-h-0 border-t-4 border-[#c0c0c0]">{sidePanel(sideTab)}</div>
             </div>
-            <div className="flex-1 min-h-0">{sidePanel(sideTab)}</div>
-          </aside>
-        </div>
+            <aside className="w-28 xl:w-32 shrink-0 bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white" aria-label="Controls">
+              <TransportButtons p={transport} stacked />
+              <div className="h-2" />
+              <div className="flex flex-col gap-1" role="tablist" aria-label="Lower pane">
+                {SIDE_TABS.map(t => (
+                  <button key={t.id} type="button" role="tab" aria-selected={sideTab === t.id} onClick={() => setSideTab(t.id)}
+                    className={`qn-btn h-8 text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
+                    {t.id === 'live' && liveShow ? '● Live' : t.label}
+                  </button>
+                ))}
+              </div>
+            </aside>
+          </div>
+          <div className="h-[150px] xl:h-[170px] shrink-0">{hotButtons(false, true)}</div>
+        </>
       ) : (
         /* ═══ Phone / tablet: one pane + bottom tabs ═══ */
         <>
           <div className="flex-1 min-h-0 flex flex-col">
             {(pane === 'log' || pane === 'schedule') && (
-              <div className="shrink-0 flex bg-[#14143c] border-b border-[#2a2a5e]">
+              <div className="shrink-0 flex gap-1 p-1 bg-[#c0c0c0]">
                 {(['log', 'schedule'] as Pane[]).map(t => (
-                  <button key={t} type="button" onClick={() => setPane(t)}
-                    className={`flex-1 h-10 text-sm font-semibold border-b-2 ${pane === t ? 'border-cyan-400 text-cyan-200' : 'border-transparent text-gray-400'}`}>
+                  <button key={t} type="button" onClick={() => setPane(t)} aria-pressed={pane === t}
+                    className="qn-btn flex-1 h-9 text-sm">
                     {t === 'log' ? 'Played' : 'Schedule'}
                   </button>
                 ))}
@@ -595,14 +600,14 @@ export default function Dashboard() {
               {pane === 'queue' ? queuePanel : pane === 'buttons' ? hotButtons(true) : sidePanel(pane)}
             </div>
           </div>
-          <nav className="shrink-0 flex bg-[#0c0c2c] border-t border-[#2a2a5e] pb-[env(safe-area-inset-bottom)]" aria-label="Control room sections">
+          <nav className="shrink-0 flex gap-1 px-1 pt-1 bg-[#c0c0c0] border-t-2 border-white pb-[max(0.25rem,env(safe-area-inset-bottom))]" aria-label="Control room sections">
             {MOBILE_TABS.map(t => {
               const active = pane === t.id || (t.id === 'log' && pane === 'schedule');
               return (
                 <button key={t.id} type="button" onClick={() => setPane(t.id)} aria-current={active ? 'page' : undefined}
-                  className={`flex-1 h-14 flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold
-                    ${active ? 'text-cyan-300' : 'text-gray-500'}
-                    ${t.id === 'live' && liveShow ? '!text-red-400' : ''}`}>
+                  className={`qn-btn flex-1 h-12 flex flex-col items-center justify-center gap-0.5 text-[11px]
+                    ${active ? '!bg-[#ffff80]' : ''}
+                    ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
                   <span className="text-lg leading-none" aria-hidden="true">{t.icon}</span>
                   {t.label}
                 </button>
@@ -613,8 +618,8 @@ export default function Dashboard() {
       )}
 
       {isDesktop && (
-        <footer className="shrink-0 h-6 px-3 flex items-center justify-between gap-4 bg-[#0c0c2c] border-t border-[#2a2a5e] text-[11px] text-gray-500">
-          <span>Shortcuts: <b className="text-gray-400">N</b> next · <b className="text-gray-400">/</b> search · <b className="text-gray-400">Esc</b> cancel insert</span>
+        <footer className="shrink-0 h-5 px-2 flex items-center justify-between gap-4 bg-[#c0c0c0] border-t border-[#808080] text-[11px] text-black">
+          <span>Shortcuts: <b>N</b> next · <b>/</b> search · <b>Esc</b> cancel insert</span>
           <span className="truncate">{station?.name ?? ''}{station?.timezone ? ` · ${station.timezone}` : ''}</span>
           <span className="truncate">{user?.email ?? ''}{user?.role ? ` (${user.role})` : ''}</span>
         </footer>
