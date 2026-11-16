@@ -59,7 +59,7 @@ function Clock({ tz }: { tz?: string }) {
 /** A level meter in the style operators know: cyan segments, red near the top. */
 function VuBar({ level, label }: { level: number; label: string }) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1" title="Station level (RMS), -40 to 0 dBFS; red is above -8 dBFS">
       <span className="w-9 text-[9px] italic text-cyan-200 leading-none">{label}</span>
       <div className="flex-1 h-2.5 flex gap-px bg-black">
         {Array.from({ length: 30 }).map((_, i) => (

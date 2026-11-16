@@ -130,5 +130,6 @@ INGEST 2026-11-16 live-listeners.md listeners leave the live count at once (ende
 INGEST 2026-11-16 operator-actions.md Next never skips a timed item on air (time, weather, sponsorship): protected:true; rapid-Next test
 INGEST 2026-11-16 hourly-slots.md hourly time clips per region (?region= on /time-announcements, falls back to the default set; queued checks realigned each hourly pass)
 INGEST 2026-11-16 alerts (no page) create_alert folds a repeat (same type, title, station) of an open alert from the last 24 h into it (context.repeats, no notify) - 20,407 open alerts had piled up (Empty block, Dead air, Server restarted). POST /alerts/resolve-all; the Alerts page pages 100 at a time. A screen whose code file vanished in a newer release (tab left open across merges) now reloads itself, or says the site was updated; the app error box clears on navigation.
+INGEST 2026-11-16 control-room.md meters are RMS dBFS (-40..0, red above -8) with ballistics; mute and Listen never change them
 
 INGEST 2026-11-16 operator-actions.md placeholders (NEVER_AUTO_TITLES) are skipped at pick time from every automatic source (_skip_placeholders); short or timed items hand over 0.3 s before their end, not at half their length

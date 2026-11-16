@@ -104,3 +104,5 @@ Every `select.qn-field` in the control room is drawn grey with a raised arrow (`
 ## Meters move without Listen
 
 The audio engine always runs silently for the LEFT/RIGHT meters once the page has had any click or key (browsers need one gesture). Decks feed a bus; the bus feeds the meter analysers and an output gain to the speakers. Listen (`listenHere`, `setMonitor`) only opens that output gain on this computer; volume and mute act on it too, and deck gains carry replay gain only. In stream mode the engine still runs silently for the meters while the stream element makes the sound, so the meters lead the heard audio by the stream delay.
+
+Meter scale: each side is the RMS level of the on-air bus in dBFS over about 46 ms (`getFloatTimeDomainData`, fftSize 2048), with a quick rise and a ~20 dB/s fall. 30 segments span -40 to 0 dBFS; red (last 6) is above -8 dBFS. The old meter averaged FFT bins times 2.5, which sat in the red on normal music. The e2e plays a -5.1 dBFS tone and expects 26 segments a side.
