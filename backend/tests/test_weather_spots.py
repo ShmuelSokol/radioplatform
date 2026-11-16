@@ -50,6 +50,7 @@ async def test_upload_creates_the_days_weather_spot(client: AsyncClient, auth_he
     asset = (await db_session.execute(select(Asset))).scalar_one()
     assert asset.asset_type == "spot" and asset.category == "weather_spot"
     assert asset.metadata_extra["slot_key"] == DAY
+    assert asset.artist == "Kol B'ramah"           # display spelling, not the voice spelling
 
     got = await client.get(f"/api/v1/weather-spots/{DAY}", headers=auth_headers)
     assert got.status_code == 200
