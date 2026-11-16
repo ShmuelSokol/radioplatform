@@ -122,3 +122,11 @@ The Mac's listener heard 2 to 3 s of near silence at song changes. Causes on our
   3 s before the end of the file it actually loaded. The periodic sync no longer applies
   the server's elapsed time to a deck that holds a different item.
 Checks: `backend/tests/test_song_change_gaps.py`, `e2e/audio-engine.mjs stored-length-longer-than-file`.
+
+## Timed item due right after a song change (2026-11-16)
+
+`_pick_next_pending` starts a timed item (hard or soft) due within
+`TIMED_EARLY_START_SECONDS` (8 s) of a song change at that change, instead of waiting
+for the clock or starting a song that would be cut seconds later. Live: a block at
+08:35:00 waited 3.3 s after the song before it ended. Test:
+`backend/tests/test_timed_item_starts_early.py`.

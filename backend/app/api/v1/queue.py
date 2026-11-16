@@ -508,6 +508,9 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
 
 
 # Item types that must never be used to keep a station on the air
+# A timed item due within this many seconds of a song change starts at the change
+TIMED_EARLY_START_SECONDS = 8.0
+
 _NOT_FILLER_TYPES = ("silence", "spot", "jingle", "sweeper", "station_id", "time", "weather")
 
 
@@ -527,6 +530,25 @@ async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) ->
         .limit(1)
     )
     entry = ad_result.scalar_one_or_none()
+    if entry:
+        return entry
+    # A timed item due in a moment starts now instead of waiting for the clock: the
+    # song before it often ends a few seconds early, and waiting left that much quiet
+    # air (heard live: 3.3 s before a block at 08:35:00). Starting the next song
+    # instead would only have it cut off seconds later.
+    soon = await db.execute(
+        select(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at > now_utc,
+            QueueEntry.preempt_at <= now_utc + timedelta(seconds=TIMED_EARLY_START_SECONDS),
+        )
+        .order_by(QueueEntry.preempt_at, QueueEntry.position)
+        .limit(1)
+    )
+    entry = soon.scalar_one_or_none()
     if entry:
         return entry
     result = await db.execute(
