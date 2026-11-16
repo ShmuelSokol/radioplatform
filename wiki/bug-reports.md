@@ -36,7 +36,8 @@ Same pattern as his supplier-item-database project (`wiki/bug-autofix.md` there)
    when its checks pass comments the PR link and labels the issue `auto-fix-ready`.
    If unclear or risky: comments a question and labels `auto-fix-needs-owner`.
    It never merges: Shmuel says "merge the fix for bug N".
-4. `bug_report_service.notify_loop` (in the API process, every 5 min) reads those
+4. Right after a report arrives, the API pushes "Bug N received" to `NTFY_TOPIC` (added 2026-11-16: Shmuel expected a push the moment he sent one). Then
+   `bug_report_service.notify_loop` (in the API process, every 5 min) reads those
    issues and sends ONE ntfy push per label change to `NTFY_TOPIC` (Railway only,
    never in the repo). A closed issue marks the report fixed/closed.
 

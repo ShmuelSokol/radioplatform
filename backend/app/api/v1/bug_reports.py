@@ -165,8 +165,8 @@ async def create_bug_report(
     logging.getLogger(__name__).info(
         "Bug report %s from %s on %s: %s", number, report.reporter_name or "anonymous", body.page_url, body.description[:120]
     )
-    if bug_report_service.github_enabled():
-        task = asyncio.get_running_loop().create_task(bug_report_service.mirror_to_github(report.id))
+    if bug_report_service.github_enabled() or bug_report_service.settings.NTFY_TOPIC:
+        task = asyncio.get_running_loop().create_task(bug_report_service.report_received(report.id))
         _background.add(task)
         task.add_done_callback(_background.discard)
     return {"id": str(report.id), "number": number, "mirrored": bug_report_service.github_enabled()}
