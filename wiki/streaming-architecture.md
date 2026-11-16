@@ -196,4 +196,11 @@ health check waits for it), and `users.last_seen_at` was written every 5 s by ev
 request (now at most once a minute per user per process; the Users page shows
 "Online" for 2 minutes). The `pg_timezone_names` query seen then is not ours (no code
 issues it; the Supabase dashboard does). Test: `backend/tests/test_cold_start.py`.
+The burst after that deploy was led by "last played per item": a GROUP BY over a
+station's whole play history (3.3 s), now `services/last_played.py` (read in full
+once per station per process, then only new plays), and the library's per-row last
+played lookup by item, now answered by `ix_play_logs_asset_start (asset_id,
+start_utc)`, built CONCURRENTLY in the background after startup
+(`CONCURRENT_INDEXES` in main.py; put indexes on big tables there, not in the
+migration list, where a plain CREATE INDEX blocks writes for the build).
 Test: `backend/tests/test_safe_migrations.py`.

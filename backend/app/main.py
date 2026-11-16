@@ -377,6 +377,47 @@ async def _warm_connection_pool(timeout: float = 20.0) -> None:
     except Exception as e:
         logger.warning("Database pool warm-up skipped: %s", e)
 
+
+# Indexes on big, busy tables. A plain CREATE INDEX blocks writes to the table for
+# the whole build, so these are built CONCURRENTLY (reads and writes carry on) in
+# the background after startup, outside any transaction.
+CONCURRENT_INDEXES = {
+    # The library's "last played" per item looks up plays by item across stations
+    "ix_play_logs_asset_start": "play_logs (asset_id, start_utc)",
+}
+
+
+async def _build_concurrent_indexes() -> None:
+    import asyncpg
+
+    if not settings.DATABASE_URL.startswith("postgresql"):
+        return
+    dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    try:
+        conn = await asyncpg.connect(dsn, statement_cache_size=0)
+    except Exception as e:
+        logger.warning("Could not connect to build indexes: %s", e)
+        return
+    try:
+        await conn.execute("SET statement_timeout = '10min'")
+        for name, target in CONCURRENT_INDEXES.items():
+            try:
+                valid = await conn.fetchval(
+                    "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                    "WHERE c.relname = $1", name,
+                )
+                if valid:
+                    continue
+                if valid is False:  # a build that was interrupted leaves an unusable index
+                    await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+                started = asyncio.get_running_loop().time()
+                await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
+                logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+            except Exception as e:
+                logger.warning("Index %s not built: %s", name, e)
+    finally:
+        await conn.close()
+
 async def _seed_default_categories():
     """Insert default categories if the categories table is empty."""
     try:
@@ -628,10 +669,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     import asyncio as _asyncio
     from app.services.duration_backfill import backfill_on_startup
     backfill_task = _asyncio.get_running_loop().create_task(backfill_on_startup())
+    index_task = _asyncio.get_running_loop().create_task(_build_concurrent_indexes())
 
     yield
 
     backfill_task.cancel()
+    index_task.cancel()
     # Shutdown — stop the scheduler cleanly
     try:
         from app.services.scheduler_engine import stop_scheduler

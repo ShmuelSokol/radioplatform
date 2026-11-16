@@ -17,12 +17,11 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.asset import Asset, fit_for_random_pick, not_placeholder, stored_analysis
-from app.models.play_log import PlayLog
 from app.models.schedule import Schedule
 from app.models.station import Station
 from app.services.scheduling import SchedulingService
@@ -146,12 +145,9 @@ class _Library:
         self.last_used: dict[str, datetime] | None = None
 
     async def _load_last_used(self) -> None:
-        rows = await self.db.execute(
-            select(PlayLog.asset_id, func.max(PlayLog.start_utc))
-            .where(PlayLog.station_id == self.station_id, PlayLog.asset_id.isnot(None))
-            .group_by(PlayLog.asset_id)
-        )
-        self.last_used = {str(a): as_utc(t) for a, t in rows.all() if t is not None}
+        from app.services.last_played import last_played
+
+        self.last_used = await last_played(self.db, self.station_id)
 
     async def pool(self, asset_type: str, category: str | None) -> list:
         key = (asset_type, category)
