@@ -78,3 +78,4 @@ UPDATE 2026-11-15 spot-schedules.md in block mode (breaks) a daypart wholly insi
 UPDATE 2026-11-15 operator-actions.md Next/Fade/Soft, natural end and Start refill an empty queue (fallback to any music) instead of stopping.
 INGEST 2026-11-15 streaming-architecture.md one player per station: _check_station's old block player (now_playing + play_logs + WS) ran beside the queue; removed with _check_channel and the emergency jingle fallback; dead air restarts the queue
 UPDATE 2026-11-16 release-pickup.md a release no longer reloads a listener in the gap between items: holdUpdates() while a player is on, plus a 2-minute grace after any audio
+UPDATE 2026-11-16 operator-actions.md GET queue returns next_entry_id (same rule as the Next pick); the control room's Next line uses it.
