@@ -7,7 +7,7 @@ that day's spot; days with no upload keep the ElevenLabs fallback.
 import re
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.models.user import User
 from app.services.weather_spot_service import (
     find_time_clip_asset,
     find_weather_spot_asset,
+    normalize_region,
     store_uploaded_time_clip,
     store_uploaded_weather_spot,
 )
@@ -36,11 +37,13 @@ class WeatherSpotResponse(BaseModel):
     source: str  # "shprach" (or another uploader), or "elevenlabs" for a generated spot
     script: str | None = None
     replaced: bool = False
+    region: str = "lakewood"
 
 
 def _to_response(spot_date: date, asset: Asset, replaced: bool = False) -> WeatherSpotResponse:
     extra = asset.metadata_extra or {}
     return WeatherSpotResponse(
+        region=normalize_region(extra.get("region")),
         spot_date=spot_date,
         asset_id=str(asset.id),
         file_url=asset.file_path,
@@ -54,11 +57,12 @@ def _to_response(spot_date: date, asset: Asset, replaced: bool = False) -> Weath
 @router.get("/{spot_date}", response_model=WeatherSpotResponse)
 async def get_weather_spot(
     spot_date: date,
+    region: str | None = Query(None, description="Weather region, e.g. jerusalem (default: lakewood)"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    """The weather spot the station will play on this date (404 if none exists yet)."""
-    asset = await find_weather_spot_asset(db, spot_date.isoformat())
+    """The weather spot stations of this region will play on this date (404 if none exists yet)."""
+    asset = await find_weather_spot_asset(db, spot_date.isoformat(), _region(region))
     if asset is None:
         raise HTTPException(404, "No weather spot for this date")
     return _to_response(spot_date, asset)
@@ -70,10 +74,14 @@ async def upload_weather_spot(
     file: UploadFile = File(...),
     script: str | None = Form(None),
     source: str = Form("shprach"),
+    region: str | None = Query(None, description="Weather region, e.g. jerusalem (default: lakewood)"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    """Upload a finished recording as the weather spot for a date (Eastern, YYYY-MM-DD).
+    """Upload a finished recording as the weather spot for a date (the region's local date, YYYY-MM-DD).
+
+    Stations play the spot of their own region (automation_config.weather_region).
+    A station with a region other than the default never falls back to another city's report.
 
     Replaces whatever spot that date already has, including one already queued.
     Any audio format FFmpeg reads is accepted; it is stored as loudness-normalized MP3.
@@ -81,11 +89,18 @@ async def upload_weather_spot(
     data = await _read_upload(file, source)
     try:
         asset, replaced = await store_uploaded_weather_spot(
-            db, spot_date.isoformat(), data, source=source, script=(script or None)
+            db, spot_date.isoformat(), data, source=source, script=(script or None), region=_region(region)
         )
     except ValueError as e:
         raise HTTPException(422, str(e))
     return _to_response(spot_date, asset, replaced)
+
+
+def _region(region: str | None) -> str:
+    value = normalize_region(region)
+    if not re.fullmatch(r"[a-z][a-z0-9-]{1,30}", value):
+        raise HTTPException(422, "region must be lowercase letters, digits or dashes")
+    return value
 
 
 async def _read_upload(file: UploadFile, source: str) -> bytes:

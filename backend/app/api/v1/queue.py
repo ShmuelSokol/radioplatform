@@ -460,9 +460,11 @@ async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) ->
     # Generate assets (TTS + weather fetch + upload)
     logger.info("Generating weather/time TTS for station %s slot %s", station_id, slot_key)
     try:
-        from app.services.weather_spot_service import get_or_create_weather_spot_assets
+        from app.services.weather_spot_service import get_or_create_weather_spot_assets, weather_region_for_station
 
-        time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key)
+        time_asset, weather_asset = await get_or_create_weather_spot_assets(
+            db, slot_key, await weather_region_for_station(db, station_id)
+        )
     except Exception:
         logger.warning("Failed to create weather spot assets for slot %s", slot_key, exc_info=True)
         return
@@ -2235,10 +2237,17 @@ async def preview_weather(
     eastern_now = now.astimezone(await station_announcement_zone(db, station_id))
     slot_key = slot_key_for(now, eastern_now.tzinfo)
 
-    from app.services.weather_spot_service import get_or_create_weather_spot_assets, _build_time_text, _build_weather_text
+    from app.services.weather_spot_service import (
+        _build_time_text,
+        _build_weather_text,
+        get_or_create_weather_spot_assets,
+        weather_region_for_station,
+    )
     from app.services.weather_service import get_current_weather
 
-    time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key)
+    time_asset, weather_asset = await get_or_create_weather_spot_assets(
+        db, slot_key, await weather_region_for_station(db, station_id)
+    )
     await db.commit()
 
     # Build text for display
@@ -2272,8 +2281,10 @@ async def insert_weather_now(
     now = datetime.now(timezone.utc)
     slot_key = slot_key_for(now, await station_announcement_zone(db, station_id))
 
-    from app.services.weather_spot_service import get_or_create_weather_spot_assets
-    time_asset, weather_asset = await get_or_create_weather_spot_assets(db, slot_key)
+    from app.services.weather_spot_service import get_or_create_weather_spot_assets, weather_region_for_station
+    time_asset, weather_asset = await get_or_create_weather_spot_assets(
+        db, slot_key, await weather_region_for_station(db, station_id)
+    )
 
     assets_to_insert = [a for a in [time_asset, weather_asset] if a is not None]
     if not assets_to_insert:

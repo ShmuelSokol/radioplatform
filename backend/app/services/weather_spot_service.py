@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -148,13 +148,47 @@ def _slot_time(slot_key: str, fallback: datetime) -> datetime:
     return fallback
 
 
-async def find_weather_spot_asset(db: AsyncSession, weather_key: str) -> Asset | None:
-    """The weather spot asset for one day (weather_key like "2024-01-15"), if any."""
+# Weather is per region, so a station abroad plays its own city's report. A station
+# names its region in automation_config["weather_region"]; no setting means the
+# default region (Lakewood), which is also what every spot made before regions
+# existed belongs to (they carry no "region" in their metadata).
+DEFAULT_WEATHER_REGION = "lakewood"
+
+
+def normalize_region(region: str | None) -> str:
+    region = (region or "").strip().lower()
+    return region or DEFAULT_WEATHER_REGION
+
+
+def station_weather_region(automation_config: dict | None) -> str:
+    """The weather region a station's config asks for (default region if unset)."""
+    return normalize_region((automation_config or {}).get("weather_region"))
+
+
+async def weather_region_for_station(db: AsyncSession, station_id) -> str:
+    from app.models.station import Station
+
+    station = await db.get(Station, station_id)
+    return station_weather_region(station.automation_config if station else None)
+
+
+def _region_filter(region: str):
+    stored = Asset.metadata_extra["region"].astext
+    if region == DEFAULT_WEATHER_REGION:
+        return or_(stored.is_(None), stored == DEFAULT_WEATHER_REGION)
+    return stored == region
+
+
+async def find_weather_spot_asset(
+    db: AsyncSession, weather_key: str, region: str | None = None
+) -> Asset | None:
+    """The weather spot asset for one day (weather_key like "2024-01-15") and region, if any."""
     result = await db.execute(
         select(Asset).where(
             Asset.asset_type == "spot",
             Asset.category == "weather_spot",
             Asset.metadata_extra["slot_key"].astext == weather_key,
+            _region_filter(normalize_region(region)),
         ).limit(1)
     )
     return result.scalar_one_or_none()
@@ -230,8 +264,9 @@ async def store_uploaded_weather_spot(
     *,
     source: str = "shprach",
     script: str | None = None,
+    region: str | None = None,
 ) -> tuple[Asset, bool]:
-    """Make an uploaded, ready-made recording the weather spot for one day.
+    """Make an uploaded, ready-made recording the weather spot for one day and region.
 
     The day's weather spot is a single asset keyed by date, and the hourly
     scheduler pre-queues that asset up to 48 hours ahead. So when one already
@@ -242,13 +277,17 @@ async def store_uploaded_weather_spot(
 
     Returns (asset, replaced) where replaced says an existing spot was overwritten.
     """
-    url, duration = await _store_upload(audio_bytes, f"weather/{weather_key}_weather_{source}")
-    asset = await find_weather_spot_asset(db, weather_key)
+    region = normalize_region(region)
+    own = region != DEFAULT_WEATHER_REGION
+    url, duration = await _store_upload(
+        audio_bytes, f"weather/{weather_key}{'_' + region if own else ''}_weather_{source}"
+    )
+    asset = await find_weather_spot_asset(db, weather_key, region)
     replaced = asset is not None
     if asset is None:
         asset = Asset(
             id=uuid.uuid4(),
-            title=f"Weather Report - {weather_key}",
+            title=f"Weather Report - {weather_key}" + (f" ({region.title()})" if own else ""),
             artist=STATION_DISPLAY_NAME,
             file_path=url,
             asset_type="spot",
@@ -259,9 +298,9 @@ async def store_uploaded_weather_spot(
     asset.duration = duration
     # Replaced wholesale on purpose: any cached analysis/trim points in the old
     # metadata belong to the old recording.
-    asset.metadata_extra = _upload_meta(source, script, slot_key=weather_key)
+    asset.metadata_extra = _upload_meta(source, script, slot_key=weather_key, region=region)
     await db.flush()
-    logger.info("Stored uploaded %s weather spot for day %s (replaced=%s)", source, weather_key, replaced)
+    logger.info("Stored uploaded %s weather spot for %s, day %s (replaced=%s)", source, region, weather_key, replaced)
     return asset, replaced
 
 
@@ -331,7 +370,7 @@ def resume_generation() -> None:
 
 
 async def get_or_create_weather_spot_assets(
-    db: AsyncSession, slot_key: str
+    db: AsyncSession, slot_key: str, region: str | None = None
 ) -> tuple[Asset | None, Asset | None]:
     """Get or create time-announcement and weather-spot assets.
 
@@ -348,7 +387,12 @@ async def get_or_create_weather_spot_assets(
     Uploaded recordings win: the reusable time clip for the slot's hour and the
     day's uploaded weather spot are used when they exist. ElevenLabs is only the
     fallback for what is missing, and only when a key is configured.
+
+    region: the station's weather region (station_weather_region). Only the
+    default region's weather is ever generated; another region has weather only
+    when its own spot was uploaded, so a station never plays another city's report.
     """
+    region = normalize_region(region)
     # Weather uses daily key (just the date part)
     weather_key = slot_key.split("T")[0] if "T" in slot_key else slot_key
 
@@ -369,9 +413,10 @@ async def get_or_create_weather_spot_assets(
     if uploaded_time is not None:
         existing_time = uploaded_time
 
-    existing_weather = await find_weather_spot_asset(db, weather_key)
+    existing_weather = await find_weather_spot_asset(db, weather_key, region)
+    generate_weather = region == DEFAULT_WEATHER_REGION
 
-    if existing_time and existing_weather:
+    if existing_time and (existing_weather or not generate_weather):
         return existing_time, existing_weather
     if not settings.elevenlabs_enabled or _generation_paused():
         return existing_time, existing_weather
@@ -410,7 +455,7 @@ async def get_or_create_weather_spot_assets(
 
     # Generate weather spot if needed (per-day — reused until midnight)
     weather_asset = existing_weather
-    if not weather_asset:
+    if not weather_asset and generate_weather:
         try:
             weather_data = await get_current_weather()
             weather_text = _build_weather_text(weather_data)

@@ -471,10 +471,13 @@ class SchedulingService:
                     announcement_zone,
                     get_or_create_weather_spot_assets,
                     slot_key_for,
+                    station_weather_region,
                 )
 
                 slot_key = slot_key_for(now, announcement_zone(station.timezone))
-                time_asset, _ = await get_or_create_weather_spot_assets(self.db, slot_key)
+                time_asset, _ = await get_or_create_weather_spot_assets(
+                    self.db, slot_key, station_weather_region(config)
+                )
                 if time_asset:
                     return time_asset.id
 
@@ -499,10 +502,13 @@ class SchedulingService:
                         announcement_zone,
                         get_or_create_weather_spot_assets,
                         slot_key_for,
+                        station_weather_region,
                     )
 
                     slot_key = slot_key_for(now, announcement_zone(station.timezone))
-                    _, weather_asset = await get_or_create_weather_spot_assets(self.db, slot_key)
+                    _, weather_asset = await get_or_create_weather_spot_assets(
+                        self.db, slot_key, station_weather_region(config)
+                    )
                     if weather_asset:
                         return weather_asset.id
 
