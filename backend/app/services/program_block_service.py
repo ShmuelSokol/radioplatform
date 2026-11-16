@@ -231,10 +231,13 @@ class _Resolver:
         slot_key = local.strftime("%Y-%m-%dT%H")
         if slot_key not in self.announcements:
             try:
-                from app.services.weather_spot_service import get_or_create_weather_spot_assets
+                from app.services.weather_spot_service import (
+                    get_or_create_weather_spot_assets,
+                    station_weather_region,
+                )
 
                 self.announcements[slot_key] = await get_or_create_weather_spot_assets(
-                    self.db, slot_key
+                    self.db, slot_key, station_weather_region(self.station.automation_config)
                 )
             except Exception:
                 logger.warning("Time and weather for %s could not be prepared", slot_key)

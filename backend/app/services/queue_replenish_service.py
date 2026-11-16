@@ -219,6 +219,44 @@ class QueueReplenishService:
         await self.db.commit()
         logger.info("Queue replenishment complete")
 
+    async def _realign_weather_region(self, region: str) -> int:
+        """Point queued weather spots at the station's own region.
+
+        Weather queued before a station had its own region (or before its spot
+        was uploaded) is another city's report. Each such entry is moved to the
+        station's own spot for that day when one exists, and removed otherwise
+        (that slot then airs without weather rather than with the wrong city's).
+        """
+        from app.services.weather_spot_service import find_weather_spot_asset, normalize_region
+
+        rows = await self.db.execute(
+            select(QueueEntry, Asset)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                Asset.category == "weather_spot",
+            )
+        )
+        changed = 0
+        own_spot: dict[str, Asset | None] = {}
+        for entry, asset in rows.all():
+            meta = asset.metadata_extra if isinstance(asset.metadata_extra, dict) else {}
+            if normalize_region(meta.get("region")) == region:
+                continue
+            day = meta.get("slot_key")
+            if day not in own_spot:
+                own_spot[day] = await find_weather_spot_asset(self.db, day, region) if day else None
+            if own_spot[day] is not None:
+                entry.asset_id = own_spot[day].id
+            else:
+                await self.db.delete(entry)
+            changed += 1
+        if changed:
+            await self.db.flush()
+            logger.info("Station %s: %d queued weather spots moved to its own region (%s)", self.station_id, changed, region)
+        return changed
+
     async def _drop_wrong_hour_announcements(self, zone) -> int:
         """Remove queued hourly time checks that say another clock's hour.
 
@@ -847,12 +885,16 @@ class QueueReplenishService:
             get_or_create_weather_spot_assets,
             slot_key_for,
             station_announcement_zone,
+            station_weather_region,
         )
 
         now = datetime.now(timezone.utc)
         # Each station announces its own time (Jerusalem said New York's 1 AM at 8 AM)
         zone = await station_announcement_zone(self.db, self.station_id)
         await self._drop_wrong_hour_announcements(zone)
+        # ...and plays its own city's weather
+        region = station_weather_region(self.automation_config)
+        await self._realign_weather_region(region)
 
         # Check which exact slot times already have scheduled ANNOUNCEMENT entries.
         # CRITICAL: exclude ad_slot entries and compare exact minutes — the old code
@@ -893,7 +935,7 @@ class QueueReplenishService:
             slot_key = slot_key_for(hour_boundary, zone)
 
             try:
-                time_asset, weather_asset = await get_or_create_weather_spot_assets(self.db, slot_key)
+                time_asset, weather_asset = await get_or_create_weather_spot_assets(self.db, slot_key, region)
             except Exception:
                 logger.warning("Failed to generate weather for slot %s", slot_key, exc_info=True)
                 continue

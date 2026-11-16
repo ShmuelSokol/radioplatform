@@ -61,6 +61,15 @@ The OpenWeatherMap key (free plan, 60 calls/min) was blocked on 2026-11-15. Caus
 - `get_or_create_weather_spot_assets` pauses all generation for 15 min after a failure; uploaded clips are still returned.
 - Tests reset both through the autouse fixture in `tests/conftest.py`.
 
+## Weather per region (2026-11-16)
+
+Each station plays its own city's weather. `automation_config["weather_region"]` names the region (`"jerusalem"` for KBR Jerusalem); unset means the default region `lakewood`. Weather spot assets carry `metadata_extra.region`; spots without it (everything made before regions) belong to `lakewood`.
+
+- Upload/lookup: `PUT|GET /api/v1/weather-spots/{date}?region=jerusalem` (no region = lakewood). A non-default region's spot is titled `Weather Report - {date} (Jerusalem)` and stored under `weather/{date}_jerusalem_weather_…`.
+- `get_or_create_weather_spot_assets(db, slot_key, region)`: only the default region is ever generated (ElevenLabs); another region has weather only when its own spot was uploaded, so a station never airs another city's report. Every caller passes the station's region (`station_weather_region(config)` / `weather_region_for_station(db, id)`).
+- `QueueReplenishService._realign_weather_region` runs with the hourly pass: queued weather of another region is moved to the station's own spot for that day, or removed when there is none.
+- The Kol B'ramah Jerusalem spot comes from the voice PC like Lakewood's (`daily_station.ps1`), uploaded with `region=jerusalem`.
+
 ## Hard vs soft preempts
 
 - **Hard** (`source != "ad_slot"`): Interrupts current track immediately at `preempt_at` time

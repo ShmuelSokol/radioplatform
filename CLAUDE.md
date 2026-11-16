@@ -188,7 +188,7 @@ radioplatform/
 | program_block_service.py | Expands program blocks into timed queue entries (`source="block"`) and replaces the built-in hourly time and weather (see `wiki/program-blocks.md`) |
 | tts_service.py | ElevenLabs TTS generation |
 | weather_service.py | OpenWeatherMap API (current + 3-day forecast) |
-| weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots (ElevenLabs is the fallback) |
+| weather_spot_service.py | Weather/time announcement generation + caching; stores uploaded daily weather spots per region (station `automation_config.weather_region`, default lakewood; ElevenLabs is the fallback for the default region only) |
 | sun_service.py | Sunrise/sunset calculations (astral) |
 | icecast_service.py | Icecast OTA broadcast source client |
 | email_service.py | Resend transactional email (campaign updates, invoices, payments) |
