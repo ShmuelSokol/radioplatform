@@ -87,6 +87,65 @@ class AudioConnectionManager:
 audio_manager = AudioConnectionManager()
 
 
+# --- On-air relay: the host's microphone straight to listeners ---
+# There is no broadcast server (Icecast) yet, so the host's audio is passed on to
+# every page listening to the station. Frames are raw 16-bit little-endian mono PCM
+# at LIVE_SAMPLE_RATE (useHostAudio sends them; useLiveAudio plays them). One web
+# process holds all sockets, like the now-playing channel.
+LIVE_SAMPLE_RATE = 24000
+
+
+class StationLiveRelay:
+    def __init__(self):
+        self.listeners: Dict[str, Set[WebSocket]] = {}  # station_id -> listener sockets
+        self.on_air: Dict[str, str] = {}  # station_id -> show_id whose host is sending
+
+    def state(self, station_id: str) -> dict:
+        show_id = self.on_air.get(station_id)
+        return {"type": "live_state", "live": show_id is not None, "show_id": show_id,
+                "sample_rate": LIVE_SAMPLE_RATE}
+
+    async def _send_all(self, station_id: str, send) -> None:
+        conns = list(self.listeners.get(station_id, ()))
+        if not conns:
+            return
+        results = await asyncio.gather(*(send(ws) for ws in conns), return_exceptions=True)
+        for ws, result in zip(conns, results):
+            if isinstance(result, Exception):
+                self.listeners.get(station_id, set()).discard(ws)
+
+    async def set_on_air(self, station_id: str, show_id: str | None) -> None:
+        if show_id is None:
+            self.on_air.pop(station_id, None)
+        else:
+            self.on_air[station_id] = show_id
+        message = json.dumps(self.state(station_id))
+        await self._send_all(station_id, lambda ws: ws.send_text(message))
+
+    async def audio(self, station_id: str, frame: bytes) -> None:
+        await self._send_all(station_id, lambda ws: asyncio.wait_for(ws.send_bytes(frame), 2.0))
+
+
+live_relay = StationLiveRelay()
+
+
+@router.websocket("/ws/live/station/{station_id}/listen")
+async def websocket_station_live_listen(websocket: WebSocket, station_id: str):
+    """Public: a listener page hears the station's live show here while one is on air."""
+    await websocket.accept()
+    live_relay.listeners.setdefault(station_id, set()).add(websocket)
+    try:
+        await websocket.send_text(json.dumps(live_relay.state(station_id)))
+        while True:
+            await websocket.receive_text()  # nothing expected; this only notices the close
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Live listen WS for station %s ended: %s", station_id, e)
+    finally:
+        live_relay.listeners.get(station_id, set()).discard(websocket)
+
+
 # --- Auth Helper ---
 
 async def _authenticate_ws(websocket: WebSocket, show_id: str) -> User | None:
@@ -247,24 +306,44 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     if user is None:
         return
 
-    audio_manager.active_connections[show_id] = websocket
-    logger.info("Audio WS authed for show %s user %s", show_id, user.id)
+    station_id = None
+    try:
+        async for db in get_async_session():
+            from app.services.live_show_service import get_show
+            show = await get_show(db, show_id)
+            if show is not None:
+                station_id = str(show.station_id)
+            break
+    except Exception as e:
+        logger.error("Audio WS: could not load show %s: %s", show_id, e)
+    if station_id is None:
+        await websocket.close(code=4004)
+        return
 
+    audio_manager.active_connections[show_id] = websocket
+    logger.info("Audio WS authed for show %s user %s (station %s)", show_id, user.id, station_id)
+    await live_relay.set_on_air(station_id, show_id)
+
+    from app.config import settings
     try:
         while True:
             data = await websocket.receive_bytes()
-            # Forward to Icecast
-            try:
-                from app.services.icecast_service import get_icecast_client
-                client = get_icecast_client(show_id)
-                await client.push_audio(data)
-            except Exception as e:
-                logger.error("Failed to push audio to Icecast for show %s: %s", show_id, e)
+            await live_relay.audio(station_id, data)
+            if settings.icecast_enabled:
+                try:
+                    from app.services.icecast_service import get_icecast_client
+                    client = get_icecast_client(show_id)
+                    await client.push_audio(data)
+                except Exception as e:
+                    logger.error("Failed to push audio to Icecast for show %s: %s", show_id, e)
     except WebSocketDisconnect:
-        audio_manager.disconnect(show_id)
+        pass
     except Exception as e:
         logger.error("Audio WS error for show %s: %s", show_id, e)
+    finally:
         audio_manager.disconnect(show_id)
+        if live_relay.on_air.get(station_id) == show_id:
+            await live_relay.set_on_air(station_id, None)
 
 
 # --- Broadcast helpers ---

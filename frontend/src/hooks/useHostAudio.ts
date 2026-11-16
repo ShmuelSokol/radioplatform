@@ -10,15 +10,39 @@ interface UseHostAudioReturn {
 
 /**
  * Hook for capturing host microphone audio and streaming it via WebSocket.
- * Uses MediaRecorder to capture audio as webm/opus chunks and sends binary frames.
+ * Sends raw 16-bit mono PCM at LIVE_RATE: the server passes it straight on to
+ * every page listening to the station (useLiveAudio), which plays it with Web
+ * Audio. That works in every browser, Safari on iPhone included; the earlier
+ * webm/opus chunks could only have been played through a broadcast server.
  */
+const LIVE_RATE = 24000;
+
+/** Mono float samples at `from` Hz to 16-bit samples at LIVE_RATE (linear interpolation). */
+function makeResampler(from: number) {
+  const step = from / LIVE_RATE;
+  let pos = 0; // position in the current input block, carried across blocks
+  return (input: Float32Array): Int16Array => {
+    const out: number[] = [];
+    while (pos < input.length) {
+      const i = Math.floor(pos);
+      const frac = pos - i;
+      const a = input[i];
+      const b = i + 1 < input.length ? input[i + 1] : input[i];
+      const v = Math.max(-1, Math.min(1, a + (b - a) * frac));
+      out.push(v < 0 ? v * 0x8000 : v * 0x7fff);
+      pos += step;
+    }
+    pos -= input.length;
+    return Int16Array.from(out);
+  };
+}
 export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -86,23 +110,16 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
         // in the address instead: the server dropped the socket at once (no host
         // audio ever arrived) and the address, token included, was written to the logs.
         ws.send(JSON.stringify({ type: 'auth', token: localStorage.getItem('access_token') || '' }));
-        // Start MediaRecorder
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm';
-        const recorder = new MediaRecorder(stream, {
-          mimeType,
-          audioBitsPerSecond: 128000,
-        });
-
-        recorder.ondataavailable = (e) => {
-          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-            e.data.arrayBuffer().then(buf => ws.send(buf));
-          }
+        // About 85 ms of microphone per frame
+        const processor = ctx.createScriptProcessor(4096, 1, 1);
+        const resample = makeResampler(ctx.sampleRate);
+        processor.onaudioprocess = (e) => {
+          const pcm = resample(e.inputBuffer.getChannelData(0));
+          if (ws.readyState === WebSocket.OPEN && pcm.length) ws.send(pcm.buffer);
         };
-
-        recorder.start(250); // 250ms chunks
-        mediaRecorderRef.current = recorder;
+        source.connect(processor);
+        processor.connect(ctx.destination); // runs only when connected; its output is silent
+        processorRef.current = processor;
         setIsRecording(true);
       };
 
@@ -120,10 +137,11 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   }, [showId, connectAudioWS, updateLevel, isRecording]);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+    if (processorRef.current) {
+      processorRef.current.onaudioprocess = null;
+      processorRef.current.disconnect();
+      processorRef.current = null;
     }
-    mediaRecorderRef.current = null;
 
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(t => t.stop());

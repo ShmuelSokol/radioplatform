@@ -2,6 +2,7 @@
 Live show lifecycle management — create, start, end, hard stop.
 """
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -103,6 +104,76 @@ def _aware(t):
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
+
+# Timed items that came due during the show and are this late are not played
+# afterwards (a time check for an hour already past)
+STALE_TIMED_AFTER = timedelta(minutes=2)
+
+
+async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None:
+    """The host is on air: stop the item playing and queue it again first, to carry
+    on from where it stopped when the show ends. Nothing plays meanwhile (dead-air
+    recovery is off while the station has a live show)."""
+    from sqlalchemy import update
+
+    from app.models.play_log import PlayLog
+    from app.models.queue_entry import QueueEntry, resume_source
+    from app.services import long_items
+
+    current = (await db.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+    )).scalars().first()
+    if current is None:
+        return
+    if current.started_at:
+        db.add(PlayLog(id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
+                       start_utc=current.started_at, end_utc=now, source="scheduler"))
+    at = long_items.resume_point(current, now)
+    current.status = "played"
+    if at is None:
+        return  # it was nearly over
+    first = (await db.execute(
+        select(func.min(QueueEntry.position)).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+    )).scalar() or 1
+    await db.execute(
+        update(QueueEntry)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .values(position=QueueEntry.position + 1)
+        .execution_options(synchronize_session=False)
+    )
+    db.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id, position=first,
+                      status="pending", source=resume_source(at)))
+    await db.flush()
+
+
+async def _resume_automation(db: AsyncSession, station_id, now: datetime) -> None:
+    """The show is over: drop time checks that came due long ago, then start the
+    queue (the item the show paused comes first)."""
+    from sqlalchemy import update
+
+    from app.models.queue_entry import QueueEntry, hard_timed
+
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at < now - STALE_TIMED_AFTER,
+            hard_timed(),
+        )
+        .values(status="played")
+        .execution_options(synchronize_session=False)
+    )
+    await db.flush()
+    try:
+        from app.api.v1.queue import start_from_queue
+        await start_from_queue(db, station_id)
+    except Exception as e:
+        logger.error("Station %s: could not restart the queue after the show: %s", station_id, e)
+
+
 async def start_show(
     db: AsyncSession,
     show_id: UUID | str,
@@ -134,6 +205,7 @@ async def start_show(
         config = dict(station.automation_config or {})
         config["live_show_id"] = str(show.id)
         station.automation_config = config
+        await _pause_automation(db, station.id, now)
 
     # Set icecast mount for WebRTC mode
     if show.broadcast_mode == "webrtc" and not show.icecast_mount:
@@ -172,6 +244,7 @@ async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
         config = dict(station.automation_config)
         config.pop("live_show_id", None)
         station.automation_config = config
+        await _resume_automation(db, station.id, now)
 
     # End all active calls
     try:
