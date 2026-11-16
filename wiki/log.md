@@ -79,3 +79,4 @@ UPDATE 2026-11-15 operator-actions.md Next/Fade/Soft, natural end and Start refi
 INGEST 2026-11-15 streaming-architecture.md one player per station: _check_station's old block player (now_playing + play_logs + WS) ran beside the queue; removed with _check_channel and the emergency jingle fallback; dead air restarts the queue
 UPDATE 2026-11-16 release-pickup.md a release no longer reloads a listener in the gap between items: holdUpdates() while a player is on, plus a 2-minute grace after any audio
 UPDATE 2026-11-16 release-pickup.md useAudioEngine holds releases only while its audio context is running, so a control room with sound off still updates; browser check e2e/audio-engine.mjs release-hold
+INGEST 2026-11-16 multi-station-load.md now_playing announcements never go backwards (stale tick after the precise advance made listeners jump back); join cache ignores raced reads
