@@ -669,3 +669,40 @@ async def test_dated_weather_reports_are_never_random_filler(db_session: AsyncSe
     # Asked for by name, a weather clip can still be picked
     assert str(await SchedulingService(db_session)._pick_asset_for_slot(
         "spot", "weather_spot", station.id)) == str(weather.id)
+
+
+@pytest.mark.asyncio
+async def test_queued_time_and_weather_follow_the_station_default(db_session: AsyncSession):
+    """Time and weather queued with no timing counted as "on the second", so a :30
+    weather report cut the song. Only :00 is on the second; :30 waits for the song."""
+    station = Station(id=uuid.uuid4(), name="KBR", timezone="UTC", is_active=True,
+                      automation_config={"weather_enabled": True})
+    weather = Asset(id=uuid.uuid4(), title="Weather Report - 2026-11-15", duration=40.0,
+                    file_path="w.mp3", asset_type="spot", category="weather_spot")
+    song = Asset(id=uuid.uuid4(), title="Song", duration=200.0, file_path="s.mp3",
+                 asset_type="music")
+    db_session.add_all([station, weather, song])
+    await db_session.flush()
+    hour = (datetime.now(UTC) + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
+    rows = {
+        "top": QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=weather.id, position=1,
+                          status="pending", source="auto", preempt_at=hour),
+        "half": QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=weather.id, position=2,
+                           status="pending", source="auto", preempt_at=hour + timedelta(minutes=30)),
+        # an operator's timed song is left as it is
+        "manual": QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id, position=3,
+                             status="pending", source="manual", preempt_at=hour + timedelta(minutes=30)),
+    }
+    db_session.add_all(rows.values())
+    await db_session.commit()
+
+    svc = QueueReplenishService(db_session, station.id)
+    svc.max_pos = 10
+    await svc._load_automation_config()
+    await svc._schedule_hourly_announcements()
+    await db_session.commit()
+    for e in rows.values():
+        await db_session.refresh(e)
+    assert rows["top"].timing_mode == "hard"
+    assert rows["half"].timing_mode == "soft"
+    assert rows["manual"].timing_mode is None

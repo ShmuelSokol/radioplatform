@@ -70,3 +70,6 @@ See also: [streaming-architecture](streaming-architecture.md)
 
 ## Never random filler
 Weather reports and time checks are made for one moment. `fit_for_random_pick()` (models/asset.py) keeps categories `weather_spot` and `time_announcement` out of every random draw (rule fill, gap fill, template slots, playlist generator) unless the category is named. Before 2026-11-15 a fill of "any spot" could air a weather report from months earlier.
+
+## On the second only at :00
+Automatic time and weather entries get `timing_mode` from `spot_schedule_service.default_timing` (station `automation_config.spot_timing`, default hard at :00 and soft otherwise). Null timing on anything but `ad_slot` still counts as hard (operator timed inserts rely on it), so `_schedule_hourly_announcements` also fills in timing for pending time/weather entries queued before 2026-11-16.
