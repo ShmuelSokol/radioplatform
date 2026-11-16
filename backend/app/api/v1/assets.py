@@ -562,6 +562,7 @@ async def list_all(
     album_search: str | None = Query(None, description="Search by album"),
     duration_min: float | None = Query(None, description="Minimum duration in seconds"),
     duration_max: float | None = Query(None, description="Maximum duration in seconds"),
+    hide_generated: bool = Query(False, description="Leave out dated time and weather recordings"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_staff),
 ):
@@ -571,6 +572,7 @@ async def list_all(
         title_search=title_search, artist_search=artist_search,
         album_search=album_search,
         duration_min=duration_min, duration_max=duration_max,
+        hide_generated=hide_generated,
     )
     return AssetListResponse(assets=assets, total=total)
 

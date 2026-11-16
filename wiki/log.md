@@ -87,3 +87,4 @@ UPDATE 2026-11-16 release-pickup.md useAudioEngine holds releases only while its
 INGEST 2026-11-16 multi-station-load.md now_playing announcements never go backwards (stale tick after the precise advance made listeners jump back); join cache ignores raced reads
 INGEST 2026-11-16 streaming-architecture.md timed items get an exact timer (hard at preempt_at, soft at hard_by); items with NULL duration (queue read, restart cut, background backfill); restart starts via start_from_queue
 UPDATE 2026-11-16 audio-engine.md item starts within 1 s play from the top without a seek (Safari repeated the opening)
+INGEST 2026-11-16 control-room.md KBR Studio look (classic.css, desktop layout, row heights tied to ROW_*); jingle cart hides dated time/weather recordings via hide_generated

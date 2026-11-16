@@ -131,6 +131,10 @@ async def get_asset(db: AsyncSession, asset_id: uuid.UUID) -> Asset:
     return asset
 
 
+# Titles the time and weather service gives its recordings (weather_spot_service)
+GENERATED_TITLE_PREFIXES = ("Time Announcement - ", "Weather Report - ")
+
+
 async def list_assets(
     db: AsyncSession,
     skip: int = 0,
@@ -143,9 +147,14 @@ async def list_assets(
     album_search: str | None = None,
     duration_min: float | None = None,
     duration_max: float | None = None,
+    hide_generated: bool = False,
 ) -> tuple[list[dict], int]:
     # Build shared WHERE conditions
     conditions = []
+    if hide_generated:
+        # Time and weather recordings made for one hour or day: wrong at any other time
+        for prefix in GENERATED_TITLE_PREFIXES:
+            conditions.append(~Asset.title.like(f"{prefix}%"))
     if asset_type:
         conditions.append(Asset.asset_type == asset_type)
     if category:

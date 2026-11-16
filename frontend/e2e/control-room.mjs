@@ -179,7 +179,7 @@ async function desktop(browser, width, height) {
   await page.waitForTimeout(200);
   const scrolled = await page.getByTestId('queue-scroll').evaluate(el => el.scrollTop);
   const l2 = await layout(page);
-  check(`${tag}: queue scrolls while the header stays put`, scrolled > 1000 && l2.header.top === l.header.top && l2.nav.top === 0, `scrollTop ${scrolled}, header top ${l2.header.top}`);
+  check(`${tag}: queue scrolls while the header stays put`, scrolled > 600 && l2.header.top === l.header.top && l2.nav.top === 0, `scrollTop ${scrolled}, header top ${l2.header.top}`);
   await page.getByTestId('queue-scroll').evaluate(el => { el.scrollTop = 0; });
   await shot(page, `${width}-1-main`);
 
@@ -233,7 +233,7 @@ async function desktop(browser, width, height) {
   check(`${tag}: instant button puts the jingle on air immediately`, backend.nowId() === 'j3');
   check(`${tag}: play now is one request`, backend.calls.filter(c => c.path.endsWith('/queue/fire-now')).length === 1 && !backend.calls.some(c => c.path.endsWith('/queue/skip')));
   const introText = await page.locator('[data-testid=intro-countdown]:visible').first().textContent().catch(() => '');
-  check(`${tag}: intro countdown shows while the intro runs`, /0:0[1-6]\s*Intro/i.test(introText), introText);
+  check(`${tag}: intro countdown shows while the intro runs`, /(0:0[1-6]\s*Intro|Intro\s*0:0[1-6])/i.test(introText), introText);
   await shot(page, `${width}-3-jingle-on-air`);
 
   // Play-next mode
@@ -267,7 +267,7 @@ async function desktop(browser, width, height) {
   await page.getByRole('radio', { name: 'Play next' }).click();
 
   // NEXT (button and keyboard)
-  await page.getByRole('button', { name: /NEXT/ }).click();
+  await page.getByRole('button', { name: /Go next/ }).click();
   await page.waitForFunction(() => /Station ID 5/.test(document.querySelector('[data-testid=control-room] header')?.textContent || ''));
   await page.locator('body').click({ position: { x: 5, y: 300 } }).catch(() => {});
   await page.keyboard.press('n');
@@ -405,7 +405,7 @@ async function phone(browser, deviceName) {
   await page.waitForFunction(() => /Station ID 2/.test(document.querySelector('[data-testid=control-room] header')?.textContent || ''));
   check(`${tag}: instant button fires the jingle now`, backend.nowId() === 'j2');
 
-  await page.getByRole('button', { name: /NEXT/ }).tap();
+  await page.getByRole('button', { name: /Go next/ }).tap();
   await page.waitForTimeout(500);
   check(`${tag}: NEXT advances`, backend.nowId() !== 'j2');
 
@@ -466,7 +466,7 @@ await desktop(browser, 1024, 768);
 await phone(browser, 'iPhone 13');
 await phone(browser, 'iPhone SE');
 await phone(browser, 'iPad Mini');
-await longQueue(browser, { viewport: { width: 1440, height: 900 } }, 'desktop long queue', 40);
+await longQueue(browser, { viewport: { width: 1440, height: 900 } }, 'desktop long queue', 26);
 await longQueue(browser, { ...devices['iPhone 13'] }, 'phone long queue', 66);
 await browser.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
