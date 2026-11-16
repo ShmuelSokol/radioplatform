@@ -157,8 +157,8 @@ export default function Navbar() {
           {/* Logo + desktop links */}
           <div className="flex items-center gap-4 text-sm">
             <Link to="/" className={isV2
-              ? 'text-lg font-extrabold tracking-tight bg-gradient-to-r from-violet-300 to-fuchsia-300 bg-clip-text text-transparent'
-              : 'text-lg font-bold tracking-tight text-cyan-300'}>
+              ? 'inline-flex items-center min-h-[44px] text-lg font-extrabold tracking-tight bg-gradient-to-r from-violet-300 to-fuchsia-300 bg-clip-text text-transparent'
+              : 'inline-flex items-center min-h-[44px] text-lg font-bold tracking-tight text-cyan-300'}>
               KBR Studio
             </Link>
             {/* Desktop nav - hidden on mobile */}
@@ -292,7 +292,7 @@ export default function Navbar() {
               </>
             ) : (
               <Link to="/admin/login"
-                className="relative text-[11px] bg-[#2a2a5e] hover:bg-[#3a3a7e] text-cyan-300 px-2 py-0.5 rounded transition after:content-[''] after:absolute after:-inset-x-1 after:-inset-y-3">
+                className="inline-flex items-center min-h-[44px] text-xs bg-[#2a2a5e] hover:bg-[#3a3a7e] text-cyan-300 px-3 rounded transition">
                 Admin Login
               </Link>
             )}

@@ -203,7 +203,7 @@ export default function Dashboard() {
     return () => audio.removeEventListener('error', onError);
   }, [dashUseStream]);
 
-  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio } = useAudioEngine(
+  const { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio: engineInit, releaseAudio } = useAudioEngine(
     dashUseStream ? null : audioAsset, realElapsed, dashUseStream ? false : isPlaying,
     nextPreempt?.preempt_at ?? null,
     nextPreempt?.asset_id ?? null,
@@ -218,7 +218,46 @@ export default function Dashboard() {
     null, null,
     serverStartedAt,
     wsNowPlaying?.change_fade_seconds ?? null,
+    false, // sound only on a click in this tab
   );
+
+  // ── One control room tab makes sound at a time ──
+  // A tab that switches sound on tells the others, and they go quiet. Action
+  // buttons (Next, Start, play now) switch sound on only while no other tab has it.
+  const soundElsewhere = useRef(false);
+  const holdsSound = useRef(false);
+  const soundChannel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const ch = new BroadcastChannel('kbr-control-room-sound');
+    soundChannel.current = ch;
+    ch.onmessage = (e: MessageEvent) => {
+      if (e.data?.type === 'taken') {
+        soundElsewhere.current = true;
+        if (holdsSound.current) {
+          holdsSound.current = false;
+          releaseAudio();
+          setStatusMessage('Sound moved to another control room tab. Press the speaker here to hear it in this tab.');
+        }
+      } else if (e.data?.type === 'released') {
+        soundElsewhere.current = false;
+      }
+    };
+    const onLeave = () => { if (holdsSound.current) ch.postMessage({ type: 'released' }); };
+    window.addEventListener('pagehide', onLeave);
+    return () => { onLeave(); window.removeEventListener('pagehide', onLeave); ch.close(); soundChannel.current = null; };
+  }, [releaseAudio]);
+  const takeSound = useCallback(async () => {
+    soundElsewhere.current = false;
+    if (!holdsSound.current) soundChannel.current?.postMessage({ type: 'taken' });
+    holdsSound.current = true;
+    setStatusMessage(null);
+    await engineInit();
+  }, [engineInit]);
+  const initAudio = useCallback(async () => {
+    if (soundElsewhere.current) return;
+    await takeSound();
+  }, [takeSound]);
   useEffect(() => {
     if (dashStreamAudioRef.current) dashStreamAudioRef.current.volume = muted ? 0 : volume;
   }, [volume, muted]);
@@ -483,7 +522,7 @@ export default function Dashboard() {
     looping: looping,
     onLoop: toggleLoop,
     loopBusy: loopBusy,
-    audio: { audioReady, initAudio, volume, setVolume, muted, toggleMute, vuL, vuR },
+    audio: { audioReady, initAudio: takeSound, volume, setVolume, muted, toggleMute, vuL, vuR },
     stationTz: stationTz,
     liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
   };

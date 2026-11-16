@@ -284,7 +284,7 @@ export default function ListenV2() {
           {/* Volume */}
           {userStarted && (audioReady || useStream) && (
             <div className="flex items-center gap-3 mt-6 w-full max-w-xs">
-              <button onClick={toggleMute} className="text-gray-400 hover:text-white text-lg w-8 transition" title={muted ? 'Unmute' : 'Mute'}>
+              <button onClick={toggleMute} className="text-gray-400 hover:text-white text-lg min-w-[44px] min-h-[44px] transition" title={muted ? 'Unmute' : 'Mute'}>
                 {muted ? (
                   <svg className="w-5 h-5 mx-auto" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12a4.5 4.5 0 00-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.94 8.94 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.26c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 003.69-1.81L19.73 21 21 19.73 4.27 3zM12 4L9.91 6.09 12 8.18V4z" /></svg>
                 ) : (
@@ -294,7 +294,7 @@ export default function ListenV2() {
               <input
                 type="range" min={0} max={1} step={0.01} value={volume}
                 onChange={(e) => setVolume(Number(e.target.value))}
-                className="v2-range flex-1"
+                className="v2-range flex-1 h-11"
               />
               <span className="text-gray-500 text-xs w-10 text-right tabular-nums">{Math.round(volume * 100)}%</span>
             </div>
@@ -354,7 +354,7 @@ export default function ListenV2() {
       <div className="v2-glass rounded-3xl p-6 mt-6">
         <button
           onClick={() => { setRequestOpen(!requestOpen); setReqResult(null); setReqError(''); }}
-          className="flex items-center gap-2 text-violet-300 hover:text-violet-200 font-semibold transition w-full"
+          className="flex items-center gap-2 min-h-[44px] text-violet-300 hover:text-violet-200 font-semibold transition w-full"
         >
           <svg className={`w-4 h-4 transition-transform duration-300 ${requestOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
