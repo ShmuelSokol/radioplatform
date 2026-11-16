@@ -54,3 +54,18 @@ class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     created_by_user = relationship("User", back_populates="assets")
     categories = relationship("Category", secondary=asset_categories, back_populates="assets", lazy="selectin")
     sponsor = relationship("Sponsor", lazy="noload")
+
+
+# Clips made for one moment (a dated weather report, an hour's time check). They air
+# only through the timed weather/time paths, never as random filler of their type.
+ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
+
+
+def fit_for_random_pick():
+    """SQL condition: an asset that may be drawn at random (not do-not-play, not a one-moment clip)."""
+    from sqlalchemy import or_
+
+    return or_(
+        Asset.category.is_(None),
+        Asset.category.notin_(("do_not_play", *ONE_MOMENT_CATEGORIES)),
+    )

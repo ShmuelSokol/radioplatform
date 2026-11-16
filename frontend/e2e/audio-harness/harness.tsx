@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useAudioEngine } from '../../src/hooks/useAudioEngine';
+import { nextCut } from '../../src/pages/admin/controlroom/timing';
 import { updatesHeld } from '../../src/lib/appUpdate';
 
 const audios: HTMLAudioElement[] = [];
@@ -31,9 +32,11 @@ w.__snap = () => audios.map((a, i) => ({
 function Harness() {
   const [s, set] = useState<any>(null);
   w.__set = set;
+  // Timed items in the queue, picked the way the control room picks them
+  const cut = s?.queue ? nextCut(s.queue) : null;
   const engine = useAudioEngine(
     s ? { id: s.id, title: s.id, artist: null, asset_type: 'music', category: null, duration: s.dur } : null,
-    0, !!s, null, null, 2000, 0, 0, s?.cross ?? 0, 0, s?.nextId ?? null, 0, 0, null, null, s?.startedAt ?? null,
+    0, !!s, cut?.preempt_at ?? null, cut?.asset_id ?? null, 2000, 0, 0, s?.cross ?? 0, 0, s?.nextId ?? null, 0, 0, null, null, s?.startedAt ?? null,
     s?.fade ?? null,
   );
   w.__listen = engine.initAudio;

@@ -601,3 +601,71 @@ async def test_exact_time_due_within_two_minutes_still_airs_once(
     await db_session.flush()
     await reconcile_spot_slots(db_session, station_id, now=now + timedelta(seconds=40))
     assert len(at_due(await _ad_slots(db_session, station_id))) == 1
+
+
+@pytest.mark.asyncio
+async def test_placeholder_test_spot_is_off_by_default(db_session: AsyncSession):
+    """With no spot schedules, the placeholder "KOL BRAMAH TEST SPONSOR" is not queued
+    unless the station asks for it, and slots it already holds are taken out."""
+    station = Station(id=uuid.uuid4(), name="KBR", timezone="UTC", is_active=True)
+    placeholder = Asset(id=uuid.uuid4(), title="KOL BRAMAH TEST SPONSOR", duration=39.0,
+                        file_path="test.mp3", asset_type="spot")
+    db_session.add_all([station, placeholder])
+    await db_session.flush()
+    queued = QueueEntry(
+        id=uuid.uuid4(), station_id=station.id, asset_id=placeholder.id, position=1,
+        status="pending", source="ad_slot",
+        preempt_at=datetime.now(UTC) + timedelta(minutes=20),
+    )
+    db_session.add(queued)
+    await db_session.commit()
+
+    async def run():
+        svc = QueueReplenishService(db_session, station.id)
+        svc.max_pos = 10
+        await svc._load_automation_config()
+        await svc._schedule_ad_slots()
+        await db_session.commit()
+
+    await run()
+    assert await _ad_slots(db_session, station.id) == []
+
+    station.automation_config = {"ad_slot_legacy_spot": True}
+    await db_session.commit()
+    await run()
+    assert len(await _ad_slots(db_session, station.id)) > 0
+
+
+@pytest.mark.asyncio
+async def test_dated_weather_reports_are_never_random_filler(db_session: AsyncSession):
+    """Old "Weather Report YYYY-MM-DD" clips (category weather_spot) and hourly time
+    checks must not be drawn when the queue is filled with any spot."""
+    from app.services.scheduling import SchedulingService
+
+    station = Station(id=uuid.uuid4(), name="KBR", timezone="UTC", is_active=True)
+    weather = Asset(id=uuid.uuid4(), title="Weather Report - 2026-05-18", duration=40.0,
+                    file_path="w.mp3", asset_type="spot", category="weather_spot")
+    clock = Asset(id=uuid.uuid4(), title="Time 3 PM", duration=5.0,
+                  file_path="t.mp3", asset_type="spot", category="time_announcement")
+    real = Asset(id=uuid.uuid4(), title="Community notice", duration=30.0,
+                 file_path="c.mp3", asset_type="spot", category="community")
+    db_session.add_all([station, weather, clock, real])
+    await db_session.commit()
+
+    svc = QueueReplenishService(db_session, station.id)
+    svc.max_pos = 0
+    svc.exclude_ids, svc.queued_ids = set(), set()
+    await svc._load_automation_config()
+    await svc._fill_content(300, asset_type="spot", category=None)
+    await db_session.commit()
+    rows = (await db_session.execute(
+        select(QueueEntry.asset_id).where(QueueEntry.station_id == station.id)
+    )).scalars().all()
+    assert rows and {str(a) for a in rows} == {str(real.id)}
+
+    picks = {str(await SchedulingService(db_session)._pick_asset_for_slot("spot", None, station.id))
+             for _ in range(10)}
+    assert picks == {str(real.id)}
+    # Asked for by name, a weather clip can still be picked
+    assert str(await SchedulingService(db_session)._pick_asset_for_slot(
+        "spot", "weather_spot", station.id)) == str(weather.id)

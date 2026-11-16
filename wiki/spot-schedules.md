@@ -12,7 +12,7 @@ A `SpotSchedule` row = "air this sponsor's asset N times in each chosen daypart,
 
 ## Things you would not guess from the code
 
-- **Legacy fallback is keyed on "no schedule rows at all".** A station with zero spot schedules keeps the old behaviour: the single asset titled `automation_config.ad_slot_asset_title` (default "KOL BRAMAH TEST SPONSOR") in every slot. As soon as one schedule row exists (even inactive), only scheduled spots air. Deleting the last schedule brings the test spot back.
+- **Legacy fallback is keyed on "no schedule rows at all".** A station with zero spot schedules can play the single asset titled `automation_config.ad_slot_asset_title` (default "KOL BRAMAH TEST SPONSOR") in every :15/:30/:45 slot, but only if it sets `ad_slot_legacy_spot = true`. As soon as one schedule row exists (even inactive), only scheduled spots air.
 - **The plan must be time-independent.** It is computed per whole local day, then filtered to the future. If you plan only "slots from now", placements shift every run and the queue churns.
 - **2-minute safety margin.** Reconcile never adds or deletes an entry within 2 minutes of air, so it cannot race the player.
 - **Playback is untouched.** Entries are written exactly like the legacy ad slots (soft preempt via `preempt_at`), so the player/engine does not know the difference.
@@ -25,7 +25,7 @@ Spacing rules between sponsors are still to come.
 
 ## Edge rules (added after review, 2026-11-15)
 
-- **Legacy test spot off switch**: `automation_config.ad_slot_legacy_spot = false` on a station stops the old one-spot-in-every-slot fallback, so deleting the last schedule leaves the slots empty instead of bringing "KOL BRAMAH TEST SPONSOR" back. Default is still on.
+- **Legacy test spot is off by default** (since 2026-11-15; it was airing on the live stations at night). `automation_config.ad_slot_legacy_spot = true` turns it on; otherwise each queue refill removes pending placeholder slots.
 - **Clock change nights**: wall-clock times that do not exist on a spring-forward night (02:xx) are not slots. Before this they collided with 03:xx in UTC and were dropped silently.
 - **Validation**: `start_date` after `end_date` is 422 (create and update, including against the stored other date). Explicit `null` for `asset_id`, `days_of_week`, `dayparts`, `plays_per_daypart`, `is_active` on PUT is 422; `name`, `station_id`, `start_date`, `end_date` may be cleared with null.
 - **Audio ownership**: a schedule can only use audio that is unowned or already belongs to the same sponsor (422 otherwise).

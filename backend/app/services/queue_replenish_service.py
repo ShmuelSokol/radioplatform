@@ -10,12 +10,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
 
-from app.models.asset import Asset
+from app.models.asset import Asset, fit_for_random_pick
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
@@ -374,6 +374,8 @@ class QueueReplenishService:
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
         if rule.category:
             query = query.where(Asset.category == rule.category)
+        else:
+            query = query.where(fit_for_random_pick())
         if self.exclude_ids:
             query = query.where(Asset.id.notin_(self.exclude_ids))
         query = self._apply_oldies_filter(query)
@@ -535,6 +537,8 @@ class QueueReplenishService:
             query = select(Asset).where(Asset.asset_type == asset_type)
             if category:
                 query = query.where(Asset.category == category)
+            else:
+                query = query.where(fit_for_random_pick())
             # Only exclude on first pass; allow repeats on subsequent passes
             if passes == 1 and self.exclude_ids:
                 query = query.where(Asset.id.notin_(self.exclude_ids))
@@ -792,21 +796,30 @@ class QueueReplenishService:
             self.max_pos = max(self.max_pos, reconciled["max_pos"])
             return
 
-        # Legacy behaviour (no spot schedules yet): one asset in every slot.
-        # Set automation_config.ad_slot_legacy_spot to false to turn it off for good,
-        # so deleting the last spot schedule does not bring the test spot back.
-        if self.automation_config.get("ad_slot_legacy_spot", True) is False:
-            return
+        # Legacy behaviour (no spot schedules yet): one placeholder spot in every slot.
+        # Off unless a station sets automation_config.ad_slot_legacy_spot = true: the
+        # placeholder ("KOL BRAMAH TEST SPONSOR") was airing on real stations.
         ad_title = self.automation_config.get("ad_slot_asset_title", "KOL BRAMAH TEST SPONSOR")
         result = await self.db.execute(
             select(Asset).where(Asset.title == ad_title).limit(1)
         )
         ad_asset = result.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if self.automation_config.get("ad_slot_legacy_spot", False) is not True:
+            if ad_asset:
+                # Take the placeholder out of the queue (only slots not yet on air)
+                await self.db.execute(
+                    delete(QueueEntry).where(
+                        QueueEntry.station_id == self.station_id,
+                        QueueEntry.status == "pending",
+                        QueueEntry.source == "ad_slot",
+                        QueueEntry.asset_id == ad_asset.id,
+                    )
+                )
+            return
         if not ad_asset:
             logger.warning("Ad asset '%s' not found", ad_title)
             return
-
-        now = datetime.now(timezone.utc)
 
         # Get existing ad_slot preempt times to avoid duplicates
         existing = await self.db.execute(

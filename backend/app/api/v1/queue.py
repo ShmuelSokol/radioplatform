@@ -978,7 +978,7 @@ async def _get_queue_impl(station_id, limit, db):
     entry_cols = (
         QueueEntry.id, QueueEntry.station_id, QueueEntry.asset_id, QueueEntry.position,
         QueueEntry.status, QueueEntry.started_at, QueueEntry.preempt_at,
-        QueueEntry.source, QueueEntry.timing_mode,
+        QueueEntry.source, QueueEntry.timing_mode, QueueEntry.hard_by,
     )
     asset_cols = (
         Asset.id, Asset.title, Asset.artist, Asset.duration, Asset.intro_seconds,
@@ -1247,6 +1247,9 @@ async def _get_queue_impl(station_id, limit, db):
             "estimated_start": est_start,
             "source": e.source,
             "preempt_at": e.preempt_at.isoformat() if e.preempt_at else None,
+            # The control-room player fades the song only for these (controlroom/timing.ts)
+            "hard_timed": bool(e.preempt_at) and not is_soft_timed(e),
+            "hard_by": e.hard_by.isoformat() if e.hard_by else None,
             "asset": {
                 "id": str(e.asset.id),
                 "title": e.asset.title,
