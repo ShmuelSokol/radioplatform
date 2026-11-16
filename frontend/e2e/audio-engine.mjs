@@ -141,6 +141,25 @@ const SCENARIOS = {
     },
     end: { src: 'c', minT: 2, maxT: 3.5 },
   },
+  // Control room Next: the next item is heard at once, before the server answers
+  // 0.6 s later with the same item, which must not restart or jump it
+  'next-heard-before-the-server-answers': {
+    start: { ...A, nextId: 'b' }, wait: 6, watch: 5,
+    change: (set, startA, nextNow) => {
+      nextNow('b', 0.5);
+      setTimeout(() => set({ ...B, nextId: 'c', startedAt: now(), fade: 0.5 }), 600);
+    },
+    audibleWithin: 0.45, noSeekOn: 'b', end: { src: 'b', minT: 4.3, maxT: 5.6 },
+  },
+  // The server moved somewhere else (another operator, a timed item): follow it
+  'next-ahead-then-server-differs': {
+    start: { ...A, nextId: 'b' }, wait: 6, watch: 5,
+    change: (set, startA, nextNow) => {
+      nextNow('b', 0.5);
+      setTimeout(() => set({ ...C, nextId: 'a', startedAt: now(), fade: 0.5 }), 600);
+    },
+    end: { src: 'c', minT: 3.5, maxT: 5 },
+  },
   // Next mid-song with the next item pre-loaded, announced straight away: the new item
   // starts from its top with no seek (a small seek repeated the opening in Safari)
   'next-starts-clean': {
@@ -190,7 +209,8 @@ async function run(name, sc) {
 
   const t0 = Date.now();
   await page.evaluate(() => { window.__seeks.length = 0; });
-  sc.change(set, startA);
+  const nextNow = (id, fade) => page.evaluate(([i, f]) => window.__nextNow(i, f), [id, fade]);
+  sc.change(set, startA, nextNow);
   let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, firstSilent = null, last = [];
   const target = sc.end?.src;
   while (Date.now() - t0 < sc.watch * 1000) {

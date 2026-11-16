@@ -69,7 +69,14 @@ export interface AudioEngineState {
   vuLevels: [number, number];
   audioReady: boolean;
   initAudio: () => Promise<void>;
+  /** Operator's Next: bring this item up here at once, before the server's answer
+   *  arrives. Listeners still change when the server announces it. */
+  playNextNow: (asset: AssetInfo, fadeSeconds: number | null) => void;
 }
+
+// How long a local Next waits for the server to announce the same item before the
+// player goes back to following the server
+const LOCAL_NEXT_CONFIRM_MS = 4000;
 
 export function useAudioEngine(
   nowPlayingAsset: AssetInfo | null,
@@ -97,6 +104,37 @@ export function useAudioEngine(
   // sent with the message that announces the change. null = the default quick fade.
   changeFadeSeconds: number | null = null,
 ): AudioEngineState {
+  // ── Operator's Next heard at once (control room) ──
+  // The item the operator moved to, played here before the server confirms it. While
+  // it stands, the player follows it instead of the server's now-playing.
+  const [localNext, setLocalNext] = useState<{
+    asset: AssetInfo; startedAt: string; cueIn: number; replayGainDb: number; fade: number | null; at: number;
+  } | null>(null);
+  const serverAssetId = nowPlayingAsset?.id ?? null;
+  const serverStartedMs = currentStartedAt ? new Date(currentStartedAt).getTime() : NaN;
+  useEffect(() => {
+    if (!localNext) return;
+    // The server announced a change made after the click: the same item (confirmed)
+    // or another one (the server chose differently, follow it)
+    if (serverAssetId === localNext.asset.id
+      || (isFinite(serverStartedMs) && serverStartedMs >= localNext.at - 1000)) {
+      setLocalNext(null);
+      return;
+    }
+    const t = setTimeout(() => setLocalNext(null), LOCAL_NEXT_CONFIRM_MS);
+    return () => clearTimeout(t);
+  }, [localNext, serverAssetId, serverStartedMs]);
+  if (localNext) {
+    nowPlayingAsset = localNext.asset;
+    currentStartedAt = localNext.startedAt;
+    currentCueIn = localNext.cueIn;
+    currentReplayGainDb = localNext.replayGainDb;
+    currentCrossStart = 0;
+    changeFadeSeconds = localNext.fade;
+    // What follows is unknown until the server answers (the old "next" is this item)
+    nextAssetId = null;
+  }
+
   const changeFadeRef = useRef<number | null>(changeFadeSeconds);
   changeFadeRef.current = changeFadeSeconds;
   const ctxRef = useRef<AudioContext | null>(null);
@@ -804,5 +842,19 @@ export function useAudioEngine(
     return () => window.removeEventListener('kbr-mix-over', onMixOver);
   }, [replayGainMultiplier]);
 
-  return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio };
+  const playNextNow = useCallback((asset: AssetInfo, fadeSeconds: number | null) => {
+    if (!ctxRef.current || ctxRef.current.state !== 'running') return; // not listening here
+    const now = Date.now();
+    setLocalNext({
+      asset,
+      startedAt: new Date(now).toISOString(),
+      // cue and loudness of the item the server said is next, when it is this one
+      cueIn: nextAssetIdRef.current === asset.id ? nextCueInRef.current : 0,
+      replayGainDb: nextAssetIdRef.current === asset.id ? nextReplayGainDbRef.current : 0,
+      fade: fadeSeconds,
+      at: now,
+    });
+  }, []);
+
+  return { volume, setVolume, muted, toggleMute, vuLevels, audioReady, initAudio, playNextNow };
 }

@@ -40,6 +40,8 @@ function Harness() {
     s?.fade ?? null,
   );
   w.__listen = engine.initAudio;
+  w.__nextNow = (id: string, fade: number | null) =>
+    engine.playNextNow({ id, title: id, artist: null, asset_type: 'music', category: null, duration: null }, fade);
   return null;
 }
 createRoot(document.getElementById('root')!).render(<Harness />);
