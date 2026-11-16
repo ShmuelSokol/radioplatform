@@ -71,9 +71,10 @@ export default function BugReporter() {
   }, [phase]);
 
   const { pathname } = useLocation();
-  // On a phone the control room's queue reaches the bottom-left corner, where the
-  // button would cover a row's insert button; there it lives in the menu instead.
-  const hideOnPhone = pathname === '/admin/dashboard';
+  // The control room fills the window to its edges: the floating button would cover
+  // a queue row's insert button on a phone and the cart's buttons on a computer. There
+  // it lives in the menu (phone) and in the status bar along the bottom (computer).
+  const hideFloating = pathname === '/admin/dashboard';
   const startRef = useRef<() => void>(() => {});
 
   const start = async () => {
@@ -148,7 +149,7 @@ export default function BugReporter() {
           onClick={start}
           title="Report a bug"
           aria-label="Report a bug"
-          className={`fixed left-3 bottom-24 z-[60] h-9 w-9 rounded-full ${hideOnPhone ? 'hidden md:flex' : 'flex'} bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden`}
+          className={`fixed left-3 bottom-24 z-[60] h-9 w-9 rounded-full ${hideFloating ? 'hidden' : 'flex'} bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden`}
         >
           <span aria-hidden>🐞</span>
         </button>

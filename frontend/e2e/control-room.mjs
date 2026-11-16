@@ -365,6 +365,25 @@ async function desktop(browser, width, height) {
   await page.getByText("Can't reach the station").first().waitFor({ timeout: 20000 }).catch(() => {});
   check(`${tag}: then says it cannot reach the station`, await page.getByText("Can't reach the station", { exact: false }).count() > 0);
   await page.getByLabel('Station').first().selectOption({ label: 'Kol Berama' });
+
+  // Drag bar between Up next and the lower pane: drag it down, Up next grows and stays after a reload
+  const qh = () => page.getByTestId('queue-area').evaluate(el => el.getBoundingClientRect().height);
+  const h0 = await qh();
+  const bar = await page.getByTestId('split-handle').boundingBox();
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + 120, { steps: 6 });
+  await page.mouse.up();
+  const h1 = await qh();
+  check(`${tag}: dragging the bar makes Up next taller`, h1 > h0 + 80, `${Math.round(h0)} -> ${Math.round(h1)}`);
+  await page.reload();
+  await page.getByTestId('split-handle').waitFor();
+  await page.waitForTimeout(300);
+  const h2 = await qh();
+  check(`${tag}: the chosen size is kept after a reload`, Math.abs(h2 - h1) < 12, `${Math.round(h1)} vs ${Math.round(h2)}`);
+  const sel = await page.getByLabel('Station').first().evaluate(el => getComputedStyle(el).backgroundColor);
+  check(`${tag}: station dropdown is grey like the console`, sel === 'rgb(192, 192, 192)', sel);
+  await page.getByTestId('split-handle').dblclick();
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 }
