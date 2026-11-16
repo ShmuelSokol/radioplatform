@@ -147,3 +147,15 @@ Not tested: real Icecast listeners at scale, real iPhone Safari on the stream.
 
 `liquidsoap_client.py` / `LIQUIDSOAP_*` (telnet push) is the earlier attempt and must stay off:
 it re-pushed the current track every 3 s and ran two clocks.
+
+## A change is announced before the queue is refilled (2026-11-16)
+
+`_check_advance_locked` used to top the queue up (`_replenish_queue`) before returning,
+so the caller's now-playing broadcast waited for the refill. At 09:00 on KBR Jerusalem
+the refill was slow: the hourly time check started at 09:00:51 but was announced at
+09:02:51; listeners played the next song from their pre-load meanwhile, then were
+pulled back. Now the refill runs afterwards in its own session (`_replenish_soon`),
+under a per-station refill lock, not the change lock (a slow refill must not hold the
+next change), and the item on air is announced again when it finishes, so "next"
+includes anything the refill added. Refills over 5 s log "queue refill took". Test:
+`backend/tests/test_announce_before_refill.py`.
