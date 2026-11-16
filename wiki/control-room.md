@@ -94,3 +94,9 @@ Tap targets on public pages need a real 44 px box (`min-h-[44px]`): checkers mea
 Safari throttles timers in a hidden tab and can leave its socket dead with no close event, so a control room left behind a locked screen showed an item that had ended minutes earlier. On `visibilitychange` back to visible after more than 5 s, `useNowPlayingWS` reads `/now-playing` at once and opens a fresh socket, and the Dashboard refetches the queue. `lib/appUpdate.ts` also takes a waiting release on return after 10 minutes away if nothing is actually sounding, even while a player is switched on (otherwise a held player kept an old release for hours).
 
 Native `<select>` on iPhone Safari ignores CSS height; the public station pickers use `.kbr-select` (`appearance: none`, 44 px, own arrow). The cloud test machine has no WebKit, so only the Mac can confirm it.
+
+## Drag bar and dropdowns
+
+On a computer, a drag bar (`data-testid="split-handle"`) sits between Up next and the lower pane (Songs, Played, Schedule, Live). Up next gets 15-85 % of the height. The choice is saved in localStorage `kbr-cr-split`; a double-click resets it to 60 %, and the arrow keys move it. Pointer events with `touch-action: none` make it work by touch (iPad). A phone shows one pane at a time, so there is nothing to split there.
+
+Every `select.qn-field` in the control room is drawn grey with a raised arrow (`appearance: none`; Safari shows its own white or blue control otherwise). The floating 🐞 button is hidden on the control room because it covered the cart's buttons; Report a bug sits in the status bar (computer) and the menu (phone).

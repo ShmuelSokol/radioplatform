@@ -18,6 +18,7 @@ import type { QueueDataLike } from '../../hooks/queueOptimistic';
 import type { AssetInfo } from '../../types';
 import TransportBar, { TransportButtons } from './controlroom/TransportBar';
 import type { TransportProps } from './controlroom/TransportBar';
+import { REPORT_BUG_EVENT } from '../../components/BugReporter';
 import QueuePanel from './controlroom/QueuePanel';
 import type { QueueRow } from './controlroom/QueuePanel';
 import { nextCut } from './controlroom/timing';
@@ -51,6 +52,11 @@ const MOBILE_TABS: Array<{ id: Pane; label: string; icon: string }> = [
 
 // Fade lengths the server uses for each Next button (queue.py SKIP_FADE_SECONDS)
 const SKIP_FADE_SECONDS: Record<SkipFade, number> = { hard: 0, fade: 0.5, soft: 3 };
+
+// Share of the height Up next gets above the lower pane (the old fixed 3:2)
+const SPLIT_DEFAULT = 0.6;
+const SPLIT_MIN = 0.15;
+const SPLIT_MAX = 0.85;
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -641,6 +647,33 @@ export default function Dashboard() {
       onPfl={pfl.toggle}
     />
   );
+  // Drag bar between Up next and the lower pane: the share of the height Up next gets
+  const splitBoxRef = useRef<HTMLDivElement>(null);
+  const [split, setSplitStored] = useStored<number>('kbr-cr-split', SPLIT_DEFAULT);
+  const [splitLive, setSplitLive] = useState<number | null>(null);
+  const clampSplit = (v: number) => Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, v));
+  const setSplit = (v: number) => { setSplitLive(null); setSplitStored(clampSplit(v)); };
+  const splitAt = (clientY: number) => {
+    const box = splitBoxRef.current?.getBoundingClientRect();
+    return box && box.height > 0 ? clampSplit((clientY - box.top) / box.height) : null;
+  };
+  const onSplitDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const v = splitAt(e.clientY);
+    if (v !== null) setSplitLive(v);
+  };
+  const onSplitMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (splitLive === null) return;
+    const v = splitAt(e.clientY);
+    if (v !== null) setSplitLive(v);
+  };
+  const onSplitUp = () => { if (splitLive !== null) setSplit(splitLive); };
+  const onSplitKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowUp') { e.preventDefault(); setSplit(split - 0.05); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSplit(split + 0.05); }
+  };
+  const splitShown = clampSplit(splitLive ?? split);
+
   const sidePanel = (tab: Pane) =>
     tab === 'library' ? libraryPanel
     : tab === 'live' ? <LivePanel stationId={stationId} stationTz={stationTz} />
@@ -670,9 +703,27 @@ export default function Dashboard() {
         /* ═══ Desktop, laid out like the old program: log over songs, buttons on the right, cart along the bottom ═══ */
         <>
           <div className="flex-1 min-h-0 flex">
-            <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-              <main className="flex-[3] min-h-0">{queuePanel}</main>
-              <div className="flex-[2] min-h-0 border-t-4 border-[#c0c0c0]">{sidePanel(sideTab)}</div>
+            <div ref={splitBoxRef} className="flex-1 min-w-0 min-h-0 flex flex-col">
+              <main className="min-h-0" data-testid="queue-area" style={{ flex: `${splitShown} 1 0` }}>{queuePanel}</main>
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Drag to make Up next taller or shorter"
+                aria-valuemin={Math.round(SPLIT_MIN * 100)}
+                aria-valuemax={Math.round(SPLIT_MAX * 100)}
+                aria-valuenow={Math.round(splitShown * 100)}
+                tabIndex={0}
+                title="Drag to make Up next taller or shorter (double-click to reset)"
+                data-testid="split-handle"
+                onPointerDown={onSplitDown}
+                onPointerMove={onSplitMove}
+                onPointerUp={onSplitUp}
+                onPointerCancel={onSplitUp}
+                onDoubleClick={() => setSplit(SPLIT_DEFAULT)}
+                onKeyDown={onSplitKey}
+                className="qn-splitter shrink-0 h-2 cursor-row-resize touch-none"
+              />
+              <div className="min-h-0" style={{ flex: `${1 - splitShown} 1 0` }}>{sidePanel(sideTab)}</div>
             </div>
             <aside className="w-28 xl:w-32 shrink-0 bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white" aria-label="Controls">
               <TransportButtons p={transport} stacked />
@@ -726,7 +777,11 @@ export default function Dashboard() {
 
       {isDesktop && (
         <footer className="shrink-0 h-5 px-2 flex items-center justify-between gap-4 bg-[#c0c0c0] border-t border-[#808080] text-[11px] text-black">
-          <span>Shortcuts: <b>N</b> next · <b>/</b> search · <b>Esc</b> cancel insert</span>
+          <span className="flex items-center gap-3">
+            <span>Shortcuts: <b>N</b> next · <b>/</b> search · <b>Esc</b> cancel insert</span>
+            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
+              className="underline hover:text-red-700">🐞 Report a bug</button>
+          </span>
           <span className="truncate">{station?.name ?? ''}{station?.timezone ? ` · ${station.timezone}` : ''}</span>
           <span className="truncate">{user?.email ?? ''}{user?.role ? ` (${user.role})` : ''}</span>
         </footer>
