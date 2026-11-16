@@ -116,6 +116,13 @@ export default function Dashboard() {
   const nextAsset = (nextEntryId !== undefined
     ? queueEntries.find(e => e.id === nextEntryId)
     : queueEntries.find(e => e.status === 'pending'))?.asset ?? null;
+  // What pressing Next plays right now. It differs from "up next" when a timed item
+  // (the :30 weather) is due by the end of the song but not yet: Next skips it.
+  const skipIdRaw = (queueData as { skip_entry_id?: string | null } | undefined)?.skip_entry_id;
+  const skipEntryId = skipIdRaw !== undefined ? skipIdRaw : nextEntryId;
+  const skipAsset = skipIdRaw !== undefined
+    ? queueEntries.find(e => e.id === skipIdRaw)?.asset ?? null
+    : nextAsset;
   const liveShow = (liveData?.shows ?? []).find(s => s.status === 'live' && (!stationId || s.station_id === stationId)) ?? null;
 
   // ── UI state ───────────────────────────────────────────────
@@ -389,8 +396,8 @@ export default function Dashboard() {
 
   // Next is heard here at once: the item the server will move to (it says which) is
   // brought up before the answer arrives; listeners change when the server announces it.
-  const nextNow = useRef({ nextAsset, nextEntryId, serverStartedAt });
-  nextNow.current = { nextAsset, nextEntryId, serverStartedAt };
+  const nextNow = useRef({ nextAsset: skipAsset, nextEntryId: skipEntryId, serverStartedAt });
+  nextNow.current = { nextAsset: skipAsset, nextEntryId: skipEntryId, serverStartedAt };
   const handleNext = useCallback((fade?: SkipFade) => {
     initAudio();
     const { nextAsset: upNext, nextEntryId: upNextId, serverStartedAt: onAirSince } = nextNow.current;
