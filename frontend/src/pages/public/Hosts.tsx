@@ -97,7 +97,7 @@ export default function Hosts() {
             Our DJs & Hosts
           </h1>
           <p className="text-gray-400 mt-2 text-sm">
-            Meet the voices behind Kol Bramah Radio
+            Meet the voices behind Kol B'ramah Radio
           </p>
         </div>
 
