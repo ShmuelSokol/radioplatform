@@ -179,7 +179,7 @@ radioplatform/
 | playback_service.py | Playback state management |
 | schedule_service.py | Schedule CRUD operations |
 | scheduling.py | Schedule resolution logic |
-| scheduler_engine.py | Background scheduling engine |
+| scheduler_engine.py | Background scheduling engine: advances each station's queue (or ticks the playout engine), live-show hard stops, blackout silence, dead-air recovery through the queue. Never plays anything beside the queue (see `wiki/streaming-architecture.md`, one player per station) |
 | queue_replenish_service.py | Auto-replenish playback queue |
 | schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
 | spot_schedule_service.py | Plans sponsor spots into clock slots and keeps pending `ad_slot` queue entries in step (see `wiki/spot-schedules.md`) |
@@ -384,7 +384,7 @@ Claude Code accessible over Telegram for remote development.
 | `TWILIO_VOICE_NUMBER` | Dedicated voice number for live call-ins | For live shows |
 | `LIVE_SHOW_HOLD_MUSIC_URL` | Public URL to hold music MP3 | For live shows |
 | `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks | For live shows |
-| `EMERGENCY_FALLBACK_CATEGORY` | Asset category for emergency fallback (default: "emergency") | For silence detection |
+| `EMERGENCY_FALLBACK_CATEGORY` | Unused since dead air restarts the queue instead (kept so old settings still load) | No |
 | `SILENCE_DETECTION_SECONDS` | Seconds of silence before alert (default: 30) | For silence detection |
 | `LIQUIDSOAP_ENABLED` | Enable Liquidsoap (remote VPS) | For streaming |
 | `LIQUIDSOAP_HOST` | VPS hostname for Liquidsoap telnet | For streaming |

@@ -5,6 +5,8 @@ Every frontend build writes `dist/version.json` and bakes the same id into the b
 `frontend/src/lib/appUpdate.ts` (started from `main.tsx`) polls `/version.json` every 60s and on tab focus. When the id differs, the tab reloads itself at the first free moment:
 
 - **never** while any audio element is playing or a microphone is live (it wraps `HTMLMediaElement.prototype.play` and `getUserMedia` to know, so new players are covered without registering anything);
+- **never** while a player is switched on, even in the gap between items: `holdUpdates()` returns a release function; Listen/ListenV2 hold from the Listen tap, `useAudioEngine` while `isPlaying` and its audio context is running (on the control room the station is nearly always on air, so holding on `isPlaying` alone kept operator tabs on an old release forever; with no click the context stays suspended). Checked by `e2e/audio-engine.mjs release-hold`;
+- not within 2 minutes of any audio (covers players that do not hold). Before 2026-11-16 a gap between items (decks paused while the 7 PM time/weather loaded) plus 30 s idle reloaded listener tabs, and the reloaded page stayed silent because browsers need a tap to start audio again;
 - not while a form field has focus;
 - then: tab hidden, or 30s without input, or the person changes route (`UpdateOnNavigation` in `App.tsx`).
 
@@ -15,7 +17,7 @@ Consequences to remember:
 - If the playout engine moves listeners to one stream, the rule still holds: a reload would cut the stream, so it waits.
 - If audio is ever played through Web Audio buffer sources instead of media elements, `isAudioActive()` will not see it; extend it then.
 
-Tested with Playwright fake clock against `vite preview`: no new release → no reload; idle → reload; playing → no reload and audio continues; after pause → reload; typing → no reload.
+Tested with Playwright fake clock against `vite preview`: no new release → no reload; idle → reload; playing → no reload and audio continues; paused 100 s (a gap) → no reload; paused 200 s → reload; typing → no reload.
 
 ## Server restarts (backend releases)
 

@@ -1587,23 +1587,49 @@ async def _skip_current_locked(
         except Exception:
             pass
 
-    if not refilled:
-        await _replenish_queue(db, station_id)
     if next_entry:
         next_entry.status = "playing"
         next_entry.started_at = datetime.now(timezone.utc)
         next_id = next_entry.id
         next_asset_id = next_entry.asset_id
         await db.commit()
+        # Listeners first: the new item goes out before anything else is done
         await _broadcast_now_playing_entry(db, station_id, next_id, fade_seconds)
+        if not refilled:
+            # Topping the queue up to 24 hours took most of Next's 2 s; it can wait
+            _replenish_soon(station_id)
         return {
             "message": "Skipped",
             "now_playing": str(next_asset_id),
             "queue": await _queue_after_action(db, station_id),
         }
 
+    if not refilled:
+        await _replenish_queue(db, station_id)
     await db.commit()
     return {"message": "Queue empty", "now_playing": None, "queue": await _queue_after_action(db, station_id)}
+
+
+_background: set[asyncio.Task] = set()
+
+
+def _replenish_soon(station_id) -> None:
+    """Top the queue up after the response, in its own session, under the same
+    lock as every track change. Failures are logged; the scheduler's next fill
+    covers them."""
+    async def run():
+        from app.db.engine import async_session_factory
+        try:
+            async with advance_lock(station_id):
+                async with async_session_factory() as session:
+                    await _replenish_queue(session, station_id)
+                    await session.commit()
+        except Exception as exc:
+            logger.warning("Queue top-up after Next failed for station %s: %s", station_id, exc)
+
+    task = asyncio.get_running_loop().create_task(run())
+    _background.add(task)
+    task.add_done_callback(_background.discard)
 
 
 async def _queue_after_action(db: AsyncSession, station_id) -> dict | None:
@@ -2033,19 +2059,40 @@ async def start_playback(
             logger.error("_replenish_queue failed during start: %s", exc, exc_info=True)
         return {"message": "Playout engine will start the next track", "now_playing": None}
 
-    # Fill the queue (schedule, rules, rotation; any music as a last resort) and start
+    started = await start_from_queue(db, station_id)
+    if started is None:
+        return {"message": "Queue empty — no music assets available", "now_playing": None}
+    return {"message": "Started", "now_playing": str(started.asset_id)}
+
+
+async def start_from_queue(db: AsyncSession, station_id) -> QueueEntry | None:
+    """Refill the queue (schedule, rules, rotation; any music as a last resort) and
+    start its next item. The Start button and the scheduler's dead-air recovery both
+    use this, so the queue stays the station's only player. If something started
+    meanwhile, that entry is returned and nothing else starts."""
+    async with advance_lock(station_id):
+        already = (await db.execute(
+            select(QueueEntry)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )).scalar_one_or_none()
+        if already is not None:
+            return already
+        return await _start_next_locked(db, station_id)
+
+
+async def _start_next_locked(db: AsyncSession, station_id) -> QueueEntry | None:
     next_entry = await _refill_for_next(db, station_id)
     if not next_entry:
         await db.commit()
-        return {"message": "Queue empty — no music assets available", "now_playing": None}
-
+        return None
     next_entry.status = "playing"
     next_entry.started_at = datetime.now(timezone.utc)
     started_id = next_entry.id
-    started_asset_id = next_entry.asset_id
     await db.commit()
     await _broadcast_now_playing_entry(db, station_id, started_id)
-    return {"message": "Started", "now_playing": str(started_asset_id)}
+    return next_entry
 
 
 

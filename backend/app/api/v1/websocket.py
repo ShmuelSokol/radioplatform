@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Dict, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -287,6 +288,7 @@ async def _cached_queue_now_playing(station_id: str, db=None) -> dict | None:
         hit = _join_cache.get(station_id)
         if hit and time.monotonic() - hit[0] < JOIN_CACHE_SECONDS:
             return hit[1]
+        generation = _np_generation.get(station_id, 0)
         payload = None
         if db is not None:
             payload = await _queue_now_playing(db, station_id)
@@ -294,7 +296,8 @@ async def _cached_queue_now_playing(station_id: str, db=None) -> dict | None:
             async for session in get_async_session():
                 payload = await _queue_now_playing(session, station_id)
                 break
-        if payload is not None:
+        # An announcement during the read means it may be the old song: don't keep it
+        if payload is not None and _np_generation.get(station_id, 0) == generation:
             _join_cache[station_id] = (time.monotonic(), payload)
         return payload
 
@@ -332,6 +335,20 @@ async def broadcast_now_playing_update(station_id: str, now_playing_data: dict):
     Helper function to broadcast now-playing updates to all connected clients.
     Called by the scheduling engine when playback changes.
     """
+    started = _parse_start(now_playing_data.get("started_at"))
+    latest = _latest_start.get(station_id)
+    if started is not None and latest is not None and started < latest:
+        # Something that started before what listeners already hear: a stale read
+        # (a scheduler tick that read the old song just before the change, then
+        # broadcast after it). Sending it would jump every listener back.
+        logger.warning(
+            "Dropped stale now_playing for station %s (started %s, on air since %s)",
+            station_id, started.isoformat(), latest.isoformat(),
+        )
+        return
+    if started is not None:
+        _latest_start[station_id] = started
+    _np_generation[station_id] = _np_generation.get(station_id, 0) + 1
     message = {"type": "now_playing", "data": now_playing_data}
     key = json.dumps(message, sort_keys=True, default=str)
     now = time.monotonic()
@@ -345,3 +362,20 @@ async def broadcast_now_playing_update(station_id: str, now_playing_data: dict):
 
 # station_id -> (last message sent, when)
 _last_now_playing: Dict[str, tuple[str, float]] = {}
+# station_id -> start time of the latest item announced (never goes backwards)
+_latest_start: Dict[str, datetime] = {}
+# station_id -> count of announcements, so a join-cache fill that raced one is not kept
+_np_generation: Dict[str, int] = {}
+
+
+def _parse_start(value) -> datetime | None:
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)

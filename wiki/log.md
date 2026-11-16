@@ -79,3 +79,7 @@ INGEST 2026-11-15 control-room.md The control-room browser player faded the song
 UPDATE 2026-11-15 spot-schedules.md legacy placeholder spot (KOL BRAMAH TEST SPONSOR) now off unless ad_slot_legacy_spot=true; pending placeholder slots are removed on refill
 INGEST 2026-11-15 hourly-slots.md dated weather reports (weather_spot) and time checks (time_announcement) were drawn as random spot filler (a May weather report aired in November); models/asset.py fit_for_random_pick() now keeps them out of every random pick unless the category is asked for by name
 UPDATE 2026-11-15 operator-actions.md Next/Fade/Soft, natural end and Start refill an empty queue (fallback to any music) instead of stopping.
+INGEST 2026-11-15 streaming-architecture.md one player per station: _check_station's old block player (now_playing + play_logs + WS) ran beside the queue; removed with _check_channel and the emergency jingle fallback; dead air restarts the queue
+UPDATE 2026-11-16 release-pickup.md a release no longer reloads a listener in the gap between items: holdUpdates() while a player is on, plus a 2-minute grace after any audio
+UPDATE 2026-11-16 release-pickup.md useAudioEngine holds releases only while its audio context is running, so a control room with sound off still updates; browser check e2e/audio-engine.mjs release-hold
+INGEST 2026-11-16 multi-station-load.md now_playing announcements never go backwards (stale tick after the precise advance made listeners jump back); join cache ignores raced reads

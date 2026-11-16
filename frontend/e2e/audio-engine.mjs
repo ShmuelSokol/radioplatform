@@ -204,10 +204,44 @@ async function run(name, sc) {
   await page.close();
 }
 
+// A new release must never reload a tab whose audio is really playing (the
+// browser would not restart it without a click), but a control room that only
+// shows the station, with sound never switched on, must still pick it up.
+async function releaseHold() {
+  for (const [label, gesture, expectHeld] of [
+    ['audio playing', true, true],
+    ['station on air, sound never switched on', false, false],
+  ]) {
+    const page = await browser.newPage();
+    // Headless Chromium lets audio start without a click, so act out the real
+    // rule: with no click, the page's audio context stays suspended.
+    if (!gesture) {
+      await page.addInitScript(() => {
+        const Real = window.AudioContext;
+        window.AudioContext = class extends Real {
+          constructor(...a) { super(...a); void this.suspend(); }
+          resume() { return Promise.resolve(); }
+        };
+      });
+    }
+    await page.route('**/__tone/*.wav', (r) => r.fulfill({ contentType: 'audio/wav', body: wav(...TONES.a) }));
+    await page.route('**/assets/*/audio-url', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/__tone/a.wav' }) }));
+    await page.goto(`${base}e2e/audio-harness/index.html`);
+    await page.waitForFunction(() => typeof window.__set === 'function');
+    await page.evaluate((x) => window.__set(x), { ...A, startedAt: now() });
+    await sleep(3000);
+    const held = await page.evaluate(() => window.__held());
+    const sounding = (await page.evaluate(() => window.__snap())).some((d) => d.playing);
+    check(`release hold: ${label}`, held === expectHeld, `held=${held}, deck playing=${sounding}`);
+    await page.close();
+  }
+}
+
 try {
   for (const [name, sc] of Object.entries(SCENARIOS)) {
     if (!only || only === name) await run(name, sc);
   }
+  if (!only || only === 'release-hold') await releaseHold();
 } finally {
   await browser.close();
   await server.close();
