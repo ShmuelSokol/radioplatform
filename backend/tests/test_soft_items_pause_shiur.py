@@ -284,3 +284,33 @@ async def test_engine_wait_station_keeps_soft_items_soft(client, db_session, eng
     await playout_engine.tick(db_session, st)
     assert engine.timed() == []
     assert (await _fresh(db_session, weather.id)).timing_mode == "soft"
+
+
+@pytest.mark.asyncio
+async def test_soft_item_turns_hard_ahead_so_it_starts_on_time(db_session):
+    """F-SOFTPAUSE-18: live on Jerusalem the weather was made hard only when due and
+    started on the next 3 s poll (+2.3 s) with no pre-load on the page. It now turns
+    hard 90 s ahead: the control room pre-loads it and the exact timer starts it."""
+    station, talk, (weather,), _ = await _setup(db_session, left=20 * 60, due_ago=-60)
+    on_air = await queue_module._check_advance(db_session, station.id)
+    assert on_air.asset_id == talk.id  # not due yet: the shiur plays on
+    row = next(e for e in await _pending(db_session, station.id) if e.asset_id == weather.id)
+    assert row.timing_mode == "hard"
+
+
+@pytest.mark.asyncio
+async def test_soft_item_far_ahead_is_left_soft(db_session):
+    """Two minutes ahead is beyond the look-ahead: nothing changes yet."""
+    station, talk, (weather,), _ = await _setup(db_session, left=20 * 60, due_ago=-120)
+    await queue_module._check_advance(db_session, station.id)
+    row = next(e for e in await _pending(db_session, station.id) if e.asset_id == weather.id)
+    assert row.timing_mode == "soft"
+
+
+@pytest.mark.asyncio
+async def test_ahead_rule_uses_time_left_when_due(db_session):
+    """Six minutes left now but the item is due in 80 s: under 5 min left by then, so it waits."""
+    station, talk, (weather,), _ = await _setup(db_session, left=6 * 60, due_ago=-80)
+    await queue_module._check_advance(db_session, station.id)
+    row = next(e for e in await _pending(db_session, station.id) if e.asset_id == weather.id)
+    assert row.timing_mode == "soft"

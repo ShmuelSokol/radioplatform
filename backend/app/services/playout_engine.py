@@ -633,7 +633,8 @@ async def _soft_items_during_long(db: AsyncSession, station, now, horizon) -> No
     if current is None or not long_items.is_long_form(current.asset):
         return
     if await _soft_items_pause_long(
-        db, station.id, current, long_items.policy(station), now, horizon=horizon
+        db, station.id, current, long_items.policy(station), now, horizon=horizon,
+        include_due=False,
     ):
         await db.commit()
 
