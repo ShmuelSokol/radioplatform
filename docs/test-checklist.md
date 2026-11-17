@@ -936,6 +936,7 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [ ] F-CR-TRANSPORT-33 Toasts: ok auto-hide 2.5 s, warn/error 6 s, ✕ dismisses | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::toasts "ok toast hides after about 2.5 s" + "warning toast stays about 6 s" + "✕ dismisses"
 - [ ] F-CR-TRANSPORT-34 Footer shows shortcuts, station + timezone, user email + role | sizes: desktop | n.a. | covered: e2e/control-room-actions.mjs::badges "footer shows shortcuts, station + timezone, user + role"
 - [ ] F-CR-TRANSPORT-35 Time & weather preview button ('Preview time & weather') plays time then weather clips off air only; 'No weather announcement' toast when none; error toast on failure | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::side "time & weather preview plays the time clip, nothing sent to air" + "No weather announcement"
+- [x] F-CR-TRANSPORT-36 A hard timed item (time check, hard block) due before the song on air ends: Remaining counts down to its time (not the file end), the label says "fades <time>", the progress bar fills toward the cut; a soft timed item changes nothing (Shmuel 2026-11-17 9:59 AM: "1:45 remaining" with the 10 AM time check 19 s away) | sizes: desktop, phone, phone sideways | both | covered: e2e/control-room-actions.mjs::cut (fixed: counted to the end of the file)
 
 ## Control room: Up next queue
 
