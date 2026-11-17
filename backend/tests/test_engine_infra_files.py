@@ -154,6 +154,36 @@ def test_setup_script_rules():
     assert "HTTPS:   NOT set up yet" in sh
 
 
+def test_setup_rerun_restarts_only_what_changed():
+    """Droplet, 2026-11-17: every rerun restarted Icecast and all engines at once. Two
+    Liquidsoap starts on one core left Jerusalem off air about 50 s and up to 7.6 s behind
+    ("We must catchup"). A rerun now checks a new script first, leaves unchanged engines
+    and Icecast running, and restarts changed engines one after the other."""
+    sh = _read("setup.sh")
+    # The new script is checked (at low priority, away from live HLS files) before it replaces the old
+    assert 'curl -fsSL "$RAW/radio.liq" -o /etc/kbr-engine/radio.liq.new' in sh
+    check = sh.index("liquidsoap --check /etc/kbr-engine/radio.liq.new")
+    assert "nice -n 19" in sh[check - 60:check]
+    assert "export KBR_HLS_DIR= KBR_DEBUG_WAV=" in sh[:check]
+    assert check < sh.index("mv /etc/kbr-engine/radio.liq.new /etc/kbr-engine/radio.liq")
+    failed = sh[check:sh.index("mv /etc/kbr-engine/radio.liq.new")]
+    assert "exit 1" in failed and "restart" not in failed.replace("Nothing was restarted", "")
+    # Icecast: its passwords are kept, so an unchanged file does not restart it
+    assert 'RELAY_PW="${RELAY_PW:-$(secret)}"' in sh and 'ADMIN_PW="${ADMIN_PW:-$(secret)}"' in sh
+    assert "$(secret)/" not in sh  # no fresh random value written into a file on each run
+    assert sh.count("systemctl restart icecast2") == 1
+    ice = sh.index("systemctl restart icecast2")
+    assert '"$ICE_SUM" != "$(cat "$APPLIED/icecast"' in sh[ice - 200:ice]
+    # Engines: skipped when unchanged and running; otherwise one at a time, waiting for an answer
+    assert sh.count('systemctl restart "kbr-engine@$SID"') == 1
+    restart = sh.index('systemctl restart "kbr-engine@$SID"')
+    skip = sh.index("unchanged, left running")
+    assert skip < restart and "continue" in sh[skip:restart]
+    assert 'engine_answers "$EPORT"' in sh[restart:restart + 300]
+    for part in ("/etc/kbr-engine/radio.liq", "kbr-engine@.service", '"$ENV_FILE"', '"$STATION_DIR/$SID.env"'):
+        assert part in sh[sh.index('ENG_SUM="$(sum_of'):skip]
+
+
 def test_no_secret_in_infra_files():
     """V1-24: nothing that looks like a generated secret (48 hex chars) is committed."""
     for f in INFRA.iterdir():
