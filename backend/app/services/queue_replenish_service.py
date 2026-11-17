@@ -17,7 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
 
-from app.models.asset import ONE_MOMENT_CATEGORIES, Asset, fit_for_random_pick, in_category, not_placeholder
+from app.models.asset import (
+    ONE_MOMENT_CATEGORIES,
+    Asset,
+    fit_for_random_pick,
+    in_category,
+    not_contract_audio,
+    not_placeholder,
+)
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
@@ -677,7 +684,7 @@ class QueueReplenishService:
     async def _find_assets_for_rule(self, rule: ScheduleRule) -> Sequence[Asset]:
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
         if rule.category:
-            query = query.where(in_category(rule.category), not_placeholder())
+            query = query.where(in_category(rule.category), not_placeholder(), not_contract_audio())
         else:
             query = query.where(fit_for_random_pick())
         if self.exclude_ids:
@@ -843,7 +850,7 @@ class QueueReplenishService:
 
             query = select(Asset).where(Asset.asset_type == asset_type)
             if category:
-                query = query.where(in_category(category), not_placeholder())
+                query = query.where(in_category(category), not_placeholder(), not_contract_audio())
             else:
                 query = query.where(fit_for_random_pick())
             # Only exclude on first pass; allow repeats on subsequent passes

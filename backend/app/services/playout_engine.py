@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -340,6 +340,21 @@ async def pick_next(
         QueueEntry.source.in_(OPERATOR_SOURCES),
         QueueEntry.asset_id.notin_(select(Asset.id).where(~not_placeholder())),
     )
+    # Nor a sponsorship whose contract no longer covers today (it waited past its
+    # last day behind a long item). Read-only here too; the queue refill marks them.
+    from app.models.station import Station
+    from app.services.spot_schedule_service import lapsed_contract_assets
+
+    station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+    lapsed = await lapsed_contract_assets(db, station, now) if station is not None else set()
+    if lapsed:
+        may_air = and_(
+            may_air,
+            or_(
+                QueueEntry.source.in_(OPERATOR_SOURCES),
+                QueueEntry.asset_id.notin_([uuid.UUID(x) for x in lapsed]),
+            ),
+        )
 
     def usable(entries):
         for e in entries:

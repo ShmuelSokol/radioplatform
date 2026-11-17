@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.asset import Asset, in_category, not_placeholder
+from app.models.asset import Asset, in_category, not_contract_audio, not_placeholder
 from app.models.program_block import ProgramBlock
 from app.models.queue_entry import QueueEntry
 from app.models.station import Station
@@ -212,7 +212,7 @@ class _Resolver:
         key = (asset_type, category)
         if key not in self.pools:
             stmt = select(Asset.id, Asset.title, Asset.duration).where(
-                Asset.asset_type == asset_type, not_placeholder()
+                Asset.asset_type == asset_type, not_placeholder(), not_contract_audio()
             )
             if category:
                 stmt = stmt.where(in_category(category))
