@@ -33,3 +33,4 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [air-watch](air-watch.md) — on-air self-check: late or missing time checks, dead air, engine drift, skipped timed items; alerts and ntfy
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when
 - [live-shows](live-shows.md) — how a live show goes on air without a broadcast server: mic relay, automation pause/resume, hard stop
+- [deploys](deploys.md) — what a merge to main publishes: website only for frontend changes, backend only for backend changes; how to check and force

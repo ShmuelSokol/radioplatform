@@ -343,3 +343,30 @@ async def test_block_sponsor_places_reach_the_queue_in_block_order(
     )
     assert plan.status_code == 200, plan.text
     assert {p["block"] for p in plan.json()["planned"]} == {"Weather Sponsors"}
+
+
+@pytest.mark.asyncio
+async def test_an_announcement_is_left_out_when_its_programme_is_missing(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """Jerusalem 2026-11-17: "Daf Yomi" was announced and then music played. A block's
+    earlier items (its announcement) are not queued when its programme, the last
+    recording, has nothing to play; time and weather still are."""
+    station, made = await _library(db_session)
+    await db_session.commit()
+    body = _block(
+        station, made,
+        items=[
+            {"kind": "asset", "asset_id": str(made["id"].id), "label": "Announcement"},
+            {"kind": "asset", "asset_id": str(uuid.uuid4()), "label": "Daf Yomi"},
+        ],
+    )
+    res = await client.post("/api/v1/program-blocks", json=body, headers=auth_headers)
+    assert res.status_code == 201, res.text
+    assert await _pending(db_session, station) == []
+    preview = await client.get(
+        f"/api/v1/program-blocks/preview?station_id={station.id}&hours=2", headers=auth_headers
+    )
+    run = preview.json()["occurrences"][0]
+    assert any("Announcement: left out" in p for p in run["problems"])
+    assert run["seconds"] == 0

@@ -321,6 +321,88 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
     return f"annotate:{annotations}:{url}"
 
 
+# ── Every item's own level before it is handed over ─────────────────────────
+# Items were analysed when the item before them went on air, while the engine asked
+# for them at that same moment (it pre-loads one track), so an item with no analysis
+# was handed over without its level and aired as loud or quiet as its file (Jerusalem
+# 2026-11-17 20:00Z: -19.9 to -10.6 LUFS). Now the item is analysed before it is
+# handed over (at most LEVEL_WAIT_SECONDS), and items coming up are analysed ahead.
+LEVEL_WAIT_SECONDS = 6.0
+LOOK_AHEAD_ITEMS = 3
+LOOK_AHEAD_TIMED = timedelta(minutes=15)
+_level_jobs: dict[str, asyncio.Task] = {}
+
+
+async def _analyse_alone(asset_id: str) -> None:
+    from app.db.session import async_session_factory
+    from app.services.audio_analysis_service import analyze_audio
+
+    async with async_session_factory() as own:
+        await analyze_audio(own, asset_id)
+        await own.commit()
+
+
+def _level_job(asset) -> asyncio.Task | None:
+    """The analysis of this item: started now if it needs one, at most once per process."""
+    from app.models.asset import needs_analysis
+    from app.services import upcoming_analysis
+
+    if not upcoming_analysis.ENABLED:  # off in tests
+        return None
+    if asset is None or not asset.file_path or (asset.asset_type or "").lower() == "silence":
+        return None
+    key = str(asset.id)
+    job = _level_jobs.get(key)
+    if job is None:
+        if not needs_analysis(asset):
+            return None
+        if len(_level_jobs) > 2000:
+            for k in [k for k, t in _level_jobs.items() if t.done()][:1000]:
+                _level_jobs.pop(k, None)
+        job = asyncio.get_running_loop().create_task(_analyse_alone(key))
+        _level_jobs[key] = job
+    return job
+
+
+async def ensure_level(db: AsyncSession, entry: QueueEntry, wait: float = LEVEL_WAIT_SECONDS) -> None:
+    """Give `entry`'s item its analysis (level, cue points) before it is handed over.
+    Waits at most `wait` seconds; a slower analysis carries on and serves the next airing."""
+    job = _level_job(entry.asset)
+    if job is None:
+        return
+    if not job.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(job), wait)
+        except asyncio.TimeoutError:
+            logger.warning("Analysis of %s not ready in %.0f s; handed over without its level",
+                           entry.asset_id, wait)
+            return
+        except Exception:
+            pass
+    if job.done() and not job.cancelled() and job.exception() is None:
+        await db.refresh(entry.asset, ["metadata_extra"])
+
+
+async def _analyse_ahead(db: AsyncSession, station_id, now: datetime) -> None:
+    """Start the analysis of the next few items and of timed items due soon."""
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now + LOOK_AHEAD_TIMED),
+        )
+        .order_by(QueueEntry.preempt_at.isnot(None).desc(), QueueEntry.preempt_at, QueueEntry.position)
+        .limit(LOOK_AHEAD_ITEMS + 10)
+    )
+    entries = res.unique().scalars().all()
+    timed = [e for e in entries if e.preempt_at is not None]
+    music = [e for e in entries if e.preempt_at is None][:LOOK_AHEAD_ITEMS]
+    for e in timed + music:
+        _level_job(e.asset)
+
+
 # ── Choosing the next entry (same rules as the time-based engine in queue.py) ──
 
 
@@ -498,6 +580,7 @@ async def handle_next(
                 logger.warning("Replenish on empty queue failed: %s", e)
             if entry is None:
                 break
+        await ensure_level(db, entry)
         uri = build_uri(entry, "main")
         if uri:
             entry_id, asset_id = str(entry.id), str(entry.asset_id)
@@ -1148,6 +1231,11 @@ async def tick(db: AsyncSession, station) -> None:
         await db.rollback()
         await db.refresh(station)
     await _hand_over_timed(db, station_id, state, now, horizon)
+    try:
+        await _analyse_ahead(db, station_id, now)
+    except Exception as e:
+        logger.warning("Analysing upcoming items for station %s failed: %s", station_id, e)
+        await db.rollback()
 
     # Forget timed entries that no longer exist as pending (played, removed)
     if state.timed_sent:
