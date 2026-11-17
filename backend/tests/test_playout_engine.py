@@ -695,3 +695,42 @@ async def test_next_never_hands_out_what_just_started(client, db_session, engine
     state.recent_started.append(str(entries[0].id))
     nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
     assert nxt.json()["entry_id"] == str(entries[1].id)
+
+
+@pytest.mark.asyncio
+async def test_a_due_soft_item_replaces_the_cued_song_near_the_end(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    now = datetime.now(UTC)
+    on_air = await db_session.get(QueueEntry, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = now - timedelta(seconds=160)  # 20 s left
+    await db_session.commit()
+    nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert nxt.json()["entry_id"] == str(entries[1].id)
+    soft = await db_session.get(QueueEntry, entries[3].id)
+    soft.source = "ad_slot"
+    soft.preempt_at = now - timedelta(seconds=1)
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+
+    assert [path for path, _ in sent].count("/flush") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_reshuffled_song_keeps_the_cued_one_near_the_end(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    now = datetime.now(UTC)
+    on_air = await db_session.get(QueueEntry, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = now - timedelta(seconds=160)  # 20 s left
+    await db_session.commit()
+    nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert nxt.json()["entry_id"] == str(entries[1].id)
+    moved = await db_session.get(QueueEntry, entries[3].id)
+    moved.position = 0
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+
+    assert "/flush" not in [path for path, _ in sent]

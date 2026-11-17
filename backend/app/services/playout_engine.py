@@ -748,7 +748,15 @@ async def _flush_if_head_changed(db: AsyncSession, station_id, state: EngineStat
     )
     current = res.unique().scalars().first()
     end = _airs_until(current) if current is not None else None
-    if end is not None and (end - now).total_seconds() < KEEP_CUED_LAST_SECONDS:
+    # A timed item that is due now (a :15 sponsorship, a block that waited for the song)
+    # always takes the place of the pre-loaded song: it is short, and waiting would slip
+    # it a whole song
+    due_timed = (
+        desired is not None
+        and desired.preempt_at is not None
+        and (desired.preempt_at if desired.preempt_at.tzinfo else desired.preempt_at.replace(tzinfo=UTC)) <= now
+    )
+    if not due_timed and end is not None and (end - now).total_seconds() < KEEP_CUED_LAST_SECONDS:
         return
     state.last_auto_flush = mono
     logger.info(
