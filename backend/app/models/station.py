@@ -34,7 +34,12 @@ class Station(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Protected (the FM feed): only admins and staff assigned to it by name may operate it.
     protected: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
-    channels = relationship("ChannelStream", back_populates="station", lazy="selectin")
+    # Deleted with the station (the database cascades too): without this the loaded
+    # channels were set to station_id NULL and deleting any station with a channel failed
+    channels = relationship(
+        "ChannelStream", back_populates="station", lazy="selectin",
+        cascade="all, delete-orphan", passive_deletes=True,
+    )
     schedule_entries = relationship("ScheduleEntry", back_populates="station", lazy="noload")
     play_logs = relationship("PlayLog", back_populates="station", lazy="noload")
     schedules = relationship("Schedule", back_populates="station", lazy="noload")

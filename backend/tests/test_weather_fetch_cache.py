@@ -7,6 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import weather_service
 
+
+
+@pytest.fixture(autouse=True)
+def _weather_key(monkeypatch):
+    """These tests are about a configured key; without one nothing is fetched at all."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "OPENWEATHERMAP_API_KEY", "test-only")
+
+
 SAMPLE = {"temp_f": 50, "description": "clear sky", "wind_speed_mph": 5, "wind_direction": "north",
           "humidity": 40, "forecast": []}
 

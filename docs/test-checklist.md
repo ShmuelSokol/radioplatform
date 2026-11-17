@@ -239,14 +239,14 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-HOLIDAYS-2 `POST /holidays` [require_manager] create holiday | modes: both | covered: tests/test_holidays.py
 - [ ] B-HOLIDAYS-3 `PUT /holidays/{holiday_id}` [require_manager] update holiday | modes: both | covered: tests/test_holidays.py
 - [ ] B-HOLIDAYS-4 `DELETE /holidays/{holiday_id}` [require_manager] delete holiday | modes: both | covered: tests/test_holidays.py
-- [ ] B-HOLIDAYS-5 `POST /holidays/preview` [require_manager] Preview auto-generated blackout windows without saving to DB. | modes: both | NOT COVERED
+- [x] B-HOLIDAYS-5 `POST /holidays/preview` [require_manager] Preview auto-generated blackout windows without saving to DB. | modes: both | covered: tests/test_holiday_generation_endpoints.py::test_preview_lists_windows_and_saves_nothing
 - [ ] B-HOLIDAYS-6 `POST /holidays/auto-generate` [require_manager] Auto-generate Shabbos & Yom Tov blackout windows based on station location. | modes: both | covered: partial (tests/test_station_write_permissions.py::test_blackouts_follow_station_permissions: station check only)
-- [ ] B-HOLIDAYS-7 ↳ Shabbos/Yom Tov windows from station location (candle-lighting/havdalah) | modes: both | NOT COVERED
-- [ ] B-HOLIDAYS-8 `POST /holidays/ensure-silence-asset` [require_manager] Ensure a silence audio asset exists. Creates one via FFmpeg if needed. | modes: both | NOT COVERED
-- [ ] B-HOLIDAYS-9 ↳ creates silence asset via FFmpeg if missing | modes: n.a. | NOT COVERED
+- [x] B-HOLIDAYS-7 ↳ Shabbos/Yom Tov windows from station location (candle-lighting/havdalah) | modes: both | covered: tests/test_holiday_generation_endpoints.py::test_auto_generate_uses_the_stations_own_sunset, ::test_second_station_in_the_same_town_gets_its_own_shabbos (FIXED: the endpoint's duplicate check ignored which station a window covers, so a second station in the same area got no Shabbos at all), ::test_moving_a_station_moves_its_shabbos (BUG xfail: windows made for the old location stay after the station's latitude/longitude change)
+- [x] B-HOLIDAYS-8 `POST /holidays/ensure-silence-asset` [require_manager] Ensure a silence audio asset exists. Creates one via FFmpeg if needed. | modes: both | covered: tests/test_holiday_generation_endpoints.py::test_ensure_silence_asset_makes_it_once
+- [x] B-HOLIDAYS-9 ↳ creates silence asset via FFmpeg if missing | modes: n.a. | covered: tests/test_holiday_generation_endpoints.py::test_ensure_silence_asset_makes_it_once, ::test_ensure_silence_asset_reports_ffmpeg_failure
 
 ### icecast.py (prefix `/icecast`)
-- [ ] B-ICECAST-1 `GET /icecast/status` [require_admin] Get Icecast configuration status. | modes: n.a. | NOT COVERED
+- [x] B-ICECAST-1 `GET /icecast/status` [require_admin] Get Icecast configuration status. | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_icecast_status_and_start_follow_icecast_host
 - [ ] B-ICECAST-2 `POST /icecast/{station_id}/start` [require_admin] Start Icecast OTA stream for a station. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ICECAST-3 `POST /icecast/{station_id}/stop` [require_admin] Stop Icecast OTA stream for a station. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 
@@ -255,8 +255,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-LISTENERS-2 ↳ new session created with geo lookup; rejoin within window reuses session | modes: both | covered: tests/test_listeners_live.py
 - [ ] B-LISTENERS-3 `POST /listeners/disconnect` [PUBLIC] Called when a listener stops — finalizes the session and drops it from the live count. | modes: both | covered: tests/test_listeners_live.py
 - [ ] B-LISTENERS-4 `POST /listeners/leave` [PUBLIC] Same as /disconnect, for navigator.sendBeacon when the page closes. | modes: both | covered: tests/test_listeners_live.py
-- [ ] B-LISTENERS-5 `WEBSOCKET /listeners/ws` [PUBLIC] Admin pages keep this open and refetch /live when told something changed. | modes: both | NOT COVERED
-- [ ] B-LISTENERS-6 ↳ admin watchers told to refetch on change; dead socket dropped | modes: n.a. | NOT COVERED
+- [x] B-LISTENERS-5 `WEBSOCKET /listeners/ws` [PUBLIC] Admin pages keep this open and refetch /live when told something changed. | modes: both | covered: tests/test_admin_sockets.py::test_listener_watchers_told_to_refetch_and_dead_ones_dropped, ::test_listener_watcher_pinged_when_quiet
+- [x] B-LISTENERS-6 ↳ admin watchers told to refetch on change; dead socket dropped | modes: n.a. | covered: tests/test_admin_sockets.py::test_listener_watchers_told_to_refetch_and_dead_ones_dropped
 - [ ] B-LISTENERS-7 `GET /listeners/live` [require_manager] Current active listeners across all stations, grouped by station + region. | modes: both | covered: tests/test_listeners_live.py
 - [ ] B-LISTENERS-8 `GET /listeners/today` [require_manager] Today's listener stats: total sessions, unique listeners, total minutes. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
 - [ ] B-LISTENERS-9 ↳ total sessions, unique, minutes, peak concurrent | modes: n.a. | covered: partial (tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads: answers, values not checked)
@@ -433,14 +433,14 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 ### reviews.py (prefix `/reviews`)
 - [ ] B-REVIEWS-1 `POST /reviews/queues` [require_manager] create queue | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-REVIEWS-2 `GET /reviews/queues` [require_staff] list queues | modes: n.a. | covered: tests/test_role_access.py
-- [ ] B-REVIEWS-3 `GET /reviews/queues/{queue_id}` [require_staff] get queue | modes: n.a. | NOT COVERED
-- [ ] B-REVIEWS-4 `GET /reviews/queues/{queue_id}/items` [require_staff] list queue items | modes: n.a. | NOT COVERED
-- [ ] B-REVIEWS-5 `GET /reviews/queues/{queue_id}/next` [require_staff] Get the next unreviewed item and assign to current user. | modes: n.a. | NOT COVERED
+- [x] B-REVIEWS-3 `GET /reviews/queues/{queue_id}` [require_staff] get queue | modes: n.a. | covered: tests/test_review_next_reviewers.py::test_queue_and_items_reads, tests/test_review_queues.py::test_queue_progress_and_audit
+- [x] B-REVIEWS-4 `GET /reviews/queues/{queue_id}/items` [require_staff] list queue items | modes: n.a. | covered: tests/test_review_next_reviewers.py::test_queue_and_items_reads
+- [x] B-REVIEWS-5 `GET /reviews/queues/{queue_id}/next` [require_staff] Get the next unreviewed item and assign to current user. | modes: n.a. | covered: tests/test_review_next_reviewers.py::test_two_reviewers_never_get_the_same_item, tests/test_review_queues.py::test_next_claims_first_pending
 - [ ] B-REVIEWS-6 `PATCH /reviews/items/{item_id}` [require_staff] update item | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-REVIEWS-7 `POST /reviews/queues/{queue_id}/batch-update` [require_manager] batch update | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
-- [ ] B-REVIEWS-8 `GET /reviews/assets/{asset_id}/history` [require_staff] get asset history | modes: n.a. | NOT COVERED
+- [x] B-REVIEWS-8 `GET /reviews/assets/{asset_id}/history` [require_staff] get asset history | modes: n.a. | covered: tests/test_review_queues.py::test_history_and_comments
 - [ ] B-REVIEWS-9 `POST /reviews/assets/{asset_id}/comment` [require_staff] add comment | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
-- [ ] B-REVIEWS-10 `GET /reviews/queues/{queue_id}/activity` [require_staff] get queue activity | modes: n.a. | NOT COVERED
+- [x] B-REVIEWS-10 `GET /reviews/queues/{queue_id}/activity` [require_staff] get queue activity | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_queue_activity_lists_this_queues_decisions
 
 ### rules.py (prefix `/rules`)
 - [ ] B-RULES-1 `GET /rules` [require_staff] list rules | modes: n.a. | covered: tests/test_role_access.py
@@ -493,8 +493,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SITERELEAS-5 ↳ scheduled push at time; cancel push; tabs reload after their audio ends | modes: n.a. | covered: tests/test_site_release.py
 - [ ] B-SITERELEAS-6 `DELETE /site-release/push` [require_admin] cancel push | modes: n.a. | covered: tests/test_site_release.py
 - [ ] B-SITERELEAS-7 `GET /site-release/tabs` [require_admin] Every open tab of the site right now: its release, screen and whether it plays audio. | modes: n.a. | covered: tests/test_site_release.py
-- [ ] B-SITERELEAS-8 `WEBSOCKET /ws/site` [PUBLIC] site socket | modes: n.a. | NOT COVERED
-- [ ] B-SITERELEAS-9 ↳ tab registers with info (cleaned), receives release state; silent tab expires | modes: n.a. | NOT COVERED
+- [x] B-SITERELEAS-8 `WEBSOCKET /ws/site` [PUBLIC] site socket | modes: n.a. | covered: tests/test_admin_sockets.py::test_site_tab_gets_release_state_and_shows_cleaned_in_tab_list
+- [x] B-SITERELEAS-9 ↳ tab registers with info (cleaned), receives release state; silent tab expires | modes: n.a. | covered: tests/test_admin_sockets.py::test_site_tab_gets_release_state_and_shows_cleaned_in_tab_list, ::test_silent_site_tab_expires
 
 ### song_requests.py (prefix `/song-requests`)
 - [ ] B-SONGREQUES-1 `POST /song-requests` [PUBLIC] Public: submit a song request with fuzzy matching and auto-approval. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
@@ -546,19 +546,19 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 ### stations.py (prefix `/stations`)
 - [ ] B-STATIONS-1 `POST /stations` [require_manager] create | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
 - [ ] B-STATIONS-2 ↳ manager+ only; dj/viewer/sponsor 403 | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix
-- [ ] B-STATIONS-3 ↳ timezone, lat/lon, automation_config saved; new station gets queue on next replenish | modes: both | NOT COVERED
+- [x] B-STATIONS-3 ↳ timezone, lat/lon, automation_config saved; new station gets queue on next replenish | modes: both | covered: tests/test_station_changes_on_air.py::test_new_station_settings_saved_and_it_goes_on_air
 - [ ] B-STATIONS-4 `GET /stations` [PUBLIC] list all | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
-- [ ] B-STATIONS-5 `GET /stations/geocode` [require_manager] Search for cities by name using OpenStreetMap Nominatim. Returns up to 5 results. | modes: n.a. | NOT COVERED
-- [ ] B-STATIONS-6 ↳ Nominatim lookup returns <=5 results; upstream failure handled | modes: n.a. | NOT COVERED
+- [x] B-STATIONS-5 `GET /stations/geocode` [require_manager] Search for cities by name using OpenStreetMap Nominatim. Returns up to 5 results. | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_city_search_returns_places_with_time_zones
+- [x] B-STATIONS-6 ↳ Nominatim lookup returns <=5 results; upstream failure handled | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_city_search_returns_places_with_time_zones
 - [ ] B-STATIONS-7 `GET /stations/{station_id}` [PUBLIC] get one | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
 - [ ] B-STATIONS-8 `PUT /stations/{station_id}` [require_manager] update | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
 - [ ] B-STATIONS-9 ↳ non-admin cannot toggle `protected` (403) | modes: n.a. | covered: tests/test_station_permissions.py
 - [ ] B-STATIONS-10 ↳ manager not assigned to station gets 403 | modes: n.a. | covered: tests/test_station_permissions.py
-- [ ] B-STATIONS-11 ↳ changing automation_config (weather_region, spot_timing, timed_during_long_items...) takes effect at next replenish | modes: both | NOT COVERED
-- [ ] B-STATIONS-12 ↳ changing timezone moves hourly time clips to the new local hour (_drop_wrong_hour_announcements) | modes: both | NOT COVERED
+- [x] B-STATIONS-11 ↳ changing automation_config (weather_region, spot_timing, timed_during_long_items...) takes effect at next replenish | modes: both | covered: tests/test_station_changes_on_air.py::test_automation_config_change_takes_effect_at_next_refill
+- [x] B-STATIONS-12 ↳ changing timezone moves hourly time clips to the new local hour (_drop_wrong_hour_announcements) | modes: both | covered: tests/test_station_changes_on_air.py::test_timezone_change_moves_time_checks_to_the_new_local_hour
 - [ ] B-STATIONS-13 `DELETE /stations/{station_id}` [require_manager] delete | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
 - [ ] B-STATIONS-14 ↳ protected station: only admin may delete | modes: n.a. | covered: tests/test_station_permissions.py
-- [ ] B-STATIONS-15 ↳ delete cascades queue/schedules/now-playing without orphan errors in scheduler loop | modes: both | NOT COVERED
+- [x] B-STATIONS-15 ↳ delete cascades queue/schedules/now-playing without orphan errors in scheduler loop | modes: both | covered: tests/test_rule_fill_and_station_delete.py::test_deleting_a_station_removes_its_rows_and_the_scheduler_carries_on (FIXED: deleting a station that had a channel stream failed with a server error; the loaded channels were set to station_id NULL instead of deleted)
 
 ### streams.py (prefix `/stations`)
 - [ ] B-STREAMS-1 `GET /stations/{station_id}/stream` [PUBLIC] stream info | modes: both | covered: tests/test_stations.py
@@ -582,10 +582,10 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-USERS-11 `PATCH /users/me/preferences` [get_current_user] update my preferences | modes: n.a. | covered: tests/test_admin_crud.py::test_users_round_trip_preferences_and_hosts
 
 ### weather_readouts.py (prefix `/weather-readouts`)
-- [ ] B-WEATHERREA-1 `GET /weather-readouts` [require_staff] list readouts | modes: both | NOT COVERED
+- [x] B-WEATHERREA-1 `GET /weather-readouts` [require_staff] list readouts | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_readout_list_get_and_template_preview
 - [ ] B-WEATHERREA-2 `POST /weather-readouts` [require_manager] create readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
-- [ ] B-WEATHERREA-3 `GET /weather-readouts/template-preview` [require_staff] template preview | modes: both | NOT COVERED
-- [ ] B-WEATHERREA-4 `GET /weather-readouts/{readout_id}` [require_staff] get readout | modes: both | NOT COVERED
+- [x] B-WEATHERREA-3 `GET /weather-readouts/template-preview` [require_staff] template preview | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_readout_list_get_and_template_preview, ::test_readout_pages_say_weather_is_not_set_up
+- [x] B-WEATHERREA-4 `GET /weather-readouts/{readout_id}` [require_staff] get readout | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_readout_list_get_and_template_preview
 - [ ] B-WEATHERREA-5 `PATCH /weather-readouts/{readout_id}` [require_manager] update readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
 - [ ] B-WEATHERREA-6 `POST /weather-readouts/{readout_id}/regenerate` [require_manager] regenerate readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
 - [ ] B-WEATHERREA-7 `POST /weather-readouts/{readout_id}/queue` [require_manager] queue readout | modes: both | covered: tests/test_station_write_permissions.py::test_queuing_a_weather_readout_needs_the_station (BUG fixed: no station check)
@@ -604,10 +604,10 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-WEATHERSPO-9 ↳ re-upload realigns already queued time clips (_realign_time_clips) | modes: both | covered: tests/test_time_clip_regions.py
 
 ### websocket.py
-- [ ] B-WEBSOCKET-1 `WEBSOCKET /ws/alerts` [PUBLIC] WebSocket endpoint for real-time alert notifications to admin clients. | modes: both | NOT COVERED
-- [ ] B-WEBSOCKET-2 `WEBSOCKET /ws/now-playing/{station_id}` [PUBLIC] websocket now playing | modes: both | NOT COVERED
+- [x] B-WEBSOCKET-1 `WEBSOCKET /ws/alerts` [PUBLIC] WebSocket endpoint for real-time alert notifications to admin clients. | modes: both | covered: tests/test_websocket_auth.py::test_alerts_socket_refuses_anonymous_and_non_managers, ::test_alerts_socket_lets_managers_listen, ::test_alert_broadcast_reaches_only_signed_in_sockets
+- [x] B-WEBSOCKET-2 `WEBSOCKET /ws/now-playing/{station_id}` [PUBLIC] websocket now playing | modes: both | covered: tests/test_now_playing_socket.py (join cache, ping/pong, slow and failed listeners dropped, first message), tests/test_websocket_auth.py::test_now_playing_socket_route_is_public
 - [ ] B-WEBSOCKET-3 ↳ receives now_playing on every change (incl. engine started reports), stream_url field | modes: both | covered: tests/test_now_playing_broadcast.py
-- [ ] B-WEBSOCKET-4 ↳ mix_over and fade_seconds messages delivered | modes: browser | NOT COVERED
+- [x] B-WEBSOCKET-4 ↳ mix_over and fade_seconds messages delivered | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_mix_over_and_fade_reach_the_browser_players
 ## 2. Background jobs and periodic behaviour
 
 ### 2a. Scheduler loop (`services/scheduler_engine.py`, every 3 s, leader-only)
@@ -658,12 +658,12 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-45 Dead air timer reset when something plays; not counted during blackout | modes: browser | covered: tests/test_scheduler_jobs.py::test_dead_air_timer_resets_and_ignores_blackouts
 - [ ] B-JOB-46 Engine station: no backend dead-air recovery (engine emergency playlist instead) | modes: engine | NOT COVERED
 - [ ] B-JOB-47 Daily: holiday coverage extended when < 365 days ahead or no window in next 7 days (`_maybe_extend_holidays`) | modes: both | covered: tests/test_scheduler_jobs.py::test_daily_holiday_extension_is_per_station (per station, fixed)
-- [ ] B-JOB-48 Daily weather readout generated at station local generate_time (default 06:00) when weather_readout.enabled | modes: both | NOT COVERED
-- [ ] B-JOB-49 Weather readout auto-queued at queue_time when weather_readout.auto_queue | modes: both | NOT COVERED
-- [ ] B-JOB-50 Legacy Liquidsoap health check / push / skip only when LIQUIDSOAP_ENABLED (must stay off) | modes: browser | NOT COVERED
+- [x] B-JOB-48 Daily weather readout generated at station local generate_time (default 06:00) when weather_readout.enabled | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_daily_readout_made_at_the_stations_generate_time, ::test_failed_readout_is_tried_again_the_same_day (BUG xfail: a failed fetch at generate_time still marks the day as done, so no readout that day)
+- [x] B-JOB-49 Weather readout auto-queued at queue_time when weather_readout.auto_queue | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_recorded_readout_queued_at_its_time_when_auto_queue, ::test_tomorrows_readout_waits_for_tomorrow (BUG xfail: readout_date is not checked, so tomorrow's readout is queued tonight)
+- [x] B-JOB-50 Legacy Liquidsoap health check / push / skip only when LIQUIDSOAP_ENABLED (must stay off) | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_legacy_liquidsoap_is_off_by_default, ::test_legacy_liquidsoap_when_switched_on
 
 ### 2b. Queue replenish (`services/queue_replenish_service.py`)
-- [ ] B-JOB-51 requests_only station: fill from approved song requests / popular (popular_request_threshold, default 3) | modes: both | NOT COVERED
+- [x] B-JOB-51 requests_only station: fill from approved song requests / popular (popular_request_threshold, default 3) | modes: both | covered: tests/test_station_settings.py::test_requests_only_station_plays_requests_not_the_library, ::test_popular_request_threshold
 - [ ] B-JOB-52 Dated weather/time queued as ordinary songs are dropped (drop_dated_clips) | modes: both | covered: tests/test_schedule_refresh.py
 - [ ] B-JOB-53 Station with block playlists fills from them a few hours ahead even with generation off; >2x hours of old fill is replaced | modes: both | covered: tests/test_schedule_refresh.py
 - [ ] B-JOB-54 15 min before a block's playlist takes over, automatic songs are redrawn so the block starts on time (realign_before_block_change) | modes: both | covered: tests/test_block_on_time.py, tests/test_schedule_refresh.py
@@ -674,30 +674,30 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-59 Each station announces its own local hour (station timezone); wrong-hour clips removed after timezone change | modes: both | covered: tests/test_time_announcement.py (text only); tests/test_restart_holidays_timezones.py::test_wrong_hour_time_checks_are_replaced
 - [ ] B-JOB-60 Weather and time clips realigned to the station's weather_region | modes: both | covered: tests/test_weather_regions.py, tests/test_time_clip_regions.py
 - [ ] B-JOB-61 Uploaded time clip used for the hour; ElevenLabs only fallback (default region only); missing both -> no entry, no crash | modes: both | covered: tests/test_weather_spots.py
-- [ ] B-JOB-62 ElevenLabs failure pauses generation (backoff) then resumes | modes: both | NOT COVERED
+- [x] B-JOB-62 ElevenLabs failure pauses generation (backoff) then resumes | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_generation_resumes_after_the_pause, tests/test_weather_fetch_cache.py::test_failed_generation_pauses_instead_of_retrying_every_slot
 - [ ] B-JOB-63 Weather fetch cached per 15-min slot; OpenWeatherMap 429 handled | modes: both | covered: tests/test_weather_fetch_cache.py
 - [ ] B-JOB-64 Program blocks replace built-in hourly time/weather once a station has any; blocks_keep_hourly keeps both (hour first, block after) | modes: both | covered: tests/test_blocks_keep_hourly.py
 - [ ] B-JOB-65 Ad slots at ad_slot_minutes (default 15/30/45) soft-timed; legacy test sponsor placeholder off unless ad_slot_legacy_spot | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-JOB-66 Placeholders and do_not_play items never auto-queued; skipped if found at play time | modes: both | covered: tests/test_placeholder_never_auto.py, tests/test_do_not_play_and_codec.py, tests/test_no_test_items_in_fill.py
 - [ ] B-JOB-67 Playlist generation (playlist_generation.enabled): picks from block sequences, cursor saved, artist distance, min vote | modes: both | covered: tests/test_playlist_generation.py
 - [ ] B-JOB-68 Generation finds no sequence -> ordinary music fill only as far as `hours` | modes: both | covered: tests/test_playlist_generation.py
-- [ ] B-JOB-69 Rule-based 7-day fill: daypart, fixed_time, interval, rotation rules; time-aware across dayparts | modes: both | NOT COVERED
-- [ ] B-JOB-70 Global sponsors inserted only for stations using global rules | modes: both | NOT COVERED
-- [ ] B-JOB-71 oldies_only filter (oldies_min_years, default 10) | modes: both | NOT COVERED
-- [ ] B-JOB-72 No rules -> random music fill; library empty -> queue_empty alert | modes: both | NOT COVERED
-- [ ] B-JOB-73 Replenish skipped during blackout after advance; serialized per station (_refill_lock); slow refill (>5 s) logged | modes: both | NOT COVERED
+- [x] B-JOB-69 Rule-based 7-day fill: daypart, fixed_time, interval, rotation rules; time-aware across dayparts | modes: both | covered: tests/test_rule_fill_and_station_delete.py::test_dayparts_share_the_week_by_hours_owned, ::test_rotation_rule_puts_an_item_every_n_songs (BUG xfail: rotation items land after the whole 7-day fill, back to back), ::test_interval_rule_queues_its_item (BUG xfail: interval rules are never applied)
+- [x] B-JOB-70 Global sponsors inserted only for stations using global rules | modes: both | covered: tests/test_rule_fill_and_station_delete.py::test_global_sponsors_only_for_stations_on_global_rules
+- [x] B-JOB-71 oldies_only filter (oldies_min_years, default 10) | modes: both | covered: tests/test_station_settings.py::test_oldies_only_filters_by_release_date
+- [x] B-JOB-72 No rules -> random music fill; library empty -> queue_empty alert | modes: both | covered: tests/test_rule_fill_and_station_delete.py::test_no_rules_fills_a_week_of_random_music, ::test_empty_library_after_restart_raises_queue_empty_alert
+- [x] B-JOB-73 Replenish skipped during blackout after advance; serialized per station (_refill_lock); slow refill (>5 s) logged | modes: both | covered: tests/test_refill_legacy_ws_email.py::test_advance_tops_up_the_queue_but_not_during_blackout, ::test_refills_of_one_station_run_one_at_a_time, ::test_slow_refill_is_logged
 - [ ] B-JOB-74 Quick successive playlist edits share one background rebuild | modes: both | covered: tests/test_listeners_live.py
 
 ### 2c. Schedule refresh / spots / blocks
 - [ ] B-JOB-75 Schedule, block, playlist-entry or template change -> refresh_station replaces unplayed automatic songs; manual and timed items kept | modes: both | covered: tests/test_schedule_refresh.py
-- [ ] B-JOB-76 Removing automatic songs rewinds the generation cursor by the number dropped per block | modes: both | NOT COVERED
+- [x] B-JOB-76 Removing automatic songs rewinds the generation cursor by the number dropped per block | modes: both | covered: tests/test_generation_cursor_rewind.py::test_removing_automatic_songs_rewinds_each_blocks_cursor
 - [ ] B-JOB-77 Spot planning: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range, fixed times, two sponsors never share a slot | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-JOB-78 Spot planning skips Shabbos/blackouts and DST spring-forward missing times | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-JOB-79 reconcile_spot_slots keeps pending ad_slot entries in step; slots about to air left alone | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-JOB-80 Program block expansion: items in order, hard/soft/soft-with-limit (hard_by), sponsor places, rotation by last played | modes: both | covered: tests/test_program_blocks.py
 - [ ] B-JOB-81 A due slot deleted while about to play does not leave dead air | modes: both | covered: tests/test_due_slot_deleted.py
 - [ ] B-JOB-82 7-day look-ahead: overlaps, gaps, off-air windows, unplaced spots, using the engine's resolver | modes: n.a. | covered: tests/test_schedule_lookahead.py
-- [ ] B-JOB-83 detect_schedule_conflicts raises an alert when a new/edited block overlaps | modes: n.a. | NOT COVERED
+- [x] B-JOB-83 detect_schedule_conflicts raises an alert when a new/edited block overlaps | modes: n.a. | covered: tests/test_block_conflict_alerts.py::test_overlapping_block_raises_a_conflict_alert, ::test_blocks_on_different_days_do_not_conflict (BUG xfail: days are ignored, so weekly blocks on different days raise false conflicts), ::test_overnight_block_conflict_is_found (BUG xfail: a block past midnight never conflicts)
 
 ### 2d. Long items (`services/long_items.py`) and resume
 - [ ] B-JOB-84 policy pause (default): time check plays, shiur re-queued as resume@<seconds> and continues where it stopped | modes: browser | covered: tests/test_timed_pauses_shiur.py
@@ -726,7 +726,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-103 tail_analysis: song end/crossfade point from HTTP range reads (no full download) | modes: both | covered: tests/test_song_change_gaps.py
 - [ ] B-JOB-104 Alert creation dedupes repeats; _notify_users dispatches SMS/WhatsApp/email per user preference | modes: n.a. | covered: tests/test_alert_repeats.py
 - [ ] B-JOB-105 Bug report notify_loop: first check after 60 s, then every NOTIFY_EVERY_SECONDS; pushes "fix ready" to ntfy when labels/PR appear | modes: n.a. | covered: tests/test_bug_reports.py (check_github_once); notify_loop NOT COVERED
-- [ ] B-JOB-106 send_ntfy disabled when NTFY_TOPIC empty; uses NTFY_SERVER | modes: n.a. | NOT COVERED
+- [x] B-JOB-106 send_ntfy disabled when NTFY_TOPIC empty; uses NTFY_SERVER | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_ntfy_only_with_a_topic_and_on_its_server
 - [ ] B-JOB-107 Activity log middleware: records every write with user, station, objects changed, redacts secrets, device/IP/location; batched inserts | modes: n.a. | covered: tests/test_activity_log.py
 - [ ] B-JOB-108 last_seen_at written at most once a minute per user | modes: n.a. | covered: tests/test_cold_start.py
 - [ ] B-JOB-109 Site release: scheduled push fires at its time to all open tabs; tabs silent past TAB_SILENT_LIMIT dropped from list | modes: n.a. | covered: tests/test_site_release.py (API); timing NOT COVERED
@@ -756,7 +756,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SET-14 `live_show_id` (set by live show start; cleared on end/hard stop/stale) | modes: both | covered: tests/test_live_show_lifecycle.py
 - [ ] B-SET-15 `loop_asset_id` (set by /queue/loop) | modes: both | covered: tests/test_operator_actions.py
 - [ ] B-SET-16 `playlist_generation` {enabled, hours, artist_distance, min_vote, cursor} | modes: both | covered: tests/test_playlist_generation.py
-- [ ] B-SET-17 `weather_readout` {enabled, generate_time, auto_queue, queue_time, template, city_name, brand_name} | modes: both | NOT COVERED
+- [x] B-SET-17 `weather_readout` {enabled, generate_time, auto_queue, queue_time, template, city_name, brand_name} | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_daily_readout_made_at_the_stations_generate_time, ::test_recorded_readout_queued_at_its_time_when_auto_queue, ::test_readout_list_get_and_template_preview
 - [ ] B-SET-18 `hourly_station_id` (scheduling._check_automation_insertions, legacy path) - verify still used or dead | modes: both | covered: tests/test_station_settings.py::test_hourly_station_id_legacy_insertion (legacy SchedulingService path only; queue engine never reads it)
 - [ ] B-SET-19 Station.timezone drives announced hour, dayparts, blackouts, spot clock | modes: both | covered: tests/test_spot_schedules.py (partial)
 - [ ] B-SET-20 Station lat/lon drive sunrise/sunset blocks and Shabbos generation | modes: both | covered: tests/test_schedule_lookahead.py (sun blocks)
@@ -767,25 +767,25 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SET-23 PLAYOUT_ENGINE_ENABLED + PLAYOUT_ENGINE_STATION_ID(s) -> engine_drives(station) true only for listed stations | modes: engine | covered: tests/test_playout_engine.py
 - [ ] B-SET-24 PLAYOUT_ENGINE_URL / engine_control_url per station; PLAYOUT_ENGINE_TOKEN both ways | modes: engine | covered: tests/test_playout_engine.py
 - [ ] B-SET-25 PLAYOUT_STREAM_LIVE -> stream_url published, site plays engine stream | modes: engine | covered: tests/test_playout_status.py
-- [ ] B-SET-26 LIQUIDSOAP_ENABLED (legacy telnet) must stay off; when on, skip/push calls made | modes: browser | NOT COVERED
+- [x] B-SET-26 LIQUIDSOAP_ENABLED (legacy telnet) must stay off; when on, skip/push calls made | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_legacy_liquidsoap_is_off_by_default, ::test_legacy_liquidsoap_when_switched_on
 - [ ] B-SET-27 SILENCE_DETECTION_SECONDS default 30 | modes: browser | covered: tests/test_station_settings.py::test_dead_air_alert_follows_silence_threshold
 - [ ] B-SET-28 ELEVENLABS_API_KEY/VOICE_ID unset -> no TTS fallback, uploaded clips only | modes: both | covered: tests/test_weather_spots.py
-- [ ] B-SET-29 OPENWEATHERMAP_API_KEY unset -> weather disabled gracefully | modes: both | NOT COVERED
-- [ ] B-SET-30 SUPABASE_URL/SERVICE_KEY unset -> uploads/local storage path; hourly announcements skipped | modes: both | NOT COVERED
-- [ ] B-SET-31 ICECAST_* (icecast_enabled) -> /icecast start/stop usable | modes: n.a. | NOT COVERED
+- [x] B-SET-29 OPENWEATHERMAP_API_KEY unset -> weather disabled gracefully | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_no_weather_key_never_calls_the_api, ::test_no_weather_key_does_not_stop_time_announcements, ::test_readout_pages_say_weather_is_not_set_up (FIXED: with no key the API was still called with an empty key; the failed weather attempt paused all announcement generation, so generated time checks stopped; readout pages gave a bare server error, now 503 with the reason)
+- [x] B-SET-30 SUPABASE_URL/SERVICE_KEY unset -> uploads/local storage path; hourly announcements skipped | modes: both | covered: tests/test_station_changes_on_air.py::test_no_storage_skips_hourly_time_checks, ::test_no_storage_keeps_uploads_on_local_disk
+- [x] B-SET-31 ICECAST_* (icecast_enabled) -> /icecast start/stop usable | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_icecast_status_and_start_follow_icecast_host
 - [ ] B-SET-32 STRIPE_* (stripe_enabled) -> checkout/webhook enabled else refused | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_off_when_stripe_not_configured, tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
-- [ ] B-SET-33 RESEND_API_KEY -> emails sent else skipped | modes: n.a. | NOT COVERED
+- [x] B-SET-33 RESEND_API_KEY -> emails sent else skipped | modes: n.a. | covered: tests/test_refill_legacy_ws_email.py::test_email_sent_only_with_resend_key
 - [ ] B-SET-34 ANTHROPIC_API_KEY -> AI email drafts and copy review via Claude; else keyword fallback | modes: n.a. | covered: tests/test_copy_review.py
 - [ ] B-SET-35 TWILIO_* (twilio_enabled / twilio_voice_enabled) -> SMS alerts and phone call-ins | modes: n.a. | NOT COVERED
 - [ ] B-SET-36 BUG_REPORTS_GITHUB_TOKEN / BUG_REPORTS_REPO -> mirror to GitHub | modes: n.a. | covered: tests/test_bug_reports.py
-- [ ] B-SET-37 NTFY_TOPIC / NTFY_SERVER -> push notifications | modes: n.a. | NOT COVERED
-- [ ] B-SET-38 SENTRY_DSN -> Sentry enabled | modes: n.a. | NOT COVERED
+- [x] B-SET-37 NTFY_TOPIC / NTFY_SERVER -> push notifications | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_ntfy_only_with_a_topic_and_on_its_server
+- [x] B-SET-38 SENTRY_DSN -> Sentry enabled | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_sentry_only_with_a_dsn
 - [ ] B-SET-39 ADMIN_SEED_PASSWORD / ALLOW_DESTRUCTIVE_SEED / APP_ENV=production | modes: n.a. | covered: tests/test_auth.py
 - [ ] B-SET-40 JWT expiry (30 min access, 7 day refresh) honoured | modes: n.a. | covered: tests/test_auth_security.py::test_token_lifetimes
-- [ ] B-SET-41 CORS_ORIGINS parsing (JSON array or CSV) and error responses still carry CORS | modes: n.a. | NOT COVERED
-- [ ] B-SET-42 DATABASE_URL fix-up (postgres:// -> asyncpg), statement_cache_size=0 for pooler | modes: n.a. | NOT COVERED
-- [ ] B-SET-43 REDIS_URL / CELERY_* empty -> workers disabled without errors | modes: n.a. | NOT COVERED
-- [ ] B-SET-44 EMERGENCY_FALLBACK_CATEGORY still loads but is unused | modes: n.a. | NOT COVERED
+- [x] B-SET-41 CORS_ORIGINS parsing (JSON array or CSV) and error responses still carry CORS | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_cors_origins_json_or_comma_list, ::test_server_error_still_carries_cors
+- [x] B-SET-42 DATABASE_URL fix-up (postgres:// -> asyncpg), statement_cache_size=0 for pooler | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_database_url_fixed_for_asyncpg_and_pooler
+- [x] B-SET-43 REDIS_URL / CELERY_* empty -> workers disabled without errors | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_no_redis_means_no_workers_and_no_errors
+- [x] B-SET-44 EMERGENCY_FALLBACK_CATEGORY still loads but is unused | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_emergency_fallback_category_loads_but_is_unused
 - [ ] B-SET-45 BACKEND_PUBLIC_URL / LIVE_SHOW_HOLD_MUSIC_URL used in Twilio TwiML | modes: n.a. | NOT COVERED
 
 ## 4. Engine-vs-browser differences (each must be tested in the mode(s) listed)

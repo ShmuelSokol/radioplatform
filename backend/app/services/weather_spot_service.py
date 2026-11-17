@@ -441,7 +441,9 @@ async def get_or_create_weather_spot_assets(
         existing_time = uploaded_time
 
     existing_weather = await find_weather_spot_asset(db, weather_key, region)
-    generate_weather = region == DEFAULT_WEATHER_REGION
+    # No weather key: no weather to generate. Trying anyway failed every time, and each
+    # failure paused the time announcements' generation too.
+    generate_weather = region == DEFAULT_WEATHER_REGION and settings.weather_enabled
 
     if existing_time and (existing_weather or not generate_weather):
         return existing_time, existing_weather

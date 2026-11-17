@@ -60,6 +60,7 @@ The OpenWeatherMap key (free plan, 60 calls/min) was blocked on 2026-11-15. Caus
 - `weather_service.get_current_weather` now caches per location for 30 min and remembers a failure (15 min, or 60 min for 401/429) instead of retrying.
 - `get_or_create_weather_spot_assets` pauses all generation for 15 min after a failure; uploaded clips are still returned.
 - Tests reset both through the autouse fixture in `tests/conftest.py`.
+- No `OPENWEATHERMAP_API_KEY` (2026-11-17): `get_current_weather` raises `WeatherNotConfiguredError` without a request, weather is not even attempted by `get_or_create_weather_spot_assets` (a failed attempt used to pause the time announcements too), and the weather readout pages answer 503 with the reason. Tests that fetch weather must set the key.
 
 ## Weather per region (2026-11-16)
 

@@ -20,9 +20,24 @@ from app.services.weather_readout_service import (
     DEFAULT_TEMPLATE,
     render_template,
 )
-from app.services.weather_service import get_current_weather
+from app.services.weather_service import WeatherNotConfiguredError, get_current_weather
 
 router = APIRouter(prefix="/weather-readouts", tags=["weather-readouts"])
+
+
+async def _weather_for(station: Station) -> dict:
+    """The station's weather, or a clear 503 when it cannot be had (no key, API down):
+    the page said only "Server error" before."""
+    try:
+        return await get_current_weather(
+            lat=station.latitude or 40.0968,
+            lon=station.longitude or -74.2179,
+            timezone_name=station.timezone or "America/New_York",
+        )
+    except WeatherNotConfiguredError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(503, f"The weather service did not answer: {e}")
 
 
 @router.get("/", response_model=WeatherReadoutListResponse)
@@ -89,10 +104,7 @@ async def create_readout(
         raise HTTPException(409, "Readout already exists for this station and date")
 
     # Fetch weather
-    lat = station.latitude or 40.0968
-    lon = station.longitude or -74.2179
-    tz_name = station.timezone or "America/New_York"
-    weather = await get_current_weather(lat=lat, lon=lon, timezone_name=tz_name)
+    weather = await _weather_for(station)
 
     # Render
     config = (station.automation_config or {}).get("weather_readout", {})
@@ -127,10 +139,7 @@ async def template_preview(
     if not station:
         raise HTTPException(404, "Station not found")
 
-    lat = station.latitude or 40.0968
-    lon = station.longitude or -74.2179
-    tz_name = station.timezone or "America/New_York"
-    weather = await get_current_weather(lat=lat, lon=lon, timezone_name=tz_name)
+    weather = await _weather_for(station)
 
     config = (station.automation_config or {}).get("weather_readout", {})
     tpl = template or config.get("template", DEFAULT_TEMPLATE)
@@ -197,10 +206,7 @@ async def regenerate_readout(
     if not may_operate_station(_user, station):
         raise HTTPException(403, "Your login is not set up to operate this station")
 
-    lat = station.latitude or 40.0968
-    lon = station.longitude or -74.2179
-    tz_name = station.timezone or "America/New_York"
-    weather = await get_current_weather(lat=lat, lon=lon, timezone_name=tz_name)
+    weather = await _weather_for(station)
 
     config = (station.automation_config or {}).get("weather_readout", {})
     template = config.get("template", DEFAULT_TEMPLATE)
