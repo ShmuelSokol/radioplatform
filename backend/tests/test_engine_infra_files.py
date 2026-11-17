@@ -148,7 +148,10 @@ def test_setup_script_rules():
     sh = _read("setup.sh")
     assert '[ "$(id -u)" = 0 ] || { echo "Run as root."; exit 1; }' in sh
     assert '[ "${VERSION_ID}" = "24.04" ] || echo "Warning' in sh
-    assert 'TOKEN="$(old KBR_PLAYOUT_TOKEN)";' in sh and 'TOKEN="${TOKEN:-$(secret)}"' in sh
+    assert 'TOKEN="$(old KBR_PLAYOUT_TOKEN)"' in sh and 'TOKEN="$(secret)"; TOKEN_IS_NEW=yes' in sh
+    # A rerun does not print the token again (its output gets pasted into chats)
+    assert sh.count("PLAYOUT_ENGINE_TOKEN=${TOKEN}") == 1
+    assert '[ "$TOKEN_IS_NEW" = yes ] || [ "${KBR_SHOW_TOKEN:-}" = 1 ]' in sh
     assert 'SOURCE_PW="${SOURCE_PW:-$(secret)}"' in sh
     assert 'chown root:liquidsoap "$ENV_FILE"; chmod 640 "$ENV_FILE"' in sh
     assert 'chmod 640 "$STATION_DIR/$SID.env"' in sh
