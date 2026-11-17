@@ -153,11 +153,9 @@ async def test_daily_readout_made_at_the_stations_generate_time(db_session, weat
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: when the weather fetch fails at generate_time the scheduler still marks the station "
-    "as checked for the day, so no readout is made that day even after the weather service is back"))
 async def test_failed_readout_is_tried_again_the_same_day(db_session, weather_key):
-    """B-JOB-48: a readout that could not be made (weather down) is tried again on a later pass."""
+    """B-JOB-48: a readout that could not be made (weather down) is tried again on a later pass.
+    FIXED: the station was marked as checked for the day even when nothing was made."""
     from app.services.scheduler_engine import SchedulerEngine
 
     st = await _station(db_session, _zone_with_room(), enabled=True, generate_time="00:00")
@@ -211,11 +209,9 @@ async def test_recorded_readout_queued_at_its_time_when_auto_queue(db_session):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: auto-queue compares only the time of day, not readout_date: tomorrow's readout, "
-    "recorded the evening before, is queued at once and tomorrow's weather plays tonight"))
 async def test_tomorrows_readout_waits_for_tomorrow(db_session):
-    """B-JOB-49: a readout recorded for tomorrow is not queued today."""
+    """B-JOB-49: a readout recorded for tomorrow is not queued today. FIXED: auto-queue
+    compared only the time of day, so tomorrow's weather played tonight."""
     from app.services.scheduler_engine import SchedulerEngine
 
     zone = _zone_with_room()

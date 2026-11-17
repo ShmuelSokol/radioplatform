@@ -61,6 +61,7 @@ The OpenWeatherMap key (free plan, 60 calls/min) was blocked on 2026-11-15. Caus
 - `get_or_create_weather_spot_assets` pauses all generation for 15 min after a failure; uploaded clips are still returned.
 - Tests reset both through the autouse fixture in `tests/conftest.py`.
 - No `OPENWEATHERMAP_API_KEY` (2026-11-17): `get_current_weather` raises `WeatherNotConfiguredError` without a request, weather is not even attempted by `get_or_create_weather_spot_assets` (a failed attempt used to pause the time announcements too), and the weather readout pages answer 503 with the reason. Tests that fetch weather must set the key.
+- Daily weather readout (`SchedulerEngine._maybe_generate_weather_readouts`): the day counts as done only once a readout for that date exists. A failed attempt (weather down) is retried the same day: next pass, then 1, 2, 4 ... minutes, at most 30 (`READOUT_RETRY_MAX_SECONDS`, in memory per process). Auto-queue (`_maybe_queue_weather_readouts`) queues a readout only on its own `readout_date` in the station's zone, so tomorrow's readout recorded tonight waits. Tests: `backend/tests/test_weather_without_key_and_readouts.py`.
 
 ## Weather per region (2026-11-16)
 
@@ -97,7 +98,7 @@ On KBR Jerusalem the hard :00 time check cut a shiur 14 minutes in and the rest 
 
 Also fixed then: the weather (same `preempt_at`, hard) used to cut the time check that had just started; `_same_timed_group` lets the group play in order. Due soft items with the same time now go by position (time check before weather).
 
-Soft timed items (since 2026-11-17, Shmuel's rule): a soft group (:15/:30/:45 weather, sponsorships, soft blocks, with or without a limit) due while a shiur or story has more than `long_items.SOFT_PAUSE_MIN_LEFT_SECONDS` (5 min) left is made hard (`timing_mode="hard"`, `hard_by=None`) by `queue._soft_items_pause_long`, so the rule above applies (pause, or cut on a "cut" station); with 5 min or less left it keeps waiting. A "wait" station, and HS off, leave soft items alone. The browser player runs it in `_check_advance_locked` for items due within `SOFT_PAUSE_LOOKAHEAD_SECONDS` (90 s; time left measured at the due time), so they turn hard ahead and the control room pre-loads them and fades on time. Both this change and the "wait" station's softening (`_defer_hard_until_end`) are committed at once: the scheduler's 3 s poll rolls its session back after a check that changes nothing on air, so until 2026-11-17 the flip only lived inside that poll (the exact timer still saw it; pages never did) (done only at the due time, the live weather started 2.3 s late, cold, and its last seconds played under the resumed shiur); the engine runs it in `tick` (`playout_engine._soft_items_during_long`) for items due within the 45 s hand-over window, before `_apply_long_item_rule`. `_queue_resume` now puts the resume first after the group, ahead of every other pending item (before, a song queued at a lower position than the timed item played before the shiur carried on).
+Soft timed items (since 2026-11-17, Shmuel's rule): a soft group (:15/:30/:45 weather, sponsorships, soft blocks, with or without a limit) due while a shiur or story has more than `long_items.SOFT_PAUSE_MIN_LEFT_SECONDS` (5 min) left is made hard (`timing_mode="hard"`, `hard_by=None`) by `queue._soft_items_pause_long`, so the rule above applies (pause, or cut on a "cut" station); with 5 min or less left it keeps waiting. A "wait" station, and HS off, leave soft items alone. The browser player runs it in `_check_advance_locked` for items due within `SOFT_PAUSE_LOOKAHEAD_SECONDS` (90 s; time left measured at the due time), so they turn hard ahead and the control room pre-loads them and fades on time (done only at the due time, the live weather started 2.3 s late, cold, and its last seconds played under the resumed shiur); the engine runs it in `tick` (`playout_engine._soft_items_during_long`) for items due within the 45 s hand-over window, before `_apply_long_item_rule`. `_queue_resume` now puts the resume first after the group, ahead of every other pending item (before, a song queued at a lower position than the timed item played before the shiur carried on).
 
 On an engine station (since 2026-11-17) `playout_engine._apply_long_item_rule` applies the same rule in `tick`, when the next hard group is about to be handed over (45 s early): `pause` queues the resume entry at the head of the music lane (the engine re-asks for its pre-loaded track because the queue head changed), `wait` turns the group soft via `_defer_hard_until_end` and hands nothing (but when the shiur itself is in the timed lane, part of an earlier hard block, the groups stay hard and move to the moment it ends, `_airs_until`: a soft group would wait for the music lane, 34 s late in the harness), `cut` does nothing extra. In `radio.liq`, a group that goes on air while an earlier timed item is still on air (a block's Daf Yomi, a Play Now) now skips that item; before, the new group sat in the same timed queue behind it (the 21:00 time check aired at 21:09 after the 20:00 block's Daf Yomi, 2026-11-16). A `radio.liq` change reaches the server only when `setup.sh` is run again there.
 
@@ -128,4 +129,24 @@ The control room marks timed items due at the same moment with a cyan bar and a
 - Hour marks come from the station's own clock (`local_hour_marks`): a half-hour zone
   (India) heard its time check at local :30, and the default hard/soft timing used the UTC
   minute. On the autumn DST day 1 AM gets two checks, in spring 2 AM none.
+- Moving a station (new latitude/longitude in `PUT /stations/{id}`): `update_station` drops
+  the Shabbos/Yom Tov windows generated for the old place (`drop_generated_holidays_for_location`:
+  covering this station only, name and start matching what the generator makes for the old
+  place) and generates the new place's at once. Hand-made windows, windows shared with
+  other stations and a window in progress are kept. There is no "generated" flag on
+  `HolidayWindow`; the match against the generator is how they are told apart.
+  Test: `backend/tests/test_holiday_generation_endpoints.py::test_moving_a_station_moves_its_shabbos`.
 - Tests: `backend/tests/test_scheduler_jobs.py`, `backend/tests/test_restart_holidays_timezones.py`.
+
+
+## Rotation and interval rules in the rule-based fill (2026-11-17)
+
+Stations without playlist generation fill 7 days from `ScheduleRule`s. After the daypart
+fill, `_spread_rule_items` weaves rule items between the fill's songs and renumbers the
+fill's positions: rotation (`songs_between=N`) puts one item after every N filled songs,
+interval (`interval_minutes=N`) one each time N minutes of estimated air time pass. Both
+only where the rule's `hour_start`/`hour_end` (a range like 22-2 wraps) and
+`days_of_week` (0=Mon) cover the estimated station-local air time. Before, rotation items
+went after the whole week, back to back, and interval rules were never applied. Legacy
+global sponsors still go at the end of the fill (unchanged). Test:
+`backend/tests/test_rule_fill_and_station_delete.py`.
