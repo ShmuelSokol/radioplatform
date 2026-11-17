@@ -366,6 +366,10 @@ async def _skip_placeholders(db: AsyncSession, station_id) -> None:
         .values(status="skipped")
         .execution_options(synchronize_session=False)
     )
+    # A sponsorship still waiting in the queue on a day its contract no longer covers
+    from app.services.spot_schedule_service import skip_lapsed_sponsorships
+
+    await skip_lapsed_sponsorships(db, station_id)
 
 
 async def _pick_next_pending(

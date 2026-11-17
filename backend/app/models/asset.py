@@ -128,6 +128,18 @@ def in_category(category):
     return condition
 
 
+def not_contract_audio():
+    """SQL condition: no spot schedule uses the asset. Sponsorship audio airs only
+    through its contract (the spot planner) or an operator's own pick; a rotation
+    or block that draws "a spot" at random would air it outside its dates, days
+    and caps (2026-11-17)."""
+    from sqlalchemy import select
+
+    from app.models.spot_schedule import SpotSchedule
+
+    return Asset.id.notin_(select(SpotSchedule.asset_id))
+
+
 def fit_for_random_pick():
     """SQL condition: an asset that may be drawn at random (not do-not-play, not a
     test item, not a one-moment clip, not a placeholder). Category case does not matter."""
@@ -139,6 +151,7 @@ def fit_for_random_pick():
             func.lower(Asset.category).notin_((*NEVER_RANDOM_CATEGORIES, *ONE_MOMENT_CATEGORIES)),
         ),
         not_placeholder(),
+        not_contract_audio(),
     )
 
 

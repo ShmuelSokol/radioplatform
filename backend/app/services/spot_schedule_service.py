@@ -422,6 +422,67 @@ async def load_station_schedules(db: AsyncSession, station_id) -> list[SpotSched
     return list(result.scalars().all())
 
 
+async def lapsed_contract_assets(
+    db: AsyncSession, station: Station, now: datetime | None = None
+) -> set[str]:
+    """Sponsorship audio whose contract does not cover today on this station.
+
+    An asset some spot schedule uses is contract audio: it airs only while a
+    schedule for this station (or every station) is active and today, in station
+    time, is inside its dates and days. A queued sponsorship that is still waiting
+    (a soft slot behind a long shiur, a station that was stopped) must not air on
+    a day its contract no longer covers: a contract ending today used to air at
+    00:05 tomorrow from a 23:45 slot. Ids are strings."""
+    now = now or datetime.now(UTC)
+    today = now.astimezone(station_tz(station.timezone)).date()
+    rows = (await db.execute(select(SpotSchedule))).scalars().all()
+    used: set[str] = set()
+    covered: set[str] = set()
+    for s in rows:
+        used.add(str(s.asset_id))
+        if s.station_id is not None and str(s.station_id) != str(station.id):
+            continue
+        if _applies_on(s, today):
+            covered.add(str(s.asset_id))
+    return used - covered
+
+
+async def skip_lapsed_sponsorships(db: AsyncSession, station_id, now: datetime | None = None) -> int:
+    """Mark pending automatic queue entries of lapsed contract audio that are due
+    (or due within the safety margin) as skipped (see lapsed_contract_assets). Later
+    ones are removed by reconcile_spot_slots or the block rebuild. An operator's own
+    pick is left alone."""
+    from sqlalchemy import update
+
+    from app.api.v1.queue import OPERATOR_SOURCES
+
+    station = (
+        await db.execute(select(Station).where(Station.id == station_id))
+    ).scalar_one_or_none()
+    if station is None:
+        return 0
+    now = now or datetime.now(UTC)
+    lapsed = await lapsed_contract_assets(db, station, now)
+    if not lapsed:
+        return 0
+    ids = [uuid.UUID(x) for x in lapsed]
+    result = await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.asset_id.in_(ids),
+            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now + SAFETY_MARGIN),
+            or_(QueueEntry.source.is_(None), QueueEntry.source.notin_(OPERATOR_SOURCES)),
+        )
+        .values(status="skipped")
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount:
+        logger.info("Station %s: %d queued sponsorship(s) skipped, contract over", station_id, result.rowcount)
+    return result.rowcount or 0
+
+
 async def load_blackouts(
     db: AsyncSession, station_id, start: datetime, end: datetime
 ) -> list[Blackout]:
@@ -502,6 +563,9 @@ async def reconcile_spot_slots(
     now = now or datetime.now(UTC)
     earliest = now + SAFETY_MARGIN
     latest = now + timedelta(days=HORIZON_DAYS)
+    # Overdue or about-to-air slots are left alone below; one whose contract no
+    # longer covers today must still never air.
+    await skip_lapsed_sponsorships(db, station_id, now)
 
     placements, unplaced = await plan_for_station(db, station, days=HORIZON_DAYS + 1, now=now)
     # Places inside program blocks are written by the block, in its order.
