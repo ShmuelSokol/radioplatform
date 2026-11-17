@@ -1,8 +1,9 @@
-import logging
 import asyncio
+import logging
+import subprocess
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_manager
@@ -60,24 +61,34 @@ async def mix_tracks(
     # Mix
     from app.services.mixer_service import mix_audio
 
-    mixed_data, duration = await asyncio.to_thread(
-        mix_audio,
-        backtrack_data=bt_data,
-        overlay_data=ov_data,
-        bt_ext=bt_ext,
-        ov_ext=ov_ext,
-        bt_trim_start=body.bt_trim_start,
-        bt_trim_end=body.bt_trim_end,
-        bt_target_dur=body.bt_target_dur,
-        bt_volume=body.bt_volume,
-        ov_volume=body.ov_volume,
-        bt_fade_in=body.bt_fade_in,
-        bt_fade_out=body.bt_fade_out,
-        bt_fade_out_start=body.bt_fade_out_start,
-        ov_fade_in=body.ov_fade_in,
-        ov_fade_out=body.ov_fade_out,
-        ov_fade_out_start=body.ov_fade_out_start,
-    )
+    try:
+        mixed_data, duration = await asyncio.to_thread(
+            mix_audio,
+            backtrack_data=bt_data,
+            overlay_data=ov_data,
+            bt_ext=bt_ext,
+            ov_ext=ov_ext,
+            bt_trim_start=body.bt_trim_start,
+            bt_trim_end=body.bt_trim_end,
+            bt_target_dur=body.bt_target_dur,
+            bt_volume=body.bt_volume,
+            ov_volume=body.ov_volume,
+            bt_fade_in=body.bt_fade_in,
+            bt_fade_out=body.bt_fade_out,
+            bt_fade_out_start=body.bt_fade_out_start,
+            ov_fade_in=body.ov_fade_in,
+            ov_fade_out=body.ov_fade_out,
+            ov_fade_out_start=body.ov_fade_out_start,
+        )
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
+        # One of the two files is not audio FFmpeg can read (or the mix timed out):
+        # say so instead of a bare 500
+        logger.warning("Studio mix failed for %s + %s: %s", bt_asset.id, ov_asset.id, exc)
+        raise HTTPException(
+            status_code=422,
+            detail="These two items could not be mixed: one of them is not audio that can be read. "
+                   "Check that both play in the library.",
+        )
 
     # Upload result
     s3_key = generate_asset_key("mixed.mp3")

@@ -204,6 +204,7 @@ export interface BulkAutoTrimStatus {
   trimmed: number;
   skipped: number;
   errors: number;
+  detail?: string | null;
 }
 
 export const bulkAutoTrim = async (params: BulkAutoTrimParams): Promise<{ job_id: string }> => {

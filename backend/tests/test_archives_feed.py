@@ -137,7 +137,6 @@ async def test_podcast_rss_caps_at_100(client, db_session):
     assert len(items) == 100 and items[0].findtext("title") == "Ep 104"
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: podcast feed lacks channel <link>, atom:self and enclosure length, which Apple/validators require")
 @pytest.mark.asyncio
 async def test_podcast_rss_has_fields_directories_require(client, db_session):
     st = await _station(db_session)

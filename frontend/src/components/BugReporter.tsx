@@ -63,6 +63,7 @@ export default function BugReporter() {
   const [expected, setExpected] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [number, setNumber] = useState<number | null>(null);
+  const [shotDropped, setShotDropped] = useState(false);
   const contextRef = useRef<Record<string, unknown> | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -133,6 +134,7 @@ export default function BugReporter() {
         context: contextRef.current,
       });
       setNumber(res.data.number);
+      setShotDropped(res.data.screenshot_saved === false);
       setPhase('sent');
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string };
@@ -172,7 +174,9 @@ export default function BugReporter() {
                 <div className="text-3xl mb-2">✅</div>
                 <h2 className="text-lg font-semibold">Thanks, bug {number} was sent</h2>
                 <p className="mt-2 text-sm text-gray-400">
-                  The screenshot and what the player was doing went with it.
+                  {shotDropped
+                    ? 'The screenshot could not be kept (too big or unreadable). What the player was doing went with it.'
+                    : 'The screenshot and what the player was doing went with it.'}
                 </p>
                 <button type="button" onClick={close} className="mt-5 rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/20">
                   Close

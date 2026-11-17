@@ -36,6 +36,36 @@ def split_title_artist(song_title: str, song_artist: str | None) -> tuple[str, s
     return m.group("title").strip(), m.group("artist").strip()
 
 
+_DASH_SPLIT = re.compile(r"^(?P<a>.+?)\s+[-\u2013\u2014]\s+(?P<b>\S.*)$")
+
+
+def request_readings(song_title: str, song_artist: str | None, known_artists: set[str]) -> set[tuple[str, str | None]]:
+    """Ways to read a request as (title, artist).
+
+    As typed; "X by Y"; "X - Y" either way round (listeners write "Song - Singer"
+    and "Singer - Song"); and, with no separator, a known artist's name at the
+    start or end of the title box ("matisyahu one day"). Only artist names already
+    in the library are tried for the last one, so a request costs a few readings,
+    not one per word."""
+    readings = {(song_title, song_artist), split_title_artist(song_title, song_artist)}
+    if song_artist and song_artist.strip():
+        return readings
+    text = song_title.strip()
+    m = _DASH_SPLIT.match(text)
+    if m:
+        a, b = m.group("a").strip(), m.group("b").strip()
+        readings |= {(a, b), (b, a)}
+        return readings
+    words = _normalize(text).split()
+    for k in range(1, len(words)):
+        head, tail = " ".join(words[:k]), " ".join(words[k:])
+        if head in known_artists:
+            readings.add((tail, head))
+        if tail in known_artists:
+            readings.add((head, tail))
+    return readings
+
+
 def _score_text(norm_title: str, norm_artist: str, title: str, artist: str, beat: float = 0.0) -> float:
     """Title x 0.7 + artist x 0.3 on normalized text. Returns 0 early when even the
     upper bound (SequenceMatcher.quick_ratio) cannot beat `beat`."""
@@ -86,9 +116,11 @@ async def fuzzy_match_asset(
     if not rows:
         return None, 0.0
 
-    # Score the request as typed and, if the title reads "X by Y", also as
-    # title X + artist Y; keep the better one ("Stand By Me" still works).
-    readings = {(song_title, song_artist), split_title_artist(song_title, song_artist)}
+    # Score every reading of the request (as typed, "X by Y", "X - Y" both ways,
+    # a known artist before or after the title) and keep the best: "Stand By Me"
+    # still works because the as-typed reading is always scored too.
+    known_artists = {_normalize(r.artist) for r in rows if r.artist}
+    readings = request_readings(song_title, song_artist, known_artists)
     norm_readings = [
         (_normalize(t), _normalize(a) if a else "") for t, a in readings
     ]

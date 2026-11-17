@@ -1,6 +1,6 @@
 # Station permissions and the protected station
 
-Who may operate (change) which station. Reading is not restricted by station.
+Who may operate (change) which station. Reading is not restricted by station, except analytics (below).
 
 - `User.station_ids` (JSON list of station ids, or null). Null = every station that is not protected. A list = only those stations. Admins are never limited.
 - `Station.protected` (bool). A protected station (the FM feed) can be operated only by admins and by staff whose `station_ids` names it. "Every station" does NOT include it. Only an admin can set or clear the flag, or delete a protected station.
@@ -16,7 +16,7 @@ Who may operate (change) which station. Reading is not restricted by station.
 
 - A spot schedule for all stations (`station_id` null) airs on the protected FM station too, so creating, changing or deleting one, widening one to all stations, or moving its end date from the Databank needs `may_operate_every_station` (admins, or staff allowed on every station including the protected ones). Routes: `spot_schedules.py` (`_check_every_station`) and `databank.py` end-date. Test: `tests/test_every_station_spots.py` (review finding F-DATABANK-58).
 
-Not restricted by station: objects that belong to no station (shared playlist templates), the library, rules. Those are limited by role only. Reading is never restricted by station.
+Not restricted by station: objects that belong to no station (shared playlist templates), the library, rules. Those are limited by role only. Reading is not restricted by station, with one exception: analytics (`api/v1/analytics.py::_stations_in_scope`) shows a login only the stations `may_operate_station` allows; asking for another station is 403, and "all stations" means all of theirs (test: `tests/test_analytics_queries.py::test_station_limited_manager_cannot_read_other_station`).
 
 Role matrix for every write route: `backend/tests/test_write_role_matrix.py` (a new write route must be added to its policy table); frontend `auth/access.ts` is checked against it by `test_access_mirror.py`.
 
