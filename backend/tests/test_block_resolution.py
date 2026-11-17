@@ -161,3 +161,81 @@ async def test_polar_summer_does_not_break_block_resolution(db_session):
     ])
     oslo = ZoneInfo("Europe/Oslo")
     assert await _on(db_session, station, 2027, 6, 21, 12, 0, tz=oslo) == "Day"
+
+
+@pytest.mark.asyncio
+async def test_recurring_block_outside_its_dates_does_not_air(db_session):
+    """B-PUBLIC-5: a daily/weekly/monthly block with start_date..end_date only airs on
+    station-local dates inside that range (the base block wins outside it)"""
+    station = await _station(db_session)
+    await _blocks(db_session, station, [
+        {"name": "Base", "start_time": time(0), "end_time": time(23, 59)},
+        {"name": "Summer", "start_time": time(9), "end_time": time(10), "priority": 5,
+         "start_date": date(2026, 6, 1), "end_date": date(2026, 8, 31)},
+        {"name": "Fridays in Dec", "start_time": time(12), "end_time": time(13), "priority": 5,
+         "recurrence_type": RecurrenceType.WEEKLY, "recurrence_pattern": ["friday"],
+         "start_date": date(2026, 12, 1), "end_date": date(2026, 12, 31)},
+        {"name": "Monthly 5th", "start_time": time(15), "end_time": time(16), "priority": 5,
+         "recurrence_type": RecurrenceType.MONTHLY, "recurrence_pattern": [5],
+         "start_date": date(2026, 12, 1), "end_date": date(2027, 1, 31)},
+    ])
+    assert await _on(db_session, station, 2026, 7, 15, 9, 30) == "Summer"
+    assert await _on(db_session, station, 2026, 8, 31, 9, 30) == "Summer"  # last day counts
+    assert await _on(db_session, station, 2026, 9, 1, 9, 30) == "Base"
+    assert await _on(db_session, station, 2026, 5, 31, 9, 30) == "Base"
+    assert await _on(db_session, station, 2026, 11, 20, 12, 30) == "Base"  # a Friday before the range
+    assert await _on(db_session, station, 2026, 12, 4, 12, 30) == "Fridays in Dec"
+    assert await _on(db_session, station, 2027, 1, 1, 12, 30) == "Base"
+    assert await _on(db_session, station, 2026, 11, 5, 15, 30) == "Base"
+    assert await _on(db_session, station, 2027, 1, 5, 15, 30) == "Monthly 5th"
+    assert await _on(db_session, station, 2027, 2, 5, 15, 30) == "Base"
+
+
+@pytest.mark.asyncio
+async def test_recurring_block_dates_are_station_local(db_session):
+    """The range is checked against the station's own date: 21:30 New York on the
+    last day is 02:30 UTC the next day and still airs; an overnight block that starts
+    on the last day runs on past midnight."""
+    station = await _station(db_session)
+    await _blocks(db_session, station, [
+        {"name": "Evening", "start_time": time(21), "end_time": time(22),
+         "end_date": date(2026, 11, 17)},
+        {"name": "Late", "start_time": time(23), "end_time": time(1),
+         "end_date": date(2026, 11, 17)},
+    ])
+    assert await _on(db_session, station, 2026, 11, 17, 21, 30) == "Evening"
+    assert await _on(db_session, station, 2026, 11, 18, 0, 30) == "Late"
+    assert await _on(db_session, station, 2026, 11, 18, 21, 30) is None
+    assert await _on(db_session, station, 2026, 11, 18, 23, 30) is None
+
+
+@pytest.mark.asyncio
+async def test_recurring_block_open_ended_dates(db_session):
+    """Only a start_date: on from that date with no end. Only an end_date: on every
+    day up to it. Neither: every day."""
+    station = await _station(db_session)
+    await _blocks(db_session, station, [
+        {"name": "From Dec", "start_time": time(9), "end_time": time(10), "start_date": date(2026, 12, 1)},
+        {"name": "Until Nov", "start_time": time(11), "end_time": time(12), "end_date": date(2026, 11, 30)},
+        {"name": "Always", "start_time": time(13), "end_time": time(14)},
+    ])
+    assert await _on(db_session, station, 2026, 11, 30, 9, 30) is None
+    assert await _on(db_session, station, 2026, 12, 1, 9, 30) == "From Dec"
+    assert await _on(db_session, station, 2030, 6, 1, 9, 30) == "From Dec"
+    assert await _on(db_session, station, 2020, 1, 1, 11, 30) == "Until Nov"
+    assert await _on(db_session, station, 2026, 11, 30, 11, 30) == "Until Nov"
+    assert await _on(db_session, station, 2026, 12, 1, 11, 30) is None
+    assert await _on(db_session, station, 2020, 1, 1, 13, 30) == "Always"
+    assert await _on(db_session, station, 2030, 1, 1, 13, 30) == "Always"
+
+
+@pytest.mark.asyncio
+async def test_start_only_block_stops_after_its_end_date(db_session):
+    """A recurring start-only (until next) block does not stay on past its end_date"""
+    station = await _station(db_session)
+    await _blocks(db_session, station, [
+        {"name": "Winter list", "start_time": time(6), "end_time": time(7), "until_next": True,
+         "end_date": date(2026, 11, 10)},
+    ])
+    assert await _on(db_session, station, 2026, 11, 10, 20, 0) == "Winter list"
+    assert await _on(db_session, station, 2026, 11, 12, 20, 0) is None

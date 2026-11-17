@@ -144,12 +144,9 @@ async def test_epg_default_date_is_the_stations_own_date(client, db_session, mon
     assert r.json()["date"] == local.isoformat()
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG (decide): start_date/end_date are only checked on one_time blocks, in the EPG "
-    "and in playout (scheduling._recurs_on), so a recurring block whose run ended is "
-    "still listed and still airs; fixing the guide alone would make it disagree with air"))
 async def test_epg_honours_recurring_block_dates(client, db_session):
-    """B-PUBLIC-5"""
+    """B-PUBLIC-5: a recurring block only shows on dates inside its start_date..end_date
+    (the guide and playout both go through scheduling._recurs_on)"""
     st = await _station(db_session)
     sched = await _schedule(db_session, st)
     db_session.add(ScheduleBlock(
@@ -159,6 +156,9 @@ async def test_epg_honours_recurring_block_dates(client, db_session):
     await db_session.commit()
     r = await client.get(f"{API}/schedules/epg/{st.id}", params={"date": "2026-11-17"})
     assert r.json()["blocks"] == []
+    r = await client.get(f"{API}/schedules/epg/{st.id}", params={"date": "2026-07-01"})
+    assert [(b["name"], b["start_time"], b["end_time"]) for b in r.json()["blocks"]] == [
+        ("Summer only", "09:00", "10:00")]
 
 
 # ── B-PUBLIC-6..8: listener heartbeat ──
