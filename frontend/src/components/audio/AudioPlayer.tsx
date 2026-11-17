@@ -25,6 +25,7 @@ export default function AudioPlayer() {
             step="0.05"
             value={volume}
             onChange={(e) => setVolume(Number(e.target.value))}
+            aria-label="Volume"
             className="w-24 accent-brand-500"
           />
           <button

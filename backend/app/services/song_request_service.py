@@ -279,12 +279,14 @@ async def get_queue_position_info(
 
     songs_ahead = len(entries_ahead)
     total_seconds = 0.0
+    now = datetime.now(timezone.utc)
     for entry in entries_ahead:
         # Eagerly loaded asset may not be available; use default duration
-        if entry.asset and entry.asset.duration:
-            total_seconds += entry.asset.duration
-        else:
-            total_seconds += 180  # 3 min default
+        length = entry.asset.duration if entry.asset and entry.asset.duration else 180  # 3 min default
+        if entry.status == "playing" and entry.started_at is not None:
+            started = entry.started_at if entry.started_at.tzinfo else entry.started_at.replace(tzinfo=timezone.utc)
+            length = max(0.0, length - (now - started).total_seconds())  # only what is left of the song on air
+        total_seconds += length
 
     return {
         "songs_ahead": songs_ahead,

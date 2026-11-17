@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import apiClient from '../api/client';
 import { usePlayerStore } from '../stores/playerStore';
 import { addBreadcrumb, collectContext } from '../lib/diagnostics';
+import { useEscape } from '../hooks/useEscape';
 
 /**
  * "Report a bug" button on every page. Takes a screenshot of the screen as it
@@ -116,6 +117,7 @@ export default function BugReporter() {
     setIncludeShot(true);
     setError(null);
   };
+  useEscape(phase === 'open' || phase === 'sent', close);
 
   const send = async () => {
     if (!description.trim()) {

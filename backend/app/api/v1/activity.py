@@ -27,7 +27,7 @@ def _parse_time(value: str | None) -> datetime | None:
         t = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    return t.astimezone(timezone.utc) if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
 def _uuid(value: str | None) -> uuid.UUID | None:

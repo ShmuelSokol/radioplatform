@@ -72,8 +72,6 @@ async def test_alert_texts_go_to_the_right_people(db_session, texts):
     assert sorted(to for _, to, _ in texts) == ["+1003"]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: a repeat that escalates an open alert (warning -> critical) texts and pushes nobody; "
-                   "tests/test_alert_repeats.py currently asserts that, so the owner must decide")
 @pytest.mark.asyncio
 async def test_escalation_notifies_again(db_session, texts):
     """V2-77: a repeat that raises the severity (warning -> critical) texts and pushes again."""

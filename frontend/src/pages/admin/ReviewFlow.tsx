@@ -47,6 +47,7 @@ export default function ReviewFlow() {
   const [notes, setNotes] = useState('');
   const [silenceRegions, setSilenceRegions] = useState<SilenceRegion[]>([]);
   const [waveformKey, setWaveformKey] = useState(0);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const waveformRef = useRef<WaveformPlayerHandle>(null);
 
   const items = itemsData?.items ?? [];
@@ -79,6 +80,7 @@ export default function ReviewFlow() {
   const advanceToNext = useCallback(() => {
     if (currentIndex < items.length - 1) {
       setCurrentIndex((i) => i + 1);
+      setSaveError(null);
       setNotes('');
       setSilenceRegions([]);
     }
@@ -87,6 +89,7 @@ export default function ReviewFlow() {
   const handleAction = useCallback(
     (status: string) => {
       if (!currentItem) return;
+      setSaveError(null);
       updateMutation.mutate(
         {
           itemId: currentItem.id,
@@ -97,6 +100,16 @@ export default function ReviewFlow() {
             refetchItems();
             advanceToNext();
           },
+          onError: (err: unknown) => {
+            const e = err as { response?: { status?: number; data?: { detail?: string } } };
+            if (e.response?.status === 409) {
+              // Another reviewer saved this item first: show what they decided, keep the notes
+              setSaveError('Someone else changed this item while you were on it. It now shows their decision; press again to save yours.');
+              refetchItems();
+            } else {
+              setSaveError(`Not saved: ${e.response?.data?.detail || 'the server could not be reached'}. Please try again.`);
+            }
+          },
         }
       );
     },
@@ -106,8 +119,11 @@ export default function ReviewFlow() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Don't trigger when typing in inputs
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Don't trigger when typing in a field or choosing in a drop-down (letters pick options there)
+      const t = e.target;
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
+      if (t instanceof HTMLElement && t.isContentEditable) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       switch (e.key.toLowerCase()) {
         case 'a':
           handleAction('approved');
@@ -265,6 +281,11 @@ export default function ReviewFlow() {
               />
             </div>
 
+            {saveError && (
+              <div role="alert" className="border border-red-300 bg-red-50 text-red-800 text-sm rounded px-3 py-2" data-testid="review-save-error">
+                {saveError}
+              </div>
+            )}
             {/* Action buttons */}
             <div className="flex flex-wrap items-center gap-3">
               <button

@@ -34,7 +34,9 @@ async def create_alert(
 
     The same problem reported again (same type, title and station) while an
     earlier report of it is still open and recent only updates that report: it
-    counts the repeat in context["repeats"] and notifies nobody. Before this,
+    counts the repeat in context["repeats"] and notifies nobody, unless the
+    repeat is more severe (warning -> critical): that raises the alert and
+    notifies again as a new alert of that severity would. Before this,
     every scheduler pass and every restart added a row (20,000 open alerts in
     November 2026, nearly all "Empty block", "Dead air" and "Server restarted").
     """
@@ -56,9 +58,15 @@ async def create_alert(
         ctx["last_message"] = message
         existing.context = ctx
         existing.updated_at = datetime.now(timezone.utc)
-        if _SEVERITY_ORDER.get(a_sev.value, 0) > _SEVERITY_ORDER.get(existing.severity.value, 0):
+        escalated = _SEVERITY_ORDER.get(a_sev.value, 0) > _SEVERITY_ORDER.get(existing.severity.value, 0)
+        if escalated:
             existing.severity = a_sev
+            existing.message = message
         await db.flush()
+        if escalated:
+            # Worse than before (e.g. warning -> critical): people who only want
+            # critical texts have heard nothing yet, so notify as for a new alert.
+            await _dispatch(db, existing, a_sev, title, message)
         return existing
 
     alert = Alert(

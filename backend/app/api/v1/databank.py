@@ -95,10 +95,12 @@ async def list_items(
         conditions.append(Asset.file_path != "")
         conditions.append(or_(Asset.category.is_(None), func.lower(Asset.category) != "do_not_play"))
     if search:
-        pat = f"%{search.strip()}%"
+        # % and _ are matched as typed (file names like track_01), not as LIKE wildcards
+        typed = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pat = f"%{typed}%"
         conditions.append(or_(
-            Asset.title.ilike(pat), Asset.artist.ilike(pat),
-            Asset.category.ilike(pat), Asset.file_path.ilike(pat),
+            Asset.title.ilike(pat, escape="\\"), Asset.artist.ilike(pat, escape="\\"),
+            Asset.category.ilike(pat, escape="\\"), Asset.file_path.ilike(pat, escape="\\"),
         ))
 
     total = (await db.execute(select(func.count(Asset.id)).where(*conditions))).scalar() or 0

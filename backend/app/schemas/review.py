@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -50,12 +51,16 @@ class ReviewItemListResponse(BaseModel):
     total: int
 
 
+# What a reviewer may set an item to (in_review is set by /next only)
+ReviewDecision = Literal["pending", "approved", "rejected", "flagged", "skipped"]
+
+
 class ReviewItemUpdate(BaseModel):
-    status: str | None = None
+    status: ReviewDecision | None = None
     notes: str | None = None
     version: int  # optimistic lock
 
 
 class BatchUpdateRequest(BaseModel):
     item_ids: list[str]
-    status: str
+    status: ReviewDecision

@@ -71,6 +71,18 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
 }) {
   const days = useMemo(() => recentDays(stationTz), [stationTz]);
   const [day, setDay] = useState(days[0]);
+  const [sel, setSel] = useState<number | null>(null);
+  // Another station (maybe another time zone): "today" follows to the new station's today,
+  // an earlier day is kept if the new list has it (else today), and no line stays
+  // highlighted, since the index would point at a line of the other station's log.
+  const shownFor = `${stationId}|${stationTz ?? ''}`;
+  const [lastFor, setLastFor] = useState({ key: shownFor, days });
+  if (lastFor.key !== shownFor) {
+    const wasToday = day === lastFor.days[0];
+    setLastFor({ key: shownFor, days });
+    setDay(wasToday || !days.includes(day) ? days[0] : day);
+    setSel(null);
+  }
   const { data, isLoading, isError } = useQuery({
     queryKey: ['day-log', stationId, day],
     queryFn: () => getDayLog(stationId!, day),
@@ -78,7 +90,6 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
     refetchInterval: day === days[0] ? 15_000 : false,
   });
   const lines = useMemo(() => linesOf(data?.logs ?? []), [data]);
-  const [sel, setSel] = useState<number | null>(null);
 
   const picker = compact ? (
     <select className="qn-field h-11 w-full px-2 text-sm" value={day} onChange={e => { setDay(e.target.value); setSel(null); }}
