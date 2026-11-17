@@ -41,6 +41,7 @@ from app.models.scheduler_lease import SchedulerLease
 from app.models.site_release import SiteRelease
 from app.models.bug_report import BugReport
 from app.models.hs_softened import HsSoftened
+from app.models.engine_handoff import EngineHandoff
 
 __all__ = [
     "User", "UserRole",
@@ -85,4 +86,5 @@ __all__ = [
     "ProgramBlock",
     "BugReport",
     "HsSoftened",
+    "EngineHandoff",
 ]

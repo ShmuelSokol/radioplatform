@@ -135,6 +135,23 @@ async def list_items(
     }
 
 
+@router.get("/types")
+async def list_types(
+    asset_type: str = Query("music"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_staff),
+):
+    """Every type (category) in the whole table, for the Type filter and the Edit-mode list."""
+    rows = (await db.execute(
+        select(Asset.category).where(Asset.asset_type == asset_type, Asset.category.is_not(None), Asset.category != "")
+        .distinct()
+    )).scalars().all()
+    seen: dict[str, str] = {}
+    for c in rows:
+        seen.setdefault(c.strip().lower(), c.strip())
+    return {"types": sorted(seen.values(), key=str.lower)}
+
+
 @router.get("/spots")
 async def list_spots(
     station_id: uuid.UUID | None = Query(None),
