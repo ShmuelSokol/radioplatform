@@ -14,6 +14,6 @@ Dates on this page are day-first (14/12/2026), as the old program writes them; t
 
 Edit mode (managers): click or tap Artist, Title, Type, V or Intro on a song, Category or End date on a spot; Enter saves (`PATCH /assets/{id}`), Esc cancels.
 
-Not copied (unknown meaning or no match here): the Mpeg / Prsnt filters, 123, BLK PRE SPOT, "blank" jingles of a set length, and in the control room HS, Spots mode, Panic.
+Mpeg / Prsnt filters and 123 (go to record): see [station-modes](station-modes.md). Not copied: BLK PRE SPOT, "blank" jingles of a set length.
 
 Test: `frontend/e2e/databank.mjs` against a running site with data (desktop and iPhone), `backend/tests/test_databank.py`.
