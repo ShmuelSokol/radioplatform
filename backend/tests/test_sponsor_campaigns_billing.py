@@ -450,3 +450,86 @@ async def test_sponsor_portal_counts_and_upcoming(client, sponsor_login, db_sess
     assert up[0]["time_slot"] == local.strftime("%I:%M %p").lstrip("0")
     assert up[0]["estimated_date"] == local.strftime("%Y-%m-%d")
 
+
+
+# --- V1-108: who may create a campaign ---
+
+@pytest.mark.asyncio
+async def test_campaign_create_by_manager_and_unlinked_sponsor(client, sponsor_login, db_session):
+    """Managers could not create a campaign at all (always 403 "Managers must specify a
+    sponsor_id", with no way to pass one). Fixed: staff name the sponsor with sponsor_id.
+    A sponsor login with no linked sponsor record gets 403 on create and empty lists."""
+    from app.core.security import create_access_token
+
+    _, sponsor, _ = sponsor_login
+    manager = User(id=uuid.uuid4(), email="mgr@t.test", hashed_password="x", role=UserRole.MANAGER, is_active=True)
+    lonely = User(id=uuid.uuid4(), email="lonely@sponsor.test", hashed_password="x", role=UserRole.SPONSOR,
+                  is_active=True)
+    db_session.add_all([manager, lonely])
+    await db_session.commit()
+    mh = {"Authorization": f"Bearer {create_access_token(str(manager.id))}"}
+    lh = {"Authorization": f"Bearer {create_access_token(str(lonely.id))}"}
+
+    r = await client.post(f"{API}/campaigns", json={"name": "No sponsor"}, headers=mh)
+    assert r.status_code == 400
+    r = await client.post(f"{API}/campaigns", json={"name": "Ghost", "sponsor_id": str(uuid.uuid4())}, headers=mh)
+    assert r.status_code == 404
+    r = await client.post(f"{API}/campaigns", json={"name": "For Acme", "sponsor_id": str(sponsor.id)}, headers=mh)
+    assert r.status_code == 201, r.text
+    assert r.json()["sponsor_id"] == str(sponsor.id)
+
+    r = await client.post(f"{API}/campaigns", json={"name": "Mine", "sponsor_id": str(sponsor.id)}, headers=lh)
+    assert r.status_code == 403
+    assert (await client.get(f"{API}/campaigns", headers=lh)).json() == []
+    assert (await client.get(f"{API}/billing/invoices", headers=lh)).json() == []
+
+
+@pytest.mark.asyncio
+async def test_sponsor_cannot_create_a_campaign_for_another_sponsor(client, sponsor_login, db_session):
+    headers, sponsor, _ = sponsor_login
+    other = Sponsor(id=uuid.uuid4(), name="Other", length_seconds=30, audio_file_path="o.mp3")
+    db_session.add(other)
+    await db_session.commit()
+    r = await client.post(f"{API}/campaigns", json={"name": "Sneaky", "sponsor_id": str(other.id)}, headers=headers)
+    assert r.status_code == 201
+    assert r.json()["sponsor_id"] == str(sponsor.id)  # always the sponsor's own
+
+
+# --- V1-109: checkout refusals and webhook signature ---
+
+@pytest.mark.asyncio
+async def test_checkout_refusals_and_bad_webhook_signature(client, sponsor_login, db_session, monkeypatch):
+    import stripe
+
+    from app.config import settings
+
+    headers, sponsor, _ = sponsor_login
+    other = Sponsor(id=uuid.uuid4(), name="Other", length_seconds=30, audio_file_path="o.mp3")
+    db_session.add(other)
+    await db_session.flush()
+    paid = Invoice(sponsor_id=sponsor.id, amount_cents=100, currency="USD", status=InvoiceStatus.PAID)
+    theirs = Invoice(sponsor_id=other.id, amount_cents=100, currency="USD", status=InvoiceStatus.SENT)
+    db_session.add_all([paid, theirs])
+    await db_session.commit()
+    monkeypatch.setattr(settings, "STRIPE_SECRET_KEY", "sk_test_fake")
+    monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_fake")
+
+    def no_stripe(**kw):
+        raise AssertionError("Stripe must not be called")
+
+    monkeypatch.setattr(stripe.checkout.Session, "create", no_stripe)
+    r = await client.post(f"{API}/billing/invoices/{paid.id}/checkout", headers=headers)
+    assert r.status_code == 400 and "already paid" in r.text
+    r = await client.post(f"{API}/billing/invoices/{theirs.id}/checkout", headers=headers)
+    assert r.status_code == 404  # not 403: another sponsor's invoice is not admitted to exist
+    r = await client.post(f"{API}/billing/invoices/{uuid.uuid4()}/checkout", headers=headers)
+    assert r.status_code == 404
+
+    body = json.dumps({"type": "checkout.session.completed",
+                       "data": {"object": {"metadata": {"invoice_id": str(theirs.id)}}}})
+    r = await client.post(f"{API}/billing/webhook", content=body, headers={"stripe-signature": "t=1,v1=bad"})
+    assert r.status_code == 400
+    r = await client.post(f"{API}/billing/webhook", content=body)
+    assert r.status_code == 400
+    await db_session.refresh(theirs)
+    assert theirs.status == InvoiceStatus.SENT

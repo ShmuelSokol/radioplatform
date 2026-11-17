@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_db, require_manager, require_sponsor_or_manager
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from app.models.ad_campaign import AdCampaign, AdComment, AdDraft, CampaignStatus
 from app.models.sponsor import Sponsor
 from app.models.user import User, UserRole
@@ -89,10 +89,11 @@ async def create_campaign(
         raise ForbiddenError("No sponsor record linked to your account")
 
     # For sponsors, always use their own sponsor_id
-    sponsor_id = sponsor.id if sponsor else None
+    sponsor_id = sponsor.id if user.role == UserRole.SPONSOR else data.sponsor_id
     if not sponsor_id:
-        # Manager creating — need to pick a sponsor; use first one for now
-        raise ForbiddenError("Managers must specify a sponsor_id when creating campaigns via the admin panel")
+        raise BadRequestError("sponsor_id is required when staff create a campaign")
+    if user.role != UserRole.SPONSOR and await db.get(Sponsor, sponsor_id) is None:
+        raise NotFoundError("Sponsor not found")
 
     campaign = AdCampaign(
         sponsor_id=sponsor_id,

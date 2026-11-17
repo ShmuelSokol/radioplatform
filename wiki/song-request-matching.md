@@ -44,3 +44,5 @@ Selection is the cheap win; **recall is the real ceiling**. A smarter selection 
 bolted on top inherits the character-level candidate list and still cannot see
 `B'tzeis Yisroel` for a semantic query. Fix recall first (trigram / embeddings), then
 improve selection, then collapse the duplicate rows.
+
+Daily request caps (auto-approve `max_requests_per_day`) count plays and requests from the station's own local midnight (`song_request_service.station_day_start`), not UTC midnight. Test: `backend/tests/test_song_request_station_day.py`.

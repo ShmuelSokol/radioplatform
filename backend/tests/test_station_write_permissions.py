@@ -367,6 +367,50 @@ async def test_form_encoded_write_cannot_skip_the_station_check(client: AsyncCli
     assert (await db_session.execute(select(Schedule))).scalars().all() == []
 
 
+@pytest.mark.asyncio
+async def test_multipart_and_form_writes_are_checked_by_the_guard(db_session: AsyncSession):
+    """V1-101 (fixed): the guard read JSON bodies only, so a multipart or url-encoded write
+    naming station_id in a form field skipped the station check. No guarded router takes a
+    form today; this mounts one to prove the guard reads forms too."""
+    from fastapi import APIRouter, Depends, FastAPI, File, Form, UploadFile
+    from httpx import ASGITransport
+
+    from app.core.station_guard import station_write_guard
+    from app.db.session import get_db
+
+    fm, web, *_ = await _world(db_session)
+    manager = await _login(db_session, UserRole.MANAGER)  # every station but FM
+    router = APIRouter(dependencies=[Depends(station_write_guard())])
+
+    @router.post("/form")
+    async def form_write(station_id: str = Form(...)):
+        return {"ok": station_id}
+
+    @router.post("/upload")
+    async def upload_write(station_id: str = Form(...), file: UploadFile = File(...)):
+        return {"ok": station_id, "size": len(await file.read())}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    async def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/form", data={"station_id": str(fm.id)}, headers=manager)
+        assert r.status_code == 403
+        r = await c.post("/upload", data={"station_id": str(fm.id)}, files={"file": ("a.mp3", b"abc")},
+                         headers=manager)
+        assert r.status_code == 403
+        r = await c.post("/form", data={"station_id": str(web.id)}, headers=manager)
+        assert r.status_code == 200
+        # the route still reads the form (and the file) after the guard has
+        r = await c.post("/upload", data={"station_id": str(web.id)}, files={"file": ("a.mp3", b"abc")},
+                         headers=manager)
+        assert r.status_code == 200 and r.json() == {"ok": str(web.id), "size": 3}
+
+
 # ---- V1-102: reading is not restricted by station (wiki/station-permissions.md) ----
 
 @pytest.mark.asyncio
@@ -377,3 +421,22 @@ async def test_restricted_staff_can_still_read_other_stations(client: AsyncClien
     manager = await _login(db_session, UserRole.MANAGER, [str(web.id)])
     r = await client.get("/api/v1/program-blocks", params={"station_id": str(fm.id)}, headers=manager)
     assert r.status_code == 200
+
+
+# ---- B-ROLE-22: a refusal is 403 with a plain detail (the frontend shows "not allowed" on any write 403) ----
+
+@pytest.mark.asyncio
+async def test_refusals_are_403_with_a_detail(client: AsyncClient, db_session: AsyncSession):
+    fm, web, *_ = await _world(db_session)
+    viewer = await _login(db_session, UserRole.VIEWER)
+    limited = await _login(db_session, UserRole.MANAGER, [str(web.id)])
+    refusals = [
+        await client.post("/api/v1/stations", json={"name": "Nope"}, headers=viewer),  # role
+        await client.delete(f"/api/v1/stations/{fm.id}", headers=limited),  # protected station
+        await client.put(f"/api/v1/stations/{fm.id}", json={"name": "x"}, headers=limited),
+        await client.post(f"/api/v1/stations/{fm.id}/queue/skip", headers=limited),  # router guard
+    ]
+    for r in refusals:
+        assert r.status_code == 403, (r.request.url, r.status_code, r.text)
+        assert isinstance(r.json().get("detail"), str) and r.json()["detail"], r.text
+    assert "not set up to operate this station" in refusals[2].json()["detail"]

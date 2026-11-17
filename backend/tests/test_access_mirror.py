@@ -81,19 +81,16 @@ SCREEN_WRITES = {
     "/admin/audio-enhance": [("POST", "/assets/{asset_id}/enhance")],
     "/admin/studio": [("POST", "/assets/upload")],  # RecordingStudio saves the take with uploadAsset
     "/admin/crm": [("POST", "/crm/raffles"), ("POST", "/crm/raffles/{raffle_id}/draw")],
-    "/admin/program-clock": [("PUT", "/stations/{station_id}"), ("DELETE", "/rules/{rule_id}")],
+    # the Automation panel saves the station's automation_config; the rule buttons are
+    # admin-only inside the screen (canEditRules, checked below), like the Rules screen
+    "/admin/program-clock": [("PUT", "/stations/{station_id}")],
     "/sponsor/campaigns": [("POST", "/campaigns"), ("POST", "/campaigns/{campaign_id}/comments")],
     "/sponsor/billing": [("POST", "/billing/invoices/{invoice_id}/checkout")],
     "/sponsor/wording": [("POST", "/sponsorship/copy-review")],
 }
 
 # Screens where the two sides disagree today (recorded as bugs below).
-KNOWN_MISMATCH = {
-    "/admin/studio": "BUG: DJs may open the Recording Studio and are not marked view-only, but saving a take "
-                     "(POST /assets/upload) is managers only, so a DJ's recording is refused at the end",
-    "/admin/program-clock": "BUG: managers may change the program clock (WRITE_ROLES MANAGERS) but deleting a "
-                            "rule there (DELETE /rules/{id}) is admin only",
-}
+KNOWN_MISMATCH: dict[str, str] = {}
 
 
 def _disagreements(screen):
@@ -107,6 +104,21 @@ def _disagreements(screen):
             if can_access(role, screen) and not shown and role in allowed:
                 out.append(f"{role} is shown View only on {screen} but {route} lets it change")
     return out
+
+
+PROGRAM_CLOCK_TSX = ACCESS_TS.parents[1] / "pages" / "admin" / "ProgramClock.tsx"
+
+
+def test_program_clock_rule_buttons_are_admin_only():
+    """The program clock writes rules (POST/PUT/DELETE /rules, admin only) and the station's
+    automation settings (PUT /stations/{id}, managers). Managers keep the settings; the rule
+    buttons are shown only to admins (owner: only admins change schedule rules)."""
+    src = PROGRAM_CLOCK_TSX.read_text()
+    assert re.search(r"const canEditRules = user\?\.role === 'admin';", src)
+    for route in (("POST", "/rules"), ("PUT", "/rules/{rule_id}"), ("DELETE", "/rules/{rule_id}")):
+        assert WRITE_POLICY[route] == {"admin"}
+    for call in ("handleSaveRule", "handleDeleteRule"):
+        assert re.search(rf"\{{canEditRules &&[^\n]*(\n[^\n]*){{0,3}}onClick=\{{{call}\}}", src), call
 
 
 def test_access_ts_parsed():

@@ -12,6 +12,7 @@ from app.models.ad_campaign import CampaignStatus
 
 class CampaignCreate(BaseModel):
     name: str
+    sponsor_id: UUID | None = None  # managers name the sponsor; a sponsor's own is always used
     description: str | None = None
     start_date: date | None = None
     end_date: date | None = None

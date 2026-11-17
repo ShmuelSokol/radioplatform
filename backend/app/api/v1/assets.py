@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_manager, require_staff
+from app.core.dependencies import require_dj_or_manager, require_manager, require_staff
 from app.db.session import get_db
 from app.models.asset import Asset as AssetModel
 from app.models.user import User
@@ -239,7 +239,7 @@ async def upload_asset(
     asset_type: str = Form("music"),
     category: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager),
+    user: User = Depends(require_dj_or_manager),  # DJs save Recording Studio takes (owner, 2026-11-17)
 ):
     file_data = await file.read()
     original_filename = file.filename or "upload.mp3"
