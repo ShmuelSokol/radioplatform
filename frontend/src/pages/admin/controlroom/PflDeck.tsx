@@ -82,10 +82,13 @@ function markersOf(asset: { intro_seconds?: number | null; metadata_extra?: Reco
 /** column: phone held sideways, in the transport column (title row, then the buttons beside the wave). */
 export function PflDeck({ pfl, compact = false, column = false }: { pfl: Pfl; compact?: boolean; column?: boolean }) {
   const id = pfl.loadedId;
+  // A run of clips that are not library items (time & weather preview)
+  const seq = pfl.seq;
+  const isSeq = !!seq;
   const { data: asset } = useQuery({
     queryKey: ['pfl-asset', id],
     queryFn: () => getAsset(id as string),
-    enabled: !!id,
+    enabled: !!id && !isSeq,
     staleTime: 5 * 60_000,
   });
 
@@ -103,10 +106,10 @@ export function PflDeck({ pfl, compact = false, column = false }: { pfl: Pfl; co
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      const a = pfl.getAudio();
-      if (a) {
-        if (Number.isFinite(a.duration) && a.duration > 0) setDuration(d => (Math.abs(d - a.duration) > 0.01 ? a.duration : d));
-        setTime(t => (Math.abs(t - a.currentTime) > 0.03 ? a.currentTime : t));
+      const pos = pfl.position();
+      if (pos) {
+        if (pos.duration > 0) setDuration(d => (Math.abs(d - pos.duration) > 0.01 ? pos.duration : d));
+        setTime(t => (Math.abs(t - pos.time) > 0.03 ? pos.time : t));
       }
       raf = requestAnimationFrame(tick);
     };
@@ -114,7 +117,8 @@ export function PflDeck({ pfl, compact = false, column = false }: { pfl: Pfl; co
     return () => cancelAnimationFrame(raf);
   }, [pfl]);
 
-  useEffect(() => { setDuration(0); setTime(0); setPeaks(undefined); }, [id]);
+  // No waveform for a run of clips: the bar is a ruler with a mark where each clip starts
+  useEffect(() => { setDuration(0); setTime(0); setPeaks(isSeq ? null : undefined); }, [id, isSeq]);
 
   // Waveform: from cache, or decoded once per item (songs and spots only)
   const url = pfl.url;
@@ -138,7 +142,12 @@ export function PflDeck({ pfl, compact = false, column = false }: { pfl: Pfl; co
     return () => ro.disconnect();
   }, [id]);
 
-  const markers = markersOf(asset, duration);
+  const starts = isSeq ? pfl.clipStarts() : [];
+  const markers: Marker[] = isSeq
+    ? starts.flatMap((at, i) => (i > 0 && at !== null && duration && at < duration
+      ? [{ key: `clip-${i}`, at, label: (seq.clips[i] ?? '').toUpperCase(), color: '#00e5ff', title: `${seq.clips[i]} starts here` }]
+      : []))
+    : markersOf(asset, duration);
   const shown = dragAt ?? time;
   const frac = duration ? Math.min(1, shown / duration) : 0;
 
@@ -269,15 +278,21 @@ export function PflDeck({ pfl, compact = false, column = false }: { pfl: Pfl; co
   const unplayable = failed === UNPLAYABLE_MESSAGE;
   // After a failed load, ▶ loads the file again
   const onPlay = () => {
-    if (failed) { if (!unplayable) { pfl.stop(); void pfl.toggle(id); } return; }
+    if (failed) { if (!unplayable) pfl.retry(); return; }
     void pfl.playPause();
   };
-  const title = asset?.title ?? 'Loading…';
-  const artist = asset?.artist;
+  const title = seq?.label ?? asset?.title ?? 'Loading…';
+  const artist = seq
+    ? `${seq.clips[pfl.clipIndex] ?? ''}${seq.clips.length > 1 ? ` (${pfl.clipIndex + 1} of ${seq.clips.length})` : ''} · only you hear this, not on air`
+    : asset?.artist;
   const hoverTime = hoverX !== null && width ? (hoverX / width) * duration : null;
   const remaining = Math.max(0, duration - shown);
 
-  const jumps: { label: string; at: number; title: string }[] = [
+  const jumps: { label: string; at: number; title: string }[] = seq ? (
+    seq.clips.length > 1
+      ? starts.flatMap((at, i) => (at === null ? [] : [{ label: seq.clips[i], at, title: `Hear the ${seq.clips[i].toLowerCase()} from its start` }]))
+      : []
+  ) : [
     ...markers.map(m => ({ label: m.label === 'START' ? 'Start' : m.label === 'INTRO' ? 'Intro end' : m.label === 'MIX' ? 'Mix' : 'End', at: m.key === 'end' || m.key === 'mix' ? Math.max(0, m.at - 5) : m.at, title: m.key === 'end' || m.key === 'mix' ? `5 s before ${m.label.toLowerCase()}` : m.title })),
     ...(duration > 30 ? [{ label: 'Last 15 s', at: Math.max(0, duration - 15), title: 'Hear how it ends' }] : []),
   ];
@@ -289,7 +304,7 @@ export function PflDeck({ pfl, compact = false, column = false }: { pfl: Pfl; co
         <div className="flex items-center gap-1.5">
           <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-bold bg-[#2bff4a] text-black rounded-sm" title="Pre-listen: only you hear it, not on air">PFL</span>
           <div className="flex-1 min-w-0 leading-tight">
-            <div className="text-[#ffff40] font-bold text-sm truncate" title={title}>{title}</div>
+            <div className="text-[#ffff40] font-bold text-sm truncate" title={title}>{seq ? `${title} · ${seq.clips[pfl.clipIndex] ?? ''}` : title}</div>
           </div>
           <div className="shrink-0 leading-none text-right" aria-live="off">
             <div className="qn-digits text-base" data-testid="pfl-elapsed">{fmt(shown)}</div>
