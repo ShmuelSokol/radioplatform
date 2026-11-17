@@ -7,12 +7,16 @@ export function useAlerts(filters?: {
   severity?: string;
   alert_type?: string;
   is_resolved?: boolean;
-} | null) {
+  station_id?: string;
+} | null, live = false) {
   return useQuery({
     queryKey: ['alerts', filters],
     queryFn: () => getAlerts(filters!),
     enabled: !!filters,
-    staleTime: 60_000,
+    // live: the control room's Errors tab, where an on-air alarm must show within seconds
+    staleTime: live ? 0 : 60_000,
+    refetchInterval: live ? 10_000 : false,
+    refetchOnWindowFocus: live ? true : undefined,
   });
 }
 

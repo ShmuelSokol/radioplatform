@@ -221,7 +221,7 @@ def keep_for_emergency(played) =
     dest = "#{emergency_dir}/" ^ path.basename(played)
     # Copied under a temporary name first, so the playlist never sees half a file
     part = dest ^ ".part"
-    cmd = "cp -f #{process.quote(played)} #{process.quote(part)} && mv -f #{process.quote(part)} #{process.quote(dest)} && cd #{process.quote(emergency_dir)} && ls -1t | tail -n +#{emergency_keep + 1} | xargs -r rm -f"
+    cmd = "cp -f #{process.quote(played)} #{process.quote(part)} && mv -f #{process.quote(part)} #{process.quote(dest)} && cd #{process.quote(emergency_dir)} && ls -1t | tail -n +#{emergency_keep + 1} | tr '\\n' '\\000' | xargs -0 -r rm -f --"
     thread.run(fast=false, {ignore(process.run(cmd))})
   end
 end

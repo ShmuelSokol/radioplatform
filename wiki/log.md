@@ -171,3 +171,4 @@ INGEST 2026-11-17 station-modes.md HS = hard start switch (softens pending hard 
 UPDATE 2026-11-17 station-modes.md HS softened timings moved from automation_config (order-dependent trim, whole-dict rewrite race) to the hs_softened table; Panic arming is per station and ignores double-clicks
 UPDATE 2026-11-17 air-watch.md hour_missing is not checked while the station has HS (hard start) off: the time check waits for the song by design (station-modes.md)
 INGEST 2026-11-17 admin-page-layout.md admin-flows.mjs suite: roles x screens on real backend, KNOWN_BUGS list, sign-in rate slot, 307 on "/" POSTs, stale-code reload guard per tab, a11y gap list
+QUERY 2026-11-17 databank.md station-modes.md air-watch.md audio-engine.md engine-harness.md read to write checklist rows F-DATABANK/F-MODES/F-MATCH/F-LANDSCAPE/F-HANDOVER/F-AIRWATCH/F-ENGINE2 (docs/test-checklist.md section N)

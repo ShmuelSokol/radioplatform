@@ -101,9 +101,11 @@ async def test_kept_hour_plays_time_weather_then_the_block(db_session: AsyncSess
     by_hour: dict = {}
     for e in rows:
         by_hour.setdefault(e.preempt_at, []).append(e.asset_id)
-    # the block reaches one hour further than the hourly loop (48 h vs the next 47 tops of the hour)
+    # The block reaches one hour further than the hourly loop (48 h vs the next 47 tops of the
+    # hour). Run in the last minutes before an hour, the loop has already left out the coming
+    # hour (too close to queue) while the block still has it: a lone block at either end only.
     lone = [at for at, v in by_hour.items() if v == [ids["sched"]]]
-    assert len(lone) <= 1 and (not lone or lone[0] == max(by_hour))
+    assert len(lone) <= 2 and all(at in (min(by_hour), max(by_hour)) for at in lone), lone
     full = [v for at, v in by_hour.items() if at not in lone]
     assert len(full) >= 46
     assert all(v == [ids["clock"], ids["weather"], ids["sched"]] for v in full), by_hour

@@ -207,6 +207,44 @@ async def test_skipped_time_check_is_reported_but_not_a_duplicate(db_session):
 
 
 @pytest.mark.asyncio
+async def test_time_check_cut_by_panic_is_not_called_never_aired(db_session):
+    """F-AIRWATCH-28: a time check that started and was cut is reported as cut short."""
+    now = datetime.now(UTC)
+    st = await _station(db_session)
+    song = await _asset(db_session, "Song")
+    tc = await _asset(db_session, "Time", category="time_announcement", kind="jingle", duration=8)
+    due = now - timedelta(minutes=2)
+    db_session.add_all([
+        _entry(st, tc, status="skipped", preempt_at=due, timing_mode="hard", started_at=due + timedelta(seconds=1)),
+        _entry(st, song, position=2, status="playing", started_at=due + timedelta(seconds=3)),
+    ])
+    await db_session.commit()
+    found = await AirWatch().check_station(db_session, st, now)
+    assert [(f.kind, f.title) for f in found] == [("timed_skipped", "Time was cut short")]
+    assert "never aired" not in found[0].detail
+
+
+@pytest.mark.asyncio
+async def test_time_check_replaced_by_another_recording_is_not_skipped(db_session):
+    """F-AIRWATCH-29: the time check aired from a different recording (a block's own, a
+    redrawn weather spot): the replaced one is not reported as skipped."""
+    now = datetime.now(UTC)
+    st = await _station(db_session)
+    old_tc = await _asset(db_session, "Time old", category="time_announcement", kind="jingle", duration=8)
+    new_tc = await _asset(db_session, "Time new", category="time_announcement", kind="jingle", duration=8)
+    song = await _asset(db_session, "Song")
+    due = now - timedelta(minutes=2)
+    db_session.add_all([
+        _entry(st, old_tc, status="skipped", preempt_at=due, timing_mode="hard"),
+        _entry(st, new_tc, position=2, status="played", preempt_at=due, timing_mode="hard", started_at=due),
+        _entry(st, song, position=3, status="playing", started_at=due + timedelta(seconds=9)),
+    ])
+    await db_session.commit()
+    found = await AirWatch().check_station(db_session, st, now)
+    assert [f for f in found if f.kind == "timed_skipped"] == []
+
+
+@pytest.mark.asyncio
 async def test_engine_drift(db_session, monkeypatch):
     from app.config import settings
     from app.services import playout_engine
@@ -270,3 +308,37 @@ async def test_status_endpoint(client, auth_headers):
     assert r.status_code == 200
     assert set(r.json()) == {"last_run", "runs", "findings"}
     assert (await client.get("/api/v1/air-watch")).status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_one_station_failing_does_not_stop_the_others(db_session, monkeypatch):
+    """F-AIRWATCH-27: a database error on one station rolls back and the next station is
+    still checked (on Postgres the error would otherwise abort the session for all)."""
+    from sqlalchemy import text
+
+    now = datetime.now(UTC)
+    bad = await _station(db_session)
+    good = Station(id=uuid.uuid4(), name="Jerusalem", timezone="Asia/Jerusalem", automation_config={})
+    db_session.add(good)
+    await db_session.commit()
+    bad_id, good_id = bad.id, good.id  # the rollback expires the test's own objects too
+    real = AirWatch.check_station
+    seen, checked = [], []
+
+    async def flaky(self, db, station, now):
+        seen.append(station.id)
+        if station.id == bad_id:
+            await db.execute(text("SELECT * FROM no_such_table"))
+        result = await real(self, db, station, now)
+        checked.append(station.id)
+        return result
+
+    monkeypatch.setattr(AirWatch, "check_station", flaky)
+    monkeypatch.setattr(AirWatch, "report", lambda self, db, found: _noop())
+    await AirWatch().run_once(db_session, now)
+    assert set(seen) >= {bad_id, good_id}
+    assert checked == [good_id], "the station after the failing one was not checked"
+
+
+async def _noop():
+    return None

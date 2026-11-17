@@ -165,10 +165,19 @@ async def list_alerts(
     severity: str | None = None,
     alert_type: str | None = None,
     is_resolved: bool | None = None,
+    station_id=None,
 ) -> tuple[list[Alert], int, int]:
-    """List alerts with optional filters. Returns (alerts, total, unresolved_count)."""
+    """List alerts with optional filters. Returns (alerts, total, unresolved_count).
+    station_id: that station's alerts plus the ones tied to no station (the control
+    room's Errors tab, so a busy station cannot push another's errors off the page)."""
     query = select(Alert)
     count_query = select(func.count(Alert.id))
+    if station_id is not None:
+        from sqlalchemy import or_
+
+        cond = or_(Alert.station_id == station_id, Alert.station_id.is_(None))
+        query = query.where(cond)
+        count_query = count_query.where(cond)
 
     # The page sends "warning" / "queue_empty"; compare as the enum (a bare string
     # would be matched against the stored enum names and fail).

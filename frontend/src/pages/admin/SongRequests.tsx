@@ -77,6 +77,13 @@ export default function SongRequests() {
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] min-h-[calc(100vh-4rem)] flex flex-col text-white p-4">
+      {updateMut.isError && (
+        <p role="alert" data-testid="request-error" className="mb-2 rounded border border-red-700 bg-red-950 px-3 py-2 text-red-200">
+          {(updateMut.error as any)?.response?.data?.detail
+            || (updateMut.error as any)?.response?.data?.message
+            || 'That did not work. Try again.'}
+        </p>
+      )}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-cyan-300">
           Song Requests
@@ -199,7 +206,7 @@ export default function SongRequests() {
                       {req.status !== 'queued' && req.status !== 'played' && req.status !== 'rejected' && (
                         <div className="mt-0.5">
                           <MatchToSong
-                            initial={[req.song_title, req.song_artist].filter(Boolean).join(' ')}
+                            initial={req.song_title || req.song_artist || ''}
                             busy={updateMut.isPending}
                             onPick={(a) => handleMatch(req.id, a.id)}
                           />
@@ -287,7 +294,7 @@ export default function SongRequests() {
                   <div className="flex gap-2 items-start">
                     {req.status !== 'queued' && req.status !== 'played' && req.status !== 'rejected' && (
                       <MatchToSong
-                        initial={[req.song_title, req.song_artist].filter(Boolean).join(' ')}
+                        initial={req.song_title || req.song_artist || ''}
                         busy={updateMut.isPending}
                         onPick={(a) => handleMatch(req.id, a.id)}
                       />

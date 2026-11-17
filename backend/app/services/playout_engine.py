@@ -818,6 +818,10 @@ async def tick(db: AsyncSession, station) -> None:
         await _apply_long_item_rule(db, station, state, now, horizon)
     except Exception as e:
         logger.warning("Long-item rule for station %s failed: %s", station_id, e)
+        # A database error would otherwise fail the rest of the tick, including
+        # handing the time check to the engine.
+        await db.rollback()
+        await db.refresh(station)
     res = await db.execute(
         select(QueueEntry)
         .options(joinedload(QueueEntry.asset))

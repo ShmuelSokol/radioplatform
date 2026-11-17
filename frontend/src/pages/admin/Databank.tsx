@@ -201,7 +201,7 @@ export default function Databank() {
     const v = raw.trim();
     const body: Record<string, unknown> = {};
     if (field === 'vote') {
-      const n = Number(v);
+      const n = v === '' ? NaN : Number(v);
       if (!Number.isInteger(n) || n < 0 || n > 100) { setNotice({ ok: false, text: 'V is a whole number from 0 to 100.' }); return; }
       body.vote = n;
     } else if (field === 'intro') {
@@ -253,13 +253,16 @@ export default function Databank() {
   // Arrow keys move the selection; Space pre-listens
   const onKey = (e: React.KeyboardEvent) => {
     if (editing || ids.length === 0) return;
+    // Typing in Find, a drop-down or any other field keeps its own keys
+    const t = e.target as HTMLElement;
+    if (t.closest('input, textarea, select, [contenteditable="true"]')) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const i = recIdx < 0 ? 0 : Math.min(ids.length - 1, Math.max(0, recIdx + (e.key === 'ArrowDown' ? 1 : -1)));
       setSel(ids[i]);
       document.querySelector(`[data-row="${CSS.escape(ids[i])}"]`)?.scrollIntoView({ block: 'nearest' });
     }
-    if (e.key === ' ' && sel && tab !== 'blocks') { e.preventDefault(); void pfl.toggle(sel); }
+    if (e.key === ' ' && sel && tab !== 'blocks' && tab !== 'log') { e.preventDefault(); void pfl.toggle(sel); }
   };
 
   const canEdit = manager && editMode;
