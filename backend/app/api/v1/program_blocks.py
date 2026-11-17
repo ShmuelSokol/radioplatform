@@ -87,6 +87,13 @@ async def list_program_blocks(
     return list(result.scalars().all())
 
 
+@router.get("/capabilities")
+async def program_block_capabilities(_: User = Depends(require_manager)):
+    """What blocks can do on this server, for scripts that set blocks up (the Daf Yomi job
+    checks keep_hourly before it makes any block on a station that keeps its hourly items)."""
+    return {"keep_hourly": True}
+
+
 @router.get("/preview", response_model=BlockPreview)
 async def preview_program_blocks(
     station_id: UUID,
