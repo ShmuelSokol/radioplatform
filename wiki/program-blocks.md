@@ -21,7 +21,9 @@ song at most this long, then fade it; queued as `QueueEntry.hard_by`), `items` (
   weather from `get_or_create_weather_spot_assets`
 
 - `{"kind": "sponsors", "count": N}`: N sponsor places, filled by the spot
-  planner (below)
+  planner (below). `"max_seconds": 180` limits the sponsorship time of one airing
+  instead (or as well); with only a time limit the item holds up to 10
+  (`item_places`).
 
 Items may carry a `label` (the page stores the recording's title there).
 
@@ -75,6 +77,33 @@ with room; with no room left it is unplaced ("no sponsor place left in this time
 of day's blocks", shown on Schedule Check). An exact-time sponsorship whose time
 is a block's start takes a place in that block; other exact times keep their
 own `ad_slot` entry.
+
+### More sponsorships than room (2026-11-17)
+
+Shmuel's case: a block allowed 3 minutes, 7 sponsorships of 30 s wanting it.
+
+- Room is places and, when the item has `max_seconds`, time: a play needs a free
+  place and enough seconds left for its own length (`Asset.duration`, 30 s when
+  unknown). The queue never holds more than the limit for one airing.
+- With enough room nothing changed: first booked, first seated, each play aimed
+  at its share of the daypart (one play a daypart aims at the block nearest the
+  middle, so with blocks at 7 and 8 PM it is the 8 PM one that fills first).
+- Over-booked daypart (`_fair_order`): everyone's first play before anyone's
+  second; contracts ending within 3 days first; the rest take turns, the start
+  moving on one each day and daypart, so a different sponsorship waits each day.
+  A pure function of the date: the plan is the same whenever it is worked out.
+- A play with no room in its own daypart rolls to the first later block the same
+  day with room, after that daypart seated its own plays (`Placement.moved_from`,
+  "moved from afternoon" on the Spot Schedule page). It never rolls to another
+  day and never past the contract's end date.
+- Only then is it unplaced. Said three ways: `warnings` in the answer to saving a
+  spot schedule (red box on the page, naming others that lose plays too), one
+  folded alert "More sponsorships than room on <station>", and Schedule Check
+  ("In the next 7 days it misses 2 of 14 plays. Its contract ends Nov 20, so
+  they cannot be made up.").
+- Not built: telling the sponsor in their portal. That is a business choice.
+
+Tests: `tests/test_sponsorship_room.py`.
 
 Placements in blocks (`Placement.block` set) are not written by
 `reconcile_spot_slots`: the block reconciler asks the spot plan which

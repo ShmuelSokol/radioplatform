@@ -51,12 +51,23 @@ function length(seconds: number) {
   return `runs ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function minutesText(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  if (!sec) return `${m} minute${m === 1 ? '' : 's'}`;
+  return m ? `${m}:${String(sec).padStart(2, '0')} minutes` : `${sec} seconds`;
+}
+
 function itemText(item: BlockItem) {
   if (item.label) return item.label;
   if (item.kind === 'time') return 'Time announcement';
   if (item.kind === 'weather') return 'Weather';
-  if (item.kind === 'sponsors')
-    return `${item.count} sponsor place${item.count === 1 ? '' : 's'}`;
+  if (item.kind === 'sponsors') {
+    const limit = item.max_seconds ? `up to ${minutesText(item.max_seconds)} of sponsorships` : '';
+    if (!item.count) return limit || '1 sponsor place';
+    const places = `${item.count} sponsor place${item.count === 1 ? '' : 's'}`;
+    return limit ? `${places}, ${limit}` : places;
+  }
   if (item.kind === 'category')
     return item.category ? `${item.asset_type} / ${item.category}` : item.asset_type;
   return 'Recording';
@@ -67,7 +78,9 @@ function itemHint(item: BlockItem) {
   if (item.kind === 'category') return 'takes turns: the one that has rested longest';
   if (item.kind === 'time') return "the hour's time announcement";
   if (item.kind === 'sponsors')
-    return 'filled from the sponsorships that want this time of day (Spot Schedule)';
+    return item.max_seconds
+      ? 'filled from the sponsorships that want this time of day; what does not fit goes to the next block with room'
+      : 'filled from the sponsorships that want this time of day (Spot Schedule)';
   return "the day's weather";
 }
 
@@ -97,6 +110,7 @@ export default function ProgramBlocks() {
   const [search, setSearch] = useState('');
   const [combo, setCombo] = useState('');
   const [places, setPlaces] = useState(3);
+  const [sponsorMinutes, setSponsorMinutes] = useState('');
 
   const { data: blocks, isLoading } = useQuery({
     queryKey: ['program-blocks', station],
@@ -531,11 +545,34 @@ export default function ProgramBlocks() {
                   />
                   <button
                     type="button"
-                    onClick={() => addItem({ kind: 'sponsors', count: places })}
+                    onClick={() => {
+                      const seconds = Math.round((Number(sponsorMinutes) || 0) * 60);
+                      addItem(
+                        seconds >= 15
+                          ? { kind: 'sponsors', max_seconds: Math.min(900, seconds) }
+                          : { kind: 'sponsors', count: places },
+                      );
+                    }}
                     className="px-3 py-2 border rounded-lg bg-white hover:bg-gray-50"
                   >
                     Add sponsor places
                   </button>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    at most
+                    <input
+                      type="number"
+                      min={0.25}
+                      max={15}
+                      step={0.25}
+                      placeholder="any"
+                      aria-label="Most minutes of sponsorships in this block"
+                      data-testid="sponsor-minutes"
+                      value={sponsorMinutes}
+                      onChange={(e) => setSponsorMinutes(e.target.value)}
+                      className="w-20 px-2 py-2 border rounded-lg"
+                    />
+                    minutes (with a time limit, as many as fit in it; the number of places is not used)
+                  </label>
                 </div>
                 <div className="flex flex-wrap gap-2 mt-3">
                   <button

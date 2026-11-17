@@ -17,6 +17,8 @@ class BlockItem(BaseModel):
     category: str | None = Field(None, max_length=100)
     label: str | None = Field(None, max_length=80)
     count: int | None = Field(None, ge=1, le=10)  # sponsors: how many places
+    # sponsors: the most sponsorship time this item may hold in one airing
+    max_seconds: int | None = Field(None, ge=15, le=900)
 
     @model_validator(mode="after")
     def _complete(self):
@@ -24,7 +26,9 @@ class BlockItem(BaseModel):
             raise ValueError("choose the recording for this item")
         if self.kind == "category" and not (self.asset_type or "").strip():
             raise ValueError("choose the type of recording for this item")
-        if self.kind == "sponsors" and self.count is None:
+        if self.kind != "sponsors":
+            self.max_seconds = None
+        if self.kind == "sponsors" and self.count is None and self.max_seconds is None:
             self.count = 1
         return self
 
