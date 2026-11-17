@@ -1,14 +1,15 @@
 """
-Ad Campaign management endpoints.
-Sponsors see their own campaigns; managers see all.
+Sponsorship campaign endpoints.
+Sponsors see their own campaigns; managers see and change all; DJs and viewers
+may look at every campaign (the admin Campaigns screen, view only).
 """
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_manager, require_sponsor_or_manager
+from app.core.dependencies import get_current_user, get_db, require_manager, require_sponsor_or_manager
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.ad_campaign import AdCampaign, AdComment, AdDraft, CampaignStatus
 from app.models.sponsor import Sponsor
@@ -37,9 +38,21 @@ async def _get_sponsor_for_user(db: AsyncSession, user: User) -> Sponsor | None:
     return result.scalar_one_or_none()
 
 
+_STAFF = (UserRole.ADMIN, UserRole.MANAGER, UserRole.DJ, UserRole.VIEWER)
+
+
+async def require_staff_or_sponsor(user: User = Depends(get_current_user)) -> User:
+    """Who may READ campaigns: every staff role (DJs and viewers see the admin
+    screen view only) and sponsors (their own campaigns only)."""
+    if user.role not in _STAFF and user.role != UserRole.SPONSOR:
+        raise ForbiddenError("Staff or sponsor access required")
+    return user
+
+
 def _can_access_campaign(user: User, campaign: AdCampaign, sponsor: Sponsor | None) -> bool:
-    """Check if user can access this campaign."""
-    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+    """Check if user can access this campaign. Writes are further limited by
+    each route's guard (require_sponsor_or_manager / require_manager)."""
+    if user.role in _STAFF:
         return True
     if sponsor and campaign.sponsor_id == sponsor.id:
         return True
@@ -51,12 +64,11 @@ def _can_access_campaign(user: User, campaign: AdCampaign, sponsor: Sponsor | No
 @router.get("", response_model=list[CampaignInDB])
 async def list_campaigns(
     skip: int = 0,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=500),
+    sponsor_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_sponsor_or_manager),
+    user: User = Depends(require_staff_or_sponsor),
 ):
-    from app.models.sponsor import Sponsor
-
     stmt = (
         select(AdCampaign, Sponsor.name.label("sponsor_name"))
         .outerjoin(Sponsor, AdCampaign.sponsor_id == Sponsor.id)
@@ -68,6 +80,8 @@ async def list_campaigns(
         if not sponsor:
             return []
         stmt = stmt.where(AdCampaign.sponsor_id == sponsor.id)
+    elif sponsor_id is not None:
+        stmt = stmt.where(AdCampaign.sponsor_id == sponsor_id)
 
     result = await db.execute(stmt)
     campaigns = []
@@ -117,7 +131,7 @@ async def create_campaign(
 async def get_campaign(
     campaign_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_sponsor_or_manager),
+    user: User = Depends(require_staff_or_sponsor),
 ):
     result = await db.execute(select(AdCampaign).where(AdCampaign.id == campaign_id))
     campaign = result.scalar_one_or_none()
@@ -128,6 +142,7 @@ async def get_campaign(
     if not _can_access_campaign(user, campaign, sponsor):
         raise ForbiddenError("Access denied")
 
+    campaign.sponsor_name = campaign.sponsor.name if campaign.sponsor else None
     return campaign
 
 
@@ -189,7 +204,7 @@ async def update_campaign_status(
 async def list_drafts(
     campaign_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_sponsor_or_manager),
+    user: User = Depends(require_staff_or_sponsor),
 ):
     # Verify campaign access
     result = await db.execute(select(AdCampaign).where(AdCampaign.id == campaign_id))
@@ -320,7 +335,7 @@ async def upload_draft_audio(
 async def list_comments(
     campaign_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_sponsor_or_manager),
+    user: User = Depends(require_staff_or_sponsor),
 ):
     result = await db.execute(select(AdCampaign).where(AdCampaign.id == campaign_id))
     campaign = result.scalar_one_or_none()

@@ -389,13 +389,16 @@ async def test_campaigns_and_billing_keep_sponsors_apart(client: AsyncClient, db
                                ("POST", f"/api/v1/campaigns/{cid}/comments", {"body": "hi"})]:
         r = await client.request(method, path, json=body, headers=b)
         assert r.status_code in (403, 404), (method, path, r.status_code)
-    # managers see everyone's; only managers change status; dj refused altogether
+    # managers see everyone's; only managers change status; a dj may look (the admin
+    # Campaigns screen, view only) but not change anything
     assert cid in [c["id"] for c in (await client.get("/api/v1/campaigns", headers=manager)).json()]
     assert (await client.patch(f"/api/v1/campaigns/{cid}/status", json={"status": "approved"},
                                headers=a)).status_code == 403
     r = await client.patch(f"/api/v1/campaigns/{cid}/status", json={"status": "approved"}, headers=manager)
     assert r.status_code == 200, r.text
-    assert (await client.get("/api/v1/campaigns", headers=dj)).status_code == 403
+    assert (await client.get("/api/v1/campaigns", headers=dj)).status_code == 200
+    assert (await client.post(f"/api/v1/campaigns/{cid}/comments", json={"body": "hi"},
+                              headers=dj)).status_code == 403
     assert (await client.post("/api/v1/sponsorship/copy-review", json={"text": "x"}, headers=dj)).status_code == 403
 
     # billing
