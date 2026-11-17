@@ -542,15 +542,34 @@ async def _skip_placeholders(db: AsyncSession, station_id) -> None:
     )
 
 
-async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) -> QueueEntry | None:
+async def _pick_next_pending(
+    db: AsyncSession, station_id, now_utc: datetime, silence_only: bool = False
+) -> QueueEntry | None:
     """The next queue entry due to play: a timed item whose time has come (soft or
     hard), otherwise the first pending entry by position (future timed entries wait).
 
     Hard items count too: the weather that follows the hourly time check is due at
     the same moment but sits at the end of the queue by position. Picking by
     position started the next song when the time check ended, and the weather then
-    cut it a moment later (heard live at 13:00 ET, 2026-11-16)."""
+    cut it a moment later (heard live at 13:00 ET, 2026-11-16).
+
+    `silence_only` (during a blackout): only the blackout's silence may start; a time
+    check or anything else queued for those hours waits until it is over."""
     await _skip_placeholders(db, station_id)
+    if silence_only:
+        silence_ids = select(Asset.id).where(Asset.asset_type == "silence").scalar_subquery()
+        res = await db.execute(
+            select(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.asset_id.in_(silence_ids),
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+            )
+            .order_by(QueueEntry.preempt_at.nullsfirst(), QueueEntry.position)
+            .limit(1)
+        )
+        return res.scalar_one_or_none()
     ad_result = await db.execute(
         select(QueueEntry)
         .where(
@@ -1036,6 +1055,13 @@ async def _check_advance_locked(
         .limit(1)
     )
     preempt_entry = preempt_result.scalar_one_or_none()
+    if (
+        preempt_entry
+        and is_blackout
+        and (preempt_entry.asset is None or preempt_entry.asset.asset_type != "silence")
+    ):
+        # Shabbos / Yom Tov: nothing but silence goes on air, timed or not
+        preempt_entry = None
     if preempt_entry and _same_timed_group(current, preempt_entry):
         # The item on air belongs to the same timed group (time check, then weather):
         # the rest of the group follows it, it does not cut it
@@ -1115,7 +1141,7 @@ async def _check_advance_locked(
         # Looping: the same item goes in again as the next thing to play
         await add_loop_repeat(db, station_id)
 
-    next_entry = await _pick_next_pending(db, station_id, now_utc)
+    next_entry = await _pick_next_pending(db, station_id, now_utc, silence_only=is_blackout)
     if not next_entry and not is_blackout:
         # The queue ran out: fill it and carry on rather than going silent
         next_entry = await _refill_for_next(db, station_id)

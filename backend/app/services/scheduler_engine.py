@@ -173,7 +173,6 @@ class SchedulerEngine:
 
         self._last_holiday_check = now
         try:
-            from sqlalchemy import func as sa_func
             from app.services.station_service import auto_generate_holidays_for_station
 
             stmt = select(Station).where(
@@ -184,33 +183,41 @@ class SchedulerEngine:
             result = await db.execute(stmt)
             stations = result.scalars().all()
 
-            for station in stations:
-                try:
-                    # Find the furthest-out blackout window for this station
-                    max_stmt = select(sa_func.max(HolidayWindow.end_datetime)).where(
-                        HolidayWindow.is_blackout == True,
-                    )
-                    max_result = await db.execute(max_stmt)
-                    max_end = max_result.scalar()
+            # Each station's own windows: looking across all stations let one
+            # covered station hide another that had none (it then played through Shabbos)
+            from app.services.station_service import window_covers_station
+            windows = (await db.execute(
+                select(HolidayWindow).where(
+                    HolidayWindow.is_blackout == True,
+                    HolidayWindow.end_datetime >= now,
+                )
+            )).scalars().all()
+            next_week = now + timedelta(days=7)
+            # Plain values: a commit below expires the loaded rows
+            stations = [(s.id, s.name, s) for s in stations]
+            coverage = {
+                sid: [
+                    (_aware(w.start_datetime), _aware(w.end_datetime))
+                    for w in windows if window_covers_station(w, sid)
+                ]
+                for sid, _, _ in stations
+            }
 
-                    # Also check for a gap: if no window exists in the next 7 days, regenerate
-                    next_week = now + timedelta(days=7)
-                    gap_stmt = select(sa_func.count(HolidayWindow.id)).where(
-                        HolidayWindow.is_blackout == True,
-                        HolidayWindow.start_datetime <= next_week,
-                        HolidayWindow.end_datetime >= now,
-                    )
-                    gap_result = await db.execute(gap_stmt)
-                    near_term_count = gap_result.scalar() or 0
+            for station_id, station_name, station in stations:
+                try:
+                    own = coverage[station_id]
+                    max_end = max((end for _, end in own), default=None)
+                    near_term_count = sum(1 for start, _ in own if start <= next_week)
 
                     # Extend if coverage < 365 days OR no near-term windows exist
-                    if not max_end or (max_end.replace(tzinfo=timezone.utc) - now).days < 365 or near_term_count == 0:
+                    if not max_end or (max_end - now).days < 365 or near_term_count == 0:
+                        station = await db.get(Station, station_id)
                         count = await auto_generate_holidays_for_station(db, station)
                         if count > 0:
                             await db.commit()
-                            logger.info("Extended holidays for station %s: %d new windows", station.name, count)
+                            logger.info("Extended holidays for station %s: %d new windows", station_name, count)
                 except Exception as e:
-                    logger.warning("Holiday extension failed for station %s: %s", station.name, e)
+                    logger.warning("Holiday extension failed for station %s: %s", station_name, e)
         except Exception as e:
             logger.error("Holiday extension check failed: %s", e, exc_info=True)
 
@@ -591,7 +598,7 @@ class SchedulerEngine:
                 cross_seconds = min(cross_seconds, max(0.0, duration / 2))
 
                 # Calculate remaining time from started_at
-                elapsed = (datetime.now(timezone.utc) - entry.started_at).total_seconds()
+                elapsed = (datetime.now(timezone.utc) - _aware(entry.started_at)).total_seconds()
                 remaining = duration - elapsed
                 # Past the crossfade point the timer has already fired; arming it again
                 # (with a delay of 0) would only start a second advance.
