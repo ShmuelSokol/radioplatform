@@ -57,110 +57,110 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 
 ### main.py
 - [ ] B-MAIN-1 `GET /health` [PUBLIC] Liveness + DB check (not under /api/v1) | modes: n.a. | covered: tests/test_health.py
-- [ ] B-MAIN-2 `GET /api/v1/init` [PUBLIC] Create tables on demand (Vercel compat) | modes: n.a. | NOT COVERED
+- [ ] B-MAIN-2 `GET /api/v1/init` [PUBLIC] Create tables on demand (Vercel compat) | modes: n.a. | covered: tests/test_auth_security.py::test_init_is_harmless_to_repeat
 
 ### activity.py (prefix `/activity`)
 - [ ] B-ACTIVITY-1 `GET /activity` [require_admin] list activity | modes: n.a. | covered: tests/test_activity_log.py
 - [ ] B-ACTIVITY-2 `GET /activity/people` [require_admin] One line per person for the period: how many actions, screens opened | modes: n.a. | covered: tests/test_activity_log.py
-- [ ] B-ACTIVITY-3 `GET /activity/filters` [require_admin] People and stations to filter by, and the action groups. | modes: n.a. | NOT COVERED
+- [ ] B-ACTIVITY-3 `GET /activity/filters` [require_admin] People and stations to filter by, and the action groups. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
 - [ ] B-ACTIVITY-4 `POST /activity/page-view` [get_current_user] The admin site reports the screens a signed-in user opens. | modes: n.a. | covered: tests/test_activity_log.py
 - [ ] B-ACTIVITY-5 `GET /activity/listeners` [require_admin] Each listening session: station, when, how long, where from, which device. | modes: n.a. | covered: tests/test_activity_log.py
 
 ### ai_emails.py (prefix `/ai-emails`)
-- [ ] B-AIEMAILS-1 `POST /ai-emails/draft` [require_manager] generate draft | modes: n.a. | NOT COVERED
-- [ ] B-AIEMAILS-2 `POST /ai-emails/send` [require_manager] send drafted email | modes: n.a. | NOT COVERED
+- [ ] B-AIEMAILS-1 `POST /ai-emails/draft` [require_manager] generate draft | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-AIEMAILS-2 `POST /ai-emails/send` [require_manager] send drafted email | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 
 ### alerts.py (prefix `/alerts`)
 - [ ] B-ALERTS-1 `GET /alerts` [require_manager] List alerts with optional filters. | modes: n.a. | covered: tests/test_alert_repeats.py, tests/test_role_access.py
 - [ ] B-ALERTS-2 `GET /alerts/unresolved-count` [require_manager] Get unresolved alert count for notification badge. | modes: n.a. | covered: tests/test_alert_repeats.py
 - [ ] B-ALERTS-3 `POST /alerts/resolve-all` [require_manager] Resolve every open alert (a fresh start). | modes: n.a. | covered: tests/test_alert_repeats.py
-- [ ] B-ALERTS-4 `PATCH /alerts/{alert_id}/resolve` [require_manager] Mark an alert as resolved. | modes: n.a. | NOT COVERED
-- [ ] B-ALERTS-5 `PATCH /alerts/{alert_id}/reopen` [require_manager] Reopen a resolved alert. | modes: n.a. | NOT COVERED
+- [ ] B-ALERTS-4 `PATCH /alerts/{alert_id}/resolve` [require_manager] Mark an alert as resolved. | modes: n.a. | covered: tests/test_admin_crud.py::test_alerts_resolve_reopen_delete
+- [ ] B-ALERTS-5 `PATCH /alerts/{alert_id}/reopen` [require_manager] Reopen a resolved alert. | modes: n.a. | covered: tests/test_admin_crud.py::test_alerts_resolve_reopen_delete
 - [ ] B-ALERTS-6 `DELETE /alerts/{alert_id}` [require_admin] Delete an alert (admin only). | modes: n.a. | covered: tests/test_alert_repeats.py
 
 ### analytics.py (prefix `/analytics`)
-- [ ] B-ANALYTICS-1 `GET /analytics/play-counts` [require_manager] Get play counts by asset, grouped by day. | modes: n.a. | NOT COVERED
-- [ ] B-ANALYTICS-2 `GET /analytics/top-assets` [require_manager] Get most played assets. | modes: n.a. | NOT COVERED
-- [ ] B-ANALYTICS-3 `GET /analytics/category-breakdown` [require_manager] Get play counts grouped by asset category. | modes: n.a. | NOT COVERED
-- [ ] B-ANALYTICS-4 `GET /analytics/hourly-distribution` [require_manager] Get play distribution by hour of day. | modes: n.a. | NOT COVERED
-- [ ] B-ANALYTICS-5 `GET /analytics/summary` [require_manager] Get high-level analytics summary. | modes: n.a. | NOT COVERED
+- [ ] B-ANALYTICS-1 `GET /analytics/play-counts` [require_manager] Get play counts by asset, grouped by day. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ANALYTICS-2 `GET /analytics/top-assets` [require_manager] Get most played assets. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ANALYTICS-3 `GET /analytics/category-breakdown` [require_manager] Get play counts grouped by asset category. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ANALYTICS-4 `GET /analytics/hourly-distribution` [require_manager] Get play distribution by hour of day. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ANALYTICS-5 `GET /analytics/summary` [require_manager] Get high-level analytics summary. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
 
 ### archives.py (prefix `/archives`)
-- [ ] B-ARCHIVES-1 `POST /archives` [require_manager] create archive | modes: n.a. | NOT COVERED
-- [ ] B-ARCHIVES-2 `GET /archives` [PUBLIC] Public: list published archives. Admin sees all. | modes: n.a. | NOT COVERED
-- [ ] B-ARCHIVES-3 ↳ public sees published only; manager sees all | modes: n.a. | NOT COVERED
-- [ ] B-ARCHIVES-4 `GET /archives/{archive_id}` [PUBLIC] get archive | modes: n.a. | NOT COVERED
-- [ ] B-ARCHIVES-5 `PATCH /archives/{archive_id}` [require_manager] update archive | modes: n.a. | NOT COVERED
-- [ ] B-ARCHIVES-6 `DELETE /archives/{archive_id}` [require_manager] delete archive | modes: n.a. | NOT COVERED
-- [ ] B-ARCHIVES-7 `GET /archives/station/{station_id}/rss` [PUBLIC] Public: RSS feed for a station's show archives (podcast format). | modes: n.a. | NOT COVERED
+- [ ] B-ARCHIVES-1 `POST /archives` [require_manager] create archive | modes: n.a. | covered: tests/test_admin_crud.py::test_archives_round_trip
+- [ ] B-ARCHIVES-2 `GET /archives` [PUBLIC] Public: list published archives. Admin sees all. | modes: n.a. | covered: tests/test_public_endpoints.py::test_archives_public_sees_published_only_manager_sees_all (BUG fixed: managers never saw drafts)
+- [ ] B-ARCHIVES-3 ↳ public sees published only; manager sees all | modes: n.a. | covered: tests/test_public_endpoints.py::test_archives_public_sees_published_only_manager_sees_all (BUG fixed: managers never saw drafts)
+- [ ] B-ARCHIVES-4 `GET /archives/{archive_id}` [PUBLIC] get archive | modes: n.a. | covered: tests/test_admin_crud.py::test_archives_round_trip
+- [ ] B-ARCHIVES-5 `PATCH /archives/{archive_id}` [require_manager] update archive | modes: n.a. | covered: tests/test_admin_crud.py::test_archives_round_trip
+- [ ] B-ARCHIVES-6 `DELETE /archives/{archive_id}` [require_manager] delete archive | modes: n.a. | covered: tests/test_admin_crud.py::test_archives_round_trip
+- [ ] B-ARCHIVES-7 `GET /archives/station/{station_id}/rss` [PUBLIC] Public: RSS feed for a station's show archives (podcast format). | modes: n.a. | covered: tests/test_public_endpoints.py::test_archives_public_sees_published_only_manager_sees_all (BUG fixed: managers never saw drafts)
 
 ### asset_types.py (prefix `/asset-types`)
 - [ ] B-ASSETTYPES-1 `GET /asset-types` [require_staff] list asset types | modes: n.a. | covered: tests/test_role_access.py
-- [ ] B-ASSETTYPES-2 `POST /asset-types` [require_manager] create asset type | modes: n.a. | NOT COVERED
-- [ ] B-ASSETTYPES-3 `PATCH /asset-types/{asset_type_id}` [require_manager] update asset type | modes: n.a. | NOT COVERED
-- [ ] B-ASSETTYPES-4 `DELETE /asset-types/{asset_type_id}` [require_manager] delete asset type | modes: n.a. | NOT COVERED
+- [ ] B-ASSETTYPES-2 `POST /asset-types` [require_manager] create asset type | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+- [ ] B-ASSETTYPES-3 `PATCH /asset-types/{asset_type_id}` [require_manager] update asset type | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+- [ ] B-ASSETTYPES-4 `DELETE /asset-types/{asset_type_id}` [require_manager] delete asset type | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
 
 ### assets.py (prefix `/assets`)
-- [ ] B-ASSETS-1 `GET /assets/ffmpeg-check` [require_manager] Diagnostic: check FFmpeg, run conversion test, and do full roundtrip. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-2 `POST /assets/refresh-requested-category` [require_manager] Manually refresh the dynamic 'requested' category. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-3 `POST /assets/backfill-durations` [require_manager] Measure the length of items that have none (they broke the queue view). | modes: n.a. | NOT COVERED
+- [ ] B-ASSETS-1 `GET /assets/ffmpeg-check` [require_manager] Diagnostic: check FFmpeg, run conversion test, and do full roundtrip. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-2 `POST /assets/refresh-requested-category` [require_manager] Manually refresh the dynamic 'requested' category. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-3 `POST /assets/backfill-durations` [require_manager] Measure the length of items that have none (they broke the queue view). | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ASSETS-4 ↳ measures assets with no duration | modes: n.a. | covered: tests/test_items_without_length.py
-- [ ] B-ASSETS-5 `POST /assets/backfill-release-dates` [require_manager] Batch-lookup release dates for music assets missing them. | modes: n.a. | NOT COVERED
+- [ ] B-ASSETS-5 `POST /assets/backfill-release-dates` [require_manager] Batch-lookup release dates for music assets missing them. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ASSETS-6 `POST /assets/upload` [require_manager] upload asset | modes: n.a. | covered: tests/test_assets.py, tests/test_mpeg_conversion.py
 - [ ] B-ASSETS-7 ↳ mp3/wav/etc. converted; duration measured; codec check | modes: n.a. | covered: tests/test_mpeg_conversion.py
-- [ ] B-ASSETS-8 `POST /assets/{asset_id}/analyze-audio` [require_manager] Manually trigger audio analysis for a single asset. | modes: n.a. | NOT COVERED
+- [ ] B-ASSETS-8 `POST /assets/{asset_id}/analyze-audio` [require_manager] Manually trigger audio analysis for a single asset. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ASSETS-9 `POST /assets/bulk-analyze` [require_manager] Batch-analyse items with no analysis or one older than ANALYSIS_VERSION (those | modes: n.a. | covered: tests/test_safe_migrations.py
-- [ ] B-ASSETS-10 `GET /assets/bulk-analyze/status/{job_id}` [require_manager] Poll the status of a bulk audio analysis job. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-11 `POST /assets/bulk-auto-trim` [require_manager] Start a bulk auto-trim job. Returns a job_id to poll for status. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-12 `GET /assets/bulk-auto-trim/status/{job_id}` [require_manager] Poll the status of a bulk auto-trim job. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-13 `PATCH /assets/bulk-category` [require_manager] bulk set category | modes: n.a. | NOT COVERED
+- [ ] B-ASSETS-10 `GET /assets/bulk-analyze/status/{job_id}` [require_manager] Poll the status of a bulk audio analysis job. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-11 `POST /assets/bulk-auto-trim` [require_manager] Start a bulk auto-trim job. Returns a job_id to poll for status. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-12 `GET /assets/bulk-auto-trim/status/{job_id}` [require_manager] Poll the status of a bulk auto-trim job. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-13 `PATCH /assets/bulk-category` [require_manager] bulk set category | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ASSETS-14 `GET /assets` [require_staff] list all | modes: n.a. | covered: tests/test_assets.py, tests/test_assets_hide_generated.py, tests/test_playlist_generation.py
 - [ ] B-ASSETS-15 ↳ generated weather/time clips hidden from library list | modes: n.a. | covered: tests/test_assets_hide_generated.py
-- [ ] B-ASSETS-16 `GET /assets/{asset_id}/audio-url` [require_staff] Return a public URL for wavesurfer.js to fetch audio directly. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-17 `PATCH /assets/{asset_id}/request-settings` [require_manager] Update auto_approve_requests and max_requests_per_day in metadata_extra. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-18 `GET /assets/enhance-presets` [require_staff] Return all available audio enhancement presets. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-19 `POST /assets/{asset_id}/enhance` [require_manager] Apply enhancement filters to an asset. Non-destructive: keeps original. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-20 `POST /assets/{asset_id}/auto-enhance` [require_manager] AI auto-enhancement: analyze audio and apply optimal filters. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-21 `POST /assets/{asset_id}/enhance-preview` [require_staff] Preview enhancement on a short segment. Returns audio/mpeg blob. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-22 `POST /assets/{asset_id}/detect-audience` [require_staff] Detect audience/student questions in a shiur recording. | modes: n.a. | NOT COVERED
+- [ ] B-ASSETS-16 `GET /assets/{asset_id}/audio-url` [require_staff] Return a public URL for wavesurfer.js to fetch audio directly. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-17 `PATCH /assets/{asset_id}/request-settings` [require_manager] Update auto_approve_requests and max_requests_per_day in metadata_extra. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-18 `GET /assets/enhance-presets` [require_staff] Return all available audio enhancement presets. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-19 `POST /assets/{asset_id}/enhance` [require_manager] Apply enhancement filters to an asset. Non-destructive: keeps original. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-20 `POST /assets/{asset_id}/auto-enhance` [require_manager] AI auto-enhancement: analyze audio and apply optimal filters. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-21 `POST /assets/{asset_id}/enhance-preview` [require_staff] Preview enhancement on a short segment. Returns audio/mpeg blob. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-22 `POST /assets/{asset_id}/detect-audience` [require_staff] Detect audience/student questions in a shiur recording. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ASSETS-23 `GET /assets/{asset_id}` [require_staff] get one | modes: n.a. | covered: tests/test_assets.py, tests/test_mpeg_conversion.py, tests/test_operator_actions.py
 - [ ] B-ASSETS-24 `PATCH /assets/{asset_id}` [require_manager] update asset | modes: n.a. | covered: tests/test_assets.py, tests/test_mpeg_conversion.py, tests/test_operator_actions.py
-- [ ] B-ASSETS-25 `GET /assets/{asset_id}/download` [require_staff] download asset | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-26 `POST /assets/{asset_id}/transcode` [require_manager] transcode | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-27 `POST /assets/{asset_id}/clip` [require_manager] clip | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-28 `POST /assets/{asset_id}/detect-silence` [require_staff] Detect silence regions in an asset's audio file. | modes: n.a. | NOT COVERED
+- [ ] B-ASSETS-25 `GET /assets/{asset_id}/download` [require_staff] download asset | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-26 `POST /assets/{asset_id}/transcode` [require_manager] transcode | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-27 `POST /assets/{asset_id}/clip` [require_manager] clip | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-28 `POST /assets/{asset_id}/detect-silence` [require_staff] Detect silence regions in an asset's audio file. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ASSETS-29 `POST /assets/{asset_id}/trim` [require_manager] Trim audio to [trim_start, trim_end]. Non-destructive: keeps original. | modes: n.a. | covered: tests/test_activity_log.py
-- [ ] B-ASSETS-30 ↳ non-destructive trim, restore-original returns file | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-31 `POST /assets/{asset_id}/restore-original` [require_manager] Restore asset to its original file before any trims. | modes: n.a. | NOT COVERED
-- [ ] B-ASSETS-32 `POST /assets/bulk-create` [require_manager] Create asset records for files already uploaded to Supabase Storage. | modes: n.a. | NOT COVERED
+- [ ] B-ASSETS-30 ↳ non-destructive trim, restore-original returns file | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-31 `POST /assets/{asset_id}/restore-original` [require_manager] Restore asset to its original file before any trims. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-32 `POST /assets/bulk-create` [require_manager] Create asset records for files already uploaded to Supabase Storage. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ASSETS-33 `DELETE /assets/{asset_id}` [require_manager] delete | modes: n.a. | covered: tests/test_assets.py, tests/test_mpeg_conversion.py, tests/test_operator_actions.py
 
 ### auth.py (prefix `/auth`)
 - [ ] B-AUTH-1 `POST /auth/login` [PUBLIC] login | modes: n.a. | covered: tests/conftest.py, tests/test_activity_log.py, tests/test_auth.py
 - [ ] B-AUTH-2 ↳ wrong password -> 401; inactive user refused | modes: n.a. | covered: tests/test_auth.py
 - [ ] B-AUTH-3 ↳ sponsor and staff both can log in; token type access+refresh returned | modes: n.a. | covered: tests/test_auth.py
-- [ ] B-AUTH-4 ↳ rate limit (slowapi 200/min default) answers 429 when exceeded | modes: n.a. | NOT COVERED
+- [ ] B-AUTH-4 ↳ rate limit (slowapi 200/min default) answers 429 when exceeded | modes: n.a. | covered: tests/test_auth_security.py::test_login_is_rate_limited_per_address (limit is 10/min; BUG V1-104 xfail test_login_limit_counts_each_real_client_separately)
 - [ ] B-AUTH-5 `POST /auth/refresh` [PUBLIC] refresh | modes: n.a. | covered: tests/test_auth.py
 - [ ] B-AUTH-6 ↳ refresh with an access token (wrong type) refused; expired refresh refused | modes: n.a. | covered: tests/test_auth.py
 - [ ] B-AUTH-7 `GET /auth/me` [get_current_user] me | modes: n.a. | covered: tests/test_auth.py, tests/test_cold_start.py, tests/test_role_access.py
 - [ ] B-AUTH-8 ↳ any_role incl. sponsor gets 200; anonymous 401/403 | modes: n.a. | covered: tests/test_role_access.py
 - [ ] B-AUTH-9 `POST /auth/seed` [PUBLIC] seed admin | modes: n.a. | covered: tests/test_auth.py
 - [ ] B-AUTH-10 ↳ refused (503) when ADMIN_SEED_PASSWORD unset; refused (403) when an admin already exists | modes: n.a. | covered: tests/test_auth.py
-- [ ] B-AUTH-11 `POST /auth/seed-reset` [require_admin] Reset admin credentials — requires existing admin auth. | modes: n.a. | NOT COVERED
-- [ ] B-AUTH-12 `POST /auth/migrate` [PUBLIC] Add new columns to existing tables (safe to run multiple times). | modes: n.a. | NOT COVERED
-- [ ] B-AUTH-13 ↳ PUBLIC (no guard): safe to repeat; confirm it cannot be abused (idempotent ALTERs only) | modes: n.a. | NOT COVERED
+- [ ] B-AUTH-11 `POST /auth/seed-reset` [require_admin] Reset admin credentials — requires existing admin auth. | modes: n.a. | covered: tests/test_auth_security.py::test_seed_reset, test_seed_reset_with_two_admins_does_not_crash (BUG fixed: 500 with two admins)
+- [ ] B-AUTH-12 `POST /auth/migrate` [PUBLIC] Add new columns to existing tables (safe to run multiple times). | modes: n.a. | covered: tests/test_auth_security.py::test_migrate_is_admin_only (BUG fixed: was public)
+- [ ] B-AUTH-13 ↳ PUBLIC (no guard): safe to repeat; confirm it cannot be abused (idempotent ALTERs only) | modes: n.a. | covered: tests/test_auth_security.py::test_migrate_is_admin_only (BUG fixed: was public)
 - [ ] B-AUTH-14 `POST /auth/seed-all` [require_admin] Drop all data and re-seed everything: admin, station, assets, rules. | modes: n.a. | covered: tests/test_auth.py
 - [ ] B-AUTH-15 ↳ refused in production unless ALLOW_DESTRUCTIVE_SEED=true; wipes library/stations/rules otherwise | modes: n.a. | covered: tests/test_auth.py
-- [ ] B-AUTH-16 `POST /auth/seed-assets` [require_admin] Redirect to seed-all. | modes: n.a. | NOT COVERED
+- [ ] B-AUTH-16 `POST /auth/seed-assets` [require_admin] Redirect to seed-all. | modes: n.a. | covered: tests/test_auth_security.py::test_seed_assets_and_reset_refused_for_managers
 
 ### billing.py (prefix `/billing`)
-- [ ] B-BILLING-1 `GET /billing/invoices` [require_sponsor_or_manager] list invoices | modes: n.a. | NOT COVERED
-- [ ] B-BILLING-2 `POST /billing/invoices` [require_manager] create invoice | modes: n.a. | NOT COVERED
-- [ ] B-BILLING-3 `POST /billing/invoices/{invoice_id}/checkout` [require_sponsor] create checkout session | modes: n.a. | NOT COVERED
-- [ ] B-BILLING-4 ↳ sponsor can only checkout own invoice; stripe disabled -> error | modes: n.a. | NOT COVERED
-- [ ] B-BILLING-5 `POST /billing/webhook` [PUBLIC] stripe webhook | modes: n.a. | NOT COVERED
-- [ ] B-BILLING-6 ↳ Stripe signature verified; invoice marked paid | modes: n.a. | NOT COVERED
-- [ ] B-BILLING-7 `GET /billing/summary` [require_sponsor] get billing summary | modes: n.a. | NOT COVERED
+- [ ] B-BILLING-1 `GET /billing/invoices` [require_sponsor_or_manager] list invoices | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-BILLING-2 `POST /billing/invoices` [require_manager] create invoice | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-BILLING-3 `POST /billing/invoices/{invoice_id}/checkout` [require_sponsor] create checkout session | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-BILLING-4 ↳ sponsor can only checkout own invoice; stripe disabled -> error | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-BILLING-5 `POST /billing/webhook` [PUBLIC] stripe webhook | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_off_when_stripe_not_configured, test_stripe_webhook_checks_the_signature
+- [ ] B-BILLING-6 ↳ Stripe signature verified; invoice marked paid | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_checks_the_signature
+- [ ] B-BILLING-7 `GET /billing/summary` [require_sponsor] get billing summary | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
 
 ### bug_reports.py (prefix `/bug-reports`)
 - [ ] B-BUGREPORTS-1 `POST /bug-reports` [_optional_user] create bug report | modes: n.a. | covered: tests/test_bug_reports.py
@@ -169,37 +169,37 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-BUGREPORTS-4 `GET /bug-reports/{report_id}` [require_staff] get bug report | modes: n.a. | covered: tests/test_bug_reports.py
 - [ ] B-BUGREPORTS-5 `GET /bug-reports/{report_id}/screenshot` [require_staff] get bug screenshot | modes: n.a. | covered: tests/test_bug_reports.py
 - [ ] B-BUGREPORTS-6 `PATCH /bug-reports/{report_id}` [require_admin] set bug status | modes: n.a. | covered: tests/test_bug_reports.py
-- [ ] B-BUGREPORTS-7 `POST /bug-reports/{report_id}/resend` [require_admin] Copy a report to GitHub again (e.g. one sent before the token was set). | modes: n.a. | NOT COVERED
-- [ ] B-BUGREPORTS-8 ↳ admin only; copies to GitHub again | modes: n.a. | NOT COVERED
+- [ ] B-BUGREPORTS-7 `POST /bug-reports/{report_id}/resend` [require_admin] Copy a report to GitHub again (e.g. one sent before the token was set). | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-BUGREPORTS-8 ↳ admin only; copies to GitHub again | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 
 ### call_in.py (prefix `/call-in`)
 - [ ] B-CALLIN-1 `POST /call-in/{station_id}` [PUBLIC] Join the queue of the station's live show. Returns the call and the token its | modes: n.a. | covered: tests/test_web_call_in.py
 - [ ] B-CALLIN-2 ↳ no live show -> 409; show not taking calls -> 409; burst -> 429 | modes: n.a. | covered: tests/test_web_call_in.py
 
 ### campaigns.py (prefix `/campaigns`)
-- [ ] B-CAMPAIGNS-1 `GET /campaigns` [require_sponsor_or_manager] list campaigns | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-2 ↳ sponsor sees only own campaigns; manager sees all | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-3 `POST /campaigns` [require_sponsor_or_manager] create campaign | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-4 `GET /campaigns/{campaign_id}` [require_sponsor_or_manager] get campaign | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-5 `PATCH /campaigns/{campaign_id}` [require_sponsor_or_manager] update campaign | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-6 `PATCH /campaigns/{campaign_id}/status` [require_manager] update campaign status | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-7 `GET /campaigns/{campaign_id}/drafts` [require_sponsor_or_manager] list drafts | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-8 `POST /campaigns/{campaign_id}/drafts` [require_sponsor_or_manager] create draft | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-9 `POST /campaigns/{campaign_id}/drafts/{draft_id}/upload-audio` [require_sponsor_or_manager] upload draft audio | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-10 `GET /campaigns/{campaign_id}/comments` [require_sponsor_or_manager] list comments | modes: n.a. | NOT COVERED
-- [ ] B-CAMPAIGNS-11 `POST /campaigns/{campaign_id}/comments` [require_sponsor_or_manager] create comment | modes: n.a. | NOT COVERED
+- [ ] B-CAMPAIGNS-1 `GET /campaigns` [require_sponsor_or_manager] list campaigns | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-2 ↳ sponsor sees only own campaigns; manager sees all | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-3 `POST /campaigns` [require_sponsor_or_manager] create campaign | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-4 `GET /campaigns/{campaign_id}` [require_sponsor_or_manager] get campaign | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-5 `PATCH /campaigns/{campaign_id}` [require_sponsor_or_manager] update campaign | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-6 `PATCH /campaigns/{campaign_id}/status` [require_manager] update campaign status | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-7 `GET /campaigns/{campaign_id}/drafts` [require_sponsor_or_manager] list drafts | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-8 `POST /campaigns/{campaign_id}/drafts` [require_sponsor_or_manager] create draft | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-9 `POST /campaigns/{campaign_id}/drafts/{draft_id}/upload-audio` [require_sponsor_or_manager] upload draft audio | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-CAMPAIGNS-10 `GET /campaigns/{campaign_id}/comments` [require_sponsor_or_manager] list comments | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-11 `POST /campaigns/{campaign_id}/comments` [require_sponsor_or_manager] create comment | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
 
 ### categories.py (prefix `/categories`)
 - [ ] B-CATEGORIES-1 `GET /categories` [require_staff] list categories | modes: n.a. | covered: tests/test_role_access.py
-- [ ] B-CATEGORIES-2 `POST /categories` [require_manager] create category | modes: n.a. | NOT COVERED
-- [ ] B-CATEGORIES-3 `PATCH /categories/{category_id}` [require_manager] update category | modes: n.a. | NOT COVERED
-- [ ] B-CATEGORIES-4 `DELETE /categories/{category_id}` [require_manager] delete category | modes: n.a. | NOT COVERED
+- [ ] B-CATEGORIES-2 `POST /categories` [require_manager] create category | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+- [ ] B-CATEGORIES-3 `PATCH /categories/{category_id}` [require_manager] update category | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+- [ ] B-CATEGORIES-4 `DELETE /categories/{category_id}` [require_manager] delete category | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
 
 ### channels.py (prefix `/channels`)
-- [ ] B-CHANNELS-1 `GET /channels` [PUBLIC] list channels | modes: n.a. | NOT COVERED
-- [ ] B-CHANNELS-2 `POST /channels` [require_manager] create channel | modes: n.a. | NOT COVERED
-- [ ] B-CHANNELS-3 `PUT /channels/{channel_id}` [require_manager] update channel | modes: n.a. | NOT COVERED
-- [ ] B-CHANNELS-4 `DELETE /channels/{channel_id}` [require_manager] delete channel | modes: n.a. | NOT COVERED
+- [ ] B-CHANNELS-1 `GET /channels` [PUBLIC] list channels | modes: n.a. | covered: tests/test_admin_crud.py::test_channels_round_trip
+- [ ] B-CHANNELS-2 `POST /channels` [require_manager] create channel | modes: n.a. | covered: tests/test_admin_crud.py::test_channels_round_trip
+- [ ] B-CHANNELS-3 `PUT /channels/{channel_id}` [require_manager] update channel | modes: n.a. | covered: tests/test_admin_crud.py::test_channels_round_trip
+- [ ] B-CHANNELS-4 `DELETE /channels/{channel_id}` [require_manager] delete channel | modes: n.a. | covered: tests/test_admin_crud.py::test_channels_round_trip
 
 ### controls.py (prefix `/stations`) — router guard: require_station_operator on writes
 - [ ] B-CONTROLS-1 `POST /stations/{station_id}/controls/play` [require_dj_or_manager] play | modes: both | covered: tests/test_controls_streams_scheduler.py::test_controls_play_with_empty_redis_queue; BUG controls 500 without Redis (tests/test_controls_streams_scheduler.py::test_controls_do_not_500_without_redis, xfail)
@@ -217,22 +217,22 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-COPYREVIEW-4 `POST /sponsorship/copy-review` [require_sponsor_or_manager] Check proposed sponsorship wording against the rules in force. | modes: n.a. | covered: tests/test_copy_review.py
 
 ### crm.py (prefix `/crm`)
-- [ ] B-CRM-1 `POST /crm/register` [PUBLIC] Register a new CRM member. Returns a 6-digit PIN (shown once). | modes: n.a. | NOT COVERED
-- [ ] B-CRM-2 `POST /crm/login` [PUBLIC] Login with a 6-digit PIN. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-3 `POST /crm/rate` [get_crm_member] Rate or favorite a song. Upserts if a rating already exists. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-4 `DELETE /crm/rate/{asset_id}` [get_crm_member] Remove a rating for a song. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-5 `GET /crm/my-ratings` [get_crm_member] List all ratings/favorites for the authenticated member. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-6 `GET /crm/raffles/active` [PUBLIC] List open raffles. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-7 `POST /crm/raffles/{raffle_id}/enter` [get_crm_member] Enter a raffle. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-8 `GET /crm/members` [require_manager] List CRM members with optional search. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-9 `GET /crm/members/{member_id}` [require_manager] Get a single member detail. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-10 `DELETE /crm/members/{member_id}` [require_manager] Deactivate a CRM member (soft delete). | modes: n.a. | NOT COVERED
-- [ ] B-CRM-11 `GET /crm/song-rankings` [require_manager] Songs ranked by listener ratings — useful for playlist curation. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-12 `GET /crm/raffles` [require_manager] List all raffles (admin). | modes: n.a. | NOT COVERED
-- [ ] B-CRM-13 `POST /crm/raffles` [require_manager] Create a new raffle. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-14 `PATCH /crm/raffles/{raffle_id}` [require_manager] Update a raffle. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-15 `POST /crm/raffles/{raffle_id}/draw` [require_manager] Randomly draw a winner for a raffle. | modes: n.a. | NOT COVERED
-- [ ] B-CRM-16 `GET /crm/raffles/{raffle_id}/entries` [require_manager] List entries for a raffle. | modes: n.a. | NOT COVERED
+- [ ] B-CRM-1 `POST /crm/register` [PUBLIC] Register a new CRM member. Returns a 6-digit PIN (shown once). | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-2 `POST /crm/login` [PUBLIC] Login with a 6-digit PIN. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-3 `POST /crm/rate` [get_crm_member] Rate or favorite a song. Upserts if a rating already exists. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-4 `DELETE /crm/rate/{asset_id}` [get_crm_member] Remove a rating for a song. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-5 `GET /crm/my-ratings` [get_crm_member] List all ratings/favorites for the authenticated member. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-6 `GET /crm/raffles/active` [PUBLIC] List open raffles. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-7 `POST /crm/raffles/{raffle_id}/enter` [get_crm_member] Enter a raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-8 `GET /crm/members` [require_manager] List CRM members with optional search. | modes: n.a. | covered: tests/test_crm.py::test_admin_member_list_and_soft_delete
+- [ ] B-CRM-9 `GET /crm/members/{member_id}` [require_manager] Get a single member detail. | modes: n.a. | covered: tests/test_crm.py::test_admin_member_list_and_soft_delete
+- [ ] B-CRM-10 `DELETE /crm/members/{member_id}` [require_manager] Deactivate a CRM member (soft delete). | modes: n.a. | covered: tests/test_crm.py::test_admin_member_list_and_soft_delete
+- [ ] B-CRM-11 `GET /crm/song-rankings` [require_manager] Songs ranked by listener ratings — useful for playlist curation. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-12 `GET /crm/raffles` [require_manager] List all raffles (admin). | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-13 `POST /crm/raffles` [require_manager] Create a new raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-14 `PATCH /crm/raffles/{raffle_id}` [require_manager] Update a raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-15 `POST /crm/raffles/{raffle_id}/draw` [require_manager] Randomly draw a winner for a raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-16 `GET /crm/raffles/{raffle_id}/entries` [require_manager] List entries for a raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
 
 ### holidays.py (prefix `/holidays`)
 - [ ] B-HOLIDAYS-1 `GET /holidays` [require_manager] list holidays | modes: both | covered: tests/test_holidays.py
@@ -240,15 +240,15 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-HOLIDAYS-3 `PUT /holidays/{holiday_id}` [require_manager] update holiday | modes: both | covered: tests/test_holidays.py
 - [ ] B-HOLIDAYS-4 `DELETE /holidays/{holiday_id}` [require_manager] delete holiday | modes: both | covered: tests/test_holidays.py
 - [ ] B-HOLIDAYS-5 `POST /holidays/preview` [require_manager] Preview auto-generated blackout windows without saving to DB. | modes: both | NOT COVERED
-- [ ] B-HOLIDAYS-6 `POST /holidays/auto-generate` [require_manager] Auto-generate Shabbos & Yom Tov blackout windows based on station location. | modes: both | NOT COVERED
+- [ ] B-HOLIDAYS-6 `POST /holidays/auto-generate` [require_manager] Auto-generate Shabbos & Yom Tov blackout windows based on station location. | modes: both | covered: partial (tests/test_station_write_permissions.py::test_blackouts_follow_station_permissions: station check only)
 - [ ] B-HOLIDAYS-7 ↳ Shabbos/Yom Tov windows from station location (candle-lighting/havdalah) | modes: both | NOT COVERED
 - [ ] B-HOLIDAYS-8 `POST /holidays/ensure-silence-asset` [require_manager] Ensure a silence audio asset exists. Creates one via FFmpeg if needed. | modes: both | NOT COVERED
 - [ ] B-HOLIDAYS-9 ↳ creates silence asset via FFmpeg if missing | modes: n.a. | NOT COVERED
 
 ### icecast.py (prefix `/icecast`)
 - [ ] B-ICECAST-1 `GET /icecast/status` [require_admin] Get Icecast configuration status. | modes: n.a. | NOT COVERED
-- [ ] B-ICECAST-2 `POST /icecast/{station_id}/start` [require_admin] Start Icecast OTA stream for a station. | modes: n.a. | NOT COVERED
-- [ ] B-ICECAST-3 `POST /icecast/{station_id}/stop` [require_admin] Stop Icecast OTA stream for a station. | modes: n.a. | NOT COVERED
+- [ ] B-ICECAST-2 `POST /icecast/{station_id}/start` [require_admin] Start Icecast OTA stream for a station. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ICECAST-3 `POST /icecast/{station_id}/stop` [require_admin] Stop Icecast OTA stream for a station. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 
 ### listeners.py (prefix `/listeners`)
 - [ ] B-LISTENERS-1 `POST /listeners/heartbeat` [PUBLIC] Public endpoint — called by the Listen page every 30s to track active listeners. | modes: both | covered: tests/test_listeners_live.py
@@ -258,35 +258,35 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-LISTENERS-5 `WEBSOCKET /listeners/ws` [PUBLIC] Admin pages keep this open and refetch /live when told something changed. | modes: both | NOT COVERED
 - [ ] B-LISTENERS-6 ↳ admin watchers told to refetch on change; dead socket dropped | modes: n.a. | NOT COVERED
 - [ ] B-LISTENERS-7 `GET /listeners/live` [require_manager] Current active listeners across all stations, grouped by station + region. | modes: both | covered: tests/test_listeners_live.py
-- [ ] B-LISTENERS-8 `GET /listeners/today` [require_manager] Today's listener stats: total sessions, unique listeners, total minutes. | modes: both | NOT COVERED
-- [ ] B-LISTENERS-9 ↳ total sessions, unique, minutes, peak concurrent | modes: n.a. | NOT COVERED
-- [ ] B-LISTENERS-10 `GET /listeners/history` [require_manager] Daily listener aggregates for charting. | modes: both | NOT COVERED
-- [ ] B-LISTENERS-11 `GET /listeners/regions` [require_manager] Listener breakdown by country/region over a period. | modes: both | NOT COVERED
+- [ ] B-LISTENERS-8 `GET /listeners/today` [require_manager] Today's listener stats: total sessions, unique listeners, total minutes. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-LISTENERS-9 ↳ total sessions, unique, minutes, peak concurrent | modes: n.a. | covered: partial (tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads: answers, values not checked)
+- [ ] B-LISTENERS-10 `GET /listeners/history` [require_manager] Daily listener aggregates for charting. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-LISTENERS-11 `GET /listeners/regions` [require_manager] Listener breakdown by country/region over a period. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
 
 ### live_shows.py (prefix `/live-shows`) — router guard: station_write_guard(show_id)
-- [ ] B-LIVESHOWS-1 `POST /live-shows` [require_dj_or_manager] Create a new live show. | modes: both | NOT COVERED
+- [ ] B-LIVESHOWS-1 `POST /live-shows` [require_dj_or_manager] Create a new live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
 - [ ] B-LIVESHOWS-2 `GET /live-shows` [require_staff] List live shows with optional filters. | modes: both | covered: tests/test_role_access.py
-- [ ] B-LIVESHOWS-3 `GET /live-shows/{show_id}` [require_dj_or_manager] Get a live show by ID. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWS-4 `PATCH /live-shows/{show_id}` [require_dj_or_manager] Update a live show. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWS-5 `DELETE /live-shows/{show_id}` [require_admin] Delete a live show (admin only). | modes: both | NOT COVERED
+- [ ] B-LIVESHOWS-3 `GET /live-shows/{show_id}` [require_dj_or_manager] Get a live show by ID. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-4 `PATCH /live-shows/{show_id}` [require_dj_or_manager] Update a live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-5 `DELETE /live-shows/{show_id}` [require_admin] Delete a live show (admin only). | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
 - [ ] B-LIVESHOWS-6 `POST /live-shows/{show_id}/start` [require_dj_or_manager] Start a live show (go live). | modes: both | covered (indirect, calls handler): tests/test_live_show_lifecycle.py, tests/test_live_show_on_air.py
 - [ ] B-LIVESHOWS-7 ↳ start pauses automation (live_show_id set), queue resumes after end | modes: both | covered: tests/test_live_show_on_air.py
-- [ ] B-LIVESHOWS-8 ↳ station not operable by user -> 403 (station_write_guard) | modes: n.a. | NOT COVERED
-- [ ] B-LIVESHOWS-9 `POST /live-shows/{show_id}/end` [require_dj_or_manager] End a live show. | modes: both | NOT COVERED
+- [ ] B-LIVESHOWS-8 ↳ station not operable by user -> 403 (station_write_guard) | modes: n.a. | covered: tests/test_station_write_permissions.py::test_live_shows_follow_station_permissions
+- [ ] B-LIVESHOWS-9 `POST /live-shows/{show_id}/end` [require_dj_or_manager] End a live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
 - [ ] B-LIVESHOWS-10 ↳ end clears live_show_id and resumes automation; archive created? | modes: both | covered: tests/test_live_show_on_air.py
-- [ ] B-LIVESHOWS-11 `GET /live-shows/{show_id}/time-remaining` [require_dj_or_manager] Get seconds until hard stop. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWS-12 `GET /live-shows/{show_id}/calls` [require_dj_or_manager] List all callers for a show. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWS-13 `POST /live-shows/{show_id}/calls/{call_id}/approve` [require_dj_or_manager] Approve a caller. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWS-14 `POST /live-shows/{show_id}/calls/{call_id}/reject` [require_dj_or_manager] Reject a caller. | modes: both | NOT COVERED
+- [ ] B-LIVESHOWS-11 `GET /live-shows/{show_id}/time-remaining` [require_dj_or_manager] Get seconds until hard stop. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-12 `GET /live-shows/{show_id}/calls` [require_dj_or_manager] List all callers for a show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-13 `POST /live-shows/{show_id}/calls/{call_id}/approve` [require_dj_or_manager] Approve a caller. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-14 `POST /live-shows/{show_id}/calls/{call_id}/reject` [require_dj_or_manager] Reject a caller. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
 - [ ] B-LIVESHOWS-15 `POST /live-shows/{show_id}/calls/{call_id}/on-air` [require_dj_or_manager] Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted). | modes: both | covered: tests/test_web_call_in.py
 - [ ] B-LIVESHOWS-16 ↳ only one caller on air at a time -> 409 | modes: n.a. | covered: tests/test_web_call_in.py
-- [ ] B-LIVESHOWS-17 `POST /live-shows/{show_id}/calls/{call_id}/end-call` [require_dj_or_manager] End an active call. | modes: both | NOT COVERED
+- [ ] B-LIVESHOWS-17 `POST /live-shows/{show_id}/calls/{call_id}/end-call` [require_dj_or_manager] End an active call. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
 - [ ] B-LIVESHOWS-18 `PATCH /live-shows/{show_id}/calls/{call_id}` [require_dj_or_manager] Update caller name/notes. | modes: both | covered: tests/test_web_call_in.py
-- [ ] B-LIVESHOWS-19 `GET /live-shows/station/{station_id}/active` [PUBLIC] Public endpoint: get the active live show for a station (if any). | modes: both | NOT COVERED
-- [ ] B-LIVESHOWS-20 `POST /live-shows/twilio/inbound` [PUBLIC] Twilio inbound call webhook — find active show, create CallInRequest, return hold TwiML. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWS-21 ↳ Twilio signature/no active show -> polite TwiML; creates CallInRequest | modes: n.a. | NOT COVERED
-- [ ] B-LIVESHOWS-22 `POST /live-shows/twilio/status` [PUBLIC] Twilio call status callback — update call status when caller hangs up. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWS-23 `GET /live-shows/twilio/hold-music` [PUBLIC] Return TwiML with hold music URL for Twilio conference waitUrl. | modes: both | NOT COVERED
+- [ ] B-LIVESHOWS-19 `GET /live-shows/station/{station_id}/active` [PUBLIC] Public endpoint: get the active live show for a station (if any). | modes: both | covered: tests/test_public_endpoints.py::test_active_live_show_is_public_without_callers
+- [ ] B-LIVESHOWS-20 `POST /live-shows/twilio/inbound` [PUBLIC] Twilio inbound call webhook — find active show, create CallInRequest, return hold TwiML. | modes: both | covered: tests/test_auth_security.py::test_twilio_inbound_with_no_live_show_answers_politely, test_twilio_inbound_queues_the_caller_and_status_ends_it
+- [ ] B-LIVESHOWS-21 ↳ Twilio signature/no active show -> polite TwiML; creates CallInRequest | modes: n.a. | covered: BUG unsigned Twilio webhooks accepted (tests/test_auth_security.py::test_unsigned_twilio_webhook_is_refused xfail)
+- [ ] B-LIVESHOWS-22 `POST /live-shows/twilio/status` [PUBLIC] Twilio call status callback — update call status when caller hangs up. | modes: both | covered: tests/test_auth_security.py::test_twilio_inbound_queues_the_caller_and_status_ends_it
+- [ ] B-LIVESHOWS-23 `GET /live-shows/twilio/hold-music` [PUBLIC] Return TwiML with hold music URL for Twilio conference waitUrl. | modes: both | covered: tests/test_auth_security.py::test_twilio_hold_music_is_twiml
 
 ### live_shows_ws.py
 - [ ] B-LIVESHOWSW-1 `WEBSOCKET /ws/live/station/{station_id}/listen` [PUBLIC] Public: a listener page hears the station's live show here while one is on air. | modes: both | NOT COVERED
@@ -297,7 +297,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-LIVESHOWSW-6 ↳ first message must be auth token; wrong token closes | modes: n.a. | covered: tests/test_web_call_in.py
 
 ### mixer.py (prefix `/studio`)
-- [ ] B-MIXER-1 `POST /studio/mix` [require_manager] Mix two assets (backtrack + overlay) and save as a new asset. | modes: n.a. | NOT COVERED
+- [ ] B-MIXER-1 `POST /studio/mix` [require_manager] Mix two assets (backtrack + overlay) and save as a new asset. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 
 ### now_playing.py (prefix `/now-playing`)
 - [ ] B-NOWPLAYING-1 `GET /now-playing/{station_id}` [PUBLIC] Get current now-playing state for a station. | modes: both | covered: tests/test_now_playing_broadcast.py
@@ -311,9 +311,9 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-NOWPLAYING-7 ↳ DEAD CODE: nowplaying.py router is not mounted in api/v1/__init__.py - confirm/remove | modes: n.a. | covered: tests/test_controls_streams_scheduler.py::test_old_nowplaying_socket_is_not_mounted (confirmed not mounted)
 
 ### playlists.py (prefix `/playlists`) — router guard: station_write_guard(template/slot)
-- [ ] B-PLAYLISTS-1 `GET /playlists` [require_manager] list templates | modes: both | NOT COVERED
-- [ ] B-PLAYLISTS-2 `POST /playlists` [require_manager] create template | modes: both | NOT COVERED
-- [ ] B-PLAYLISTS-3 `GET /playlists/asset-types` [require_manager] Return distinct asset_type + category combinations from the assets table. | modes: both | NOT COVERED
+- [ ] B-PLAYLISTS-1 `GET /playlists` [require_manager] list templates | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
+- [ ] B-PLAYLISTS-2 `POST /playlists` [require_manager] create template | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
+- [ ] B-PLAYLISTS-3 `GET /playlists/asset-types` [require_manager] Return distinct asset_type + category combinations from the assets table. | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
 - [ ] B-PLAYLISTS-4 `GET /playlists/generation` [require_manager] Settings, plus a dry run of what generation would queue next. Changes nothing. | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
 - [ ] B-PLAYLISTS-5 `PUT /playlists/generation` [require_manager] set generation | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
 - [ ] B-PLAYLISTS-6 ↳ enable generation: queue fills from block sequences N hours ahead; artist distance, min vote | modes: both | covered: tests/test_playlist_generation.py
@@ -322,7 +322,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-PLAYLISTS-9 `GET /playlists/{template_id}` [require_manager] get template | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
 - [ ] B-PLAYLISTS-10 `PATCH /playlists/{template_id}` [require_manager] update template | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
 - [ ] B-PLAYLISTS-11 `DELETE /playlists/{template_id}` [require_manager] delete template | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
-- [ ] B-PLAYLISTS-12 `POST /playlists/slots` [require_manager] create slot | modes: both | NOT COVERED
+- [ ] B-PLAYLISTS-12 `POST /playlists/slots` [require_manager] create slot | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
 - [ ] B-PLAYLISTS-13 `PATCH /playlists/slots/{slot_id}` [require_manager] update slot | modes: both | covered: tests/test_schedule_refresh.py
 - [ ] B-PLAYLISTS-14 `DELETE /playlists/slots/{slot_id}` [require_manager] delete slot | modes: both | covered: tests/test_schedule_refresh.py
 
@@ -355,7 +355,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-PROGRAMBLO-5 `POST /program-blocks` [require_manager] create program block | modes: both | covered: tests/test_program_blocks.py
 - [ ] B-PROGRAMBLO-6 ↳ block items expanded into source=block queue entries at clock times (hard/soft/soft+limit) | modes: both | covered: tests/test_program_blocks.py
 - [ ] B-PROGRAMBLO-7 ↳ blocks replace built-in hourly time/weather unless blocks_keep_hourly | modes: both | covered: tests/test_blocks_keep_hourly.py
-- [ ] B-PROGRAMBLO-8 ↳ non-assigned station -> 403 | modes: n.a. | NOT COVERED
+- [ ] B-PROGRAMBLO-8 ↳ non-assigned station -> 403 | modes: n.a. | covered: tests/test_station_write_permissions.py::test_program_blocks_follow_station_permissions
 - [ ] B-PROGRAMBLO-9 `PUT /program-blocks/{block_id}` [require_manager] update program block | modes: both | covered: tests/test_blocks_keep_hourly.py, tests/test_program_blocks.py
 - [ ] B-PROGRAMBLO-10 `DELETE /program-blocks/{block_id}` [require_manager] delete program block | modes: both | covered: tests/test_blocks_keep_hourly.py, tests/test_program_blocks.py
 
@@ -431,23 +431,23 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-RDS-2 ↳ plain text title for RDS encoder; unknown station 404 | modes: both | covered: tests/test_rds.py
 
 ### reviews.py (prefix `/reviews`)
-- [ ] B-REVIEWS-1 `POST /reviews/queues` [require_manager] create queue | modes: n.a. | NOT COVERED
+- [ ] B-REVIEWS-1 `POST /reviews/queues` [require_manager] create queue | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-REVIEWS-2 `GET /reviews/queues` [require_staff] list queues | modes: n.a. | covered: tests/test_role_access.py
 - [ ] B-REVIEWS-3 `GET /reviews/queues/{queue_id}` [require_staff] get queue | modes: n.a. | NOT COVERED
 - [ ] B-REVIEWS-4 `GET /reviews/queues/{queue_id}/items` [require_staff] list queue items | modes: n.a. | NOT COVERED
 - [ ] B-REVIEWS-5 `GET /reviews/queues/{queue_id}/next` [require_staff] Get the next unreviewed item and assign to current user. | modes: n.a. | NOT COVERED
-- [ ] B-REVIEWS-6 `PATCH /reviews/items/{item_id}` [require_staff] update item | modes: n.a. | NOT COVERED
-- [ ] B-REVIEWS-7 `POST /reviews/queues/{queue_id}/batch-update` [require_manager] batch update | modes: n.a. | NOT COVERED
+- [ ] B-REVIEWS-6 `PATCH /reviews/items/{item_id}` [require_staff] update item | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-REVIEWS-7 `POST /reviews/queues/{queue_id}/batch-update` [require_manager] batch update | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-REVIEWS-8 `GET /reviews/assets/{asset_id}/history` [require_staff] get asset history | modes: n.a. | NOT COVERED
-- [ ] B-REVIEWS-9 `POST /reviews/assets/{asset_id}/comment` [require_staff] add comment | modes: n.a. | NOT COVERED
+- [ ] B-REVIEWS-9 `POST /reviews/assets/{asset_id}/comment` [require_staff] add comment | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-REVIEWS-10 `GET /reviews/queues/{queue_id}/activity` [require_staff] get queue activity | modes: n.a. | NOT COVERED
 
 ### rules.py (prefix `/rules`)
 - [ ] B-RULES-1 `GET /rules` [require_staff] list rules | modes: n.a. | covered: tests/test_role_access.py
-- [ ] B-RULES-2 `POST /rules` [require_admin] create rule | modes: n.a. | NOT COVERED
-- [ ] B-RULES-3 `PUT /rules/{rule_id}` [require_admin] update rule | modes: n.a. | NOT COVERED
-- [ ] B-RULES-4 `DELETE /rules/{rule_id}` [require_admin] delete rule | modes: n.a. | NOT COVERED
-- [ ] B-RULES-5 `GET /rules/preview` [require_staff] Generate a preview of what the schedule would look like for a given date. | modes: n.a. | NOT COVERED
+- [ ] B-RULES-2 `POST /rules` [require_admin] create rule | modes: n.a. | covered: tests/test_admin_crud.py::test_rules_round_trip_and_preview
+- [ ] B-RULES-3 `PUT /rules/{rule_id}` [require_admin] update rule | modes: n.a. | covered: tests/test_admin_crud.py::test_rules_round_trip_and_preview
+- [ ] B-RULES-4 `DELETE /rules/{rule_id}` [require_admin] delete rule | modes: n.a. | covered: tests/test_admin_crud.py::test_rules_round_trip_and_preview
+- [ ] B-RULES-5 `GET /rules/preview` [require_staff] Generate a preview of what the schedule would look like for a given date. | modes: n.a. | covered: tests/test_admin_crud.py::test_rules_round_trip_and_preview
 
 ### scheduler.py (prefix `/scheduler`)
 - [ ] B-SCHEDULER-1 `POST /scheduler/start` [require_manager] Start the automatic scheduling engine. | modes: both | covered: tests/test_controls_streams_scheduler.py::test_scheduler_start_stop_status
@@ -456,8 +456,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SCHEDULER-4 `GET /scheduler/status` [PUBLIC] Get current scheduler status. | modes: both | covered: tests/test_controls_streams_scheduler.py::test_scheduler_start_stop_status
 
 ### schedules.py (prefix `/schedules`) — router guard: station_write_guard(schedule/block/entry, body winner/other ids)
-- [ ] B-SCHEDULES-1 `GET /schedules/epg/{station_id}` [PUBLIC] Public EPG: returns all schedule blocks for a station on a given day, sorted by start_time. | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-2 ↳ public EPG for a date sorted by start; one-time blocks only on their date | modes: n.a. | NOT COVERED
+- [ ] B-SCHEDULES-1 `GET /schedules/epg/{station_id}` [PUBLIC] Public EPG: returns all schedule blocks for a station on a given day, sorted by start_time. | modes: both | covered: tests/test_public_endpoints.py::test_epg_lists_the_days_blocks_in_time_order
+- [ ] B-SCHEDULES-2 ↳ public EPG for a date sorted by start; one-time blocks only on their date | modes: n.a. | covered: partial (tests/test_public_endpoints.py::test_epg_lists_the_days_blocks_in_time_order: order; one-time blocks not)
 - [ ] B-SCHEDULES-3 `POST /schedules` [require_manager] Create a new schedule for a station. | modes: both | covered: tests/test_schedules.py
 - [ ] B-SCHEDULES-4 `GET /schedules` [PUBLIC] List all schedules, optionally filtered by station. | modes: both | covered: tests/test_schedules.py
 - [ ] B-SCHEDULES-5 `POST /schedules/blocks` [require_manager] Create a new schedule block. | modes: both | covered: tests/test_block_waits_for_its_time.py, tests/test_schedule_refresh.py, tests/test_schedules.py
@@ -468,16 +468,16 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SCHEDULES-10 `PATCH /schedules/blocks/{block_id}` [require_manager] Update a schedule block. | modes: both | covered: tests/test_schedule_lookahead.py, tests/test_schedules.py
 - [ ] B-SCHEDULES-11 ↳ block waits for its time; starts on time (realign 15 min before) | modes: both | covered: tests/test_block_waits_for_its_time.py
 - [ ] B-SCHEDULES-12 `DELETE /schedules/blocks/{block_id}` [require_manager] Delete a schedule block. | modes: both | covered: tests/test_schedule_lookahead.py, tests/test_schedules.py
-- [ ] B-SCHEDULES-13 `POST /schedules/blocks/{block_id}/set-prerecorded` [require_manager] Set a block to play a single pre-recorded show asset. | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-14 ↳ block plays a single pre-recorded show asset at its time | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-15 `POST /schedules/playlist-entries` [require_manager] Add an asset to a schedule block's playlist. | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-16 ↳ adds asset to block playlist; refresh_station queued | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-17 `GET /schedules/playlist-entries` [PUBLIC] List all playlist entries, optionally filtered by block. | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-18 `GET /schedules/playlist-entries/{entry_id}` [PUBLIC] Get a single playlist entry by ID. | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-19 `PATCH /schedules/playlist-entries/{entry_id}` [require_manager] Update a playlist entry. | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-20 `DELETE /schedules/playlist-entries/{entry_id}` [require_manager] Delete a playlist entry. | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-21 `GET /schedules/timeline-preview` [PUBLIC] Preview what block is active and blackout status at a given time. | modes: both | NOT COVERED
-- [ ] B-SCHEDULES-22 ↳ active block + blackout flag at given time | modes: n.a. | NOT COVERED
+- [ ] B-SCHEDULES-13 `POST /schedules/blocks/{block_id}/set-prerecorded` [require_manager] Set a block to play a single pre-recorded show asset. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-14 ↳ block plays a single pre-recorded show asset at its time | modes: both | covered: partial (tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block: entry set, airing not)
+- [ ] B-SCHEDULES-15 `POST /schedules/playlist-entries` [require_manager] Add an asset to a schedule block's playlist. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-16 ↳ adds asset to block playlist; refresh_station queued | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-17 `GET /schedules/playlist-entries` [PUBLIC] List all playlist entries, optionally filtered by block. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-18 `GET /schedules/playlist-entries/{entry_id}` [PUBLIC] Get a single playlist entry by ID. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-19 `PATCH /schedules/playlist-entries/{entry_id}` [require_manager] Update a playlist entry. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-20 `DELETE /schedules/playlist-entries/{entry_id}` [require_manager] Delete a playlist entry. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-21 `GET /schedules/timeline-preview` [PUBLIC] Preview what block is active and blackout status at a given time. | modes: both | covered: tests/test_admin_crud.py::test_timeline_preview
+- [ ] B-SCHEDULES-22 ↳ active block + blackout flag at given time | modes: n.a. | covered: tests/test_admin_crud.py::test_timeline_preview
 - [ ] B-SCHEDULES-23 `GET /schedules/look-ahead` [require_manager] What collides over the coming days, how each collision is settled | modes: both | covered: tests/test_program_blocks.py, tests/test_schedule_lookahead.py, tests/test_schedule_refresh.py
 - [ ] B-SCHEDULES-24 `POST /schedules/look-ahead/settle` [require_manager] Choose which of the overlapping blocks plays, by raising its priority above the others. | modes: both | covered: tests/test_schedule_lookahead.py
 - [ ] B-SCHEDULES-25 ↳ raises winner priority above others; other station's block -> 403 | modes: n.a. | covered: tests/test_schedule_lookahead.py
@@ -497,15 +497,15 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SITERELEAS-9 ↳ tab registers with info (cleaned), receives release state; silent tab expires | modes: n.a. | NOT COVERED
 
 ### song_requests.py (prefix `/song-requests`)
-- [ ] B-SONGREQUES-1 `POST /song-requests` [PUBLIC] Public: submit a song request with fuzzy matching and auto-approval. | modes: both | NOT COVERED
-- [ ] B-SONGREQUES-2 ↳ fuzzy match to library asset; unmatched saved pending | modes: both | NOT COVERED
+- [ ] B-SONGREQUES-1 `POST /song-requests` [PUBLIC] Public: submit a song request with fuzzy matching and auto-approval. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-2 ↳ fuzzy match to library asset; unmatched saved pending | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
 - [ ] B-SONGREQUES-3 ↳ auto-approve when asset allows and under max_requests_per_day -> queued | modes: both | NOT COVERED
-- [ ] B-SONGREQUES-4 `GET /song-requests/analytics/top-requested` [require_manager] Admin: get most-requested songs grouped by matched asset. | modes: both | NOT COVERED
-- [ ] B-SONGREQUES-5 `GET /song-requests` [require_manager] Admin: list song requests with optional filters. | modes: both | NOT COVERED
-- [ ] B-SONGREQUES-6 `PATCH /song-requests/{request_id}` [require_manager] Admin: approve/reject/update a song request. | modes: both | NOT COVERED
-- [ ] B-SONGREQUES-7 ↳ approving matched request adds asset to the station queue | modes: both | NOT COVERED
-- [ ] B-SONGREQUES-8 `DELETE /song-requests/{request_id}` [require_manager] Admin: delete a song request. | modes: both | NOT COVERED
-- [ ] B-SONGREQUES-9 `GET /song-requests/station/{station_id}/count` [PUBLIC] Public: count pending song requests for a station. | modes: both | NOT COVERED
+- [ ] B-SONGREQUES-4 `GET /song-requests/analytics/top-requested` [require_manager] Admin: get most-requested songs grouped by matched asset. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-5 `GET /song-requests` [require_manager] Admin: list song requests with optional filters. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-6 `PATCH /song-requests/{request_id}` [require_manager] Admin: approve/reject/update a song request. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-7 ↳ approving matched request adds asset to the station queue | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow, tests/test_station_write_permissions.py::test_approving_a_song_request_needs_the_station
+- [ ] B-SONGREQUES-8 `DELETE /song-requests/{request_id}` [require_manager] Admin: delete a song request. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-9 `GET /song-requests/station/{station_id}/count` [PUBLIC] Public: count pending song requests for a station. | modes: both | covered: tests/test_public_endpoints.py::test_song_request_count_counts_pending_only
 
 ### sponsor_portal.py (prefix `/sponsor-portal`)
 - [ ] B-SPONSORPOR-1 `GET /sponsor-portal/spots` [require_sponsor] get my spots | modes: n.a. | covered: tests/test_spot_schedules.py
@@ -523,13 +523,13 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 ### spot_recordings.py (prefix `/spot-recordings`)
 - [ ] B-SPOTRECORD-1 `GET /spot-recordings` [require_manager] list spot recordings | modes: n.a. | covered: tests/test_spot_recordings.py
 - [ ] B-SPOTRECORD-2 `POST /spot-recordings` [require_manager] create spot recording | modes: n.a. | covered: tests/test_spot_recordings.py
-- [ ] B-SPOTRECORD-3 `PUT /spot-recordings/{recording_id}` [require_manager] update spot recording | modes: n.a. | NOT COVERED
+- [ ] B-SPOTRECORD-3 `PUT /spot-recordings/{recording_id}` [require_manager] update spot recording | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-SPOTRECORD-4 `POST /spot-recordings/{recording_id}/generate` [require_manager] Make the audio from the script (Shprach when connected, placeholder until then). | modes: n.a. | covered: tests/test_spot_recordings.py
 - [ ] B-SPOTRECORD-5 `POST /spot-recordings/{recording_id}/audio` [require_manager] upload audio | modes: n.a. | covered: tests/test_spot_recordings.py
 - [ ] B-SPOTRECORD-6 `GET /spot-recordings/{recording_id}/audio` [require_manager] get audio | modes: n.a. | covered: tests/test_spot_recordings.py
 - [ ] B-SPOTRECORD-7 `POST /spot-recordings/{recording_id}/approve` [require_manager] Put the spot in the library as this sponsor's audio so it can be scheduled. | modes: n.a. | covered: tests/test_spot_recordings.py
 - [ ] B-SPOTRECORD-8 `POST /spot-recordings/{recording_id}/reject` [require_manager] reject spot recording | modes: n.a. | covered: tests/test_spot_recordings.py
-- [ ] B-SPOTRECORD-9 `DELETE /spot-recordings/{recording_id}` [require_manager] delete spot recording | modes: n.a. | NOT COVERED
+- [ ] B-SPOTRECORD-9 `DELETE /spot-recordings/{recording_id}` [require_manager] delete spot recording | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 
 ### spot_schedules.py (prefix `/spot-schedules`) — router guard: station_write_guard(schedule_id)
 - [ ] B-SPOTSCHEDU-1 `GET /spot-schedules` [require_manager] list spot schedules | modes: both | covered: tests/test_program_blocks.py, tests/test_spot_recordings.py, tests/test_spot_schedules.py
@@ -545,7 +545,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 
 ### stations.py (prefix `/stations`)
 - [ ] B-STATIONS-1 `POST /stations` [require_manager] create | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
-- [ ] B-STATIONS-2 ↳ manager+ only; dj/viewer/sponsor 403 | modes: n.a. | NOT COVERED
+- [ ] B-STATIONS-2 ↳ manager+ only; dj/viewer/sponsor 403 | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix
 - [ ] B-STATIONS-3 ↳ timezone, lat/lon, automation_config saved; new station gets queue on next replenish | modes: both | NOT COVERED
 - [ ] B-STATIONS-4 `GET /stations` [PUBLIC] list all | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
 - [ ] B-STATIONS-5 `GET /stations/geocode` [require_manager] Search for cities by name using OpenStreetMap Nominatim. Returns up to 5 results. | modes: n.a. | NOT COVERED
@@ -569,28 +569,28 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-STREAMS-6 ↳ audio URL + elapsed timing for current track; nothing playing -> empty; liquidsoap branch when LIQUIDSOAP_ENABLED | modes: browser | covered: tests/test_controls_streams_scheduler.py::test_live_audio_storage_paths_and_liquidsoap_branch (next-item URL 500, fixed)
 
 ### users.py (prefix `/users`)
-- [ ] B-USERS-1 `GET /users/public/hosts` [PUBLIC] Public: list all hosts/DJs with public profiles. | modes: n.a. | NOT COVERED
+- [ ] B-USERS-1 `GET /users/public/hosts` [PUBLIC] Public: list all hosts/DJs with public profiles. | modes: n.a. | covered: tests/test_admin_crud.py::test_users_round_trip_preferences_and_hosts
 - [ ] B-USERS-2 `GET /users` [require_admin] list users | modes: n.a. | covered: tests/test_activity_log.py, tests/test_role_access.py
 - [ ] B-USERS-3 `POST /users` [require_admin] create user | modes: n.a. | covered: tests/test_activity_log.py
 - [ ] B-USERS-4 ↳ admin creates user with role and station_ids | modes: n.a. | covered: tests/test_station_permissions.py
 - [ ] B-USERS-5 `PUT /users/{user_id}` [require_admin] update user | modes: n.a. | covered: tests/test_auth.py, tests/test_station_permissions.py
-- [ ] B-USERS-6 ↳ cannot disable own account / remove own admin role -> 400 | modes: n.a. | NOT COVERED
+- [ ] B-USERS-6 ↳ cannot disable own account / remove own admin role -> 400 | modes: n.a. | covered: tests/test_auth_security.py::test_admin_cannot_lock_themselves_out
 - [ ] B-USERS-7 `DELETE /users/{user_id}` [require_admin] delete user | modes: n.a. | covered: tests/test_auth.py, tests/test_station_permissions.py
-- [ ] B-USERS-8 ↳ cannot delete yourself -> 400 | modes: n.a. | NOT COVERED
-- [ ] B-USERS-9 `GET /users/audit-log` [require_admin] Admin: view persistent audit log of all write actions. | modes: n.a. | NOT COVERED
-- [ ] B-USERS-10 `GET /users/me/preferences` [get_current_user] get my preferences | modes: n.a. | NOT COVERED
-- [ ] B-USERS-11 `PATCH /users/me/preferences` [get_current_user] update my preferences | modes: n.a. | NOT COVERED
+- [ ] B-USERS-8 ↳ cannot delete yourself -> 400 | modes: n.a. | covered: tests/test_auth_security.py::test_admin_cannot_lock_themselves_out
+- [ ] B-USERS-9 `GET /users/audit-log` [require_admin] Admin: view persistent audit log of all write actions. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-USERS-10 `GET /users/me/preferences` [get_current_user] get my preferences | modes: n.a. | covered: tests/test_admin_crud.py::test_users_round_trip_preferences_and_hosts
+- [ ] B-USERS-11 `PATCH /users/me/preferences` [get_current_user] update my preferences | modes: n.a. | covered: tests/test_admin_crud.py::test_users_round_trip_preferences_and_hosts
 
 ### weather_readouts.py (prefix `/weather-readouts`)
 - [ ] B-WEATHERREA-1 `GET /weather-readouts` [require_staff] list readouts | modes: both | NOT COVERED
-- [ ] B-WEATHERREA-2 `POST /weather-readouts` [require_manager] create readout | modes: both | NOT COVERED
+- [ ] B-WEATHERREA-2 `POST /weather-readouts` [require_manager] create readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
 - [ ] B-WEATHERREA-3 `GET /weather-readouts/template-preview` [require_staff] template preview | modes: both | NOT COVERED
 - [ ] B-WEATHERREA-4 `GET /weather-readouts/{readout_id}` [require_staff] get readout | modes: both | NOT COVERED
-- [ ] B-WEATHERREA-5 `PATCH /weather-readouts/{readout_id}` [require_manager] update readout | modes: both | NOT COVERED
-- [ ] B-WEATHERREA-6 `POST /weather-readouts/{readout_id}/regenerate` [require_manager] regenerate readout | modes: both | NOT COVERED
-- [ ] B-WEATHERREA-7 `POST /weather-readouts/{readout_id}/queue` [require_manager] queue readout | modes: both | NOT COVERED
-- [ ] B-WEATHERREA-8 ↳ queues readout into station queue | modes: both | NOT COVERED
-- [ ] B-WEATHERREA-9 `DELETE /weather-readouts/{readout_id}` [require_manager] delete readout | modes: both | NOT COVERED
+- [ ] B-WEATHERREA-5 `PATCH /weather-readouts/{readout_id}` [require_manager] update readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
+- [ ] B-WEATHERREA-6 `POST /weather-readouts/{readout_id}/regenerate` [require_manager] regenerate readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
+- [ ] B-WEATHERREA-7 `POST /weather-readouts/{readout_id}/queue` [require_manager] queue readout | modes: both | covered: tests/test_station_write_permissions.py::test_queuing_a_weather_readout_needs_the_station (BUG fixed: no station check)
+- [ ] B-WEATHERREA-8 ↳ queues readout into station queue | modes: both | covered: tests/test_station_write_permissions.py::test_queuing_a_weather_readout_needs_the_station
+- [ ] B-WEATHERREA-9 `DELETE /weather-readouts/{readout_id}` [require_manager] delete readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
 
 ### weather_spots.py (prefix `/weather-spots`)
 - [ ] B-WEATHERSPO-1 `GET /weather-spots/{spot_date}` [require_manager] The weather spot stations of this region will play on this date (404 if none exists yet). | modes: both | covered: tests/test_weather_regions.py, tests/test_weather_spots.py
@@ -741,26 +741,26 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 
 ### 3a. Station `automation_config` keys
 - [ ] B-SET-1 `weather_enabled` (bool) - schedules weather after time check (scheduling + replenish) | modes: both | covered: tests/test_blocks_keep_hourly.py
-- [ ] B-SET-2 `hourly_time_announcement` (bool) - enables hourly time check; off -> no time clips queued | modes: both | NOT COVERED (off branch)
+- [ ] B-SET-2 `hourly_time_announcement` (bool) - enables hourly time check; off -> no time clips queued | modes: both | covered: tests/test_station_settings.py::test_hourly_time_check_only_when_switched_on
 - [ ] B-SET-3 `weather_interval_minutes` (default 30; 30 = extra :30 weather, other = hourly only) | modes: both | covered: tests/test_blocks_keep_hourly.py
 - [ ] B-SET-4 `weather_region` (default lakewood; normalised lowercase) - which uploaded weather/time clips the station uses | modes: both | covered: tests/test_weather_regions.py, tests/test_time_clip_regions.py
 - [ ] B-SET-5 `spot_timing` {on_the_hour, other} hard|soft - default timing of spots and of time/weather; on_the_hour=soft makes the time check wait for the song (NOT on the hour) | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-SET-6 `timed_during_long_items` pause|wait|cut (default pause) | modes: both | covered: tests/test_timed_pauses_shiur.py (pause only)
 - [ ] B-SET-7 `blocks_keep_hourly` (bool) | modes: both | covered: tests/test_blocks_keep_hourly.py
-- [ ] B-SET-8 `ad_slot_minutes` (default [15,30,45]) - custom list honoured by replenish and spot planner | modes: both | NOT COVERED
+- [ ] B-SET-8 `ad_slot_minutes` (default [15,30,45]) - custom list honoured by replenish and spot planner | modes: both | covered: partial (tests/test_station_settings.py::test_spot_slots_follow_ad_slot_minutes: spot planner; replenish legacy ad slots not)
 - [ ] B-SET-9 `ad_slot_legacy_spot` (default false) + `ad_slot_asset_title` | modes: both | covered: tests/test_spot_schedules.py
-- [ ] B-SET-10 `requests_only` (bool) | modes: both | NOT COVERED
-- [ ] B-SET-11 `popular_request_threshold` (default 3) | modes: both | NOT COVERED
-- [ ] B-SET-12 `oldies_only` + `oldies_min_years` (default 10) | modes: both | NOT COVERED
-- [ ] B-SET-13 `silence_threshold_seconds` (default SILENCE_DETECTION_SECONDS) | modes: browser | NOT COVERED
+- [ ] B-SET-10 `requests_only` (bool) | modes: both | covered: tests/test_station_settings.py::test_requests_only_station_plays_requests_not_the_library
+- [ ] B-SET-11 `popular_request_threshold` (default 3) | modes: both | covered: tests/test_station_settings.py::test_popular_request_threshold
+- [ ] B-SET-12 `oldies_only` + `oldies_min_years` (default 10) | modes: both | covered: tests/test_station_settings.py::test_oldies_only_filters_by_release_date
+- [ ] B-SET-13 `silence_threshold_seconds` (default SILENCE_DETECTION_SECONDS) | modes: browser | covered: tests/test_station_settings.py::test_dead_air_alert_follows_silence_threshold
 - [ ] B-SET-14 `live_show_id` (set by live show start; cleared on end/hard stop/stale) | modes: both | covered: tests/test_live_show_lifecycle.py
 - [ ] B-SET-15 `loop_asset_id` (set by /queue/loop) | modes: both | covered: tests/test_operator_actions.py
 - [ ] B-SET-16 `playlist_generation` {enabled, hours, artist_distance, min_vote, cursor} | modes: both | covered: tests/test_playlist_generation.py
 - [ ] B-SET-17 `weather_readout` {enabled, generate_time, auto_queue, queue_time, template, city_name, brand_name} | modes: both | NOT COVERED
-- [ ] B-SET-18 `hourly_station_id` (scheduling._check_automation_insertions, legacy path) - verify still used or dead | modes: both | NOT COVERED
+- [ ] B-SET-18 `hourly_station_id` (scheduling._check_automation_insertions, legacy path) - verify still used or dead | modes: both | covered: tests/test_station_settings.py::test_hourly_station_id_legacy_insertion (legacy SchedulingService path only; queue engine never reads it)
 - [ ] B-SET-19 Station.timezone drives announced hour, dayparts, blackouts, spot clock | modes: both | covered: tests/test_spot_schedules.py (partial)
 - [ ] B-SET-20 Station lat/lon drive sunrise/sunset blocks and Shabbos generation | modes: both | covered: tests/test_schedule_lookahead.py (sun blocks)
-- [ ] B-SET-21 Station.is_active false -> scheduler ignores station, restart does not resume it | modes: both | NOT COVERED
+- [ ] B-SET-21 Station.is_active false -> scheduler ignores station, restart does not resume it | modes: both | covered: partial (tests/test_station_settings.py::test_inactive_station_is_not_advanced: scheduler skips; restart not)
 - [ ] B-SET-22 Station.protected (see roles) | modes: n.a. | covered: tests/test_station_permissions.py
 
 ### 3b. Env flags (`app/config.py`) that change behaviour
@@ -768,12 +768,12 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SET-24 PLAYOUT_ENGINE_URL / engine_control_url per station; PLAYOUT_ENGINE_TOKEN both ways | modes: engine | covered: tests/test_playout_engine.py
 - [ ] B-SET-25 PLAYOUT_STREAM_LIVE -> stream_url published, site plays engine stream | modes: engine | covered: tests/test_playout_status.py
 - [ ] B-SET-26 LIQUIDSOAP_ENABLED (legacy telnet) must stay off; when on, skip/push calls made | modes: browser | NOT COVERED
-- [ ] B-SET-27 SILENCE_DETECTION_SECONDS default 30 | modes: browser | NOT COVERED
+- [ ] B-SET-27 SILENCE_DETECTION_SECONDS default 30 | modes: browser | covered: tests/test_station_settings.py::test_dead_air_alert_follows_silence_threshold
 - [ ] B-SET-28 ELEVENLABS_API_KEY/VOICE_ID unset -> no TTS fallback, uploaded clips only | modes: both | covered: tests/test_weather_spots.py
 - [ ] B-SET-29 OPENWEATHERMAP_API_KEY unset -> weather disabled gracefully | modes: both | NOT COVERED
 - [ ] B-SET-30 SUPABASE_URL/SERVICE_KEY unset -> uploads/local storage path; hourly announcements skipped | modes: both | NOT COVERED
 - [ ] B-SET-31 ICECAST_* (icecast_enabled) -> /icecast start/stop usable | modes: n.a. | NOT COVERED
-- [ ] B-SET-32 STRIPE_* (stripe_enabled) -> checkout/webhook enabled else refused | modes: n.a. | NOT COVERED
+- [ ] B-SET-32 STRIPE_* (stripe_enabled) -> checkout/webhook enabled else refused | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_off_when_stripe_not_configured, tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
 - [ ] B-SET-33 RESEND_API_KEY -> emails sent else skipped | modes: n.a. | NOT COVERED
 - [ ] B-SET-34 ANTHROPIC_API_KEY -> AI email drafts and copy review via Claude; else keyword fallback | modes: n.a. | covered: tests/test_copy_review.py
 - [ ] B-SET-35 TWILIO_* (twilio_enabled / twilio_voice_enabled) -> SMS alerts and phone call-ins | modes: n.a. | NOT COVERED
@@ -781,7 +781,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SET-37 NTFY_TOPIC / NTFY_SERVER -> push notifications | modes: n.a. | NOT COVERED
 - [ ] B-SET-38 SENTRY_DSN -> Sentry enabled | modes: n.a. | NOT COVERED
 - [ ] B-SET-39 ADMIN_SEED_PASSWORD / ALLOW_DESTRUCTIVE_SEED / APP_ENV=production | modes: n.a. | covered: tests/test_auth.py
-- [ ] B-SET-40 JWT expiry (30 min access, 7 day refresh) honoured | modes: n.a. | NOT COVERED
+- [ ] B-SET-40 JWT expiry (30 min access, 7 day refresh) honoured | modes: n.a. | covered: tests/test_auth_security.py::test_token_lifetimes
 - [ ] B-SET-41 CORS_ORIGINS parsing (JSON array or CSV) and error responses still carry CORS | modes: n.a. | NOT COVERED
 - [ ] B-SET-42 DATABASE_URL fix-up (postgres:// -> asyncpg), statement_cache_size=0 for pooler | modes: n.a. | NOT COVERED
 - [ ] B-SET-43 REDIS_URL / CELERY_* empty -> workers disabled without errors | modes: n.a. | NOT COVERED
@@ -820,25 +820,25 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 ## 5. Roles and permissions
 - [ ] B-ROLE-1 Role matrix GET: assets/categories/asset-types/rules/reviews/live-shows = staff; users = admin; sponsors/alerts = admin+manager; auth/me = all | modes: n.a. | covered: tests/test_role_access.py
 - [ ] B-ROLE-2 Anonymous refused (401/403) on every protected GET in the matrix | modes: n.a. | covered: tests/test_role_access.py
-- [ ] B-ROLE-3 Role matrix for WRITES (POST/PUT/PATCH/DELETE) per router guard: viewer cannot change anything; dj only queue/controls/live shows/now-playing | modes: n.a. | NOT COVERED
-- [ ] B-ROLE-4 require_admin-only writes: rules create/update/delete, users CRUD, alert delete, live-show delete, icecast, site-release, bug status/resend, activity | modes: n.a. | NOT COVERED (partly site-release)
+- [ ] B-ROLE-3 Role matrix for WRITES (POST/PUT/PATCH/DELETE) per router guard: viewer cannot change anything; dj only queue/controls/live shows/now-playing | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix (+ tests/test_access_mirror.py)
+- [ ] B-ROLE-4 require_admin-only writes: rules create/update/delete, users CRUD, alert delete, live-show delete, icecast, site-release, bug status/resend, activity | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix
 - [ ] B-ROLE-5 Sponsor cannot reach staff endpoints (library, queue, rules, reviews) | modes: n.a. | covered: tests/test_role_access.py
-- [ ] B-ROLE-6 Sponsor isolation: sponsor sees only own campaigns, drafts, comments, invoices, spots, play history | modes: n.a. | covered: tests/test_spot_schedules.py (portal); campaigns/billing NOT COVERED
-- [ ] B-ROLE-7 require_sponsor_or_manager: dj/viewer refused on campaigns/billing/copy-review | modes: n.a. | NOT COVERED
+- [ ] B-ROLE-6 Sponsor isolation: sponsor sees only own campaigns, drafts, comments, invoices, spots, play history | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-ROLE-7 require_sponsor_or_manager: dj/viewer refused on campaigns/billing/copy-review | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix, tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
 - [ ] B-ROLE-8 may_operate_station: admin always; others assigned stations only; station_ids=None -> all non-protected | modes: n.a. | covered: tests/test_station_permissions.py
 - [ ] B-ROLE-9 Protected station needs explicit assignment even for manager | modes: n.a. | covered: tests/test_station_permissions.py
 - [ ] B-ROLE-10 require_station_operator applies to all non-GET /stations/{id}/queue and /controls routes; GET left to route guards | modes: both | covered: tests/test_station_permissions.py
-- [ ] B-ROLE-11 station_write_guard on schedules, playlists, spot-schedules, live-shows (path and body ids incl. winner/other block ids) | modes: n.a. | covered: tests/test_station_permissions.py (schedules, playlists); spot-schedules/live-shows NOT COVERED
-- [ ] B-ROLE-12 Program blocks: not-assigned station -> 403 | modes: n.a. | NOT COVERED
+- [ ] B-ROLE-11 station_write_guard on schedules, playlists, spot-schedules, live-shows (path and body ids incl. winner/other block ids) | modes: n.a. | covered: tests/test_station_write_permissions.py::test_spot_schedules_follow_station_permissions, test_live_shows_follow_station_permissions
+- [ ] B-ROLE-12 Program blocks: not-assigned station -> 403 | modes: n.a. | covered: tests/test_station_write_permissions.py::test_program_blocks_follow_station_permissions
 - [ ] B-ROLE-13 Station update/delete: manager not assigned -> 403; only admin toggles/deletes protected | modes: n.a. | covered: tests/test_station_permissions.py
-- [ ] B-ROLE-14 Admin cannot disable/demote/delete self | modes: n.a. | NOT COVERED
+- [ ] B-ROLE-14 Admin cannot disable/demote/delete self | modes: n.a. | covered: tests/test_auth_security.py::test_admin_cannot_lock_themselves_out
 - [ ] B-ROLE-15 Inactive user token refused; access-vs-refresh token type enforced | modes: n.a. | covered: tests/test_auth.py
-- [ ] B-ROLE-16 Public (no auth) endpoints work anonymously and leak nothing private: stations list/get, now-playing, stream, live-audio, EPG, schedules list/blocks/entries GET, archives, rss, hosts, song request submit/count, listeners heartbeat, channels list, scheduler status, playout-status, rds.txt, site-release, call-in, crm register/login/raffles | modes: n.a. | NOT COVERED
-- [ ] B-ROLE-17 Unguarded writes to check for abuse: POST /auth/migrate, GET /api/v1/init, PUT/POST via live-shows twilio webhooks (signature?), /billing/webhook (Stripe signature) | modes: n.a. | NOT COVERED
-- [ ] B-ROLE-18 GET /schedules, /schedules/blocks, /schedules/playlist-entries are public - confirm intended | modes: n.a. | NOT COVERED
+- [ ] B-ROLE-16 Public (no auth) endpoints work anonymously and leak nothing private: stations list/get, now-playing, stream, live-audio, EPG, schedules list/blocks/entries GET, archives, rss, hosts, song request submit/count, listeners heartbeat, channels list, scheduler status, playout-status, rds.txt, site-release, call-in, crm register/login/raffles | modes: n.a. | covered: tests/test_public_endpoints.py::test_public_gets_work_anonymously_and_leak_nothing
+- [ ] B-ROLE-17 Unguarded writes to check for abuse: POST /auth/migrate, GET /api/v1/init, PUT/POST via live-shows twilio webhooks (signature?), /billing/webhook (Stripe signature) | modes: n.a. | covered: tests/test_auth_security.py::test_migrate_is_admin_only (BUG fixed), test_init_is_harmless_to_repeat, test_stripe_webhook_checks_the_signature; BUG Twilio unsigned (xfail)
+- [ ] B-ROLE-18 GET /schedules, /schedules/blocks, /schedules/playlist-entries are public - confirm intended | modes: n.a. | covered: tests/test_public_endpoints.py::test_public_get_list_is_what_we_reviewed (kept public: same data as the EPG, nothing secret)
 - [ ] B-ROLE-19 Playout endpoints: X-Playout-Token required; wrong station 404 | modes: engine | covered: tests/test_playout_engine.py
-- [ ] B-ROLE-20 CRM member auth (6-digit PIN token) separate from staff JWT; staff token refused on member routes and vice versa | modes: n.a. | NOT COVERED
-- [ ] B-ROLE-21 WebSockets: /ws/alerts and /ws/live/{show}/events|audio require staff auth; /ws/now-playing public | modes: n.a. | NOT COVERED
+- [ ] B-ROLE-20 CRM member auth (6-digit PIN token) separate from staff JWT; staff token refused on member routes and vice versa | modes: n.a. | covered: tests/test_crm.py::test_member_and_staff_logins_do_not_cross
+- [ ] B-ROLE-21 WebSockets: /ws/alerts and /ws/live/{show}/events|audio require staff auth; /ws/now-playing public | modes: n.a. | covered: tests/test_websocket_auth.py::test_alerts_socket_refuses_anonymous_and_non_managers (BUG fixed: /ws/alerts was open), test_live_show_socket_follows_station_permissions
 - [ ] B-ROLE-22 Refused action returns 403 with "not allowed" detail the frontend ViewOnlyNotice shows | modes: n.a. | covered: tests/test_station_permissions.py (partial)
 # Frontend test checklist (from frontend/src, 2026-11-17)
 

@@ -380,6 +380,8 @@ async def create_slot(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_manager),
 ):
+    if await db.get(PlaylistTemplate, data.template_id) is None:
+        raise HTTPException(status_code=404, detail="Playlist template not found")
     slot = TemplateSlot(
         template_id=data.template_id,
         position=data.position,

@@ -51,7 +51,7 @@ router = APIRouter(
 # ==================== Public EPG ====================
 @router.get("/epg/{station_id}")
 async def get_epg(
-    station_id: str,
+    station_id: UUID,
     date: str | None = Query(None),  # YYYY-MM-DD, defaults to today
     db: AsyncSession = Depends(get_db),
 ):

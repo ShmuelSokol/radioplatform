@@ -98,10 +98,64 @@ class AlertConnectionManager:
 alert_manager = AlertConnectionManager()
 
 
+ALERTS_AUTH_TIMEOUT = 5.0
+
+
+async def alerts_ws_user(token: str, db):
+    """The signed-in admin or manager a /ws/alerts token belongs to, else None.
+    Alerts carry station names and error text, so only the roles that may read
+    /alerts may listen (it used to accept anyone, with no token at all)."""
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from app.core.security import decode_token
+    from app.models.user import User, UserRole
+
+    try:
+        payload = decode_token(token or "")
+    except ValueError:
+        return None
+    if payload.get("type") != "access" or not payload.get("sub"):
+        return None
+    try:
+        user_id = _uuid.UUID(str(payload["sub"]))
+    except ValueError:
+        return None
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None or not user.is_active or user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        return None
+    return user
+
+
 @router.websocket("/ws/alerts")
 async def websocket_alerts(websocket: WebSocket):
-    """WebSocket endpoint for real-time alert notifications to admin clients."""
-    await alert_manager.connect(websocket)
+    """Real-time alerts for admins and managers. The first message must be
+    {"type": "auth", "token": "<access token>"}; otherwise the socket is closed
+    (4003 not an auth message, 4001 bad token or role)."""
+    from app.db.session import get_async_session
+
+    await websocket.accept()
+    try:
+        first = await asyncio.wait_for(websocket.receive_json(), timeout=ALERTS_AUTH_TIMEOUT)
+    except Exception:
+        await websocket.close(code=4003)
+        return
+    if not isinstance(first, dict) or first.get("type") != "auth":
+        await websocket.close(code=4003)
+        return
+    user = None
+    try:
+        async for db in get_async_session():
+            user = await alerts_ws_user(str(first.get("token", "")), db)
+            break
+    except Exception as e:
+        logger.warning("Alert WebSocket auth failed: %s", e)
+    if user is None:
+        await websocket.close(code=4001)
+        return
+    alert_manager.connections.add(websocket)
+    await websocket.send_json({"type": "authenticated"})
     try:
         while True:
             try:

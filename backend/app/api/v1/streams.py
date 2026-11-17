@@ -28,6 +28,10 @@ async def stream_info(station_id: uuid.UUID, db: AsyncSession = Depends(get_db))
 @router.get("/{station_id}/now-playing")
 async def now_playing(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     await get_station(db, station_id)  # validate station exists
+    if not settings.redis_enabled:
+        # The old Redis playlist engine is off in production (REDIS_URL empty); this
+        # answered 500. What is on air comes from /now-playing/{id} and the socket.
+        return {"state": None, "now_playing": None, "upcoming": []}
     return await get_now_playing(str(station_id))
 
 
