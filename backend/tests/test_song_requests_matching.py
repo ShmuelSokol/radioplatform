@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 from sqlalchemy import select
 
-from app.models.asset import Asset, fit_for_random_pick
+from app.models.asset import Asset, fit_for_random_pick, in_category
 from app.models.queue_entry import QueueEntry
 from app.models.song_request import SongRequest
 from app.models.station import Station, StationType
@@ -145,42 +145,119 @@ async def test_matching_speed_with_a_large_library(db_session):
     assert took < limit(1.0), f"matching 5,000 songs took {took:.2f}s"
 
 
-@pytest.mark.asyncio
-async def test_requested_category_swaps_and_restores(db_session):
-    """V2-114: 3+ requests in 30 days replace the category with "requested" (old one
-    saved) and restore it when it drops under."""
+async def _requested_three_times(db_session, category="lively", title="Popular"):
     st = await _station(db_session)
-    song = _song("Popular", category="lively")
+    song = _song(title, category=category)
     db_session.add(song)
     await db_session.commit()
-    reqs = [SongRequest(station_id=st.id, requester_name="r", song_title="Popular", asset_id=song.id) for _ in range(3)]
+    reqs = [SongRequest(station_id=st.id, requester_name="r", song_title=title, asset_id=song.id) for _ in range(3)]
     db_session.add_all(reqs)
     await db_session.commit()
+    return song, reqs
 
+
+@pytest.mark.asyncio
+async def test_requested_category_tags_and_untags(db_session):
+    """V2-114 (Shmuel, 2026-11-17): 3+ requests in 30 days tag the song as requested;
+    it keeps its own category; the tag goes when it drops under 3."""
+    song, reqs = await _requested_three_times(db_session)
     assert await refresh_requested_category(db_session) == 1
     await db_session.refresh(song)
-    assert song.category == "requested" and song.metadata_extra["original_category"] == "lively"
+    assert song.category == "lively" and song.metadata_extra["requested"] == "yes"
+    assert "original_category" not in song.metadata_extra
 
     for r in reqs[:2]:
         await db_session.delete(r)
     await db_session.commit()
-    await refresh_requested_category(db_session)
+    assert await refresh_requested_category(db_session) == 0
     await db_session.refresh(song)
-    assert song.category == "lively" and "original_category" not in song.metadata_extra
+    assert song.category == "lively" and "requested" not in song.metadata_extra
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: a requested song's category is replaced by 'requested', so it drops out of its real category's rotation")
 @pytest.mark.asyncio
 async def test_requested_song_stays_in_its_category_rotation(db_session):
-    st = await _station(db_session)
-    song = _song("Popular", category="lively")
-    db_session.add(song)
-    await db_session.commit()
-    db_session.add_all([SongRequest(station_id=st.id, requester_name="r", song_title="Popular", asset_id=song.id) for _ in range(3)])
+    song, _ = await _requested_three_times(db_session)
+    await refresh_requested_category(db_session)
+    lively = (await db_session.execute(select(Asset.id).where(in_category("lively"), fit_for_random_pick()))).scalars().all()
+    assert song.id in lively
+
+
+@pytest.mark.asyncio
+async def test_requested_song_is_picked_for_requested_rotations(db_session):
+    """A block or rule on the "requested" category draws the tagged song (and songs
+    staff put in "requested" by hand), in every rotation pick."""
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from app.services.playlist_generator_service import _Library
+    from app.services.program_block_service import _Resolver
+    from app.services.queue_replenish_service import QueueReplenishService
+    from app.services.scheduling import SchedulingService
+
+    song, _ = await _requested_three_times(db_session)
+    by_hand = _song("By hand", category="requested")
+    other = _song("Plain", category="lively")
+    db_session.add_all([by_hand, other])
     await db_session.commit()
     await refresh_requested_category(db_session)
-    lively = (await db_session.execute(select(Asset.id).where(Asset.category == "lively", fit_for_random_pick()))).scalars().all()
-    assert song.id in lively
+
+    ids = set((await db_session.execute(select(Asset.id).where(in_category("requested")))).scalars().all())
+    assert ids == {song.id, by_hand.id}
+
+    want = {song.id, by_hand.id}
+    st = (await db_session.execute(select(Station))).scalars().first()
+
+    # Schedule slot (scheduling.py)
+    picked = {await SchedulingService(db_session)._pick_asset_for_slot("music", "requested", None) for _ in range(20)}
+    assert picked <= want and picked
+    # Playlist generator pools
+    lib = _Library(db_session, st.id, set())
+    assert {r.id for r in await lib.pool("music", "requested")} == want
+    assert song.id in {r.id for r in await lib.pool("music", "lively")}
+    # Queue top-up rules
+    rule = SimpleNamespace(asset_type="music", category="requested")
+    service = QueueReplenishService(db_session, st.id)
+    service.exclude_ids = set()
+    found = await service._find_assets_for_rule(rule)
+    assert {a.id for a in found} <= want and found
+    # Program block rotation
+    row = await _Resolver(db_session, st, dry_run=True)._rotate("music", "requested", datetime.now(UTC))
+    assert row.id in want
+
+
+@pytest.mark.asyncio
+async def test_staff_category_edit_is_never_overwritten(db_session):
+    """A category staff set while the song is requested stays when the tag goes."""
+    song, reqs = await _requested_three_times(db_session)
+    await refresh_requested_category(db_session)
+    song.category = "relax"
+    await db_session.commit()
+    await refresh_requested_category(db_session)
+    await db_session.refresh(song)
+    assert song.category == "relax"
+    for r in reqs:
+        await db_session.delete(r)
+    await db_session.commit()
+    await refresh_requested_category(db_session)
+    await db_session.refresh(song)
+    assert song.category == "relax" and "requested" not in song.metadata_extra
+
+
+@pytest.mark.asyncio
+async def test_songs_swapped_by_the_old_version_get_their_category_back(db_session):
+    """Production data from before the change: category "requested" with the own
+    category saved. The next refresh heals it (and tags it if still requested)."""
+    song, reqs = await _requested_three_times(db_session, category="requested")
+    song.metadata_extra = {"original_category": "lively", "audio_analysis": {"cue_in_seconds": 1}}
+    gone = _song("Faded", category="requested", metadata_extra={"original_category": "med_fast"})
+    db_session.add(gone)
+    await db_session.commit()
+    await refresh_requested_category(db_session)
+    await db_session.refresh(song)
+    await db_session.refresh(gone)
+    assert song.category == "lively"
+    assert song.metadata_extra == {"requested": "yes", "audio_analysis": {"cue_in_seconds": 1}}
+    assert gone.category == "med_fast" and gone.metadata_extra == {}
 
 
 def test_weather_readout_template():
