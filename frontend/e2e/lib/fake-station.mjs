@@ -213,6 +213,15 @@ export function makeStation(opts = {}) {
       queue_duration_seconds: total, total_queue_duration_seconds: total, preempt_fade_ms: 2000, next_entry_id: next,
     };
   };
+  /** When a queued timed entry cuts into the item on air, as the server's _cut_time:
+   *  a hard item at its time, a soft one only at its limit (hard_by), else null. */
+  const cutAt = (e) => {
+    if (!e || !e.preempt_at) return null;
+    if (e.hard_timed === false) {
+      return e.hard_by ? new Date(Math.max(new Date(e.preempt_at).getTime(), new Date(e.hard_by).getTime())).toISOString() : null;
+    }
+    return new Date(e.preempt_at).toISOString();
+  };
   /** What the server pushes on the now-playing channel for the item on air. */
   s.nowPlaying = (extra = {}) => {
     const cur = playing();
@@ -224,7 +233,7 @@ export function makeStation(opts = {}) {
       station_id: SID, asset_id: a.id, started_at: cur.started_at,
       ends_at: new Date(new Date(cur.started_at).getTime() + a.duration * 1000).toISOString(),
       asset: { title: a.title, artist: a.artist, album: a.album, audio_url: `/__tone/${a.id}.wav`, cue_in: 0, cue_out: a.duration, cross_start: a.duration - 3, replay_gain_db: 0, intro_seconds: a.intro_seconds ?? null },
-      next_asset: na ? { id: na.id, title: na.title, artist: na.artist, audio_url: `/__tone/${na.id}.wav`, cue_in: 0, replay_gain_db: 0 } : null,
+      next_asset: na ? { id: na.id, title: na.title, artist: na.artist, audio_url: `/__tone/${na.id}.wav`, cue_in: 0, replay_gain_db: 0, cut_at: cutAt(nxt) } : null,
       ...extra,
     };
   };

@@ -128,9 +128,11 @@ forward. Test: `tests/test_items_without_length.py`.
 ## Backend restarts and two processes
 
 `EngineState` is in memory, per process. It is safe to lose: the pre-loaded entry is covered
-by `given`, timed duplicates by the engine's own id check. The one thing lost is "the last
-change was a manual skip", so a Next pressed in the second before a restart may be logged as
-played instead of skipped.
+by `given`, timed duplicates by the engine's own id check, and what was handed out (entry id
+to asset, for a start report of an entry deleted meanwhile) is also written to the
+`engine_handoffs` table (pruned after 6 h). The one thing lost is "the last change was a
+manual skip", so a Next pressed in the second before a restart may be logged as played
+instead of skipped.
 
 ## Flags (backend)
 
@@ -241,7 +243,7 @@ A plain `<audio src=stream>` in Chrome waits for about 200 KB of the 320 kbps st
 Heard live on Main: the stream kept playing but the site showed nothing on air and the listener page said "Offline". A schedule refresh (`schedule_refresh_service.remove_automatic_songs` / redraw) deleted the unplayed automatic songs, including the one already handed to the engine. Its `/started` report then matched no queue entry, so nothing was marked playing and the queue drifted from what was heard.
 
 - `playout_engine.held_entry_ids(station)` (the cued entry and timed items already sent) are excluded from the refresh.
-- The link remembers the asset of the last 30 entries it handed out (`EngineState.handed`). A start report for one that was deleted some other way puts a fresh entry with that asset on air instead of leaving the station empty.
+- The link remembers the asset of the last 30 entries it handed out (`EngineState.handed`), and of every hand-over in the `engine_handoffs` table (model `EngineHandoff`), so it also works after a backend restart. A start report for one that was deleted some other way puts a fresh entry with that asset on air instead of leaving the station empty.
 - The listener page shows "On Air" whenever the stream is playing, whatever the now-playing record says.
 
 ## Stop, Listen and the phone's own controls (2026-11-16)
@@ -255,9 +257,19 @@ Timing on the server stream:
 - Every listener of a station plays the same Icecast mount, so they all hear the same audio. They differ only by their own delay: about 1 s with the MSE player (Chrome, Edge, Firefox, Android). On iPhone Safari, which has no `MediaSource` (only `ManagedMediaSource`, not used yet), it is a few seconds more.
 - Hard-timed items (time check, ID) are handed to the engine 45 s early with an absolute time. The engine starts the fade `skip_fade` before it, so the item starts on the second by the stream server's clock (Ubuntu's timesyncd keeps it on time).
 
-## Known engine gaps (tests, 2026-11-17)
+## Engine gaps found by tests, fixed (2026-11-17)
 
-`backend/tests/test_engine_backend.py` holds strict xfail tests, each with a reproduction, for engine behaviour that is wrong today: a hard timed item whose 45 s hand-over was missed (restart, slow pass, created late) never reaches the timed lane and `pick_next` orders it by position; no alert when /timed never succeeds; the watchdog never fires before the first engine contact, never in the first 30 min after host boot (monotonic < 1800), and fires falsely during any item over 2 min (the engine only calls between tracks); blackout silence handed to the timed lane outlives the blackout; live shows do not stop the engine (`/next` keeps serving music, `end_show` marks an entry playing locally); `timed_during_long_items` pause/wait are ignored on the engine; engine commands run serially inside the shared scheduler pass (4 s timeout each). When one is fixed, its test starts passing and strict xfail fails: remove the marker. Static checks of the stream-server files: `tests/test_engine_infra_files.py`.
+`backend/tests/test_engine_backend.py` recorded these as strict xfail tests; all pass now:
+
+- **Missed hand-over**: a hard item whose 45 s window was missed (restart, slow pass, created late) still goes to the timed lane and airs at once while it is at most `MISSED_HAND_OVER_SECONDS` (5 min) late; never during a blackout (silence excepted), never one the engine already holds in its music lane. Later than that, `pick_next` plays it next: it now takes every due timed item first, hard as well as soft (the browser rule), not by queue position.
+- **Never delivered**: a hard item whose time passed while every `/timed` failed raises "Timed item did not reach the playout engine" (once per item).
+- **Watchdog**: `_alert` treats `last_alert` 0 as "never" (it compared with `time.monotonic()`, so no alert for 30 min after the host booted); silence counts from the first tick until the engine first calls; no "not responding" while the item on air has not reached its end (the engine calls only between items). Past the end the overrun alert covers it.
+- **Blackout silence in the timed lane**: at blackout end the silences still waiting there are closed and sent to the engine's new `/timed_drop` (proto 2 engines only) (`radio.liq` skips a dropped id the moment it would start), before `/flush` + `/skip`.
+- **Live show**: `/next` answers 204 while `live_show_id` is set (the paused item's resume entry stays queued), the tick drops the pre-loaded track once, a start report without entry during the show raises no emergency alert, and `end_show` does not call `start_from_queue` on an engine station (the engine asks again by itself).
+- **Hung engine**: the tick hands each group over in parallel (one command timeout per group, not per item). Each `/timed` carries `seq` and `of`; `radio.liq` holds a group until all of it is there (at most 1 s), then queues it in `seq` order. Groups still go one after another. Only for an engine that reports `proto` >= 2 (`ENGINE_PROTO_GROUPS`): the new `radio.liq` sends it with `/hello` and every `/next`, kept in `EngineState.engine_proto`. An engine that sends none (old `radio.liq`, which queues timed items in arrival order and has no `/timed_drop`) gets the serial hand-over and plain flush + skip at blackout end, so the backend is safe to deploy before `setup.sh` is rerun; the new behaviour turns on by itself after.
+- **No playable audio**: `/next` that skipped entries without a fetchable URL and ends with nothing raises "Playout engine has nothing it can play".
+
+Static checks of the stream-server files: `tests/test_engine_infra_files.py`.
 ## The same song handed out twice (2026-11-17 02:49Z, Main)
 
 The engine asks for its next track the moment a track starts. Its start report for Shema

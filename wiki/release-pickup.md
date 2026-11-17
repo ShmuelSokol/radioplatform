@@ -9,8 +9,9 @@ Every frontend build writes `dist/version.json` and bakes the same id into the b
 - not within 2 minutes of any audio (covers players that do not hold). Before 2026-11-16 a gap between items (decks paused while the 7 PM time/weather loaded) plus 30 s idle reloaded listener tabs, and the reloaded page stayed silent because browsers need a tap to start audio again;
 - not while a form field has focus;
 - then: tab hidden, or 30s without input, or the person changes route (`UpdateOnNavigation` in `App.tsx`).
+- back after 10+ min hidden with nothing sounding: reloads even with a player switched on, but not while a form field has focus.
 
-A stale lazy chunk (`vite:preloadError`) also triggers a reload unless audio is playing. If the screen errors anyway, the error box reloads 300 ms later unless sound is playing at that moment (leaving Listen stops it, so the 2-min audio grace does not apply here).
+A stale lazy chunk (`vite:preloadError` with a missing-file error, `isStaleCodeError`) also triggers a reload unless audio is playing. Vite raises the same event when a screen's code throws while loading; that is a real bug, so it is left to the error box ("Something went wrong") instead of being hidden behind a reload. If the screen errors anyway, the error box reloads 300 ms later unless sound is playing at that moment (leaving Listen stops it, so the 2-min audio grace does not apply here).
 
 ## Admin control (Settings > Site Updates, `/admin/site-updates`)
 
@@ -19,7 +20,7 @@ Backend `app/api/v1/site_release.py`, one row in table `site_release`. Every tab
 - `PUT /site-release {mode}` (admin): `auto` = the quiet-moment rules above; `manual` = no tab reloads on its own (navigation and long-away reloads too). A stale lazy chunk still reloads in both modes, or the screen would be broken.
 - `POST /site-release/push {version, at, include_playing}` (admin): tabs take release `version` once it is really served at `/version.json` (so a push made right after a merge waits for Vercel) and the time `at` has come (server clock; tabs correct their own clock from `server_time`). No idle wait. Typing still holds a tab. Tabs playing audio wait until they stop, unless `include_playing`: then they reload within 8 s after the next item change (`noteItemChange()` from `useAudioEngine`), or after 5 min of one long item, and `takeResume()` switches the player back on (`components/audio/ResumeAfterRelease.tsx`, used by Listen and the control room). Chrome/Edge allow that without a tap (same-origin reload keeps the autoplay permission); Safari/iPhone refuse, so the page shows "Tap to keep listening". A push with no version means "whatever is published" and lasts one hour.
 - `DELETE /site-release/push` cancels. `GET /site-release/tabs` (admin) lists open tabs (in-memory, per backend process).
-- A tab never reloads for a release twice within 2 minutes (`kbr_release_reload_at` in sessionStorage), so a CDN still serving the old index cannot cause a loop.
+- A tab never reloads for a release twice within 2 minutes (`kbr_release_reload_at` in sessionStorage; `window.name` when the browser refuses sessionStorage, e.g. site data blocked, which used to switch the guard off), so a CDN still serving the old index cannot cause a loop. A stored time in the future (device clock set back) is ignored.
 
 A Claude thread can push with the admin login: `POST https://api.kbrlive.com/api/v1/site-release/push` with `{"version": "<sha from https://kbrlive.com/version.json>"}`.
 
