@@ -182,12 +182,12 @@ const SCENARIOS = {
     audibleWithin: 1, noSeekOn: 'b', end: { src: 'b', minT: 3, maxT: 5 },
   },
   // The stored length and crossfade point say 180 s / 177 s, but the file is 20 s long
-  // (the old analysis measured every item as 180 s): the player hands over 3 s before
-  // the file's real end by itself, before the server announces anything
+  // (the old analysis measured every item as 180 s): the player hands over 1 s (the
+  // song crossfade) before the file's real end by itself, before the server announces anything
   'stored-length-longer-than-file': {
     start: { ...A, dur: 180, cross: 177, nextId: 'b' }, wait: 15, watch: 9,
     change: () => {},
-    end: { src: 'b', minT: 5.5, maxT: 8 },
+    end: { src: 'b', minT: 3.8, maxT: 6 },
   },
   // Same, cold: the next item was never pre-loaded
   'next-starts-clean-cold': {
