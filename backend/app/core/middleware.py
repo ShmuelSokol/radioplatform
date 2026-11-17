@@ -111,7 +111,9 @@ def setup_middleware(app: FastAPI) -> None:
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+        # Every custom header the website sends must be listed here, or the
+        # browser preflight fails (X-CRM-PIN: listener ratings, PR 188).
+        allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-CRM-PIN"],
     )
 
     # Rate limiting on public endpoints
