@@ -1141,7 +1141,10 @@ async def _check_advance_locked(
         # Looping: the same item goes in again as the next thing to play
         await add_loop_repeat(db, station_id)
 
-    next_entry = await _pick_next_pending(db, station_id, now_utc, silence_only=is_blackout)
+    if is_blackout:
+        next_entry = await _pick_next_pending(db, station_id, now_utc, silence_only=True)
+    else:
+        next_entry = await _pick_next_pending(db, station_id, now_utc)
     if not next_entry and not is_blackout:
         # The queue ran out: fill it and carry on rather than going silent
         next_entry = await _refill_for_next(db, station_id)
@@ -1743,7 +1746,11 @@ async def fire_now(
 
     # The operator asked for this item: it goes on air even if a song change is in progress
     async with advance_lock(station_id):
-        skipped = await _skip_current_locked(station_id, db, keep_incoming=False)
+        # Play-now wins over a time check on air too (only Next is refused there);
+        # it answered "on air" while the item was only queued behind the time check
+        skipped = await _skip_current_locked(
+            station_id, db, keep_incoming=False, protect_timed=False
+        )
     done = {**queued, "message": "Going on air", "on_air": True, "queue": skipped.get("queue")}
     _remember_fire_request(station_id, body.client_request_id, done)
     return done
@@ -1853,7 +1860,9 @@ async def _skip_current_locked(
     db: AsyncSession,
     fade_seconds: float | None = None,
     keep_incoming: bool = True,
+    protect_timed: bool = True,
 ):
+    """`protect_timed`: Next leaves a timed item on air alone; play-now (False) does not."""
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
@@ -1862,7 +1871,7 @@ async def _skip_current_locked(
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
-    if current and _is_timed_entry(current):
+    if current and protect_timed and _is_timed_entry(current):
         # Next never skips a time check, weather or sponsorship: it plays to the end and
         # Next works again after it (Shmuel, 2026-11-16: a burst of Nexts skipped the
         # Jerusalem weather 3.2 s in). Play-now still puts something else on air.

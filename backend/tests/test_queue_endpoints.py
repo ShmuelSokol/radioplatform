@@ -602,3 +602,96 @@ async def test_force_replenish_reports_counts(client, auth_headers, db_session):
     assert body["total_entries"] == len(entries)
     assert body["total_seconds"] == 180.0 * len(entries)
     assert body["total_hours"] == round(180.0 * len(entries) / 3600, 1)
+
+
+# ── Fire-now / mix-over edge cases ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_fire_now_during_a_timed_item_still_goes_on_air(client, auth_headers, db_session):
+    """B-QUEUE-20: Next never skips a time check, but play-now does put the item on air"""
+    station, assets, entries = await _station_with_queue(db_session)
+    entries[0].preempt_at = datetime.now(UTC) - timedelta(seconds=5)
+    entries[0].timing_mode = "hard"
+    await db_session.commit()
+    skip = (await client.post(_url(station, "/skip"), headers=auth_headers)).json()
+    assert skip.get("protected") is True
+    body = (await _timed(client.post(_url(station, "/fire-now"), headers=auth_headers,
+                                     json={"asset_id": str(assets[3].id)}))).json()
+    assert body["on_air"] is True
+    assert body["queue"]["now_playing"]["asset_id"] == str(assets[3].id)
+
+
+@pytest.mark.asyncio
+async def test_fire_now_with_nothing_on_air_starts_and_the_queue_follows(client, auth_headers, db_session):
+    """V1-51"""
+    station, assets, entries = await _station_with_queue(db_session, playing=False)
+    first_waiting = str(entries[0].id)
+    body = (await client.post(_url(station, "/fire-now"), headers=auth_headers,
+                              json={"asset_id": str(assets[4].id)})).json()
+    q = body["queue"]
+    assert q["now_playing"]["asset_id"] == str(assets[4].id)
+    assert q["next_entry_id"] == first_waiting
+
+
+def _aware_dt(dt):
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_mix_over_logs_once_and_ignores_a_double_tap(client, auth_headers, db_session, monkeypatch):
+    """B-QUEUE-25, V1-46, V1-47: one PlayLog (source manual, length of the item), a repeat
+    of the same client_request_id does nothing, the queue does not move"""
+    import app.api.v1.websocket as ws
+
+    sent = []
+
+    async def capture(station_id, message):
+        sent.append(message)
+
+    monkeypatch.setattr(ws.manager, "broadcast_to_station", capture)
+    station, assets, entries = await _station_with_queue(db_session)
+    on_air_id = str(entries[0].id)
+    before = await _pending_ids(db_session, station.id)
+    payload = {"asset_id": str(assets[2].id), "client_request_id": "jingle-1"}
+    one = (await _timed(client.post(_url(station, "/mix-over"), headers=auth_headers, json=payload))).json()
+    two = (await client.post(_url(station, "/mix-over"), headers=auth_headers, json=payload)).json()
+    assert one["on_air"] is True and two.get("duplicate") is True
+    assert len(sent) == 1 and sent[0]["type"] == "mix_over"
+    logs = (await db_session.execute(select(PlayLog).where(PlayLog.station_id == station.id)
+                                     .execution_options(populate_existing=True))).scalars().all()
+    assert len(logs) == 1
+    assert str(getattr(logs[0].source, "value", logs[0].source)) == "manual"
+    assert (_aware_dt(logs[0].end_utc) - _aware_dt(logs[0].start_utc)).total_seconds() == 180.0
+    assert await _pending_ids(db_session, station.id) == before
+    q = (await client.get(_url(station), headers=auth_headers)).json()
+    assert q["now_playing"]["id"] == on_air_id
+
+
+@pytest.mark.asyncio
+async def test_ran_dry_fills_with_music_never_with_spots_or_silence(db_session):
+    """V1-52: nothing left and the normal fill adds nothing -> random music as fallback;
+    without music, any item that is not silence, a spot, a jingle or an announcement"""
+    station = Station(id=uuid.uuid4(), name="Dry FM", timezone="UTC")
+    db_session.add(station)
+    for kind in ("silence", "spot", "jingle"):
+        db_session.add(Asset(id=uuid.uuid4(), title=kind, duration=30.0, asset_type=kind,
+                             file_path=f"https://cdn.example.com/{kind}.mp3"))
+    await db_session.commit()
+    station_id = station.id
+    assert await queue_module._refill_for_next(db_session, station_id) is None
+
+    talk = Asset(id=uuid.uuid4(), title="Talk", duration=600.0, asset_type="shiur",
+                 file_path="https://cdn.example.com/talk.mp3")
+    db_session.add(talk)
+    await db_session.commit()
+    picked = await queue_module._refill_for_next(db_session, station_id)
+    assert picked.asset_id == talk.id and picked.source == "fallback"
+
+    song = Asset(id=uuid.uuid4(), title="Song", duration=200.0, asset_type="music",
+                 file_path="https://cdn.example.com/song.mp3")
+    db_session.add(song)
+    await db_session.execute(QueueEntry.__table__.delete().where(QueueEntry.station_id == station_id))
+    await db_session.commit()
+    picked = await queue_module._refill_for_next(db_session, station_id)
+    assert picked.asset_id == song.id

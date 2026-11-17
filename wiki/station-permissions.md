@@ -13,3 +13,9 @@ Who may operate (change) which station. Reading is not restricted by station.
 Not restricted by station: holidays (one window can cover several stations, `affected_stations`), objects that belong to no station (shared playlist templates, spot schedules for all stations), the library, rules. Those are limited by role only.
 
 Tests: `backend/tests/test_station_permissions.py`.
+
+
+Queue entry routes (move-up/down, reorder, reorder-dnd, DELETE) look the entry up by id
+AND the URL's station (`_station_entry` in `api/v1/queue.py`): by id alone a DJ allowed on
+one station could change the protected station's queue through their own station's URL.
+Test: `backend/tests/test_queue_endpoints.py::test_entries_of_another_station_cannot_be_changed_through_this_station`.
