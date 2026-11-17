@@ -24,8 +24,8 @@ Where: **H** = harness (`infra/streaming/harness/run_harness.py`, real Liquidsoa
 | A1-5 | Soft items at :15/:30/:45 wait for the song; pause a long shiur when over 5 min are left | H `soft_timed_waits_for_song`, `soft_pauses_long_shiur`, `soft_waits_for_short_shiur` | [B-JOB-35, V1-34] |
 | A1-6 | Timed groups: 3 items, two groups 0.3 s and 1 s apart, duplicate id, slow file | H `three_item_timed_group`, `two_groups_*`, `duplicate_timed_id`, `slow_timed_file` | every item once, in order, at full level [H-10, F-ENGINE2-9] |
 | A1-7 | Songs fitted before the hour (PR 221) | H `fit_before_hour`; J two top-of-hours | song on air at the hour loses 15 s or less where the queue allows [F-BLOCKS-8, -8b] |
-| A1-8 | Engine or backend restart inside the 45 s before the hour | H `engine_crash_restart`; T | time check still airs once, on the second [V1-30, V1-31] (V1-30/31 at the hour itself: NOT COVERED, to add) |
-| A1-9 | Droplet clock | D `timedatectl` + `chronyc tracking` | synchronised, offset under 100 ms [V2-122] |
+| A1-8 | Engine or backend restart inside the 45 s before the hour, and the engine down across the hour | H `engine_crash_restart`, `engine_restart_15s_before_hour`, `engine_restart_across_hour`, `backend_restart_before_hour`; T | time check airs once; on the second when the engine is back in time, else as soon as it is back [V1-30, V1-31] |
+| A1-9 | Droplet clock | D `timedatectl` + `chronyc tracking` | synchronised, offset under 100 ms [V2-122]  **PASS** 2026-11-17 22:22Z: NTP synchronised, offset +3.0 ms |
 
 ### A2. Operator actions (control room, stream-server station)
 | # | Check | Where | Pass means |
@@ -46,7 +46,7 @@ Where: **H** = harness (`infra/streaming/harness/run_harness.py`, real Liquidsoa
 | A3-3 | Same song never handed out twice (Shema, 02:49Z) | T `test_playout_engine.py` (F-ENGINE2-1/2/3) | with about 700 pending rows the start report takes under 300 ms |
 | A3-4 | Schedule redraw while a song is with the engine | T (B-MODE-21, B-PLAYOUT-14) | the site still shows it on air |
 | A3-5 | Engine did not move on at 0:00 | T (F-ENGINE2-4); J watchdog | alert within 30 s [H-9] |
-| A3-6 | Main's emergency folder is not empty at the moment of the move | D `ls /var/lib/kbr-engine/<main id>/emergency | wc -l` | 10 or more files before the switch (it only fills itself from songs Main's engine has aired, so copy Jerusalem's or pre-seed) [F-ENGINE2-11] |
+| A3-6 | Emergency folder | D | **Checked** 22:22Z: one folder shared by all engines (`/var/lib/kbr-engine/emergency`), 40 files from Jerusalem, so it is not empty; Main falling back to Jerusalem's songs is with the engine thread [F-ENGINE2-11] |
 | A3-7 | 12 hours on Jerusalem with today's code | J watchdog + PC 12 h watch | every top of hour within 1 s, zero silence over 2 s, zero "catchup" lines, nothing aired twice |
 
 ### A4. Sound
@@ -111,6 +111,6 @@ Where: **H** = harness (`infra/streaming/harness/run_harness.py`, real Liquidsoa
 2. Two engines on the 1-core droplet are unproven since PR 209/214 (A7-1, A7-2). If they do not pass, the droplet needs 2 vCPU / 2 GB, which costs money and needs Shmuel.
 3. Live show on a stream-server station has never been tested (A6-3). Main is the station that carries live shows.
 4. iPhone has only been checked in desktop WebKit (A6-2).
-5. Main's emergency folder starts empty (A3-6).
-6. How the FM transmitter is fed must be known before the move: if it plays the website's Main in a browser it will switch to the stream by itself and run a few seconds behind the clock; if it is fed another way nothing changes for it. Unknown today.
+5. Main's emergency music would be Jerusalem's (one shared folder). Not silence, so not a blocker; engine thread decides.
+6. FM transmitter: not fed by the site today (the station still runs KBR Studio), so the move does not touch FM. Closed.
 7. No Shabbos has yet passed on the engine (A5-2).

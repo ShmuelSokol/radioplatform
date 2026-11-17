@@ -282,7 +282,23 @@ class Stack:
             start_new_session=True,
         )
         self.procs.append(p)
+        self.backend = p
         wait_for(lambda: http_ok(f"http://127.0.0.1:{BACKEND_PORT}/health"), 90, "backend /health")
+
+    def restart_backend(self) -> None:
+        """Stop the backend and start it again (a deploy): everything it kept in memory is lost."""
+        p = getattr(self, "backend", None)
+        if p is not None:
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+                p.wait(timeout=15)
+            except Exception:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+            self.procs.remove(p)
+        self.start_backend()
 
     def start_icecast(self) -> None:
         conf = self.dir / "icecast.xml"
@@ -1571,6 +1587,59 @@ async def sc_engine_crash_restart(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s after the restart")
 
 
+async def _restart_near_hour(h: Harness, name: str, what: str, lead: float, allowed: float) -> None:
+    await wait_music(h)
+    due = at(60)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, due.timestamp() - time.time() - lead))
+    t_kill = time.time()
+    if what == "engine":
+        await asyncio.to_thread(h.stack.restart_engine)
+        t_from = h.stack.wav_t0
+    else:
+        await asyncio.to_thread(h.stack.restart_backend)
+        t_from = t_kill - 20
+    up = time.time()
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + TONES["time"][1] + 14)
+    heard = h.heard(max(t_from, due.timestamp() - 20), time.time() - 1)
+    h.print_timeline(heard, due.timestamp())
+    clock = tone_name(TONES["time"][0])
+    tl = timeline(heard)
+    names = [n for _, n in tl]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    first = next((t for t, n in tl if n == clock), None)
+    late = None if first is None else first - due.timestamp()
+    h.check(name, late is not None and -1.0 <= late <= allowed,
+            f"{what} restarted {due.timestamp() - t_kill:.0f} s before the time check and was back "
+            f"{due.timestamp() - up:+.1f} s before it: time check "
+            f"{'never' if late is None else f'{late:+.1f} s'} (allowed {allowed:.0f} s)")
+    h.check(name, runs.count(clock) == 1, f"time check heard once: {runs}")
+    h.check(name, "EMERGENCY" not in runs[runs.index(clock):] if clock in runs else False,
+            f"station items after it, no emergency files: {runs}")
+    gap, _ = longest_silence(h.heard(max(t_from + 6, due.timestamp() - 5), time.time() - 1))
+    h.check(name, gap <= 1.5, f"longest silence {gap:.1f} s")
+    playing = [e for e in await h.rows() if e.status == "playing"]
+    h.check(name, len(playing) == 1, f"one item on air on the site ({len(playing)})")
+
+
+async def sc_engine_restart_15s_before_hour(h: Harness) -> None:
+    """V1-30: the engine restarts 15 s before a hard time check that was already handed over.
+    The backend hands it over again and it airs once, on its second."""
+    await _restart_near_hour(h, "engine_restart_15s_before_hour", "engine", 15, 2.0)
+
+
+async def sc_engine_restart_across_hour(h: Harness) -> None:
+    """V1-30: the engine is down across the second of a hard time check. It airs once as soon
+    as the engine is back (late, but not dropped and not twice)."""
+    await _restart_near_hour(h, "engine_restart_across_hour", "engine", 3, 20.0)
+
+
+async def sc_backend_restart_before_hour(h: Harness) -> None:
+    """V1-31: the backend restarts (a deploy) after it handed the time check over. It hands it
+    over again with the same id; the engine airs it once, on its second."""
+    await _restart_near_hour(h, "backend_restart_before_hour", "backend", 30, 2.0)
+
+
 async def sc_duplicate_timed_id(h: Harness) -> None:
     """H-10: the same timed item handed over twice (a retried /timed after a lost answer, a
     backend restart) airs once, on time."""
@@ -1741,6 +1810,9 @@ SCENARIOS = {
     "blackout_ended_early": sc_blackout_ended_early,
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
+    "engine_restart_15s_before_hour": sc_engine_restart_15s_before_hour,
+    "engine_restart_across_hour": sc_engine_restart_across_hour,
+    "backend_restart_before_hour": sc_backend_restart_before_hour,
     "next_after_idle": sc_next_after_idle,
     "next_twice": sc_next_twice,
     "engine_crash_restart": sc_engine_crash_restart,
