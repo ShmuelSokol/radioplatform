@@ -54,7 +54,8 @@ export default function AdminArchives() {
   const [stationFilter, setStationFilter] = useState<string>('');
 
   const { data: stationsData } = useStations();
-  const { data, isLoading } = useArchives(stationFilter ? { station_id: stationFilter } : undefined);
+  // drafts: the admin list must keep unpublished archives, or one set to Draft vanishes
+  const { data, isLoading } = useArchives(stationFilter ? { station_id: stationFilter, drafts: true } : { drafts: true });
   const createMut = useCreateArchive();
   const updateMut = useUpdateArchive();
   const deleteMut = useDeleteArchive();
@@ -253,7 +254,7 @@ export default function AdminArchives() {
               <h2 className="text-lg font-bold text-cyan-300">
                 {editingId ? 'Edit Archive' : 'New Archive'}
               </h2>
-              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-white text-xl">&times;</button>
+              <button onClick={() => setShowModal(false)} aria-label="Close" className="text-gray-500 hover:text-white text-xl">&times;</button>
             </div>
             <div className="p-5 space-y-4">
               {!editingId && (

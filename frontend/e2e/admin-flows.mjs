@@ -2054,6 +2054,449 @@ section('categories', async () => {
   }
 });
 
+// ── Alerts ──────────────────────────────────────────────────────────────────
+function seedAlerts(n, tag) {
+  if (!process.env.E2E_DATABASE_URL) throw new Error('needs E2E_DATABASE_URL (the API cannot make alerts)');
+  execFileSync('uv', ['run', 'python', path.join(HERE, 'admin-flows-seed.py')], {
+    cwd: path.join(HERE, '..', '..', 'backend'),
+    env: { ...process.env, DATABASE_URL: process.env.E2E_DATABASE_URL, E2E_ALERTS: String(n), E2E_ALERT_TAG: tag },
+    stdio: 'pipe',
+  });
+}
+section('alerts', async () => {
+  const tag = `${RUN}a`;
+  seedAlerts(105, tag); // more than one page (100 a page)
+  const sel = (page, label) => field(page, label);
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('admin', view);
+    const row = i => page.locator('tr', { has: page.getByText(`E2E alert ${tag} ${i}`, { exact: true }) });
+    if (view === 'desktop') {
+      await step('F-ALERTS-1 desktop: severity / type / status filters narrow the list; pager Older / Newer', async () => {
+        await page.goto(`${BASE}/admin/alerts`);
+        await page.getByTestId('alerts-list').waitFor();
+        const pager = page.getByTestId('alerts-pager');
+        await until(async () => /Page 1 of [2-9]/.test(await pager.innerText()), 'two pages of alerts');
+        await pager.getByRole('button', { name: 'Older' }).click();
+        await until(async () => /Page 2 of/.test(await pager.innerText()), 'page 2');
+        await pager.getByRole('button', { name: 'Newer' }).click();
+        await until(async () => /Page 1 of/.test(await pager.innerText()), 'back to page 1');
+        await sel(page, 'Severity').selectOption('warning');
+        await until(async () => {
+          const sev = await page.locator('[data-testid=alerts-list] tbody tr td:nth-child(2)').allInnerTexts();
+          return sev.length && sev.every(s => s.trim() === 'WARNING');
+        }, 'only WARNING rows');
+        await sel(page, 'Severity').selectOption('');
+        await sel(page, 'Type').selectOption('system');
+        await until(async () => {
+          const t = await page.locator('[data-testid=alerts-list] tbody tr td:nth-child(3)').allInnerTexts();
+          return t.length && t.every(s => s.trim() === 'system');
+        }, 'only system rows');
+        await sel(page, 'Status').selectOption('resolved');
+        await until(async () => {
+          const t = await page.locator('[data-testid=alerts-list] tbody tr td:nth-child(7)').allInnerTexts().catch(() => []);
+          return (await page.getByText('No alerts found').count()) || (t.length && t.every(s => s.trim() === 'Resolved'));
+        }, 'only resolved rows');
+        await sel(page, 'Status').selectOption('');
+        await sel(page, 'Type').selectOption('');
+      }, page);
+    } else {
+      await page.goto(`${BASE}/admin/alerts`);
+      await page.getByTestId('alerts-list').waitFor().catch(() => {});
+      await sel(page, 'Status').selectOption(''); // opens on Unresolved; a resolved row would leave the list
+    }
+    await step(`F-ALERTS-2 ${view}: Resolve, Reopen, Delete (confirm) each save fast`, async () => {
+      // the seeded alerts share one time, so which are on page 1 varies: take the first one shown
+      const i = await until(async () => {
+        const titles = await page.locator('[data-testid=alerts-list] tbody tr td:nth-child(4)').allInnerTexts();
+        const t = titles.map(x => x.trim()).find(x => x.startsWith(`E2E alert ${tag} `));
+        return t && t.split(' ').pop();
+      }, 'a seeded alert on page 1', 8000);
+      await timedSave(page, 'resolve', (m, p) => m === 'PATCH' && p.endsWith('/resolve'), () => row(i).getByRole('button', { name: 'Resolve' }).click());
+      await row(i).getByText('Resolved', { exact: true }).waitFor();
+      await timedSave(page, 'reopen', (m, p) => m === 'PATCH' && p.endsWith('/reopen'), () => row(i).getByRole('button', { name: 'Reopen' }).click());
+      await row(i).getByText('Open', { exact: true }).waitFor();
+      await timedSave(page, 'delete', (m, p) => m === 'DELETE' && p.startsWith('/alerts/'), () => row(i).getByRole('button', { name: 'Delete' }).click());
+      await row(i).waitFor({ state: 'detached' });
+    }, page);
+    await closePage(page);
+  }
+  const page = await newPage('manager');
+  await step('F-ALERTS-2/3 Resolve all (confirm) resolves every open alert and the bell count goes away', async () => {
+    await page.goto(`${BASE}/admin/alerts`);
+    const badge = page.locator('nav span.bg-red-600');
+    await badge.waitFor();
+    assert(!(await page.getByRole('button', { name: 'Delete' }).count()), 'a manager is offered Delete (admin only)');
+    const { ms } = await timedSave(page, 'resolve all', (m, p) => m === 'POST' && p === '/alerts/resolve-all', () => page.getByTestId('resolve-all').click());
+    await page.getByTestId('resolve-all').waitFor({ state: 'detached' });
+    // A station can raise a new alert at any moment; the badge must at least drop below the 105 just seeded.
+    await until(async () => !(await badge.count()) || (await badge.innerText()).trim() !== '9+', 'bell count to drop', 5000);
+    return `resolved in ${ms} ms`;
+  }, page);
+  await closePage(page);
+});
+
+// ── Bug reports page ────────────────────────────────────────────────────────
+section('bug-reports', async () => {
+  const text = `E2E report for the list ${RUN}`;
+  await api('POST', '/bug-reports', { token: USERS.viewer.token, body: { description: text, expected: 'E2E expected', page_url: `${BASE}/stations` } });
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage(view === 'desktop' ? 'admin' : 'manager', view);
+    await step(`F-BUGS-1 ${view}: list shows the report; Details / Hide details${view === 'desktop' ? '; Close sets it closed' : '; no Close for a manager'}`, async () => {
+      await page.goto(`${BASE}/admin/bug-reports`);
+      const item = page.locator('li', { hasText: text });
+      await item.waitFor();
+      assert((await item.innerText()).includes('Expected: E2E expected'), 'expected text not shown');
+      await item.getByRole('button', { name: 'Details' }).click();
+      await item.locator('pre').waitFor();
+      await item.getByRole('button', { name: 'Hide details' }).click();
+      await item.locator('pre').waitFor({ state: 'detached' });
+      if (view === 'desktop') {
+        const { ms } = await timedSave(page, 'close', (m, p) => m === 'PATCH' && p.startsWith('/bug-reports/'), () => item.getByRole('button', { name: 'Close' }).click());
+        await item.getByRole('button', { name: 'Close' }).waitFor({ state: 'detached' });
+        return `closed in ${ms} ms`;
+      }
+      assert(!(await item.getByRole('button', { name: 'Close' }).count()), 'manager offered Close (admin only)');
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Site updates ────────────────────────────────────────────────────────────
+section('site-updates', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('admin', view);
+    const listener = await newPage(null, view);
+    await step(`F-SITEUPD-3 ${view}: open tabs list shows another open tab (a listener on /stations) with version and playing`, async () => {
+      await listener.goto(`${BASE}/stations`);
+      await page.goto(`${BASE}/admin/site-updates`);
+      const table = page.getByTestId('tabs-table');
+      await until(async () => (await table.locator('tr', { hasText: 'Listener' }).count()) > 0, 'the listener tab in the list', 8000);
+      const r = table.locator('tr', { hasText: 'Listener' }).first();
+      const cells = await r.locator('td').allInnerTexts();
+      assert(cells[3] && cells[3].trim() !== '', 'no version shown');
+      assert(/Yes|No/.test(cells[4]), 'no playing column');
+      assert(Number(await page.getByTestId('tab-count').innerText()) >= 2, 'tab count below 2');
+      await listener.close();
+      await until(async () => !(await table.locator('tr', { hasText: 'Listener' }).count()), 'closed tab leaves the list', 10000);
+    }, page);
+    await step(`F-SITEUPD-1/2 ${view}: mode buttons save; push at a later time shows the push and Cancel removes it`, async () => {
+      const was = (await api('GET', '/site-release', {})).mode;
+      const other = was === 'manual' ? 'auto' : 'manual';
+      const { ms } = await timedSave(page, 'mode', (m, p) => m === 'PUT' && p.startsWith('/site-release'), () => page.getByTestId(`mode-${other}`).click());
+      await until(async () => (await page.getByTestId(`mode-${other}`).getAttribute('class')).includes('bg-blue-600'), 'mode shown as chosen');
+      await timedSave(page, 'mode back', (m, p) => m === 'PUT' && p.startsWith('/site-release'), () => page.getByTestId(`mode-${was}`).click());
+      await page.locator('input[type=datetime-local]').fill(localInput(new Date(Date.now() + 86400e3)));
+      await page.getByTestId('push-release').waitFor();
+      await until(async () => /at that time/.test(await page.getByTestId('push-release').innerText()), 'push button for a later time');
+      await timedSave(page, 'push later', (m, p) => m === 'POST' && p.startsWith('/site-release'), () => page.getByTestId('push-release').click());
+      await page.getByTestId('active-push').getByText('Scheduled', { exact: false }).waitFor();
+      await timedSave(page, 'cancel push', (m, p) => m === 'DELETE' && p.startsWith('/site-release'), () => page.getByTestId('cancel-push').click());
+      await page.getByTestId('active-push').waitFor({ state: 'detached' });
+      return `saved in ${ms} ms`;
+    }, page);
+    await closePage(listener);
+    await closePage(page);
+  }
+});
+
+// ── Activity ────────────────────────────────────────────────────────────────
+section('activity', async () => {
+  const name = `E2E Activity Station ${RUN}`;
+  await api('POST', '/stations', { token: USERS.manager.token, body: { name, timezone: 'UTC' } });
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('admin', view);
+    await step(`F-ACTIVITY-1 / V1-141 ${view}: tab and view are remembered after a reload`, async () => {
+      await page.goto(`${BASE}/admin/activity`);
+      await page.getByRole('tab', { name: 'Listeners' }).click();
+      await page.getByTestId('listener-list').or(page.getByText(/No listening|No listeners|nobody/i)).first().waitFor();
+      await page.reload();
+      await until(async () => (await page.getByRole('tab', { name: 'Listeners' }).getAttribute('aria-selected')) === 'true', 'Listeners tab kept');
+      await page.getByRole('tab', { name: 'Who did what' }).click();
+      await page.getByRole('tab', { name: 'Everything in order' }).click();
+      await page.reload();
+      await until(async () => (await page.getByRole('tab', { name: 'Everything in order' }).getAttribute('aria-selected')) === 'true', '"Everything in order" kept');
+      assert(await page.evaluate(() => localStorage.getItem('activity-tab') === 'staff' && localStorage.getItem('activity-view') === 'all'), 'not stored under activity-tab / activity-view');
+    }, page);
+    await step(`F-ACTIVITY-2 ${view}: search finds the manager's change; expand shows the detail; quick ranges set the dates`, async () => {
+      const search = page.getByPlaceholder('Song, action, person, IP…');
+      await search.fill(name);
+      const r = page.getByTestId('activity-row').filter({ hasText: name }).first();
+      await r.waitFor({ timeout: 10000 });
+      await r.getByRole('button').first().click();
+      await until(async () => (await r.innerText()).split('\n').length > 2, 'detail shown');
+      await search.fill('');
+      await page.getByRole('button', { name: '7 days', exact: true }).click();
+      const dates = await page.locator('input[type=date]').evaluateAll(els => els.map(e => e.value));
+      assert(dates[0] && dates[1] && dates[0] < dates[1], `7 days set ${dates}`);
+      await page.getByRole('button', { name: 'Today', exact: true }).click();
+      const d2 = await page.locator('input[type=date]').evaluateAll(els => els.map(e => e.value));
+      assert(d2[0] === d2[1], `Today set ${d2}`);
+      await page.getByRole('tab', { name: 'By person' }).click();
+      const person = page.getByTestId('person-row').filter({ hasText: USERS.manager.email.split('@')[0] }).first()
+        .or(page.getByTestId('person-row').first());
+      await person.first().waitFor();
+      await person.first().getByRole('button').first().click();
+      await page.getByTestId('activity-list').first().waitFor();
+    }, page);
+    await step(`F-ACTIVITY-3 ${view}: Listeners: search, station, minimum minutes, dates`, async () => {
+      await page.getByRole('tab', { name: 'Listeners' }).click();
+      await page.getByPlaceholder('City, state, country, IP, device…').fill('nowhere-e2e');
+      await page.getByText(/No listen|No sessions|Nobody|nothing/i).first().waitFor();
+      await page.getByPlaceholder('City, state, country, IP, device…').fill('');
+      const selects = page.locator('main select');
+      for (let i = 0; i < await selects.count(); i++) {
+        const opts = await selects.nth(i).locator('option').evaluateAll(o => o.map(x => x.value));
+        if (opts.length > 1) await selects.nth(i).selectOption(opts[1]);
+      }
+      await page.getByText('Could not load').waitFor({ state: 'detached', timeout: 2000 }).catch(() => {});
+      assert(!(await page.getByText('Could not load the listeners').count()), 'listeners failed to load with filters');
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Analytics ───────────────────────────────────────────────────────────────
+section('analytics', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    await step(`F-ANALYTICS-1 ${view}: station and days selects reload the figures`, async () => {
+      await page.goto(`${BASE}/admin/analytics`);
+      await page.getByRole('heading').first().waitFor();
+      const selects = page.locator('main select');
+      await until(async () => (await selects.count()) >= 1, 'selects');
+      const st = selects.filter({ has: page.locator(`option[value="${FX.station.id}"]`) }).first();
+      const { status } = await timedResponse(page, (m, p) => m === 'GET' && p.startsWith('/analytics'), () => st.selectOption(FX.station.id));
+      assert(status < 400, `analytics ${status}`);
+      const days = selects.filter({ hasNot: page.locator(`option[value="${FX.station.id}"]`) }).first();
+      if (await days.count()) {
+        const opts = await days.locator('option').evaluateAll(o => o.map(x => x.value));
+        const r = await timedResponse(page, (m, p) => m === 'GET' && p.startsWith('/analytics'), () => days.selectOption(opts[opts.length - 1]));
+        assert(r.status < 400, `analytics ${r.status}`);
+      }
+      assert(!(await page.getByText(/Something went wrong|Could not load/).count()), 'error shown');
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Song requests (admin) ───────────────────────────────────────────────────
+section('requests', async () => {
+  const mk = t => api('POST', '/song-requests', { body: { station_id: FX.station.id, requester_name: 'E2E Listener', song_title: t, song_artist: 'Nobody Known' } });
+  for (const view of ['desktop', 'iphone']) {
+    const titles = ['A', 'B', 'C'].map(x => `E2E Request ${x} ${view} ${RUN}`);
+    for (const t of titles) await mk(t);
+    const page = await newPage('manager', view);
+    const item = t => (view === 'desktop' ? page.locator('tr', { hasText: t }) : page.locator('div.md\\:hidden > div', { hasText: t })).first();
+    await step(`F-REQUESTS-${view === 'desktop' ? 1 : 2} ${view}: Approve, Reject, Delete (confirm) save fast; status tabs filter`, async () => {
+      await page.goto(`${BASE}/admin/requests`);
+      await page.getByRole('button', { name: 'Pending', exact: true }).click();
+      await item(titles[0]).waitFor();
+      await timedSave(page, 'approve', (m, p) => m !== 'GET' && p.startsWith('/song-requests/'), () => item(titles[0]).getByRole('button', { name: 'Approve' }).click());
+      await item(titles[0]).waitFor({ state: 'detached' }); // leaves the Pending tab
+      await timedSave(page, 'reject', (m, p) => m !== 'GET' && p.startsWith('/song-requests/'), () => item(titles[1]).getByRole('button', { name: 'Reject' }).click());
+      await item(titles[1]).waitFor({ state: 'detached' });
+      await page.getByRole('button', { name: 'Approved', exact: true }).click();
+      await item(titles[0]).waitFor();
+      assert(!(await item(titles[1]).count()), 'rejected request on the Approved tab');
+      await page.getByRole('button', { name: 'Rejected', exact: true }).click();
+      await item(titles[1]).waitFor();
+      await page.getByRole('button', { name: 'All', exact: true }).click();
+      const { ms } = await timedSave(page, 'delete', (m, p) => m === 'DELETE' && p.startsWith('/song-requests/'), () => item(titles[2]).getByRole('button', { name: 'Delete' }).click());
+      await item(titles[2]).waitFor({ state: 'detached' });
+      await page.getByRole('button', { name: 'Most Requested Songs' }).click();
+      await page.getByText(/No matched requests yet|req/).first().waitFor();
+      return `deleted in ${ms} ms`;
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Show archives (admin) ───────────────────────────────────────────────────
+section('admin-archives', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    const title = `E2E Archive ${view} ${RUN}`;
+    const r = () => page.locator('tr', { hasText: title }).first();
+    const dlg = page.locator('div.fixed.inset-0');
+    await step(`F-AARCH-1 ${view}: New Archive: Create off until title/audio/station; × and Cancel close; create; Edit saves`, async () => {
+      await page.goto(`${BASE}/admin/archives`);
+      await page.getByRole('button', { name: '+ New Archive' }).click();
+      await dlg.getByRole('button', { name: 'Close' }).click();
+      await dlg.waitFor({ state: 'detached' });
+      await page.getByRole('button', { name: '+ New Archive' }).click();
+      await dlg.getByRole('button', { name: 'Cancel' }).click();
+      await dlg.waitFor({ state: 'detached' });
+      await page.getByRole('button', { name: '+ New Archive' }).click();
+      const create = dlg.getByRole('button', { name: 'Create' });
+      assert(await create.isDisabled(), 'Create allowed while empty');
+      await field(dlg, 'Station').selectOption(FX.station.id);
+      await dlg.getByPlaceholder('Show title').fill(title);
+      assert(await create.isDisabled(), 'Create allowed without audio URL');
+      await dlg.getByPlaceholder('https://example.com/audio.mp3').fill('https://example.test/e2e.mp3');
+      await dlg.getByPlaceholder('Episode description...').fill('E2E description');
+      await dlg.getByPlaceholder('Host name').fill('E2E Host');
+      await dlg.getByPlaceholder('3600').fill('1800');
+      const { ms } = await timedSave(page, 'create archive', (m, p) => m === 'POST' && p.startsWith('/archives'), () => create.click());
+      await r().waitFor();
+      await r().getByRole('button', { name: 'Edit' }).click();
+      await dlg.getByPlaceholder('Show title').fill(`${title} edited`);
+      await timedSave(page, 'update archive', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/archives/'), () => dlg.getByRole('button', { name: 'Update' }).click());
+      await page.locator('tr', { hasText: `${title} edited` }).waitFor();
+      return `created in ${ms} ms`;
+    }, page);
+    await step(`F-AARCH-2 ${view}: Draft / Published toggle saves; station filter; Delete (confirm)`, async () => {
+      const toggle = r().getByRole('button', { name: /^(Draft|Published)$/ });
+      const before = (await toggle.innerText()).trim();
+      await timedSave(page, 'publish toggle', (m, p) => m !== 'GET' && p.startsWith('/archives/'), () => toggle.click());
+      await until(async () => (await r().getByRole('button', { name: /^(Draft|Published)$/ }).innerText()).trim() !== before, 'toggle changed');
+      const filter = page.locator('select', { has: page.locator('option', { hasText: 'All Stations' }) }).first();
+      await filter.selectOption(FX.takeover.id);
+      await r().waitFor({ state: 'detached' });
+      await filter.selectOption(FX.station.id);
+      await r().waitFor();
+      const { ms } = await timedSave(page, 'delete archive', (m, p) => m === 'DELETE' && p.startsWith('/archives/'), () => r().getByRole('button', { name: 'Delete' }).click());
+      await r().waitFor({ state: 'detached' });
+      return `deleted in ${ms} ms`;
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Live shows, host console, call screener ─────────────────────────────────
+section('live', async () => {
+  const T = USERS.admin.token;
+  // Its own station: going live silences the station's music.
+  const st = await api('POST', '/stations', { token: T, body: { name: `E2E Live St ${RUN}`, timezone: 'UTC' } });
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('dj', view);
+    const title = `E2E Show ${view} ${RUN}`;
+    const cardL = (t = title) => page.locator('div.bg-\\[\\#12123a\\].rounded-lg', { hasText: t }).first();
+    const dlg = page.locator('div.fixed.inset-0');
+    await step(`F-LIVE-1 ${view}: New show: Create off until title+station; create; tabs; Edit saves; Delete (confirm)`, async () => {
+      await page.goto(`${BASE}/admin/live`);
+      await page.getByRole('button', { name: '+ New Show' }).click();
+      assert(await dlg.getByRole('button', { name: 'Create' }).isDisabled(), 'Create allowed while empty');
+      await dlg.getByPlaceholder('Show title').fill(title);
+      await dlg.getByPlaceholder('Optional description').fill('E2E');
+      await field(dlg, 'Station').selectOption(st.id);
+      const start = new Date(Date.now() + 2 * 3600e3), end = new Date(Date.now() + 3 * 3600e3);
+      await field(dlg, 'Start Time').fill(localInput(start));
+      await field(dlg, 'End Time').fill(localInput(end));
+      await dlg.getByLabel('Enable call-ins').check();
+      const { ms } = await timedSave(page, 'create show', (m, p) => m === 'POST' && p === '/live-shows', () => dlg.getByRole('button', { name: 'Create' }).click());
+      await cardL().waitFor();
+      assert((await cardL().innerText()).includes('Calls ON'), 'calls not shown as on');
+      await page.getByRole('button', { name: 'live', exact: true }).click();
+      await cardL().waitFor({ state: 'detached' });
+      await page.getByRole('button', { name: 'scheduled', exact: true }).click();
+      await cardL().waitFor();
+      await cardL().getByRole('button', { name: 'Edit' }).click();
+      await dlg.getByPlaceholder('Show title').fill(`${title} edited`);
+      await timedSave(page, 'edit show', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/live-shows/'), () => dlg.getByRole('button', { name: 'Save' }).click());
+      await cardL(`${title} edited`).waitFor();
+      // Delete is admin only on the server: a DJ must not be offered it
+      assert(!(await cardL(`${title} edited`).getByRole('button', { name: 'Delete' }).count()), 'DJ offered Delete (server refuses it)');
+      const adm = await newPage('admin', view);
+      try {
+        await adm.goto(`${BASE}/admin/live`);
+        const c = adm.locator('div.bg-\\[\\#12123a\\].rounded-lg', { hasText: `${title} edited` }).first();
+        await timedSave(adm, 'delete show', (m, p) => m === 'DELETE' && p.startsWith('/live-shows/'), () => c.getByRole('button', { name: 'Delete' }).click());
+        await c.waitFor({ state: 'detached' });
+      } finally { await closePage(adm); }
+      return `created in ${ms} ms`;
+    }, page);
+    await closePage(page);
+  }
+
+  // F-LIVE-2, F-HOST-2/4, F-SCREENER-2: one show taken live, a web caller screened.
+  {
+    const page = await newPage('dj');
+    const title = `E2E Live Now ${RUN}`;
+    const show = await api('POST', '/live-shows', { token: T, body: { station_id: st.id, title, scheduled_start: new Date(Date.now() - 60e3).toISOString(), scheduled_end: new Date(Date.now() + 2 * 3600e3).toISOString(), calls_enabled: true } });
+    const cardL = page.locator('div.bg-\\[\\#12123a\\].rounded-lg', { hasText: title }).first();
+    await step('F-LIVE-2 Go Live saves fast; Host Console and Screener links open', async () => {
+      await page.goto(`${BASE}/admin/live`);
+      const { ms } = await timedSave(page, 'go live', (m, p) => m === 'POST' && p.startsWith(`/live-shows/${show.id}`), () => cardL.getByRole('button', { name: 'Go Live' }).click());
+      await cardL.getByRole('link', { name: 'Screener' }).waitFor();
+      await cardL.getByRole('link', { name: 'Screener' }).click();
+      await waitPath(page, `/admin/live/${show.id}/screen`);
+      await page.goBack();
+      await cardL.getByRole('link', { name: 'Host Console' }).click();
+      await waitPath(page, `/admin/live/${show.id}/host`);
+      return `live in ${ms} ms`;
+    }, page);
+    await step('F-HOST-2 countdown to the hard stop shows about 2 hours and ticks down', async () => {
+      const clock = page.locator('div.font-mono').filter({ hasText: /^\d\d:\d\d:\d\d$/ }).first();
+      await until(async () => /^01:5\d:\d\d$/.test((await clock.innerText()).trim()), 'countdown near 01:59', 8000);
+      const a = (await clock.innerText()).trim();
+      await page.waitForTimeout(2100);
+      const b = (await clock.innerText()).trim();
+      assert(a !== b && b < a, `countdown not ticking (${a} → ${b})`);
+      return `${a} → ${b}`;
+    }, page);
+    const screener = await newPage('dj');
+    const call = await api('POST', `/call-in/${st.id}`, { body: { name: `E2E Caller ${RUN}`, note: 'hi' } });
+    await step('F-SCREENER-2 edit caller name (Esc cancels, Enter saves), Approve, Put On Air, End Call; Reject', async () => {
+      await screener.goto(`${BASE}/admin/live/${show.id}/screen`);
+      await screener.getByText(`E2E Caller ${RUN}`).waitFor();
+      await screener.getByRole('button', { name: 'edit', exact: true }).first().click();
+      const box = screener.locator('main input, input').first();
+      await box.fill('E2E Esc name');
+      await box.press('Escape');
+      await screener.getByText(`E2E Caller ${RUN}`).waitFor();
+      await screener.getByRole('button', { name: 'edit', exact: true }).first().click();
+      await box.fill(`E2E Renamed ${RUN}`);
+      await timedSave(screener, 'rename caller', (m, p) => m !== 'GET' && p.includes(call.call_id), () => box.press('Enter'));
+      await screener.getByText(`E2E Renamed ${RUN}`).waitFor();
+      await timedSave(screener, 'approve', (m, p) => m !== 'GET' && p.includes(call.call_id), () => screener.getByRole('button', { name: 'Approve' }).first().click());
+      await screener.getByText('Approved (1)').waitFor();
+      await timedSave(screener, 'on air', (m, p) => m !== 'GET' && p.includes(call.call_id), () => screener.getByRole('button', { name: 'Put On Air' }).click());
+      await screener.getByRole('button', { name: 'End Call' }).waitFor();
+      // the host console sees the caller on air
+      await page.getByText(`E2E Renamed ${RUN}`).first().waitFor({ timeout: 5000 });
+      await timedSave(screener, 'end call', (m, p) => m !== 'GET' && p.includes(call.call_id), () => screener.getByRole('button', { name: 'End Call' }).click());
+      await screener.getByRole('button', { name: 'End Call' }).waitFor({ state: 'detached' });
+      const c2 = await api('POST', `/call-in/${st.id}`, { body: { name: `E2E Caller Two ${RUN}` } });
+      await screener.getByText(`E2E Caller Two ${RUN}`).waitFor();
+      await timedSave(screener, 'reject', (m, p) => m !== 'GET' && p.includes(c2.call_id), () => screener.getByRole('button', { name: 'Reject' }).first().click());
+      await screener.getByText(`E2E Caller Two ${RUN}`).waitFor({ state: 'detached' });
+    }, screener);
+    await closePage(screener);
+    await step('F-HOST-4 End Show (confirm) goes back to Live shows and the station plays music again', async () => {
+      const { ms } = await timedSave(page, 'end show', (m, p) => m === 'POST' && p.startsWith(`/live-shows/${show.id}`), () => page.getByRole('button', { name: 'End Show' }).click());
+      await waitPath(page, '/admin/live');
+      const s = await api('GET', `/live-shows/${show.id}`, { token: T });
+      assert(s.status === 'ended', `show ${s.status}`);
+      return `ended in ${ms} ms`;
+    }, page);
+    await closePage(page);
+  }
+
+  // F-HOST-5 hard stop: the scheduler ends a show at its end time; the host console says so.
+  {
+    const page = await newPage('dj');
+    // Started by the DJ: a DJ's console only gets show events for a show they host.
+    const show = await api('POST', '/live-shows', { token: USERS.dj.token, body: { station_id: st.id, title: `E2E Hard Stop ${RUN}`, scheduled_start: new Date(Date.now() - 60e3).toISOString(), scheduled_end: new Date(Date.now() + 45e3).toISOString() } });
+    await api('POST', `/live-shows/${show.id}/start`, { token: USERS.dj.token });
+    await step('F-HOST-5 hard stop ends the show at its end time (host console shows SHOW ENDED) and the queue plays on', async () => {
+      await page.goto(`${BASE}/admin/live/${show.id}/host`);
+      await page.getByText('SHOW ENDED').waitFor({ timeout: 90_000 });
+      const late = Date.now() - new Date(show.scheduled_end).getTime();
+      assert(late < 20_000, `ended ${Math.round(late / 1000)} s after its end time`);
+      const s = await api('GET', `/live-shows/${show.id}`, { token: T });
+      assert(s.status === 'ended', `show ${s.status}`);
+      await until(async () => {
+        const q = await api('GET', `/stations/${st.id}/queue?limit=5`, { token: T });
+        return (q.entries || []).some(e => e.status === 'playing');
+      }, 'queue playing after the hard stop', 40_000);
+      await page.getByRole('button', { name: 'Back to Live Shows' }).click();
+      await waitPath(page, '/admin/live');
+      return `ended ${Math.round(late / 1000)} s after its end time`;
+    }, page);
+    await closePage(page);
+  }
+});
+
 // ── S-5 page load speed, every page, desktop and iPhone ─────────────────────
 section('load', async () => {
   for (const view of ['desktop', 'iphone']) {

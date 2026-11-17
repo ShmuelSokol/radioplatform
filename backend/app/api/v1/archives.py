@@ -1,18 +1,39 @@
 """Show archive + podcast RSS feed API."""
 import uuid
 from fastapi import APIRouter, Depends, Query, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_db, require_manager
 from app.core.exceptions import NotFoundError
+from app.core.security import decode_token
 from app.models.show_archive import ShowArchive
 from app.models.station import Station
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.show_archive import (
     ShowArchiveCreate, ShowArchiveUpdate, ShowArchiveInDB, ShowArchiveListResponse,
 )
 
 router = APIRouter(prefix="/archives", tags=["archives"])
+
+_optional_bearer = HTTPBearer(auto_error=False)
+
+
+async def _may_see_drafts(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> bool:
+    """True for a signed-in admin or manager (the list is public otherwise)."""
+    if not credentials:
+        return False
+    try:
+        payload = decode_token(credentials.credentials)
+        if payload.get("type") != "access" or not payload.get("sub"):
+            return False
+        user = (await db.execute(select(User).where(User.id == uuid.UUID(payload["sub"])))).scalar_one_or_none()
+    except Exception:
+        return False
+    return bool(user and user.is_active and user.role in (UserRole.ADMIN, UserRole.MANAGER))
 
 # --- Admin CRUD ---
 
@@ -35,11 +56,18 @@ async def list_archives(
     station_id: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    drafts: bool = Query(False, description="Include unpublished archives (admins and managers only)"),
     db: AsyncSession = Depends(get_db),
+    may_see_drafts: bool = Depends(_may_see_drafts),
 ):
-    """Public: list published archives. Admin sees all."""
-    q = select(ShowArchive).where(ShowArchive.is_published == True)
-    count_q = select(func.count(ShowArchive.id)).where(ShowArchive.is_published == True)
+    """Public: list published archives. With drafts=true an admin or manager also gets the
+    unpublished ones (the admin page asks for them, or a draft vanished and could not be
+    published again)."""
+    q = select(ShowArchive)
+    count_q = select(func.count(ShowArchive.id))
+    if not (drafts and may_see_drafts):
+        q = q.where(ShowArchive.is_published == True)
+        count_q = count_q.where(ShowArchive.is_published == True)
     if station_id:
         q = q.where(ShowArchive.station_id == station_id)
         count_q = count_q.where(ShowArchive.station_id == station_id)
