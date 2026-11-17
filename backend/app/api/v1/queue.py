@@ -2409,10 +2409,27 @@ async def reorder_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    result = await db.execute(_station_entry(station_id, body.entry_id))
+    # Only a waiting entry moves (like drag-and-drop): moving the item on air or a played
+    # one changed nothing useful and could put it ahead of the queue (V1-42)
+    result = await db.execute(
+        _station_entry(station_id, body.entry_id).where(QueueEntry.status == "pending")
+    )
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
+    # Make room so no two waiting entries share a position: a tie left the order (and
+    # which one plays next) up to the database
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.id != entry.id,
+            QueueEntry.position >= body.new_position,
+        )
+        .values(position=QueueEntry.position + 1)
+        .execution_options(synchronize_session=False)
+    )
     entry.position = body.new_position
     await db.commit()
     return {"message": "Reordered"}
