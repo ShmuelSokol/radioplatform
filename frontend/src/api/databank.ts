@@ -74,3 +74,7 @@ export interface DayLogEntry {
 
 export const getDayLog = async (stationId: string, day: string): Promise<{ day: string; timezone: string; logs: DayLogEntry[] }> =>
   (await apiClient.get('/databank/log', { params: { station_id: stationId, day } })).data;
+
+/** Every type (category) in the whole table, for the Type filter and the Edit-mode list. */
+export const listDbTypes = async (assetType: string): Promise<{ types: string[] }> =>
+  (await apiClient.get('/databank/types', { params: { asset_type: assetType } })).data;

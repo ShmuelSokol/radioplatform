@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getDayLog, type DayLogEntry } from '../../../api/databank';
 
@@ -15,8 +15,12 @@ export function localDay(d: Date, tz?: string): string {
 }
 
 /** The station's today and the days before it, newest first. */
-export function recentDays(tz?: string, back = DAYS_BACK): string[] {
-  const today = localDay(new Date(), tz);
+export function recentDays(tz?: string, back = DAYS_BACK, now = new Date()): string[] {
+  return daysBack(localDay(now, tz), back);
+}
+
+/** `today` (YYYY-MM-DD) and the days before it, newest first. */
+function daysBack(today: string, back = DAYS_BACK): string[] {
   const [y, m, d] = today.split('-').map(Number);
   return Array.from({ length: back }, (_, i) => {
     const day = new Date(Date.UTC(y, m - 1, d - i));
@@ -69,8 +73,19 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
   /** Phone: day picker on top instead of on the left */
   compact?: boolean;
 }) {
-  const days = useMemo(() => recentDays(stationTz), [stationTz]);
-  const [day, setDay] = useState(days[0]);
+  // The station's today, looked at every 30 s, so a page left open over the station's
+  // midnight moves on to the new day (F-DATABANK-45)
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const today = localDay(now, stationTz);
+  const days = useMemo(() => daysBack(today), [today]);
+  // A day picked from the list stays; "today" (nothing picked) follows the station's clock
+  const [picked, setPicked] = useState<string | null>(null);
+  const day = picked && days.includes(picked) ? picked : days[0];
+  const setDay = (d: string) => setPicked(d === days[0] ? null : d);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['day-log', stationId, day],
     queryFn: () => getDayLog(stationId!, day),
@@ -107,7 +122,7 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
         {!isLoading && !isError && lines.length === 0 && <p className="p-2 text-gray-600">Nothing aired on {dayLabel(day)}.</p>}
         {lines.map((l, i) => (
           <button type="button" key={`${l.entry.id}-${l.what}`} onClick={() => setSel(i)}
-            className={`w-full text-left flex gap-3 px-1.5 ${compact ? 'min-h-[36px] items-center' : ''} ${sel === i ? 'bg-[#000080] text-white' : 'text-black hover:bg-[#eef]'}`}>
+            className={`w-full text-left flex gap-3 px-1.5 ${compact ? 'min-h-[44px] items-center' : ''} ${sel === i ? 'bg-[#000080] text-white' : 'text-black hover:bg-[#eef]'}`}>
             <span className="shrink-0 tabular-nums">{clockMs(l.at, data?.timezone ?? stationTz)}</span>
             <span className="min-w-0 flex-1 truncate">
               {nameOf(l.entry)}{' '}

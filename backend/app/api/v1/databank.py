@@ -47,6 +47,11 @@ async def _station(db: AsyncSession, station_id) -> Station:
     return station
 
 
+def like_escape(text: str) -> str:
+    """Find text as typed: % and _ are letters, not LIKE wildcards ("100%" finds "100%" only)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 # KBR Studio's "Mpeg" filter: MPEG audio files
 MPEG_EXTS = ("mp3", "mp2", "mpg", "mpeg")
 
@@ -95,10 +100,10 @@ async def list_items(
         conditions.append(Asset.file_path != "")
         conditions.append(or_(Asset.category.is_(None), func.lower(Asset.category) != "do_not_play"))
     if search:
-        pat = f"%{search.strip()}%"
+        pat = f"%{like_escape(search.strip())}%"
         conditions.append(or_(
-            Asset.title.ilike(pat), Asset.artist.ilike(pat),
-            Asset.category.ilike(pat), Asset.file_path.ilike(pat),
+            Asset.title.ilike(pat, escape="\\"), Asset.artist.ilike(pat, escape="\\"),
+            Asset.category.ilike(pat, escape="\\"), Asset.file_path.ilike(pat, escape="\\"),
         ))
 
     total = (await db.execute(select(func.count(Asset.id)).where(*conditions))).scalar() or 0
@@ -131,6 +136,24 @@ async def list_items(
             for a, last in rows
         ],
     }
+
+
+@router.get("/types")
+async def list_types(
+    asset_type: str = Query("music"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_staff),
+):
+    """Every type (category) in the whole table, for the Type filter and the Edit-mode list,
+    not only the types on the page shown (F-DATABANK-28). Same spelling counted once."""
+    conditions = [Asset.asset_type == asset_type, Asset.category.is_not(None), Asset.category != ""]
+    for prefix in GENERATED_TITLE_PREFIXES:
+        conditions.append(~Asset.title.like(f"{prefix}%"))
+    rows = (await db.execute(select(Asset.category).where(*conditions).distinct())).scalars().all()
+    seen: dict[str, str] = {}
+    for c in sorted(rows):
+        seen.setdefault(c.lower(), c)
+    return {"types": sorted(seen.values(), key=str.lower)}
 
 
 @router.get("/spots")

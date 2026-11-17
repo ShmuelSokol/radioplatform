@@ -6,7 +6,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { isManager } from '../../auth/access';
 import { updateAsset } from '../../api/assets';
 import {
-  listDbItems, listDbSpots, setSpotEndDate,
+  listDbItems, listDbSpots, listDbTypes, setSpotEndDate,
   type DbFiles, type DbItem, type DbSort, type DbSpot,
 } from '../../api/databank';
 import { listProgramBlocks, type ProgramBlock } from '../../api/programBlocks';
@@ -39,7 +39,10 @@ function dmy(iso: string | null, tz?: string): string {
   if (!iso) return '';
   const d = new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso);
   const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'numeric', year: 'numeric', ...(tz && iso.length > 10 ? { timeZone: tz } : { timeZone: 'UTC' }) };
-  return new Intl.DateTimeFormat('en-GB', opts).format(d);
+  // Built from the parts: en-GB pads to 08/10/2026, the old program writes 8/10/2026
+  const parts = new Intl.DateTimeFormat('en-GB', opts).formatToParts(d);
+  const part = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+  return `${Number(part('day'))}/${Number(part('month'))}/${part('year')}`;
 }
 function hm(iso: string | null, tz?: string): string {
   if (!iso) return '';
@@ -58,7 +61,12 @@ function EditCell({ value, type = 'text', onSave, onCancel, list }: {
 }) {
   const [v, setV] = useState(value);
   const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); ref.current?.select?.(); }, []);
+  useEffect(() => {
+    ref.current?.focus(); ref.current?.select?.();
+    // On a phone the keyboard opens over the lower half: keep the box in view
+    const t = setTimeout(() => ref.current?.scrollIntoView?.({ block: 'center' }), 300);
+    return () => clearTimeout(t);
+  }, []);
   return (
     <input ref={ref} type={type} value={v} list={list} data-testid="db-edit-input"
       onChange={e => setV(e.target.value)}
@@ -68,7 +76,7 @@ function EditCell({ value, type = 'text', onSave, onCancel, list }: {
         if (e.key === 'Escape') onCancel();
       }}
       onBlur={() => (v === value ? onCancel() : onSave(v))}
-      className="w-full h-full min-h-[24px] px-1 bg-white text-black font-normal outline-none border border-[#000080]" />
+      className="w-full h-full min-h-[24px] px-1 bg-white text-black font-normal outline-none border border-[#000080] text-[16px] lg:text-[13px]" />
   );
 }
 
@@ -109,6 +117,9 @@ export default function Databank() {
   const [editing, setEditing] = useState<{ id: string; field: string } | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const findRef = useRef<HTMLInputElement>(null);
+  // Pressing "Edit mode" to turn it off closes an open cell WITHOUT saving it (the press
+  // blurs the box first, and leaving a box otherwise saves it)
+  const editOffPress = useRef(false);
   const pfl = usePfl();
 
   const setTab = (t: Tab) => {
@@ -180,9 +191,19 @@ export default function Databank() {
   }, [blocksQ.data, search]);
 
   const items = useMemo(() => itemsQ.data?.items ?? [], [itemsQ.data]);
+  // Types of the whole table (not only the 200 rows shown), so any type can be picked from page 1
+  const typesQ = useQuery({
+    queryKey: ['databank-types', assetType],
+    queryFn: () => listDbTypes(assetType),
+    enabled: itemsTab,
+    staleTime: 60_000,
+  });
   const typesSeen = useMemo(() => Array.from(new Set(
-    (tab === 'spots' ? spots.map(s => s.category) : items.map(i => i.type)).filter(Boolean) as string[],
-  )).sort(), [items, spots, tab]);
+    (tab === 'spots' ? (spotsQ.data?.spots ?? []).map(s => s.category)
+      : [...(typesQ.data?.types ?? []), ...items.map(i => i.type)]).filter(Boolean) as string[],
+  )).sort((a, b) => a.localeCompare(b)), [items, spotsQ.data, typesQ.data, tab]);
+  // While a new sort or page loads the old rows stay on screen: they cannot be edited then
+  const staleRows = itemsTab && itemsQ.isPlaceholderData;
 
   // Status bar numbers, as in the old program: Page, Rec (selected), View (found), Tot (all)
   const ids: string[] = tab === 'spots' ? spots.map(s => s.id) : tab === 'blocks' ? blockRows.map(r => r.key) : items.map(i => i.id);
@@ -218,6 +239,7 @@ export default function Databank() {
       setNotice({ ok: true, text: 'Saved.' });
       await qc.invalidateQueries({ queryKey: ['databank-items'] });
       await qc.invalidateQueries({ queryKey: ['databank-spots'] });
+      void qc.invalidateQueries({ queryKey: ['databank-types'] });
       void qc.invalidateQueries({ queryKey: ['assets'] });
     } catch (e: any) {
       setNotice({ ok: false, text: e?.response?.data?.detail ?? 'Could not save that change.' });
@@ -226,8 +248,12 @@ export default function Databank() {
 
   const saveEndDate = async (spot: DbSpot, raw: string) => {
     setEditing(null);
+    // Without a station the API moves the spot on every station: always name the one shown
+    if (!station) { setNotice({ ok: false, text: 'Choose a station first.' }); return; }
+    // Clearing (the iPhone date wheel's Clear, or an empty box) makes it air for ever: ask first
+    if (!raw && !window.confirm(`Take the end date off ${spot.title}? Every schedule of it on ${station.name} will air with no end.`)) return;
     try {
-      await setSpotEndDate(spot.id, raw || null, stationId || undefined);
+      await setSpotEndDate(spot.id, raw || null, station.id);
       setNotice({ ok: true, text: raw ? `${spot.title} now runs until ${dmy(raw)}.` : `${spot.title} now has no end date.` });
       await qc.invalidateQueries({ queryKey: ['databank-spots'] });
       void qc.invalidateQueries({ queryKey: ['spot-schedules'] });
@@ -265,10 +291,10 @@ export default function Databank() {
     if (e.key === ' ' && sel && tab !== 'blocks' && tab !== 'log') { e.preventDefault(); void pfl.toggle(sel); }
   };
 
-  const canEdit = manager && editMode;
+  const canEdit = manager && editMode && !staleRows;
   const cell = (id: string, field: string, value: string, type: 'text' | 'number' = 'text', list?: string) =>
     editing?.id === id && editing.field === field
-      ? <EditCell value={value} type={type} list={list} onSave={v => saveAsset(id, field, v)} onCancel={() => setEditing(null)} />
+      ? <EditCell value={value} type={type} list={list} onSave={v => (editOffPress.current ? setEditing(null) : saveAsset(id, field, v))} onCancel={() => setEditing(null)} />
       : null;
   const startEdit = (id: string, field: string) => (e: React.MouseEvent) => {
     if (!canEdit) return;
@@ -360,7 +386,7 @@ export default function Databank() {
       )}
       {spots.map(s => {
         const end = editing?.id === s.id && editing.field === 'end'
-          ? <EditCell value={s.end_date ?? ''} type="date" onSave={v => saveEndDate(s, v)} onCancel={() => setEditing(null)} />
+          ? <EditCell value={s.end_date ?? ''} type="date" onSave={v => (editOffPress.current ? setEditing(null) : saveEndDate(s, v))} onCancel={() => setEditing(null)} />
           : s.schedules === 0 ? <span className="font-normal text-[#a0a0a0]">not scheduled</span>
           : s.open_ended ? <span className="font-normal">no end</span>
           : dmy(s.end_date);
@@ -387,7 +413,7 @@ export default function Databank() {
               <span className="block truncate text-xs font-normal opacity-80" onClick={startEdit(s.id, 'type')}>{cat || 'no category'}</span>
             </span>
             <span className="shrink-0 text-right text-xs tabular-nums">
-              <span className="block min-h-[22px]" {...endProps}>{end}</span>
+              <span className={`flex items-center justify-end ${s.schedules ? 'min-h-[44px]' : 'min-h-[22px]'}`} {...endProps}>{end}</span>
               <span className="block font-normal opacity-80">{fmtDur(s.length)}</span>
             </span>
           </div>
@@ -483,11 +509,13 @@ export default function Databank() {
             )}
             {tab !== 'blocks' && (
               <button type="button" disabled={!sel} onClick={() => sel && pfl.toggle(sel)}
-                className="qn-btn h-11 lg:h-8 px-3 text-sm" title="Pre-listen to the selected item (Space). Nothing goes on air."
+                className="qn-btn h-11 lg:h-8 px-3 min-w-[44px] lg:min-w-0 text-sm" title="Pre-listen to the selected item (Space). Nothing goes on air."
                 aria-label="Pre-listen to the selected item">🎧</button>
             )}
             {manager && tab !== 'blocks' && (
-              <button type="button" aria-pressed={editMode} onClick={() => { setEditMode(!editMode); setEditing(null); }}
+              <button type="button" aria-pressed={editMode}
+                onPointerDown={() => { if (editMode && editing) { editOffPress.current = true; setTimeout(() => { editOffPress.current = false; }, 1000); } }}
+                onClick={() => { setEditMode(!editMode); setEditing(null); editOffPress.current = false; }}
                 className={`qn-btn h-11 lg:h-8 px-3 text-sm ${editMode ? '!text-[#000080]' : ''}`} data-testid="db-edit-mode"
                 title="Edit mode: click a cell to change it">{editMode ? '✎ Editing' : 'Edit mode'}</button>
             )}
@@ -500,7 +528,11 @@ export default function Databank() {
           </>
         )}
         {stations.length > 1 && (
-          <select value={stationId} onChange={e => { setStationId(e.target.value); setSel(null); }} aria-label="Station"
+          <select value={stationId} onChange={e => {
+              setStationId(e.target.value); setSel(null);
+              // "Control room" then opens on the same station
+              try { localStorage.setItem('radio_last_station', e.target.value); } catch { /* storage blocked */ }
+            }} aria-label="Station"
             className="qn-field h-11 lg:h-8 px-2 text-sm lg:ml-auto max-w-[14rem]">
             {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
@@ -519,7 +551,8 @@ export default function Databank() {
         {tab === 'log' ? (
           <DayLog stationId={stationId || null} stationTz={tz} compact={!isDesktop} />
         ) : (
-          <div className="qn-log h-full overflow-auto overscroll-contain" tabIndex={0} data-testid="db-table">
+          <div className={`qn-log h-full overflow-auto overscroll-contain ${staleRows ? 'opacity-60' : ''}`} tabIndex={0} data-testid="db-table"
+            aria-busy={staleRows || undefined}>
             {itemsTab ? songsTable : tab === 'spots' ? spotsTable : blocksTable}
           </div>
         )}
@@ -535,11 +568,11 @@ export default function Databank() {
       {tab !== 'log' && (
         <div className="shrink-0 bg-[#c0c0c0] border-t border-white flex items-stretch gap-1 p-0.5 text-[12px] text-black pb-[max(0.125rem,env(safe-area-inset-bottom))]" data-testid="db-status">
           {itemsTab && (
-            <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="qn-btn px-2 min-h-[32px]" aria-label="Previous page">◀</button>
+            <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="qn-btn px-2 min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" aria-label="Previous page">◀</button>
           )}
           <span className="qn-sunken px-2 flex items-center">Page {page + 1}{itemsTab && pages > 1 ? ` of ${pages}` : ''}</span>
           {itemsTab && (
-            <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} className="qn-btn px-2 min-h-[32px]" aria-label="Next page">▶</button>
+            <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} className="qn-btn px-2 min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" aria-label="Next page">▶</button>
           )}
           {goTo !== null ? (
             <input type="number" min={1} max={Math.max(1, view)} autoFocus value={goTo} data-testid="db-goto"
@@ -559,13 +592,13 @@ export default function Databank() {
               }}
               className="qn-field w-24 px-1 text-[16px] lg:text-[12px]" />
           ) : (
-            <button type="button" onClick={() => setGoTo('')} className="qn-sunken px-2 flex items-center min-h-[32px]" data-testid="db-rec"
+            <button type="button" onClick={() => setGoTo('')} className="qn-sunken px-2 flex items-center justify-center min-w-[52px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" data-testid="db-rec"
               title="123: go to a record number">Rec {recIdx >= 0 ? (itemsTab ? page * PAGE : 0) + recIdx + 1 : 0}</button>
           )}
           <span className="qn-sunken px-2 flex items-center" data-testid="db-view">View {view}</span>
           <span className="qn-sunken px-2 flex items-center" data-testid="db-tot">Tot {tot}</span>
           <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
-            className="ml-auto px-2 underline hover:text-red-700 min-h-[32px]">🐞<span className="hidden sm:inline"> Report a bug</span></button>
+            className="ml-auto px-2 underline hover:text-red-700 min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" data-testid="db-report-bug">🐞<span className="hidden sm:inline"> Report a bug</span></button>
         </div>
       )}
     </div>
