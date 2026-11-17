@@ -88,6 +88,7 @@ INGEST 2026-11-15 streaming-architecture.md one player per station: _check_stati
 UPDATE 2026-11-16 release-pickup.md a release no longer reloads a listener in the gap between items: holdUpdates() while a player is on, plus a 2-minute grace after any audio
 UPDATE 2026-11-16 operator-actions.md GET queue returns next_entry_id (same rule as the Next pick); the control room's Next line uses it.
 UPDATE 2026-11-16 release-pickup.md useAudioEngine holds releases only while its audio context is running, so a control room with sound off still updates; browser check e2e/audio-engine.mjs release-hold
+UPDATE 2026-11-17 hourly-slots.md soft-item look-ahead flip and wait-station softening are now committed at once (poll rollback lost them; Jerusalem showed weather soft until it started)
 INGEST 2026-11-16 multi-station-load.md now_playing announcements never go backwards (stale tick after the precise advance made listeners jump back); join cache ignores raced reads
 INGEST 2026-11-16 streaming-architecture.md startup migrations skip existing columns/indexes and use a 1 s lock timeout (an ADD COLUMN IF NOT EXISTS froze the backend 4 min during a deploy); analysis holds no transaction during range reads/FFmpeg; bulk jobs detached from the request (BackgroundTasks kept the request transaction open 2 h); scheduler session per pass
 INGEST 2026-11-16 streaming-architecture.md deploy cold start: bounded startup play-log scan, pool warmed before serving, last_seen_at once a minute; pg_timezone_names is the Supabase dashboard, not us

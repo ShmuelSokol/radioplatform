@@ -945,15 +945,15 @@ async def _long_item_policy(db: AsyncSession, station_id, current: QueueEntry) -
     return long_items.policy(station)
 
 
-async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntry) -> None:
+async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntry) -> int:
     """Hard timed items due before the shiur on air ends become soft: they play
-    straight after it, and no player fades it for them."""
+    straight after it, and no player fades it for them. Returns how many changed."""
     from app.services import long_items
 
     end = long_items.ends_at(current)
     if end is None:
-        return
-    await db.execute(
+        return 0
+    res = await db.execute(
         update(QueueEntry)
         .where(
             QueueEntry.station_id == station_id,
@@ -965,6 +965,7 @@ async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntr
         .values(timing_mode="soft", hard_by=None)
         .execution_options(synchronize_session=False)
     )
+    return res.rowcount or 0
 
 
 # How far ahead a soft item that will pause a shiur is made hard on the browser player:
@@ -1137,13 +1138,18 @@ async def _check_advance_locked(
     now_utc = datetime.now(timezone.utc)
     long_policy = await _long_item_policy(db, station_id, current)
     if long_policy == "wait":
-        # The station lets a shiur finish: timed items due before its end wait for it
-        await _defer_hard_until_end(db, station_id, current)
+        # The station lets a shiur finish: timed items due before its end wait for it.
+        # Saved at once, or pages would still see them hard and cut the shiur locally.
+        if await _defer_hard_until_end(db, station_id, current):
+            await db.commit()
     elif long_policy:
-        await _soft_items_pause_long(
+        if await _soft_items_pause_long(
             db, station_id, current, long_policy, now_utc,
             horizon=now_utc + timedelta(seconds=SOFT_PAUSE_LOOKAHEAD_SECONDS),
-        )
+        ):
+            # Save it now: the poll rolls back after a check that changes nothing on
+            # air, and pages must see the item turn hard ahead to pre-load it
+            await db.commit()
     preempt_result = await db.execute(
         select(QueueEntry)
         .where(
