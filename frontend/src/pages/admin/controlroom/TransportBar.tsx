@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import PlayoutBadge from '../../../components/audio/PlayoutBadge';
 import { Link } from 'react-router-dom';
 import { assetLabel, fmtDur } from './shared';
 import './classic.css';
@@ -206,6 +207,7 @@ export default function TransportBar(p: Props) {
         <div className="flex flex-col items-start gap-1 shrink-0 min-w-[70px]">
           {status}
           <span className="hidden lg:block">{stationSelect}</span>
+          <PlayoutBadge stationId={p.stationId} dark className="hidden lg:inline-flex" />
         </div>
         <div className="leading-none shrink-0">
           <div className="qn-lcd-label">Remaining</div>
@@ -275,6 +277,7 @@ export default function TransportBar(p: Props) {
       {/* Phones and tablets: buttons and sound under the titles */}
       <div className="lg:hidden flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#c0c0c0]">
         {sound}
+        <PlayoutBadge stationId={p.stationId} className="!text-black" />
         <div className="flex-1" />
         <TransportButtons p={p} stacked={false} />
       </div>

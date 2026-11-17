@@ -236,3 +236,10 @@ Heard live on Main: the stream kept playing but the site showed nothing on air a
 ## Stop, Listen and the phone's own controls (2026-11-16)
 
 Stop then Listen on the built-in player went on from where it was stopped: the click restarted the paused deck and the player took it as already on air. Stop now silences both decks and forgets what they hold, so Listen always joins at the station's current position (`e2e/audio-engine.mjs stop-then-listen`, which fails on the old player). The stream player already reconnects on Listen. Lock screen, CarPlay and headphone pause/play are routed to Stop and Listen through `navigator.mediaSession` action handlers; left to the browser they only paused the audio element, and play resumed old audio.
+
+## Which player a station is on, and timing (2026-11-17)
+`GET /playout-status` (public, cached 8 s per station) says per station: `mode` "server" (listeners hear the engine's stream) or "browser" (pages play the files). For an engine station it also asks the engine's `/status` what it has on air and compares that with the queue's playing entry (entry id, else title): `engine_ok` and `in_sync`. `components/audio/PlayoutBadge.tsx` shows it in the control room header, on the station list and on the Listen page: green "Server stream", yellow "out of step", red "not answering", grey "Browser player".
+
+Timing on the server stream:
+- Every listener of a station plays the same Icecast mount, so they all hear the same audio. They differ only by their own delay: about 1 s with the MSE player (Chrome, Edge, Firefox, Android). On iPhone Safari, which has no `MediaSource` (only `ManagedMediaSource`, not used yet), it is a few seconds more.
+- Hard-timed items (time check, ID) are handed to the engine 45 s early with an absolute time. The engine starts the fade `skip_fade` before it, so the item starts on the second by the stream server's clock (Ubuntu's timesyncd keeps it on time).
