@@ -88,7 +88,8 @@ async function step(name, fn, page) {
       fs.mkdirSync(SHOTS, { recursive: true });
       await page.screenshot({ path: path.join(SHOTS, `${name.replace(/[^a-z0-9]+/gi, '_').slice(0, 80)}.png`) }).catch(() => {});
     }
-    return record(name, false, String(e?.message || e).split('\n')[0].slice(0, 240));
+    const at = (String(e?.stack || '').match(/admin-flows\.mjs:(\d+)/) || [])[1];
+    return record(name, false, String(e?.message || e).split('\n')[0].slice(0, 240) + (at ? ` @line ${at}` : ''));
   }
 }
 function assert(cond, msg) { if (!cond) throw new Error(msg); }
@@ -211,6 +212,17 @@ function defaultReady() {
   return !!root.querySelector('h1, h2, h3, table, form, button');
 }
 
+/** Polls fn until it returns something truthy (or throws after timeout). */
+async function until(fn, what, timeout = 5000) {
+  const t0 = Date.now();
+  for (;;) {
+    const v = await fn().catch(() => false);
+    if (v) return v;
+    if (Date.now() - t0 > timeout) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(r => setTimeout(r, 100));
+  }
+}
+
 async function waitText(page, text, timeout = 5000) {
   await page.getByText(text, { exact: false }).first().waitFor({ state: 'visible', timeout });
 }
@@ -270,8 +282,8 @@ async function setup() {
   // A few library items, song length (short test files make the station queue thousands
   // of entries long, which is not what a real station has).
   FX.assets = [];
-  for (const [i, t] of [['1', 'music'], ['2', 'music'], ['3', 'spot']].entries()) {
-    const f = makeTone(path.join(TMP, `fx${i}.mp3`), t[1] === 'spot' ? 30 : 170 + i * 15, 300 + i * 120, '32k');
+  for (const [i, t] of [['1', 'music'], ['2', 'music'], ['3', 'spot'], ['4', 'jingle']].entries()) {
+    const f = makeTone(path.join(TMP, `fx${i}.mp3`), t[1] === 'spot' ? 30 : t[1] === 'jingle' ? 12 : 170 + i * 15, 300 + i * 120, '32k');
     const form = new FormData();
     form.append('file', new Blob([fs.readFileSync(f)], { type: 'audio/mpeg' }), `fx${i}.mp3`);
     form.append('title', `E2E Tone ${t[0]} ${RUN}`);
@@ -1830,6 +1842,215 @@ section('program-blocks', async () => {
       await cardP().waitFor({ state: 'detached' });
     }, page);
     await closePage(page);
+  }
+});
+
+// ── Schedule check ──────────────────────────────────────────────────────────
+section('schedule-check', async () => {
+  const T = USERS.admin.token;
+  const st = await api('POST', '/stations', { token: T, body: { name: `E2E Check St ${RUN}`, timezone: 'America/New_York' } });
+  const sched = await api('POST', '/schedules', { token: T, body: { name: `E2E Check Sched ${RUN}`, station_id: st.id } });
+  const mk = (n, h) => api('POST', '/schedules/blocks', { token: T, body: { schedule_id: sched.id, name: n, recurrence_type: 'daily', start_time: `${h}:00:00`, end_time: `${h + 2}:00:00`, priority: 1, playback_mode: 'shuffle' } });
+  const pairs = { desktop: [await mk(`E2E Morning A ${RUN}`, 10), await mk(`E2E Morning B ${RUN}`, 10)] };
+  for (const view of ['desktop', 'iphone']) {
+    // desktop settles its overlap, so the phone gets one of its own later in the day
+    if (!pairs[view]) pairs[view] = [await mk(`E2E Noon A ${RUN}`, 14), await mk(`E2E Noon B ${RUN}`, 14)];
+    const [a, b] = pairs[view];
+    const page = await newPage('manager', view);
+    await step(`F-SCHEDCHECK-1 ${view}: station select shows the overlap under "Needs a look"`, async () => {
+      await page.goto(`${BASE}/admin/schedule-check`);
+      await page.locator('select', { has: page.locator(`option[value="${st.id}"]`) }).selectOption(st.id);
+      await page.getByRole('heading', { name: 'Needs a look' }).waitFor({ timeout: 8000 });
+      await page.getByRole('button', { name: new RegExp(`(Keep|Play) "${a.name}"`) }).first().waitFor();
+    }, page);
+    if (view === 'desktop') {
+      await step('F-SCHEDCHECK-2 settle a conflict: choosing one block makes it win and the item leaves "Needs a look"', async () => {
+        const btn = page.getByRole('button', { name: `Play "${b.name}" instead` }).first();
+        const target = (await btn.count()) ? btn : page.getByRole('button', { name: `Play "${a.name}" instead` }).first();
+        const { ms } = await timedSave(page, 'settle', (m, p) => m === 'POST' && p.includes('look-ahead/settle'), () => target.click());
+        await page.getByText('Nothing needs you').waitFor({ timeout: 5000 });
+        return `settled in ${ms} ms`;
+      }, page);
+    }
+    await closePage(page);
+  }
+  await api('DELETE', `/schedules/${sched.id}`, { token: T }).catch(() => {});
+  await api('DELETE', `/stations/${st.id}`, { token: T }).catch(() => {});
+});
+
+// ── Sponsorship rules and copy review ───────────────────────────────────────
+section('sponsorship-rules', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    const ta = page.locator('textarea').first();
+    await step(`F-SPRULES-1 ${view}: Save is off until changed; Undo changes restores; Save rules saves a new version fast`, async () => {
+      await page.goto(`${BASE}/admin/sponsorship-rules`);
+      const save = page.getByRole('button', { name: 'Save rules' });
+      await save.waitFor();
+      assert(await save.isDisabled(), 'Save enabled with no change');
+      const original = await ta.inputValue();
+      await ta.fill(original + `\nE2E extra rule ${view} ${RUN}.`);
+      await page.getByRole('button', { name: 'Undo changes' }).click();
+      assert(await ta.inputValue() === original, 'Undo did not restore');
+      await ta.fill('Too short');
+      assert(await save.isDisabled(), 'Save allowed for a 9-letter rule text');
+      await ta.fill(original + `\nE2E extra rule ${view} ${RUN}.`);
+      const { ms } = await timedSave(page, 'save rules', (m, p) => m !== 'GET' && p.startsWith('/sponsorship/rules'), () => save.click());
+      await page.getByText('Saved.').waitFor();
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-SPRULES-2 ${view}: Show earlier versions, Load into editor, Hide`, async () => {
+      await page.getByRole('button', { name: /Show earlier versions/ }).click();
+      const first = page.getByRole('button', { name: 'Load into editor' }).last(); // oldest: differs from the text in force
+      await first.waitFor();
+      await first.click();
+      await page.getByRole('button', { name: 'Undo changes' }).waitFor();
+      await page.getByRole('button', { name: 'Undo changes' }).click();
+      await page.getByRole('button', { name: /Hide earlier versions/ }).click();
+      await page.getByRole('button', { name: 'Load into editor' }).first().waitFor({ state: 'detached' });
+    }, page);
+    await step(`F-SPRULES-3 ${view}: copy review panel: business name + wording, Check my wording, result shown`, async () => {
+      await page.getByPlaceholder('Burger Bar').fill('E2E Bakery');
+      const words = page.getByPlaceholder('Write it the way you would say it. We will show you what needs to change.');
+      await words.fill('E2E Bakery has the best and cheapest bread in town, guaranteed! Call now!');
+      const { ms } = await timedResponse(page, (m, p) => m === 'POST' && p.startsWith('/sponsorship'), () => page.getByRole('button', { name: 'Check my wording' }).click());
+      await page.getByText(/This wording is fine\.|Some wording needs to change\./).waitFor();
+      const use = page.getByRole('button', { name: 'Use this wording' });
+      if (await use.count()) { await use.click(); assert((await words.inputValue()).length > 3, 'suggestion not put in the box'); }
+      return `checked in ${ms} ms${(await use.count()) ? ', suggestion used' : ''}`;
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Playlists ───────────────────────────────────────────────────────────────
+section('playlists', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    const name = `E2E Playlist ${view} ${RUN}`;
+    const head = () => page.locator('div.cursor-pointer', { hasText: name }).first();
+    await step(`F-PLAYLISTS-1 ${view}: create (name, station, pattern) saves fast; station filter`, async () => {
+      await page.goto(`${BASE}/admin/playlists`);
+      await page.getByRole('button', { name: 'New playlist' }).click();
+      await page.getByRole('button', { name: 'Create playlist' }).click();
+      assert(await page.getByPlaceholder('Morning Rotation').evaluate(el => el.validationMessage), 'no message on empty name');
+      await page.getByPlaceholder('Morning Rotation').fill(name);
+      await field(page, 'Station (optional)').selectOption(FX.station.id);
+      await page.getByPlaceholder('Fast → New Hit → Fast → Relax').fill('Fast → Slow');
+      const { ms } = await timedSave(page, 'create playlist', (m, p) => m === 'POST' && p === '/playlists', () => page.getByRole('button', { name: 'Create playlist' }).click());
+      await head().waitFor();
+      assert((await head().innerText()).includes(`Station: ${FX.station.name}`), 'station not shown');
+      const filter = page.locator('select', { has: page.locator('option', { hasText: 'All Stations' }) }).first();
+      await filter.selectOption(FX.takeover.id);
+      await head().waitFor({ state: 'detached' });
+      await filter.selectOption(FX.station.id);
+      await head().waitFor();
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-PLAYLISTS-2 ${view}: add 3 steps, move up/down, remove one (each saves fast)`, async () => {
+      if (!(await page.getByRole('button', { name: /\+ Add step|Done/ }).count())) await head().click();
+
+      for (const kind of ['music', 'jingle', 'spot']) {
+        if (await page.getByRole('button', { name: /\+ Add step/ }).count()) await page.getByRole('button', { name: /\+ Add step/ }).first().click();
+        const kindSel = page.locator('select', { has: page.locator('option[value="jingle"]') }).first();
+        await kindSel.selectOption(kind);
+        await timedSave(page, 'add step', (m, p) => m === 'POST' && p.startsWith('/playlists/slots'), () => page.getByRole('button', { name: 'Add', exact: true }).first().click());
+      }
+      const rows = page.locator('div.bg-white.p-2.rounded.border').filter({ has: page.getByRole('button', { name: 'Remove' }) });
+      await rows.nth(2).waitFor();
+      const order = async () => (await rows.allInnerTexts()).map(t => (t.match(/music|jingle|spot/) || [''])[0]).join(',');
+      assert(await order() === 'music,jingle,spot', `order ${await order()}`);
+      await timedSave(page, 'move up', (m, p) => m !== 'GET' && p.startsWith('/playlists'), () => rows.nth(2).getByRole('button', { name: 'Move up' }).click());
+      await page.waitForFunction(async () => true);
+      await page.waitForTimeout(150);
+      assert(await order() === 'music,spot,jingle', `after move up ${await order()}`);
+      await timedSave(page, 'move down', (m, p) => m !== 'GET' && p.startsWith('/playlists'), () => rows.nth(0).getByRole('button', { name: 'Move down' }).click());
+      await page.waitForTimeout(150);
+      assert(await order() === 'spot,music,jingle', `after move down ${await order()}`);
+      await timedSave(page, 'remove step', (m, p) => m === 'DELETE' && p.startsWith('/playlists/slots'), () => rows.nth(2).getByRole('button', { name: 'Remove' }).click());
+      await page.waitForTimeout(150);
+      assert(await order() === 'spot,music', `after remove ${await order()}`);
+    }, page);
+    if (view === 'desktop') {
+      await step('F-PLAYLISTS-3 generation panel: settings change enables Save and disables Regenerate; Save keeps them', async () => {
+        const panel = page.locator('main');
+        await page.getByRole('heading', { name: 'Generate the playlist ahead' }).waitFor();
+        const on = panel.getByLabel('Generate from sequences');
+        const was = await on.isChecked();
+        if (!was) await on.check();
+        const hours = panel.getByLabel('Generate for (hours)');
+        await hours.fill('5');
+        const save = panel.getByRole('button', { name: 'Save', exact: true });
+        assert(!(await save.isDisabled()), 'Save off after a change');
+        const regen = panel.getByRole('button', { name: /Regenerate now/ });
+        if (await regen.count()) assert(await regen.isDisabled(), 'Regenerate allowed with unsaved changes');
+        const { ms } = await timedSave(page, 'save generation', (m, p) => m === 'PUT' && p.startsWith('/playlists/generation'), () => save.click());
+        await page.reload();
+        await page.getByText('Choose a station above').waitFor(); // the station choice is not kept on reload
+        await page.locator('select', { has: page.locator('option', { hasText: 'All Stations' }) }).first().selectOption(FX.station.id);
+        await page.getByRole('heading', { name: 'Generate the playlist ahead' }).waitFor();
+        await until(async () => await panel.getByLabel('Generate for (hours)').inputValue() === '5', 'hours kept as 5 after reload');
+        const regen2 = panel.getByRole('button', { name: /Regenerate now/ });
+        await regen2.waitFor();
+        const r = await timedResponse(page, (m, p) => m === 'POST' && p.startsWith('/playlists/generation/regenerate'), () => regen2.click());
+        assert(r.status < 400, `regenerate ${r.status}`);
+        // put generation back as it was (it changes how the station queue fills)
+        await api('PUT', '/playlists/generation', { token: USERS.admin.token, body: { station_id: FX.station.id, enabled: was } }).catch(() => {});
+        return `saved in ${ms} ms, regenerate ${r.ms} ms`;
+      }, page);
+    }
+    await step(`F-PLAYLISTS-2 ${view}: Delete template (confirm)`, async () => {
+      await timedSave(page, 'delete playlist', (m, p) => m === 'DELETE' && p.startsWith('/playlists/'), () => head().getByRole('button', { name: 'Delete' }).click());
+      await head().waitFor({ state: 'detached' });
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Categories and asset types ──────────────────────────────────────────────
+section('categories', async () => {
+  for (const [id, url, ph, api1] of [['F-CATS-1', '/admin/categories', 'New category name...', '/categories'], ['F-CATS-2', '/admin/asset-types', 'New asset type name...', '/asset-types']]) {
+    for (const view of ['desktop', 'iphone']) {
+      const page = await newPage('manager', view);
+      const name = `e2e-${view}-${RUN}`;
+      await step(`${id} ${view}: Add is off while empty; Add by button and by Enter save fast`, async () => {
+        await page.goto(`${BASE}${url}`);
+        const input = page.getByPlaceholder(ph);
+        assert(await page.getByRole('button', { name: 'Add', exact: true }).isDisabled(), 'Add enabled while empty');
+        await input.fill(name);
+        const { ms } = await timedSave(page, 'add', (m, p) => m === 'POST' && p.startsWith(api1), () => page.getByRole('button', { name: 'Add', exact: true }).click());
+        await rowOf(page, name).waitFor();
+        await input.fill(`${name}-enter`);
+        await timedSave(page, 'add by Enter', (m, p) => m === 'POST' && p.startsWith(api1), () => input.press('Enter'));
+        await rowOf(page, `${name}-enter`).waitFor();
+        return `saved in ${ms} ms`;
+      }, page);
+      await step(`${id} ${view}: Rename: Esc cancels, Enter saves, Save button saves; Cancel`, async () => {
+        await rowOf(page, `${name}-enter`).getByRole('button', { name: 'Rename' }).click();
+        const box = rowOf(page, `${name}-enter`).locator('input').or(page.locator('tbody input')).first();
+        await box.fill(`${name}-esc`);
+        await box.press('Escape');
+        await rowOf(page, `${name}-enter`).getByRole('button', { name: 'Rename' }).waitFor();
+        await rowOf(page, `${name}-enter`).getByRole('button', { name: 'Rename' }).click();
+        await page.locator('tbody input').first().fill(`${name}-renamed`);
+        await timedSave(page, 'rename', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith(api1), () => page.locator('tbody input').first().press('Enter'));
+        await rowOf(page, `${name}-renamed`).waitFor();
+        await page.locator('tr').filter({ has: page.getByText(name, { exact: true }) }).getByRole('button', { name: 'Rename' }).click();
+        await page.locator('tbody input').first().fill(`${name}-btn`);
+        await timedSave(page, 'rename by Save', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith(api1), () => page.getByRole('button', { name: 'Save', exact: true }).click());
+        await rowOf(page, `${name}-btn`).waitFor();
+        await rowOf(page, `${name}-btn`).getByRole('button', { name: 'Rename' }).click();
+        await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await rowOf(page, `${name}-btn`).getByRole('button', { name: 'Rename' }).waitFor();
+      }, page);
+      await step(`${id} ${view}: Delete (confirm)`, async () => {
+        for (const n of [`${name}-btn`, `${name}-renamed`]) {
+          await timedSave(page, 'delete', (m, p) => m === 'DELETE' && p.startsWith(api1), () => rowOf(page, n).getByRole('button', { name: 'Delete' }).click());
+          await rowOf(page, n).waitFor({ state: 'detached' });
+        }
+      }, page);
+      await closePage(page);
+    }
   }
 });
 
