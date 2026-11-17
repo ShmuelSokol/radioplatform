@@ -787,7 +787,7 @@ async def test_no_song_is_handed_out_seconds_before_a_hard_item(client, db_sessi
     # song was handed out and chopped after 2.4 s. The engine gets nothing instead and
     # stays quiet until the time check (its hold lane).
     station, entries, sent = engine_station
-    # The song on air would change (3 s crossfade) 2 s before the hard item
+    # The song on air would change (1 s crossfade) at the hard item itself
     await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=59.0)
     url = f"/api/v1/playout/{station.id}/next?proto=3"
     assert (await client.get(url, headers=HEADERS)).status_code == 204
@@ -814,11 +814,11 @@ async def test_a_song_is_still_handed_out_when_there_is_room_or_the_hard_item_cu
 
 async def test_the_hold_counts_a_song_whose_start_report_has_not_arrived(client, db_session, engine_station):
     # The engine asks the moment its pre-loaded song starts, before the start report
-    # for it is in: that song (180 s, hands over at 177 s) is the one that ends before
+    # for it is in: that song (180 s, hands over at 179 s) is the one that ends before
     # the hard item, not the one still shown on air.
     station, entries, sent = engine_station
     url = f"/api/v1/playout/{station.id}/next?proto=3"
-    await _on_air_ending(db_session, entries, ends_in=3.0, hard_in=179.0)
+    await _on_air_ending(db_session, entries, ends_in=3.0, hard_in=183.0)
     first = await client.get(f"{url}&given=", headers=HEADERS)
     assert first.json()["entry_id"] == str(entries[1].id)
     # entries[1] is starting now (still pending for us) and changes 2 s before the item

@@ -73,9 +73,10 @@ def test_levels_and_output_processing():
 
 
 def test_crossfade_and_timed_group_constants():
-    """V1-8/V1-10: 3 s crossfade; timed gate open 1.5 s; groups within 0.5 s are one take-over."""
+    """V1-8/V1-10: crossfade length from each item (1 s default); timed gate open 1.5 s; groups within 0.5 s are one take-over."""
     liq = _liq()
-    assert "cross(duration=3., transition, main)" in liq
+    assert 'cross(duration=default_overlap, override_duration="liq_cross_duration", transition, main)' in liq
+    assert "default_overlap = 1." in liq
     assert "thread.run(delay=1.5, {timed_armed := false})" in liq
     assert "abs(at - timed_group_at()) > 0.5" in liq
     # length() leaves out items already fetched, so the gate also stays open while one
@@ -256,3 +257,42 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     assert "timed_pending() > 0 and left < 8. and left > -2." in liq
     assert 'elsif hold_open() then "hold" else "emergency"' in liq
     assert "engine_proto = 3" in liq
+
+
+def test_speech_is_never_overlapped_and_the_song_crossfade_comes_from_the_backend():
+    """Sponsorships played in a row ran into each other (Shmuel 2026-11-17): the engine
+    overlapped every change by a fixed 3 s. Now each item brings its own overlap."""
+    liq = _liq()
+    assert 'cross(duration=default_overlap, override_duration="liq_cross_duration", transition, main)' in liq
+    assert 'float_of_string(default=default_overlap, ending.metadata["kbr_overlap"])' in liq
+    assert "sequence([ending.source, starting.source])" in liq
+    assert "fade.out(duration=overlap, ending.source)" in liq
+    assert "duration=3." not in liq
+
+
+def test_engine_items_carry_their_overlap():
+    from types import SimpleNamespace
+
+    from app.api.v1 import queue as queue_module
+    from app.services import playout_engine
+
+    station = "s1"
+    queue_module._station_crossfade.pop(station, None)
+
+    def uri(kind, duration=120.0):
+        asset = SimpleNamespace(id="a", title="T", artist="", asset_type=kind, duration=duration,
+                                file_path="https://cdn.example.com/a.mp3", metadata_extra={})
+        entry = SimpleNamespace(id="e", asset=asset, station_id=station, preempt_at=None,
+                                timing_mode=None, source="auto", resume_seconds=None)
+        return playout_engine.build_uri(entry, "main")
+
+    song = uri("music")
+    assert 'kbr_overlap="1.00"' in song and 'liq_cross_duration="1.00"' in song
+    spot = uri("spot", 30.0)
+    assert 'kbr_overlap="0.00"' in spot and 'liq_cross_duration="0.20"' in spot
+    queue_module._station_crossfade[station] = 0.0
+    try:
+        song = uri("music")
+        assert 'kbr_overlap="0.00"' in song and 'liq_cross_duration="0.20"' in song
+    finally:
+        queue_module._station_crossfade.pop(station, None)

@@ -933,9 +933,10 @@ async def sc_song_ends_before_hour(h: Harness) -> None:
         if t0 is None:
             h.check(name, False, "song6 never went on air")
             return
-        # song5 (already with the engine) starts at +37 and ends at +77: the time check
-        # is due 1 s after that, where song2 would have started 4 s before it
-        due = datetime.fromtimestamp(t0 + 78, UTC)
+        # Songs overlap 1 s: song5 (already with the engine) starts at +39 and ends at
+        # +79. The time check is due 1.5 s after that, where song2 would have started
+        # 2.5 s before it
+        due = datetime.fromtimestamp(t0 + 80.5, UTC)
         await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
         await asyncio.sleep(max(0, due.timestamp() - time.time()) + 16)
         starts = await h.started_times("time", due.timestamp() - 5)
@@ -958,6 +959,81 @@ async def sc_song_ends_before_hour(h: Harness) -> None:
         h.check(name, gap <= 3.5, f"longest silence {gap:.1f} s at {_fmt(gap_at)}")
     finally:
         await h.set_config(fit_before_hard_items=None)
+
+
+def both_audible(h: Harness, start: float, end: float, f1: float, f2: float, floor_db: float = -40.0) -> float:
+    """Seconds between start and end in which both tones are heard at once."""
+    total, t = 0.0, start
+    while t + WINDOW <= end:
+        a = tone_db(h.stack.wav, h.stack.wav_t0, t, t + WINDOW, f1)
+        b = tone_db(h.stack.wav, h.stack.wav_t0, t, t + WINDOW, f2)
+        if a > floor_db and b > floor_db:
+            total += WINDOW
+        t += WINDOW
+    return total
+
+
+async def sc_speech_never_overlaps(h: Harness) -> None:
+    """Shmuel 2026-11-17: sponsorships played in a row ran into each other (the 3 s song
+    crossfade was applied to speech). In the music lane two spoken items back to back
+    are never heard together and leave no gap; the item after a spoken one still
+    reports its start; song into song overlaps about 1 s (the station's setting), and
+    not at all with the setting at 0."""
+    name = "speech_never_overlaps"
+    await wait_music(h)
+    await h.clear_pending()
+    auto = {"source": "auto"}
+    await h.queue([("weather", dict(auto)), ("announce", dict(auto)), ("song5", dict(auto)),
+                   ("song2", dict(auto)), ("song4", dict(auto))])
+    await asyncio.sleep(8)
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    t0 = await h.wait_on_air("weather", 30)
+    if t0 is None:
+        h.check(name, False, "the spoken item never went on air")
+        return
+    t_song2 = await h.wait_on_air("song2", 8 + 6 + 40 + 20)
+    await asyncio.sleep(5)
+    freq = {k: TONES[k][0] for k in ("weather", "announce", "song5", "song2", "song1", "song3")}
+    heard = h.heard(t0 - 1, time.time() - 1)
+    h.print_timeline(heard, t0)
+    a_start = await h.started_times("announce", t0)
+    s5 = await h.started_times("song5", t0)
+    h.check(name, bool(a_start) and bool(s5),
+            f"the item after each spoken item reported its start (announce {bool(a_start)}, song {bool(s5)})")
+    if not a_start or not s5 or t_song2 is None:
+        h.check(name, False, f"the items did not all air (song2 on air: {t_song2})")
+        return
+    ta, t5 = a_start[0][0], s5[0][0]
+    both = both_audible(h, ta - 3, ta + 3, freq["weather"], freq["announce"])
+    h.check(name, both <= 0.1, f"two spoken items heard together for {both:.1f} s")
+    both = both_audible(h, t5 - 3, t5 + 3, freq["announce"], freq["song5"])
+    h.check(name, both <= 0.1, f"a spoken item and the song after it heard together for {both:.1f} s")
+    gap, gap_at = longest_silence([w for w in heard if t0 + 1 <= w[0] <= t5 + 3])
+    h.check(name, gap <= 1.0, f"longest gap around the spoken items {gap:.1f} s")
+    both = both_audible(h, t_song2 - 4, t_song2 + 4, freq["song5"], freq["song2"])
+    h.check(name, 0.4 <= both <= 1.6, f"song into song overlaps {both:.1f} s (setting: 1 s)")
+
+    # The station's song crossfade at 0: no overlap between songs either
+    await h.set_config(crossfade_seconds=0)
+    try:
+        await asyncio.sleep(12)  # the scheduler picks the setting up on its next pass
+        await h.clear_pending()
+        await h.queue([("song1", dict(auto)), ("song3", dict(auto)), ("song4", dict(auto))])
+        await asyncio.sleep(8)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t1 = await h.wait_on_air("song1", 30)
+        t3 = await h.wait_on_air("song3", 60) if t1 is not None else None
+        if t3 is None:
+            h.check(name, False, f"songs with crossfade 0 did not air (song1 {t1}, song3 {t3})")
+            return
+        await asyncio.sleep(5)
+        both = both_audible(h, t3 - 4, t3 + 4, freq["song1"], freq["song3"])
+        h.check(name, both <= 0.1, f"with the crossfade at 0, songs heard together for {both:.1f} s")
+        gap, _ = longest_silence(h.heard(t3 - 4, t3 + 4))
+        h.check(name, gap <= 1.0, f"and the gap between them is {gap:.1f} s")
+    finally:
+        await h.set_config(crossfade_seconds=None)
+        await asyncio.sleep(12)
 
 
 async def sc_soft_waits_for_song(h: Harness) -> None:
@@ -1817,6 +1893,7 @@ SCENARIOS = {
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
     "song_ends_before_hour": sc_song_ends_before_hour,
+    "speech_never_overlaps": sc_speech_never_overlaps,
     "next_after_idle": sc_next_after_idle,
     "next_twice": sc_next_twice,
     "engine_crash_restart": sc_engine_crash_restart,
