@@ -1010,6 +1010,9 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [ ] F-CR-PFL-10 Close (Esc / ✕) hides the deck | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-PFL-11 Compact deck on phone | sizes: phone | n.a. | covered: e2e/control-room-actions.mjs::pfl "compact deck on a phone (under a quarter of the screen, full width, no overflow)"
 - [ ] F-CR-PFL-12 PFL audio goes to chosen headphones output, not the monitor | sizes: desktop | n.a. | covered: e2e/control-room-actions.mjs::cart "pre-listen audio goes to the chosen output"
+- [x] F-CR-PFL-13 'Preview time & weather' plays in the PFL deck as one item (time, then weather): pause/play, seek across both clips (also while paused), ✕ stops; the button is never stuck disabled and pressed again stops it | sizes: desktop, iPhone, iPhone sideways | n.a. | covered: e2e/control-room-actions.mjs::previews "weather preview opens the deck and plays the time clip" + "seeking to 90% goes into the weather clip" + "✕ stops the weather preview" (fixed: weather preview had no controls, button stuck on 'Playing preview…')
+- [x] F-CR-PFL-14 Hot button / cart PFL uses the same deck: pause, play, seek, ✕ stops | sizes: desktop, iPhone, iPhone sideways | n.a. | covered: e2e/control-room-actions.mjs::previews "hot button ❚❚ pauses" + "hot button seek to half way" + "✕ stops the hot button pre-listen"
+- [x] F-CR-PFL-15 One preview at a time: weather, hot button and library PFL replace each other; no preview sends anything to air | sizes: desktop, iPhone, iPhone sideways | n.a. | covered: e2e/control-room-actions.mjs::previews "weather preview replaces the hot button pre-listen" + "library PFL replaces the weather preview" + "nothing sent to the station by any preview"
 
 ## Control room: Go live, Played, Schedule tabs and layout
 

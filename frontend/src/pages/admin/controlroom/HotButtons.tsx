@@ -2,7 +2,7 @@ import { memo, useState } from 'react';
 import { useAssets } from '../../../hooks/useAssets';
 import { CART_PAGES, fmtDur } from './shared';
 import type { CartSet, CtlAsset, FireMode, SendFn } from './shared';
-import type { Pfl } from './pfl';
+import { WEATHER_PFL_ID, type Pfl } from './pfl';
 
 interface Props {
   pins: CtlAsset[];
@@ -23,8 +23,9 @@ interface Props {
   inserting: boolean;
   onCancelInsert: () => void;
   disabled: boolean;
+  /** Starts the time & weather preview in the pre-listen deck. */
   onPreviewWeather: () => void;
-  weatherState: 'idle' | 'loading' | 'playing';
+  weatherLoading: boolean;
   pfl: Pfl;
   /** Grid columns differ between the narrow desktop sidebar and the phone tab. */
   wide: boolean;
@@ -196,11 +197,15 @@ function HotButtons(p: Props) {
       )}
     </div>
   ) : null;
+  // Plays in the pre-listen deck (pause, seek, stop there); pressed again it stops
+  const weatherOn = pfl.loadedId === WEATHER_PFL_ID;
   const weather = (
-    <button type="button" onClick={p.onPreviewWeather} disabled={p.weatherState !== 'idle' || p.disabled}
-      title="Only you hear this"
-      className={`qn-btn h-8 px-2.5 text-xs shrink-0 ${p.weatherState === 'playing' ? 'animate-pulse' : ''}`}>
-      {p.weatherState === 'loading' ? 'Loading…' : p.weatherState === 'playing' ? 'Playing preview…' : 'Preview time & weather'}
+    <button type="button" onClick={weatherOn ? pfl.stop : p.onPreviewWeather}
+      disabled={p.weatherLoading || (p.disabled && !weatherOn)}
+      aria-pressed={weatherOn} data-testid="weather-preview"
+      title="Only you hear this, in the pre-listen player"
+      className={`qn-btn h-8 px-2.5 text-xs shrink-0 ${weatherOn ? '!bg-[#2bff4a]' : ''}`}>
+      {p.weatherLoading ? 'Loading…' : weatherOn ? '■ Stop time & weather' : 'Preview time & weather'}
     </button>
   );
   const walls = (
