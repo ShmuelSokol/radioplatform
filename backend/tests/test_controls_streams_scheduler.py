@@ -134,9 +134,6 @@ async def _post_or_500(client, url, **kw):
         return 500
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: /controls/play|pause|stop|play-now|enqueue need Redis (PlaylistEngine); with "
-    "REDIS_URL empty, as in production, every call is a 500"))
 @pytest.mark.asyncio
 async def test_controls_do_not_500_without_redis(client, auth_headers, db_session):
     """B-CONTROLS-1/3/5/7 without Redis (production has none)"""
@@ -148,9 +145,6 @@ async def test_controls_do_not_500_without_redis(client, auth_headers, db_sessio
         assert status < 500, (path, status)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: /controls/play-now starts an HLS (ffmpeg) player beside the queue instead of "
-    "putting the asset on air through the queue (two players per station)"))
 @pytest.mark.asyncio
 async def test_controls_play_now_goes_through_the_queue(
     client, auth_headers, db_session, fake_redis, monkeypatch

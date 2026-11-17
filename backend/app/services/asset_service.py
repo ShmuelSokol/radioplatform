@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models.asset import Asset
 from app.models.play_log import PlayLog
 from app.models.sponsor import Sponsor
@@ -241,7 +241,16 @@ async def set_album_art(db: AsyncSession, asset_id: uuid.UUID, art_path: str) ->
 
 
 async def delete_asset(db: AsyncSession, asset_id: uuid.UUID) -> None:
+    from app.models.queue_entry import QueueEntry
+
     asset = await get_asset(db, asset_id)
+    # Deleting the item on air would cascade away its playing queue entry and leave the
+    # station silent until dead-air recovery: refuse; press Next first.
+    on_air = (await db.execute(
+        select(QueueEntry.id).where(QueueEntry.asset_id == asset_id, QueueEntry.status == "playing").limit(1)
+    )).scalar_one_or_none()
+    if on_air is not None:
+        raise ConflictError("This item is on air. Press Next (or wait for it to end), then delete it.")
     await db.delete(asset)
     await db.flush()
 
