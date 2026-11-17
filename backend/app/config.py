@@ -11,7 +11,8 @@ class Settings(BaseSettings):
 
     # App
     APP_ENV: str = "development"
-    APP_DEBUG: bool = True
+    # Off unless asked: debug mode echoes every SQL statement into the log
+    APP_DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
 
     # Database
@@ -130,7 +131,7 @@ class Settings(BaseSettings):
     # Icecast (optional — set host to empty to disable)
     ICECAST_HOST: str = ""
     ICECAST_PORT: int = 8000
-    ICECAST_SOURCE_PASSWORD: str = "hackme"
+    ICECAST_SOURCE_PASSWORD: str = ""  # required to stream; the old default "hackme" is refused
     ICECAST_MOUNT: str = "/live"
     ICECAST_BITRATE: int = 192
     ICECAST_FORMAT: str = "mp3"  # "mp3" or "ogg"

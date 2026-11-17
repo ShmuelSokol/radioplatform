@@ -6,7 +6,6 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-import pytest
 
 INFRA = Path(__file__).resolve().parents[2] / "infra" / "streaming"
 
@@ -143,9 +142,6 @@ def test_no_secret_in_infra_files():
             assert not re.search(r"\b[0-9a-f]{48}\b", f.read_text()), f.name
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: setup.sh 'all' reads GET /stations?limit=100 once; stations past the first 100 "
-    "get no engine and nothing says so"))
 def test_setup_reads_every_station():
     """V1-22. Reproduction: 101 active stations, run setup.sh with 'all' -> 100 engines."""
     sh = _read("setup.sh")

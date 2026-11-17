@@ -372,7 +372,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `ALLOW_DESTRUCTIVE_SEED` | Allow `/auth/seed-all` (wipes data) in production | No |
 | `CORS_ORIGINS` | JSON array of allowed origins | Yes |
 | `APP_ENV` | "production" | Yes |
-| `APP_DEBUG` | "false" in production | No |
+| `APP_DEBUG` | Debug mode and SQL echo; default false (set "true" only locally) | No |
 | `REDIS_URL` | Empty string to disable | No |
 | `S3_ENDPOINT_URL` | Empty string to disable | No |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS API key | For weather/time |
@@ -383,7 +383,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `SUPABASE_STORAGE_BUCKET` | Storage bucket name (default: "audio") | For storage |
 | `ICECAST_HOST` | Icecast server hostname (empty to disable) | For OTA |
 | `ICECAST_PORT` | Icecast server port (default: 8000) | For OTA |
-| `ICECAST_SOURCE_PASSWORD` | Icecast source password | For OTA |
+| `ICECAST_SOURCE_PASSWORD` | Icecast source password (no default; empty or "hackme" = nothing streams) | For OTA |
 | `ICECAST_MOUNT` | Icecast mount point (default: /live) | For OTA |
 | `STRIPE_SECRET_KEY` | Stripe secret key (empty to disable) | For billing |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | For billing |

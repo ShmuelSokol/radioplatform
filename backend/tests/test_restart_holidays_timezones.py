@@ -201,9 +201,6 @@ def test_shabbos_next_to_yom_tov_is_one_window():
     assert all(b[0] > a[1] for a, b in zip(spans, spans[1:]))  # no overlaps left
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: Yom Tov is always the 2-day diaspora calendar; a station in Israel (KBR Jerusalem) "
-    "is blacked out on the second day too (shabbos_service.YOM_TOV_DEFINITIONS)"))
 def test_yom_tov_in_israel_is_one_day():
     """V1-83"""
     from pyluach.dates import HebrewDate
@@ -389,9 +386,6 @@ async def test_long_song_counts_as_a_long_item(db_session):
 # ── Deleting what is on air ───────────────────────────────────────────────
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: DELETE /queue/{entry} on the entry on air removes it and starts nothing: the "
-    "browser station is silent until dead-air recovery (30 s)"))
 @pytest.mark.asyncio
 async def test_removing_the_entry_on_air_moves_on(client, auth_headers, db_session):
     """V1-43"""
@@ -402,9 +396,6 @@ async def test_removing_the_entry_on_air_moves_on(client, auth_headers, db_sessi
     assert [p.asset_id for p in playing] == [assets[1].id]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: deleting a library item that is on air cascades away its playing queue entry: "
-    "the browser station is silent until dead-air recovery (30 s)"))
 @pytest.mark.asyncio
 async def test_deleting_the_library_item_on_air_keeps_the_station_playing(client, auth_headers, db_session):
     """V1-91"""
