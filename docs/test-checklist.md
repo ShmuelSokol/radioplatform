@@ -23,6 +23,7 @@ the limits in section S. A row passes only when it does the right thing **and** 
 - [ ] S-7 Listen (control room or public): sound within 1.5 s of the press; stream mode stays about 1 s behind live | both | covered: partial
 - [ ] S-8 Now-playing on every open screen updates within 1 s of a real change on air | both | covered: NOT COVERED
 - [ ] S-9 Hard timed item (time check, hard block, hard spot) heard within 1 s of its time | both | covered: harness (engine), pw10 scripts (browser, not in repo)
+- [ ] S-11 iPhone Safari, server-stream station: Listen (control room and public Listen page) to sound within 2 s; never silent for 10 s or more (Shmuel, 2026-11-16 9:54 PM: about 10 s, then over 2 minutes of nothing) | engine | covered: NOT COVERED
 - [ ] S-10 Upload: progress shown at once; item playable in the library within 10 s of upload end for a 5 MB file | n.a. | covered: NOT COVERED
 
 ## H. On-air timing on a real engine (infra/streaming/harness/run_harness.py)
@@ -35,6 +36,10 @@ the limits in section S. A row passes only when it does the right thing **and** 
 - [ ] H-6 Soft timed item waits for the song, no silence | engine | covered: harness soft_timed_waits_for_song
 - [ ] H-7 Rapid Next (6 presses, hard/fade/soft): one item on air, what the site shows is what is heard, no silence | engine | covered: harness rapid_next
 - [ ] H-8 Queue runs out: no silence, no emergency files, something on air | engine | covered: harness empty_queue
+
+- [ ] H-9 Item on air reaches 0:00 on a server-stream station: the next item starts within 1 s and the control room moves on (Shmuel 2026-11-16 9:57 PM: Main sat at 0:00 Remaining with Billabong next, no audio) | engine | covered: NOT COVERED
+- [ ] H-10 Engine started before the backend, lost start report, /next 204 retries, slow track download, slow timed file, 3-item timed group, two groups 0.3 s / 1 s apart, /skip on the timed lane, same entry reported once, mix-over keeps /status, token checks, emergency files at runtime, engine crash and restart, duplicate /timed id, blackout ended early, live show on an engine station, hard_by while downloading | engine | covered: NOT COVERED (harness scenarios to add)
+- [ ] F-ARCHIVES-PHONE "+ New Archive" button fully visible at iPhone width (PC thread found it cut off at the right edge) | n.a. | covered: NOT COVERED
 
 ## W. Production self-check (runs on the live backend all the time)
 
