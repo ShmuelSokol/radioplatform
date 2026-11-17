@@ -834,7 +834,10 @@ async def room_warnings(
     short.sort(key=lambda f: (str(f.schedule.id) != str(schedule_id), -f.missed))
     for f in short:
         mine = str(f.schedule.id) == str(schedule_id)
-        who = "This sponsorship" if mine else (names.get(str(f.schedule.sponsor_id)) or f.schedule.name or "A sponsorship")
+        sponsor = names.get(str(f.schedule.sponsor_id))
+        # Two schedules of one sponsor read alike without the schedule's own name
+        named = f"{sponsor} ({f.schedule.name})" if sponsor and f.schedule.name else sponsor or f.schedule.name
+        who = "This sponsorship" if mine else (named or "A sponsorship")
         line = (
             f"{station.name}: {who} misses {f.missed} of {f.promised} plays in the next {days} days "
             "(no room left in the blocks)."
