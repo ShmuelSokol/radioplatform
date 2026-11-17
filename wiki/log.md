@@ -144,3 +144,4 @@ INGEST 2026-11-16 live-shows.md web call-ins: /call/<station> page, POST /call-i
 INGEST 2026-11-16 program-blocks.md automation_config.blocks_keep_hourly: blocks play beside the built-in hourly time and weather (block on the hour plays right after them); category block_only never filler; GET /program-blocks/capabilities
 INGEST 2026-11-17 control-room.md PFL deck: waveform seek, cue markers, keys; global keys ignore the deck; waveform only for items up to 10 min; seeking needs byte ranges
 INGEST 2026-11-17 streaming-architecture.md /playout-status + PlayoutBadge (server stream vs browser player, engine /status compared with the queue); listener timing on the stream: same mount for all, ~1 s MSE delay, iPhone Safari a few s more (no MediaSource); timed items start on the second by the stream server clock
+INGEST 2026-11-17 control-room.md PFL deck: unplayable files (MP2 in .mp3) keep the deck open with a red reason instead of closing; usePfl.error
