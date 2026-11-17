@@ -129,3 +129,16 @@ The control room marks timed items due at the same moment with a cyan bar and a
   (India) heard its time check at local :30, and the default hard/soft timing used the UTC
   minute. On the autumn DST day 1 AM gets two checks, in spring 2 AM none.
 - Tests: `backend/tests/test_scheduler_jobs.py`, `backend/tests/test_restart_holidays_timezones.py`.
+
+
+## Rotation and interval rules in the rule-based fill (2026-11-17)
+
+Stations without playlist generation fill 7 days from `ScheduleRule`s. After the daypart
+fill, `_spread_rule_items` weaves rule items between the fill's songs and renumbers the
+fill's positions: rotation (`songs_between=N`) puts one item after every N filled songs,
+interval (`interval_minutes=N`) one each time N minutes of estimated air time pass. Both
+only where the rule's `hour_start`/`hour_end` (a range like 22-2 wraps) and
+`days_of_week` (0=Mon) cover the estimated station-local air time. Before, rotation items
+went after the whole week, back to back, and interval rules were never applied. Legacy
+global sponsors still go at the end of the fill (unchanged). Test:
+`backend/tests/test_rule_fill_and_station_delete.py`.
