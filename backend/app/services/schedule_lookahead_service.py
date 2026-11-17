@@ -223,7 +223,11 @@ async def look_ahead(
             )
         )
 
-    _, unplaced = await plan_for_station(db, station, days=days, now=now)
+    planned, unplaced = await plan_for_station(db, station, days=days, now=now)
+    from app.services.spot_schedule_service import shortfalls
+
+    short = shortfalls(planned, unplaced)
+    today = now.astimezone(tz).date()
     unplaced = [u for u in unplaced if u.blackout is None]
     sponsor_names: dict[str, str] = {}
     if unplaced:
@@ -249,20 +253,29 @@ async def look_ahead(
         plays = "1 play" if n == 1 else f"{n} plays"
         if "sponsor place" in reason:
             fix = (
-                "Not resolved: add sponsor places to a block in this time of day, "
-                "add another block, or lower the plays."
+                "Not resolved: no later block that day had room either. Add sponsorship "
+                "room to a block in this time of day, add another block, or lower the plays."
             )
         elif "already taken" in reason:
             fix = "Not resolved: pick another exact time for one of them."
         else:
             fix = "Not resolved: lower the plays in this time of day or add spot times."
+        # Said ahead of time: how far short the sponsorship falls, and whether its
+        # contract ends before the plays could be made up.
+        total = short.get(str(u.schedule.id))
+        behind = ""
+        if total and total.missed:
+            behind = f" In the next {days} days it misses {total.missed} of {total.promised} plays."
+            if total.ends_within(today, days):
+                end = u.schedule.end_date
+                behind += f" Its contract ends {end:%b} {end.day}, so they cannot be made up."
         findings.append(
             Finding(
                 kind=SPOT_UNPLACED,
                 start=(day + timedelta(hours=h_start)).astimezone(UTC),
                 end=(day + timedelta(hours=h_end)).astimezone(UTC),
                 title=f"{who}: {plays} with no place ({daypart})",
-                detail=f"{reason[0].upper()}{reason[1:]}.",
+                detail=f"{reason[0].upper()}{reason[1:]}.{behind}",
                 resolution=fix,
                 needs_attention=True,
             )

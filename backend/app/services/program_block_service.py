@@ -104,10 +104,30 @@ async def load_blocks(db: AsyncSession, station_id, active_only: bool = True) ->
     return list((await db.execute(stmt.order_by(ProgramBlock.name))).scalars().all())
 
 
+# Places a "sponsors" item holds when it only says how long it may run
+TIMED_PLACES = 10
+
+
+def item_places(item: dict) -> int:
+    """How many sponsorships a "sponsors" item can hold at most."""
+    if item.get("count"):
+        return max(0, int(item["count"]))
+    return TIMED_PLACES if item.get("max_seconds") else 1
+
+
 def sponsor_places(block: ProgramBlock) -> int:
-    return sum(
-        max(0, int(i.get("count") or 1)) for i in block.items or [] if i.get("kind") == "sponsors"
-    )
+    return sum(item_places(i) for i in block.items or [] if i.get("kind") == "sponsors")
+
+
+def sponsor_seconds(block: ProgramBlock) -> float | None:
+    """The most sponsorship time one airing of the block may hold, or None when no
+    "sponsors" item sets a limit (then only the places count)."""
+    limits = [
+        float(i["max_seconds"])
+        for i in block.items or []
+        if i.get("kind") == "sponsors" and i.get("max_seconds")
+    ]
+    return sum(limits) if limits else None
 
 
 async def load_breaks(db: AsyncSession, station: Station, start: datetime, end: datetime):
@@ -123,6 +143,7 @@ async def load_breaks(db: AsyncSession, station: Station, start: datetime, end: 
             timing_mode=o.block.timing_mode,
             name=o.block.name,
             latest_minutes=o.block.latest_minutes,
+            seconds=sponsor_seconds(o.block),
         )
         for o in occurrences_between(blocks, station_tz(station.timezone), start, end)
     ]
@@ -246,10 +267,17 @@ class _Resolver:
                 self.announcements[slot_key] = (None, None)
         return self.announcements[slot_key]
 
-    async def _sponsor_items(self, planned: list, count: int) -> list[ResolvedItem]:
+    async def _sponsor_items(self, planned: list, count: int, timed: bool = False) -> list[ResolvedItem]:
         found = []
         for _ in range(count):
             if not planned:
+                if timed:
+                    # A time limit, not a number of places: one line says there is room
+                    if not found:
+                        found.append(
+                            ResolvedItem(kind="sponsors", label="Open sponsorship time", open_place=True)
+                        )
+                    break
                 found.append(ResolvedItem(kind="sponsors", label="Open sponsor place", open_place=True))
                 continue
             placement = planned.pop(0)
@@ -272,7 +300,7 @@ class _Resolver:
             label = item.get("label") or item_label(item)
             if kind == "sponsors":
                 occurrence.items.extend(
-                    await self._sponsor_items(planned, max(0, int(item.get("count") or 1)))
+                    await self._sponsor_items(planned, item_places(item), timed=bool(item.get("max_seconds")))
                 )
                 continue
             out = ResolvedItem(kind=kind, label=label)
