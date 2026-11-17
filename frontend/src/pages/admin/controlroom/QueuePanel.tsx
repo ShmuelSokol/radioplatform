@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { clockTime, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, useMediaQuery, weekdayShort } from './shared';
+import { clockTime, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, useMediaQuery, usePhoneLandscape, weekdayShort } from './shared';
 
 export interface QueueRow {
   id: string;
@@ -48,6 +48,7 @@ interface Props {
 // match these numbers.
 const ROW_DESKTOP = 26;   // lg:h-[26px]
 const ROW_PHONE = 66;     // h-[66px]
+const ROW_LANDSCAPE = 50; // h-[50px]: phone sideways, one line of title
 const MARKER_H = 40;      // h-10
 const ACTIONS_H = 61;     // h-[61px]
 const OVERSCAN = 30;      // extra rows drawn above and below, so a fast fling rarely outruns the redraw
@@ -66,7 +67,8 @@ function QueuePanel(p: Props) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const rowH = isDesktop ? ROW_DESKTOP : ROW_PHONE;
+  const landscape = usePhoneLandscape();
+  const rowH = isDesktop ? ROW_DESKTOP : landscape ? ROW_LANDSCAPE : ROW_PHONE;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [firstRow, setFirstRow] = useState(0);   // top of the window, in steps of STEP rows
   const [viewH, setViewH] = useState(800);
@@ -82,6 +84,21 @@ function QueuePanel(p: Props) {
     return () => ro.disconnect();
   }, []);
 
+  // Turning the phone changes the row height: keep the same row at the top. Work from
+  // the last scroll position seen at the old height (Chrome's scroll anchoring may
+  // already have moved it by the time this runs; Safari does not anchor).
+  const prevRowH = useRef(rowH);
+  const lastTop = useRef(0);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const was = prevRowH.current;
+    prevRowH.current = rowH;
+    if (!el || was === rowH || lastTop.current === 0) return;
+    el.scrollTop = Math.round((lastTop.current / was) * rowH);
+    lastTop.current = el.scrollTop;
+    setFirstRow(Math.floor(el.scrollTop / rowH / STEP) * STEP);
+  }, [rowH]);
+
   // Back to the top when the day changes.
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
@@ -93,6 +110,7 @@ function QueuePanel(p: Props) {
   const onAtTop = p.dateFilter ? undefined : p.onAtTop;
   const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
+    if (prevRowH.current === rowH) lastTop.current = el.scrollTop;
     const row = Math.floor(el.scrollTop / rowH / STEP) * STEP;
     setFirstRow(prev => (prev === row ? prev : row));
     if (moreOnServer && el.scrollTop + el.clientHeight > el.scrollHeight - 20 * rowH) onNeedAll?.();
@@ -118,7 +136,7 @@ function QueuePanel(p: Props) {
 
   return (
     <section className="flex flex-col min-h-0 h-full qn-log" aria-label="Queue">
-      <div className="shrink-0 flex items-center gap-2 px-2 h-8 bg-[#c0c0c0] text-black text-xs font-normal border-b border-[#808080]">
+      <div className="cr-queue-head shrink-0 flex items-center gap-2 px-2 h-8 bg-[#c0c0c0] text-black text-xs font-normal border-b border-[#808080]">
         <span className="font-bold">Up next</span>
         <span className="truncate">
           {countLabel} items
@@ -214,7 +232,7 @@ function QueuePanel(p: Props) {
                 } : undefined}
                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                 onClick={() => !isCur && setSelectedId(isSel ? null : entry.id)}
-                className={`relative flex items-center gap-2 lg:gap-0 pl-1.5 lg:pl-0.5 pr-2 lg:pr-3 h-[66px] lg:h-[26px] overflow-hidden border-b border-[#222] lg:border-0 cursor-pointer group
+                className={`relative flex items-center gap-2 lg:gap-0 pl-1.5 lg:pl-0.5 pr-2 lg:pr-3 ${landscape ? 'h-[50px]' : 'h-[66px]'} lg:h-[26px] overflow-hidden border-b border-[#222] lg:border-0 cursor-pointer group
                   ${tone}
                   ${isDragOver ? 'border-t-2 border-t-cyan-400' : ''}
                   ${dragId === entry.id ? 'opacity-40' : ''}`}
@@ -229,7 +247,7 @@ function QueuePanel(p: Props) {
                     onClick={(e) => { e.stopPropagation(); p.onArmInsert(isArmed ? null : entry.id); }}
                     title="Insert a song before this one"
                     aria-label={`Insert a song before ${title}`}
-                    className={`w-10 h-10 lg:w-6 lg:h-[22px] lg:mr-1 shrink-0 flex items-center justify-center text-xl lg:text-base font-bold leading-none
+                    className={`cr-tap w-10 h-10 lg:w-6 lg:h-[22px] lg:mr-1 shrink-0 flex items-center justify-center text-xl lg:text-base font-bold leading-none
                       ${isArmed ? 'bg-[#00ffff] text-black' : 'text-[#00ffff] hover:bg-[#003838]'}`}
                   >
                     +
@@ -243,7 +261,7 @@ function QueuePanel(p: Props) {
                 <span className="hidden lg:block w-12 shrink-0 tabular-nums text-[13px]">{fmtDur(a?.duration)}</span>
 
                 <span className="flex-1 min-w-0 leading-tight">
-                  <span className={`line-clamp-2 lg:line-clamp-1 break-words text-[15px] lg:text-[13px] ${isSilence ? 'text-red-400' : ''}`}>
+                  <span className={`${landscape ? 'line-clamp-1' : 'line-clamp-2'} lg:line-clamp-1 break-words text-[15px] lg:text-[13px] ${isSilence ? 'text-red-400' : ''}`}>
                     <span className="hidden lg:inline">{a?.artist ? `${a.artist}  ` : ''}</span>{title}
                     {entry.source === 'ad_slot' && (
                       <span className="ml-2 align-middle text-[10px] bg-[#ffa64d] text-black px-1 py-px font-bold">SPONSOR</span>
