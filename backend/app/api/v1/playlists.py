@@ -234,17 +234,13 @@ async def regenerate(
     timed items (time, weather).
     """
     from app.services.playlist_generator_service import settings_for
-    from app.services.queue_replenish_service import QueueReplenishService
 
     station = await _station(db, station_id)
     if not settings_for(station.automation_config).enabled:
         raise HTTPException(status_code=409, detail="Playlist generation is switched off")
-    from app.services.schedule_refresh_service import remove_automatic_songs
+    from app.services.schedule_refresh_service import replace_automatic_songs
 
-    removed = await remove_automatic_songs(db, station_id)
-    await db.commit()
-    await QueueReplenishService(db, station_id).replenish()
-    await db.commit()
+    removed = await replace_automatic_songs(db, station_id)
     return {"removed": removed, "queued_hours": round(await _queued_seconds(db, station_id) / 3600, 1)}
 
 

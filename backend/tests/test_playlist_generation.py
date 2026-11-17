@@ -256,7 +256,7 @@ async def test_settings_endpoints_and_queue_fill(
         f"{url}/regenerate", params={"station_id": str(station.id)}, headers=auth_headers
     )
     assert r.status_code == 200, r.text
-    assert r.json()["removed"] == 30
+    assert r.json()["removed"] == 29  # the next song stays (it may be about to start)
     kept = (
         (await db_session.execute(select(QueueEntry).where(QueueEntry.source == "manual")))
         .scalars()
