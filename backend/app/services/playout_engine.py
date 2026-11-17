@@ -328,6 +328,12 @@ def _quote(value) -> str:
     return f'"{text}"'
 
 
+def _overlap(entry) -> float:
+    from app.api.v1.queue import overlap_seconds
+
+    return overlap_seconds(entry)
+
+
 def build_uri(entry: QueueEntry, lane: str) -> str | None:
     """Liquidsoap `annotate:` URI carrying the entry id, titles, cue points and level."""
     asset = entry.asset
@@ -342,6 +348,9 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
         "kbr_lane": lane,
         # The engine keeps copies of music it played as its emergency fallback
         "kbr_kind": (asset.asset_type or "").lower(),
+        # How long this item overlaps the next at its end: the station's song
+        # crossfade, 0 for anything spoken (queue.overlap_seconds)
+        "kbr_overlap": f"{_overlap(entry):.2f}",
         "title": asset.title or "",
         "artist": asset.artist or "",
     }

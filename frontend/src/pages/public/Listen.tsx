@@ -333,6 +333,8 @@ export default function Listen() {
     wsNowPlaying?.change_fade_seconds ?? null,
     true, true,
     false, // no level meters on this page
+    wsAsset?.overlap_seconds,
+    useStream ? undefined : wsNextAsset?.overlap_seconds,
   );
 
   // Fetch active live show status (still uses polling — shows don't change often)

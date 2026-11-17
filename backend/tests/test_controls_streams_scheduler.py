@@ -190,7 +190,8 @@ async def test_live_audio_gives_url_timing_and_next(client, db_session):
     assert body["asset_id"] == str(a.id) and body["audio_url"] == a.file_path
     assert 19.0 <= body["elapsed"] <= 23.0
     assert body["duration"] == 200.0
-    assert body["cue_in"] == 0.4 and body["cross_start"] == 195.0
+    # analysed audible end 198 s (crossfade point 195 + 3), station crossfade 1 s
+    assert body["cue_in"] == 0.4 and body["cross_start"] == 197.0 and body["overlap_seconds"] == 1.0
     assert body["next_asset"]["id"] == str(b.id)
     assert body["next_asset"]["audio_url"] == b.file_path
     assert "stream_url" not in body  # Liquidsoap off

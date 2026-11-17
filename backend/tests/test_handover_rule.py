@@ -36,9 +36,69 @@ def test_long_timed_item_plays_to_its_end():
 
 
 def test_song_uses_its_crossfade_point():
+    # audible end 198.5 s (the analysed point + 3), default crossfade 1 s
     e = _entry(200.0, {"cross_start_seconds": 195.5})
-    assert handover_seconds(e) == 4.5
-    assert handover_seconds(_entry(200.0)) == 3.0
+    assert handover_seconds(e) == 2.5
+    assert handover_seconds(_entry(200.0)) == 1.0
     now = datetime.now(UTC)
     e.started_at = now
-    assert switch_time(e) == now + timedelta(seconds=195.5)
+    assert switch_time(e) == now + timedelta(seconds=197.5)
+
+
+# ── Only songs overlap the next item (Shmuel, 2026-11-17: sponsorships played back to
+# back faded into each other) and the song crossfade length is a station setting ──
+
+
+def _typed(duration, asset_type, analysis=None, station_id=None, **kw):
+    e = _entry(duration, analysis, **kw)
+    e.asset.asset_type = asset_type
+    if station_id is not None:
+        e.station_id = station_id
+    return e
+
+
+def test_a_sponsorship_played_by_hand_is_never_crossfaded():
+    from app.api.v1.queue import overlap_seconds
+
+    # 30 s spot, queued by an operator (not timed), with an analysis that has a crossfade point
+    for kind in ("spot", "sponsor", "shiur", "story", "jingle", "weather", "announcement"):
+        e = _typed(30.0, kind, {"cross_start_seconds": 26.0}, source="manual")
+        assert handover_seconds(e) == SHORT_ITEM_HANDOVER_SECONDS, kind
+        assert overlap_seconds(e) == 0.0, kind
+    # a 40 minute shiur ends at its end too
+    assert handover_seconds(_typed(2400.0, "shiur")) == SHORT_ITEM_HANDOVER_SECONDS
+
+
+def test_songs_crossfade_one_second_by_default():
+    from app.api.v1.queue import overlap_seconds
+
+    e = _typed(200.0, "music")
+    assert handover_seconds(e) == 1.0 and overlap_seconds(e) == 1.0
+    e = _typed(200.0, "music", {"cross_start_seconds": 190.0})  # 7 s of silent tail
+    assert handover_seconds(e) == 8.0 and overlap_seconds(e) == 1.0
+
+
+def test_station_crossfade_setting_moves_the_hand_over():
+    from types import SimpleNamespace
+
+    from app.api.v1.queue import crossfade_setting, note_station_crossfade, overlap_seconds
+
+    sid = uuid.uuid4()
+    note_station_crossfade(SimpleNamespace(id=sid, automation_config={"crossfade_seconds": 0}))
+    plain = _typed(200.0, "music", station_id=sid)
+    tail = _typed(200.0, "music", {"cross_start_seconds": 190.0}, station_id=sid)
+    # no crossfade: the song plays to its audible end (193 s), then the next one starts
+    assert overlap_seconds(plain) == 0.0 and handover_seconds(plain) == SHORT_ITEM_HANDOVER_SECONDS
+    assert handover_seconds(tail) == 7.0 + SHORT_ITEM_HANDOVER_SECONDS
+
+    note_station_crossfade(SimpleNamespace(id=sid, automation_config={"crossfade_seconds": 6}))
+    assert overlap_seconds(plain) == 6.0 and handover_seconds(plain) == 6.0
+    assert handover_seconds(tail) == 13.0
+    # another station is untouched; a spot on this one still never overlaps
+    assert handover_seconds(_typed(200.0, "music")) == 1.0
+    assert handover_seconds(_typed(30.0, "spot", station_id=sid)) == SHORT_ITEM_HANDOVER_SECONDS
+
+    assert crossfade_setting(None) == 1.0 and crossfade_setting({"crossfade_seconds": "x"}) == 1.0
+    assert crossfade_setting({"crossfade_seconds": 99}) == 10.0
+    assert crossfade_setting({"crossfade_seconds": -1}) == 0.0
+    assert crossfade_setting({"crossfade_seconds": True}) == 1.0

@@ -120,7 +120,11 @@ export default function SpotSchedules() {
   const [previewStation, setPreviewStation] = useState('');
   const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
 
-  const stationId = previewStation || stations[0]?.id || '';
+  // The look-ahead opens on a station that has sponsorships: opening on the first
+  // station (Main) showed "none planned" while 180 plays were queued on two others.
+  const scheduledStation = (schedules ?? []).find((x) => x.is_active && x.station_id)?.station_id;
+  const withSchedules = stations.find((st) => String(st.id) === String(scheduledStation))?.id;
+  const stationId = previewStation || withSchedules || stations[0]?.id || '';
 
   const { data: spotResults, isFetching: searching } = useQuery({
     queryKey: ['spot-search', spotSearch],
@@ -147,6 +151,8 @@ export default function SpotSchedules() {
     },
   });
 
+  // What the last save could not fit, said at once
+  const [saveWarnings, setSaveWarnings] = useState<string[]>([]);
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['spot-schedules'] });
     queryClient.invalidateQueries({ queryKey: ['spot-plan'] });
@@ -154,8 +160,9 @@ export default function SpotSchedules() {
 
   const createMut = useMutation({
     mutationFn: createSpotSchedule,
-    onSuccess: () => {
+    onSuccess: (saved) => {
       refresh();
+      setSaveWarnings(saved.warnings ?? []);
       setShowForm(false);
       setForm(emptyForm);
       setSpot(null);
@@ -167,7 +174,10 @@ export default function SpotSchedules() {
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<SpotSchedule> }) =>
       updateSpotSchedule(id, data),
-    onSuccess: refresh,
+    onSuccess: (saved) => {
+      refresh();
+      setSaveWarnings(saved.warnings ?? []);
+    },
   });
   const deleteMut = useMutation({ mutationFn: deleteSpotSchedule, onSuccess: refresh });
 
@@ -588,6 +598,25 @@ export default function SpotSchedules() {
                 <p>No sponsor spots go on the air, so none are planned here. Switch Spots mode back on in the control room to plan them again.</p>
               </div>
             )}
+            {!!saveWarnings.length && (
+              <div
+                className="bg-red-50 border border-red-200 text-red-900 rounded-lg p-4"
+                role="alert"
+                data-testid="save-warnings"
+              >
+                <div className="flex justify-between gap-3">
+                  <p className="font-semibold">Saved, but not every play has room</p>
+                  <button type="button" className="text-sm underline" onClick={() => setSaveWarnings([])}>
+                    Dismiss
+                  </button>
+                </div>
+                <ul className="text-sm mt-1 list-disc list-inside">
+                  {saveWarnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {!!plan?.unplaced.length && (
               <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4">
                 <p className="font-semibold">
@@ -643,6 +672,11 @@ export default function SpotSchedules() {
                         {p.sponsor_name}
                         {p.block && (
                           <span className="ml-2 text-xs text-gray-600">in {p.block}</span>
+                        )}
+                        {p.moved_from && (
+                          <span className="ml-2 text-xs font-semibold text-amber-700" title={`The ${p.moved_from} blocks were full, so this play moved here`}>
+                            moved from {p.moved_from}
+                          </span>
                         )}
                         {p.timing_mode === 'hard' && (
                           <span className="ml-2 text-xs font-semibold text-red-700" title={TIMING_LABEL.hard}>
