@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  getActivity, getActivityFilters, getListenerSessions,
-  type ActivityItem, type ActivityObject, type ListenerSessionItem,
+  getActivity, getActivityFilters, getActivityPeople, getListenerSessions,
+  type ActivityItem, type ActivityObject, type ActivityParams, type ActivityPerson, type ListenerSessionItem,
 } from '../../api/activity';
 
 /**
@@ -26,6 +26,11 @@ const CATEGORY_STYLE: Record<string, string> = {
   settings: 'bg-cyan-900/70 text-cyan-200',
   view: 'bg-gray-800 text-gray-300',
   other: 'bg-gray-800 text-gray-300',
+};
+
+const CATEGORY_NAMES: Record<string, string> = {
+  signin: 'Sign-ins', control: 'Control room', live: 'Live', library: 'Library', schedule: 'Scheduling',
+  sponsors: 'Sponsors', users: 'Users', settings: 'Settings', view: 'Screens', other: 'Other',
 };
 
 const TYPE_NAMES: Record<string, string> = {
@@ -192,7 +197,7 @@ function StatusBadge({ code }: { code: number | null }) {
   return <span className="px-1.5 py-0.5 rounded bg-red-800 text-red-100 text-[11px]">{text}</span>;
 }
 
-function ActivityRow({ item, fresh }: { item: ActivityItem; fresh: boolean }) {
+function ActivityRow({ item, fresh, hideWho = false }: { item: ActivityItem; fresh: boolean; hideWho?: boolean }) {
   const [open, setOpen] = useState(false);
   const who = item.user_name || item.user_email || 'Someone';
   return (
@@ -200,8 +205,8 @@ function ActivityRow({ item, fresh }: { item: ActivityItem; fresh: boolean }) {
       <button type="button" onClick={() => setOpen(o => !o)} className="w-full text-left">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="text-[12px] text-gray-400 tabular-nums shrink-0 w-full sm:w-44">{fmtTime(item.created_at)}</span>
-          <span className="text-cyan-200 font-semibold">{who}</span>
-          {item.user_role && <span className="text-[10px] uppercase text-gray-500">{item.user_role}</span>}
+          {!hideWho && <span className="text-cyan-200 font-semibold">{who}</span>}
+          {!hideWho && item.user_role && <span className="text-[10px] uppercase text-gray-500">{item.user_role}</span>}
           <span className={`px-1.5 py-0.5 rounded text-[11px] ${CATEGORY_STYLE[item.category] || CATEGORY_STYLE.other}`}>{item.label}</span>
           <StatusBadge code={item.status_code} />
           {item.detail && item.category !== 'view' && <span className="text-white break-words min-w-0">{item.detail}</span>}
@@ -219,33 +224,13 @@ function ActivityRow({ item, fresh }: { item: ActivityItem; fresh: boolean }) {
   );
 }
 
-function StaffActivity() {
-  const { data: filters } = useFilters();
-  const [userId, setUserId] = useState('');
-  const [stationId, setStationId] = useState('');
-  const [category, setCategory] = useState('');
-  const [search, setSearch] = useState('');
-  const [q, setQ] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [showViews, setShowViews] = useState(true);
-  const [failedOnly, setFailedOnly] = useState(false);
+type FeedParams = Omit<ActivityParams, 'skip' | 'limit' | 'after'>;
+
+/** One list of activity rows with paging and live updates. */
+function Feed({ params, live, nested = false }: { params: FeedParams; live: boolean; nested?: boolean }) {
   const [page, setPage] = useState(0);
-  const [live, setLive] = useState(true);
-
-  useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t); }, [search]);
-  useEffect(() => { setPage(0); }, [userId, stationId, category, q, from, to, showViews, failedOnly]);
-
-  const params = useMemo(() => ({
-    user_id: userId || undefined,
-    station_id: stationId || undefined,
-    category: category || undefined,
-    q: q || undefined,
-    start: from ? dayStart(from) : undefined,
-    end: to ? dayAfter(to) : undefined,
-    include_views: showViews,
-    failed_only: failedOnly || undefined,
-  }), [userId, stationId, category, q, from, to, showViews, failedOnly]);
+  const key = JSON.stringify(params);
+  useEffect(() => { setPage(0); }, [key]);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['activity', 'list', params, page],
@@ -263,7 +248,8 @@ function StaffActivity() {
   }, [extra, data]);
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  const liveOn = live && page === 0 && !(to && to < localDate(new Date()));
+  const endsInPast = !!params.end && new Date(params.end).getTime() < Date.now();
+  const liveOn = live && page === 0 && !endsInPast;
 
   useEffect(() => {
     if (!liveOn || !data) return;
@@ -289,18 +275,158 @@ function StaffActivity() {
   }, [liveOn, data, params]);
 
   const total = (data?.total ?? 0) + extra.length;
+  if (isLoading) return <div className="text-gray-500 text-center py-6">Loading activity…</div>;
+  if (isError) {
+    return (
+      <div className="text-center py-6 text-red-300">
+        Could not load the activity. <button onClick={() => refetch()} className="underline text-cyan-300">Try again</button>
+      </div>
+    );
+  }
+  if (items.length === 0) return <div className="text-center py-8 text-gray-500">Nothing matches these filters yet.</div>;
+  return (
+    <>
+      <ul className={`bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-y-auto ${nested ? 'max-h-[70vh]' : 'flex-1 min-h-0'}`} data-testid="activity-list">
+        {items.map(i => <ActivityRow key={i.id} item={i} fresh={freshIds.has(i.id)} hideWho={nested} />)}
+      </ul>
+      {total > PAGE_SIZE && <Pager page={page} total={total} onPage={setPage} />}
+    </>
+  );
+}
+
+function initials(name: string): string {
+  const parts = name.replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? '?') + (parts[1]?.[0] ?? '')).toUpperCase();
+}
+
+function PersonRow({ person, params, live, periodWord }: { person: ActivityPerson; params: FeedParams; live: boolean; periodWord: string }) {
+  const [open, setOpen] = useState(false);
+  const name = person.user_name || person.user_email || 'Unknown';
+  const cats = Object.entries(person.by_category).filter(([c]) => c !== 'view').sort((a, b) => b[1] - a[1]);
+  const feedParams: FeedParams = person.user_id
+    ? { ...params, user_id: person.user_id }
+    : { ...params, user_email: person.user_email ?? undefined };
+  return (
+    <li className="border-b border-[#1e1e4a]" data-testid="person-row">
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        className={`w-full text-left px-3 py-3 flex items-center gap-3 hover:bg-[#12123a] ${open ? 'bg-[#12123a]' : ''}`}>
+        <span className="shrink-0 w-10 h-10 rounded-full bg-cyan-900 text-cyan-100 flex items-center justify-center font-bold">{initials(name)}</span>
+        <span className="flex-1 min-w-0">
+          <span className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-cyan-100 font-semibold text-[15px] break-words">{name}</span>
+            {person.user_role && <span className="text-[10px] uppercase text-gray-500">{person.user_role}</span>}
+            {!person.user_id && <span className="text-[10px] uppercase text-amber-400">no account</span>}
+          </span>
+          <span className="block text-[13px] text-white mt-0.5">
+            <b>{person.actions.toLocaleString()}</b> action{person.actions === 1 ? '' : 's'} {periodWord}
+            {person.views > 0 && <span className="text-gray-400"> · {person.views.toLocaleString()} screens opened</span>}
+            {person.failed > 0 && <span className="text-red-300"> · {person.failed} refused or failed</span>}
+          </span>
+          <span className="flex flex-wrap gap-1 mt-1">
+            {cats.slice(0, 5).map(([c, n]) => (
+              <span key={c} className={`px-1.5 py-0.5 rounded text-[10px] ${CATEGORY_STYLE[c] || CATEGORY_STYLE.other}`}>
+                {CATEGORY_NAMES[c] || c} {n}
+              </span>
+            ))}
+          </span>
+        </span>
+        <span className="shrink-0 text-right text-[11px] text-gray-400">
+          <span className="block">Last</span>
+          <span className="block text-gray-300">{fmtTime(person.last_at)}</span>
+          <span className="block text-cyan-300 mt-1">{open ? 'Close ▲' : 'Open ▼'}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="px-2 sm:px-6 pb-3">
+          <Feed params={feedParams} live={live} nested />
+        </div>
+      )}
+    </li>
+  );
+}
+
+function PeopleView({ params, live, periodWord }: { params: FeedParams; live: boolean; periodWord: string }) {
+  const { user_id: _u, user_email: _e, ...groupParams } = params;
+  void _u; void _e;
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['activity', 'people', groupParams],
+    queryFn: () => getActivityPeople(groupParams),
+    refetchInterval: () => (live && document.visibilityState === 'visible' ? 10_000 : false),
+  });
+  if (isLoading) return <div className="text-gray-500 text-center py-8">Loading…</div>;
+  if (isError) {
+    return (
+      <div className="text-center py-8 text-red-300">
+        Could not load the activity. <button onClick={() => refetch()} className="underline text-cyan-300">Try again</button>
+      </div>
+    );
+  }
+  const people = data?.people ?? [];
+  if (people.length === 0) return <div className="text-center py-12 text-gray-500">Nobody did anything {periodWord}.</div>;
+  return (
+    <ul className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-y-auto flex-1 min-h-0" data-testid="people-list">
+      {people.map(p => <PersonRow key={p.key} person={p} params={groupParams} live={live} periodWord={periodWord} />)}
+    </ul>
+  );
+}
+
+function StaffActivity() {
+  const { data: filters } = useFilters();
+  const today = localDate(new Date());
+  const [view, setView] = useState<'people' | 'all'>(() => {
+    try { return localStorage.getItem('activity-view') === 'all' ? 'all' : 'people'; } catch { return 'people'; }
+  });
+  useEffect(() => { try { localStorage.setItem('activity-view', view); } catch { /* private mode */ } }, [view]);
+  const [userId, setUserId] = useState('');
+  const [stationId, setStationId] = useState('');
+  const [category, setCategory] = useState('');
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const [showViews, setShowViews] = useState(true);
+  const [failedOnly, setFailedOnly] = useState(false);
+  const [live, setLive] = useState(true);
+
+  useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t); }, [search]);
+
+  const params = useMemo<FeedParams>(() => ({
+    user_id: view === 'all' && userId ? userId : undefined,
+    station_id: stationId || undefined,
+    category: category || undefined,
+    q: q || undefined,
+    start: from ? dayStart(from) : undefined,
+    end: to ? dayAfter(to) : undefined,
+    include_views: showViews,
+    failed_only: failedOnly || undefined,
+  }), [view, userId, stationId, category, q, from, to, showViews, failedOnly]);
+
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return localDate(d); })();
+  const periodWord = from === today && to === today ? 'today'
+    : from === yesterday && to === yesterday ? 'yesterday'
+    : !from && !to ? 'in total' : 'in this period';
   const people = filters?.users ?? [];
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
       <div className="bg-[#12123a] border border-[#2a2a5e] rounded p-3 mb-3 space-y-2">
+        <div className="flex rounded overflow-hidden border border-[#2a2a5e] w-fit" role="tablist" aria-label="View">
+          {([['people', 'By person'], ['all', 'Everything in order']] as const).map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)}
+              className={`px-3 min-h-[34px] text-[12px] ${view === id ? 'bg-cyan-700 text-white' : 'bg-[#0a0a28] text-cyan-200'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-          <label className="flex flex-col text-[11px] text-gray-400 gap-1">Person
-            <select value={userId} onChange={e => setUserId(e.target.value)} className={inputCls}>
-              <option value="">Everyone</option>
-              {people.map(u => <option key={u.id} value={u.id}>{u.name ? `${u.name} (${u.email})` : u.email} · {u.role}</option>)}
-            </select>
-          </label>
+          {view === 'all' && (
+            <label className="flex flex-col text-[11px] text-gray-400 gap-1">Person
+              <select value={userId} onChange={e => setUserId(e.target.value)} className={inputCls}>
+                <option value="">Everyone</option>
+                {people.map(u => <option key={u.id} value={u.id}>{u.name ? `${u.name} (${u.email})` : u.email} · {u.role}</option>)}
+              </select>
+            </label>
+          )}
           <label className="flex flex-col text-[11px] text-gray-400 gap-1">Station
             <select value={stationId} onChange={e => setStationId(e.target.value)} className={inputCls}>
               <option value="">All stations</option>
@@ -339,27 +465,13 @@ function StaffActivity() {
           <label className="flex items-center gap-2 min-h-[32px]">
             <input type="checkbox" checked={live} onChange={e => setLive(e.target.checked)} className="w-4 h-4" />
             Live
-            {liveOn && <span className="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" aria-label="updating live" />}
+            {live && <span className="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" aria-label="updating live" />}
           </label>
         </div>
       </div>
-
-      {isLoading ? (
-        <div className="text-gray-500 text-center py-8">Loading activity…</div>
-      ) : isError ? (
-        <div className="text-center py-8 text-red-300">
-          Could not load the activity. <button onClick={() => refetch()} className="underline text-cyan-300">Try again</button>
-        </div>
-      ) : items.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">Nothing matches these filters yet.</div>
-      ) : (
-        <>
-          <ul className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-y-auto flex-1 min-h-0" data-testid="activity-list">
-            {items.map(i => <ActivityRow key={i.id} item={i} fresh={freshIds.has(i.id)} />)}
-          </ul>
-          <Pager page={page} total={total} onPage={setPage} />
-        </>
-      )}
+      {view === 'people'
+        ? <PeopleView params={params} live={live} periodWord={periodWord} />
+        : <Feed params={params} live={live} />}
     </div>
   );
 }

@@ -1785,6 +1785,8 @@ async def skip_current(
             await db.commit()
             await playout_engine.engine_flush(station_id)
         if await playout_engine.engine_skip(station_id, fade_seconds):
+            from app.services import activity_log
+            activity_log.note("Sent to the playout engine", [on_air.asset_id if on_air else None])
             return {"message": "Skipped", "now_playing": None, "fade_seconds": fade_seconds}
         return JSONResponse(
             status_code=503,
@@ -1794,6 +1796,10 @@ async def skip_current(
     # Same lock as the automatic advance, so Next cannot collide with a song change
     async with advance_lock(station_id):
         done = await _skip_current_locked(station_id, db, fade_seconds=fade_seconds)
+    if done.get("message") != "Skipped":
+        # Nothing changed hands: say why on the activity page
+        from app.services import activity_log
+        activity_log.note(done.get("message") or "Nothing skipped", [done.get("now_playing")])
     return {**done, "fade_seconds": fade_seconds}
 
 

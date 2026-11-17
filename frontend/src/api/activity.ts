@@ -42,6 +42,7 @@ export interface ActivityItem {
 
 export interface ActivityParams {
   user_id?: string;
+  user_email?: string;
   station_id?: string;
   category?: string;
   q?: string;
@@ -98,3 +99,19 @@ export const getListenerSessions = async (params: ListenerParams) =>
 export const reportPageView = (path: string, title?: string) => {
   apiClient.post('/activity/page-view', { path, title }).catch(() => {});
 };
+
+export interface ActivityPerson {
+  key: string;
+  user_id: string | null;
+  user_email: string | null;
+  user_name: string | null;
+  user_role: string | null;
+  actions: number;
+  views: number;
+  failed: number;
+  last_at: string | null;
+  by_category: Record<string, number>;
+}
+
+export const getActivityPeople = async (params: Omit<ActivityParams, 'user_id' | 'user_email' | 'after' | 'skip' | 'limit'>) =>
+  (await apiClient.get<{ people: ActivityPerson[] }>('/activity/people', { params })).data;
