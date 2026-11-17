@@ -58,6 +58,23 @@ for (const view of VIEWS) {
   check(texts.length > 0 && texts.every(t => /shalsheles/i.test(t)), `${view.name}: Find keeps only matching rows (${texts.length})`);
   await page.getByRole('button', { name: 'ALL' }).click();
 
+  // Mpeg / Prsnt filters and 123 (go to record)
+  const tot = Number((await page.getByTestId('db-tot').innerText()).replace(/\D/g, ''));
+  await page.getByTestId('db-present').click();
+  await page.waitForTimeout(800);
+  check(await page.getByTestId('db-present').getAttribute('aria-pressed') === 'true', `${view.name}: Prsnt filter on`);
+  await page.getByTestId('db-mpeg').click();
+  await page.waitForTimeout(800);
+  const mpegView = Number((await page.getByTestId('db-view').innerText()).replace(/\D/g, ''));
+  check(mpegView > 0 && mpegView <= tot, `${view.name}: Mpeg filter shows MPEG files (${mpegView} of ${tot})`);
+  await page.getByRole('button', { name: 'ALL' }).click();
+  await page.waitForTimeout(600);
+  await page.getByTestId('db-rec').click();
+  await page.getByTestId('db-goto').fill('5');
+  await page.getByTestId('db-goto').press('Enter');
+  await page.waitForTimeout(500);
+  check((await page.getByTestId('db-rec').innerText()).includes('Rec 5'), `${view.name}: 123 went to record 5`);
+
   if (view.desktop) {
     // Sort by V, highest first
     await page.locator('.qn-log-head button', { hasText: /^V/ }).click();

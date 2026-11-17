@@ -47,6 +47,9 @@ async def _station(db: AsyncSession, station_id) -> Station:
     return station
 
 
+# KBR Studio's "Mpeg" filter: MPEG audio files
+MPEG_EXTS = ("mp3", "mp2", "mpg", "mpeg")
+
 # Column name in the table -> what it sorts on
 SORTS = {
     "artist": Asset.artist,
@@ -66,6 +69,7 @@ async def list_items(
     station_id: uuid.UUID | None = Query(None, description="Last played on this station (all stations if empty)"),
     search: str | None = Query(None, description="Find: artist, title, type or file"),
     category: str | None = Query(None, description="Only this type (category)"),
+    files: str = Query("all", description="all; mpeg = MPEG audio files (.mp3/.mp2/.mpg); present = playable (not marked do_not_play)"),
     sort: str = Query("artist"),
     desc: bool = Query(False),
     skip: int = Query(0, ge=0),
@@ -84,6 +88,12 @@ async def list_items(
         conditions.append(~Asset.title.like(f"{prefix}%"))
     if category:
         conditions.append(func.lower(Asset.category) == category.lower())
+    if files == "mpeg":
+        low = func.lower(Asset.file_path)
+        conditions.append(or_(*[low.like(f"%.{ext}") | low.like(f"%.{ext}?%") for ext in MPEG_EXTS]))
+    elif files == "present":
+        conditions.append(Asset.file_path != "")
+        conditions.append(or_(Asset.category.is_(None), func.lower(Asset.category) != "do_not_play"))
     if search:
         pat = f"%{search.strip()}%"
         conditions.append(or_(

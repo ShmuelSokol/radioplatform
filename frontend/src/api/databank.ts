@@ -16,11 +16,14 @@ export interface DbItem {
 
 export type DbSort = 'artist' | 'title' | 'type' | 'vote' | 'length' | 'intro' | 'file' | 'last_played' | 'added';
 
+export type DbFiles = 'all' | 'mpeg' | 'present';
+
 export interface DbItemsParams {
   asset_type: string;
   station_id?: string;
   search?: string;
   category?: string;
+  files?: DbFiles;
   sort: DbSort;
   desc: boolean;
   skip: number;
@@ -31,6 +34,7 @@ export const listDbItems = async (p: DbItemsParams): Promise<{ total: number; it
   const params: Record<string, unknown> = { ...p };
   if (!p.search) delete params.search;
   if (!p.category) delete params.category;
+  if (!p.files || p.files === 'all') delete params.files;
   if (!p.station_id) delete params.station_id;
   return (await apiClient.get('/databank/items', { params })).data;
 };

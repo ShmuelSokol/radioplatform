@@ -7,7 +7,7 @@ import { isManager } from '../../auth/access';
 import { updateAsset } from '../../api/assets';
 import {
   listDbItems, listDbSpots, setSpotEndDate,
-  type DbItem, type DbSort, type DbSpot,
+  type DbFiles, type DbItem, type DbSort, type DbSpot,
 } from '../../api/databank';
 import { listProgramBlocks, type ProgramBlock } from '../../api/programBlocks';
 import { fmtDur, isValidTz, useDebounced, useMediaQuery } from './controlroom/shared';
@@ -97,6 +97,10 @@ export default function Databank() {
   const [find, setFind] = useState('');
   const search = useDebounced(find.trim(), 300);
   const [category, setCategory] = useState('');
+  // KBR Studio's ALL / Mpeg / Prsnt: every record, MPEG audio files only, playable files only
+  const [files, setFiles] = useState<DbFiles>('all');
+  const [goTo, setGoTo] = useState<string | null>(null);
+  const pendingRec = useRef<number | null>(null);
   const [sort, setSort] = useState<DbSort>('artist');
   const [desc, setDesc] = useState(false);
   const [page, setPage] = useState(0);
@@ -111,7 +115,7 @@ export default function Databank() {
     setTabRaw(t); setPage(0); setSel(null); setEditing(null); setCategory('');
     setSort(t === 'jingles' ? 'title' : 'artist'); setDesc(false);
   };
-  useEffect(() => { setPage(0); }, [search, category, sort, desc]);
+  useEffect(() => { setPage(0); }, [search, category, sort, desc, files]);
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(null), 5000);
@@ -121,8 +125,8 @@ export default function Databank() {
   const assetType = tab === 'jingles' ? 'jingle' : 'music';
   const itemsTab = tab === 'songs' || tab === 'jingles';
   const itemsQ = useQuery({
-    queryKey: ['databank-items', assetType, stationId, search, category, sort, desc, page],
-    queryFn: () => listDbItems({ asset_type: assetType, station_id: stationId || undefined, search, category, sort, desc, skip: page * PAGE, limit: PAGE }),
+    queryKey: ['databank-items', assetType, stationId, search, category, files, sort, desc, page],
+    queryFn: () => listDbItems({ asset_type: assetType, station_id: stationId || undefined, search, category, files, sort, desc, skip: page * PAGE, limit: PAGE }),
     enabled: itemsTab,
     placeholderData: prev => prev,
   });
@@ -151,6 +155,8 @@ export default function Databank() {
       rows = rows.filter(r => `${r.title} ${r.file} ${r.category ?? ''}`.toLowerCase().includes(s));
     }
     if (category) rows = rows.filter(r => (r.category ?? '').toLowerCase() === category.toLowerCase());
+    if (files === 'mpeg') rows = rows.filter(r => /\.(mp3|mp2|mpg|mpeg)$/i.test(r.file));
+    if (files === 'present') rows = rows.filter(r => !!r.file && (r.category ?? '').toLowerCase() !== 'do_not_play');
     const key = (r: DbSpot): string | number =>
       sort === 'type' ? (r.category ?? '').toLowerCase()
       : sort === 'length' ? r.length ?? 0
@@ -160,7 +166,7 @@ export default function Databank() {
       const x = key(a), y = key(b);
       return (x < y ? -1 : x > y ? 1 : 0) * (desc ? -1 : 1);
     });
-  }, [spotsQ.data, search, category, sort, desc]);
+  }, [spotsQ.data, search, category, files, sort, desc]);
 
   const blockRows = useMemo(() => {
     const rows: { key: string; block: ProgramBlock; time: string }[] = [];
@@ -229,6 +235,20 @@ export default function Databank() {
       setNotice({ ok: false, text: e?.response?.data?.detail ?? 'Could not change the end date.' });
     }
   };
+
+  const selectIndex = (i: number) => {
+    const id = ids[i];
+    if (!id) return;
+    setSel(id);
+    requestAnimationFrame(() => document.querySelector(`[data-row="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' }));
+  };
+  // "Go to record" on another page: select it once that page has loaded
+  useEffect(() => {
+    if (pendingRec.current === null || !itemsTab || itemsQ.isFetching) return;
+    const i = pendingRec.current;
+    pendingRec.current = null;
+    selectIndex(i);
+  });
 
   // Arrow keys move the selection; Space pre-listens
   const onKey = (e: React.KeyboardEvent) => {
@@ -440,8 +460,17 @@ export default function Databank() {
             <input ref={findRef} type="search" value={find} onChange={e => setFind(e.target.value)} placeholder="Find"
               aria-label="Find" data-testid="db-find"
               className="qn-field h-11 lg:h-8 px-2 text-[16px] lg:text-sm flex-1 min-w-[8rem] lg:flex-none lg:w-64" />
-            <button type="button" onClick={() => { setFind(''); setCategory(''); findRef.current?.focus(); }}
+            <button type="button" onClick={() => { setFind(''); setCategory(''); setFiles('all'); findRef.current?.focus(); }}
+              aria-pressed={files === 'all' && !find && !category}
               className="qn-btn h-11 lg:h-8 px-3 text-sm" title="Show every record again">ALL</button>
+            {tab !== 'blocks' && (
+              <>
+                <button type="button" onClick={() => setFiles(files === 'mpeg' ? 'all' : 'mpeg')} aria-pressed={files === 'mpeg'}
+                  data-testid="db-mpeg" className="qn-btn h-11 lg:h-8 px-3 text-sm" title="Mpeg: only MPEG audio files (.mp3, .mp2, .mpg)">Mpeg</button>
+                <button type="button" onClick={() => setFiles(files === 'present' ? 'all' : 'present')} aria-pressed={files === 'present'}
+                  data-testid="db-present" className="qn-btn h-11 lg:h-8 px-3 text-sm" title="Prsnt: only items whose file is there and playable (leaves out do_not_play)">Prsnt</button>
+              </>
+            )}
             {tab !== 'blocks' && (
               <select value={category} onChange={e => setCategory(e.target.value)} aria-label={tab === 'jingles' ? 'Group' : tab === 'spots' ? 'Category' : 'Type'}
                 className="qn-field h-11 lg:h-8 px-2 text-sm max-w-[11rem]" data-testid="db-type">
@@ -509,7 +538,27 @@ export default function Databank() {
           {itemsTab && (
             <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} className="qn-btn px-2 min-h-[32px]" aria-label="Next page">▶</button>
           )}
-          <span className="qn-sunken px-2 flex items-center">Rec {recIdx >= 0 ? page * PAGE * (itemsTab ? 1 : 0) + recIdx + 1 : 0}</span>
+          {goTo !== null ? (
+            <input type="number" min={1} max={Math.max(1, view)} autoFocus value={goTo} data-testid="db-goto"
+              aria-label="Go to record number" placeholder="Rec #"
+              onChange={e => setGoTo(e.target.value)}
+              onBlur={() => setGoTo(null)}
+              onKeyDown={e => {
+                e.stopPropagation();
+                if (e.key === 'Escape') setGoTo(null);
+                if (e.key !== 'Enter') return;
+                const n = Math.floor(Number(goTo));
+                setGoTo(null);
+                if (!Number.isFinite(n) || n < 1 || n > view) { setNotice({ ok: false, text: `There are ${view} records here.` }); return; }
+                const idx = n - 1;
+                if (itemsTab && Math.floor(idx / PAGE) !== page) { pendingRec.current = idx % PAGE; setPage(Math.floor(idx / PAGE)); }
+                else selectIndex(itemsTab ? idx % PAGE : idx);
+              }}
+              className="qn-field w-24 px-1 text-[16px] lg:text-[12px]" />
+          ) : (
+            <button type="button" onClick={() => setGoTo('')} className="qn-sunken px-2 flex items-center min-h-[32px]" data-testid="db-rec"
+              title="123: go to a record number">Rec {recIdx >= 0 ? (itemsTab ? page * PAGE : 0) + recIdx + 1 : 0}</button>
+          )}
           <span className="qn-sunken px-2 flex items-center" data-testid="db-view">View {view}</span>
           <span className="qn-sunken px-2 flex items-center" data-testid="db-tot">Tot {tot}</span>
           <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}

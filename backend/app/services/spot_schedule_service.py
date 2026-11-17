@@ -447,6 +447,11 @@ async def plan_for_station(
     db: AsyncSession, station: Station, days: int = HORIZON_DAYS, now: datetime | None = None
 ) -> tuple[list[Placement], list[Unplaced]]:
     now = now or datetime.now(UTC)
+    from app.services.station_modes import spots_on
+
+    if not spots_on(station):
+        # Spots mode off (control room): no sponsorship goes in the queue
+        return [], []
     schedules = await load_station_schedules(db, station.id)
     tz = station_tz(station.timezone)
     minutes = (station.automation_config or {}).get("ad_slot_minutes") or DEFAULT_SLOT_MINUTES

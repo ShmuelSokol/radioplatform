@@ -4,6 +4,7 @@ import { usePlayLog } from '../../../hooks/useQueue';
 import { useTimelinePreview } from '../../../hooks/useSchedules';
 import { useCreateLiveShow, useEndLiveShow, useLiveShows, useStartLiveShow } from '../../../hooks/useLiveShows';
 import { typeStyle } from './shared';
+import { useAlerts, useResolveAlert } from '../../../hooks/useAlerts';
 
 /* ── Play log ─────────────────────────────────────────────── */
 
@@ -202,6 +203,41 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
         </div>
         <Link to="/admin/live" className="block mt-3 px-1 text-sm text-cyan-300 hover:underline">Schedule or edit live shows</Link>
       </div>
+    </section>
+  );
+});
+
+/* ── Errors (KBR Studio's Errors button): open problems on this station ── */
+
+export const ErrorsPanel = memo(function ErrorsPanel({ stationId, stationTz, canSee }: {
+  stationId: string | null; stationTz?: string; canSee: boolean;
+}) {
+  const { data, isLoading, isError } = useAlerts(canSee ? { is_resolved: false, limit: 100 } : null);
+  const resolve = useResolveAlert();
+  const rows = (data?.alerts ?? []).filter(a => !a.station_id || a.station_id === stationId);
+  const sev = (s: string) => (s === 'critical' ? 'text-red-400' : s === 'warning' ? 'text-amber-300' : 'text-cyan-300');
+  return (
+    <section className="h-full overflow-y-auto overscroll-contain bg-[#0a0a28]" aria-label="Errors" data-testid="errors-panel">
+      {!canSee && <p className="p-4 text-sm text-gray-400">Errors are shown to managers.</p>}
+      {canSee && isLoading && <p className="p-4 text-sm text-gray-400">Loading…</p>}
+      {canSee && isError && <p className="p-4 text-sm text-red-300">Can't load the errors.</p>}
+      {canSee && !isLoading && !isError && rows.length === 0 && (
+        <p className="p-4 text-sm text-gray-400">No open errors for this station.</p>
+      )}
+      {rows.map(a => (
+        <div key={a.id} className="flex items-start gap-2 px-3 py-2 border-b border-[#15153a]">
+          <span className="w-[68px] shrink-0 tabular-nums text-xs text-gray-400 pt-0.5">
+            {new Date(a.updated_at || a.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', ...(stationTz ? { timeZone: stationTz } : {}) })}
+          </span>
+          <span className="flex-1 min-w-0 leading-tight">
+            <span className={`block text-sm font-bold ${sev(a.severity)}`}>{a.title}</span>
+            <span className="block text-xs text-gray-300 break-words">{a.message}</span>
+          </span>
+          <button type="button" onClick={() => resolve.mutate(a.id)} disabled={resolve.isPending}
+            className="qn-btn shrink-0 h-9 px-2 text-xs" aria-label={`Mark "${a.title}" as dealt with`}>Done</button>
+        </div>
+      ))}
+      {canSee && <Link to="/admin/alerts" className="block px-3 py-3 text-xs text-cyan-300 underline">All alerts</Link>}
     </section>
   );
 });

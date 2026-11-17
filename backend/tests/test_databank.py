@@ -124,3 +124,17 @@ async def test_day_log_is_one_station_day_oldest_first(client, auth_headers, db_
 async def test_databank_is_staff_only(client):
     r = await client.get("/api/v1/databank/items")
     assert r.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_mpeg_and_present_filters(client, auth_headers, db_session):
+    db_session.add_all([
+        _asset("Old mpg", file_path="https://x/a/old.mpg"),
+        _asset("Wave", file_path="https://x/a/wave.wav"),
+        _asset("Broken", file_path="https://x/a/broken.mp3", category="do_not_play"),
+    ])
+    await db_session.commit()
+    mpeg = (await client.get("/api/v1/databank/items?files=mpeg&sort=title", headers=auth_headers)).json()
+    assert [i["title"] for i in mpeg["items"]] == ["Broken", "Old mpg"]
+    present = (await client.get("/api/v1/databank/items?files=present&sort=title", headers=auth_headers)).json()
+    assert [i["title"] for i in present["items"]] == ["Old mpg", "Wave"]
