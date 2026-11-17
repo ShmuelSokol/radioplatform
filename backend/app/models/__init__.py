@@ -40,6 +40,7 @@ from app.models.program_block import ProgramBlock
 from app.models.scheduler_lease import SchedulerLease
 from app.models.site_release import SiteRelease
 from app.models.bug_report import BugReport
+from app.models.hs_softened import HsSoftened
 
 __all__ = [
     "User", "UserRole",
@@ -83,4 +84,5 @@ __all__ = [
     "SpotRecording",
     "ProgramBlock",
     "BugReport",
+    "HsSoftened",
 ]

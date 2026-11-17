@@ -358,6 +358,24 @@ async function desktop(browser, width, height) {
   await page.getByRole('tab', { name: 'Schedule' }).click();
   await page.getByText('Afternoon music').first().waitFor({ timeout: 5000 }).catch(() => {});
   check(`${tag}: schedule status shows`, await page.getByText('Afternoon music').count() === 1);
+  // Panic: a double-click is one tap, a Panic armed on one station never fires on another
+  const panics = () => backend.calls.filter(c => c.method === 'POST' && c.path.endsWith('/queue/panic'));
+  await page.getByTestId('panic').dblclick();
+  await page.waitForTimeout(600);
+  check(`${tag}: a double-click on Panic cuts nothing`, panics().length === 0 && (await page.getByTestId('panic').innerText()).includes('Tap again'));
+  await page.getByLabel('Station').first().selectOption({ label: 'Second Feed' });
+  await page.waitForTimeout(300);
+  check(`${tag}: switching station disarms Panic`, (await page.getByTestId('panic').innerText()).trim() === 'Panic');
+  await page.getByTestId('panic').click();
+  await page.waitForTimeout(100);
+  check(`${tag}: Panic armed on one station does not fire on the next`, panics().length === 0);
+  await page.getByLabel('Station').first().selectOption({ label: 'Kol Berama' });
+  await page.waitForTimeout(300);
+  await page.getByTestId('panic').click();
+  await page.waitForTimeout(500);
+  await page.getByTestId('panic').click();
+  await page.waitForTimeout(500);
+  check(`${tag}: two separate taps send one Panic for this station`, panics().length === 1 && panics()[0].path === `/stations/${SID}/queue/panic`, panics().map(c => c.path).join(','));
   // A station whose queue cannot be loaded is not shown as stopped with an empty queue
   await page.getByLabel('Station').first().selectOption({ label: 'Unreachable Feed' });
   await page.getByText(/Can't reach the station|Loading the queue/).first().waitFor({ timeout: 5000 }).catch(() => {});
