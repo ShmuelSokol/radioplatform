@@ -22,7 +22,6 @@ def app_log(caplog):
     lg.removeHandler(caplog.handler)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: APP_DEBUG defaults to true when unset (FastAPI debug + every SQL statement echoed)")
 def test_debug_is_off_unless_asked(monkeypatch):
     monkeypatch.delenv("APP_DEBUG", raising=False)
     assert Settings(_env_file=None).APP_DEBUG is False
@@ -120,7 +119,6 @@ def test_idle_connection_is_pinged_and_replaced_when_dead(monkeypatch):
     assert engine_mod.engine.pool._recycle == 300
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: SLOW QUERY log lines include raw parameters (emails, phone numbers) that bug reports copy")
 def test_slow_query_log_hides_personal_parameters(monkeypatch, app_log):
     caplog = app_log
     conn = SimpleNamespace(info={})

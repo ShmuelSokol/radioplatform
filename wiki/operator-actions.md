@@ -23,6 +23,22 @@ A repeat of the same `client_request_id` within 5 s returns the first answer wit
 `duplicate: true` and does nothing (double tap). Fire-now always goes on air, also during an
 automatic change. The guard is in memory, per process.
 
+## Removing what is on air (2026-11-17)
+
+`DELETE queue/{entry_id}` on the entry that is playing starts the next item at once, under
+`advance_lock`, with the same pick as Next (only blackout silence during a blackout; refill if
+the queue is empty). Before, the row went and nothing started: a browser station was silent
+until dead-air recovery (30 s). Engine stations are unchanged (the engine plays to the end).
+Deleting a library item that is on air (`DELETE /assets/{id}`) is refused with 409 ("press
+Next first"): the cascade would remove the playing entry. Tests:
+`tests/test_restart_holidays_timezones.py` (V1-43, V1-91).
+
+## Old /controls routes
+
+`/stations/{id}/controls/play-now` is fire-now (it calls `queue.fire_now`); it used to start
+an ffmpeg HLS player beside the queue. play, pause, stop and enqueue still drive the old Redis
+list player; with no Redis (production) they answer 409 with a reason instead of 500.
+
 ## Insert at a point
 
 `POST queue/insert {asset_id? , asset_ids?: [...], after_entry_id?: id | null}`. Assets go in,

@@ -2584,9 +2584,47 @@ async def remove_from_queue(
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
+    if entry.status == "playing" and not settings.engine_drives(station_id):
+        # Removing what is on air moves on to the next item at once, like Next; a
+        # browser station would otherwise be silent until dead-air recovery.
+        async with advance_lock(station_id):
+            await _remove_on_air_locked(db, station_id, entry)
+        return
     await db.delete(entry)
     await _replenish_queue(db, station_id)
     await db.commit()
+
+
+async def _remove_on_air_locked(db: AsyncSession, station_id, entry: QueueEntry) -> None:
+    await db.delete(entry)
+    await db.flush()
+    still_playing = (await db.execute(
+        select(QueueEntry.id)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .limit(1)
+    )).scalar_one_or_none()
+    if still_playing is not None:
+        await db.commit()
+        return
+    # During a blackout only its silence may start (same rule as Next)
+    blacked_out = await _is_blacked_out(db, station_id)
+    next_entry = await _pick_next_pending(db, station_id, datetime.now(timezone.utc), silence_only=blacked_out)
+    refilled = False
+    if not next_entry and not blacked_out:
+        next_entry = await _refill_for_next(db, station_id)
+        refilled = True
+    if next_entry is None:
+        if not refilled:
+            await _replenish_queue(db, station_id)
+        await db.commit()
+        return
+    mark_started(next_entry, datetime.now(timezone.utc))
+    await _drop_timed_twins(db, next_entry)
+    next_id = next_entry.id
+    await db.commit()
+    await _broadcast_now_playing_entry(db, station_id, next_id)
+    if not refilled:
+        _replenish_soon(station_id)
 
 
 @router.post("/start")

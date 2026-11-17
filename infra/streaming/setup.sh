@@ -30,11 +30,22 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q liquidsoap icecast2 nginx certbot python3-certbot-nginx curl ufw openssl
 
-# "<id>|<name>" per line, for the stations to play
-STATION_LINES="$(curl -fsSL "$BACKEND_URL/stations?limit=100" | WANT="$STATIONS" python3 -c '
-import json, os, sys
-data = json.load(sys.stdin)
-rows = data.get("stations", data) if isinstance(data, dict) else data
+# "<id>|<name>" per line, for the stations to play. The list is read page by page
+# (the backend returns at most 100 per call), so 'all' covers every station.
+STATION_LINES="$(BACKEND_URL="$BACKEND_URL" WANT="$STATIONS" python3 -c '
+import json, os, urllib.request
+base = os.environ["BACKEND_URL"]
+page_size = 100
+rows, skip = [], 0
+while True:
+    with urllib.request.urlopen(f"{base}/stations?skip={skip}&limit={page_size}", timeout=30) as resp:
+        data = json.load(resp)
+    page = data.get("stations", data) if isinstance(data, dict) else data
+    rows += page
+    skip += len(page)
+    total = data.get("total") if isinstance(data, dict) else None
+    if len(page) < page_size or (total is not None and skip >= total):
+        break
 want = os.environ["WANT"].strip()
 ids = None if want in ("", "all") else {w.strip() for w in want.split(",") if w.strip()}
 for r in rows:
