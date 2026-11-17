@@ -296,7 +296,7 @@ export default function Navbar() {
             {/* Hamburger button - shown on mobile (also to visitors: the public links are hidden on phones) */}
             {(
               <button onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu"
-                className="md:hidden text-gray-400 hover:text-white p-1">
+                className="md:hidden inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-gray-400 hover:text-white p-1">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {menuOpen ? (
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
