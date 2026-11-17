@@ -48,7 +48,7 @@ async def create_archive(
 @router.get("", response_model=ShowArchiveListResponse)
 async def list_archives(
     request: Request,
-    station_id: str | None = Query(None),
+    station_id: uuid.UUID | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     include_unpublished: bool = Query(False),
@@ -132,8 +132,12 @@ async def delete_archive(
 @router.get("/station/{station_id}/rss")
 async def podcast_rss(station_id: str, db: AsyncSession = Depends(get_db)):
     """Public: RSS feed for a station's show archives (podcast format)."""
+    try:
+        station_uuid = uuid.UUID(station_id)
+    except ValueError:
+        raise NotFoundError("Station not found")
     # Get station info
-    station_result = await db.execute(select(Station).where(Station.id == station_id))
+    station_result = await db.execute(select(Station).where(Station.id == station_uuid))
     station = station_result.scalar_one_or_none()
     if not station:
         raise NotFoundError("Station not found")
@@ -141,7 +145,7 @@ async def podcast_rss(station_id: str, db: AsyncSession = Depends(get_db)):
     # Get published archives
     result = await db.execute(
         select(ShowArchive).where(
-            ShowArchive.station_id == station_id,
+            ShowArchive.station_id == station_uuid,
             ShowArchive.is_published == True,
         ).order_by(ShowArchive.recorded_at.desc().nullslast()).limit(100)
     )
@@ -149,6 +153,10 @@ async def podcast_rss(station_id: str, db: AsyncSession = Depends(get_db)):
 
     # Build RSS XML
     from xml.sax.saxutils import escape
+
+    def attr(value: str) -> str:
+        """Escaped for a double-quoted XML attribute (a quote in a URL must not end it)."""
+        return escape(value, {'"': "&quot;"})
 
     items_xml = ""
     for a in archives:
@@ -164,12 +172,12 @@ async def podcast_rss(station_id: str, db: AsyncSession = Depends(get_db)):
     <item>
       <title>{escape(a.title)}</title>
       <description>{escape(a.description or '')}</description>
-      <enclosure url="{escape(a.audio_url)}" type="audio/mpeg" />
+      <enclosure url="{attr(a.audio_url)}" type="audio/mpeg" />
       <pubDate>{pub_date}</pubDate>
       <guid isPermaLink="false">{a.id}</guid>
       {duration}
       {f'<itunes:author>{escape(a.host_name)}</itunes:author>' if a.host_name else ''}
-      {f'<itunes:image href="{escape(a.cover_image_url)}" />' if a.cover_image_url else ''}
+      {f'<itunes:image href="{attr(a.cover_image_url)}" />' if a.cover_image_url else ''}
     </item>"""
 
     rss = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -180,7 +188,7 @@ async def podcast_rss(station_id: str, db: AsyncSession = Depends(get_db)):
     <language>en</language>
     <itunes:author>{escape(station.name)}</itunes:author>
     <itunes:category text="Music" />
-    {f'<itunes:image href="{escape(station.logo_url)}" />' if station.logo_url else ''}
+    {f'<itunes:image href="{attr(station.logo_url)}" />' if station.logo_url else ''}
     {items_xml}
   </channel>
 </rss>"""

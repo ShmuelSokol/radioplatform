@@ -41,6 +41,10 @@ async def create_queue(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_manager),
 ):
+    try:
+        asset_uuids = [uuid.UUID(str(a)) for a in body.asset_ids]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="One of the library item ids is not valid")
     queue = ReviewQueue(
         name=body.name,
         description=body.description,
@@ -51,10 +55,10 @@ async def create_queue(
     db.add(queue)
     await db.flush()
 
-    for i, asset_id in enumerate(body.asset_ids):
+    for i, asset_id in enumerate(asset_uuids):
         item = ReviewItem(
             queue_id=queue.id,
-            asset_id=uuid.UUID(asset_id),
+            asset_id=asset_id,
             position=i + 1,
         )
         db.add(item)

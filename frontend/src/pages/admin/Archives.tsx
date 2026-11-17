@@ -54,7 +54,7 @@ export default function AdminArchives() {
   const [stationFilter, setStationFilter] = useState<string>('');
 
   const { data: stationsData } = useStations();
-  const { data, isLoading } = useArchives(stationFilter ? { station_id: stationFilter } : undefined);
+  const { data, isLoading } = useArchives(stationFilter ? { station_id: stationFilter, include_unpublished: true } : { include_unpublished: true });
   const createMut = useCreateArchive();
   const updateMut = useUpdateArchive();
   const deleteMut = useDeleteArchive();
