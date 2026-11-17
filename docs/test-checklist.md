@@ -558,7 +558,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [x] B-STATIONS-12 ↳ changing timezone moves hourly time clips to the new local hour (_drop_wrong_hour_announcements) | modes: both | covered: tests/test_station_changes_on_air.py::test_timezone_change_moves_time_checks_to_the_new_local_hour
 - [ ] B-STATIONS-13 `DELETE /stations/{station_id}` [require_manager] delete | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
 - [ ] B-STATIONS-14 ↳ protected station: only admin may delete | modes: n.a. | covered: tests/test_station_permissions.py
-- [ ] B-STATIONS-15 ↳ delete cascades queue/schedules/now-playing without orphan errors in scheduler loop | modes: both | NOT COVERED
+- [x] B-STATIONS-15 ↳ delete cascades queue/schedules/now-playing without orphan errors in scheduler loop | modes: both | covered: tests/test_rule_fill_and_station_delete.py::test_deleting_a_station_removes_its_rows_and_the_scheduler_carries_on (FIXED: deleting a station that had a channel stream failed with a server error; the loaded channels were set to station_id NULL instead of deleted)
 
 ### streams.py (prefix `/stations`)
 - [ ] B-STREAMS-1 `GET /stations/{station_id}/stream` [PUBLIC] stream info | modes: both | covered: tests/test_stations.py
@@ -663,7 +663,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [x] B-JOB-50 Legacy Liquidsoap health check / push / skip only when LIQUIDSOAP_ENABLED (must stay off) | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_legacy_liquidsoap_is_off_by_default, ::test_legacy_liquidsoap_when_switched_on
 
 ### 2b. Queue replenish (`services/queue_replenish_service.py`)
-- [ ] B-JOB-51 requests_only station: fill from approved song requests / popular (popular_request_threshold, default 3) | modes: both | NOT COVERED
+- [x] B-JOB-51 requests_only station: fill from approved song requests / popular (popular_request_threshold, default 3) | modes: both | covered: tests/test_station_settings.py::test_requests_only_station_plays_requests_not_the_library, ::test_popular_request_threshold
 - [ ] B-JOB-52 Dated weather/time queued as ordinary songs are dropped (drop_dated_clips) | modes: both | covered: tests/test_schedule_refresh.py
 - [ ] B-JOB-53 Station with block playlists fills from them a few hours ahead even with generation off; >2x hours of old fill is replaced | modes: both | covered: tests/test_schedule_refresh.py
 - [ ] B-JOB-54 15 min before a block's playlist takes over, automatic songs are redrawn so the block starts on time (realign_before_block_change) | modes: both | covered: tests/test_block_on_time.py, tests/test_schedule_refresh.py
@@ -681,10 +681,10 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-66 Placeholders and do_not_play items never auto-queued; skipped if found at play time | modes: both | covered: tests/test_placeholder_never_auto.py, tests/test_do_not_play_and_codec.py, tests/test_no_test_items_in_fill.py
 - [ ] B-JOB-67 Playlist generation (playlist_generation.enabled): picks from block sequences, cursor saved, artist distance, min vote | modes: both | covered: tests/test_playlist_generation.py
 - [ ] B-JOB-68 Generation finds no sequence -> ordinary music fill only as far as `hours` | modes: both | covered: tests/test_playlist_generation.py
-- [ ] B-JOB-69 Rule-based 7-day fill: daypart, fixed_time, interval, rotation rules; time-aware across dayparts | modes: both | NOT COVERED
-- [ ] B-JOB-70 Global sponsors inserted only for stations using global rules | modes: both | NOT COVERED
-- [ ] B-JOB-71 oldies_only filter (oldies_min_years, default 10) | modes: both | NOT COVERED
-- [ ] B-JOB-72 No rules -> random music fill; library empty -> queue_empty alert | modes: both | NOT COVERED
+- [x] B-JOB-69 Rule-based 7-day fill: daypart, fixed_time, interval, rotation rules; time-aware across dayparts | modes: both | covered: tests/test_rule_fill_and_station_delete.py::test_dayparts_share_the_week_by_hours_owned, ::test_rotation_rule_puts_an_item_every_n_songs (BUG xfail: rotation items land after the whole 7-day fill, back to back), ::test_interval_rule_queues_its_item (BUG xfail: interval rules are never applied)
+- [x] B-JOB-70 Global sponsors inserted only for stations using global rules | modes: both | covered: tests/test_rule_fill_and_station_delete.py::test_global_sponsors_only_for_stations_on_global_rules
+- [x] B-JOB-71 oldies_only filter (oldies_min_years, default 10) | modes: both | covered: tests/test_station_settings.py::test_oldies_only_filters_by_release_date
+- [x] B-JOB-72 No rules -> random music fill; library empty -> queue_empty alert | modes: both | covered: tests/test_rule_fill_and_station_delete.py::test_no_rules_fills_a_week_of_random_music, ::test_empty_library_after_restart_raises_queue_empty_alert
 - [x] B-JOB-73 Replenish skipped during blackout after advance; serialized per station (_refill_lock); slow refill (>5 s) logged | modes: both | covered: tests/test_refill_legacy_ws_email.py::test_advance_tops_up_the_queue_but_not_during_blackout, ::test_refills_of_one_station_run_one_at_a_time, ::test_slow_refill_is_logged
 - [ ] B-JOB-74 Quick successive playlist edits share one background rebuild | modes: both | covered: tests/test_listeners_live.py
 
