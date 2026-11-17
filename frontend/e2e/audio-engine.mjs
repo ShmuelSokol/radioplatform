@@ -265,6 +265,35 @@ const SCENARIOS = {
     firstHeard: { src: 't', from: 2.8, to: 3.4 },
     overlapOf: ['t', 'd'], end: { src: 'd', minT: 6, maxT: 8.5 },
   },
+  // Listen page, a hard group at hh:00 (11:00 2026-11-17, Main): time check then the
+  // Daf Yomi announcement, both queued with the same preempt_at. Once the time check is
+  // on air, next_asset is the announcement with cut_at = that same (past) time. The
+  // announcement must still wait for the time check and be heard from its first word.
+  'second-item-of-a-timed-group-from-the-top': {
+    start: { ...D, nextId: 't' }, wait: 1, watch: 13, ranges: true,
+    change: (set, startA) => {
+      const due = inSeconds(3);
+      set({ ...D, nextId: 't', startedAt: startA, cut: { preempt_at: due, asset_id: 't' } });
+      setTimeout(() => set({ ...T, nextId: 'c', startedAt: due, cut: { preempt_at: due, asset_id: 'c' } }), 3350);
+      // the server moves on 0.3 s before the clip's end; its message lands 0.4 s later
+      setTimeout(() => set({ ...C, nextId: 'a', startedAt: inSeconds(-0.4), cut: null }), 3000 + 4700 + 400);
+    },
+    firstHeard: { src: 't', from: 2.8, to: 3.4 },
+    overlapOf: ['t', 'c'], noSeekOn: 'c', end: { src: 'c', minT: 3.5, maxT: 5.5 },
+  },
+  // Same, but the announcement's file is slow to arrive (it is only fetched once the
+  // time check is on air): it still starts from its first word, a moment late
+  'second-item-of-a-timed-group-slow-file': {
+    start: { ...D, nextId: 't' }, wait: 1, watch: 15, ranges: true, urlDelayFor: { c: 5000 }, maxSilence: 5.6,
+    change: (set, startA) => {
+      const due = inSeconds(3);
+      set({ ...D, nextId: 't', startedAt: startA, cut: { preempt_at: due, asset_id: 't' } });
+      setTimeout(() => set({ ...T, nextId: 'c', startedAt: due, cut: { preempt_at: due, asset_id: 'c' } }), 3350);
+      setTimeout(() => set({ ...C, nextId: 'a', startedAt: inSeconds(-0.4), cut: null }), 3000 + 4700 + 400);
+    },
+    firstHeard: { src: 't', from: 2.8, to: 3.4 },
+    overlapOf: ['t', 'c'], noSeekOn: 'c', end: { src: 'c', minT: 1, maxT: 2.5 },
+  },
   // Switching while the station's own crossfade is under way
   'switch-station-during-crossfade': {
     start: { ...A, nextId: 'b' }, wait: 17.5, watch: 4,
@@ -297,7 +326,7 @@ async function run(name, sc) {
   });
   await page.route('**/assets/*/audio-url', async (r) => {
     const id = r.request().url().split('/').slice(-2)[0];
-    await sleep(urlDelay);
+    await sleep(sc.urlDelayFor?.[id] ?? urlDelay);
     await r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: `/__tone/${id}.wav` }) });
   });
   await page.goto(`${base}e2e/audio-harness/index.html`);
@@ -346,7 +375,9 @@ async function run(name, sc) {
   }
   const audible = last.filter((d) => d.playing && d.gain > 0.05);
   const state = last.map((d) => `${d.src || '-'}${d.playing ? '' : '(stopped)'}@${d.t}`).join(' | ');
-  check(`${name}: never silent`, longestSilence < 0.5, `longest gap ${longestSilence.toFixed(1)} s`);
+  // sc.maxSilence: a file held back on purpose leaves that much quiet, no more
+  check(`${name}: ${sc.maxSilence ? `silent no longer than ${sc.maxSilence} s` : 'never silent'}`,
+    longestSilence < (sc.maxSilence ?? 0.5), `longest gap ${longestSilence.toFixed(1)} s`);
   check(`${name}: ends with only "${target}" on air, at the right position`,
     audible.length === 1 && audible[0].src === target && audible[0].t >= sc.end.minT && audible[0].t <= sc.end.maxT, state);
   if (sc.audibleWithin) {
