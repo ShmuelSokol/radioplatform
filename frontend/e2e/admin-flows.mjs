@@ -58,12 +58,9 @@ const VIEWS = {
 // Checks that fail because the SITE is wrong. Key = check name prefix, value = the bug.
 // A listed check that passes is reported as FIXED? so the list stays honest.
 const KNOWN_BUGS = {
-  'F-BLOCKS-5': 'songs added to a block ("+ Add song") never reach the queue: SchedulingService.get_next_asset_for_block has no caller; the queue fills from rotation',
   'F-STUDIO-1 dj': 'a DJ may open the recording studio and record, but Save is refused (POST /assets/upload is manager-only: 403 "Manager access required"); the take is lost',
   'V2-101 a11y-gaps': 'basic accessibility gaps (fields without labels, grey-on-dark text under 4.5:1, see the detail per page); totals printed after the a11y section',
   'V2-101 Esc': 'Esc does not close the New Archive, New Show or bug report dialogs',
-  'F-SPOTSCHED-1 dayparts': 'S-6: saving a spot schedule for all stations re-plans every active station\'s queue inside the request, one after another (api/v1/spot_schedules.py _refresh_queues); with 81 stations it took 1.9-3 s (limit 1 s); fast with a handful',
-  'V2-105':'the program guide lists stored times only: sunset/sunrise blocks show their placeholder time and overlapping blocks are both listed (priority ignored)',
 };
 
 // ── Result bookkeeping ──────────────────────────────────────────────────────

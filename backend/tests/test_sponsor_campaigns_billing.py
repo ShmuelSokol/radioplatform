@@ -471,7 +471,7 @@ async def test_campaign_create_by_manager_and_unlinked_sponsor(client, sponsor_l
     lh = {"Authorization": f"Bearer {create_access_token(str(lonely.id))}"}
 
     r = await client.post(f"{API}/campaigns", json={"name": "No sponsor"}, headers=mh)
-    assert r.status_code == 400
+    assert r.status_code == 422  # main (#169) answers 422 "Choose the sponsor"
     r = await client.post(f"{API}/campaigns", json={"name": "Ghost", "sponsor_id": str(uuid.uuid4())}, headers=mh)
     assert r.status_code == 404
     r = await client.post(f"{API}/campaigns", json={"name": "For Acme", "sponsor_id": str(sponsor.id)}, headers=mh)

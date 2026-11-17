@@ -77,7 +77,9 @@ async def test_only_every_station_staff_touch_every_station_spot_schedules(
     assert r.status_code == 403, r.text
 
     # Staff on every station, and admins, may
-    r = await client.patch(f"/api/v1/databank/spots/{spot.id}/end-date", json={"end_date": later}, headers=both)
+    r = await client.patch(
+        f"/api/v1/databank/spots/{spot.id}/end-date?station_id={web.id}", json={"end_date": later}, headers=both
+    )
     assert r.status_code == 200, r.text
     r = await client.post("/api/v1/spot-schedules", json=new, headers=admin)
     assert r.status_code == 201, r.text

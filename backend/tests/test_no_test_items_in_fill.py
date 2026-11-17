@@ -21,7 +21,7 @@ async def test_random_pick_skips_test_items(db_session):
     skipped = [
         Asset(id=uuid.uuid4(), title=f"ZZ Listening Test {c}", asset_type="spot", category=c,
               duration=30.0, file_path=f"https://cdn.example.com/{i}.mp3")
-        for i, c in enumerate(["test", "Test", "do_not_play", "weather_spot", "Carlebach"])
+        for i, c in enumerate(["test", "Test", "do_not_play", "weather_spot", "Carlebach", "kids"])
     ]
     db_session.add_all([keep, keep2, *skipped])
     await db_session.commit()
