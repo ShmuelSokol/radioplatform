@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -129,6 +129,63 @@ async def auto_generate_holidays_for_station(db: AsyncSession, station: Station,
     return created
 
 
+def _same_start(stored: datetime, made: datetime) -> bool:
+    """Stored start equals a generated one (to the minute). SQLite drops the zone of stored
+    rows and keeps the wall time, so a naive stored value is compared as wall time."""
+    if stored.tzinfo is None:
+        made = made.replace(tzinfo=None)
+    return abs((stored - made).total_seconds()) < 60
+
+
+async def drop_generated_holidays_for_location(
+    db: AsyncSession, station: Station, lat: float, lon: float, tz_name: str | None,
+) -> int:
+    """Delete the Shabbos / Yom Tov windows that were generated for this station at the given
+    (old) location: windows covering this station only, whose name and start match what the
+    generator makes for that place. Hand-made windows, windows shared with other stations,
+    and a window in progress (it ends at its own time) are left alone. Returns the count."""
+    from app.services.shabbos_service import (
+        generate_shabbos_windows,
+        generate_yom_tov_windows,
+        merge_overlapping_windows,
+    )
+
+    rows = (await db.execute(select(HolidayWindow))).scalars().all()
+    own = [w for w in rows
+           if isinstance(w.affected_stations, dict)
+           and [str(i) for i in w.affected_stations.get("station_ids") or []] == [str(station.id)]]
+    if not own:
+        return 0
+    last = max(w.start_datetime for w in own).date()
+    start_date = date.today() - timedelta(days=7)
+    end_date = max(last, start_date) + timedelta(days=1)
+    ids = [str(station.id)]
+    made = merge_overlapping_windows(
+        generate_shabbos_windows(lat, lon, tz_name, start_date, end_date, ids)
+        + generate_yom_tov_windows(lat, lon, tz_name, start_date, end_date, ids)
+    )
+    by_name: dict[str, list[datetime]] = {}
+    for m in made:
+        by_name.setdefault(m["name"], []).append(datetime.fromisoformat(m["start_datetime"]))
+
+    now = datetime.now(UTC)
+
+    def aware(t: datetime) -> datetime:
+        return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+    dropped = 0
+    for w in own:
+        if not any(_same_start(w.start_datetime, t) for t in by_name.get(w.name, [])):
+            continue                                    # hand-made, or not this place's
+        if aware(w.start_datetime) <= now < aware(w.end_datetime):
+            continue                                    # on air now: let it end
+        await db.delete(w)
+        dropped += 1
+    if dropped:
+        await db.flush()
+    return dropped
+
+
 async def create_station(db: AsyncSession, data: StationCreate) -> Station:
     existing = await db.execute(select(Station).where(Station.name == data.name))
     if existing.scalar_one_or_none():
@@ -201,10 +258,23 @@ async def update_station(db: AsyncSession, station_id: uuid.UUID, data: StationU
         from app.services.timezone_service import get_timezone_for_coords
         update_data["timezone"] = get_timezone_for_coords(new_lat, new_lon)
 
+    old_place = (station.latitude, station.longitude, station.timezone)
     for field, value in update_data.items():
         setattr(station, field, value)
     await db.flush()
     await db.refresh(station)
+
+    # Moved: the blackouts made for the old place go, the new place's are made now
+    # (not at the next daily extension), so Shabbos follows the station
+    if (station.latitude, station.longitude) != old_place[:2] and station.latitude and station.longitude:
+        try:
+            dropped = 0
+            if old_place[0] and old_place[1]:
+                dropped = await drop_generated_holidays_for_location(db, station, *old_place)
+            made = await auto_generate_holidays_for_station(db, station)
+            logger.info("Station %s moved: %d old blackout windows removed, %d made", station.name, dropped, made)
+        except Exception as e:
+            logger.warning("Blackout regeneration after moving station %s failed: %s", station.name, e)
     return station
 
 

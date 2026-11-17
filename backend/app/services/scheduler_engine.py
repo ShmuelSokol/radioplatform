@@ -4,6 +4,7 @@ This runs continuously and updates now-playing state when blocks change or asset
 """
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -19,6 +20,9 @@ from app.models.station import Station
 from app.models.queue_entry import resume_offset
 
 logger = logging.getLogger(__name__)
+
+# Longest wait between tries of a daily weather readout that could not be made
+READOUT_RETRY_MAX_SECONDS = 30 * 60
 
 
 async def _safe_rollback(db: AsyncSession) -> None:
@@ -50,6 +54,8 @@ class SchedulerEngine:
         self._last_holiday_check: Optional[datetime] = None
         # Weather readout daily generation check: station_id → date string
         self._last_readout_check: dict[str, str] = {}
+        # Failed readouts: station_id -> (date string, failures so far, monotonic time of next try)
+        self._readout_retry: dict[str, tuple[str, int, float]] = {}
         # Precise advance timers: station_id → TimerHandle
         self._advance_timers: dict[str, asyncio.TimerHandle] = {}
         # station -> (due time, timer) for the next timed item (hard start or hard_by)
@@ -262,16 +268,37 @@ class SchedulerEngine:
                 if local_now.hour < gen_hour or (local_now.hour == gen_hour and local_now.minute < gen_min):
                     continue
 
+                # A failed attempt waits out its back-off before the next one (same day only)
+                retry = self._readout_retry.get(station_key)
+                if retry and retry[0] == today_str and time.monotonic() < retry[2]:
+                    continue
+
+                made = False
                 try:
+                    from app.models.weather_readout import WeatherReadout
                     from app.services.weather_readout_service import generate_readout_for_station
                     readout = await generate_readout_for_station(db, station, local_now.date())
                     if readout:
                         await db.commit()
                         logger.info("Auto-generated weather readout for station %s", station.name)
+                        made = True
+                    else:
+                        # None is either "already there" (done) or "could not be made" (retry)
+                        made = (await db.execute(select(WeatherReadout.id).where(
+                            WeatherReadout.station_id == station.id,
+                            WeatherReadout.readout_date == local_now.date(),
+                        ).limit(1))).scalar_one_or_none() is not None
                 except Exception as e:
                     logger.warning("Weather readout generation failed for station %s: %s", station.name, e)
 
-                self._last_readout_check[station_key] = today_str
+                if made:
+                    self._last_readout_check[station_key] = today_str
+                    self._readout_retry.pop(station_key, None)
+                else:
+                    # Try again later today: the next pass first, then 1, 2, 4 ... up to 30 minutes
+                    failures = retry[1] + 1 if retry and retry[0] == today_str else 1
+                    wait = 0 if failures == 1 else min(READOUT_RETRY_MAX_SECONDS, 60 * 2 ** (failures - 2))
+                    self._readout_retry[station_key] = (today_str, failures, time.monotonic() + wait)
 
         except Exception as e:
             logger.error("Weather readout generation check failed: %s", e, exc_info=True)
@@ -310,6 +337,9 @@ class SchedulerEngine:
                 except Exception:
                     local_now = datetime.now(timezone.utc)
 
+                # Only on its own day: tomorrow's readout, recorded tonight, waits for tomorrow
+                if readout.readout_date != local_now.date():
+                    continue
                 local_time = local_now.time()
                 if local_time >= readout.queue_time:
                     entry = QueueEntry(

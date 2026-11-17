@@ -137,6 +137,7 @@ export default function ProgramGuide() {
           <select
             value={selectedStation}
             onChange={(e) => setSelectedStation(e.target.value)}
+            aria-label="Station"
             className="kbr-select flex-1 h-11 bg-[#12123a] border border-[#2a2a5e] text-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 transition"
           >
             {stationsLoading && <option value="">Loading stations...</option>}
@@ -153,6 +154,7 @@ export default function ProgramGuide() {
             type="date"
             value={selectedDate}
             onChange={(e) => { setSelectedDate(e.target.value); setDatePicked(true); }}
+            aria-label="Date"
             className="bg-[#12123a] border border-[#2a2a5e] text-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 transition"
           />
         </div>
