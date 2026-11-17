@@ -34,3 +34,5 @@ dropped when the shiur ended exactly at the group) is fixed in PR 191. Scenarios
 stack one after another, so the song rotation carries over: a check like "the cut song not
 heard again" can fail when the next song happens to be the same one (three_item_timed_group
 passed alone).
+
+Added 2026-11-17: `output_limiter` (true-peak limiter), `next_after_idle` (the backend's kept connection after 35 s idle), `next_twice` (a second Next 0.5 to 5 s after a Next; OPEN: lost within about 3 s, the crossfade window). `engine_crash_restart` also presses Next right after the restart. `fit_before_hour` (PR 221: a long item that would start just before a hard time check is swapped with a short song while the engine holds the next one; the time check stays on its second).

@@ -209,6 +209,7 @@ radioplatform/
 | upcoming_analysis.py | Analyses the item on air and the next one in the background when their audio analysis is missing or older than `ANALYSIS_VERSION`, so song changes use real end and crossfade points (see `wiki/audio-engine.md`) |
 | last_played.py | When each item last aired per station, kept in memory: one full read per station per process (and hourly), then only new plays are fetched. Used by playlist and program-block rotation and `GET /queue/last-played` |
 | long_items.py | What a hard timed item does to a shiur or story on air: station `automation_config.timed_during_long_items` = pause (default; it resumes where it stopped), wait or cut; a soft item due with more than 5 min of the shiur left pauses it too (see `wiki/hourly-slots.md`) |
+| hour_fit.py | Shortly before a hard timed item, swaps queue positions so a song (or pair) that ends near it replaces one that would be faded soon after starting; automatic songs only, both players; `automation_config.fit_before_hard_items: false` switches it off (see `wiki/hourly-slots.md`) |
 | timed_groups.py | A hard timed group due while an earlier short one still plays is moved to follow it (browser check 90 s ahead, engine before hand-over; the engine gets it at the first group's time) (see `wiki/hourly-slots.md`) |
 | tail_analysis.py | Song end and crossfade point from HTTP range reads (MP3 header + last 20 s), so re-analysis does not download whole files |
 | call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |

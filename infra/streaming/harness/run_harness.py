@@ -871,6 +871,49 @@ async def sc_song_spans_hour(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
 
 
+async def sc_fit_before_hour(h: Harness) -> None:
+    """PR 221 on the engine (Jerusalem 20:58:59Z: a 5-minute song started 61 s before the
+    hard 21:00 time check). A long item due to start 38 s before a hard time check is
+    swapped with a 40 s song further down, without touching the song the engine already
+    holds; the time check still airs on its second and nothing is silent."""
+    name = "fit_before_hour"
+    await wait_music(h)
+    await h.clear_pending()
+    auto = {"source": "auto"}
+    await h.queue([("song6", dict(auto)), ("song2", dict(auto)), ("story", dict(auto)),
+                   ("song5", dict(auto)), ("song4", dict(auto))])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    t0 = await h.wait_on_air("song6", 30)
+    if t0 is None:
+        h.check(name, False, "song6 never went on air")
+        return
+    # song6 ends at +37, song2 at +74: the story would start there, 38 s before the hour
+    due = datetime.fromtimestamp(t0 + 112, UTC)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + 14)
+    starts = await h.started_times("time", due.timestamp() - 5)
+    late = starts[0][0] - due.timestamp() if starts else None
+    h.check(name, late is not None and abs(late) <= 1.0,
+            f"time check {'never' if late is None else f'{late:+.1f} s'}")
+    heard = h.heard(t0 + 2, due.timestamp() + 12)
+    h.print_timeline(heard, due.timestamp())
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    clock = tone_name(TONES["time"][0])
+    before = runs[:runs.index(clock)] if clock in runs else runs
+    h.check(name, tone_name(TONES["story"][0]) not in before,
+            f"the story did not start before the time check: {runs}")
+    h.check(name, bool(before) and before[-1] == tone_name(TONES["song5"][0]),
+            f"the 40 s song was moved up and was on air at the hour: {before}")
+    s5 = await h.started_times("song5", t0)
+    lost = (s5[0][0] + 40 - due.timestamp()) if s5 else None
+    h.check(name, lost is not None and lost <= 15.0,
+            f"it lost {'?' if lost is None else f'{lost:.0f}'} s to the time check (the story would have lost 112 s)")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
 async def sc_soft_waits_for_song(h: Harness) -> None:
     name = "soft_timed_waits_for_song"
     await wait_music(h)
@@ -1140,6 +1183,11 @@ async def sc_engine_starts_backend_down(h: Harness) -> None:
             f"the site shows the item that started after the return ({st.asset.title if st else None})")
     playing = [e for e in await h.rows() if e.status == "playing"]
     h.check(name, len(playing) == 1, f"one item on air ({len(playing)})")
+    # The backend keeps one connection to the engine open (PR 212); the restart killed
+    # it. The first command after it must still arrive: Next changes the song
+    took = await _next_changes_song(h)
+    h.check(name, took is not None and took <= 4.0,
+            f"Next right after the restart: {'no change' if took is None else f'{took:.1f} s'}")
     await asyncio.sleep(max(0, due.timestamp() - time.time()) + 10)
     starts = await h.started_times("time", due.timestamp() - 5)
     late = starts[0][0] - due.timestamp() if starts else None
@@ -1469,6 +1517,52 @@ async def sc_lane_levels(h: Harness) -> None:
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
     await asyncio.sleep(2)
 
+async def _next_changes_song(h: Harness, limit: float = 8.0) -> float | None:
+    """Press Next on the site; seconds until another item is on air (None = never)."""
+    before = await h.on_air()
+    t0 = time.time()
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    while time.time() - t0 < limit:
+        cur = await h.on_air()
+        if cur is not None and (before is None or cur.id != before.id):
+            return time.time() - t0
+        await asyncio.sleep(0.1)
+    return None
+
+
+async def sc_next_after_idle(h: Harness) -> None:
+    """PR 212: the backend's kept connection to the engine expires after 30 s without
+    use. A Next after 35 s with no operator command still changes the song at once."""
+    name = "next_after_idle"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("story", {}), ("song5", {}), ("song6", {})])
+    took = await _next_changes_song(h)
+    h.check(name, took is not None, "story on air")
+    await asyncio.sleep(35)
+    took = await _next_changes_song(h)
+    h.check(name, took is not None and took <= 3.0,
+            f"Next after 35 s idle: {'no change' if took is None else f'{took:.1f} s'}")
+
+
+async def sc_next_twice(h: Harness) -> None:
+    """A second Next shortly after the first also changes the item (an operator stepping
+    through items). Found 2026-11-17: 0.3 s after a Next the second one answered
+    "Skipped" and nothing changed."""
+    name = "next_twice"
+    for gap in (5.0, 3.5, 2.0, 0.5):
+        await wait_music(h)
+        await h.clear_pending()
+        await h.queue([("song2", {}), ("song3", {}), ("song4", {}), ("song5", {})])
+        await asyncio.sleep(3)
+        first = await _next_changes_song(h)
+        await asyncio.sleep(gap)
+        second = await _next_changes_song(h)
+        h.check(name, first is not None and second is not None and second <= 3.0,
+                f"second Next {gap} s after the first changed the item: "
+                f"{'no change in 8 s' if second is None else f'{second:.1f} s'}")
+
+
 async def sc_engine_crash_restart(h: Harness) -> None:
     """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
     the backend up. It says hello, plays station music (not emergency files) within a few
@@ -1675,6 +1769,9 @@ SCENARIOS = {
     "block_with_very_slow_shiur": lambda h: sc_block_with_slow_shiur(h, 45.0),
     "blackout_ended_early": sc_blackout_ended_early,
     "output_limiter": sc_output_limiter,
+    "fit_before_hour": sc_fit_before_hour,
+    "next_after_idle": sc_next_after_idle,
+    "next_twice": sc_next_twice,
     "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,

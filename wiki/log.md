@@ -21,6 +21,7 @@ UPDATE 2026-11-17 bug-reports.md, client-ip.md report number has a unique key (r
 UPDATE 2026-11-17 playlist-generation.md, spot-schedules.md a block's own songs ("+ Add song") now reach the queue in its playback mode (a block naming a working playlist keeps it); all-station spot saves refresh queues in the background after commit; deleting an item a spot schedule or program block uses is refused (409)
 UPDATE 2026-11-17 playlist-generation.md schedule, block and "+ Add song" saves answer at once; the queue rebuild runs in the background like playlist edits (they took 6-20 s live)
 UPDATE 2026-11-17 playlist-generation.md queue redraw swaps old songs for new in one transaction and keeps the next song (Jerusalem had 0 songs for ~60 s after a block edit)
+INGEST 2026-11-17 hourly-slots.md hour_fit.py: songs before a hard timed item are fitted to the time left by swapping queue positions (5-min song was cut after 61 s at 21:00 on Jerusalem); pick rules untouched, both players
 INGEST 2026-11-17 hourly-slots.md a hard group due while an earlier short group plays now follows it (timed_groups.space_hard_groups); the engine is handed it at the first group's time so it stays in the same take-over
 INGEST 2026-11-15 streaming-architecture.md Liquidsoap wiring can't be switched on as-is: _advance_queue re-pushes the current track every 3s poll, two clocks (DB duration vs engine), telnet 1234 open with no auth. Plan: engine pulls next track + reports real starts.
 UPDATE 2026-11-15 hourly-slots.md Uploaded weather spots: PUT /weather-spots/{date} replaces the day's weather asset in place (Shprach voice); ElevenLabs is the fallback.
@@ -116,6 +117,7 @@ UPDATE 2026-11-16 hourly-slots.md automatic time/weather entries now get timing_
 UPDATE 2026-11-16 audio-engine.md Listen mid-item in Safari: decks started inside the click, graph built before resume()
 INGEST 2026-11-16 control-room.md KBR Studio look (classic.css, desktop layout, row heights tied to ROW_*); jingle cart hides dated time/weather recordings via hide_generated
 UPDATE 2026-11-16 audio-engine.md hard timed items preloaded on the idle deck 60 s ahead
+UPDATE 2026-11-17 deploys.md the unused Vercel project studio-kolbramah-api reports its production address as backend-gamma-six-68.vercel.app, so the ignore script now also skips backend-*
 INGEST 2026-11-16 control-room.md queue polls only the first 150 rows; whole queue on scroll-to-end or day pick, back to 150 at the top
 INGEST 2026-11-16 control-room.md station name is spelled Kol B'ramah in all UI text (Shmuel); TTS keeps the phonetic Kohl Baramah; station/asset names in the database are data, renamed there
 INGEST 2026-11-16 playlist-generation.md schedule/block/playlist changes regenerate unplayed automatic songs (schedule_refresh_service); blocks with playlists turn generation on; gaps play any music
@@ -235,3 +237,5 @@ INGEST 2026-11-17 streaming-architecture.md engine items analysed before /next h
 INGEST 2026-11-17 program-blocks.md announcement left out when its programme has nothing to play; the hourly 'KBR schedule: Daf Yomi' clip is a separate block (data)
 INGEST 2026-11-17 streaming-architecture.md setup.sh rerun restarted Icecast + all engines at once (50 s off air, catch-up 7.6 s on 1 core); now script checked first, unchanged engines left running, changed ones one at a time
 INGEST 2026-11-17 streaming-architecture.md one MP3 encode shared by Icecast and HLS (ffmpeg.encode.audio + %audio.copy): output chain 14.9% -> 8.7% of a core; copied stream needs ice-bitrate header and fallible outputs
+INGEST 2026-11-17 engine-harness.md next_twice: a Next within ~3 s of a Next is lost on the engine (crossfade window); next_after_idle and Next-after-restart pass with PR 212's kept connection
+INGEST 2026-11-17 engine-harness.md fit_before_hour: PR 221's song fitting checked on the real engine (story swapped behind a 40 s song, time check +0.1 s, no silence)
