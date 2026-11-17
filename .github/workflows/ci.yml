@@ -81,7 +81,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://radio:radio@localhost:5432/radioplatform
           REDIS_URL: redis://localhost:6379/0
-        run: pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short --durations=25
 
   frontend-lint:
     runs-on: ubuntu-latest
