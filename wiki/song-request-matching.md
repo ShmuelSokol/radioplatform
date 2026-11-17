@@ -29,6 +29,12 @@ it cannot choose a candidate it was never shown.
 5 "B'tzeis Yisroel". Duplicates crowd out the candidate list and spread any ranking
 signal across interchangeable rows.
 
+**Fixed 2026-11-17 — "Song by Artist" typed in the title box.** With the artist box
+empty, the artist part counted against the title and an empty artist scored 0, so
+"One day by matisyahu" topped out near 0.36. `split_title_artist` now gives a second
+reading (title "One day", artist "matisyahu"); the better of the two readings counts.
+Matching still runs only once, at submit; approving an unmatched request queues nothing.
+
 ## Conclusion
 
 Selection is the cheap win; **recall is the real ceiling**. A smarter selection layer
