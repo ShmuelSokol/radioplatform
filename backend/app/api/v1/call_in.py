@@ -25,14 +25,18 @@ _recent: dict[str, deque] = {}
 
 
 def _rate_limited(key: str) -> bool:
+    """Has this address made RATE_MAX accepted calls in the window? Only accepted
+    calls count (see _count_call): a listener who tried before the show started, or
+    while calls were closed, is not locked out when it opens."""
     now = time.time()
     q = _recent.setdefault(key, deque())
     while q and q[0] < now - RATE_WINDOW_SECONDS:
         q.popleft()
-    if len(q) >= RATE_MAX:
-        return True
-    q.append(now)
-    return False
+    return len(q) >= RATE_MAX
+
+
+def _count_call(key: str) -> None:
+    _recent.setdefault(key, deque()).append(time.time())
 
 
 class WebCallIn(BaseModel):
@@ -45,7 +49,8 @@ async def start_web_call(station_id: uuid.UUID, body: WebCallIn, request: Reques
                          db: AsyncSession = Depends(get_db)):
     """Join the queue of the station's live show. Returns the call and the token its
     page uses on /ws/live/call/{call_id}."""
-    if _rate_limited(client_ip(request) or "?"):
+    rate_key = client_ip(request) or "?"
+    if _rate_limited(rate_key):
         raise HTTPException(429, "Too many calls in a few minutes. Please wait a little and try again.")
     show = (await db.execute(
         select(LiveShow).where(LiveShow.station_id == station_id, LiveShow.status == LiveShowStatus.LIVE).limit(1)
@@ -54,6 +59,7 @@ async def start_web_call(station_id: uuid.UUID, body: WebCallIn, request: Reques
         raise HTTPException(409, "There is no live show on this station right now.")
     if not show.calls_enabled:
         raise HTTPException(409, "This show is not taking calls.")
+    _count_call(rate_key)
     now = datetime.now(timezone.utc)
     call = CallInRequest(
         id=uuid.uuid4(), live_show_id=show.id, caller_phone=WEB_CALLER_PHONE,

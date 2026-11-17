@@ -91,6 +91,8 @@ class Stack:
         self.slow_started = 0.0
         # true = the backend cannot be reached from the engine (every call answers 502)
         self.backend_down = False
+        # file name -> seconds the audio server waits before sending it (a slow download)
+        self.slow_files: dict[str, float] = {}
 
     # audio files
     def make_audio(self) -> None:
@@ -114,10 +116,17 @@ class Stack:
 
     def serve_audio(self) -> None:
         audio_dir = str(self.audio)
+        stack = self
 
         class Handler(SimpleHTTPRequestHandler):
             def __init__(self, *a, **k):
                 super().__init__(*a, directory=audio_dir, **k)
+
+            def do_GET(self):  # noqa: N802
+                wait = stack.slow_files.get(self.path.strip("/").split("?")[0], 0.0)
+                if wait:
+                    time.sleep(wait)
+                super().do_GET()
 
             def log_message(self, *a):
                 pass
@@ -852,6 +861,11 @@ async def sc_three_item_group(h: Harness) -> None:
     name = "three_item_timed_group"
     await wait_music(h)
     cut = await h.on_air()
+    # The songs after the group must be other songs: scenarios share one rotation, and the
+    # next song being the same one as the cut song read as "the cut song came back"
+    await h.clear_pending()
+    await h.queue([(n, {}) for n in ("song1", "song2", "song3", "song4", "song5", "song6")
+                   if h.assets[n] != cut.asset_id][:4])
     t1 = at(20)
     await h.queue([(n, {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})
                    for n in ("time", "weather", "announce")])
@@ -1019,6 +1033,52 @@ async def sc_engine_starts_backend_down(h: Harness) -> None:
             f"{'never' if late is None else f'{late:+.1f} s'}")
 
 
+async def sc_slow_timed_file(h: Harness) -> None:
+    """V1-8: the time check's file takes longer to arrive than its lead (it is handed over
+    about 20 s ahead and its download takes 23 s). It must still air as soon as it is
+    there, not wait for the next group, and the music must not fall silent meanwhile."""
+    name = "slow_timed_file"
+    await wait_music(h)
+    due = at(20)
+    h.stack.slow_files["time.mp3"] = 23.0
+    try:
+        await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+        await asyncio.sleep(max(0, due.timestamp() - time.time()) + 20)
+    finally:
+        h.stack.slow_files.pop("time.mp3", None)
+    starts = await h.started_times("time", due.timestamp() - 5)
+    late = starts[0][0] - due.timestamp() if starts else None
+    h.check(name, late is not None and late <= 8.0,
+            f"slow time check aired once its file arrived: due {_fmt(due.timestamp())}, "
+            f"{'never' if late is None else f'{late:+.1f} s'}")
+    heard = h.heard(due.timestamp() - 3, due.timestamp() + 18)
+    h.print_timeline(heard, due.timestamp())
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "time" in names, f"the time check was heard: {names}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+
+
+async def sc_queue_change_drops_preloaded(h: Harness) -> None:
+    """B-MODE-7 / V1-2: the engine pre-loads the next song as soon as one starts. When the
+    queue changes (operator insert, redraw) the backend flushes it; the song that plays next
+    must be the new head of the queue, not the one pre-loaded before the change."""
+    name = "queue_change_drops_preloaded"
+    await wait_music(h)
+    await asyncio.sleep(12)  # long enough for the next song to be pre-loaded
+    cur = await h.on_air()
+    await h.clear_pending()  # deletes the old queue and flushes the engine
+    new_head = next(n for n in ("song6", "song5", "song4") if h.assets[n] != cur.asset_id)
+    await h.queue([(new_head, {}), ("song3", {}) if new_head != "song3" else ("song2", {})])
+    song_end = cur.started_at.timestamp() + (cur.asset.duration or 40)
+    await asyncio.sleep(max(0, song_end - time.time()) + 8)
+    nxt = await h.on_air()
+    h.check(name, bool(nxt) and nxt.asset_id == h.assets[new_head],
+            f"after the change the new head aired ({new_head}); on air: {nxt.asset.title if nxt else None}")
+    tl = [n for _, n in timeline(h.heard(song_end + 2, song_end + 6))]
+    h.check(name, bool(tl) and tl[-1] == new_head, f"and is what is heard: {tl}")
+
+
 SCENARIOS = {
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
@@ -1038,6 +1098,8 @@ SCENARIOS = {
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
     "backend_unreachable": sc_backend_unreachable,
     "control_endpoints": sc_control_endpoints,
+    "slow_timed_file": sc_slow_timed_file,
+    "queue_change_drops_preloaded": sc_queue_change_drops_preloaded,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
