@@ -45,6 +45,8 @@ Category **do_not_play** (any case, `NEVER_AUTO_CATEGORIES`) is in `not_placehol
 
 Uploads are checked by codec, not extension: `convert_audio` probes the first audio stream and re-encodes when a file named `.mp3` is not MP3 (160 old files were MP2 inside `.mp3`; Safari and the engine refuse those). `.mp2`/`.mpg` uploads now become MP3 instead of being kept as MP2.
 
+Since 2026-11-17 (library tests): the upload form's "MP2" choice is stored as MP3 too (before, the choice won and MP2 was stored). A file FFmpeg cannot read (PDF, image, broken file) raises `UnreadableAudioError` in `convert_audio` and `/assets/upload` answers 415 with nothing stored; FFmpeg failing on a readable file is refused the same way (the original used to be stored under a success message). Only a machine with no FFmpeg at all keeps the old store-as-is fallback. Uploads over `MAX_UPLOAD_MB` (600) get 413 before the file is read; an empty file 422. Open owner question: "Keep Original" of an MP2 file and the OGG choice still store formats Safari or the engine may not play (strict xfail in `tests/test_library_assets.py`).
+
 ## Editing steps is instant
 
 Adding, removing or moving a step changes the cached playlists before the server answers (`usePlaylists.ts`, optimistic with rollback on error). The server answers at once too: the queue rebuild after a playlist edit runs 1.5 s later in its own session (`_schedule_refresh` in `api/v1/playlists.py`), and edits within that window share one rebuild per station. Tests set `REFRESH_INLINE = True` (conftest) to see the rebuilt queue in the response.

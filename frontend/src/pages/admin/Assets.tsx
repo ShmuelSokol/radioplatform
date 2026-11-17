@@ -705,6 +705,11 @@ export default function Assets() {
                       setDeletingId(asset.id);
                       deleteMutation.mutate(asset.id, {
                         onSettled: () => setDeletingId(null),
+                        // 409: on air, or used by a spot schedule / program block (the reason names them)
+                        onError: (err: unknown) => {
+                          const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+                          alert(typeof detail === 'string' ? detail : 'Could not delete this item');
+                        },
                       });
                     }}
                     disabled={deletingId === asset.id}
