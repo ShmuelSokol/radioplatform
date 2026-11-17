@@ -6,7 +6,7 @@ import { useStations } from '../../hooks/useStations';
 import {
   useQueue, useLastPlayed, useSkipCurrent, useRemoveFromQueue, useStartPlayback,
   useMoveUp, useMoveDown, useWeatherPreview, useReorderDnd,
-  QUEUE_ALL_ROWS, QUEUE_FIRST_ROWS,
+  QUEUE_ALL_ROWS, QUEUE_FIRST_ROWS, applyActionQueue,
 } from '../../hooks/useQueue';
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
@@ -535,8 +535,7 @@ export default function Dashboard() {
     setLoopBusy(true);
     try {
       const res = await loopCurrent(sid, !looping);
-      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
-      else refreshQueue();
+      if (!applyActionQueue(qc, sid, res.queue)) refreshQueue();
       setToast(res.loop
         ? { text: 'Loop is on: this item repeats until you switch Loop off or press Next.', type: 'warn' }
         : { text: 'Loop is off. This play finishes, then the queue carries on.', type: 'ok' });
@@ -571,8 +570,7 @@ export default function Dashboard() {
     setModesBusy(true);
     try {
       const res = await setStationModes(sid, next);
-      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
-      else refreshQueue();
+      if (!applyActionQueue(qc, sid, res.queue)) refreshQueue();
       if (next.hard_start !== undefined) {
         setToast(res.modes.hard_start
           ? { text: 'HS is on: the time check and hard blocks start on the second again.', type: 'ok' }
@@ -596,8 +594,7 @@ export default function Dashboard() {
     setModesBusy(true);
     try {
       const res = await panicRequest(sid);
-      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
-      else refreshQueue();
+      if (!applyActionQueue(qc, sid, res.queue)) refreshQueue();
       // The server logs a "Panic pressed" alert: show it in the Errors tab now (F-MODES-42)
       void qc.invalidateQueries({ queryKey: ['alerts'] });
       setToast(res.message === 'Skipped'

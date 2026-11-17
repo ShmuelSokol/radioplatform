@@ -1960,11 +1960,17 @@ def _replenish_soon(station_id, rebroadcast: bool = False) -> None:
     task.add_done_callback(_background.discard)
 
 
+# Rows of the queue sent back with an action: what the control room shows and polls
+# (frontend QUEUE_FIRST_ROWS). It was 2000: on a two-day queue every Next sent ten
+# times what the screen had loaded (790 KB against 79 KB).
+ACTION_QUEUE_ROWS = 150
+
+
 async def _queue_after_action(db: AsyncSession, station_id) -> dict | None:
-    """The same body as GET /queue, returned with an action's response so the
-    client does not need a second request to show the result."""
+    """The same body as GET /queue (its first rows), returned with an action's
+    response so the client does not need a second request to show the result."""
     try:
-        return await _get_queue_impl(station_id, 2000, db)
+        return await _get_queue_impl(station_id, ACTION_QUEUE_ROWS, db)
     except Exception as exc:
         logger.warning("Queue snapshot after action failed: %s", exc)
         return None

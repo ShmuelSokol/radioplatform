@@ -196,6 +196,8 @@ export function makeStation(opts = {}) {
       asset: { id: a.id, title: a.title, artist: a.artist, duration: a.duration, asset_type: a.asset_type, category: a.category, intro_seconds: a.intro_seconds ?? null },
     };
   };
+  // Rows of the queue an action sends back, as the real server (queue.py ACTION_QUEUE_ROWS)
+  const ACTION_QUEUE_ROWS = 150;
   s.view = (limit = Infinity) => {
     const list = [playing(), ...pending()].filter(Boolean);
     let cursor = Date.now();
@@ -323,16 +325,16 @@ export function makeStation(opts = {}) {
       if (cur) cur.status = 'skipped';
       e.status = 'playing'; e.started_at = new Date().toISOString();
       loopId = null;
-      const done = { id: e.id, position: e.position, on_air: true, queue: s.view() };
+      const done = { id: e.id, position: e.position, on_air: true, queue: s.view(ACTION_QUEUE_ROWS) };
       if (body.client_request_id) fired.set(body.client_request_id, done);
       announce();
       return done;
     }
     if (path === `${q}/modes`) {
       s.modes = { hard_start: body?.hard_start ?? s.modes.hard_start, spots: body?.spots ?? s.modes.spots };
-      return { modes: s.modes, queue: s.view() };
+      return { modes: s.modes, queue: s.view(ACTION_QUEUE_ROWS) };
     }
-    if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: s.view() }; }
+    if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: s.view(ACTION_QUEUE_ROWS) }; }
     if (path === `${q}/mix-over`) return { message: 'Playing over', asset_id: body.asset_id, on_air: true };
     if (path === `${q}/insert`) {
       const anchor = body.after_entry_id ? queue.find((x) => x.id === body.after_entry_id && x.status !== 'skipped') : null;
@@ -340,7 +342,7 @@ export function makeStation(opts = {}) {
       const ids = [...(body.asset_id ? [body.asset_id] : []), ...(body.asset_ids || [])];
       pending().forEach((x) => { if (x.position > after) x.position += ids.length; });
       const made = ids.map((asset_id, i) => s.add({ asset_id, position: after + 1 + i }).id);
-      return { ids: made, queue: s.view() };
+      return { ids: made, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/start`) {
       const cur = playing();
@@ -352,17 +354,17 @@ export function makeStation(opts = {}) {
       return { now_playing: next.asset_id };
     }
     if (path === `${q}/panic`) {
-      if (s.panicReply) return { ...s.panicReply, queue: s.view() };
+      if (s.panicReply) return { ...s.panicReply, queue: s.view(ACTION_QUEUE_ROWS) };
       const cur = playing();
       if (cur) cur.status = 'skipped';
       loopId = null;
       const next = pending()[0];
       if (next) { next.status = 'playing'; next.started_at = new Date().toISOString(); }
       announce({ change_fade_seconds: 0 });
-      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view() };
+      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/skip`) {
-      if (s.skipReply) return { message: 'Kept', ...s.skipReply, queue: s.view() };
+      if (s.skipReply) return { message: 'Kept', ...s.skipReply, queue: s.view(ACTION_QUEUE_ROWS) };
       const cur = playing();
       if (cur) cur.status = 'skipped';
       const fade = { hard: 0, fade: 0.5, soft: 3 }[query.fade ?? 'fade'];
@@ -370,7 +372,7 @@ export function makeStation(opts = {}) {
       const next = pending()[0];
       if (next) { next.status = 'playing'; next.started_at = new Date().toISOString(); }
       announce({ change_fade_seconds: fade });
-      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view() };
+      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/move-up` || path === `${q}/move-down`) {
       const list = pending();
