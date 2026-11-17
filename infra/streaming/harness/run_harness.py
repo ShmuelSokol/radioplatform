@@ -1640,6 +1640,85 @@ async def sc_next_skips_one(h: Harness) -> None:
     h.check(name, "EMERGENCY" not in names, "no emergency files")
 
 
+async def sc_next_right_after_change(h: Harness) -> None:
+    """A Next pressed a moment after an item started (0.1 to 1 s after a natural song change,
+    and 0.1 / 0.3 s after another Next) still brings the next item. Found 2026-11-17: a
+    Next 0.2 s after a song start, while its crossfade ran, changed nothing."""
+    name = "next_right_after_change"
+    for delay in (0.1, 0.3, 0.6, 1.0):
+        await wait_music(h)
+        await h.clear_pending()
+        await h.queue([("song2", {}), ("song3", {}), ("song4", {})])
+        # 16 s: an automatic flush is held back 15 s after the last one, and until it
+        # happens the engine still holds a song from before the queue was replaced
+        await asyncio.sleep(16)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        if await h.wait_on_air("song2", 8) is None:
+            h.check(name, False, f"[{delay}] song2 never went on air")
+            continue
+        t3 = await h.wait_on_air("song3", 60)   # natural change, 3 s crossfade
+        if t3 is None:
+            h.check(name, False, f"[{delay}] song3 did not follow by itself")
+            continue
+        await asyncio.sleep(max(0, t3 + delay - time.time()))
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t4 = await h.wait_on_air("song4", 8)
+        h.check(name, t4 is not None,
+                f"Next {delay} s after a natural song change: "
+                f"{'no change in 8 s' if t4 is None else f'song4 after {t4 - t3 - delay:.1f} s'}")
+    for delay in (0.1, 0.3):
+        await wait_music(h)
+        await h.clear_pending()
+        await h.queue([("song2", {}), ("song3", {}), ("song4", {})])
+        await asyncio.sleep(5)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        await asyncio.sleep(delay)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t = await h.wait_on_air("song3", 8)
+        h.check(name, t is not None,
+                f"two Nexts {delay} s apart: {'song3 never on air' if t is None else 'song3 on air'}")
+        await asyncio.sleep(4)
+        cur = await h.on_air()
+        h.check(name, cur is not None and cur.asset_id == h.assets["song3"],
+                f"and no further ({cur.asset.title if cur else None})")
+
+
+async def sc_site_matches_stream(h: Harness) -> None:
+    """F-HANDOVER-14: on a stream-server station the site's "now playing" follows what the
+    engine really plays. At natural song changes (3 s crossfade) and at a hard time check
+    (no crossfade) the time the site shows an item starting is within 3 s of the moment it
+    is the loudest thing on the stream, and never after it by more than 1 s."""
+    name = "site_matches_stream"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song2", {}), ("song3", {}), ("song4", {}), ("song5", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    t0 = await h.wait_on_air("song2", 60)  # the engine may first play the song it held
+    if t0 is None:
+        h.check(name, False, "song2 never went on air")
+        return
+    due = datetime.fromtimestamp(t0 + 95, UTC)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + 14)
+    heard = h.heard(t0 + 3, time.time() - 1)
+    h.print_timeline(heard, due.timestamp())
+    tl = timeline(heard)
+    worst = 0.0
+    for item in ("song3", "song4", "time"):
+        site = await h.started_times(item, t0 + 5)  # not the song that was on air before
+        aud = next((t for t, n in tl if n == tone_name(TONES[item][0])), None)
+        if not site or aud is None:
+            h.check(name, False, f"{item}: site {'no start' if not site else 'ok'}, stream {'not heard' if aud is None else 'ok'}")
+            continue
+        diff = aud - site[0][0]
+        worst = max(worst, abs(diff))
+        limit = 1.5 if item == "time" else 3.0
+        h.check(name, -1.0 <= diff <= limit,
+                f"{item}: heard as the loudest item {diff:+.1f} s after the site showed it start (limit {limit} s)")
+    playing = [e for e in await h.rows() if e.status == "playing"]
+    h.check(name, len(playing) == 1, f"one item on air on the site ({len(playing)})")
+
+
 async def sc_engine_crash_restart(h: Harness) -> None:
     """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
     the backend up. It says hello, plays station music (not emergency files) within a few
@@ -1904,6 +1983,8 @@ SCENARIOS = {
     "engine_restart_across_hour": sc_engine_restart_across_hour,
     "backend_restart_before_hour": sc_backend_restart_before_hour,
     "next_after_idle": sc_next_after_idle,
+    "next_right_after_change": sc_next_right_after_change,
+    "site_matches_stream": sc_site_matches_stream,
     "next_twice": sc_next_twice,
     "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,
