@@ -352,6 +352,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
 - **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`. `canChange()` there says who may change things on a screen (drives the "View only" marker); any refused action shows an app-wide "not allowed" notice (`components/layout/ViewOnlyNotice.tsx`).
 - **Station permissions**: staff can be limited to named stations (`User.station_ids`), and a protected station (`Station.protected`, the FM feed) needs an explicit assignment. Rule: `may_operate_station`; guard: `require_station_operator`. See `wiki/station-permissions.md`.
+- **Caller address**: rate limits, listener IPs and the activity log take the caller's address from `app/core/client_ip.py` (rightmost non-internal X-Forwarded-For hop); never read the header by hand. See `wiki/client-ip.md`.
 - **Page layout**: admin and sponsor pages fill the window; no `max-w-* mx-auto` page wrappers. Rules in `wiki/admin-page-layout.md`.
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.
@@ -366,7 +367,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `DATABASE_URL` | Supabase PostgreSQL pooler URI | Yes |
-| `JWT_SECRET_KEY` | Secret for JWT signing | Yes |
+| `JWT_SECRET_KEY` | Secret for JWT signing (with `APP_ENV=production` the public default is refused at startup) | Yes |
 | `ADMIN_SEED_PASSWORD` | Password for accounts created by `/auth/seed` (unset = seeding refused) | First-time setup |
 | `ALLOW_DESTRUCTIVE_SEED` | Allow `/auth/seed-all` (wipes data) in production | No |
 | `CORS_ORIGINS` | JSON array of allowed origins | Yes |

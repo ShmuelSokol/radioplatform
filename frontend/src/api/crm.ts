@@ -150,8 +150,10 @@ export async function getMyRatings(): Promise<RatingResponse[]> {
   return res.data;
 }
 
-export async function getActiveRaffles(): Promise<RaffleResponse[]> {
-  const res = await apiClient.get<RaffleResponse[]>('/crm/raffles/active');
+export async function getActiveRaffles(stationId?: string): Promise<RaffleResponse[]> {
+  const res = await apiClient.get<RaffleResponse[]>('/crm/raffles/active', {
+    params: stationId ? { station_id: stationId } : undefined,
+  });
   return res.data;
 }
 

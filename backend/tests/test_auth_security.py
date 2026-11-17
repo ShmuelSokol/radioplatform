@@ -134,9 +134,6 @@ async def test_login_is_rate_limited_per_address(client: AsyncClient, db_session
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="BUG V1-104: login limit is keyed on the connecting address; behind "
-                   "Railway's proxy (uvicorn without --forwarded-allow-ips) every operator shares one address, "
-                   "so 11 people signing in within a minute lock each other out")
 async def test_login_limit_counts_each_real_client_separately(client: AsyncClient, db_session: AsyncSession):
     for i in range(11):
         r = await client.post("/api/v1/auth/login", json={"email": "x@t.com", "password": "nope"},
@@ -144,8 +141,6 @@ async def test_login_limit_counts_each_real_client_separately(client: AsyncClien
         assert r.status_code == 401, f"operator {i + 1} was refused with {r.status_code}"
 
 
-@pytest.mark.xfail(strict=True, reason="BUG V1-106: JWT_SECRET_KEY left at the public default in production "
-                   "is accepted, so anyone can forge a login token (and web call-in tokens)")
 def test_production_refuses_the_default_jwt_secret():
     from app.config import Settings
 

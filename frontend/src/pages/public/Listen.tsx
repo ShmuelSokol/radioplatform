@@ -57,7 +57,7 @@ export default function Listen() {
   // CRM state
   const crm = useCrmAuth();
   const rateMutation = useRateSong();
-  const { data: activeRaffles } = useActiveRaffles();
+  const { data: activeRaffles } = useActiveRaffles(stationId);
   const enterRaffleMutation = useEnterRaffle();
   const [crmPinInput, setCrmPinInput] = useState('');
   const [crmRegOpen, setCrmRegOpen] = useState(false);

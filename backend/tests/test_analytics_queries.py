@@ -67,7 +67,6 @@ async def test_summary_breakdown_and_limits(client, auth_headers, db_session):
     assert (await client.get(f"{API}/summary")).status_code in (401, 403)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: airtime counts each play's full item length, not how long it actually aired")
 @pytest.mark.asyncio
 async def test_airtime_counts_what_aired(client, auth_headers, db_session):
     a, _, song, _, _ = await _setup(db_session)
@@ -79,7 +78,6 @@ async def test_airtime_counts_what_aired(client, auth_headers, db_session):
     assert s["total_airtime_hours"] == 0.1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: analytics hours/days are UTC, not the station's local time")
 @pytest.mark.asyncio
 async def test_hours_are_station_local(client, auth_headers, db_session):
     a, _, song, _, _ = await _setup(db_session)
@@ -94,7 +92,6 @@ async def test_hours_are_station_local(client, auth_headers, db_session):
     assert hours == [{"hour": 20, "plays": 1}]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: analytics ignores station permissions; a manager limited to station A reads B")
 @pytest.mark.asyncio
 async def test_station_limited_manager_cannot_read_other_station(client, db_session):
     a, b, song, _, _ = await _setup(db_session)

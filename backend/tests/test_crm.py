@@ -149,8 +149,6 @@ async def test_raffle_lifecycle(client: AsyncClient, db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="BUG V1-107: CRM sign-in is a bare 6-digit PIN with no rate limit; one "
-                   "address can try PINs until one matches any member")
 async def test_pin_guessing_is_slowed_down(client: AsyncClient, db_session: AsyncSession):
     codes = set()
     for i in range(40):
