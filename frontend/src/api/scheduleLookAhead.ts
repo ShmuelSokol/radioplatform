@@ -30,6 +30,8 @@ export interface ScheduleLookAhead {
   days: number;
   needs_attention: number;
   auto_resolved: number;
+  /** Spots mode is off in the control room: sponsor spots are not planned */
+  spots_off?: boolean;
   findings: Finding[];
 }
 
