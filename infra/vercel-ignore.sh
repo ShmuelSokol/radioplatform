@@ -17,10 +17,14 @@ if [ "${VERCEL_ENV:-}" != "production" ]; then
   exit 0
 fi
 
-# The repo's two other Vercel projects never build from here.
-case "${VERCEL_URL:-}" in
-  frontend-*|studio-kolbramah-api-*)
-    echo "Not the website project: skip."
+# The repo's two other Vercel projects (the old serverless backend and an early
+# copy of the site) never build. Their settings said so, but this file overrides
+# project settings, and the first merge with it built the website into the
+# "studio-kolbramah-api" project. A deployment address is cut short
+# ("studio-kolbramah-<hash>"), so the project is told by its production address.
+case "${VERCEL_PROJECT_PRODUCTION_URL:-}" in
+  *kolbramah-api*|frontend*)
+    echo "Not the website project (${VERCEL_PROJECT_PRODUCTION_URL}): skip."
     exit 0
     ;;
 esac
