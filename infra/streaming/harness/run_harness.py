@@ -1172,7 +1172,9 @@ async def sc_engine_starts_backend_down(h: Harness) -> None:
     await wait_music(h)
     # A time check the backend hands over before the restart: the restarted engine no
     # longer holds it, so the backend must hand it over again once it hears from it
-    due = at(42)
+    # 60 s ahead: the engine's restart takes 5 to 15 s and the backend stays unreachable
+    # for 20 s after it, which must still leave the backend 15 s to hand the item over again
+    due = at(60)
     await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
     await asyncio.sleep(6)
     h.stack.backend_down = True
@@ -1579,6 +1581,65 @@ async def sc_next_twice(h: Harness) -> None:
                 f"{'no change in 8 s' if second is None else f'{second:.1f} s'}")
 
 
+async def sc_next_skips_one(h: Harness) -> None:
+    """PR 224: every Next moves on by exactly one item: single, twice 0.5 s apart, within
+    2 s of a natural song change, and with nothing queued. The item after the skipped one
+    airs, never the one after that."""
+    name = "next_skips_one"
+    await wait_music(h)
+    await h.clear_pending()
+    order = ["song2", "song3", "song4", "song5", "song6", "story", "shiur"]
+    ids = await h.queue([(n, {}) for n in order])
+    await asyncio.sleep(3)
+    t_start = time.time()
+
+    async def press_expect(expect: str, why: str) -> None:
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t = await h.wait_on_air(expect, 6)
+        cur = await h.on_air()
+        h.check(name, t is not None,
+                f"{why}: {expect} on air (site shows {cur.asset.title if cur else None})")
+
+    await press_expect("song2", "Next")
+    await asyncio.sleep(1.0)
+    await press_expect("song3", "Next 1 s later")
+    await asyncio.sleep(5)
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    await asyncio.sleep(0.5)
+    await press_expect("song5", "two Nexts 0.5 s apart move on two items")
+    await asyncio.sleep(4)
+    cur = await h.on_air()
+    h.check(name, cur is not None and cur.asset_id == h.assets["song5"],
+            f"and no further: still {cur.asset.title if cur else None} 4 s later")
+    t6 = await h.wait_on_air("song6", 60)
+    h.check(name, t6 is not None, "song5 ended by itself and song6 followed")
+    await asyncio.sleep(max(0, (t6 or time.time()) + 1.5 - time.time()))
+    await press_expect("story", "Next 1.5 s after a natural song change")
+    await asyncio.sleep(4)
+    cur = await h.on_air()
+    h.check(name, cur is not None and cur.asset_id == h.assets["story"],
+            f"and no further: still {cur.asset.title if cur else None} 4 s later")
+    last = next((e.status for e in await h.rows() if e.id == ids[-1]), None)
+    h.check(name, last == "pending", f"the item after it was not touched (shiur {last})")
+    # nothing queued: Next still changes the item, once, with no silence
+    await h.clear_pending()
+    await asyncio.sleep(3)
+    before = await h.on_air()
+    took = await _next_changes_song(h)
+    h.check(name, took is not None and took <= 3.0,
+            f"Next with nothing queued: {'no change' if took is None else f'{took:.1f} s'}")
+    after = await h.on_air()
+    await asyncio.sleep(6)
+    later = await h.on_air()
+    h.check(name, after is not None and later is not None and after.id == later.id and after.id != before.id,
+            "and it moved on once only")
+    heard = h.heard(t_start, time.time() - 1)
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence in the whole run {gap:.1f} s")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, "no emergency files")
+
+
 async def sc_engine_crash_restart(h: Harness) -> None:
     """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
     the backend up. It says hello, plays station music (not emergency files) within a few
@@ -1844,6 +1905,7 @@ SCENARIOS = {
     "backend_restart_before_hour": sc_backend_restart_before_hour,
     "next_after_idle": sc_next_after_idle,
     "next_twice": sc_next_twice,
+    "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
