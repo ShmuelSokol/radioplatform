@@ -74,6 +74,13 @@ class Occurrence:
         return [i.problem for i in self.items if i.problem]
 
 
+def blocks_keep_hourly(config: dict | None) -> bool:
+    """Station setting `automation_config.blocks_keep_hourly`: its blocks play beside the
+    built-in hourly time and weather (a block on the hour plays right after them) instead
+    of replacing them. Off by default (blocks replace the hourly time and weather)."""
+    return bool((config or {}).get("blocks_keep_hourly"))
+
+
 def item_label(item: dict) -> str:
     kind = item.get("kind")
     if kind == "time":
@@ -383,23 +390,25 @@ async def reconcile_block_entries(
         return None
 
     # The built-in hourly time and weather would double up with the blocks: drop
-    # what it queued (its timed time and weather entries).
-    legacy = await db.execute(
-        select(QueueEntry)
-        .join(Asset, QueueEntry.asset_id == Asset.id)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            QueueEntry.source == "auto",
-            QueueEntry.timing_mode.is_(None),
-            QueueEntry.preempt_at.isnot(None),
-            QueueEntry.preempt_at > earliest,
-            Asset.category.in_(("time_announcement", "weather_spot")),
+    # what it queued (its timed time and weather entries). Not when the station keeps
+    # them beside its blocks (blocks_keep_hourly).
+    if not blocks_keep_hourly(station.automation_config):
+        legacy = await db.execute(
+            select(QueueEntry)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.source == "auto",
+                QueueEntry.timing_mode.is_(None),
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > earliest,
+                Asset.category.in_(("time_announcement", "weather_spot")),
+            )
         )
-    )
-    for entry in legacy.scalars().all():
-        await db.delete(entry)
-        removed += 1
+        for entry in legacy.scalars().all():
+            await db.delete(entry)
+            removed += 1
 
     max_pos = (
         await db.execute(

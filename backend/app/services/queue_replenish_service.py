@@ -120,7 +120,19 @@ class QueueReplenishService:
 
         # Program blocks ("Weather Sponsors": station ID, weather, PSA, sponsor...)
         # replace the built-in hourly time and weather once a station has any.
-        from app.services.program_block_service import reconcile_block_entries
+        from app.services.program_block_service import blocks_keep_hourly, reconcile_block_entries
+
+        wants_hourly = bool(
+            self.automation_config.get("hourly_time_announcement")
+            or self.automation_config.get("weather_enabled")
+        )
+        # automation_config.blocks_keep_hourly: this station's blocks play beside the
+        # built-in hourly time and weather instead of replacing them. The hour is queued
+        # first, so a block due on the hour plays right after the time and weather.
+        keep_hourly = blocks_keep_hourly(self.automation_config)
+        if keep_hourly and wants_hourly:
+            await self._schedule_hourly_announcements()
+            await self.db.flush()
 
         blocks_result = None
         try:
@@ -129,10 +141,7 @@ class QueueReplenishService:
             logger.exception("Program blocks could not be queued for station %s", self.station_id)
         if blocks_result is not None:
             self.max_pos = max(self.max_pos, blocks_result["max_pos"])
-        if blocks_result is None and (
-            self.automation_config.get("hourly_time_announcement")
-            or self.automation_config.get("weather_enabled")
-        ):
+        if blocks_result is None and wants_hourly and not keep_hourly:
             await self._schedule_hourly_announcements()
 
         await self._schedule_ad_slots()
@@ -944,7 +953,9 @@ class QueueReplenishService:
                 QueueEntry.station_id == self.station_id,
                 QueueEntry.status == "pending",
                 QueueEntry.preempt_at.isnot(None),
-                or_(QueueEntry.source.is_(None), QueueEntry.source != "ad_slot"),
+                # A program block due at the same minute (blocks_keep_hourly) does not
+                # count: the hour still gets its time and weather.
+                or_(QueueEntry.source.is_(None), QueueEntry.source.notin_(("ad_slot", "block"))),
             )
         )
 

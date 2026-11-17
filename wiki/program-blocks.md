@@ -51,6 +51,19 @@ entries that code queued (source "auto", no timing mode, category
 before. So a station moving to blocks must put the time and weather in a block
 or it loses them.
 
+### Unless the station keeps them (`blocks_keep_hourly`)
+
+Station setting `automation_config.blocks_keep_hourly = true` (off by default): the
+station's blocks play **beside** the built-in hourly time and weather (and the :30
+weather). `replenish()` then queues the hourly items first and the blocks after, so a
+block due on the hour plays right after the time and weather in the same group; the
+reconciler leaves the hourly entries alone; and a block entry at :00 does not make
+`_schedule_hourly_announcements` think the hour is done. Used for KBR's hourly schedule
+announcement and the 8 PM Daf Yomi (2026-11-16). `GET /program-blocks/capabilities`
+returns `{"keep_hourly": true}` so scripts can tell a server that has this.
+Recordings meant only for blocks use category `block_only` (in `NEVER_RANDOM_CATEGORIES`:
+never drawn as filler). Test: `tests/test_blocks_keep_hourly.py`.
+
 ## Sponsor places
 
 When any active block has a `sponsors` item, `spot_schedule_service` stops

@@ -65,7 +65,9 @@ ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
 # (a listening-test spot uploaded as music once landed in KBR Jerusalem's live queue).
 # A rule or block that names one of these categories still gets it.
 # "carlebach": Shmuel, 2026-11-16: his songs are kept in the library but off the air for now.
-NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing", "carlebach")
+# "block_only": recordings that air only where a program block names them (the day's
+# Daf Yomi shiur, the schedule announcement), never as filler.
+NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing", "carlebach", "block_only")
 
 
 # Placeholder items that must never be drawn by any automatic pick, even by a
