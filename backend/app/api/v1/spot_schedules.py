@@ -4,13 +4,16 @@ Managers set days, dayparts (morning/afternoon/evening/overnight) and plays
 per daypart; the queue's clock slots follow.
 """
 
+import asyncio
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,23 +48,96 @@ router = APIRouter(
 )
 
 
-async def _refresh_queues(db: AsyncSession, station_ids: set) -> None:
-    """Apply schedule changes to the affected stations' queues right away."""
+# A save must answer within a second (S-6). One station's refresh takes 20-80 ms,
+# so a few stations are refreshed inside the request; a schedule for every station
+# (80+ stations: 2-6 s) is applied just after the save commits, in the background,
+# a few stations at a time, each in its own session. Spots are queued at least
+# 2 minutes ahead (SAFETY_MARGIN), so a refresh a few seconds later still lands
+# before any changed slot airs, and the scheduler's queue refill is the backstop.
+INLINE_MAX_STATIONS = 3
+BACKGROUND_CONCURRENCY = 4
+session_factory = None  # tests point this at the test database; None = app.db.engine
+_background: set[asyncio.Task] = set()
+
+
+async def _refresh_station(db: AsyncSession, station_id) -> None:
+    from app.services.program_block_service import reconcile_block_entries
+    from app.services.station_modes import hard_start_on, soften_hard_items
+
+    await reconcile_spot_slots(db, station_id)
+    # Sponsor places inside program blocks are written by the block.
+    await reconcile_block_entries(db, station_id, rebuild=True)
+    station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+    if station is not None and not hard_start_on(station):
+        # The rebuilt block items come back hard: HS is off, so they wait for the song
+        await soften_hard_items(db, station)
+
+
+async def _refresh_queues(db: AsyncSession, station_ids: set) -> list:
+    """Apply schedule changes to the affected stations' queues.
+
+    Refreshes up to INLINE_MAX_STATIONS stations in this session (the caller
+    commits) and returns the rest, which the caller hands to
+    `refresh_in_background` once its commit is done."""
     if None in station_ids:
         result = await db.execute(select(Station.id).where(Station.is_active.is_(True)))
         targets = [row[0] for row in result.all()]
     else:
         targets = list(station_ids)
+    if len(targets) > INLINE_MAX_STATIONS:
+        return targets
     for station_id in targets:
         try:
-            await reconcile_spot_slots(db, station_id)
-            # Sponsor places inside program blocks are written by the block.
-            from app.services.program_block_service import reconcile_block_entries
-
-            await reconcile_block_entries(db, station_id, rebuild=True)
+            await _refresh_station(db, station_id)
         except Exception:
             # The periodic queue refill will pick the change up.
             logger.exception("Spot slot refresh failed for station %s", station_id)
+    return []
+
+
+def refresh_in_background(station_ids: list, then_delete_schedule=None) -> None:
+    """Refresh these stations' queues after the save has committed. With
+    `then_delete_schedule`, that (already switched off) schedule is deleted once
+    every station has dropped its slots."""
+    if not station_ids:
+        return
+
+    async def run():
+        factory = session_factory
+        if factory is None:
+            from app.db.engine import async_session_factory as factory
+        gate = asyncio.Semaphore(BACKGROUND_CONCURRENCY)
+
+        async def one(station_id):
+            async with gate:
+                try:
+                    async with factory() as session:
+                        await _refresh_station(session, station_id)
+                        await session.commit()
+                except Exception:
+                    logger.exception("Spot slot refresh failed for station %s", station_id)
+
+        started = time.monotonic()
+        await asyncio.gather(*(one(s) for s in station_ids))
+        if then_delete_schedule is not None:
+            try:
+                async with factory() as session:
+                    await session.execute(sa_delete(SpotSchedule).where(SpotSchedule.id == then_delete_schedule))
+                    await session.commit()
+            except Exception:
+                logger.exception("Could not delete spot schedule %s", then_delete_schedule)
+        logger.info("Spot schedule change applied to %d stations in %.1f s",
+                    len(station_ids), time.monotonic() - started)
+
+    task = asyncio.get_running_loop().create_task(run())
+    _background.add(task)  # keep a reference so the task is not collected mid-run
+    task.add_done_callback(_background.discard)
+
+
+async def wait_for_background() -> None:
+    """Tests: wait until every background refresh has finished."""
+    while _background:
+        await asyncio.gather(*list(_background), return_exceptions=True)
 
 
 EVERY_STATION_REFUSED = (
@@ -114,6 +190,8 @@ async def preview_spot_plan(
 ):
     """Look ahead: every sponsor spot planned for the next N days on a station,
     plus any spot that could not be given a slot."""
+    from app.services.station_modes import spots_on
+
     station = await _get_or_404(db, Station, station_id, "Station")
     now = datetime.now(UTC)
     placements, unplaced = await plan_for_station(db, station, days=days, now=now)
@@ -163,6 +241,7 @@ async def preview_spot_plan(
             OffAirWindow(name=b.name, start=b.start, end=b.end, skipped_plays=n)
             for b, n in sorted(skipped.items(), key=lambda kv: kv[0].start)
         ],
+        spots_off=not spots_on(station),
     )
 
 
@@ -195,8 +274,9 @@ async def set_timing_defaults(
     config["spot_timing"] = {"on_the_hour": data.on_the_hour, "other": data.other}
     station.automation_config = config
     await db.flush()
-    await _refresh_queues(db, {station.id})
+    later = await _refresh_queues(db, {station.id})
     await db.commit()
+    refresh_in_background(later)
     return config["spot_timing"]
 
 
@@ -221,8 +301,9 @@ async def create_spot_schedule(
     record = SpotSchedule(**data.model_dump())
     db.add(record)
     await db.flush()
-    await _refresh_queues(db, {record.station_id})
+    later = await _refresh_queues(db, {record.station_id})
     await db.commit()
+    refresh_in_background(later)
     await db.refresh(record)
     return record
 
@@ -259,8 +340,9 @@ async def update_spot_schedule(
     affected.add(record.station_id)
 
     await db.flush()
-    await _refresh_queues(db, affected)
+    later = await _refresh_queues(db, affected)
     await db.commit()
+    refresh_in_background(later)
     await db.refresh(record)
     return record
 
@@ -280,7 +362,12 @@ async def delete_spot_schedule(
     # only on the next refill, leaving this sponsor's slots queued meanwhile).
     record.is_active = False
     await db.flush()
-    await _refresh_queues(db, affected)
+    later = await _refresh_queues(db, affected)
+    if later:
+        # Every station: the stations drop its slots after this answer, then it goes
+        await db.commit()
+        refresh_in_background(later, then_delete_schedule=record.id)
+        return
     await db.delete(record)
     await db.commit()
 

@@ -178,11 +178,31 @@ confirmed 1.5 s late or never: back to the song once the item ends, 4 s or more 
 The fake station sends `cut_at` like the server. `backend/tests/test_next_asset_cut_at.py`
 covers the soft limit, a hard ad slot and the polling answer.
 
+**Second item of a program block.** Every item of a block occurrence shares one
+`preempt_at` (see `program-blocks.md`), so with the time check on air the Daf Yomi
+announcement after it still carried hh:00 as its cut time. The page took that as "cut
+in now": the preempt fade faded the time check, the pre-arm could start the
+announcement over it, and the announcement was joined seconds in (Main, 15:00Z
+2026-11-17, heard from "the Miami daf"). Now a cut time at or before the start of the
+item on air (+1 s) is that item's own group: the server sends `cut_at: null`
+(`_cut_time(next, on_air)`) and the page ignores such a cut itself
+(`GROUP_CUT_SLACK_MS`). And whatever follows a short item this page played to its end
+starts from the top if it comes in up to 8 s late (`AFTER_SHORT_FROM_TOP_SECONDS`, a
+slow phone still fetching it); its tail is cut instead. Scenarios
+`second-item-of-a-timed-group-from-the-top` and `...-slow-file` (harness `cut` field =
+Listen's `next_asset.cut_at`); test `test_next_item_of_the_group_on_air_has_no_cut_time`.
+
 ## Server clock, not the device clock (2026-11-17)
 Every position and due time (`started_at`, `preempt_at`, `ends_at`, a push's `at`) is server time, so the player compares them with `serverNow()` from `src/lib/serverClock.ts`, never `Date.now()`. The offset is measured from `server_time` in the release policy (`lib/appUpdate.ts`, on connect and every minute). Before, a PC 20 s fast joined every song 20 s in and faded the song for the hourly time check 20 s early. Used by useAudioEngine (live position, timed fades, crossfade, playNextNow), useNowPlayingWS (overdue check), Listen, Dashboard, `controlroom/timing.ts nextCut` and the transport clock. Checked by `e2e/listen-page.mjs` ONLY=clock (device clock 20 s fast and 30 s slow).
 
 ## Known: cue-in runs ahead of the server (2026-11-17)
 The server counts an item from the top of the file (hand-over at `started_at + cross_start`; a resumed shiur moves `started_at` back). The player starts a fresh item at `cue_in` but a listener joining later at `max(cue_in, elapsed)`, so with a cue-in of N s the two are N s apart and the crossfade waits up to N - 1 s past the cross point (MAX_LEAD bound). Harmless for the usual sub-second leading silence. `e2e/audio-engine.mjs cue-gain` marks it XFAIL; fix would be server-side (start the clock at cue-in, e.g. `started_at = now - cue_in` in `mark_started`).
+
+## Listen page: nothing on air, stream retry, resume (2026-11-17)
+- Nothing on air is `{"type":"now_playing","data":null}` on the socket (on connect, and if the server ever announces a stop) and `null` from `GET /now-playing/{id}`. `useNowPlayingWS` clears the item on both (socket, polling, overdue and back-from-background re-reads). The server sends no message when the queue runs dry, so the page clears at the overdue re-read (ends_at + 6-10 s). The fake station sends null too; `legacyStopShape` keeps its old `{started_at:null}`.
+- A server stream that fails falls back to the built-in player, but is tried again: in the Listen click, and on each new item (muted, beside the built-in player; once it plays the page switches back). Before, one engine or Icecast restart left the listener on the built-in player for the session.
+- Release resume on a stream station counts the stream element really playing (`playing` event), not "Listen was pressed": Safari refuses a stream started outside a tap and now gets "Tap to keep listening".
+- Listener profile: the registration PIN is shown above the panel until dismissed; auto-login forgets a saved PIN only on 401; the heart never sends a rating the listener did not pick (the API needs a rating with a favourite, so on an unrated song it waits for the first star); stars come from `/crm/my-ratings`; raffle errors show, 409 counts as entered.
 
 ## Browser checks
 `e2e/lib/fake-station.mjs` is a fake backend for page.route (queue, actions, live shows, CRM, now-playing socket, site socket, ranged tone files, `skewClock`) with an audio probe (`window.__decks()`, `__audible()`, `__outLevel()`, Media Session handlers). Suites on the built site (`npx vite preview --port 4311 --strictPort`): `control-room-actions.mjs` (every control room button, desktop + iPhone, S-1/S-2 timings), `listen-page.mjs` (Listen page, lock screen, network loss, socket back-off/polling, stream mode with `lib/stream-server.mjs`, time check on the second), `listener-pages.mjs` (a11y basics of the public pages, global player bar), `call-in.mjs`, `release-timing.mjs` (release pickup limits under a fake clock). Each takes `ONLY=<part>`.

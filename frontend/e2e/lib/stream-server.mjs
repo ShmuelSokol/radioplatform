@@ -3,6 +3,9 @@
  * at its real bitrate (with a short burst on connect, as Icecast does), on its own port.
  *   GET /live-<station>   the stream (CORS open, like the real mount)
  *   GET /missing          404, to test the fall-back to the browser player
+ *   GET /nocors/live-<station>  the same stream with no CORS header (a mount set up
+ *                         without it: the page's fetch is refused, the plain element plays)
+ * failing = true: every mount answers 503 (an engine or Icecast restart) until set back.
  * stall(ms) holds the data back, then sends it all at once (a network stall).
  */
 import http from 'node:http';
@@ -26,13 +29,18 @@ export async function startStreamServer(port) {
   const TICK = 100;
   const clients = new Set();
   let stalledUntil = 0;
-  const stats = { connects: 0 };
+  const stats = { connects: 0, refused: 0, noCorsConnects: 0 };
+  const state = { failing: false };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
-    const cors = { 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
+    const noCors = url.pathname.startsWith('/nocors/');
+    const cors = noCors ? { 'cache-control': 'no-store' } : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
+    const mount = noCors ? url.pathname.slice('/nocors'.length) : url.pathname;
     if (req.method === 'OPTIONS') { res.writeHead(204, { ...cors, 'access-control-allow-headers': '*' }); res.end(); return; }
-    if (!url.pathname.startsWith('/live-')) { res.writeHead(404, cors); res.end('no such mount'); return; }
+    if (!mount.startsWith('/live-')) { res.writeHead(404, cors); res.end('no such mount'); return; }
+    if (state.failing) { stats.refused++; res.writeHead(503, cors); res.end('restarting'); return; }
     stats.connects++;
+    if (noCors) stats.noCorsConnects++;
     res.writeHead(200, { ...cors, 'content-type': 'audio/mpeg' });
     let pos = 0;
     let owed = 0;
@@ -56,6 +64,9 @@ export async function startStreamServer(port) {
   await new Promise((ok) => server.listen(port, '127.0.0.1', ok));
   return {
     url: (sid) => `http://localhost:${port}/live-${sid}`,
+    noCorsUrl: (sid) => `http://localhost:${port}/nocors/live-${sid}`,
+    get failing() { return state.failing; },
+    set failing(v) { state.failing = !!v; },
     missing: `http://localhost:${port}/missing`,
     origin: `http://localhost:${port}`,
     stats,

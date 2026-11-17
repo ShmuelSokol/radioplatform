@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.asset import Asset, fit_for_random_pick, not_placeholder, stored_analysis
+from app.models.playlist_entry import PlaybackMode, PlaylistEntry
 from app.models.schedule import Schedule
 from app.models.station import Station
 from app.services.scheduling import SchedulingService
@@ -211,9 +212,96 @@ class _Library:
         if longest > timedelta(0):
             window = [r for r in window if at - rested(r) >= longest / 2]
         row = random.choice(window)
+        self.mark(row, at)
+        return row, relaxed
+
+    def mark(self, row, at: datetime) -> None:
+        """A drawn item counts as just used (and waiting in the queue)."""
         self.last_used[str(row.id)] = at
         self.busy.add(str(row.id))
-        return row, relaxed
+
+    def shuffle(self, rows: list, at: datetime):
+        """Random among a block's own songs, leaving out the most recently used
+        half (aired on this station or already drawn), as the old block player did."""
+        epoch = datetime(1970, 1, 1, tzinfo=UTC)
+
+        def used(row):
+            # Waiting in the queue counts as more recent than anything aired
+            sid = str(row.id)
+            return (sid in self.busy, self.last_used.get(sid, epoch))
+
+        unique = list({str(r.id): r for r in rows}.values())
+        by_use = sorted(unique, key=used, reverse=True)
+        recent_ids = {str(r.id) for r in by_use[: len(unique) // 2] if used(r) > (False, epoch)}
+        candidates = [r for r in rows if str(r.id) not in recent_ids] or rows
+        return random.choice(candidates)
+
+
+async def block_songs(db: AsyncSession, schedules) -> dict[str, list]:
+    """Songs added straight to a block ("+ Add song"), by block id, in play order.
+
+    Only enabled entries, and never a placeholder or a do_not_play item: no
+    automatic pick may use those, even when a person listed them on a block."""
+    block_ids = [b.id for s in schedules for b in (s.blocks or [])]
+    if not block_ids:
+        return {}
+    rows = await db.execute(
+        select(
+            PlaylistEntry.block_id,
+            PlaylistEntry.weight,
+            Asset.id,
+            Asset.title,
+            Asset.artist,
+            Asset.duration,
+            Asset.asset_type,
+            Asset.category,
+        )
+        .join(Asset, Asset.id == PlaylistEntry.asset_id)
+        .where(
+            PlaylistEntry.block_id.in_(block_ids),
+            PlaylistEntry.is_enabled.is_(True),
+            not_placeholder(),
+        )
+        .order_by(PlaylistEntry.block_id, PlaylistEntry.position, PlaylistEntry.created_at)
+    )
+    songs: dict[str, list] = {}
+    for row in rows.all():
+        songs.setdefault(str(row.block_id), []).append(row)
+    return songs
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _run_start(svc: SchedulingService, block, at: datetime, station) -> datetime:
+    """When the run of `block` that is on at `at` began (UTC). A start-only block
+    began at its last start; a timed one at the start of the window holding `at`
+    (yesterday's window for the part of an overnight block after midnight)."""
+    local = svc.station_local(at, station)
+    naive = local.replace(tzinfo=None)
+    began = None
+    if getattr(block, "until_next", False):
+        began = svc.last_start(block, local, station)
+    else:
+        for day in (naive.date(), naive.date() - timedelta(days=1)):
+            try:
+                lo, hi = svc._block_window(block, day, station)
+            except Exception:
+                continue
+            if lo <= naive < hi:
+                began = lo
+                break
+    if began is None:
+        began = datetime.combine(naive.date(), datetime.min.time())
+    return began.replace(tzinfo=local.tzinfo).astimezone(UTC)
+
+
+def _mode(block) -> PlaybackMode:
+    mode = getattr(block, "playback_mode", None) or PlaybackMode.SEQUENTIAL
+    try:
+        return PlaybackMode(mode)
+    except ValueError:
+        return PlaybackMode.SEQUENTIAL
 
 
 async def generate(
@@ -248,6 +336,7 @@ async def generate(
         .all()
     )
     blackouts = await load_blackouts(db, station.id, start, end)
+    songs_by_block = await block_songs(db, schedules)
     svc = SchedulingService(db)
     library = _Library(db, station.id, busy_ids or set(), min_vote)
     recent: deque = deque(
@@ -273,6 +362,49 @@ async def generate(
             continue
         ranked = svc.rank_matching_blocks(schedules, at, station)
         block = ranked[0][1] if ranked else None
+        own = songs_by_block.get(str(block.id)) if block is not None else None
+        named = block.playlist_template if block is not None and block.playlist_template_id else None
+        both = bool(own and named is not None and named.is_active and named.slots)
+        if both:
+            # Both: the songs added by hand play first, each once per run of the
+            # block, then the block's playlist fills the rest (Shmuel, 2026-11-17).
+            if library.last_used is None:
+                await library._load_last_used()
+            began = _run_start(svc, block, at, station)
+            own = [
+                r for r in own
+                if library.last_used.get(str(r.id), _EPOCH) < began
+                and not (str(r.id) in library.busy and began <= start)
+            ]
+        if own:
+            # The block's own songs, in the block's playback mode.
+            if library.last_used is None:
+                await library._load_last_used()
+            key = str(block.id)
+            mode = _mode(block)
+            if mode == PlaybackMode.SHUFFLE:
+                row = library.shuffle(own, at)
+            elif mode == PlaybackMode.WEIGHTED:
+                row = random.choices(own, weights=[max(int(r.weight or 1), 1) for r in own], k=1)[0]
+            elif both:
+                row = own[0]  # in the block's order; the playlist's cursor is left alone
+            else:
+                index = int(cursor.get(key, 0)) % len(own)
+                row = own[index]
+                cursor[key] = (index + 1) % len(own)
+            library.mark(row, at)
+            picks.append(
+                Pick(
+                    at=at, block_id=key, block_name=block.name, asset_type=row.asset_type,
+                    category=row.category, asset_id=row.id, title=row.title, artist=row.artist,
+                    duration=float(row.duration or DEFAULT_DURATION),
+                )
+            )
+            artist = _artist_key(row.artist)
+            if artist and artist_distance:
+                recent.append(artist)
+            clock.play(await library.on_air(row))
+            continue
         template = block.playlist_template if block is not None and block.playlist_template_id else None
         slots = list(template.slots) if template and template.is_active else []
         if not slots:

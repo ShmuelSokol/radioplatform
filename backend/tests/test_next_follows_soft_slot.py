@@ -105,3 +105,25 @@ async def test_next_plain_song_has_no_cut_time(db_session):
     station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=10)
     nxt = await _next_payload(db_session, station, playing)
     assert nxt["id"] == str(pending.asset_id) and nxt["cut_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_next_item_of_the_group_on_air_has_no_cut_time(db_session):
+    # Every item of a program block shares one preempt_at. With the time check on air
+    # since hh:00, the Daf Yomi announcement after it still carries hh:00; pages took
+    # that as "cut in now", faded the time check and joined the announcement late
+    # (Main, 15:00Z 2026-11-17). It follows the item on air instead.
+    station, playing, _ = await _station_with_two_tracks(db_session, elapsed_seconds=2)
+    group_due = playing.started_at
+    playing.preempt_at = group_due
+    playing.source = "block"
+    notice = Asset(id=uuid.uuid4(), title="Daf Yomi", duration=25.0,
+                   file_path="https://cdn.example.com/daf.mp3", asset_type="spot")
+    db_session.add(notice)
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=notice.id, position=2,
+                              status="pending", source="block", preempt_at=group_due))
+    await db_session.commit()
+    nxt = await _next_payload(db_session, station, playing)
+    assert nxt["id"] == str(notice.id)
+    assert nxt["cut_at"] is None

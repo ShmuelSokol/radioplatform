@@ -19,6 +19,8 @@ const STREAM_PORT = Number(process.env.STREAM_PORT || 4322);
 const ONLY = process.env.ONLY || '';
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { ...devices['iPhone 13'] };
+// Playwright's descriptor reports the screen upright, which the page reads as typing on an upright phone
+const PHONE_LAND = { ...devices['iPhone 13 landscape'], screen: { width: 844, height: 390 } };
 
 const KNOWN_BUGS = {};
 const { check, done } = checker(KNOWN_BUGS);
@@ -320,9 +322,10 @@ async function toasts(browser) {
   await sleep(1500);
   const srcs = await page.evaluate(() => window.__audios.map((a) => a.src.split('/').pop()));
   check(`${tag}: time & weather preview plays the time clip, nothing sent to air`, srcs.includes('tc.wav') && writes(station, /\/queue\/(skip|fire-now|insert|play-next)/).length === airWrites, srcs.join());
-  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((b) => b.textContent === 'Preview time & weather' && !b.disabled), null, { timeout: 30000 }).catch(() => {});
-  const srcs2 = await page.evaluate(() => window.__audios.map((a) => a.src.split('/').pop()));
-  check(`${tag}: then the weather clip`, srcs2.includes('wx.wav'), srcs2.join());
+  // Both clips are one item in the pre-listen deck (time, then weather); see the previews part
+  await page.getByTestId('pfl-jumps').getByRole('button', { name: 'Weather', exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
+  check(`${tag}: then the weather clip (deck lists Time and Weather)`, await page.getByTestId('pfl-jumps').getByRole('button', { name: 'Weather', exact: true }).count() === 1);
+  await page.getByTestId('pfl-deck').getByRole('button', { name: 'Close pre-listen' }).click();
   station.weather = { time_url: null, weather_url: null };
   await page.getByRole('button', { name: 'Preview time & weather' }).click();
   await page.getByTestId('toast').waitFor({ timeout: 3000 }).catch(() => {});
@@ -748,6 +751,131 @@ async function pflDeck(browser, contextOpts, tag) {
   await ctx.close();
 }
 
+// ── Every preview in the deck: time & weather, hot buttons, library; one at a time ─────────────
+async function previews(browser, contextOpts, tag) {
+  const station = makeStation();
+  const { ctx, page, errors } = await openRoom(browser, contextOpts, station);
+  const mobile = !!contextOpts.isMobile;
+  const tab = (name) => page.getByRole('navigation', { name: 'Control room sections' }).getByRole('button', { name: new RegExp(name) });
+  if (mobile) await tab('Buttons').tap();
+  const deck = page.getByTestId('pfl-deck');
+  const weatherBtn = page.getByTestId('weather-preview');
+  // The deck's own audio element: what it plays, whether it is paused
+  const deckAudio = () => page.evaluate(() => {
+    const a = [...window.__audios].reverse().find((x) => x.dataset.pflId);
+    return a ? { id: a.dataset.pflId, src: a.src.split('/').pop(), paused: a.paused, t: +a.currentTime.toFixed(2) } : null;
+  });
+  const sounding = () => page.evaluate(() => window.__audios.filter((a) => a.dataset.pflId && !a.paused).map((a) => a.dataset.pflId));
+  const secs = async () => { const [m, s] = (await page.getByTestId('pfl-elapsed').innerText()).split(':'); return +m * 60 + parseFloat(s); };
+  const left = async () => { const [m, s] = (await page.getByTestId('pfl-remaining').innerText()).replace('-', '').split(':'); return +m * 60 + parseFloat(s); };
+  const press = (loc) => (mobile ? loc.tap() : loc.click());
+  const seekTo = async (frac) => {
+    const scrub = page.getByTestId('pfl-scrub');
+    const b = await scrub.boundingBox();
+    await scrub.click({ position: { x: b.width * frac, y: b.height / 2 } });
+    await sleep(500);
+  };
+
+  // Time & weather: in the deck, and the button is not stuck
+  await press(weatherBtn);
+  await deck.waitFor({ timeout: 4000 }).catch(() => {});
+  await page.waitForFunction(() => { const e = document.querySelector('[data-testid=pfl-elapsed]'); return e && !e.innerText.startsWith('0:00.'); }, null, { timeout: 4000 }).catch(() => {});
+  const a0 = await deckAudio();
+  check(`${tag}: weather preview opens the deck and plays the time clip`, await deck.count() === 1 && /Time & weather/.test(await deck.innerText()) && a0?.src === 'tc.wav' && !a0.paused, JSON.stringify(a0));
+  check(`${tag}: the weather button is not stuck disabled while it plays (it stops it)`, !(await weatherBtn.isDisabled()) && await weatherBtn.getAttribute('aria-pressed') === 'true' && /Stop time & weather/.test(await weatherBtn.innerText()));
+  // The bar covers both clips: 5 s time + 20 s weather
+  await page.waitForFunction(() => {
+    const p = (id) => { const t = document.querySelector(`[data-testid=${id}]`)?.innerText.replace('-', '') || '0:0'; const [m, s] = t.split(':'); return +m * 60 + parseFloat(s); };
+    return Math.abs(p('pfl-elapsed') + p('pfl-remaining') - 25) < 1.5;
+  }, null, { timeout: 5000 }).catch(() => {});
+  check(`${tag}: elapsed + remaining is the length of time + weather`, Math.abs((await secs()) + (await left()) - 25) < 1.5, `${await secs()} + ${await left()}`);
+  // Pause / play
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(300);
+  const p1 = await secs(); await sleep(600);
+  check(`${tag}: weather ❚❚ pauses (audio paused, time stands)`, (await deckAudio()).paused && Math.abs((await secs()) - p1) < 0.05 && await page.getByTestId('pfl-playpause').getAttribute('aria-label') === 'Play pre-listen');
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(600);
+  check(`${tag}: weather ▶ plays on`, !(await deckAudio()).paused && (await secs()) > p1 + 0.2);
+  // Seek into the second clip and back
+  await seekTo(0.9);
+  const w = await deckAudio();
+  const ws = await secs();
+  check(`${tag}: seeking to 90% goes into the weather clip`, w.src === 'wx.wav' && !w.paused && ws > 21.5 && ws < 24.5 && w.t > 16.5 && w.t < 19.5, `${JSON.stringify(w)} at ${ws}`);
+  check(`${tag}: the deck says the weather clip is playing`, /\bWeather\b/.test(await deck.innerText()));
+  await seekTo(0.1);
+  const t = await deckAudio();
+  check(`${tag}: seeking back to 10% returns to the time clip`, t.src === 'tc.wav' && t.t > 1.5 && t.t < 3.8, JSON.stringify(t));
+  // Seeking while paused keeps it paused
+  await press(page.getByTestId('pfl-playpause'));
+  await seekTo(0.8);
+  const pz = await deckAudio();
+  check(`${tag}: seeking while paused stays paused`, pz.src === 'wx.wav' && pz.paused, JSON.stringify(pz));
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(300);
+  // Stop
+  await press(deck.getByRole('button', { name: 'Close pre-listen' }));
+  await sleep(300);
+  check(`${tag}: ✕ stops the weather preview (deck gone, audio stopped)`, await deck.count() === 0 && (await sounding()).length === 0 && /Preview time & weather/.test(await weatherBtn.innerText()));
+  // The button itself stops it too
+  await press(weatherBtn);
+  await deck.waitFor({ timeout: 4000 }).catch(() => {});
+  await sleep(400);
+  await press(weatherBtn);
+  await sleep(300);
+  check(`${tag}: pressing the weather button again stops it`, await deck.count() === 0 && (await sounding()).length === 0);
+
+  // Hot button pre-listen: the same deck and controls
+  await press(page.getByTestId('pfl-toggle'));
+  const hb = page.getByTestId('hot-button').filter({ hasText: 'Station ID 2' });
+  await press(hb);
+  await deck.waitFor({ timeout: 4000 }).catch(() => {});
+  await sleep(700);
+  const h0 = await deckAudio();
+  check(`${tag}: hot button PFL opens the deck and plays`, await deck.count() === 1 && h0?.id === 'j2' && !h0.paused, JSON.stringify(h0));
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(200);
+  const hp = await secs(); await sleep(500);
+  check(`${tag}: hot button ❚❚ pauses`, (await deckAudio()).paused && Math.abs((await secs()) - hp) < 0.05);
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(400);
+  check(`${tag}: hot button ▶ plays on`, !(await deckAudio()).paused);
+  const hlen = (await secs()) + (await left());
+  await seekTo(0.5);
+  const hs = await secs();
+  check(`${tag}: hot button seek to half way`, Math.abs(hs - hlen / 2) < 1.5, `${hs} of ${hlen}`);
+  // Weather replaces the hot button, and the hot button replaces weather
+  await press(weatherBtn);
+  await page.waitForFunction(() => /Time & weather/.test(document.querySelector('[data-testid=pfl-deck]')?.innerText || ''), null, { timeout: 4000 }).catch(() => {});
+  await sleep(500);
+  check(`${tag}: weather preview replaces the hot button pre-listen`, JSON.stringify(await sounding()) === JSON.stringify(['preview:time-weather']) && await hb.getAttribute('aria-pressed') === 'false', JSON.stringify(await sounding()));
+  await press(hb);
+  await sleep(700);
+  check(`${tag}: a hot button replaces the weather preview`, JSON.stringify(await sounding()) === JSON.stringify(['j2']) && await weatherBtn.getAttribute('aria-pressed') === 'false', JSON.stringify(await sounding()));
+  await press(deck.getByRole('button', { name: 'Close pre-listen' }));
+  await sleep(300);
+  check(`${tag}: ✕ stops the hot button pre-listen`, await deck.count() === 0 && (await sounding()).length === 0);
+
+  // The library pre-listen replaces the weather preview
+  await press(weatherBtn);
+  await deck.waitFor({ timeout: 4000 }).catch(() => {});
+  await sleep(500);
+  if (mobile) await tab('Library').tap();
+  await page.getByRole('searchbox').fill('Song number 1 ');
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid=library-row]').length >= 1);
+  await press(page.getByTestId('library-pfl').first());
+  await sleep(800);
+  const lib = await sounding();
+  check(`${tag}: library PFL replaces the weather preview`, lib.length === 1 && lib[0] !== 'preview:time-weather' && await deck.count() === 1 && !/Time & weather/.test(await deck.innerText()), JSON.stringify(lib));
+  await press(deck.getByRole('button', { name: 'Close pre-listen' }));
+  await sleep(300);
+  // preview-weather only reads the clips (POST because it may make them); nothing goes on air
+  const sent = station.calls.filter((c) => c.method !== 'GET' && !c.path.startsWith('/activity') && !c.path.endsWith('/queue/preview-weather'));
+  check(`${tag}: nothing sent to the station by any preview`, sent.length === 0, sent.map((c) => c.path).join());
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Side panels: go live, end show, schedule, splitter ─────────────
 async function side(browser) {
   const tag = 'side panels';
@@ -1057,6 +1185,7 @@ try {
   if (run('library')) { await library(browser, DESKTOP, 'library desktop'); await library(browser, PHONE, 'library iPhone'); }
   if (run('cart')) await cart(browser);
   if (run('pfl')) { await pflDeck(browser, DESKTOP, 'pfl desktop'); await pflDeck(browser, PHONE, 'pfl iPhone'); }
+  if (run('previews')) { await previews(browser, DESKTOP, 'previews desktop'); await previews(browser, PHONE, 'previews iPhone'); await previews(browser, PHONE_LAND, 'previews iPhone sideways'); }
   if (run('side')) await side(browser);
   if (run('speed')) { await speed(browser, DESKTOP, 'speed desktop'); await speed(browser, PHONE, 'speed iPhone'); }
   if (run('mix')) await mixOver(browser);

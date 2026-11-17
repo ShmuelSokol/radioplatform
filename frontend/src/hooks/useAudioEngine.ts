@@ -57,6 +57,9 @@ function handOverPoint(crossStart: number, fileDuration: number): number {
 const START_FROM_TOP_SECONDS = 1.0;
 // A short item (time check) brought up this late after an item change still starts from the top
 const LATE_SHORT_FROM_TOP_SECONDS = 3.0;
+// The item after a time check (next item of a program block) starts from its first
+// word if it comes in up to this late here
+const AFTER_SHORT_FROM_TOP_SECONDS = 8.0;
 // A timed item's lead-in fade ends this long after its due time (see the preempt fade)
 const PREEMPT_FADE_OVERHANG_MS = 400;
 // A hard timed item is loaded on the idle deck this long before its time
@@ -132,6 +135,8 @@ export interface AudioEngineState {
 // How long a local Next waits for the server to announce the same item before the
 // player goes back to following the server
 const LOCAL_NEXT_CONFIRM_MS = 4000;
+// A cut time this close to (or before) the start of the item on air is that item's own
+const GROUP_CUT_SLACK_MS = 1000;
 
 export function useAudioEngine(
   nowPlayingAsset: AssetInfo | null,
@@ -195,6 +200,19 @@ export function useAudioEngine(
     changeFadeSeconds = localNext.fade;
     // What follows is unknown until the server answers (the old "next" is this item)
     nextAssetId = null;
+  }
+  // A cut time at or before the start of the item on air belongs to that item's own
+  // group: every item of a program block shares one preempt_at, so once the time check
+  // is on air the Daf Yomi announcement after it still carries hh:00. It follows the
+  // item on air; it must not fade it out, start over it or be joined late. Main,
+  // 15:00Z 2026-11-17: the announcement was heard from its third second.
+  {
+    const cutMs = nextPreemptAt ? new Date(nextPreemptAt).getTime() : NaN;
+    const onAirMs = currentStartedAt ? new Date(currentStartedAt).getTime() : NaN;
+    if (isFinite(cutMs) && isFinite(onAirMs) && cutMs <= onAirMs + GROUP_CUT_SLACK_MS) {
+      nextPreemptAt = null;
+      nextPreemptAssetId = null;
+    }
   }
 
   const changeFadeRef = useRef<number | null>(changeFadeSeconds);
@@ -634,6 +652,10 @@ export function useAudioEngine(
       && outDur - outTime > 0.05 && outDur - outTime < LET_FINISH_MAX_SECONDS;
 
     const outWasPlaying = !outDeck.audio.paused && !outDeck.audio.ended && deckAssetRef.current[outLabel] != null;
+    // A short spoken item on air here (or one that has just ended) hands over to this one
+    const outWasShort = operatorFade == null && !replay && deckAssetRef.current[outLabel] != null
+      && isFinite(outDur) && outDur > 0 && outDur < SHORT_ITEM_SECONDS
+      && (outWasPlaying || (outDeck.audio.ended && outDur - outTime < 0.5));
     let wentLive = false;
     const goLive = () => {
       if (wentLive || token !== changeTokenRef.current) return;
@@ -670,6 +692,11 @@ export function useAudioEngine(
       // waits for it to finish (letFinish). Not when sound is only now switched on.
       if (isFinite(inDur) && inDur > 0 && inDur < SHORT_ITEM_SECONDS && outWasPlaying
         && startPos - cueIn < LATE_SHORT_FROM_TOP_SECONDS) startPos = cueIn;
+      // Likewise whatever follows a time check this page played to its end (the next
+      // item of a program block, the Daf Yomi announcement): from its first word.
+      // A slow phone may still be fetching it when the time check ends: it then comes
+      // in that much late, still from the top (its tail is cut instead, if anything).
+      if (outWasShort && startPos - cueIn < AFTER_SHORT_FROM_TOP_SECONDS) startPos = cueIn;
       seekIfNeeded(inDeck.audio, startPos);
       inDeck.gain.gain.cancelScheduledValues(now);
       inDeck.gain.gain.setValueAtTime(0, now);

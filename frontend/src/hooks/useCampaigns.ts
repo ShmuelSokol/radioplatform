@@ -4,16 +4,17 @@ import {
   getCampaign,
   createCampaign,
   updateCampaign,
+  updateCampaignStatus,
   listDrafts,
   createDraft,
   listComments,
   createComment,
 } from '../api/campaigns';
 
-export function useCampaigns() {
+export function useCampaigns(opts: { sponsorId?: string; limit?: number } = {}) {
   return useQuery({
-    queryKey: ['campaigns'],
-    queryFn: listCampaigns,
+    queryKey: ['campaigns', opts.sponsorId ?? 'all', opts.limit ?? 0],
+    queryFn: () => listCampaigns(opts),
   });
 }
 
@@ -38,6 +39,17 @@ export function useUpdateCampaign() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Parameters<typeof updateCampaign>[1] }) =>
       updateCampaign(id, data),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: ['campaign', vars.id] });
+    },
+  });
+}
+
+export function useUpdateCampaignStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) => updateCampaignStatus(id, status),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       qc.invalidateQueries({ queryKey: ['campaign', vars.id] });

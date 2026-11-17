@@ -5,7 +5,11 @@
  * profile, network loss and coming back to the tab, the server-stream mode (with a
  * small MP3 stream server on STREAM_PORT), the hourly time check heard on time, and
  * short items and hard timed items handed over on the second (ONLY=handover).
- * Parts: basics forms network polling switch player elapsed clock timecheck stream handover.
+ * Parts: basics forms crm requests nothing shell live titles network polling switch player elapsed
+ * clock timecheck stream streamretry resume handover. crm..shell, streamretry and resume
+ * are the verifier's F-LISTEN-23..54 (listener profile, raffles, song request texts,
+ * nothing on air as the server says it, stream retry, release resume on the stream,
+ * the page shell).
  * The socket back-off and polling part runs on a fake clock (page.clock).
  *
  *   cd frontend && npm run build && (npx vite preview --port 4311 --strictPort &)
@@ -40,13 +44,13 @@ function CLICK_PROBE() {
   HTMLMediaElement.prototype.play = function (...a) { if (window.__inClick) { window.__playsInClick++; window.__playedInClick.push(this); } return play.apply(this, a); };
 }
 
-async function listenContext(browser, contextOpts, station, { initScripts = [], delay } = {}) {
+async function listenContext(browser, contextOpts, station, { initScripts = [], delay, down, ws = {} } = {}) {
   const ctx = await browser.newContext(contextOpts);
   await ctx.addInitScript(AUDIO_PROBE);
   await ctx.addInitScript(CLICK_PROBE);
   for (const s of initScripts) await (Array.isArray(s) ? ctx.addInitScript(...s) : ctx.addInitScript(s));
-  await routeApi(ctx, station, { delay });
-  const np = await routeNowPlaying(ctx, station);
+  await routeApi(ctx, station, { delay, down });
+  const np = await routeNowPlaying(ctx, station, ws);
   await routeSiteSocket(ctx);
   return { ctx, np };
 }
@@ -72,8 +76,9 @@ async function basics(browser, contextOpts, tag) {
   await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
   check(`${tag}: header shows type and timezone`, await page.getByText('internet · America/New_York').count() === 1);
   check(`${tag}: header shows the description`, await page.getByText('Music all day').count() === 1);
-  await page.getByTestId('playout-badge').waitFor({ timeout: 5000 }).catch(() => {});
-  check(`${tag}: playout badge says Browser player`, /Browser player/.test(await page.getByTestId('playout-badge').textContent().catch(() => '')));
+  await page.getByText('On Air', { exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
+  await sleep(500);
+  check(`${tag}: no playout badge for a browser-player station (listeners see no engine wording)`, await page.getByTestId('playout-badge').count() === 0);
   await page.getByText('On Air', { exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
   check(`${tag}: status pill says On Air while the station plays`, await page.getByText('On Air', { exact: true }).count() === 1);
   const cur = station.byId[station.playing().asset_id];
@@ -801,7 +806,7 @@ async function streamMode(browser, stream) {
   await page.getByText('On Air', { exact: true }).waitFor();
   await sleep(300);
   check(`${tag}: preconnect to the stream server before Listen`, await page.locator(`link[rel=preconnect][href="${stream.origin}"]`).count() === 1);
-  check(`${tag}: badge says Server stream`, /Server stream/.test(await page.getByTestId('playout-badge').textContent()));
+  check(`${tag}: badge says Live stream (listener wording)`, (await page.getByTestId('playout-badge').textContent()).trim() === 'Live stream');
   const el = () => page.evaluate(() => {
     const a = document.querySelector('audio');
     const b = a.buffered;
@@ -882,6 +887,699 @@ async function streamMode(browser, stream) {
     await c3.close();
   }
 }
+// ── Verifier round 1 (F-LISTEN-23..54): listener profile, raffles, requests, nothing
+//    on air, stream retry, release resume on the stream, page shell ─────────────
+const DESK = { viewport: { width: 1280, height: 900 } };
+/** Init script: a PIN saved in this browser by an earlier visit (seeded once per tab). */
+function SEED_PIN(pin) {
+  if (sessionStorage.getItem('__seed_pin')) return;
+  localStorage.setItem('crm_pin', pin);
+  sessionStorage.setItem('__seed_pin', '1');
+}
+/** Init script: Safari's rule, sound starts only inside a tap (as e2e/site-release/safari.js).
+ *  The tap is a real (trusted) input event in the last second: navigator.userActivation
+ *  cannot be used here, because Playwright runs page.evaluate as a user gesture. */
+function SAFARI_AUTOPLAY() {
+  let lastTap = -1e9;
+  for (const t of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchstart', 'touchend', 'keydown']) {
+    addEventListener(t, (e) => { if (e.isTrusted) lastTap = performance.now(); }, true);
+  }
+  const active = () => performance.now() - lastTap < 1000;
+  const Orig = window.AudioContext;
+  window.AudioContext = class extends Orig {
+    constructor(...a) { super(...a); if (!active()) Orig.prototype.suspend.call(this); }
+    resume() { return active() ? super.resume() : new Promise(() => {}); }
+  };
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function () {
+    return active() ? play.call(this) : Promise.reject(new DOMException('needs a tap', 'NotAllowedError'));
+  };
+}
+/** Init script: an admin-pushed release just reloaded this tab while it played (appUpdate.ts). */
+function SEED_RESUME(path) {
+  if (sessionStorage.getItem('__seed_resume')) return;
+  sessionStorage.setItem('kbr_resume_playback', JSON.stringify({ path, at: Date.now() }));
+  sessionStorage.setItem('__seed_resume', '1');
+}
+const pressedStars = (page) => page.locator('button[aria-label^="Rate "][aria-pressed="true"]').count();
+const rateCalls = (station) => station.calls.filter((c) => c.path === '/crm/rate' && !c.failed);
+const storedPin = (page) => page.evaluate(() => localStorage.getItem('crm_pin'));
+
+/** Run one block of checks; an exception (a button that is not there) is one FAIL, and
+ *  the next block still runs. */
+async function guarded(tag, fn) {
+  try { await fn(); } catch (e) { check(`${tag}: block ran to the end`, false, String(e?.message ?? e).split('\n')[0]); }
+}
+
+async function crmProfile(browser) {
+  const tag = 'listen crm';
+  // F-LISTEN-23 (bug 1): register logs in, and the new PIN stays on screen until dismissed
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('button', { name: 'Register' }).first().click();
+    await page.getByPlaceholder('Your name', { exact: true }).fill('Rivka');
+    await page.getByRole('button', { name: 'Register' }).last().click();
+    await page.getByText('Welcome, Rivka!').waitFor({ timeout: 3000 }).catch(() => {});
+    const box = () => page.getByTestId('crm-new-pin');
+    const text = await box().textContent().catch(() => '');
+    check(`${tag}: register shows the new 6-digit PIN with "Save this PIN" (F-LISTEN-23, bug 1 fixed)`,
+      await page.getByText('Welcome, Rivka!').count() === 1 && /654321/.test(text) && /Save this PIN/.test(text), text || 'no PIN shown');
+    await sleep(2000);
+    check(`${tag}: the PIN stays on screen until dismissed (F-LISTEN-23)`, await box().count() === 1);
+    await page.getByRole('button', { name: "I've saved my PIN" }).click();
+    check(`${tag}: "I've saved my PIN" dismisses it (F-LISTEN-23)`, await box().count() === 0 && await storedPin(page) === '654321');
+    check(`${tag}: no script errors (register)`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  });
+  // F-LISTEN-25: register fails, or register works but the login after it fails
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('button', { name: 'Register' }).first().click();
+    await page.getByPlaceholder('Your name', { exact: true }).fill('Rivka');
+    station.replyNext.set('/crm/register', [{ status: 500 }]);
+    await page.getByRole('button', { name: 'Register' }).last().click();
+    await page.getByText('Registration failed. Please try again.').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: register API fails -> "Registration failed", no PIN stored (F-LISTEN-25)`,
+      await page.getByText('Registration failed. Please try again.').count() === 1 && await storedPin(page) === null && await page.getByTestId('crm-new-pin').count() === 0);
+    station.replyNext.set('/crm/login', [{ status: 500 }]);
+    await page.getByRole('button', { name: 'Register' }).last().click();
+    await page.getByTestId('crm-new-pin').waitFor({ timeout: 3000 }).catch(() => {});
+    const text = await page.getByTestId('crm-new-pin').textContent().catch(() => '');
+    check(`${tag}: registered but the login after it failed -> the PIN is shown with "Press Login", PIN box filled in (F-LISTEN-25)`,
+      /654321/.test(text) && /Press Login/.test(text) && await page.getByPlaceholder('Enter 6-digit PIN').inputValue() === '654321', text);
+    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByText('Welcome, Rivka!').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: and Login with it works (F-LISTEN-25)`, await page.getByText('Welcome, Rivka!').count() === 1);
+    await ctx.close();
+  });
+  // F-LISTEN-24 (bug 2): saved PIN on page load. Only a refused PIN (401) is forgotten.
+  for (const [what, reply] of [['a network error', 'network'], ['a 500', { status: 500 }], ['a 429', { status: 429, detail: 'Too many wrong PINs. Please wait a few minutes and try again.' }], ['a 401 (PIN refused)', { status: 401 }]]) {
+    const station = makeStation({ shows: [] });
+    station.replyNext.set('/crm/login', [reply]);
+    const { ctx } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']], delay: (p) => (p === '/crm/login' ? 700 : 0) });
+    const page = await ctx.newPage();
+    await page.goto(`${BASE}/listen/${station.SID}`);
+    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    // The PIN box must not flash while the saved PIN is being tried
+    let flashed = false;
+    let signing = false;
+    for (let i = 0; i < 8; i++) {
+      if (await page.getByPlaceholder('Enter 6-digit PIN').count()) flashed = true;
+      if (await page.getByText('Signing you in...').count()) signing = true;
+      if (station.calls.some((c) => c.path === '/crm/login' && c.failed) && i > 0) break;
+      await sleep(60);
+    }
+    await sleep(1200);
+    if (reply.status === 401) {
+      check(`${tag}: saved PIN refused (401) -> forgotten, PIN box shown (F-LISTEN-24)`, await storedPin(page) === null && await page.getByPlaceholder('Enter 6-digit PIN').count() === 1);
+    } else {
+      check(`${tag}: auto-login fails with ${what} -> the saved PIN is kept (F-LISTEN-24, bug 2 fixed)`, await storedPin(page) === '123456', `stored ${await storedPin(page)}`);
+      check(`${tag}: auto-login fails with ${what} -> says so`, await page.getByText(reply.status === 429 ? 'Too many wrong PINs' : 'Could not sign you in right now', { exact: false }).count() === 1);
+      await page.reload();
+      await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 4000 }).catch(() => {});
+      check(`${tag}: after ${what}, a reload signs in with the kept PIN (F-LISTEN-24)`, await page.getByText('Welcome, Test Listener!').count() === 1);
+    }
+    check(`${tag}: no PIN box flash while auto-login (${what}) is pending, "Signing you in..." instead (F-LISTEN-24)`, !flashed && signing, `flashed ${flashed}, signing ${signing}`);
+    await ctx.close();
+  }
+  // Auto-login that works: profile shows without typing
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']] });
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 4000 }).catch(() => {});
+    check(`${tag}: saved PIN signs in on page load, no typing (F-LISTEN-24)`, await page.getByText('Welcome, Test Listener!').count() === 1);
+    await ctx.close();
+  });
+  // F-LISTEN-26: login refused for too many wrong PINs says so
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    station.replyNext.set('/crm/login', [{ status: 429, detail: 'Too many wrong PINs. Please wait a few minutes and try again.' }, 'network']);
+    await page.getByPlaceholder('Enter 6-digit PIN').fill('123456');
+    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByText('Too many wrong PINs', { exact: false }).waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: 429 on login shows "Too many wrong PINs", not "Invalid PIN" (F-LISTEN-26)`,
+      await page.getByText('Too many wrong PINs', { exact: false }).count() === 1 && await page.getByText('Invalid PIN').count() === 0);
+    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByText('Could not reach the server', { exact: false }).waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: no network on login says so, not "Invalid PIN"`, await page.getByText('Could not reach the server', { exact: false }).count() === 1);
+    await ctx.close();
+  });
+  // F-LISTEN-27..30, 33 (bug 3): rating and favourite
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const nextId = station.pending()[0].asset_id;
+    station.ratings.set(nextId, { rating: 2, is_favorite: true }); // rated on an earlier day
+    const { ctx } = await listenContext(browser, DESK, station, { delay: (p) => (p === '/crm/rate' ? 500 : 0) });
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText('On Air', { exact: true }).waitFor();
+    check(`${tag}: no rating widget while logged out (F-LISTEN-30)`, await page.getByRole('button', { name: 'Rate 1 star' }).count() === 0);
+    check(`${tag}: raffles not shown while logged out (F-LISTEN-32)`, await page.getByText('Win a Shabbos package').count() === 0);
+    await page.getByPlaceholder('Enter 6-digit PIN').fill('123456');
+    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 3000 });
+    check(`${tag}: profile card shows name, taste label and description, counts (F-LISTEN-33)`,
+      await page.getByText('Kumzitz lover', { exact: false }).count() === 1 && await page.getByText('Slow and soulful').count() === 1
+      && await page.getByText('1 songs rated').count() === 1 && await page.getByText('1 favorites').count() === 1);
+    check(`${tag}: rating widget shows for a logged-in listener while a song is on air (F-LISTEN-30)`, await page.getByRole('button', { name: 'Rate 1 star' }).count() === 1);
+    // Favourite a song never rated: nothing saved until a star is picked
+    const n0 = rateCalls(station).length;
+    await page.getByRole('button', { name: 'Favorite', exact: true }).click();
+    await sleep(800);
+    check(`${tag}: heart on an unrated song saves no made-up rating (F-LISTEN-27, bug 3 fixed)`, rateCalls(station).length === n0,
+      JSON.stringify(rateCalls(station).slice(n0).map((c) => c.body)));
+    check(`${tag}: heart on an unrated song asks for stars and stays lit`, await page.getByTestId('fav-needs-stars').count() === 1 && await page.getByRole('button', { name: 'Unfavorite' }).count() === 1);
+    const savingMs = await timeClick(page, page.getByRole('button', { name: 'Rate 3 stars' }), `() => document.body.innerText.includes('Saving...')`);
+    check(`${tag}: "Saving..." shows while the rating is saved (F-LISTEN-29)`, savingMs >= 0 && savingMs < 300, `${savingMs} ms`);
+    await sleep(900);
+    let last = rateCalls(station).pop();
+    check(`${tag}: the first star saves the rating with the favourite (F-LISTEN-27)`, last?.body.rating === 3 && last.body.is_favorite === true, JSON.stringify(last?.body));
+    await page.getByRole('button', { name: 'Unfavorite' }).click();
+    await sleep(900);
+    last = rateCalls(station).pop();
+    check(`${tag}: unfavourite keeps the listener's own rating (F-LISTEN-27)`, last?.body.rating === 3 && last.body.is_favorite === false, JSON.stringify(last?.body));
+    // A failed save puts the stars back and says so
+    station.replyNext.set('/crm/rate', [{ status: 500 }]);
+    await page.getByRole('button', { name: 'Rate 5 stars' }).click();
+    await sleep(1000);
+    check(`${tag}: a failed rating says so and puts the stars back (F-LISTEN-29)`, await page.getByText('Could not save your rating', { exact: false }).count() === 1 && (await pressedStars(page)) === 3, `${await pressedStars(page)} stars`);
+    station.replyNext.set('/crm/rate', [{ status: 401 }]);
+    await page.getByRole('button', { name: 'Favorite', exact: true }).click();
+    await sleep(1000);
+    check(`${tag}: a 401 on favourite says log in again and puts the heart back (F-LISTEN-29)`, await page.getByText('Please log in again to rate songs.').count() === 1 && await page.getByRole('button', { name: 'Favorite', exact: true }).count() === 1);
+    // F-LISTEN-28: the next song was rated before: its stars and heart show
+    station.goOnAir(nextId);
+    await sleep(800);
+    check(`${tag}: the listener's earlier rating and favourite show for the song on air (F-LISTEN-28)`,
+      (await pressedStars(page)) === 2 && await page.getByRole('button', { name: 'Unfavorite' }).count() === 1, `${await pressedStars(page)} stars`);
+    // F-LISTEN-30: nothing on air -> no rating widget
+    station.playing().status = 'played';
+    station.push();
+    await page.getByText('Nothing playing right now').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: no rating widget when nothing is playing (F-LISTEN-30)`, await page.getByRole('button', { name: 'Rate 1 star' }).count() === 0);
+    // F-LISTEN-33: Logout forgets the PIN; a reload stays logged out
+    await page.getByRole('button', { name: 'Logout' }).click();
+    await page.reload();
+    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await sleep(800);
+    check(`${tag}: Logout clears the stored PIN, a reload stays logged out (F-LISTEN-33)`, await storedPin(page) === null && await page.getByText('Welcome,', { exact: false }).count() === 0 && await page.getByPlaceholder('Enter 6-digit PIN').count() === 1);
+    check(`${tag}: no script errors (rating)`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  });
+  // F-LISTEN-31, 32 (bug 4): raffles
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']] });
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 4000 });
+    await page.getByText('Win a Shabbos package').waitFor({ timeout: 3000 }).catch(() => {});
+    const asked = station.calls.find((c) => c.path === '/crm/raffles/active');
+    check(`${tag}: raffles asked for this station only, prize and entry count shown (F-LISTEN-32)`, asked?.query.station_id === station.SID
+      && await page.getByText('Prize: Wine and challah').count() === 1 && await page.getByText('12 entries').count() === 1, JSON.stringify(asked?.query));
+    const enter = () => page.getByRole('button', { name: 'Enter Raffle' });
+    station.replyNext.set('/crm/raffles/rf1/enter', [{ status: 400, detail: 'Raffle is not active right now' }]);
+    await enter().click();
+    await page.getByText('Raffle is not active right now').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: raffle not active (400) says so (F-LISTEN-31, bug 4 fixed)`, await page.getByText('Raffle is not active right now').count() === 1 && await enter().count() === 1);
+    station.replyNext.set('/crm/raffles/rf1/enter', [{ status: 401 }]);
+    await enter().click();
+    await page.getByText('Please log in again to enter.').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: raffle refused for login (401) says so (F-LISTEN-31)`, await page.getByText('Please log in again to enter.').count() === 1);
+    await enter().click();
+    await page.getByText('Entered!').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: Enter Raffle -> Entered! (F-LISTEN-31)`, await page.getByText('Entered!').count() === 1);
+    await page.reload();
+    await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 4000 });
+    await page.getByText('Win a Shabbos package').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: after a reload the raffle still shows Entered! (F-LISTEN-31)`, await page.getByText('Entered!').count() === 1 && await enter().count() === 0);
+    check(`${tag}: no script errors (raffles)`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+    // Another device: the server already has the entry (409) -> Entered!, not a silent button
+    const { ctx: c2 } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']] });
+    const { page: p2 } = await openListen(c2, station.SID);
+    await p2.getByText('Win a Shabbos package').waitFor({ timeout: 4000 });
+    await p2.getByRole('button', { name: 'Enter Raffle' }).click();
+    await p2.getByText('Entered!').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: already entered (409) shows Entered! (F-LISTEN-31, bug 4 fixed)`, await p2.getByText('Entered!').count() === 1);
+    await c2.close();
+    // No raffle open: no raffle box
+    station.raffles = [];
+    const { ctx: c3 } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']] });
+    const { page: p3 } = await openListen(c3, station.SID);
+    await p3.getByText('Welcome, Test Listener!').waitFor({ timeout: 4000 });
+    await sleep(500);
+    check(`${tag}: no raffle open -> no raffle box (F-LISTEN-32)`, await p3.getByText('Win a Shabbos package').count() === 0 && await p3.getByRole('button', { name: 'Enter Raffle' }).count() === 0);
+    await c3.close();
+  });
+}
+
+// F-LISTEN-34..36: song request texts and errors
+async function songRequests(browser) {
+  const tag = 'listen requests';
+  const station = makeStation({
+    shows: [],
+    extra: (method, path, query, body) => {
+      if (path !== '/song-requests' || method !== 'POST') return undefined;
+      if (body.song_title === 'One ahead') return { id: 'r2', status: 'approved', auto_approved: true, matched_asset_title: 'Song number 12', matched_asset_artist: null, songs_ahead: 1, estimated_wait_minutes: 3 };
+      if (body.song_title === 'Matched') return { id: 'r3', status: 'pending', auto_approved: false, matched_asset_title: 'Nigun Simcha 7', matched_asset_artist: 'Artist 7', songs_ahead: null, estimated_wait_minutes: null };
+      if (body.song_title === 'Unknown') return { id: 'r4', status: 'pending', auto_approved: false, matched_asset_title: null, matched_asset_artist: null, songs_ahead: null, estimated_wait_minutes: null };
+      return undefined;
+    },
+  });
+  const { ctx } = await listenContext(browser, DESK, station);
+  const { page, errors } = await openListen(ctx, station.SID);
+  await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+  const toggle = () => page.getByRole('button', { name: 'Request a Song' });
+  await toggle().click();
+  const send = async (title) => {
+    await page.getByPlaceholder('Enter your name').fill('Moshe');
+    await page.getByPlaceholder('What song would you like to hear?').fill(title);
+    await page.getByRole('button', { name: 'Submit Request' }).click();
+    await page.getByRole('button', { name: 'Submit Request' }).waitFor();
+    await sleep(300);
+  };
+  const box = () => page.locator('#song-request-form').innerText();
+  await send('One ahead');
+  check(`${tag}: auto-approved, one song ahead -> "~1 song (~3 min)" singular (F-LISTEN-34)`, /added to the queue! Playing: Song number 12\. Will play in ~1 song \(~3 min\)/.test(await box()), (await box()).split('\n')[0]);
+  check(`${tag}: the fields clear after a success (F-LISTEN-34)`, await page.getByPlaceholder('What song would you like to hear?').inputValue() === '' && await page.getByPlaceholder('Enter your name').inputValue() === '');
+  await send('Matched');
+  check(`${tag}: matched, not auto -> "We found: ... will review" (F-LISTEN-34)`, /We found: Nigun Simcha 7 by Artist 7\.\s*The station manager will review it shortly\./.test(await box()), (await box()).split('\n')[0]);
+  await send('Unknown');
+  check(`${tag}: no match -> "submitted for review" (F-LISTEN-34)`, (await box()).includes('Your request has been submitted for review.'));
+  // F-LISTEN-35
+  await toggle().click();
+  await toggle().click();
+  check(`${tag}: closing and reopening clears the old success message (F-LISTEN-35)`, !(await box()).includes('submitted for review'));
+  await page.getByPlaceholder('Enter your name').fill('   ');
+  await page.getByPlaceholder('What song would you like to hear?').fill('Something');
+  const before = station.calls.filter((c) => c.path === '/song-requests').length;
+  await page.getByRole('button', { name: 'Submit Request' }).click();
+  check(`${tag}: a whitespace-only name gives the "required" error, nothing sent (F-LISTEN-35)`, await page.getByText('Name and song title are required.').count() === 1
+    && station.calls.filter((c) => c.path === '/song-requests').length === before);
+  await toggle().click();
+  await toggle().click();
+  check(`${tag}: closing and reopening clears the old error (F-LISTEN-35)`, await page.getByText('Name and song title are required.').count() === 0);
+  // F-LISTEN-36
+  station.replyNext.set('/song-requests', [{ status: 429, detail: 'Too many requests' }, { status: 404, detail: 'Station not found' }]);
+  await send('Anything');
+  check(`${tag}: 429 says too many requests, not the generic text (F-LISTEN-36)`, (await box()).includes('Too many requests from here just now'));
+  await send('Anything');
+  check(`${tag}: 404 says the station could not be found (F-LISTEN-36)`, (await box()).includes('This station could not be found'));
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// F-LISTEN-37 (bug 5): nothing on air, as the real server says it
+async function nothingOnAir(browser) {
+  const tag = 'listen nothing on air';
+  const nothingShown = async (page) => await page.getByText('Nothing playing right now').count() === 1 && await page.getByText('Offline', { exact: true }).count() === 1;
+  // The socket says data:null (the real server), and the fake's old {started_at:null} shape
+  for (const legacy of [false, true]) {
+    const station = makeStation({ legacyStopShape: legacy });
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText('On Air', { exact: true }).waitFor();
+    await listenBtn(page).click();
+    await timeUntil(page, `() => window.__audible().length === 1`, 3000);
+    station.playing().status = 'played';
+    const shown = timeUntil(page, `() => document.body.innerText.includes('Nothing playing right now')`, 3000);
+    station.push();
+    const ms = await shown;
+    const what = legacy ? 'the old fake shape {started_at:null}' : 'data:null (what the server sends)';
+    check(`${tag}: socket ${what} -> "Nothing playing right now" within 1 s (F-LISTEN-37${legacy ? '' : ', bug 5 fixed'})`, ms >= 0 && ms <= 1000 && await nothingShown(page), `${ms} ms`);
+    await sleep(600);
+    check(`${tag}: socket ${what} -> the old item is not heard`, (await audibleSrc(page)).length === 0, (await audibleSrc(page)).join());
+    check(`${tag}: no script errors (${legacy ? 'old shape' : 'data:null'})`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+  // Page opened while the station is stopped: the server greets with data:null
+  await guarded(tag, async () => {
+    const station = makeStation({ stopped: true });
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByText('Nothing playing right now').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: opened while stopped (greeting data:null) -> Nothing playing / Offline (F-LISTEN-37)`, await nothingShown(page));
+    await ctx.close();
+  });
+  // The server sends nothing at all when the queue runs dry; the overdue re-read answers null
+  await guarded(tag, async () => {
+    const station = makeStation();
+    const cur = station.playing();
+    cur.started_at = new Date(Date.now() - (station.byId[cur.asset_id].duration - 2) * 1000).toISOString();
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText('On Air', { exact: true }).waitFor();
+    await listenBtn(page).click();
+    station.pushOnChange = false;
+    station.queue = station.queue.map((e) => (e === cur ? { ...e, status: 'played' } : { ...e, status: 'skipped' }));
+    const ms = await timeUntil(page, `() => document.body.innerText.includes('Nothing playing right now')`, 16000);
+    check(`${tag}: no message at all, the overdue re-read answers null -> Nothing playing (F-LISTEN-37, bug 5 fixed)`, ms >= 0 && await nothingShown(page), `${ms} ms after the item's end -2 s`);
+    check(`${tag}: no script errors (overdue)`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  });
+  // Back from the background: the re-read answers null
+  await guarded(tag, async () => {
+    const station = makeStation();
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByText('On Air', { exact: true }).waitFor();
+    station.playing().status = 'played'; // nothing is announced
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+    await sleep(5500);
+    // Both the REST re-read (null) and the fresh socket's greeting (data:null) say nothing is on air
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: false, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+    await page.getByText('Nothing playing right now').waitFor({ timeout: 3000 }).catch(() => {});
+    check(`${tag}: back from the background, the null re-read and data:null greeting clear the old item (F-LISTEN-37)`, await nothingShown(page));
+    await ctx.close();
+  });
+}
+
+// F-LISTEN-38, 39 (bug 6): a failed stream is tried again; F-LISTEN-52: no CORS
+async function streamRetry(browser, stream) {
+  const tag = 'listen stream retry';
+  const onStream = `() => { const a = document.querySelector('audio'); return !a.paused && !a.muted && a.currentTime > 0.05 && a.src.startsWith('blob:'); }`;
+  const livePill = (page) => page.getByText('LIVE', { exact: true }).count();
+  for (const how of ['Stop then Listen', 'the next item']) {
+    const station = makeStation();
+    const base = station.nowPlaying;
+    station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.url(station.SID) }; };
+    station.playout = { stations: { [station.SID]: { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } };
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText('On Air', { exact: true }).waitFor();
+    stream.failing = true; // the engine or Icecast restarting
+    await listenBtn(page).click();
+    const fb = await timeUntil(page, `() => window.__audible().some(d => d.src === '${station.playing().asset_id}')`, 6000);
+    check(`${tag} (${how}): stream down -> the built-in player is heard`, fb >= 0, `${fb} ms`);
+    check(`${tag} (${how}): no LIVE pill on the built-in player after the fall-back (F-LISTEN-39)`, await livePill(page) === 0);
+    stream.failing = false;
+    if (how === 'Stop then Listen') {
+      await stopBtn(page).click();
+      await sleep(300);
+      await listenBtn(page).click();
+    } else {
+      station.goOnAir(station.pending()[0].asset_id);
+    }
+    const back = await timeUntil(page, onStream, 8000);
+    check(`${tag}: after a stream failure, ${how} goes back to the server stream (F-LISTEN-38, bug 6 fixed)`, back >= 0, `${back} ms`);
+    await sleep(800);
+    check(`${tag} (${how}): the built-in player is silent once the stream is back`, (await audibleSrc(page)).length === 0, (await audibleSrc(page)).join());
+    check(`${tag} (${how}): LIVE pill shown on the stream again (F-LISTEN-39)`, await livePill(page) === 1);
+    check(`${tag} (${how}): no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+  // F-LISTEN-52: a stream origin without CORS: fetch refused, the plain element plays, no error shown
+  await guarded(tag, async () => {
+    const station = makeStation();
+    const base = station.nowPlaying;
+    station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.noCorsUrl(station.SID) }; };
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText('On Air', { exact: true }).waitFor();
+    const ms = await timeClick(page, listenBtn(page), `() => { const a = document.querySelector('audio'); return !a.paused && a.currentTime > 0.05; }`, 10000);
+    const src = await page.evaluate(() => document.querySelector('audio').src);
+    check(`${tag}: stream origin without CORS -> the plain <audio> plays it (F-LISTEN-52)`, ms >= 0 && src === stream.noCorsUrl(station.SID), `${ms} ms, ${src}`);
+    console.log(`info   ${tag}: no-CORS stream first sound after ${ms} ms (plain element, S-7 is 1.5 s)`);
+    check(`${tag}: no error shown for the no-CORS stream (F-LISTEN-52)`, await page.getByRole('alert').count() === 0 && (await audibleSrc(page)).length === 0);
+    check(`${tag}: no script errors (no CORS)`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  });
+}
+
+// F-LISTEN-41 (bug 7): release resume on a server-stream station with Safari's rule
+async function streamResume(browser, stream) {
+  for (const [label, opts, init] of [
+    ['Safari rule, Media Source', DESK, []],
+    ['iPhone, no Media Source', { ...devices['iPhone 13'] }, [() => { delete window.MediaSource; window.MediaSource = undefined; }]],
+  ]) {
+    const tag = `listen release resume on the stream (${label})`;
+    const station = makeStation();
+    const base = station.nowPlaying;
+    station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.url(station.SID) }; };
+    station.playout = { stations: { [station.SID]: { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } };
+    const { ctx } = await listenContext(browser, opts, station, { initScripts: [SAFARI_AUTOPLAY, ...init, [SEED_RESUME, `/listen/${station.SID}`]] });
+    const { page, errors } = await openListen(ctx, station.SID);
+    const prompt = page.getByTestId('resume-after-release');
+    await prompt.waitFor({ timeout: 5000 }).catch(() => {});
+    const sounding = () => page.evaluate(() => { const a = document.querySelector('audio'); return !a.paused && a.currentTime > 0.05; });
+    check(`${tag}: "Tap to keep listening" shown when the stream could not start by itself (F-LISTEN-41, bug 7 fixed)`,
+      await prompt.count() === 1 && !(await sounding()), `prompt ${await prompt.count()}, stream ${await sounding() ? 'playing' : 'silent'}`);
+    if (await prompt.count()) {
+      await (opts.isMobile ? prompt.tap() : prompt.click());
+      const ms = await timeUntil(page, `() => { const a = document.querySelector('audio'); return !a.paused && a.currentTime > 0.05; }`, 8000);
+      check(`${tag}: one tap plays the stream (F-LISTEN-41)`, ms >= 0 && await prompt.count() === 0, `${ms} ms`);
+    }
+    check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+}
+
+// F-LISTEN-40, 46, 47, 48, 51, 53, 54: the page around the player
+async function pageShell(browser) {
+  const tag = 'listen shell';
+  // F-LISTEN-40: volume row only after Listen, hidden after Stop
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByText('On Air', { exact: true }).waitFor();
+    const vol = () => page.getByRole('slider', { name: 'Volume' }).count();
+    check(`${tag}: no volume row before Listen (F-LISTEN-40)`, await vol() === 0);
+    await listenBtn(page).click();
+    await timeUntil(page, `() => window.__audible().length === 1`, 3000);
+    check(`${tag}: volume row once the player is ready (F-LISTEN-40)`, await vol() === 1);
+    await stopBtn(page).click();
+    check(`${tag}: volume row hidden after Stop (F-LISTEN-40)`, await vol() === 0);
+    await ctx.close();
+  });
+  // F-LISTEN-47: the station lookup cannot reach the server
+  for (const [what, setup] of [['a 503', (st) => st.replyNext.set('/stations/st-1', [{ status: 503 }, { status: 503 }, { status: 503 }, { status: 503 }])], ['no network', (st) => st.replyNext.set('/stations/st-1', ['network', 'network', 'network', 'network'])]]) {
+    const station = makeStation({ shows: [] });
+    setup(station);
+    const { ctx } = await listenContext(browser, DESK, station);
+    const page = await ctx.newPage();
+    const t0 = Date.now();
+    await page.goto(`${BASE}/listen/${station.SID}`);
+    await page.getByText('Cannot reach the server right now.').waitFor({ timeout: 8000 }).catch(() => {});
+    check(`${tag}: station lookup with ${what} says it cannot reach the server, not "Station not found" (F-LISTEN-47)`,
+      await page.getByText('Cannot reach the server right now.').count() === 1 && await page.getByText('Station not found').count() === 0, `${Date.now() - t0} ms`);
+    check(`${tag}: and says so within 4 s (F-LISTEN-47)`, Date.now() - t0 < 4000, `${Date.now() - t0} ms`);
+    await ctx.close();
+  }
+  // F-LISTEN-48: listeners never see engine wording: every server-stream state shows a
+  // plain "Live stream" (the control room keeps the detail: control-room-actions.mjs badges)
+  for (const [st, what] of [
+    [{ mode: 'server', engine: true, engine_ok: true, in_sync: true }, 'engine fine'],
+    [{ mode: 'server', engine: true, engine_ok: false, in_sync: false }, 'engine not answering'],
+    [{ mode: 'server', engine: true, engine_ok: true, in_sync: false, engine_title: 'Nigun Simcha 7' }, 'engine out of step'],
+  ]) {
+    const station = makeStation({ shows: [] });
+    station.playout = { stations: { [station.SID]: st }, default: { mode: 'browser' } };
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page } = await openListen(ctx, station.SID);
+    const badge = page.getByTestId('playout-badge');
+    await badge.waitFor({ timeout: 5000 }).catch(() => {});
+    const text = (await badge.textContent().catch(() => '')).trim();
+    const title = await badge.getAttribute('title').catch(() => '');
+    check(`${tag}: ${what}: the public badge says only "Live stream", no engine wording or track title (F-LISTEN-48)`,
+      text === 'Live stream' && !/engine|server|step|answer|Nigun/i.test(title || ''), `${text} | ${title}`);
+    await ctx.close();
+  }
+  // F-LISTEN-51: lock screen before any now-playing arrives, and no Media Session at all
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, DESK, station, { ws: { greet: false } });
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await listenBtn(page).click();
+    await sleep(500);
+    const m = await page.evaluate(() => ({ title: navigator.mediaSession.metadata?.title, artist: navigator.mediaSession.metadata?.artist }));
+    check(`${tag}: lock screen before any now-playing shows the station name (F-LISTEN-51)`, m.title === 'Kol Berama' && m.artist === 'Kol Berama', JSON.stringify(m));
+    check(`${tag}: no script errors (no now-playing yet)`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+    const { ctx: c2 } = await listenContext(browser, DESK, station, { initScripts: [() => { delete Navigator.prototype.mediaSession; }] });
+    const { page: p2, errors: e2 } = await openListen(c2, station.SID);
+    await p2.getByText('On Air', { exact: true }).waitFor();
+    const has = await p2.evaluate(() => 'mediaSession' in navigator);
+    await listenBtn(p2).click();
+    const heard = await timeUntil(p2, `() => window.__audible().length === 1`, 3000);
+    check(`${tag}: a browser with no Media Session API still plays (F-LISTEN-51)`, !has && heard >= 0 && e2.length === 0, `mediaSession ${has}, ${heard} ms, ${e2.join(' | ')}`);
+    await c2.close();
+  });
+  // F-LISTEN-53: small phone and phone sideways: no sideways scroll with the PIN row and register form open
+  for (const [label, opts] of [['320 px phone', { viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true }], ['iPhone sideways', { ...devices['iPhone 13 landscape'] }]]) {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, opts, station);
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByPlaceholder('Enter 6-digit PIN').waitFor();
+    const fits = async () => {
+      const w = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, vw: innerWidth }));
+      // Anything sticking out past the screen's right edge, or out of the white card
+      const wide = await page.evaluate(() => {
+        const card = document.querySelector('main .shadow');
+        const edge = Math.min(innerWidth, card ? card.getBoundingClientRect().right : innerWidth) + 1;
+        return [...document.querySelectorAll('main *')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > edge; })
+          .map((e) => `${e.tagName}:${(e.textContent || e.getAttribute('placeholder') || '').trim().slice(0, 14)}`).slice(0, 5);
+      });
+      return { ok: w.doc <= w.vw && wide.length === 0, detail: `${w.doc} / ${w.vw} px ${wide.join(', ')}` };
+    };
+    const first = await fits();
+    check(`${tag}: ${label}: header and PIN row (input, Login, or, Register) fit, no sideways scroll (F-LISTEN-53)`, first.ok, first.detail);
+    await page.getByRole('button', { name: 'Register' }).first().dispatchEvent('click');
+    await page.getByRole('button', { name: 'Request a Song' }).dispatchEvent('click');
+    await sleep(300);
+    const open = await fits();
+    check(`${tag}: ${label}: register and song request forms open still fit (F-LISTEN-53)`, open.ok, open.detail);
+    await ctx.close();
+  }
+  // F-LISTEN-54: anonymous visitor's menu on a phone, Admin Login on both sizes
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [] });
+    const { ctx } = await listenContext(browser, { ...devices['iPhone 13'] }, station);
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    const menu = page.getByRole('button', { name: 'Menu' });
+    const box = await menu.boundingBox();
+    check(`${tag}: phone: the menu button is shown, at least 44 px (F-LISTEN-54)`, !!box && box.height >= 44 && box.width >= 44, JSON.stringify(box));
+    check(`${tag}: phone: Admin Login shown (F-LISTEN-54)`, await page.getByRole('link', { name: 'Admin Login' }).isVisible());
+    const nav = page.locator('nav');
+    for (const [name, path] of [['Stations', '/stations'], ['Program Guide', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives']]) {
+      await menu.tap();
+      const link = nav.getByRole('link', { name, exact: true }).filter({ visible: true });
+      const shown = await link.count();
+      if (shown) await link.first().tap();
+      await page.waitForURL(`**${path}`, { timeout: 3000 }).catch(() => {});
+      const closed = await nav.getByRole('link', { name: 'Archives', exact: true }).filter({ visible: true }).count() === 0;
+      check(`${tag}: phone menu: ${name} goes to ${path} and closes the menu (F-LISTEN-54)`, shown === 1 && new URL(page.url()).pathname === path && closed, `${shown} links, ${page.url()}, closed ${closed}`);
+    }
+    await ctx.close();
+    const { ctx: c2 } = await listenContext(browser, DESK, station);
+    const { page: p2 } = await openListen(c2, station.SID);
+    await p2.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    check(`${tag}: desktop: Admin Login shown, no menu button (F-LISTEN-54)`, await p2.getByRole('link', { name: 'Admin Login' }).isVisible() && !(await p2.getByRole('button', { name: 'Menu' }).isVisible()));
+    await c2.close();
+  });
+  // F-LISTEN-46: live banner keeps its state when the poll fails, goes within 15 s of the end; no call-in link with calls off
+  await guarded(tag, async () => {
+    const station = makeStation({ shows: [{ id: 'ls9', station_id: 'st-1', title: 'Motzei Shabbos Live', status: 'live', calls_enabled: false }] });
+    const { ctx } = await listenContext(browser, DESK, station);
+    const { page } = await openListen(ctx, station.SID);
+    await page.getByText('LIVE: Motzei Shabbos Live').waitFor({ timeout: 5000 });
+    check(`${tag}: calls off -> banner with no call-in link (F-LISTEN-46)`, await page.getByRole('link', { name: 'Call in from here' }).count() === 0);
+    station.replyNext.set(`/live-shows/station/${station.SID}/active`, [{ status: 500 }, 'network']);
+    await sleep(31000);
+    check(`${tag}: two failed polls keep the banner quietly (F-LISTEN-46)`, await page.getByText('LIVE: Motzei Shabbos Live').count() === 1 && await page.getByRole('alert').count() === 0);
+    station.live.shows[0].status = 'ended';
+    const gone = await timeUntil(page, `() => !document.body.innerText.includes('LIVE: Motzei Shabbos Live')`, 17000);
+    check(`${tag}: the banner goes within 15 s of the show's end (F-LISTEN-46)`, gone >= 0 && gone <= 16000, `${gone} ms`);
+    await ctx.close();
+  });
+}
+
+// F-LISTEN-44: the live-show socket opens only after Listen and closes on Stop; a show
+// already live when Listen is pressed is heard at once, with no music before it
+async function liveSocket(browser) {
+  const tag = 'listen live socket';
+  for (const showLive of [false, true]) {
+    const station = makeStation({ shows: showLive ? [{ id: 'ls9', station_id: 'st-1', title: 'Motzei Shabbos Live', status: 'live' }] : [] });
+    const { ctx } = await listenContext(browser, DESK, station);
+    await ctx.addInitScript(() => {
+      window.__liveFrames = 0;
+      const AC = window.AudioContext;
+      const cbs = AC.prototype.createBufferSource;
+      AC.prototype.createBufferSource = function (...a) { window.__liveFrames++; return cbs.apply(this, a); };
+    });
+    const live = [];
+    // Registered after the context's catch-all, so it answers the listen socket
+    await ctx.routeWebSocket(/\/ws\/live\/station\/[^/]+\/listen/, (ws) => {
+      const e = { open: true, at: Date.now(), timer: null };
+      live.push(e);
+      ws.onClose(() => { e.open = false; clearInterval(e.timer); });
+      ws.send(JSON.stringify({ type: 'live_state', live: showLive, sample_rate: 24000 }));
+      if (showLive) {
+        const frame = Buffer.alloc(4800); // 0.1 s of 16-bit mono at 24 kHz
+        for (let i = 0; i < 2400; i++) frame.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 300 * i / 24000)), i * 2);
+        e.timer = setInterval(() => { if (e.open) ws.send(frame); }, 100);
+      }
+    });
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText(showLive ? 'LIVE: Motzei Shabbos Live' : 'On Air', { exact: !showLive }).waitFor({ timeout: 5000 });
+    await sleep(2000);
+    const name = showLive ? 'show on air' : 'no show';
+    check(`${tag} (${name}): no live-audio socket before Listen is pressed (F-LISTEN-44)`, live.length === 0, `${live.length} opened`);
+    const t0 = Date.now();
+    await listenBtn(page).click();
+    const heard = await timeUntil(page, `() => window.__liveFrames > 0`, showLive ? 3000 : 1);
+    check(`${tag} (${name}): Listen opens the live-audio socket at once (F-LISTEN-44)`, live.some((e) => e.open) && live[0].at - t0 < 1500, live.length ? `${live[0].at - t0} ms` : 'never');
+    if (showLive) {
+      check(`${tag}: a show already live is heard within 1 s of Listen (F-LISTEN-14, F-LISTEN-44)`, heard >= 0 && heard <= 1000, `${heard} ms`);
+      const samples = await watchDecks(page, 2500, 100);
+      const music = samples.filter((s) => s.decks.some((d) => d.playing && d.gain > 0.05)).length;
+      check(`${tag}: no music over the live show after Listen`, music === 0, `${music} samples with music`);
+    } else {
+      const music = await timeUntil(page, `() => window.__audible().length === 1`, 3000);
+      check(`${tag}: no show: the music plays as usual`, music >= 0, `${music} ms`);
+    }
+    await stopBtn(page).click();
+    await sleep(500);
+    check(`${tag} (${name}): Stop closes the live-audio socket (F-LISTEN-44)`, live.every((e) => !e.open), `${live.filter((e) => e.open).length} open`);
+    check(`${tag} (${name}): no script errors`, errors.length === 0, errors.join(' | '));
+    live.forEach((e) => clearInterval(e.timer));
+    await ctx.close();
+  }
+}
+
+// Library titles with file-name underscores ("Moed_Katan 4") read with spaces on the
+// Listen page (card, lock screen, song request result); data sent back is unchanged
+async function titleDisplay(browser) {
+  const tag = 'listen titles';
+  const station = makeStation({
+    shows: [],
+    extra: (method, path) => (path === '/song-requests' && method === 'POST'
+      ? { id: 'r9', status: 'approved', auto_approved: true, matched_asset_title: 'Moed_Katan 4', matched_asset_artist: 'Rav_Ploni', songs_ahead: 2, estimated_wait_minutes: 7 }
+      : undefined),
+  });
+  const a = station.byId[station.playing().asset_id];
+  Object.assign(a, { title: 'Moed_Katan 4', artist: 'Rav_Ploni', album: 'Shas__Shiurim' });
+  const { ctx } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']] });
+  const { page, errors } = await openListen(ctx, station.SID);
+  await page.getByText('On Air', { exact: true }).waitFor();
+  const card = await page.locator('h3', { hasText: 'Now Playing' }).locator('..').innerText();
+  check(`${tag}: Now Playing card shows "Moed Katan 4", "Rav Ploni", "Shas Shiurim" (no underscores)`,
+    card.includes('Moed Katan 4') && card.includes('Rav Ploni') && card.includes('Shas Shiurim') && !card.includes('_'), card.replace(/\n/g, ' | '));
+  await listenBtn(page).click();
+  await sleep(500);
+  const m = await page.evaluate(() => ({ title: navigator.mediaSession.metadata?.title, artist: navigator.mediaSession.metadata?.artist }));
+  check(`${tag}: lock screen shows "Moed Katan 4" by "Rav Ploni"`, m.title === 'Moed Katan 4' && m.artist === 'Rav Ploni', JSON.stringify(m));
+  // What goes back to the API is unchanged
+  await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 4000 });
+  await page.getByRole('button', { name: 'Rate 4 stars' }).click();
+  await sleep(600);
+  const rate = station.calls.filter((c) => c.path === '/crm/rate').pop();
+  check(`${tag}: the rating is sent for the item's id`, rate?.body.asset_id === a.id, JSON.stringify(rate?.body));
+  await page.getByRole('button', { name: 'Request a Song' }).click();
+  await page.getByPlaceholder('Enter your name').fill('Moshe');
+  await page.getByPlaceholder('What song would you like to hear?').fill('Moed_Katan 4');
+  await page.getByRole('button', { name: 'Submit Request' }).click();
+  await page.getByText('Your song has been added to the queue!', { exact: false }).waitFor({ timeout: 3000 }).catch(() => {});
+  const sent = station.calls.filter((c) => c.path === '/song-requests').pop();
+  check(`${tag}: a song request is sent exactly as typed (underscore kept)`, sent?.body.song_title === 'Moed_Katan 4', JSON.stringify(sent?.body));
+  const box = await page.locator('#song-request-form').innerText();
+  check(`${tag}: the request result shows "Moed Katan 4 by Rav Ploni"`, box.includes('Playing: Moed Katan 4 by Rav Ploni'), box.split('\n')[0]);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 const browser = await chromium.launch();
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 try {
@@ -890,6 +1588,12 @@ try {
     await basics(browser, { ...devices['iPhone 13'] }, 'listen iPhone');
   }
   if (run('forms')) await forms(browser);
+  if (run('crm')) await crmProfile(browser);
+  if (run('requests')) await songRequests(browser);
+  if (run('nothing')) await nothingOnAir(browser);
+  if (run('shell')) await pageShell(browser);
+  if (run('live')) await liveSocket(browser);
+  if (run('titles')) await titleDisplay(browser);
   if (run('network')) await network(browser);
   if (run('polling')) await pollingFallback(browser);
   if (run('switch')) await stationSwitch(browser);
@@ -921,6 +1625,13 @@ try {
   if (run('stream')) {
     const stream = await startStreamServer(STREAM_PORT);
     try { await streamMode(browser, stream); } finally { await stream.close(); }
+  }
+  if (run('streamretry') || run('resume')) {
+    const stream = await startStreamServer(STREAM_PORT);
+    try {
+      if (run('streamretry')) await streamRetry(browser, stream);
+      if (run('resume')) await streamResume(browser, stream);
+    } finally { await stream.close(); }
   }
 } finally {
   await browser.close();

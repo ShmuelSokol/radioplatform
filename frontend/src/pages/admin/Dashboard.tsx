@@ -25,7 +25,7 @@ import type { QueueRow } from './controlroom/QueuePanel';
 import { nextCut } from './controlroom/timing';
 import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
-import { usePfl } from './controlroom/pfl';
+import { usePfl, WEATHER_PFL_ID, type PflClip } from './controlroom/pfl';
 import { PflDeck } from './controlroom/PflDeck';
 import { ErrorsPanel, LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import ModeButtons from './controlroom/ModeButtons';
@@ -549,8 +549,22 @@ export default function Dashboard() {
   }, [looping, qc, refreshQueue]);
 
   // HS and Spots mode switches, Panic (KBR Studio's control panel)
-  const modes = (queueData as { modes?: StationModes } | undefined)?.modes ?? { hard_start: true, spots: true };
+  // Until the queue (which carries the modes) has loaded, the real state is unknown:
+  // the buttons stay greyed so nobody presses them on a wrong state
+  const knownModes = (queueData as { modes?: StationModes } | undefined)?.modes;
+  const modes = knownModes ?? { hard_start: true, spots: true };
   const [modesBusy, setModesBusy] = useState(false);
+  // A mode change made in another control room arrives on the now-playing channel
+  useEffect(() => {
+    const onModes = (ev: Event) => {
+      const d = (ev as CustomEvent<{ station_id?: string; hard_start?: boolean; spots?: boolean }>).detail;
+      if (!d?.station_id || typeof d.hard_start !== 'boolean' || typeof d.spots !== 'boolean') return;
+      const next = { hard_start: d.hard_start, spots: d.spots };
+      qc.setQueryData(['queue', d.station_id], (old: unknown) => (old && typeof old === 'object' ? { ...old, modes: next } : old));
+    };
+    window.addEventListener('kbr-modes', onModes);
+    return () => window.removeEventListener('kbr-modes', onModes);
+  }, [qc]);
   const changeModes = useCallback(async (next: Partial<StationModes>) => {
     const sid = latest.current.stationId;
     if (!sid) return;
@@ -596,7 +610,7 @@ export default function Dashboard() {
   }, [qc, refreshQueue]);
   const modeProps = {
     stationId: stationId ?? null,
-    hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId,
+    hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId, modesKnown: !!knownModes,
     canChange: !!user && user.role !== 'viewer',
     onHardStart: () => changeModes({ hard_start: !modes.hard_start }),
     onSpots: () => changeModes({ spots: !modes.spots }),
@@ -645,33 +659,26 @@ export default function Dashboard() {
   // Pre-listen (PFL): one off-air player shared by the cart and the library
   const pfl = usePfl();
 
-  // Off-air time + weather preview
-  const [weatherState, setWeatherState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  // Off-air time + weather preview: played in the pre-listen deck (time, then
+  // weather, as one item with play/pause, seek and stop), never on air
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const playClips = pfl.playClips;
   const previewWeather = useCallback(async () => {
-    if (weatherState !== 'idle') return;
-    setWeatherState('loading');
+    if (weatherLoading) return;
+    setWeatherLoading(true);
     try {
       const data = await weatherPreviewMut.mutateAsync();
-      const urls = [data.time_url, data.weather_url].filter(Boolean) as string[];
-      if (urls.length === 0) {
-        setToast({ text: 'No weather announcement is available right now.', type: 'warn' });
-        setWeatherState('idle');
-        return;
-      }
-      setWeatherState('playing');
-      for (const url of urls) {
-        await new Promise<void>((resolve) => {
-          const a = new Audio(url);
-          a.onended = () => resolve();
-          a.onerror = () => resolve();
-          a.play().catch(() => resolve());
-        });
-      }
+      const clips: PflClip[] = [];
+      if (data.time_url) clips.push({ url: data.time_url, label: 'Time' });
+      if (data.weather_url) clips.push({ url: data.weather_url, label: 'Weather' });
+      if (clips.length === 0) setToast({ text: 'No weather announcement is available right now.', type: 'warn' });
+      else void playClips(WEATHER_PFL_ID, 'Time & weather', clips);
     } catch {
       setToast({ text: 'Could not load the weather preview.', type: 'error' });
+    } finally {
+      setWeatherLoading(false);
     }
-    setWeatherState('idle');
-  }, [weatherState, weatherPreviewMut]);
+  }, [weatherLoading, weatherPreviewMut, playClips]);
 
   // ── Keyboard shortcuts (desktop) ───────────────────────────
   const keyActions = useRef({ handleNext, cancelInsert, isPlaying });
@@ -772,7 +779,7 @@ export default function Dashboard() {
       onCancelInsert={cancelInsert}
       disabled={noStation}
       onPreviewWeather={previewWeather}
-      weatherState={weatherState}
+      weatherLoading={weatherLoading}
       pfl={pfl}
       wide={wide}
       bar={bar}
