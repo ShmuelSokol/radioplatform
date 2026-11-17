@@ -98,6 +98,10 @@ class EngineState:
     last_handoff_prune: float = 0.0
     # Protocol version the engine last reported (0 = an engine that reports none)
     engine_proto: int = 0
+    # What the engine was last told about a live show (None: not told since it or
+    # we started, so it is told again)
+    live_sent: bool | None = None
+    live_tried: float = 0.0
 
 
 HANDED_KEEP = 30
@@ -262,6 +266,18 @@ async def engine_skip(station_id, fade_seconds: float | None = None) -> bool:
     ok = await _command("/skip", None if fade_seconds is None else {"fade": fade_seconds}, station_id=station_id)
     if not ok:
         state.skip_requested = False
+    return ok
+
+
+async def engine_live(station_id, on: bool) -> bool:
+    """A live show starts or has ended: the stream goes quiet under the host and the
+    item on air does not come back (it was queued again to carry on), or the music
+    lane starts again. The engine ignores a repeat."""
+    ok = await _command("/live", {"on": bool(on)}, station_id=station_id)
+    state = get_state(station_id)
+    if ok:
+        state.live_sent = bool(on)
+        state.live_tried = 0.0
     return ok
 
 
@@ -586,7 +602,8 @@ async def _reconcile_given(db: AsyncSession, station_id, given: list[str]) -> se
 
 
 async def handle_next(
-    db: AsyncSession, station_id, given: list[str] | None = None, proto: int | None = None
+    db: AsyncSession, station_id, given: list[str] | None = None, proto: int | None = None,
+    engine_live_on: bool = False,
 ) -> dict | None:
     """The engine wants its next track: {"uri", "entry_id"}, or None if the queue is empty."""
     state = get_state(station_id)
@@ -602,6 +619,12 @@ async def handle_next(
     # first) would be used up. The engine retries by itself once the show is over.
     if await _live_show_on(db, station_id):
         return None
+    if engine_live_on:
+        # The engine is still quiet for a show that is over (its end never reached it:
+        # we restarted, or the command failed). Told in the background; it asks again.
+        task = asyncio.create_task(engine_live(station_id, False))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
 
     if state.engine_proto >= ENGINE_PROTO_HOLD and await _hold_before_hard_item(
         db, station_id, state.cued_entry_id or (given[0] if given else None)
@@ -1305,6 +1328,22 @@ async def _prune_handoffs(db: AsyncSession, station_id, state: EngineState) -> N
         await db.rollback()
 
 
+_background: set = set()
+
+
+async def _tell_live(station_id, state: EngineState, on: bool) -> None:
+    """Tell the engine once; an engine that does not answer is asked again every 15 s
+    (not on every pass: each try can cost the pass a command timeout)."""
+    if state.live_sent is on or (state.live_sent is None and not on):
+        # (Not known and no show on: an engine still quiet from a show that ended
+        # while we were restarting says so with its next ask, see handle_next)
+        return
+    if time.monotonic() - state.live_tried < 15.0:
+        return
+    state.live_tried = time.monotonic()
+    await engine_live(station_id, on)
+
+
 async def tick(db: AsyncSession, station) -> None:
     """Called by the scheduler loop for the engine-driven station."""
     station_id = station.id
@@ -1317,7 +1356,12 @@ async def tick(db: AsyncSession, station) -> None:
     if (station.automation_config or {}).get("live_show_id"):
         if state.cued_entry_id:
             await engine_flush(station_id)
+        # The stream goes quiet under the host. Sent again after an engine or backend
+        # restart during the show (the engine would play its emergency music).
+        await _tell_live(station_id, state, True)
         return
+    # The show is over (or we do not know what the engine was told): music again
+    await _tell_live(station_id, state, False)
 
     # 1. Hand hard-timed items (hourly ID, time, weather) to the engine ahead of time
     horizon = now + timedelta(seconds=TIMED_LEAD_SECONDS)

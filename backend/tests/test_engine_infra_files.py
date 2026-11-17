@@ -253,8 +253,8 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     # hard item, the emergency lane must not fill in. The hold lane sits above it, is
     # open only while a timed item is loaded and due within 8 s, and is not reported.
     liq = (INFRA / "radio.liq").read_text()
-    assert "[timed, main, hold, emergency]" in liq
-    assert "timed_pending() > 0 and left < 8. and left > -2." in liq
+    assert "[on_air_quiet, timed, main, hold, emergency]" in liq
+    assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
     assert 'elsif hold_open() then "hold" else "emergency"' in liq
     assert "engine_proto = 3" in liq
 
@@ -296,3 +296,17 @@ def test_engine_items_carry_their_overlap():
         assert 'kbr_overlap="0.00"' in song and 'liq_cross_duration="0.20"' in song
     finally:
         queue_module._station_crossfade.pop(station, None)
+
+
+def test_the_stream_is_quiet_while_a_host_is_on_air():
+    # Jerusalem 23:06Z 2026-11-17: the song on the engine played on under the host. The
+    # live lane sits above every other lane, is switched by /live, is not reported as a
+    # start, and the engine says with each ask whether it is on (a show that ended while
+    # the backend restarted).
+    liq = (INFRA / "radio.liq").read_text()
+    assert 'on_air_quiet = switch(id="host_gate", track_sensitive=false, [({live_on()}, blank(id="host_on_air"))])' in liq
+    assert 'control("/live"' in liq
+    assert 'elsif live_on() then "live"' in liq
+    assert "&live=#{if live_on() then 1 else 0 end}" in liq
+    assert "live_release := time() + 12." in liq
+

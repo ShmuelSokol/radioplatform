@@ -76,11 +76,14 @@ last_main_entry = ref("")
 # for the next track. The backend never hands these out again, and closes the older ones
 # if a start report was lost while it was unreachable (so nothing is played twice).
 given = ref([])
+# A host is on air and the stream is quiet (see the live lane below). Sent with every
+# ask, so a backend that restarted while the show ended still learns of it.
+live_on = ref(false)
 def next_request() =
   try
     handed = string.concat(separator=",", given())
     resp = http.get(headers=auth_headers, timeout=8.,
-                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}")
+                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}&live=#{if live_on() then 1 else 0 end}")
     if resp.status_code == 200 then
       let json.parse (data : {uri : string, entry_id : string}) = resp
       log.important("next: backend gave entry #{data.entry_id}")
@@ -281,13 +284,23 @@ emergency = mksafe(emergency)
 # so for those few seconds the stream is quiet until the timed item takes over. Open only
 # while a timed item is loaded and due within 8 s; never longer, so a timed item that
 # does not arrive still ends in emergency music, not dead air.
+# Also open for a few seconds after a live show ends, while the first item loads.
+live_release = ref(0.)
 def hold_open() =
   left = timed_group_at() - time()
-  timed_pending() > 0 and left < 8. and left > -2.
+  (timed_pending() > 0 and left < 8. and left > -2.) or time() < live_release()
 end
 hold = switch(id="hold_gate", track_sensitive=false, [(hold_open, blank(id="hold"))])
 
-radio = fallback(id="radio", track_sensitive=false, [timed, main, hold, emergency])
+# ── Live lane: the stream is quiet while a host is on air ────────────────────
+# The host's microphone reaches listeners through the site, not through this stream
+# (Shmuel's choice, PR 112), and automation pauses. Without this lane the song on the
+# engine played on under the host (Jerusalem 23:06Z 2026-11-17): the backend only
+# stopped handing out new items. While the lane is on air the lanes below stand still;
+# the backend switches it with /live.
+on_air_quiet = switch(id="host_gate", track_sensitive=false, [({live_on()}, blank(id="host_on_air"))])
+
+radio = fallback(id="radio", track_sensitive=false, [on_air_quiet, timed, main, hold, emergency])
 radio = amplify(override=null(), {master_gain()}, radio)
 # What is on air from the lanes above. Start reports and /status read this, so an item
 # mixed over the top (below) never counts as a change of track.
@@ -329,6 +342,22 @@ def skip_on_air(~seconds) =
     else
       skip_main()
     end
+  end)
+end
+
+# A live show starts: what is on air fades out and the live lane takes the stream.
+# (Defined here, beside the other skips: called straight from the /live handler, the
+# timed lane's skip kept the engine from starting.)
+def go_live() =
+  ramp_master(target=0., duration=skip_fade, fun () -> begin
+    if on_air_lane() == "main" then
+      main_gain := 0.
+      main_interrupted := true
+    elsif on_air_lane() == "timed" then
+      timed_queue.skip()
+    end
+    live_on := true
+    thread.run(delay=0.1, {master_gain := 1.})
   end)
 end
 
@@ -386,7 +415,7 @@ timed_dropped = ref([])
 def send_started(m) =
   entry = m["kbr_entry"]
   # No entry: an emergency file, or the quiet held just before a hard timed item
-  lane = if entry != "" then m["kbr_lane"] elsif hold_open() then "hold" else "emergency" end
+  lane = if entry != "" then m["kbr_lane"] elsif live_on() then "live" elsif hold_open() then "hold" else "emergency" end
   was = on_air_lane()
   on_air_lane := lane
   if lane == "timed" and timed_pending() > 0 then timed_pending := timed_pending() - 1 end
@@ -410,6 +439,8 @@ def send_started(m) =
   elsif lane == "hold" then
     # Not reported: nothing from the queue is on air and it is not the emergency music
     log.important("hold: quiet until the timed item due in #{timed_group_at() - time()} s")
+  elsif lane == "live" then
+    log.important("live: a host is on air; the stream is quiet")
   else
     if lane == "main" and main_interrupted() then
       # The music lane came back on a new track, not the interrupted song (after a long
@@ -419,7 +450,10 @@ def send_started(m) =
       main_interrupted := false
       main_gain := 1.
     end
-    if lane == "main" then last_main_entry := entry end
+    if lane == "main" then
+      last_main_entry := entry
+      live_release := 0.
+    end
     report_to_backend(entry, lane, m["title"])
     if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end
   end
@@ -464,6 +498,24 @@ control("/skip", fun (req) -> begin
   let json.parse (body : {fade : float?}) = req.body()
   wanted = null.default(body.fade, {skip_fade})
   skip_on_air(seconds=max(0.02, wanted))
+  '{"ok":true}'
+end)
+
+# A live show starts ({"on": true}) or has ended ({"on": false}). Safe to repeat.
+# On: the item on air fades out and does not come back (the backend has queued it to
+# carry on afterwards where that applies); a timed item on air is dropped. Off: the
+# music lane moves to its next item; the stream stays quiet (hold lane, at most 12 s)
+# until that item is loaded, so no emergency music fills in.
+control("/live", fun (req) -> begin
+  let json.parse (body : {on : bool}) = req.body()
+  if body.on and not live_on() then
+    log.important("live: show starts")
+    go_live()
+  elsif not body.on and live_on() then
+    log.important("live: show ended")
+    live_release := time() + 12.
+    live_on := false
+  end
   '{"ok":true}'
 end)
 
@@ -537,7 +589,8 @@ end)
 control("/status", fun (_) -> begin
   m = program.last_metadata() ?? []
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
-                  main_remaining=main.remaining(), timed_waiting=timed_queue.length()})
+                  main_remaining=main.remaining(), timed_waiting=timed_queue.length(),
+                  live=live_on()})
 end)
 
 # Optional: also write the output to a WAV file (testing only)

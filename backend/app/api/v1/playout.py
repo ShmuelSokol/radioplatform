@@ -56,6 +56,7 @@ async def next_track(
     station_id: uuid.UUID = Depends(_require_engine),
     given: str | None = None,
     proto: int | None = None,
+    live: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """What should play next. 204 when the queue is empty (the engine retries).
@@ -65,7 +66,7 @@ async def next_track(
     a start report was lost.
     """
     ids = [g for g in (given or "").split(",") if g]
-    result = await playout_engine.handle_next(db, station_id, ids, proto=proto)
+    result = await playout_engine.handle_next(db, station_id, ids, proto=proto, engine_live_on=bool(live))
     if result is None:
         return Response(status_code=204)
     return result

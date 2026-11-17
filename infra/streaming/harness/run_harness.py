@@ -1036,6 +1036,47 @@ async def sc_speech_never_overlaps(h: Harness) -> None:
         await asyncio.sleep(12)
 
 
+async def sc_live_show_quiet(h: Harness) -> None:
+    """Jerusalem 23:06Z 2026-11-17: with a host on air the song on the engine played on
+    for the whole show. Now the stream goes quiet within a second or two of the show's
+    start (the host is heard through the site), stays quiet with no emergency music,
+    and the station's music is back within a few seconds of its end."""
+    name = "live_show_quiet"
+    await wait_music(h)
+    await asyncio.sleep(6)
+    code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show",
+                                               "calls_enabled": False})
+    if code != 201:
+        h.check(name, False, f"could not create the show ({code})")
+        return
+    t_start = time.time()
+    code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+    h.check(name, code == 200, f"show started ({code})")
+    await asyncio.sleep(22)
+    t_end = time.time()
+    code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
+    h.check(name, code == 200, f"show ended ({code})")
+    await asyncio.sleep(16)
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
+    loud = sum(WINDOW for w in during if w[1] >= -45)
+    h.check(name, bool(during) and loud <= 0.2,
+            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music during or after the show: {names}")
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    back = after[0][0] - t_end if after else None
+    h.check(name, back is not None and back <= 8.0,
+            f"music back {'never' if back is None else f'{back:.1f} s'} after the show ended")
+    h.check(name, len({n for _, n in after}) == 1,
+            f"one item after the show, not a fragment of the old song first: {[n for _, n in after]}")
+    st = await h.on_air()
+    on_air = [k for k, v in h.assets.items() if st and v == st.asset_id and k in TONES]
+    h.check(name, bool(after) and bool(on_air) and tone_name(TONES[on_air[0]][0]) == after[-1][1],
+            f"the site shows what is heard ({on_air[0] if on_air else None} / {after[-1][1] if after else None})")
+
+
 async def sc_soft_waits_for_song(h: Harness) -> None:
     name = "soft_timed_waits_for_song"
     await wait_music(h)
@@ -1893,6 +1934,7 @@ SCENARIOS = {
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
     "song_ends_before_hour": sc_song_ends_before_hour,
+    "live_show_quiet": sc_live_show_quiet,
     "speech_never_overlaps": sc_speech_never_overlaps,
     "next_after_idle": sc_next_after_idle,
     "next_twice": sc_next_twice,
