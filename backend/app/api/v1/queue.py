@@ -521,7 +521,8 @@ OPERATOR_SOURCES = ("manual", "request", "loop")
 
 
 async def _skip_placeholders(db: AsyncSession, station_id) -> None:
-    """Placeholder items ("KOL BRAMAH TEST SPONSOR", "Kol bramah ad"...) never air from
+    """Placeholder items ("KOL BRAMAH TEST SPONSOR", "Kol bramah ad"...) and items in
+    category do_not_play never air from
     any automatic path. Rotations already avoid them; this catches every other way in
     (a playlist or block naming the item, a spot schedule, old queue rows): three of
     them aired on KBR Jerusalem at 18:56 ET on 2026-11-16."""

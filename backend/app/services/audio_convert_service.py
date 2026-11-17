@@ -98,6 +98,63 @@ CONVERT_FORMATS = {
 }
 
 
+# The audio codec each target format must actually carry. A file named .mp3 can hold
+# MP2 audio (160 of the station's old files did, 2026-11-17): Safari and the playout
+# engine's MP3 decoder reject those, so the extension alone is not trusted.
+EXPECTED_CODECS = {
+    "mp3": {"mp3"},
+    "mp2": {"mp2"},
+    "mp4": {"aac"},
+    "aac": {"aac"},
+    "flac": {"flac"},
+    "ogg": {"vorbis"},
+}
+
+
+def probe_codec(file_data: bytes, input_ext: str = ".bin") -> str | None:
+    """The codec of the first audio stream (e.g. "mp3", "mp2"), or None if ffprobe
+    cannot tell (missing, timed out, no audio stream)."""
+    if not input_ext.startswith("."):
+        input_ext = "." + input_ext
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=input_ext, delete=False) as f:
+            f.write(file_data)
+            tmp_path = f.name
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams",
+             "-select_streams", "a:0", tmp_path],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            return None
+        streams = json.loads(result.stdout).get("streams") or []
+        codec = streams[0].get("codec_name") if streams else None
+        return str(codec).lower() if codec else None
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _codec_matches(file_data: bytes, ext: str, target_format: str) -> bool:
+    """True when the file really carries the target's codec. When ffprobe cannot
+    tell, the extension is trusted as before (no needless re-encode)."""
+    if target_format == "wav":
+        codec = probe_codec(file_data, ext)
+        return codec is None or codec.startswith("pcm_")
+    expected = EXPECTED_CODECS.get(target_format)
+    if not expected:
+        return True
+    codec = probe_codec(file_data, ext)
+    return codec is None or codec in expected
+
+
 def _convert_with_ffmpeg_tempfile(file_data: bytes, target_format: str, input_ext: str = ".bin") -> bytes | None:
     """Convert using temp files — more reliable for seekable formats like MPEG-PS."""
     fmt_config = CONVERT_FORMATS.get(target_format, CONVERT_FORMATS["mp3"])
@@ -189,9 +246,14 @@ def convert_audio(
     # Already in the target format — just extract duration
     fmt_config = CONVERT_FORMATS.get(target_format, CONVERT_FORMATS["mp3"])
     if ext == fmt_config["ext"]:
-        logger.info("File '%s' is already %s — skipping conversion", original_filename, target_format)
-        duration = _extract_duration(file_data, ext)
-        return file_data, duration, ext
+        if _codec_matches(file_data, ext, target_format):
+            logger.info("File '%s' is already %s — skipping conversion", original_filename, target_format)
+            duration = _extract_duration(file_data, ext)
+            return file_data, duration, ext
+        logger.warning(
+            "File '%s' is named %s but its audio is not %s — converting",
+            original_filename, ext, target_format,
+        )
 
     # Attempt conversion (pipe first, temp-file fallback inside)
     logger.info("Converting '%s' (%s) to %s...", original_filename, ext, target_format)

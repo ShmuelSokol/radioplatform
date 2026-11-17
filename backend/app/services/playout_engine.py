@@ -239,8 +239,13 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
 async def pick_next(
     db: AsyncSession, station_id, exclude_ids: set[str] | None = None
 ) -> QueueEntry | None:
+    from app.api.v1.queue import _skip_placeholders
+
     now = datetime.now(UTC)
     exclude = {str(x) for x in (exclude_ids or set())}
+    # Same guard as the browser-player path: placeholders and do-not-play items
+    # queued by any automatic path are skipped before the engine is handed them.
+    await _skip_placeholders(db, station_id)
 
     def usable(entries):
         for e in entries:

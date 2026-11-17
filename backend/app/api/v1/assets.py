@@ -244,12 +244,10 @@ async def upload_asset(
     original_filename = file.filename or "upload.mp3"
     raw_hash = hashlib.md5(file_data[:4096]).hexdigest()
 
-    # Auto-detect MP2/MPG files: keep as MP2 to preserve quality (browser playback auto-converts)
+    # MP2/MPG files become MP3 like everything else: Safari and the playout engine do
+    # not play MP2, and a file named .mp3 that holds MP2 is caught by the codec check
+    # in convert_audio (160 such files had to be fixed by hand, 2026-11-17).
     target = format
-    ext_lower = original_filename.rsplit(".", 1)[-1].lower() if "." in original_filename else ""
-    if target == "mp3" and ext_lower in ("mp2", "mpg", "mpeg"):
-        target = "mp2"
-        logger.info("Auto-selected mp2 target for MP2/MPG source file '%s'", original_filename)
 
     logger.info(
         "UPLOAD endpoint: filename='%s', content_type='%s', size=%d, hash_4k=%s, format='%s'",
