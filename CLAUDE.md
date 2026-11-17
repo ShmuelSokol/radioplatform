@@ -172,6 +172,7 @@ radioplatform/
 | playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen) |
 | call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
+| air_watch | air_watch.py | /air-watch (staff): recent on-air self-check findings |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
 | weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); ElevenLabs is only the fallback |
 
@@ -216,6 +217,7 @@ radioplatform/
 | call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |
 | activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
+| air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship; alerts + ntfy (see `wiki/air-watch.md`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details
@@ -484,6 +486,9 @@ cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 
 # Many stations x many listeners: does everyone switch songs together? (see wiki/multi-station-load.md)
 cd backend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... uv run python loadtests/multi_station.py --base http://localhost:8000 --listeners 150
+
+# Run the real playout engine locally against the backend, with timing scenarios (see wiki/engine-harness.md)
+cd backend && uv run python ../infra/streaming/harness/run_harness.py
 
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com

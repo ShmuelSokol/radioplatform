@@ -44,6 +44,7 @@ from app.api.v1.rds import router as rds_router
 from app.api.v1.bug_reports import router as bug_reports_router
 from app.api.v1.call_in import router as call_in_router
 from app.api.v1.playout_status import router as playout_status_router
+from app.api.v1.air_watch import router as air_watch_router
 from app.api.v1.site_release import router as site_release_router
 from app.api.v1.activity import router as activity_router
 
@@ -93,5 +94,6 @@ router.include_router(rds_router)
 router.include_router(bug_reports_router)
 router.include_router(call_in_router)
 router.include_router(playout_status_router)
+router.include_router(air_watch_router)
 router.include_router(site_release_router)
 router.include_router(activity_router)

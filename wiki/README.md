@@ -27,4 +27,6 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [multi-station-load.md](multi-station-load.md) — load test for many stations and listeners; what it found
 - [station-permissions.md](station-permissions.md) — who may operate which station; the protected (FM) station
 - [activity-log](activity-log.md) — who did what: every staff change with before/after, sign-ins, screens opened, listener sessions; how rows are captured
+- [air-watch](air-watch.md) — on-air self-check: late or missing time checks, dead air, engine drift, skipped timed items; alerts and ntfy
+- [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when
 - [live-shows](live-shows.md) — how a live show goes on air without a broadcast server: mic relay, automation pause/resume, hard stop
