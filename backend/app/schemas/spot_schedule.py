@@ -162,3 +162,5 @@ class SpotPlanPreview(BaseModel):
     planned: list[PlannedSpot]
     unplaced: list[UnplacedSpot]
     off_air: list[OffAirWindow] = []
+    # Spots mode is off in the control room: nothing is planned until it is on again
+    spots_off: bool = False

@@ -582,6 +582,12 @@ export default function SpotSchedules() {
                 ))}
               </div>
             )}
+            {plan?.spots_off && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-sm" data-testid="spots-off-note">
+                <p className="font-semibold">Spots mode is off on this station</p>
+                <p>No sponsor spots go on the air, so none are planned here. Switch Spots mode back on in the control room to plan them again.</p>
+              </div>
+            )}
             {!!plan?.unplaced.length && (
               <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4">
                 <p className="font-semibold">

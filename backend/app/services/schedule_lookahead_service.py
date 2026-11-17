@@ -20,6 +20,7 @@ from app.models.station import Station
 from app.services.scheduling import SchedulingService
 from app.services.spot_schedule_service import DAYPARTS as DAYPART_HOURS
 from app.services.spot_schedule_service import load_blackouts, plan_for_station, station_tz
+from app.services.station_modes import spots_on
 
 STEP = timedelta(minutes=15)
 
@@ -295,6 +296,8 @@ async def look_ahead(
         "station_id": str(station.id),
         "timezone": station.timezone or "UTC",
         "days": days,
+        # Spots mode off (control room): no sponsor spot is planned, so none shows as missing
+        "spots_off": not spots_on(station),
         "from": start,
         "to": end,
         "needs_attention": sum(1 for f in findings if f.needs_attention),

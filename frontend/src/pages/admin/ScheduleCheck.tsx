@@ -133,6 +133,11 @@ export default function ScheduleCheck() {
 
       {data && (
         <>
+          {data.spots_off && (
+            <p className="rounded-lg p-4 border bg-amber-50 border-amber-200 text-amber-900 text-sm" data-testid="spots-off-note">
+              Spots mode is off on this station (control room), so no sponsor spots are planned and none are checked here.
+            </p>
+          )}
           <div
             className={`rounded-lg p-4 border ${
               attention.length

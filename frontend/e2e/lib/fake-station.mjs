@@ -180,6 +180,7 @@ export function makeStation(opts = {}) {
     weather: opts.weather ?? { time_url: '/__tone/tc.wav', weather_url: '/__tone/wx.wav' },
     nextEntryId: undefined,   // override next_entry_id in the queue answer
     pushOnChange: opts.pushOnChange ?? true,
+    modes: { hard_start: true, spots: true },
   };
   const pending = () => queue.filter((e) => e.status === 'pending').sort((a, b) => a.position - b.position);
   const playing = () => queue.find((e) => e.status === 'playing');
@@ -212,6 +213,7 @@ export function makeStation(opts = {}) {
       loop_asset_id: loopId, entries: entries.slice(0, limit), total: Math.min(limit, entries.length), total_all: entries.length,
       now_playing: p ? { ...p, started_at: playing().started_at } : null,
       queue_duration_seconds: total, total_queue_duration_seconds: total, preempt_fade_ms: 2000, next_entry_id: next,
+      modes: s.modes, // like the real queue body: HS and Spots mode
     };
   };
   /** When a queued timed entry cuts into the item on air, as the server's _cut_time:
@@ -325,6 +327,10 @@ export function makeStation(opts = {}) {
       if (body.client_request_id) fired.set(body.client_request_id, done);
       announce();
       return done;
+    }
+    if (path === `${q}/modes`) {
+      s.modes = { hard_start: body?.hard_start ?? s.modes.hard_start, spots: body?.spots ?? s.modes.spots };
+      return { modes: s.modes, queue: s.view() };
     }
     if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: s.view() }; }
     if (path === `${q}/mix-over`) return { message: 'Playing over', asset_id: body.asset_id, on_air: true };

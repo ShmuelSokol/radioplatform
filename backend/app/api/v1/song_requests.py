@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.dependencies import get_db, may_operate_station, require_manager
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.models.asset import Asset
 from app.models.song_request import SongRequest, RequestStatus
 from app.models.user import User
@@ -260,6 +260,10 @@ async def update_request(
             )).scalar_one_or_none()
         if matched is None:
             raise NotFoundError("Song not found in the library")
+        # Already in Up next or played: a new match would leave the old song queued
+        # and never queue the new one
+        if str(getattr(req.status, "value", req.status)) in ("queued", "played") and str(matched.id) != str(req.asset_id):
+            raise ConflictError("This request is already in the queue or has played: its song can't be changed")
         req.asset_id = matched.id
         # Approved earlier without a match: it goes to the queue now
         if not body.status and req.status in (RequestStatus.APPROVED, RequestStatus.APPROVED.value):

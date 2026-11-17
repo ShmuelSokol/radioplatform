@@ -167,6 +167,10 @@ export const useNowPlayingWS = (stationId: string) => {
               // A jingle to play on top of what is on air; the audio engine picks it up
               window.dispatchEvent(new CustomEvent('kbr-mix-over', { detail: message.data }));
             }
+            if (message.type === 'modes' && message.data) {
+              // HS / Spots mode changed in some control room: every open one shows it at once
+              window.dispatchEvent(new CustomEvent('kbr-modes', { detail: message.data }));
+            }
             if (message.type === 'ping') {
               ws.send('pong');
             }
