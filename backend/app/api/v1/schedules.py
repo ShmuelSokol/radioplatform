@@ -49,87 +49,119 @@ router = APIRouter(
 
 
 # ==================== Public EPG ====================
+def _hhmm(local: datetime) -> str:
+    return local.strftime("%H:%M")
+
+
 @router.get("/epg/{station_id}")
 async def get_epg(
     station_id: UUID,
-    date: str | None = Query(None),  # YYYY-MM-DD, defaults to today
+    date: str | None = Query(None),  # YYYY-MM-DD, defaults to the station's today
     db: AsyncSession = Depends(get_db),
 ):
-    """Public EPG: returns all schedule blocks for a station on a given day, sorted by start_time."""
+    """Public EPG: what airs on a station on one day of its own calendar, in order.
+
+    Built with the resolver the station plays by (SchedulingService.rank_matching_blocks),
+    so the guide agrees with what airs (V2-105): a sunset/sunrise block shows that
+    day's real time, overlapping blocks show only the winner for the time it wins,
+    a start-only ("until next") block ends where the next one starts, and Shabbos /
+    Yom Tov blackouts show as off air. Times are station-local HH:MM; a run that goes
+    on past midnight ends "00:00".
+    """
     from datetime import date as date_type
+    from datetime import timedelta
 
+    from app.models.station import Station
+    from app.services.scheduling import SchedulingService
+    from app.services.spot_schedule_service import load_blackouts, station_tz
+
+    station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+    # The station's own clock (block times are station-local), not the server's
+    zone = station_tz(station.timezone if station else None)
     if date:
-        target_date = date_type.fromisoformat(date)
+        try:
+            target_date = date_type.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
     else:
-        # The station's own date (block times are station-local), not the server's
-        from zoneinfo import ZoneInfo
+        target_date = datetime.now(zone).date()
 
-        from app.models.station import Station
-        tz_name = None
-        try:
-            st = (await db.execute(select(Station).where(Station.id == UUID(station_id)))).scalar_one_or_none()
-            tz_name = st.timezone if st else None
-        except (ValueError, AttributeError):
-            pass
-        try:
-            target_date = datetime.now(ZoneInfo(tz_name or "UTC")).date()
-        except Exception:
-            target_date = datetime.now(ZoneInfo("UTC")).date()
-    day_name = target_date.strftime("%A").lower()  # "monday", etc.
-
-    # Get active schedules for station
-    result = await db.execute(
-        select(ScheduleModel).where(
-            ScheduleModel.station_id == station_id,
-            ScheduleModel.is_active == True,
+    schedules = (
+        await db.execute(
+            select(ScheduleModel)
+            .where(ScheduleModel.station_id == station_id, ScheduleModel.is_active == True)  # noqa: E712
+            .options(selectinload(ScheduleModel.blocks))
         )
-    )
-    schedules = result.scalars().all()
-    schedule_ids = [s.id for s in schedules]
-    if not schedule_ids:
+    ).scalars().all()
+    if not schedules:
         return {"station_id": station_id, "date": target_date.isoformat(), "blocks": []}
 
-    # Get blocks for these schedules
-    result = await db.execute(
-        select(ScheduleBlockModel).where(ScheduleBlockModel.schedule_id.in_(schedule_ids))
-    )
-    blocks = result.scalars().all()
+    svc = SchedulingService(db)
+    day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=zone)
+    day_end = datetime.combine(target_date + timedelta(days=1), datetime.min.time(), tzinfo=zone)
+    start_utc, end_utc = day_start.astimezone(timezone.utc), day_end.astimezone(timezone.utc)
+    blackouts = await load_blackouts(db, station_id, start_utc, end_utc)
 
-    # Filter to blocks active on target_date
-    epg_blocks = []
-    for block in blocks:
-        matches = False
-        rec = block.recurrence_type.value if hasattr(block.recurrence_type, 'value') else str(block.recurrence_type)
+    # Every moment the winner can change: midnight, each block's real start and end
+    # that day (sun times resolved), and the edges of off-air windows.
+    edges = {start_utc}
+    for schedule in schedules:
+        for block in schedule.blocks:
+            for clock, event, offset in (
+                (block.start_time, block.start_sun_event, block.start_sun_offset),
+                (block.end_time, block.end_sun_event, block.end_sun_offset),
+            ):
+                if clock is None:
+                    continue
+                if event and station:
+                    clock = svc._resolve_sun_time(event, offset or 0, station, target_date, fallback=clock)
+                at = datetime.combine(target_date, clock, tzinfo=zone).astimezone(timezone.utc)
+                if start_utc < at < end_utc:
+                    edges.add(at)
+    for b in blackouts:
+        for at in (b.start, b.end):
+            if start_utc < at < end_utc:
+                edges.add(at)
+    edges = sorted(edges)
 
-        if rec == "daily":
-            matches = True
-        elif rec == "weekly":
-            pattern = block.recurrence_pattern or []
-            matches = day_name in [p.lower() for p in pattern]
-        elif rec == "monthly":
-            pattern = block.recurrence_pattern or []
-            matches = target_date.day in pattern
-        elif rec == "one_time":
-            if block.start_date and block.end_date:
-                matches = block.start_date <= target_date <= block.end_date
-            elif block.start_date:
-                matches = target_date == block.start_date
-
-        if matches:
-            # Find parent schedule name
-            schedule = next((s for s in schedules if s.id == block.schedule_id), None)
-            epg_blocks.append({
+    names = {s.id: s.name for s in schedules}
+    runs: list[dict] = []
+    for i, at in enumerate(edges):
+        until = edges[i + 1] if i + 1 < len(edges) else end_utc
+        off = next((b for b in blackouts if b.covers(at)), None)
+        if off is not None:
+            key, item = f"off:{off.name}", {
+                "id": f"off-air-{at.isoformat()}",
+                "name": off.name or "Off air",
+                "description": "Off the air",
+                "playback_mode": "off_air",
+                "schedule_name": None,
+                "off_air": True,
+            }
+        else:
+            ranked = svc.rank_matching_blocks(schedules, at, station)
+            if not ranked:
+                continue
+            schedule, block = ranked[0]
+            key, item = str(block.id), {
                 "id": str(block.id),
                 "name": block.name,
                 "description": block.description,
-                "start_time": block.start_time.strftime("%H:%M") if block.start_time else None,
-                "end_time": block.end_time.strftime("%H:%M") if block.end_time else None,
-                "playback_mode": block.playback_mode.value if hasattr(block.playback_mode, 'value') else str(block.playback_mode),
-                "schedule_name": schedule.name if schedule else None,
-            })
+                "playback_mode": block.playback_mode.value if hasattr(block.playback_mode, "value") else str(block.playback_mode),
+                "schedule_name": names.get(schedule.id),
+                "off_air": False,
+            }
+        if runs and runs[-1]["_key"] == key and runs[-1]["_until"] == at:
+            runs[-1]["_until"] = until
+            continue
+        runs.append({**item, "_key": key, "_from": at, "_until": until})
 
-    # Sort by start_time
-    epg_blocks.sort(key=lambda b: b["start_time"] or "00:00")
+    epg_blocks = []
+    for run in runs:
+        item = {k: v for k, v in run.items() if not k.startswith("_")}
+        item["start_time"] = _hhmm(run["_from"].astimezone(zone))
+        item["end_time"] = _hhmm(run["_until"].astimezone(zone))
+        epg_blocks.append(item)
 
     return {
         "station_id": station_id,

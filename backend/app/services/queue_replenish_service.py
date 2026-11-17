@@ -145,8 +145,11 @@ class QueueReplenishService:
         # built-in hourly time and weather instead of replacing them. The hour is queued
         # first, so a block due on the hour plays right after the time and weather.
         keep_hourly = blocks_keep_hourly(self.automation_config)
-        if keep_hourly and wants_hourly:
-            await self._schedule_hourly_announcements()
+        # "Hourly Station ID" (automation_config.hourly_station_id): the station ID
+        # jingle airs in the same hh:00 group, after the time check and weather.
+        wants_id = bool(self.automation_config.get("hourly_station_id"))
+        if keep_hourly and (wants_hourly or wants_id):
+            await self._schedule_top_of_hour(wants_hourly, wants_id)
             await self.db.flush()
 
         blocks_result = None
@@ -156,8 +159,8 @@ class QueueReplenishService:
             logger.exception("Program blocks could not be queued for station %s", self.station_id)
         if blocks_result is not None:
             self.max_pos = max(self.max_pos, blocks_result["max_pos"])
-        if blocks_result is None and wants_hourly and not keep_hourly:
-            await self._schedule_hourly_announcements()
+        if blocks_result is None and (wants_hourly or wants_id) and not keep_hourly:
+            await self._schedule_top_of_hour(wants_hourly, wants_id)
 
         await self._schedule_ad_slots()
         await self.db.commit()
@@ -900,6 +903,75 @@ class QueueReplenishService:
 
         await self.db.flush()
         logger.info("Requests-only replenish: filled %.1fs", filled)
+
+    async def _schedule_top_of_hour(self, time_and_weather: bool, station_id: bool) -> None:
+        if time_and_weather:
+            await self._schedule_hourly_announcements()
+        if station_id:
+            await self._schedule_hourly_station_ids()
+
+    async def _schedule_hourly_station_ids(self) -> None:
+        """Queue the station ID jingle (jingle / hourly_id) at each of the station's own
+        hh:00 for the next 48 hours, in the same timed group as the time check and
+        weather and after them (the time check stays on the second).
+
+        The "Hourly Station ID" switch was read only by the playlist-template path,
+        which nothing calls, so it did nothing (V1-79). A jingle whose title names the
+        hour ("3:00 PM") is used for that hour, otherwise any station ID jingle; with
+        no jingle in the library nothing is queued. None inside Shabbos / Yom Tov."""
+        from app.models.asset import not_placeholder
+        from app.services.spot_schedule_service import load_blackouts
+        from app.services.weather_spot_service import station_announcement_zone
+
+        jingles = list((await self.db.execute(
+            select(Asset)
+            .where(Asset.asset_type == "jingle", func.lower(Asset.category) == "hourly_id", not_placeholder())
+            .order_by(Asset.title)
+        )).scalars().all())
+        if not jingles:
+            return
+        zone = await station_announcement_zone(self.db, self.station_id)
+        now = datetime.now(timezone.utc)
+        queued = await self.db.execute(
+            select(QueueEntry.preempt_at).where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.asset_id.in_([j.id for j in jingles]),
+            )
+        )
+        have = {
+            (at if at.tzinfo else at.replace(tzinfo=timezone.utc)).replace(second=0, microsecond=0)
+            for (at,) in queued.all()
+        }
+        blackouts = await load_blackouts(self.db, self.station_id, now, now + timedelta(hours=49))
+
+        def for_hour(hour: int) -> Asset:
+            label = f"{12 if hour % 12 == 0 else hour % 12}:00 {'AM' if hour < 12 else 'PM'}"
+            for j in jingles:
+                title = j.title or ""
+                at = title.find(label)
+                # "1:00 PM" must not match "11:00 PM"
+                if at >= 0 and (at == 0 or not title[at - 1].isdigit()):
+                    return j
+            return jingles[0]
+
+        for mark in local_hour_marks(now, zone, 48):
+            if mark in have or any(b.covers(mark) for b in blackouts):
+                continue
+            self.max_pos += 1
+            self.db.add(QueueEntry(
+                id=uuid.uuid4(),
+                station_id=self.station_id,
+                asset_id=for_hour(mark.astimezone(zone).hour).id,
+                position=self.max_pos,
+                status="pending",
+                preempt_at=mark,
+                # Soft: it follows the time check and weather of the same hh:00 group
+                # (by position) and never cuts anything; hard, it would start ~45 s
+                # after its time and the air watch would report it late.
+                timing_mode="soft",
+            ))
 
     async def _schedule_hourly_announcements(self) -> None:
         """Pre-schedule time announcement + weather at each hour boundary with preempt_at.

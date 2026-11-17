@@ -400,11 +400,10 @@ class SchedulingService:
         if not slots:
             return None
 
-        # Check automation insertions first
-        if station_id:
-            insertion = await self._check_automation_insertions(station_id)
-            if insertion:
-                return insertion
+        # The hourly station ID, time check and weather are queued by the hourly pass
+        # (QueueReplenishService._schedule_hourly_announcements) at the station's own
+        # hh:00. They were also inserted here on the UTC clock (UTC minute < 2): an
+        # extra or misplaced time clip for a station in a half-hour zone (V1-73).
 
         # Determine current slot by counting total plays for this station modulo slot count
         stmt = select(func.count(PlayLog.id)).where(PlayLog.station_id == station_id)
@@ -417,102 +416,6 @@ class SchedulingService:
         return await self._pick_asset_for_slot(
             current_slot.asset_type, current_slot.category, station_id
         )
-
-    async def _check_automation_insertions(self, station_id: UUID | str) -> Optional[UUID]:
-        """Check if an automation insertion (station ID jingle, time, weather) is due."""
-        from app.models.station import Station
-
-        stmt = select(Station).where(Station.id == station_id)
-        result = await self.db.execute(stmt)
-        station = result.scalar_one_or_none()
-        if not station or not station.automation_config:
-            return None
-
-        config = station.automation_config
-        now = datetime.now(timezone.utc)
-        current_minute = now.minute
-
-        # Hourly station ID jingle
-        if config.get("hourly_station_id") and current_minute < 2:
-            # Check if we already played an hourly_id this hour
-            hour_start = now.replace(minute=0, second=0, microsecond=0)
-            stmt = (
-                select(func.count(PlayLog.id))
-                .join(Asset, PlayLog.asset_id == Asset.id)
-                .where(
-                    PlayLog.station_id == station_id,
-                    PlayLog.start_utc >= hour_start,
-                    Asset.asset_type == "jingle",
-                    Asset.category == "hourly_id",
-                )
-            )
-            result = await self.db.execute(stmt)
-            if (result.scalar() or 0) == 0:
-                asset = await self._pick_asset_for_slot("jingle", "hourly_id", station_id)
-                if asset:
-                    return asset
-
-        # Hourly time announcement
-        if config.get("hourly_time_announcement") and current_minute < 2:
-            hour_start = now.replace(minute=0, second=0, microsecond=0)
-            stmt = (
-                select(func.count(PlayLog.id))
-                .join(Asset, PlayLog.asset_id == Asset.id)
-                .where(
-                    PlayLog.station_id == station_id,
-                    PlayLog.start_utc >= hour_start,
-                    Asset.asset_type == "jingle",
-                    Asset.category == "time_announcement",
-                )
-            )
-            result = await self.db.execute(stmt)
-            if (result.scalar() or 0) == 0:
-                from app.services.weather_spot_service import (
-                    announcement_zone,
-                    get_or_create_weather_spot_assets,
-                    slot_key_for,
-                    station_weather_region,
-                )
-
-                slot_key = slot_key_for(now, announcement_zone(station.timezone))
-                time_asset, _ = await get_or_create_weather_spot_assets(
-                    self.db, slot_key, station_weather_region(config)
-                )
-                if time_asset:
-                    return time_asset.id
-
-        # Weather spot
-        weather_interval = config.get("weather_interval_minutes", 30)
-        if config.get("weather_enabled") and weather_interval > 0:
-            if current_minute % weather_interval < 2:
-                since = now - timedelta(minutes=weather_interval - 1)
-                stmt = (
-                    select(func.count(PlayLog.id))
-                    .join(Asset, PlayLog.asset_id == Asset.id)
-                    .where(
-                        PlayLog.station_id == station_id,
-                        PlayLog.start_utc >= since,
-                        Asset.asset_type == "spot",
-                        Asset.category == "weather_spot",
-                    )
-                )
-                result = await self.db.execute(stmt)
-                if (result.scalar() or 0) == 0:
-                    from app.services.weather_spot_service import (
-                        announcement_zone,
-                        get_or_create_weather_spot_assets,
-                        slot_key_for,
-                        station_weather_region,
-                    )
-
-                    slot_key = slot_key_for(now, announcement_zone(station.timezone))
-                    _, weather_asset = await get_or_create_weather_spot_assets(
-                        self.db, slot_key, station_weather_region(config)
-                    )
-                    if weather_asset:
-                        return weather_asset.id
-
-        return None
 
     async def _pick_asset_for_slot(
         self, asset_type: str, category: str | None, station_id: UUID | str | None
