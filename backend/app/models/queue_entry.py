@@ -49,7 +49,11 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # by as many, so the playlist carries on from the right step.
     block_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
-    station = relationship("Station", lazy="selectin")
+    # Never read through an entry (code goes by station_id). Loading it with every
+    # entry cost two extra queries (the station, then its channels) on each queue
+    # read: a third of the scheduler's work on an idle pass. "raise" makes an
+    # accidental use fail loudly in tests instead of quietly bringing the cost back.
+    station = relationship("Station", lazy="raise")
     asset = relationship("Asset", lazy="selectin")
 
 
