@@ -466,3 +466,50 @@ async def test_scheduler_status_is_public_and_start_stop_are_managers(client: As
     r1 = await client.post("/api/v1/scheduler/start", headers=manager)
     r2 = await client.post("/api/v1/scheduler/stop", headers=manager)
     assert r1.status_code == 200 and r2.status_code == 200, (r1.text, r2.text)
+
+
+@pytest.mark.asyncio
+async def test_regenerate_refused_while_generation_is_off(client: AsyncClient, db_session: AsyncSession):
+    """V1-153"""
+    st = await _station(db_session)
+    _, h = await _headers(db_session, UserRole.MANAGER)
+    r = await client.post("/api/v1/playlists/generation/regenerate", params={"station_id": str(st.id)}, headers=h)
+    assert r.status_code == 409, r.text
+    assert "switched off" in r.text
+
+
+@pytest.mark.asyncio
+async def test_public_song_requests_are_rate_limited(client: AsyncClient, db_session: AsyncSession):
+    """V1-145: 10 a minute from one address, then 429."""
+    from app.api.v1.song_requests import limiter
+
+    limiter.reset()
+    st = await _station(db_session)
+    codes = []
+    for n in range(11):
+        r = await client.post("/api/v1/song-requests", json={"station_id": str(st.id), "requester_name": f"F{n}",
+                                                             "song_title": f"Tune {n}"})
+        codes.append(r.status_code)
+    limiter.reset()
+    assert all(c in (200, 201) for c in codes[:10]), codes
+    assert codes[10] == 429
+
+
+@pytest.mark.asyncio
+async def test_signing_in_on_a_second_device_does_not_sign_out_the_first(client: AsyncClient, db_session: AsyncSession):
+    """V1-144: tokens are not rotated or revoked, so two devices keep working side by side."""
+    from app.core.security import hash_password
+
+    db_session.add(User(id=uuid.uuid4(), email="two@t.com", hashed_password=hash_password("pw-123456"),
+                        role=UserRole.DJ, is_active=True))
+    await db_session.commit()
+    one = (await client.post("/api/v1/auth/login", json={"email": "two@t.com", "password": "pw-123456"})).json()
+    two = (await client.post("/api/v1/auth/login", json={"email": "two@t.com", "password": "pw-123456"})).json()
+    for tokens in (one, two):
+        r = await client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+        assert r.status_code == 200, r.text
+        me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+        assert me.status_code == 200
+    # the first device refreshes again with its old refresh token: still fine
+    again = await client.post("/api/v1/auth/refresh", json={"refresh_token": one["refresh_token"]})
+    assert again.status_code == 200
