@@ -12,4 +12,6 @@ Databank toolbar: **Mpeg** = only MPEG audio files (.mp3/.mp2/.mpg), **Prsnt** =
 
 Not built: **Auto** (the station is always automated here; switching automation off would mean dead air), **BLK PRE SPOT** (a jingle before the sponsors is already an item you put before the sponsors item in a program block), Reload DBs / Log ? (no meaning on a website).
 
-Tests: `backend/tests/test_station_modes.py`; `frontend/e2e/station-modes.mjs` (real backend, real audio, meters sampled every 200 ms around Panic and the switches).
+Tests: `backend/tests/test_station_modes.py`, `test_panic.py`, `test_hs_timing.py`; `frontend/e2e/station-modes.mjs` (real backend, real audio, meters sampled every 200 ms around Panic and the switches).
+
+Panic edge cases (fixed 2026-11-17, tests in `tests/test_panic.py`): during a blackout Next and Panic start only the blackout's silence (`_pick_next_pending(silence_only=True)`); during a live show Panic does nothing (the host owns the air); a second Panic on the same station within `PANIC_REPEAT_SECONDS` (1.5 s, another control room or a double press) is ignored so it cannot cut the item the first one started.

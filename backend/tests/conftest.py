@@ -209,3 +209,13 @@ def reset_last_played():
     last_played.reset()
     yield
     last_played.reset()
+
+
+@pytest.fixture(autouse=True)
+def _forget_recent_panics():
+    """Panic ignores a repeat within 1.5 s per station; tests start with none remembered."""
+    from app.api.v1 import queue as queue_module
+
+    queue_module._last_panic.clear()
+    yield
+    queue_module._last_panic.clear()

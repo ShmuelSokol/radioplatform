@@ -342,3 +342,241 @@ async def test_one_station_failing_does_not_stop_the_others(db_session, monkeypa
 
 async def _noop():
     return None
+
+
+# ── Checklist rows F-AIRWATCH-13, -17, -19, -20, -21, -25 ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_alert_timing_limits(db_session, monkeypatch):
+    """F-AIRWATCH-13: with a pass every 5 s, a late hard item is found by 8 s + one pass
+    (13 s), a missing time check by hh:00:45, dead air by 25 s; the push goes out in the
+    same pass as the alert (ntfy delivery to the phone itself is not tested)."""
+    from app.config import settings
+    from app.services import bug_report_service
+
+    assert air_watch.LATE_SECONDS + air_watch.CHECK_EVERY_SECONDS <= 13
+    assert air_watch.HOUR_CHECK_AFTER_SECONDS + air_watch.CHECK_EVERY_SECONDS <= 45
+    assert air_watch.DEAD_AIR_SECONDS + air_watch.CHECK_EVERY_SECONDS <= 25
+
+    # Late hard item: not at 7.9 s, yes at 8.1 s
+    now = datetime.now(UTC)
+    st = await _station(db_session)
+    song = await _asset(db_session, "Song")
+    tc = await _asset(db_session, "Time", category="time_announcement", kind="jingle", duration=8)
+    due = now - timedelta(seconds=1)
+    db_session.add_all([
+        _entry(st, song, status="playing", started_at=now - timedelta(seconds=30)),
+        _entry(st, tc, position=2, preempt_at=due, timing_mode="hard"),
+    ])
+    await db_session.commit()
+    watch = AirWatch()
+    assert await watch.check_station(db_session, st, due + timedelta(seconds=7.9)) == []
+    found = await watch.check_station(db_session, st, due + timedelta(seconds=8.1))
+    assert [f.kind for f in found] == ["late_timed"]
+
+    # The push is sent in the pass that writes the alert
+    pushes = []
+
+    async def fake_push(message, title, click="", tags="", priority="default"):
+        pushes.append(title)
+        return True
+
+    monkeypatch.setattr(bug_report_service, "send_ntfy", fake_push)
+    monkeypatch.setattr(settings, "NTFY_TOPIC", "test-topic-not-real")
+    await AirWatch().run_once(db_session, due + timedelta(seconds=8.1))
+    assert len(pushes) == 1
+
+    # Missing time check: checked from hh:00:40, not before
+    st2 = Station(id=uuid.uuid4(), name="Second", timezone="America/New_York", automation_config={})
+    db_session.add(st2)
+    hour = datetime(2026, 11, 17, 2, 0, tzinfo=UTC)
+    db_session.add_all([
+        _entry(st2, tc, status="played", started_at=hour - timedelta(hours=1)),
+        _entry(st2, song, position=2, status="playing", started_at=hour + timedelta(seconds=10)),
+    ])
+    await db_session.commit()
+    watch = AirWatch()
+    assert await watch.check_station(db_session, st2, hour + timedelta(seconds=39.9)) == []
+    found = await watch.check_station(db_session, st2, hour + timedelta(seconds=40))
+    assert [f.kind for f in found] == ["hour_missing"]
+
+
+async def _hung_server():
+    """A stream server that takes the connection and never answers."""
+    import asyncio
+
+    async def hang(reader, writer):
+        await asyncio.sleep(3600)
+
+    server = await asyncio.start_server(hang, "127.0.0.1", 0)
+    return server, server.sockets[0].getsockname()[1]
+
+
+@pytest.mark.asyncio
+async def test_hung_stream_servers_keep_a_pass_under_five_seconds(db_session, monkeypatch):
+    """F-AIRWATCH-17: engine stations whose stream server hangs. Enough of them that waiting
+    for each in turn (3 s apiece) passes the limit, also where limit() is tripled (CI)."""
+    import time as _time
+
+    from app.config import settings
+    from tests.timing import limit
+
+    server, port = await _hung_server()
+    try:
+        stations = []
+        for i in range(int(limit(5.0) // 3) + 1):
+            st = Station(id=uuid.uuid4(), name=f"Engine {i}", timezone="America/New_York", automation_config={})
+            db_session.add(st)
+            stations.append(st)
+        await db_session.commit()
+        monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+        monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", ",".join(str(s.id) for s in stations))
+        monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", f"http://127.0.0.1:{port}")
+        monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "made-up-engine-token")
+        assert all(settings.engine_drives(s.id) for s in stations)
+        t0 = _time.perf_counter()
+        await AirWatch().run_once(db_session)
+        took = _time.perf_counter() - t0
+    finally:
+        server.close()
+    assert took < limit(5.0), f"one pass took {took:.1f} s"
+
+
+@pytest.mark.asyncio
+async def test_blackout_is_quiet(db_session):
+    """F-AIRWATCH-19: inside a blackout no late_timed, no hour_missing, no dead_air, and the
+    Shabbos silence running past its length is not an overrun."""
+    from app.models.holiday_window import HolidayWindow
+
+    real_now = datetime.now(UTC)
+    hour = datetime(2026, 11, 17, 2, 0, tzinfo=UTC)
+    st = await _station(db_session)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", reason="shabbos", is_blackout=True,
+                                 start_datetime=min(real_now, hour) - timedelta(days=1),
+                                 end_datetime=max(real_now, hour) + timedelta(days=1),
+                                 affected_stations={"station_ids": [str(st.id)]}))
+    tc = await _asset(db_session, "Time", category="time_announcement", kind="jingle", duration=8)
+    db_session.add_all([
+        _entry(st, tc, status="played", started_at=hour - timedelta(hours=1)),
+        _entry(st, tc, position=2, preempt_at=real_now - timedelta(seconds=60), timing_mode="hard"),
+    ])
+    await db_session.commit()
+    watch = AirWatch()
+    # Nothing on air for a long time, a hard item a minute overdue
+    assert await watch.check_station(db_session, st, real_now, mono=0.0) == []
+    assert await watch.check_station(db_session, st, real_now, mono=100.0) == []
+    # hh:00:50 with no time check
+    assert await watch.check_station(db_session, st, hour + timedelta(seconds=50)) == []
+    # The silence on air ran 10 minutes past its length
+    silence = await _asset(db_session, "Silence", kind="silence", duration=3600)
+    db_session.add(_entry(st, silence, position=3, status="playing", started_at=real_now - timedelta(seconds=4200)))
+    await db_session.commit()
+    assert await watch.check_station(db_session, st, real_now, mono=200.0) == []
+
+
+@pytest.mark.asyncio
+async def test_operator_removing_a_time_check_is_not_reported(client, auth_headers, db_session):
+    """F-AIRWATCH-20. Decision: an operator taking a time check, weather or sponsorship out
+    of the queue (Remove) is deliberate and raises nothing (the row is deleted, not marked
+    skipped). Cutting one on air (Panic) is still reported as "cut short", a warning, next to
+    Panic's own alert (test_time_check_cut_by_panic_is_not_called_never_aired)."""
+    import app.api.v1.queue as queue_module
+
+    async def nothing(*a, **k):
+        return None
+
+    now = datetime.now(UTC)
+    st = await _station(db_session)
+    song = await _asset(db_session, "Song")
+    tc = await _asset(db_session, "Time", category="time_announcement", kind="jingle", duration=8)
+    weather = await _asset(db_session, "Weather", category="weather_spot", kind="spot", duration=30)
+    spot = await _asset(db_session, "Sponsor", kind="spot", duration=30)
+    due = now + timedelta(seconds=30)
+    removed = [
+        _entry(st, tc, position=2, preempt_at=due, timing_mode="hard"),
+        _entry(st, weather, position=3, preempt_at=due, timing_mode="hard"),
+        _entry(st, spot, position=4, preempt_at=due, timing_mode="soft", source="ad_slot"),
+    ]
+    db_session.add_all([_entry(st, song, status="playing", started_at=now - timedelta(seconds=10)), *removed])
+    await db_session.commit()
+    original = queue_module._replenish_queue
+    queue_module._replenish_queue = nothing
+    try:
+        for e in removed:
+            r = await client.delete(f"/api/v1/stations/{st.id}/queue/{e.id}", headers=auth_headers)
+            assert r.status_code == 204
+    finally:
+        queue_module._replenish_queue = original
+    found = await AirWatch().check_station(db_session, st, due + timedelta(seconds=60))
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_wait_rule_time_check_behind_a_shiur_is_not_late(db_session, monkeypatch):
+    """F-AIRWATCH-21: with the long-item rule "wait", the queue advance turns the time check
+    soft before its time, so waiting for the shiur is not reported late."""
+    import app.api.v1.queue as queue_module
+
+    async def nothing(*a, **k):
+        return None
+
+    monkeypatch.setattr(queue_module, "_replenish_queue", nothing)
+    monkeypatch.setattr(queue_module, "_replenish_soon", lambda *a, **k: None)
+    now = datetime.now(UTC)
+    st = await _station(db_session, timed_during_long_items="wait")
+    shiur = await _asset(db_session, "Daf Yomi", kind="shiur", duration=3600)
+    tc = await _asset(db_session, "Time", category="time_announcement", kind="jingle", duration=8)
+    due = now + timedelta(seconds=30)
+    check = _entry(st, tc, position=2, preempt_at=due, timing_mode="hard")
+    db_session.add_all([_entry(st, shiur, status="playing", started_at=now - timedelta(minutes=10)), check])
+    await db_session.commit()
+    await queue_module._check_advance(db_session, st.id)  # the scheduler pass before hh:00
+    found = await AirWatch().check_station(db_session, st, due + timedelta(seconds=60))
+    assert [f for f in found if f.kind == "late_timed"] == []
+
+
+@pytest.mark.asyncio
+async def test_eighty_stations_in_one_pass(db_session):
+    """F-AIRWATCH-25: one pass over 80 stations takes under 5 s, with a bounded number of
+    queries per station."""
+    import time as _time
+
+    from sqlalchemy import event
+
+    from tests.conftest import engine as test_engine
+    from tests.timing import limit
+
+    # A fixed point 3 minutes after an hour whose time check aired on time, so the result
+    # does not depend on when the suite runs (it failed in CI at 7:00:55 UTC)
+    now = datetime.now(UTC).replace(minute=3, second=0, microsecond=0)
+    song = await _asset(db_session, "Song")
+    tc = await _asset(db_session, "Time", category="time_announcement", kind="jingle", duration=8)
+    for i in range(80):
+        st = Station(id=uuid.uuid4(), name=f"Station {i}", timezone="America/New_York", automation_config={})
+        db_session.add(st)
+        db_session.add_all([
+            _entry(st, tc, status="played", preempt_at=now - timedelta(minutes=3), timing_mode="hard",
+                   started_at=now - timedelta(minutes=3)),
+            _entry(st, tc, status="played", started_at=now - timedelta(hours=1)),
+            _entry(st, song, position=2, status="playing", started_at=now - timedelta(seconds=30)),
+            _entry(st, tc, position=3, preempt_at=now + timedelta(minutes=20), timing_mode="hard"),
+        ])
+    await db_session.commit()
+    queries = []
+
+    def count(*a, **k):
+        queries.append(1)
+
+    event.listen(test_engine.sync_engine, "before_cursor_execute", count)
+    try:
+        t0 = _time.perf_counter()
+        found = await AirWatch().run_once(db_session, now)
+        took = _time.perf_counter() - t0
+    finally:
+        event.remove(test_engine.sync_engine, "before_cursor_execute", count)
+    assert found == []
+    assert took < limit(5.0), f"one pass took {took:.2f} s"
+    # At most 10 per station (the hour check included), plus a few shared ones per pass
+    per_station = (len(queries) - 5) / 80
+    assert per_station <= 10, f"{len(queries)} queries for 80 stations"
