@@ -312,7 +312,10 @@ export default function Dashboard() {
         if (holdsSound.current) {
           holdsSound.current = false;
           setListenHere(false); // the other tab now remembers listening
-          setStatusMessage('Sound moved to another control room tab. Press the speaker here to hear it in this tab.');
+          const moved = 'Sound moved to another control room tab. Press the speaker here to hear it in this tab.';
+          setStatusMessage(moved);
+          // The status line only shows while nothing is on air: say it where it is seen
+          setToast({ text: moved, type: 'warn' });
         }
       } else if (e.data?.type === 'released') {
         soundElsewhere.current = false;

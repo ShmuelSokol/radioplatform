@@ -99,7 +99,12 @@ export function AUDIO_PROBE() {
     if (typeof GainNode !== 'undefined' && this instanceof GainNode && typeof AudioDestinationNode !== 'undefined' && dest instanceof AudioDestinationNode) w.__outs.push(this);
     return connect.call(this, dest, ...rest);
   };
-  w.__outLevel = () => (w.__outs.length ? +w.__outs[w.__outs.length - 1].gain.value.toFixed(3) : null);
+  // The player's own output: the speaker gain in the same audio context as the decks
+  w.__outLevel = () => {
+    const deck = [...w.__deckGain.values()][0];
+    const mine = w.__outs.filter((g) => !deck || g.context === deck.context);
+    return mine.length ? +mine[mine.length - 1].gain.value.toFixed(3) : null;
+  };
   // Lock screen / car controls: keep the handlers the page sets so a check can press them
   w.__msHandlers = {};
   if (navigator.mediaSession) {
@@ -195,7 +200,7 @@ export function makeStation(opts = {}) {
       const a = byId[e.asset_id];
       let est;
       if (e.status === 'playing') { est = e.started_at; cursor = new Date(e.started_at).getTime() + a.duration * 1000; }
-      else { if (e.preempt_at) cursor = Math.max(cursor, new Date(e.preempt_at).getTime()); est = new Date(cursor).toISOString(); cursor += a.duration * 1000; }
+      else { if (e.preempt_at) cursor = e.hard_timed === false ? Math.max(cursor, new Date(e.preempt_at).getTime()) : new Date(e.preempt_at).getTime(); est = new Date(cursor).toISOString(); cursor += a.duration * 1000; }
       return row(e, est);
     });
     const p = entries.find((e) => e.status === 'playing');
@@ -430,7 +435,7 @@ export async function adminContext(browser, contextOpts, station, { delay, down,
   const ctx = await browser.newContext(contextOpts);
   await ctx.addInitScript((st) => {
     localStorage.setItem('access_token', 'test'); localStorage.setItem('refresh_token', 'test');
-    for (const [k, v] of Object.entries(st)) { if (v === null) localStorage.removeItem(k); else if (!sessionStorage.getItem('__seeded_' + k)) { localStorage.setItem(k, v); sessionStorage.setItem('__seeded_' + k, '1'); } }
+    for (const [k, v] of Object.entries(st)) { if (sessionStorage.getItem('__seeded_' + k)) continue; if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); sessionStorage.setItem('__seeded_' + k, '1'); }
   }, storage);
   await ctx.addInitScript(AUDIO_PROBE);
   await routeApi(ctx, station, { delay, down });
