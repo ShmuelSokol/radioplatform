@@ -3466,6 +3466,30 @@ section('release', async () => {
     }, page);
     await ctx.close();
   }
+  // Manual mode: idle tabs stay; an admin's "push now" moves them at once
+  await api('PUT', '/site-release', { token: USERS.admin.token, body: { mode: 'manual' } });
+  try {
+    const { page, ctx, publish, loads } = await releasePage('/stations');
+    await page.clock.runFor(2_000); // the tab reads the manual policy
+    let before = loads();
+    await step('F-GLOBAL-16 manual mode: an idle tab with a new release waiting does not reload on its own', async () => {
+      publish();
+      await page.clock.runFor(70_000);
+      await page.clock.runFor(60_000); // well past the 30 s idle rule
+      await page.waitForTimeout(1000);
+      assert(loads() === before, 'reloaded without a push');
+    }, page);
+    before = loads();
+    await step('F-GLOBAL-17 manual mode: "push now" reloads the silent tab at once', async () => {
+      await api('POST', '/site-release/push', { token: USERS.admin.token, body: {} });
+      for (let i = 0; i < 20 && loads() === before; i++) { await page.clock.runFor(1_000); await page.waitForTimeout(250); }
+      assert(loads() > before, 'no reload within 20 s of the push');
+    }, page);
+    await ctx.close();
+  } finally {
+    await api('DELETE', '/site-release/push', { token: USERS.admin.token }).catch(() => {});
+    await api('PUT', '/site-release', { token: USERS.admin.token, body: { mode: 'auto' } }).catch(() => {});
+  }
 });
 
 // ── Errors, sessions, diagnostics, accessibility (V2-95..101, V1-144/145, F-ACCESS-15) ──
@@ -3501,6 +3525,62 @@ section('errors', async () => {
       await page.getByText('The site was updated while this tab was open').waitFor();
       await until(async () => loads > 0, 'reload after 0.3 s', 5000);
       await page.unroute(/\/assets\/Sponsors-[^/]+\.js$/);
+    }, page);
+    await closePage(page);
+  }
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('admin', view);
+    await step(`F-LISTENERS-1/2 ${view}: a listener joining shows in Active Now and Active Stations within seconds (push, not the 30 s poll), leaving takes it off; history and region day buttons ask for those days`, async () => {
+      await page.goto(`${BASE}/admin/listeners`);
+      const card = page.getByText('Active Now', { exact: true }).locator('..');
+      await card.waitFor();
+      const num = async () => Number(((await card.innerText()).match(/\n\s*(\d+)/) || [])[1]);
+      await until(async () => Number.isFinite(await num()), 'Active Now number');
+      await page.waitForTimeout(1500); // the push socket connects
+      const n0 = await num();
+      const key = `e2e-listener-${view}-${RUN}`;
+      const t0 = Date.now();
+      await api('POST', '/listeners/heartbeat', { body: { station_id: FX.station.id, session_key: key } });
+      await until(async () => (await num()) === n0 + 1, `Active Now ${n0} → ${n0 + 1}`, 10000);
+      const joinMs = Date.now() - t0;
+      assert(joinMs < 10000, `took ${joinMs} ms`);
+      await page.getByText(FX.station.name).first().waitFor();
+      await api('POST', '/listeners/disconnect', { body: { station_id: FX.station.id, session_key: key } });
+      await until(async () => (await num()) === n0, `Active Now back to ${n0}`, 10000);
+      for (const [heading, d] of [['Listening History', 7], ['Listening History', 90], ['Listener Regions', 30]]) {
+        const sec = page.locator('section', { has: page.getByRole('heading', { name: heading }) });
+        const path = heading === 'Listener Regions' ? '/listeners/regions' : '/listeners/history';
+        const r = await timedResponse(page, (m, p, resp) => m === 'GET' && p === path && resp.url().includes(`days=${d}`), () => sec.getByRole('button', { name: `${d}d`, exact: true }).click());
+        assert(r.status === 200, `${path} days=${d} answered ${r.status}`);
+      }
+      return `shown ${joinMs} ms after joining`;
+    }, page);
+    if (view === 'desktop') {
+      await step('F-GLOBAL-9 app-shell route (control room) fills the window with no page scrollbar', async () => {
+        await page.goto(`${BASE}/admin/dashboard`);
+        await page.waitForFunction(defaultReady, null, { timeout: 10000 }).catch(() => {});
+        await page.waitForTimeout(800);
+        const m = await page.evaluate(() => [document.documentElement.scrollHeight, innerHeight, document.documentElement.scrollWidth, innerWidth]);
+        assert(m[0] <= m[1] + 1 && m[2] <= m[3] + 1, `page ${m[2]}x${m[0]} in a ${m[3]}x${m[1]} window`);
+      }, page);
+    }
+    await closePage(page);
+  }
+  {
+    // A listener's old tab: the Archives code file is gone once, the reload gets the new one
+    const page = await newPage(null);
+    await step('F-PARCH-3 public Archives after a release replaced its code file: reloads and opens with no error box', async () => {
+      let gone = 1, loads = 0;
+      page.on('load', () => { loads++; });
+      await page.route(/\/assets\/Archives-[^/]+\.js$/, r => (gone-- > 0 ? r.fulfill({ status: 404, body: 'gone' }) : r.continue()));
+      await page.goto(`${BASE}/stations`);
+      await page.getByRole('link', { name: /Archives/ }).first().waitFor();
+      loads = 0;
+      await page.getByRole('link', { name: /Archives/ }).first().click();
+      await page.getByRole('heading', { name: 'Show Archives' }).waitFor({ timeout: 10000 });
+      assert(loads > 0, 'no reload');
+      assert(!(await page.getByTestId('error-boundary').count()), 'error box shown');
+      await page.unroute(/\/assets\/Archives-[^/]+\.js$/);
     }, page);
     await closePage(page);
   }
