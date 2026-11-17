@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import Navbar from './Navbar';
 import AudioPlayer from '../audio/AudioPlayer';
 import ViewOnlyNotice from './ViewOnlyNotice';
+import PageViewTracker from './PageViewTracker';
 
 // Every page uses the full window width (no centred max-width column); pages lay
 // themselves out inside it. Keep the padding below as it is: the dark full-bleed
@@ -25,6 +26,7 @@ export default function Layout() {
         </main>
         <AudioPlayer />
         <ViewOnlyNotice />
+        <PageViewTracker />
       </div>
     );
   }
@@ -37,6 +39,7 @@ export default function Layout() {
       </main>
       <AudioPlayer />
       <ViewOnlyNotice />
+      <PageViewTracker />
     </div>
   );
 }

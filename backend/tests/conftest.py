@@ -27,6 +27,11 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+from app.services import activity_log as _activity_log
+
+_activity_log.INLINE = True  # activity rows are written after each request, through the test session
+_activity_log.GEO_LOOKUP = False
+
 # SQLite compatibility: compile PostgreSQL types to SQLite equivalents
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB, ENUM as PG_ENUM
 
@@ -123,6 +128,15 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def shared_session():
+        yield db_session
+
+    _activity_log.session_factory = shared_session
+    _activity_log._inline_rows.clear()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

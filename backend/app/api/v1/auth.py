@@ -29,7 +29,27 @@ limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    user = await authenticate_user(db, body.email, body.password)
+    from app.core.exceptions import UnauthorizedError
+    from app.services import activity_log
+
+    try:
+        user = await authenticate_user(db, body.email, body.password)
+    except UnauthorizedError as e:
+        from sqlalchemy import func
+        known = (await db.execute(
+            select(User.id).where(func.lower(User.email) == (body.email or "").lower())
+        )).scalar_one_or_none()
+        activity_log.record(
+            request, user_id=str(known) if known else None, user_email=(body.email or "")[:255],
+            label="Sign-in failed", category="signin", action="login_failed",
+            resource_type="auth", detail=str(getattr(e, "detail", "") or "Wrong email or password"),
+            status_code=401,
+        )
+        raise
+    activity_log.record(
+        request, user_id=str(user.id), user_email=user.email, user_role=user.role.value,
+        label="Signed in", category="signin", action="login", resource_type="auth", status_code=200,
+    )
     return create_tokens(user)
 
 

@@ -62,6 +62,10 @@ def setup_middleware(app: FastAPI) -> None:
     # Security headers
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # Who did what (wiki/activity-log.md); inside RequestID so rows carry the request id
+    from app.services.activity_log import ActivityMiddleware
+    app.add_middleware(ActivityMiddleware)
+
     # Request ID correlation
     app.add_middleware(RequestIDMiddleware)
 
