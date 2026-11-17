@@ -57,6 +57,10 @@ KBR Studio features the control room does not have yet: HS, Spots mode, blocks t
 
 The headphones output uses `setSinkId` where the browser has it (Chrome, Edge; not iPhone Safari, where the picker is hidden). Browsers only name the outputs after the microphone has been allowed once, so "Choose the headphones output" asks for the microphone and releases it at once. The choice is kept in localStorage `kbr_pfl_output`; if that device is gone the sound falls back to the default output instead of going silent. The time and weather preview still uses its own audio elements and the default output.
 
+### The PFL deck (seek anywhere)
+
+While an item is in the pre-listen player, `controlroom/PflDeck.tsx` docks above the cart (desktop) or above the bottom tabs (phone). It is a canvas waveform you click, tap or drag to jump; elapsed and remaining time; START / INTRO / MIX / END markers from `intro_seconds` and `metadata_extra.audio_analysis` (cue_in, cross_start, cue_out) with "Jump to" buttons (Mix and End jump 5 s before); keys when the wave has focus (←/→ 5 s, Shift 15 s, J/L 10 s, Space or K, 0-9 tenths, Home/End, Esc). Dashboard's global keys ignore events from inside the deck, so N there never skips on air. The waveform is decoded in the browser from the file (22.05 kHz offline context, cached per item), only for items up to 10 minutes; longer items get a time ruler, since decoding an hour-long shiur would take hundreds of MB. Seeking needs the storage to answer byte ranges (Supabase does; the e2e route serves 206 for that reason). `usePfl` gained `loadedId`, `paused`, `playPause`, `seek`, `getAudio`; at the end the deck stays open, paused.
+
 ## Next, Fade, Soft fade, Intro, play now, insert
 
 Server contract: [operator-actions](operator-actions.md). In the transport bar NEXT (and the N key) sends `skip?fade=hard`, Fade sends `fade`, Soft fade sends `soft`, matching KBR Studio's Go next / Fade / Soft fade. The Intro countdown shows only while `asset.intro_seconds - elapsed > 0` (nothing shows for items with no intro length set).

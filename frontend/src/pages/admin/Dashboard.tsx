@@ -25,6 +25,7 @@ import { nextCut } from './controlroom/timing';
 import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
 import { usePfl } from './controlroom/pfl';
+import { PflDeck } from './controlroom/PflDeck';
 import { LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
@@ -593,6 +594,8 @@ export default function Dashboard() {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+      // Keys pressed in the pre-listen deck belong to it: N there must never skip on air
+      if (el?.closest?.('[data-testid="pfl-deck"]')) return;
       if (e.key === 'Escape') {
         if (typing) (el as HTMLElement).blur();
         keyActions.current.cancelInsert();
@@ -792,6 +795,7 @@ export default function Dashboard() {
               </div>
             </aside>
           </div>
+          <PflDeck pfl={pfl} />
           <div className="h-[150px] xl:h-[170px] shrink-0">{hotButtons(false, true)}</div>
         </>
       ) : (
@@ -812,6 +816,7 @@ export default function Dashboard() {
               {pane === 'queue' ? queuePanel : pane === 'buttons' ? hotButtons(true) : sidePanel(pane)}
             </div>
           </div>
+          <PflDeck pfl={pfl} compact />
           <nav className="shrink-0 flex gap-1 px-1 pt-1 bg-[#c0c0c0] border-t-2 border-white pb-[max(0.25rem,env(safe-area-inset-bottom))]" aria-label="Control room sections">
             {MOBILE_TABS.map(t => {
               const active = pane === t.id || (t.id === 'log' && pane === 'schedule');
