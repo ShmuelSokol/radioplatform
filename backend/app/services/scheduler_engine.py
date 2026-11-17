@@ -410,6 +410,17 @@ class SchedulerEngine:
                         if await soften_hard_items(db, station):
                             await db.commit()
                     station = await db.get(Station, station_id)
+                # Shortly before a hard timed item, put a song that ends near it in the
+                # place of one that would be faded soon after starting (hour_fit.py)
+                from app.services.hour_fit import fit_before_hard_item
+                try:
+                    async with advance_lock(station_id):
+                        if await fit_before_hard_item(db, station):
+                            await db.commit()
+                except Exception:
+                    logger.warning("Fitting songs before the hour failed for station %s", station_id, exc_info=True)
+                    await _safe_rollback(db)
+                station = await db.get(Station, station_id)
                 if settings.engine_drives(station.id):
                     # The playout engine owns the clock for this station: it asks for the
                     # next track and reports real starts. No time-based advance here.

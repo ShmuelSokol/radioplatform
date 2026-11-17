@@ -154,3 +154,13 @@ only where the rule's `hour_start`/`hour_end` (a range like 22-2 wraps) and
 went after the whole week, back to back, and interval rules were never applied. Legacy
 global sponsors still go at the end of the fill (unchanged). Test:
 `backend/tests/test_rule_fill_and_station_delete.py`.
+
+## Songs fitted to the time before the hour (2026-11-17)
+
+A hard item fades whatever is on air, and the fill never looked at the clock: on KBR Jerusalem a 5-minute song started at 20:58:59 and the 21:00 time check cut it after 61 s. `services/hour_fit.py` (`fit_before_hard_item`, called for every station in each scheduler pass, at most every 10 s, under the station's advance lock) now back-times the run-up:
+
+- Within 20 min of the next pending hard item it plays the queue forward (item on air, soft timed items that come due, songs by position) and finds the song that would be on air at the hard item's time. If that song loses more than 15 s, it looks for a better last song, or a better last two (one long song or a pair), among the next 60 untimed entries, and applies the best one when it saves at least 20 s.
+- It only **swaps `position` values**. Nothing is added or removed, so it cannot cause silence, and the pick rules (`_pick_next_pending`, `playout_engine.pick_next`) are untouched: both players follow the new order because both pick by position.
+- Moved: only `source="auto"` untimed songs of the same `block_id`. Never: an operator's pick or request, an entry the engine holds (`held_entry_ids`), a song starting within 30 s (pages already announced it), songs across a soft timed item, two songs by one artist as the pair.
+- Off when HS (hard start) is off (nothing is hard then) or `automation_config.fit_before_hard_items` is false.
+- Limits: it can only pick from what is queued, so with the item on air ending under a minute before the hour (too late to re-plan the song before) a song still starts and is faded; the looks start 20 min ahead to avoid that. No short filler or station-ID jingles exist yet to fill a small gap.
