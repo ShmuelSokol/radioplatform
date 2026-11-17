@@ -246,7 +246,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [x] B-HOLIDAYS-9 ↳ creates silence asset via FFmpeg if missing | modes: n.a. | covered: tests/test_holiday_generation_endpoints.py::test_ensure_silence_asset_makes_it_once, ::test_ensure_silence_asset_reports_ffmpeg_failure
 
 ### icecast.py (prefix `/icecast`)
-- [ ] B-ICECAST-1 `GET /icecast/status` [require_admin] Get Icecast configuration status. | modes: n.a. | NOT COVERED
+- [x] B-ICECAST-1 `GET /icecast/status` [require_admin] Get Icecast configuration status. | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_icecast_status_and_start_follow_icecast_host
 - [ ] B-ICECAST-2 `POST /icecast/{station_id}/start` [require_admin] Start Icecast OTA stream for a station. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-ICECAST-3 `POST /icecast/{station_id}/stop` [require_admin] Stop Icecast OTA stream for a station. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 
@@ -255,8 +255,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-LISTENERS-2 ↳ new session created with geo lookup; rejoin within window reuses session | modes: both | covered: tests/test_listeners_live.py
 - [ ] B-LISTENERS-3 `POST /listeners/disconnect` [PUBLIC] Called when a listener stops — finalizes the session and drops it from the live count. | modes: both | covered: tests/test_listeners_live.py
 - [ ] B-LISTENERS-4 `POST /listeners/leave` [PUBLIC] Same as /disconnect, for navigator.sendBeacon when the page closes. | modes: both | covered: tests/test_listeners_live.py
-- [ ] B-LISTENERS-5 `WEBSOCKET /listeners/ws` [PUBLIC] Admin pages keep this open and refetch /live when told something changed. | modes: both | NOT COVERED
-- [ ] B-LISTENERS-6 ↳ admin watchers told to refetch on change; dead socket dropped | modes: n.a. | NOT COVERED
+- [x] B-LISTENERS-5 `WEBSOCKET /listeners/ws` [PUBLIC] Admin pages keep this open and refetch /live when told something changed. | modes: both | covered: tests/test_admin_sockets.py::test_listener_watchers_told_to_refetch_and_dead_ones_dropped, ::test_listener_watcher_pinged_when_quiet
+- [x] B-LISTENERS-6 ↳ admin watchers told to refetch on change; dead socket dropped | modes: n.a. | covered: tests/test_admin_sockets.py::test_listener_watchers_told_to_refetch_and_dead_ones_dropped
 - [ ] B-LISTENERS-7 `GET /listeners/live` [require_manager] Current active listeners across all stations, grouped by station + region. | modes: both | covered: tests/test_listeners_live.py
 - [ ] B-LISTENERS-8 `GET /listeners/today` [require_manager] Today's listener stats: total sessions, unique listeners, total minutes. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
 - [ ] B-LISTENERS-9 ↳ total sessions, unique, minutes, peak concurrent | modes: n.a. | covered: partial (tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads: answers, values not checked)
@@ -440,7 +440,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-REVIEWS-7 `POST /reviews/queues/{queue_id}/batch-update` [require_manager] batch update | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [x] B-REVIEWS-8 `GET /reviews/assets/{asset_id}/history` [require_staff] get asset history | modes: n.a. | covered: tests/test_review_queues.py::test_history_and_comments
 - [ ] B-REVIEWS-9 `POST /reviews/assets/{asset_id}/comment` [require_staff] add comment | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
-- [ ] B-REVIEWS-10 `GET /reviews/queues/{queue_id}/activity` [require_staff] get queue activity | modes: n.a. | NOT COVERED
+- [x] B-REVIEWS-10 `GET /reviews/queues/{queue_id}/activity` [require_staff] get queue activity | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_queue_activity_lists_this_queues_decisions
 
 ### rules.py (prefix `/rules`)
 - [ ] B-RULES-1 `GET /rules` [require_staff] list rules | modes: n.a. | covered: tests/test_role_access.py
@@ -493,8 +493,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SITERELEAS-5 ↳ scheduled push at time; cancel push; tabs reload after their audio ends | modes: n.a. | covered: tests/test_site_release.py
 - [ ] B-SITERELEAS-6 `DELETE /site-release/push` [require_admin] cancel push | modes: n.a. | covered: tests/test_site_release.py
 - [ ] B-SITERELEAS-7 `GET /site-release/tabs` [require_admin] Every open tab of the site right now: its release, screen and whether it plays audio. | modes: n.a. | covered: tests/test_site_release.py
-- [ ] B-SITERELEAS-8 `WEBSOCKET /ws/site` [PUBLIC] site socket | modes: n.a. | NOT COVERED
-- [ ] B-SITERELEAS-9 ↳ tab registers with info (cleaned), receives release state; silent tab expires | modes: n.a. | NOT COVERED
+- [x] B-SITERELEAS-8 `WEBSOCKET /ws/site` [PUBLIC] site socket | modes: n.a. | covered: tests/test_admin_sockets.py::test_site_tab_gets_release_state_and_shows_cleaned_in_tab_list
+- [x] B-SITERELEAS-9 ↳ tab registers with info (cleaned), receives release state; silent tab expires | modes: n.a. | covered: tests/test_admin_sockets.py::test_site_tab_gets_release_state_and_shows_cleaned_in_tab_list, ::test_silent_site_tab_expires
 
 ### song_requests.py (prefix `/song-requests`)
 - [ ] B-SONGREQUES-1 `POST /song-requests` [PUBLIC] Public: submit a song request with fuzzy matching and auto-approval. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
@@ -548,8 +548,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-STATIONS-2 ↳ manager+ only; dj/viewer/sponsor 403 | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix
 - [x] B-STATIONS-3 ↳ timezone, lat/lon, automation_config saved; new station gets queue on next replenish | modes: both | covered: tests/test_station_changes_on_air.py::test_new_station_settings_saved_and_it_goes_on_air
 - [ ] B-STATIONS-4 `GET /stations` [PUBLIC] list all | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
-- [ ] B-STATIONS-5 `GET /stations/geocode` [require_manager] Search for cities by name using OpenStreetMap Nominatim. Returns up to 5 results. | modes: n.a. | NOT COVERED
-- [ ] B-STATIONS-6 ↳ Nominatim lookup returns <=5 results; upstream failure handled | modes: n.a. | NOT COVERED
+- [x] B-STATIONS-5 `GET /stations/geocode` [require_manager] Search for cities by name using OpenStreetMap Nominatim. Returns up to 5 results. | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_city_search_returns_places_with_time_zones
+- [x] B-STATIONS-6 ↳ Nominatim lookup returns <=5 results; upstream failure handled | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_city_search_returns_places_with_time_zones
 - [ ] B-STATIONS-7 `GET /stations/{station_id}` [PUBLIC] get one | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
 - [ ] B-STATIONS-8 `PUT /stations/{station_id}` [require_manager] update | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
 - [ ] B-STATIONS-9 ↳ non-admin cannot toggle `protected` (403) | modes: n.a. | covered: tests/test_station_permissions.py
@@ -604,8 +604,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-WEATHERSPO-9 ↳ re-upload realigns already queued time clips (_realign_time_clips) | modes: both | covered: tests/test_time_clip_regions.py
 
 ### websocket.py
-- [ ] B-WEBSOCKET-1 `WEBSOCKET /ws/alerts` [PUBLIC] WebSocket endpoint for real-time alert notifications to admin clients. | modes: both | NOT COVERED
-- [ ] B-WEBSOCKET-2 `WEBSOCKET /ws/now-playing/{station_id}` [PUBLIC] websocket now playing | modes: both | NOT COVERED
+- [x] B-WEBSOCKET-1 `WEBSOCKET /ws/alerts` [PUBLIC] WebSocket endpoint for real-time alert notifications to admin clients. | modes: both | covered: tests/test_websocket_auth.py::test_alerts_socket_refuses_anonymous_and_non_managers, ::test_alerts_socket_lets_managers_listen, ::test_alert_broadcast_reaches_only_signed_in_sockets
+- [x] B-WEBSOCKET-2 `WEBSOCKET /ws/now-playing/{station_id}` [PUBLIC] websocket now playing | modes: both | covered: tests/test_now_playing_socket.py (join cache, ping/pong, slow and failed listeners dropped, first message), tests/test_websocket_auth.py::test_now_playing_socket_route_is_public
 - [ ] B-WEBSOCKET-3 ↳ receives now_playing on every change (incl. engine started reports), stream_url field | modes: both | covered: tests/test_now_playing_broadcast.py
 - [x] B-WEBSOCKET-4 ↳ mix_over and fade_seconds messages delivered | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_mix_over_and_fade_reach_the_browser_players
 ## 2. Background jobs and periodic behaviour
@@ -726,7 +726,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-103 tail_analysis: song end/crossfade point from HTTP range reads (no full download) | modes: both | covered: tests/test_song_change_gaps.py
 - [ ] B-JOB-104 Alert creation dedupes repeats; _notify_users dispatches SMS/WhatsApp/email per user preference | modes: n.a. | covered: tests/test_alert_repeats.py
 - [ ] B-JOB-105 Bug report notify_loop: first check after 60 s, then every NOTIFY_EVERY_SECONDS; pushes "fix ready" to ntfy when labels/PR appear | modes: n.a. | covered: tests/test_bug_reports.py (check_github_once); notify_loop NOT COVERED
-- [ ] B-JOB-106 send_ntfy disabled when NTFY_TOPIC empty; uses NTFY_SERVER | modes: n.a. | NOT COVERED
+- [x] B-JOB-106 send_ntfy disabled when NTFY_TOPIC empty; uses NTFY_SERVER | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_ntfy_only_with_a_topic_and_on_its_server
 - [ ] B-JOB-107 Activity log middleware: records every write with user, station, objects changed, redacts secrets, device/IP/location; batched inserts | modes: n.a. | covered: tests/test_activity_log.py
 - [ ] B-JOB-108 last_seen_at written at most once a minute per user | modes: n.a. | covered: tests/test_cold_start.py
 - [ ] B-JOB-109 Site release: scheduled push fires at its time to all open tabs; tabs silent past TAB_SILENT_LIMIT dropped from list | modes: n.a. | covered: tests/test_site_release.py (API); timing NOT COVERED
@@ -772,20 +772,20 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SET-28 ELEVENLABS_API_KEY/VOICE_ID unset -> no TTS fallback, uploaded clips only | modes: both | covered: tests/test_weather_spots.py
 - [x] B-SET-29 OPENWEATHERMAP_API_KEY unset -> weather disabled gracefully | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_no_weather_key_never_calls_the_api, ::test_no_weather_key_does_not_stop_time_announcements, ::test_readout_pages_say_weather_is_not_set_up (FIXED: with no key the API was still called with an empty key; the failed weather attempt paused all announcement generation, so generated time checks stopped; readout pages gave a bare server error, now 503 with the reason)
 - [x] B-SET-30 SUPABASE_URL/SERVICE_KEY unset -> uploads/local storage path; hourly announcements skipped | modes: both | covered: tests/test_station_changes_on_air.py::test_no_storage_skips_hourly_time_checks, ::test_no_storage_keeps_uploads_on_local_disk
-- [ ] B-SET-31 ICECAST_* (icecast_enabled) -> /icecast start/stop usable | modes: n.a. | NOT COVERED
+- [x] B-SET-31 ICECAST_* (icecast_enabled) -> /icecast start/stop usable | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_icecast_status_and_start_follow_icecast_host
 - [ ] B-SET-32 STRIPE_* (stripe_enabled) -> checkout/webhook enabled else refused | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_off_when_stripe_not_configured, tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
 - [x] B-SET-33 RESEND_API_KEY -> emails sent else skipped | modes: n.a. | covered: tests/test_refill_legacy_ws_email.py::test_email_sent_only_with_resend_key
 - [ ] B-SET-34 ANTHROPIC_API_KEY -> AI email drafts and copy review via Claude; else keyword fallback | modes: n.a. | covered: tests/test_copy_review.py
 - [ ] B-SET-35 TWILIO_* (twilio_enabled / twilio_voice_enabled) -> SMS alerts and phone call-ins | modes: n.a. | NOT COVERED
 - [ ] B-SET-36 BUG_REPORTS_GITHUB_TOKEN / BUG_REPORTS_REPO -> mirror to GitHub | modes: n.a. | covered: tests/test_bug_reports.py
-- [ ] B-SET-37 NTFY_TOPIC / NTFY_SERVER -> push notifications | modes: n.a. | NOT COVERED
+- [x] B-SET-37 NTFY_TOPIC / NTFY_SERVER -> push notifications | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_ntfy_only_with_a_topic_and_on_its_server
 - [ ] B-SET-38 SENTRY_DSN -> Sentry enabled | modes: n.a. | NOT COVERED
 - [ ] B-SET-39 ADMIN_SEED_PASSWORD / ALLOW_DESTRUCTIVE_SEED / APP_ENV=production | modes: n.a. | covered: tests/test_auth.py
 - [ ] B-SET-40 JWT expiry (30 min access, 7 day refresh) honoured | modes: n.a. | covered: tests/test_auth_security.py::test_token_lifetimes
-- [ ] B-SET-41 CORS_ORIGINS parsing (JSON array or CSV) and error responses still carry CORS | modes: n.a. | NOT COVERED
-- [ ] B-SET-42 DATABASE_URL fix-up (postgres:// -> asyncpg), statement_cache_size=0 for pooler | modes: n.a. | NOT COVERED
-- [ ] B-SET-43 REDIS_URL / CELERY_* empty -> workers disabled without errors | modes: n.a. | NOT COVERED
-- [ ] B-SET-44 EMERGENCY_FALLBACK_CATEGORY still loads but is unused | modes: n.a. | NOT COVERED
+- [x] B-SET-41 CORS_ORIGINS parsing (JSON array or CSV) and error responses still carry CORS | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_cors_origins_json_or_comma_list, ::test_server_error_still_carries_cors
+- [x] B-SET-42 DATABASE_URL fix-up (postgres:// -> asyncpg), statement_cache_size=0 for pooler | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_database_url_fixed_for_asyncpg_and_pooler
+- [x] B-SET-43 REDIS_URL / CELERY_* empty -> workers disabled without errors | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_no_redis_means_no_workers_and_no_errors
+- [x] B-SET-44 EMERGENCY_FALLBACK_CATEGORY still loads but is unused | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_emergency_fallback_category_loads_but_is_unused
 - [ ] B-SET-45 BACKEND_PUBLIC_URL / LIVE_SHOW_HOLD_MUSIC_URL used in Twilio TwiML | modes: n.a. | NOT COVERED
 
 ## 4. Engine-vs-browser differences (each must be tested in the mode(s) listed)
