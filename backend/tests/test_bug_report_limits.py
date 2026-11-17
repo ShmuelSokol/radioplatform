@@ -7,6 +7,7 @@ import pytest
 from app.api.v1 import bug_reports as bug_api
 from app.core import log_buffer
 from app.models.bug_report import BugReport
+from tests.timing import limit
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +35,7 @@ async def test_oversized_or_wrong_screenshot_is_dropped_report_kept(client, auth
     for shot in (big, gif, "data:image/png;base64,%%%"):
         t0 = time.perf_counter()
         r = await client.post("/api/v1/bug-reports", json={"description": "x", "screenshot": shot})
-        assert time.perf_counter() - t0 < 1.0
+        assert time.perf_counter() - t0 < limit(1.0)
         assert r.status_code == 201
     reports = (await client.get("/api/v1/bug-reports", headers=auth_headers)).json()["reports"]
     assert len(reports) == 3 and not any(x["has_screenshot"] for x in reports)

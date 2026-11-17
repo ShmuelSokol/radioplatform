@@ -10,6 +10,7 @@ from app.models.asset import Asset
 from app.models.play_log import PlayLog, PlaySource
 from app.models.station import Station, StationType
 from app.models.user import User, UserRole
+from tests.timing import limit
 
 API = "/api/v1/analytics"
 
@@ -44,7 +45,7 @@ async def test_summary_breakdown_and_limits(client, auth_headers, db_session):
 
     t0 = time.perf_counter()
     s = (await client.get(f"{API}/summary", params={"days": 7}, headers=auth_headers)).json()
-    assert time.perf_counter() - t0 < 0.3
+    assert time.perf_counter() - t0 < limit(0.3)
     assert s["total_plays"] == 4
     assert s["avg_plays_per_day"] == round(4 / 7, 1)  # divided by days asked
     assert s["total_airtime_hours"] == round((600 + 600 + 300) / 3600, 1)

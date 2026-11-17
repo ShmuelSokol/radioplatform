@@ -18,6 +18,7 @@ from app.models.queue_entry import QueueEntry
 from app.models.sponsor import Sponsor
 from app.models.station import Station, StationType
 from app.models.user import User, UserRole
+from tests.timing import limit
 
 API = "/api/v1"
 
@@ -77,7 +78,7 @@ async def test_draft_audio_upload_stores_the_file(client, sponsor_login, monkeyp
         f"{API}/campaigns/{camp['id']}/drafts/{draft['id']}/upload-audio",
         files={"file": ("my spot.mp3", audio, "audio/mpeg")}, headers=headers,
     )
-    assert time.perf_counter() - t0 < 1.0
+    assert time.perf_counter() - t0 < limit(1.0)
     assert r.status_code == 200, r.text
     path = r.json()["audio_file_path"]
     # The stored path holds exactly what the sponsor sent
@@ -122,7 +123,7 @@ async def test_campaign_status_change_emails_sponsor_and_refuses_unknown(client,
 
     t0 = time.perf_counter()
     r = await client.patch(f"{API}/campaigns/{camp['id']}/status", json={"status": "in_review"}, headers=auth_headers)
-    assert time.perf_counter() - t0 < 1.0
+    assert time.perf_counter() - t0 < limit(1.0)
     assert r.status_code == 200 and r.json()["status"] == "in_review"
     assert mails[-1][0] == "owner@acme.test"
     assert mails[-1][1] == "Campaign Update: Spring Sale"
@@ -272,7 +273,7 @@ async def test_ai_draft_fallback_templates(client, auth_headers, monkeypatch):
     for purpose in ("welcome", "renewal", "follow_up", "general", "custom"):
         t0 = time.perf_counter()
         r = await client.post(f"{API}/ai-emails/draft", json={"sponsor_name": "Acme", "purpose": purpose}, headers=auth_headers)
-        assert time.perf_counter() - t0 < 1.0
+        assert time.perf_counter() - t0 < limit(1.0)
         out[purpose] = r.json()["draft_text"]
     assert "Acme" in out["welcome"] and "Welcome" in out["welcome"]
     assert "renew" in out["renewal"]
@@ -435,7 +436,7 @@ async def test_sponsor_portal_counts_and_upcoming(client, sponsor_login, db_sess
 
     t0 = time.perf_counter()
     spots = {s["title"]: s for s in (await client.get(f"{API}/sponsor-portal/spots", headers=headers)).json()}
-    assert time.perf_counter() - t0 < 0.5
+    assert time.perf_counter() - t0 < limit(0.5)
     assert set(spots) == {"Acme 30", "Acme legacy"}
     assert spots["Acme 30"]["plays_alltime"] == 2 and spots["Acme 30"]["plays_month"] == 1
     assert spots["Acme legacy"]["plays_alltime"] == 1

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import create_access_token
 from app.models.asset import Asset
 from app.models.user import User, UserRole
+from tests.timing import limit
 
 FAST = 0.3
 
@@ -42,7 +43,7 @@ async def test_register_login_rate_and_unrate(client: AsyncClient, db_session: A
     started = time.perf_counter()
     r = await client.post("/api/v1/crm/login", json={"pin": member["pin"]})
     assert r.status_code == 200 and r.json()["name"] == "Listener"
-    assert time.perf_counter() - started < FAST
+    assert time.perf_counter() - started < limit(FAST)
     assert (await client.post("/api/v1/crm/login", json={"pin": "000000" if member["pin"] != "000000" else "111111"})
             ).status_code == 401
 

@@ -13,6 +13,7 @@ import pytest
 
 from app.models.asset import Asset
 from app.services import storage_service
+from tests.timing import limit
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 
@@ -79,7 +80,7 @@ async def test_enhance_values_are_range_checked(client, auth_headers, db_session
         for path in ("enhance", "enhance-preview"):
             t0 = time.perf_counter()
             r = await client.post(f"/api/v1/assets/{a.id}/{path}", json={"filters": filters}, headers=auth_headers)
-            assert time.perf_counter() - t0 < 1.0
+            assert time.perf_counter() - t0 < limit(1.0)
             assert r.status_code == 400, (filters, path, r.text)
     r = await client.post(f"/api/v1/assets/{a.id}/enhance", json={"preset": "nope"}, headers=auth_headers)
     assert r.status_code == 400
@@ -351,7 +352,7 @@ def test_analysis_numbers():
     data = _audio("wav", 8, lead_silence=1.0, tail_silence=1.5)
     t0 = time.perf_counter()
     r = analyze_audio_bytes(data)
-    assert time.perf_counter() - t0 < 5
+    assert time.perf_counter() - t0 < limit(5)
     assert abs(r["duration"] - 10.5) < 0.1
     assert abs(r["cue_in_seconds"] - 1.0) < 0.1
     assert abs(r["cue_out_seconds"] - 9.0) < 0.1
@@ -404,7 +405,7 @@ async def test_studio_mix(client, auth_headers, db_session, local_storage):
     r = await client.post("/api/v1/studio/mix", json={
         "backtrack_asset_id": str(bed.id), "overlay_asset_id": str(voice.id), "output_title": "Promo",
     }, headers=auth_headers)
-    assert time.perf_counter() - t0 < 10
+    assert time.perf_counter() - t0 < limit(10)
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["asset_type"] == "spot" and out["category"] == "studio"

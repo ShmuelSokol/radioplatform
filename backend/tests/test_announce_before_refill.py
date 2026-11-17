@@ -16,6 +16,7 @@ import app.db.engine as engine_module
 from app.api.v1 import queue as queue_module
 from tests.conftest import TestSessionLocal
 from tests.test_queue_advance import _station_with_two_tracks
+from tests.timing import limit
 
 
 @pytest.mark.asyncio
@@ -37,7 +38,7 @@ async def test_change_returns_before_a_slow_refill(db_session, monkeypatch):
     station, _playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=177.5)
     t0 = time.monotonic()
     started = await queue_module._check_advance(db_session, station.id, 3.0)
-    assert time.monotonic() - t0 < 1.0
+    assert time.monotonic() - t0 < limit(1.0)
     assert started.id == pending.id
     assert not refilled.is_set()
 

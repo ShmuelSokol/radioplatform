@@ -14,6 +14,7 @@ from app.models.station import Station, StationType
 from app.services.requested_category_service import refresh_requested_category
 from app.services.song_request_service import fuzzy_match_asset
 from app.services.weather_readout_service import render_template
+from tests.timing import limit
 
 API = "/api/v1/song-requests"
 
@@ -96,7 +97,7 @@ async def test_submit_auto_approve_and_queue_position(client, db_session):
     t0 = time.perf_counter()
     r = await client.post(API, json={"station_id": str(st.id), "requester_name": "Dovid",
                                      "song_title": "request one", "song_artist": "singer"})
-    assert time.perf_counter() - t0 < 0.5
+    assert time.perf_counter() - t0 < limit(0.5)
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["auto_approved"] is True and body["status"] == "queued"
@@ -141,7 +142,7 @@ async def test_matching_speed_with_a_large_library(db_session):
     asset, score = await fuzzy_match_asset(db_session, "Niggun number 4321", "Artist 53", st.id)
     took = time.perf_counter() - t0
     assert asset is not None and asset.title == "Niggun number 4321"
-    assert took < 1.0, f"matching 5,000 songs took {took:.2f}s"
+    assert took < limit(1.0), f"matching 5,000 songs took {took:.2f}s"
 
 
 @pytest.mark.asyncio

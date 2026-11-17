@@ -7,6 +7,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 import app.api.v1.websocket as ws_mod
+from tests.timing import limit
 
 pytestmark = pytest.mark.asyncio
 
@@ -123,7 +124,7 @@ async def test_slow_listener_dropped_without_delaying_others(monkeypatch):
     start = time.monotonic()
     await ws_mod.manager.broadcast_to_station("st", {"type": "now_playing", "data": {"asset_id": "a1"}})
     took = time.monotonic() - start
-    assert took < 1.0
+    assert took < limit(1.0)
     assert all(len(s.sent) == 1 for s in fast)
     assert slow not in ws_mod.manager.active_connections["st"]
     assert all(s in ws_mod.manager.active_connections["st"] for s in fast)

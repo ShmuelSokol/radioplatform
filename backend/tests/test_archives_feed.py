@@ -12,6 +12,7 @@ from app.models.queue_entry import QueueEntry
 from app.models.show_archive import ShowArchive
 from app.models.station import Station, StationType
 from app.models.user import User, UserRole
+from tests.timing import limit
 
 API = "/api/v1"
 ITUNES = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
@@ -47,7 +48,7 @@ async def test_admin_list_keeps_drafts_public_list_does_not(client, auth_headers
 
     t0 = time.perf_counter()
     r = await client.get(f"{API}/archives?drafts=true", headers=auth_headers)
-    assert time.perf_counter() - t0 < 0.5
+    assert time.perf_counter() - t0 < limit(0.5)
     admin = r.json()
     assert {a["title"] for a in admin["archives"]} == {"Published", "Draft"} and admin["total"] == 2
 
@@ -106,7 +107,7 @@ async def test_podcast_rss(client, db_session):
 
     t0 = time.perf_counter()
     r = await client.get(f"{API}/archives/station/{st.id}/rss")
-    assert time.perf_counter() - t0 < 0.5
+    assert time.perf_counter() - t0 < limit(0.5)
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/rss+xml")
     root = ET.fromstring(r.content)  # must parse even with &, <, and a quote in a URL
     ch = root.find("channel")

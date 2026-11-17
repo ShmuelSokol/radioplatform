@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.security import create_access_token, decode_token, hash_password
 from app.models.user import User, UserRole
+from tests.timing import limit
 
 
 async def _login(db, role: UserRole, **kw) -> tuple[User, dict]:
@@ -52,7 +53,7 @@ async def test_init_is_harmless_to_repeat(client: AsyncClient, db_session: Async
         r = await client.get("/api/v1/init")
         assert r.status_code == 200
         assert set(r.json()) == {"status", "created"}
-        assert time.perf_counter() - started < 0.3
+        assert time.perf_counter() - started < limit(0.3)
     # nothing was lost
     assert (await client.get("/api/v1/auth/me", headers=admin)).status_code == 200
 

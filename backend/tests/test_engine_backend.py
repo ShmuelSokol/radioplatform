@@ -26,6 +26,7 @@ from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry, resume_offset
 from app.models.station import Station
 from app.services import playout_engine
+from tests.timing import limit
 
 TOKEN = "made-up-engine-token"
 HEADERS = {"X-Playout-Token": TOKEN}
@@ -175,7 +176,7 @@ async def test_hello_forgets_what_the_engine_held(client, db_session, eng):
     t0 = time.perf_counter()
     r = await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS)
     assert r.status_code == 200 and r.json() == {"ok": True}
-    assert time.perf_counter() - t0 < FAST_SECONDS
+    assert time.perf_counter() - t0 < limit(FAST_SECONDS)
     state = playout_engine.get_state(station.id)
     assert state.cued_entry_id is None and not state.timed_sent and not state.handed
     assert not state.skip_requested and not state.hard_by_done and not state.on_emergency
@@ -338,7 +339,7 @@ async def test_restart_at_59_50_still_hands_the_time_check(db_session, eng):
     playout_engine.reset_state()  # the restart
     t0 = time.perf_counter()
     await playout_engine.tick(db_session, station)
-    assert time.perf_counter() - t0 < FAST_SECONDS
+    assert time.perf_counter() - t0 < limit(FAST_SECONDS)
     timed = engine.timed()
     assert [c["id"] for c in timed] == [str(clock.id)]
     assert abs(timed[0]["at"] - at.timestamp()) < 0.01
@@ -458,7 +459,7 @@ async def test_blackout_end_clears_silence_on_the_engine(client, db_session, eng
     await db_session.commit()
     t0 = time.perf_counter()
     await playout_engine.tick(db_session, station)
-    assert time.perf_counter() - t0 < FAST_SECONDS
+    assert time.perf_counter() - t0 < limit(FAST_SECONDS)
     assert engine.paths()[-2:] == ["/flush", "/skip"]
     for s in silences[1:]:
         assert (await _fresh(db_session, s.id)).status == "played"
@@ -820,7 +821,7 @@ async def test_next_keeps_a_timed_item_on_air(client, db_session, auth_headers, 
     for fade in ("hard", "fade", "soft"):
         t0 = time.perf_counter()
         r = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade={fade}", headers=auth_headers)
-        assert time.perf_counter() - t0 < FAST_SECONDS
+        assert time.perf_counter() - t0 < limit(FAST_SECONDS)
         assert r.status_code == 200 and r.json()["protected"] is True
     assert engine.sent == []
 
@@ -834,7 +835,7 @@ async def test_skip_fades_sent_to_the_engine(client, db_session, auth_headers, e
     for fade, seconds in (("hard", 0.0), ("fade", 0.5), ("soft", 3.0)):
         t0 = time.perf_counter()
         r = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade={fade}", headers=auth_headers)
-        assert time.perf_counter() - t0 < FAST_SECONDS
+        assert time.perf_counter() - t0 < limit(FAST_SECONDS)
         assert r.json()["fade_seconds"] == seconds
         assert engine.sent[-1] == ("/skip", {"fade": seconds})
 
@@ -856,7 +857,7 @@ async def test_mix_over_uses_the_overlay_lane(client, db_session, auth_headers, 
     t0 = time.perf_counter()
     r = await client.post(f"/api/v1/stations/{station.id}/queue/mix-over", headers=auth_headers,
                           json={"asset_id": str(jingle.id)})
-    assert time.perf_counter() - t0 < FAST_SECONDS
+    assert time.perf_counter() - t0 < limit(FAST_SECONDS)
     assert r.status_code == 200 and r.json()["on_air"] is True
     assert [p for p, _ in engine.sent] == ["/overlay"]
     uri = engine.sent[0][1]["uri"]
@@ -890,7 +891,7 @@ async def test_insert_flushes_the_preloaded_track(client, db_session, auth_heade
     t0 = time.perf_counter()
     r = await client.post(f"/api/v1/stations/{station.id}/queue/insert", headers=auth_headers,
                           json={"asset_id": str(extra.id)})
-    assert time.perf_counter() - t0 < FAST_SECONDS
+    assert time.perf_counter() - t0 < limit(FAST_SECONDS)
     assert r.status_code == 201
     assert ("/flush", None) in engine.sent
     # radio.liq /flush forgets the pre-loaded entry from `given`
@@ -928,7 +929,7 @@ async def test_a_hung_engine_does_not_stall_the_scheduler_pass(db_session, eng):
     t0 = time.perf_counter()
     await playout_engine.tick(db_session, station)
     assert len(engine.timed()) == 5
-    assert time.perf_counter() - t0 < 0.5
+    assert time.perf_counter() - t0 < limit(0.5)
 
 
 # ── Verifier round 1, section B (V1-29..40) ──────────────────────────────────

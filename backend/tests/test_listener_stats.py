@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.api.v1 import listeners
 from app.models.listener_session import ListenerSession
 from app.models.station import Station, StationType
+from tests.timing import limit
 
 API = "/api/v1/listeners"
 
@@ -45,7 +46,7 @@ async def test_heartbeat_ip_location_and_timeout(client, db_session, auth_header
                       headers={"X-Real-IP": "203.0.113.5"})
     t0 = time.perf_counter()
     r = await client.post(f"{API}/heartbeat", json={"station_id": str(st.id), "session_key": "a"})
-    assert time.perf_counter() - t0 < 0.3
+    assert time.perf_counter() - t0 < limit(0.3)
     assert r.json()["status"] == "ok"
     assert geo_calls == ["198.51.100.7", "203.0.113.5"]  # repeat heartbeats do no lookup
 
@@ -94,7 +95,7 @@ async def test_first_heartbeat_does_not_wait_for_geo(client, db_session, monkeyp
     t0 = time.perf_counter()
     await client.post(f"{API}/heartbeat", json={"station_id": str(st.id), "session_key": "new"},
                       headers={"X-Forwarded-For": "198.51.100.8"})
-    assert time.perf_counter() - t0 < 0.3
+    assert time.perf_counter() - t0 < limit(0.3)
 
 
 @pytest.mark.xfail(strict=True, reason="BUG: listener 'today' starts at UTC midnight, not the station's local midnight")

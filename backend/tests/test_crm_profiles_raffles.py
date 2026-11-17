@@ -11,6 +11,7 @@ from app.models.asset import Asset
 from app.models.crm_member import CrmMember
 from app.models.raffle import Raffle, RaffleEntry
 from app.models.song_rating import SongRating
+from tests.timing import limit
 
 API = "/api/v1/crm"
 
@@ -67,7 +68,7 @@ async def test_rating_rules(client, db_session):
         assert r.status_code == 422
     t0 = time.perf_counter()
     r = await client.post(f"{API}/rate", json={"asset_id": str(a1.id), "rating": 3}, headers=pin)
-    assert time.perf_counter() - t0 < 0.3
+    assert time.perf_counter() - t0 < limit(0.3)
     assert r.status_code == 200 and r.json()["asset_title"] == "One"
     r = await client.post(f"{API}/rate", json={"asset_id": str(a1.id), "rating": 5, "is_favorite": True}, headers=pin)
     assert r.json()["rating"] == 5
@@ -143,7 +144,7 @@ async def test_member_list_pin_search_and_speed(client, auth_headers, db_session
     assert body["total"] == 200 and len(body["members"]) == 200
     assert all(m["pin"] for m in body["members"])
     assert "Gone" not in {m["name"] for m in body["members"]}
-    assert took < 1.5, f"member page of 200 took {took:.2f}s"
+    assert took < limit(1.5), f"member page of 200 took {took:.2f}s"
 
     assert (await client.get(f"{API}/members", params={"search": "Member 01"}, headers=auth_headers)).json()["total"] == 10
     assert (await client.get(f"{API}/members", params={"search": "+1555"}, headers=auth_headers)).json()["total"] == 0

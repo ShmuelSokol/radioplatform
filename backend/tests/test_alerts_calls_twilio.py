@@ -15,6 +15,7 @@ from app.models.schedule_block import ScheduleBlock
 from app.models.station import Station, StationType
 from app.models.user import User, UserRole
 from app.services import alert_service
+from tests.timing import limit
 
 
 def _user(email, role, phone, prefs, station_ids=None, active=True):
@@ -103,7 +104,7 @@ async def test_alert_filter_values(client, auth_headers, db_session):
     assert (await client.get("/api/v1/alerts", params={"alert_type": "nope"}, headers=auth_headers)).status_code == 422
     t0 = time.perf_counter()
     r = await client.get("/api/v1/alerts", params={"severity": "WARNING", "alert_type": "Queue_Empty"}, headers=auth_headers)
-    assert time.perf_counter() - t0 < 0.3
+    assert time.perf_counter() - t0 < limit(0.3)
     assert r.json()["total"] == 1
 
 

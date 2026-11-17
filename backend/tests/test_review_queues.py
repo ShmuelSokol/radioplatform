@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.asset import Asset, fit_for_random_pick, not_placeholder
+from tests.timing import limit
 
 API = "/api/v1/reviews"
 
@@ -40,7 +41,7 @@ async def test_reject_takes_the_song_off_automatic_picks(client, auth_headers, d
 
     t0 = time.perf_counter()
     r = await client.patch(f"{API}/items/{items[0]['id']}", json={"status": "rejected", "version": 1}, headers=auth_headers)
-    assert time.perf_counter() - t0 < 0.5
+    assert time.perf_counter() - t0 < limit(0.5)
     assert r.status_code == 200
     await client.patch(f"{API}/items/{items[1]['id']}", json={"status": "approved", "version": 1}, headers=auth_headers)
     await client.patch(f"{API}/items/{items[2]['id']}", json={"status": "flagged", "version": 1}, headers=auth_headers)
