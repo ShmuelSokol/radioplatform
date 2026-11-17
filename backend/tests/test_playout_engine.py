@@ -532,3 +532,205 @@ async def test_a_redraw_never_loses_what_the_engine_plays(client, db_session, en
         .execution_options(populate_existing=True)
     )).scalars().all()
     assert len(playing) == 1 and str(playing[0].asset_id) == str(asset_id)
+
+
+async def _shiur_on_air(db_session, station, entries, rule=None):
+    """entries[0] is a 70-minute shiur 20 minutes in; entries[2] is the time check in 20 s."""
+    shiur = await db_session.get(Asset, entries[0].asset_id)
+    shiur.asset_type = "daf_yomi"
+    shiur.duration = 70 * 60.0
+    now = datetime.now(UTC)
+    on_air = await db_session.get(QueueEntry, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = now - timedelta(minutes=20)
+    on_air.preempt_at = now - timedelta(minutes=20)  # it aired as part of an earlier block
+    timed = await db_session.get(QueueEntry, entries[2].id)
+    timed.preempt_at = now + timedelta(seconds=20)
+    if rule:
+        station.automation_config = {"timed_during_long_items": rule}
+    await db_session.commit()
+    return on_air, timed
+
+
+async def _resumes(db_session, station, asset_id):
+    res = await db_session.execute(
+        select(QueueEntry).where(
+            QueueEntry.station_id == station.id,
+            QueueEntry.asset_id == asset_id,
+            QueueEntry.status == "pending",
+        )
+    )
+    return res.scalars().all()
+
+
+@pytest.mark.asyncio
+async def test_time_check_pauses_a_long_shiur_and_it_resumes(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    on_air, timed = await _shiur_on_air(db_session, station, entries)
+
+    await playout_engine.tick(db_session, station)
+    await playout_engine.tick(db_session, station)
+
+    # The time check goes to the engine on its second, once
+    assert len([p for path, p in sent if path == "/timed"]) == 1
+    # The shiur is queued once, first in the music lane, from where the time check stops it
+    resumes = await _resumes(db_session, station, on_air.asset_id)
+    assert len(resumes) == 1
+    assert resumes[0].source.startswith("resume")
+    from app.models.queue_entry import resume_offset
+
+    assert 20 * 60 - 10 < resume_offset(resumes[0]) < 20 * 60 + 25
+    nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert nxt.json()["entry_id"] == str(resumes[0].id)
+
+
+@pytest.mark.asyncio
+async def test_wait_rule_lets_a_queued_shiur_finish(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    on_air, timed = await _shiur_on_air(db_session, station, entries, rule="wait")
+    on_air.preempt_at = None  # it came up in the music lane
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+
+    assert not [p for path, p in sent if path == "/timed"]
+    await db_session.refresh(timed)
+    assert timed.timing_mode == "soft"
+    assert not await _resumes(db_session, station, on_air.asset_id)
+
+
+@pytest.mark.asyncio
+async def test_wait_rule_moves_the_group_to_the_end_of_a_block_shiur(client, db_session, engine_station):
+    # The shiur aired in the timed lane (part of a hard block): the time check stays
+    # hard and starts the moment the shiur ends, not after a song in the music lane.
+    station, entries, sent = engine_station
+    on_air, timed = await _shiur_on_air(db_session, station, entries, rule="wait")
+
+    await playout_engine.tick(db_session, station)
+
+    assert not [p for path, p in sent if path == "/timed"]
+    await db_session.refresh(timed)
+    assert timed.timing_mode != "soft"
+    started = on_air.started_at if on_air.started_at.tzinfo else on_air.started_at.replace(tzinfo=UTC)
+    moved = timed.preempt_at if timed.preempt_at.tzinfo else timed.preempt_at.replace(tzinfo=UTC)
+    assert abs((moved - started).total_seconds() - 70 * 60) < 1
+    assert not await _resumes(db_session, station, on_air.asset_id)
+
+
+@pytest.mark.asyncio
+async def test_cut_rule_cuts_without_resuming(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    on_air, timed = await _shiur_on_air(db_session, station, entries, rule="cut")
+
+    await playout_engine.tick(db_session, station)
+
+    assert len([p for path, p in sent if path == "/timed"]) == 1
+    assert not await _resumes(db_session, station, on_air.asset_id)
+
+
+@pytest.mark.asyncio
+async def test_a_song_on_air_is_not_resumed(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    now = datetime.now(UTC)
+    on_air = await db_session.get(QueueEntry, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = now - timedelta(seconds=60)
+    timed = await db_session.get(QueueEntry, entries[2].id)
+    timed.preempt_at = now + timedelta(seconds=20)
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+
+    assert len([p for path, p in sent if path == "/timed"]) == 1
+    assert not await _resumes(db_session, station, on_air.asset_id)
+
+
+@pytest.mark.asyncio
+async def test_an_item_running_past_its_end_raises_one_alert(client, db_session, engine_station):
+    from app.models.alert import Alert
+
+    station, entries, sent = engine_station
+    on_air = await db_session.get(QueueEntry, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = datetime.now(UTC) - timedelta(seconds=180 + 45)
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+    await playout_engine.tick(db_session, station)
+
+    alerts = (await db_session.execute(
+        select(Alert).where(Alert.title == "Playout engine did not move on")
+    )).scalars().all()
+    assert len(alerts) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_report_renumbers_the_queue(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    third = await db_session.get(QueueEntry, entries[2].id)
+    third.position = 40
+    await db_session.commit()
+    res = await client.post(
+        f"/api/v1/playout/{station.id}/started",
+        headers=HEADERS,
+        json={"entry_id": str(entries[0].id), "lane": "main", "title": "x"},
+    )
+    assert res.status_code == 200
+    rows = (await db_session.execute(
+        select(QueueEntry.id, QueueEntry.position)
+        .where(QueueEntry.station_id == station.id)
+        .order_by(QueueEntry.position)
+        .execution_options(populate_existing=True)
+    )).all()
+    assert [p for _, p in rows] == [1, 2, 3, 4]
+    assert rows[0][0] == entries[0].id
+
+
+@pytest.mark.asyncio
+async def test_next_never_hands_out_what_just_started(client, db_session, engine_station):
+    # The start report is still being written (not committed) when the engine asks for the
+    # next track: the item on air must not come back as "next" (it would play twice).
+    station, entries, sent = engine_station
+    state = playout_engine.get_state(station.id)
+    state.recent_started.append(str(entries[0].id))
+    nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert nxt.json()["entry_id"] == str(entries[1].id)
+
+
+@pytest.mark.asyncio
+async def test_a_due_soft_item_replaces_the_cued_song_near_the_end(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    now = datetime.now(UTC)
+    on_air = await db_session.get(QueueEntry, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = now - timedelta(seconds=160)  # 20 s left
+    await db_session.commit()
+    nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert nxt.json()["entry_id"] == str(entries[1].id)
+    soft = await db_session.get(QueueEntry, entries[3].id)
+    soft.source = "ad_slot"
+    soft.preempt_at = now - timedelta(seconds=1)
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+
+    assert [path for path, _ in sent].count("/flush") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_reshuffled_song_keeps_the_cued_one_near_the_end(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    now = datetime.now(UTC)
+    on_air = await db_session.get(QueueEntry, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = now - timedelta(seconds=160)  # 20 s left
+    await db_session.commit()
+    nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert nxt.json()["entry_id"] == str(entries[1].id)
+    moved = await db_session.get(QueueEntry, entries[3].id)
+    moved.position = 0
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+
+    assert "/flush" not in [path for path, _ in sent]

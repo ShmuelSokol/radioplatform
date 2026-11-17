@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useStations } from '../../hooks/useStations';
 import {
@@ -26,13 +27,16 @@ import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
 import { usePfl } from './controlroom/pfl';
 import { PflDeck } from './controlroom/PflDeck';
-import { LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
+import { ErrorsPanel, LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
+import ModeButtons from './controlroom/ModeButtons';
+import { panicRequest, setStationModes, type StationModes } from '../../api/queue';
+import { isManager } from '../../auth/access';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
 
-type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule';
-type SideTab = 'library' | 'live' | 'log' | 'schedule';
+type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule' | 'errors';
+type SideTab = 'library' | 'live' | 'log' | 'schedule' | 'errors';
 
 interface Toast { text: string; type: 'ok' | 'warn' | 'error' }
 
@@ -41,6 +45,7 @@ const SIDE_TABS: Array<{ id: SideTab; label: string }> = [
   { id: 'live', label: 'Go live' },
   { id: 'log', label: 'Played' },
   { id: 'schedule', label: 'Schedule' },
+  { id: 'errors', label: 'Errors' },
 ];
 
 const MOBILE_TABS: Array<{ id: Pane; label: string; icon: string }> = [
@@ -516,6 +521,59 @@ export default function Dashboard() {
     }
   }, [looping, qc, refreshQueue]);
 
+  // HS and Spots mode switches, Panic (KBR Studio's control panel)
+  const modes = (queueData as { modes?: StationModes } | undefined)?.modes ?? { hard_start: true, spots: true };
+  const [modesBusy, setModesBusy] = useState(false);
+  const changeModes = useCallback(async (next: Partial<StationModes>) => {
+    const sid = latest.current.stationId;
+    if (!sid) return;
+    setModesBusy(true);
+    try {
+      const res = await setStationModes(sid, next);
+      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
+      else refreshQueue();
+      if (next.hard_start !== undefined) {
+        setToast(res.modes.hard_start
+          ? { text: 'HS is on: the time check and hard blocks start on the second again.', type: 'ok' }
+          : { text: 'HS is off: timed items now wait for the song on air to end.', type: 'warn' });
+      } else {
+        setToast(res.modes.spots
+          ? { text: 'Spots mode is on: scheduled sponsorships play again.', type: 'ok' }
+          : { text: 'Spots mode is off: no sponsorships go on the air until you switch it back on.', type: 'warn' });
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail;
+      setToast({ text: typeof msg === 'string' ? msg : 'That did not go through. Check the connection and try again.', type: 'error' });
+    } finally {
+      setModesBusy(false);
+    }
+  }, [qc, refreshQueue]);
+  const doPanic = useCallback(async () => {
+    const sid = latest.current.stationId;
+    if (!sid) return;
+    setModesBusy(true);
+    try {
+      const res = await panicRequest(sid);
+      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
+      else refreshQueue();
+      setToast(res.message === 'Skipped'
+        ? { text: 'Panic: cut what was on air and started the next item.', type: 'warn' }
+        : { text: `Panic: ${res.message}`, type: 'error' });
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail;
+      setToast({ text: typeof msg === 'string' ? msg : 'Panic did not go through. Check the connection and try again.', type: 'error' });
+    } finally {
+      setModesBusy(false);
+    }
+  }, [qc, refreshQueue]);
+  const modeProps = {
+    hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId,
+    canChange: !!user && user.role !== 'viewer',
+    onHardStart: () => changeModes({ hard_start: !modes.hard_start }),
+    onSpots: () => changeModes({ spots: !modes.spots }),
+    onPanic: doPanic,
+  };
+
   const handleStart = useCallback(() => {
     if (!stationId) { setStatusMessage('No station available'); return; }
     setStatusMessage(null);
@@ -735,6 +793,7 @@ export default function Dashboard() {
     tab === 'library' ? libraryPanel
     : tab === 'live' ? <LivePanel stationId={stationId} stationTz={stationTz} />
     : tab === 'log' ? <LogPanel stationId={stationId} stationTz={stationTz} />
+    : tab === 'errors' ? <ErrorsPanel stationId={stationId} stationTz={stationTz} canSee={isManager(user?.role)} />
     : <SchedulePanel stationId={stationId} />;
 
   return (
@@ -793,6 +852,11 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
+              <div className="h-2" />
+              <ModeButtons p={modeProps} stacked />
+              <div className="h-2" />
+              <Link to="/admin/databank" className="qn-btn h-8 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
+                data-testid="cr-databank">DB</Link>
             </aside>
           </div>
           <PflDeck pfl={pfl} />
@@ -802,14 +866,18 @@ export default function Dashboard() {
         /* ═══ Phone / tablet: one pane + bottom tabs ═══ */
         <>
           <div className="flex-1 min-h-0 flex flex-col">
-            {(pane === 'log' || pane === 'schedule') && (
+            {(pane === 'log' || pane === 'schedule' || pane === 'errors') && (
+              <ModeButtons p={modeProps} stacked={false} />
+            )}
+            {(pane === 'log' || pane === 'schedule' || pane === 'errors') && (
               <div className="shrink-0 flex gap-1 p-1 bg-[#c0c0c0]">
-                {(['log', 'schedule'] as Pane[]).map(t => (
+                {(['log', 'schedule', 'errors'] as Pane[]).map(t => (
                   <button key={t} type="button" onClick={() => setPane(t)} aria-pressed={pane === t}
                     className="qn-btn flex-1 h-9 text-sm">
-                    {t === 'log' ? 'Played' : 'Schedule'}
+                    {t === 'log' ? 'Played' : t === 'schedule' ? 'Schedule' : 'Errors'}
                   </button>
                 ))}
+                <Link to="/admin/databank?tab=log" className="qn-btn flex-1 h-9 text-sm flex items-center justify-center" data-testid="cr-databank">Databank</Link>
               </div>
             )}
             <div className="flex-1 min-h-0">
@@ -819,7 +887,7 @@ export default function Dashboard() {
           <PflDeck pfl={pfl} compact />
           <nav className="shrink-0 flex gap-1 px-1 pt-1 bg-[#c0c0c0] border-t-2 border-white pb-[max(0.25rem,env(safe-area-inset-bottom))]" aria-label="Control room sections">
             {MOBILE_TABS.map(t => {
-              const active = pane === t.id || (t.id === 'log' && pane === 'schedule');
+              const active = pane === t.id || (t.id === 'log' && (pane === 'schedule' || pane === 'errors'));
               return (
                 <button key={t.id} type="button" onClick={() => setPane(t.id)} aria-current={active ? 'page' : undefined}
                   className={`qn-btn flex-1 h-12 flex flex-col items-center justify-center gap-0.5 text-[11px]

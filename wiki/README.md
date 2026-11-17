@@ -10,6 +10,8 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [hourly-slots](hourly-slots.md) — Station ID, time announcements, weather, ad slots at :00/:15/:30/:45
 - [admin-page-layout](admin-page-layout.md) — Full-width rule for every admin page, the padding the dark pages depend on, phone tables, the layout audit script
 - [control-room](control-room.md) — Operator screen layout, liveControl.ts seam, insert-by-entry-id, where instant buttons are stored
+- [station-modes](station-modes.md) — HS (hard start) and Spots mode switches, Panic, Errors pane: what they do and their limits
+- [databank](databank.md) — KBR Studio's database window: songs/jingles/spots/blocks tables, spot end dates (on the schedules), day log to the millisecond
 - [dashboard-timing](dashboard-timing.md) — Elapsed timer overflow fix, WS vs REST data sources
 - [skip-latency](skip-latency.md) — Instant skip rule: now-playing changes must WS-broadcast
 - [lint-workflow](lint-workflow.md) — Wiki housekeeping procedure

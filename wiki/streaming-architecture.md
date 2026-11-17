@@ -244,6 +244,25 @@ Timing on the server stream:
 - Every listener of a station plays the same Icecast mount, so they all hear the same audio. They differ only by their own delay: about 1 s with the MSE player (Chrome, Edge, Firefox, Android). On iPhone Safari, which has no `MediaSource` (only `ManagedMediaSource`, not used yet), it is a few seconds more.
 - Hard-timed items (time check, ID) are handed to the engine 45 s early with an absolute time. The engine starts the fade `skip_fade` before it, so the item starts on the second by the stream server's clock (Ubuntu's timesyncd keeps it on time).
 
+## The same song handed out twice (2026-11-17 02:49Z, Main)
+
+The engine asks for its next track the moment a track starts. Its start report for Shema
+(02:49:04.79) was still being written when that ask came (02:49:04.8): the report
+renumbered about 690 queue rows one UPDATE at a time (over 3 s) before committing, so
+Shema still read as pending and was handed out again. The engine played it twice; it
+reports a change only when the entry id changes, so nothing reached the backend and the
+screen sat at 0:00 until Next. Now: `handle_next` never hands out an entry in
+`state.recent_started` (set before the report commits); the renumber is one
+`row_number()` UPDATE; `pick_next` is read-only (placeholders and do_not_play filtered in
+the SELECT; an UPDATE there held row locks inside the scheduler's long pass); a song still
+"on air" 30 s past its end raises "Playout engine did not move on"; automatic flushes of
+the pre-loaded track wait 15 s between them and never happen in the last 45 s of an item, unless a timed item is due then.
+
+Engine side (`radio.liq`): every track change is reported (`on_track` too), so untagged
+emergency files raise the emergency alert; the emergency folder was empty on the server
+(silence), so the engine now copies each song it airs there (newest 40, `kbr_kind=music`);
+big songs get 120 s to download.
+
 ## iPhone Safari plays an HLS copy (2026-11-17)
 
 iPhone Safari has no Media Source Extensions for MP3, and its plain `<audio>` on the

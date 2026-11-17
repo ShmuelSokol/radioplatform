@@ -23,6 +23,7 @@ async def _headers(client: AsyncClient, db: AsyncSession, role: UserRole) -> dic
 STAFF = {"admin", "manager", "dj", "viewer"}
 CASES = [
     ("/api/v1/assets", STAFF),
+    ("/api/v1/databank/items", STAFF),
     ("/api/v1/categories", STAFF),
     ("/api/v1/asset-types", STAFF),
     ("/api/v1/rules", STAFF),

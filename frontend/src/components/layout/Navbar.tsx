@@ -75,6 +75,7 @@ export default function Navbar() {
       hoverColor: 'hover:text-cyan-300',
       links: [
         { to: '/admin/assets', label: 'Library', color: 'hover:text-cyan-300' },
+        { to: '/admin/databank', label: 'Databank', color: 'hover:text-yellow-300' },
         { to: '/admin/categories', label: 'Categories', color: 'hover:text-teal-300' },
         { to: '/admin/asset-types', label: 'Types', color: 'hover:text-sky-300' },
         { to: '/admin/playlists', label: 'Playlists', color: 'hover:text-indigo-300' },
