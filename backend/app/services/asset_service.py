@@ -251,6 +251,29 @@ async def delete_asset(db: AsyncSession, asset_id: uuid.UUID) -> None:
     )).scalar_one_or_none()
     if on_air is not None:
         raise ConflictError("This item is on air. Press Next (or wait for it to end), then delete it.")
+    # Spot schedules would vanish silently (CASCADE) and program block items would
+    # point at nothing: refuse and name them, so the manager moves them first.
+    # Queued (not yet playing) entries and playlist lines are still removed with it.
+    from app.models.program_block import ProgramBlock
+    from app.models.spot_schedule import SpotSchedule
+
+    uses = []
+    spots = (await db.execute(
+        select(SpotSchedule.name).where(SpotSchedule.asset_id == asset_id)
+    )).scalars().all()
+    if spots:
+        uses.append("spot schedule " + ", ".join(f"'{n}'" if n else "(unnamed)" for n in spots))
+    blocks = (await db.execute(select(ProgramBlock.name, ProgramBlock.items))).all()
+    in_blocks = [
+        name for name, items in blocks
+        if any(isinstance(i, dict) and str(i.get("asset_id")) == str(asset_id) for i in (items or []))
+    ]
+    if in_blocks:
+        uses.append("program block " + ", ".join(f"'{n}'" for n in in_blocks))
+    if uses:
+        raise ConflictError(
+            "This item is used by " + "; ".join(uses) + ". Change or remove those first, then delete it."
+        )
     await db.delete(asset)
     await db.flush()
 
