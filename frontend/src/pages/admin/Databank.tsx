@@ -39,7 +39,10 @@ function dmy(iso: string | null, tz?: string): string {
   if (!iso) return '';
   const d = new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso);
   const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'numeric', year: 'numeric', ...(tz && iso.length > 10 ? { timeZone: tz } : { timeZone: 'UTC' }) };
-  return new Intl.DateTimeFormat('en-GB', opts).format(d);
+  // Built from the parts: en-GB pads to 08/10/2026, the old program writes 8/10/2026
+  const parts = new Intl.DateTimeFormat('en-GB', opts).formatToParts(d);
+  const part = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+  return `${Number(part('day'))}/${Number(part('month'))}/${part('year')}`;
 }
 function hm(iso: string | null, tz?: string): string {
   if (!iso) return '';
@@ -274,8 +277,12 @@ export default function Databank() {
 
   const saveEndDate = async (spot: DbSpot, raw: string) => {
     setEditing(null);
+    // Without a station the API moves the spot on every station: always name the one shown
+    if (!station) { setNotice({ ok: false, text: 'Choose a station first.' }); return; }
+    // Clearing (the iPhone date wheel's Clear, or an empty box) makes it air for ever: ask first
+    if (!raw && !window.confirm(`Take the end date off ${spot.title}? Every schedule of it on ${station.name} will air with no end.`)) return;
     try {
-      await setSpotEndDate(spot.id, raw || null, stationId || undefined);
+      await setSpotEndDate(spot.id, raw || null, station.id);
       setNotice({ ok: true, text: raw ? `${spot.title} now runs until ${dmy(raw)}.` : `${spot.title} now has no end date.` });
       await qc.invalidateQueries({ queryKey: ['databank-spots'] });
       void qc.invalidateQueries({ queryKey: ['spot-schedules'] });
@@ -437,7 +444,7 @@ export default function Databank() {
               <span className="block truncate text-xs font-normal opacity-80" onClick={startEdit(s.id, 'type')}>{cat || 'no category'}</span>
             </span>
             <span className="shrink-0 text-right text-xs tabular-nums">
-              <span className="block min-h-[22px]" {...endProps}>{end}</span>
+              <span className={`flex items-center justify-end ${s.schedules ? 'min-h-[44px]' : 'min-h-[22px]'}`} {...endProps}>{end}</span>
               <span className="block font-normal opacity-80">{fmtDur(s.length)}</span>
             </span>
           </div>
@@ -533,7 +540,7 @@ export default function Databank() {
             )}
             {tab !== 'blocks' && (
               <button type="button" disabled={!sel} onClick={() => sel && pfl.toggle(sel)}
-                className="qn-btn h-11 lg:h-8 px-3 text-sm" title="Pre-listen to the selected item (Space). Nothing goes on air."
+                className="qn-btn h-11 lg:h-8 px-3 min-w-[44px] lg:min-w-0 text-sm" title="Pre-listen to the selected item (Space). Nothing goes on air."
                 aria-label="Pre-listen to the selected item">🎧</button>
             )}
             {manager && tab !== 'blocks' && (
@@ -550,7 +557,11 @@ export default function Databank() {
           </>
         )}
         {stations.length > 1 && (
-          <select value={stationId} onChange={e => { setStationId(e.target.value); setSel(null); }} aria-label="Station"
+          <select value={stationId} onChange={e => {
+              setStationId(e.target.value); setSel(null);
+              // "Control room" then opens on the same station
+              try { localStorage.setItem('radio_last_station', e.target.value); } catch { /* storage blocked */ }
+            }} aria-label="Station"
             className="qn-field h-11 lg:h-8 px-2 text-sm lg:ml-auto max-w-[14rem]">
             {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
@@ -585,11 +596,11 @@ export default function Databank() {
       {tab !== 'log' && (
         <div className="shrink-0 bg-[#c0c0c0] border-t border-white flex items-stretch gap-1 p-0.5 text-[12px] text-black pb-[max(0.125rem,env(safe-area-inset-bottom))]" data-testid="db-status">
           {itemsTab && (
-            <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="qn-btn px-3 lg:px-2 min-h-[44px] lg:min-h-[32px]" aria-label="Previous page">◀</button>
+            <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="qn-btn px-3 lg:px-2 min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" aria-label="Previous page">◀</button>
           )}
           <span className="qn-sunken px-2 flex items-center">Page {page + 1}{itemsTab && pages > 1 ? ` of ${pages}` : ''}</span>
           {itemsTab && (
-            <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} className="qn-btn px-3 lg:px-2 min-h-[44px] lg:min-h-[32px]" aria-label="Next page">▶</button>
+            <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} className="qn-btn px-3 lg:px-2 min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" aria-label="Next page">▶</button>
           )}
           {goTo !== null ? (
             <input type="number" min={1} max={Math.max(1, view)} autoFocus value={goTo} data-testid="db-goto"
@@ -609,13 +620,13 @@ export default function Databank() {
               }}
               className="qn-field w-24 px-1 min-h-[44px] lg:min-h-0 text-[16px] lg:text-[12px]" />
           ) : (
-            <button type="button" onClick={() => setGoTo('')} className="qn-sunken px-2 flex items-center min-h-[44px] lg:min-h-[32px]" data-testid="db-rec"
+            <button type="button" onClick={() => setGoTo('')} className="qn-sunken px-2 flex items-center justify-center min-w-[52px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" data-testid="db-rec"
               title="123: go to a record number">Rec {recIdx >= 0 ? (itemsTab ? page * PAGE : 0) + recIdx + 1 : 0}</button>
           )}
           <span className="qn-sunken px-2 flex items-center" data-testid="db-view">View {view}</span>
           <span className="qn-sunken px-2 flex items-center" data-testid="db-tot">Tot {tot}</span>
           <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
-            className="ml-auto px-2 underline hover:text-red-700 min-h-[44px] lg:min-h-[32px]" data-testid="db-report-bug">🐞<span className="hidden sm:inline"> Report a bug</span></button>
+            className="ml-auto px-2 underline hover:text-red-700 min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" data-testid="db-report-bug">🐞<span className="hidden sm:inline"> Report a bug</span></button>
         </div>
       )}
     </div>
