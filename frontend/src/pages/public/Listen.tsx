@@ -454,7 +454,7 @@ export default function Listen() {
                   value={reqName}
                   onChange={e => setReqName(e.target.value)}
                   placeholder="Enter your name"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                  className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                 />
               </div>
               <div>
@@ -464,7 +464,7 @@ export default function Listen() {
                   value={reqSong}
                   onChange={e => setReqSong(e.target.value)}
                   placeholder="What song would you like to hear?"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                  className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                 />
               </div>
               <div>
@@ -474,7 +474,7 @@ export default function Listen() {
                   value={reqArtist}
                   onChange={e => setReqArtist(e.target.value)}
                   placeholder="Artist name"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                  className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                 />
               </div>
               <div>
@@ -515,7 +515,7 @@ export default function Listen() {
                   }
                 }}
                 disabled={reqSubmitting}
-                className="bg-brand-600 hover:bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                className="min-h-[44px] bg-brand-600 hover:bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
               >
                 {reqSubmitting ? 'Submitting...' : 'Submit Request'}
               </button>
@@ -537,7 +537,7 @@ export default function Listen() {
                   value={crmPinInput}
                   onChange={e => { setCrmPinInput(e.target.value.replace(/\D/g, '')); setCrmLoginError(''); }}
                   placeholder="Enter 6-digit PIN"
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  className="min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
                 <button
                   onClick={async () => {
@@ -572,18 +572,18 @@ export default function Listen() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
                     <input type="text" value={crmRegName} onChange={e => setCrmRegName(e.target.value)}
-                      placeholder="Your name" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                      placeholder="Your name" className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Phone (optional)</label>
                       <input type="text" value={crmRegPhone} onChange={e => setCrmRegPhone(e.target.value)}
-                        placeholder="Phone" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                        placeholder="Phone" className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
                       <input type="email" value={crmRegEmail} onChange={e => setCrmRegEmail(e.target.value)}
-                        placeholder="Email" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                        placeholder="Email" className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     </div>
                   </div>
                   <button
@@ -616,7 +616,7 @@ export default function Listen() {
                     <p className="text-brand-700 font-bold">&ldquo;{crm.profile?.taste_profile.label}&rdquo;</p>
                     <p className="text-sm text-brand-600">{crm.profile?.taste_profile.description}</p>
                   </div>
-                  <button onClick={crm.logout} className="text-xs text-gray-400 hover:text-red-500 transition">Logout</button>
+                  <button onClick={crm.logout} className="min-h-[44px] px-2 text-xs text-gray-400 hover:text-red-500 transition">Logout</button>
                 </div>
                 <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
                   <span>{crm.profile?.ratings_count} songs rated</span>
@@ -638,7 +638,7 @@ export default function Listen() {
                             { onSuccess: () => crm.refreshProfile() }
                           );
                         }}
-                        className={`text-xl transition ${star <= myRating ? 'text-yellow-400' : 'text-gray-300 hover:text-yellow-300'}`}
+                        className={`min-w-[44px] min-h-[44px] text-xl transition ${star <= myRating ? 'text-yellow-400' : 'text-gray-300 hover:text-yellow-300'}`}
                       >
                         &#9733;
                       </button>
@@ -653,7 +653,7 @@ export default function Listen() {
                         { onSuccess: () => crm.refreshProfile() }
                       );
                     }}
-                    className={`text-xl transition ${myFavorite ? 'text-red-500' : 'text-gray-300 hover:text-red-400'}`}
+                    className={`min-w-[44px] min-h-[44px] text-xl transition ${myFavorite ? 'text-red-500' : 'text-gray-300 hover:text-red-400'}`}
                     title={myFavorite ? 'Unfavorite' : 'Favorite'}
                   >
                     &#9829;
@@ -683,7 +683,7 @@ export default function Listen() {
                             });
                           }}
                           disabled={enterRaffleMutation.isPending}
-                          className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                          className="min-h-[44px] bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50"
                         >
                           Enter Raffle
                         </button>
