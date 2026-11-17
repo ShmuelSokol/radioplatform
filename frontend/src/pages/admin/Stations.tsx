@@ -362,11 +362,13 @@ function AutomationConfig({ config, onSave, saving }: {
   const [weatherOn, setWeatherOn] = useState(config.weather_enabled ?? false);
   const [weatherInterval, setWeatherInterval] = useState(config.weather_interval_minutes ?? 30);
   const [longItems, setLongItems] = useState<string>(config.timed_during_long_items ?? 'pause');
+  const [crossfade, setCrossfade] = useState<string>(String(config.crossfade_seconds ?? 1));
 
   const handleSave = () => {
     onSave({
       ...config, // keep settings made elsewhere (program clock, weather region)
       timed_during_long_items: longItems,
+      crossfade_seconds: Math.min(10, Math.max(0, Number.isFinite(parseFloat(crossfade)) ? parseFloat(crossfade) : 1)),
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
       weather_enabled: weatherOn,
@@ -406,6 +408,16 @@ function AutomationConfig({ config, onSave, saving }: {
           <option value="cut">Cut it (the time check takes over)</option>
         </select>
         <span className="block mt-1 text-xs text-gray-500">Songs are always faded for the time check as before.</span>
+      </label>
+      <label className="mt-4 block max-w-lg text-sm">
+        <span className="block font-medium text-gray-700">Song crossfade (seconds)</span>
+        <input type="number" value={crossfade} min={0} max={10} step={0.5}
+          onChange={e => setCrossfade(e.target.value)}
+          className="mt-1 w-24 px-2 py-1 border rounded" data-testid="crossfade-seconds" />
+        <span className="block mt-1 text-xs text-gray-500">
+          How long the end of one song plays over the start of the next. 0 = no overlap: each song ends, then the next starts.
+          Sponsorships, time checks, weather, shiurim and stories never overlap, whatever is set here.
+        </span>
       </label>
       <button onClick={handleSave} disabled={saving}
         className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm disabled:opacity-50">

@@ -21,6 +21,8 @@ export interface NowPlayingData {
     intro_seconds?: number | null;
     cue_out?: number;
     cross_start?: number;
+    /** How long it overlaps the next item at its end: the station's song crossfade, 0 for anything spoken */
+    overlap_seconds?: number;
     replay_gain_db?: number;
   };
   next_asset?: {
@@ -32,6 +34,7 @@ export interface NowPlayingData {
     replay_gain_db?: number;
     /** When it cuts into the item on air (hard timed item); null = it follows it */
     cut_at?: string | null;
+    overlap_seconds?: number;
   };
 }
 

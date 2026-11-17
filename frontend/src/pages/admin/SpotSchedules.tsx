@@ -120,7 +120,11 @@ export default function SpotSchedules() {
   const [previewStation, setPreviewStation] = useState('');
   const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
 
-  const stationId = previewStation || stations[0]?.id || '';
+  // The look-ahead opens on a station that has sponsorships: opening on the first
+  // station (Main) showed "none planned" while 180 plays were queued on two others.
+  const scheduledStation = (schedules ?? []).find((x) => x.is_active && x.station_id)?.station_id;
+  const withSchedules = stations.find((st) => String(st.id) === String(scheduledStation))?.id;
+  const stationId = previewStation || withSchedules || stations[0]?.id || '';
 
   const { data: spotResults, isFetching: searching } = useQuery({
     queryKey: ['spot-search', spotSearch],

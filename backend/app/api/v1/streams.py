@@ -83,7 +83,9 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     duration = asset.duration or 180.0
     cue_in = analysis.get("cue_in_seconds", 0)
     cue_out = analysis.get("cue_out_seconds", duration)
-    cross_start = analysis.get("cross_start_seconds", duration - 3.0)
+    # The one hand-over rule (a sponsorship or shiur is never crossfaded)
+    from app.api.v1.queue import handover_seconds, overlap_seconds
+    cross_start = duration - handover_seconds(entry)
     replay_gain_db = analysis.get("replay_gain_db", 0)
 
     # What follows this item (the queue's pick at the hand-over), for pre-loading
@@ -126,6 +128,7 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "cue_in": cue_in,
         "cue_out": cue_out,
         "cross_start": cross_start,
+        "overlap_seconds": overlap_seconds(entry),
         "replay_gain_db": replay_gain_db,
         "next_asset": next_asset_data,
     }

@@ -71,10 +71,11 @@ def test_server_change_ignores_an_old_crossfade_point():
     asset = SimpleNamespace(duration=160.0, metadata_extra={"audio_analysis": {
         "cue_out_seconds": 180.0, "cross_start_seconds": 120.0}})
     entry = SimpleNamespace(asset=asset, started_at=started)
-    # an old analysis's point is not trusted: 3 s before the end
-    assert switch_time(entry) == started + timedelta(seconds=157.0)
+    # an old analysis's point is not trusted: the station's crossfade (1 s) before the end
+    assert switch_time(entry) == started + timedelta(seconds=159.0)
     asset.metadata_extra["audio_analysis"]["version"] = ANALYSIS_VERSION
-    assert switch_time(entry) == started + timedelta(seconds=120.0)
+    # a current one is: audible end at 123 s (the point + 3), handed over 1 s before it
+    assert switch_time(entry) == started + timedelta(seconds=122.0)
 
 
 @pytest.mark.asyncio

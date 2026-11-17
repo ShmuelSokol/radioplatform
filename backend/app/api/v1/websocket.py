@@ -224,6 +224,8 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                         elif getattr(settings, "supabase_storage_enabled", False) and supabase_bucket:
                             audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{supabase_bucket}/{file_path}"
 
+                    from app.api.v1.queue import is_crossfaded
+
                     duration = (getattr(asset, "duration", None) if asset else None) or 180.0
 
                     # Peek at next pending queue entry
@@ -283,6 +285,9 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                                 "cue_in": analysis.get("cue_in_seconds", 0),
                                 "cue_out": analysis.get("cue_out_seconds", duration),
                                 "cross_start": analysis.get("cross_start_seconds", duration - 3.0),
+                                # anything spoken is never crossfaded (see queue.overlap_seconds);
+                                # for a song the page keeps its default until the next update
+                                **({} if is_crossfaded(asset) else {"overlap_seconds": 0.0}),
                                 "replay_gain_db": analysis.get("replay_gain_db", 0),
                             } if asset else None,
                             "next_asset": next_asset_data,

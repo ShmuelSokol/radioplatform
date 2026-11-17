@@ -68,7 +68,7 @@ def test_a_short_time_check_plays_to_its_end():
     entry = SimpleNamespace(asset=weather, started_at=started, preempt_at=started, source=None)
     assert switch_time(entry) >= started + timedelta(seconds=39.6)
 
-    # a song still crossfades 3 s before its end
-    song = SimpleNamespace(duration=200.0, metadata_extra={})
+    # a song still crossfades before its end (1 s unless the station sets another length)
+    song = SimpleNamespace(duration=200.0, metadata_extra={}, asset_type="music", station_id=None)
     entry = SimpleNamespace(asset=song, started_at=started, preempt_at=None, source="auto")
-    assert switch_time(entry) == started + timedelta(seconds=197.0)
+    assert switch_time(entry) == started + timedelta(seconds=199.0)
