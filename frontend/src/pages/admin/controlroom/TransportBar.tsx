@@ -239,8 +239,11 @@ export default function TransportBar(p: Props) {
               </span>
             )}
           </div>
-          <div className="leading-none shrink-0">
-            <div className="qn-lcd-label">Remaining</div>
+          <div className="leading-none shrink-0"
+            title={cutClock ? `This item fades at ${cutClock} for a timed item` : undefined}>
+            <div className="qn-lcd-label" data-testid="remaining-label">
+              {cutClock ? <span className="!text-yellow-300">Fades {cutClock}</span> : 'Remaining'}
+            </div>
             <div className={`qn-digits text-[28px] ${remainingCls}`} data-testid="remaining">{remainingText}</div>
           </div>
           {p.introSeconds > 0 && intro}

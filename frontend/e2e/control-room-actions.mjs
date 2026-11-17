@@ -914,7 +914,7 @@ async function cutCountdown(browser, contextOpts, tag) {
   const r = await rem();
   check(`${tag}: remaining counts to the hard item's time, not the song's end`, Math.abs(r - (cutIn - 1)) <= 2 && dur - 20 > cutIn + 5, `${r}s (song has ${dur - 20}s left)`);
   const label = await page.getByTestId('remaining-label').innerText();
-  check(`${tag}: label says when it fades`, /fades \d{1,2}:\d\d/.test(label), label);
+  check(`${tag}: label says when it fades`, /fades \d{1,2}:\d\d/i.test(label), label);
   const prog = +(await page.getByRole('progressbar').getAttribute('aria-valuenow'));
   const want = (21 / (21 + cutIn - 1)) * 100;
   check(`${tag}: progress bar fills toward the cut`, Math.abs(prog - want) < 5, `${prog}% vs ${want.toFixed(0)}%`);
@@ -928,7 +928,7 @@ async function cutCountdown(browser, contextOpts, tag) {
   const [m, s2] = (await p2.getByTestId('remaining').innerText()).split(':');
   const r2 = +m * 60 + +s2;
   const d2 = st2.byId[st2.playing().asset_id].duration;
-  check(`${tag}: a soft timed item leaves Remaining at the song's end`, Math.abs(r2 - (d2 - 21)) <= 2 && !/fades/.test(await p2.getByTestId('remaining-label').innerText()), `${r2}s`);
+  check(`${tag}: a soft timed item leaves Remaining at the song's end`, Math.abs(r2 - (d2 - 21)) <= 2 && !/fades/i.test(await p2.getByTestId('remaining-label').innerText()), `${r2}s`);
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await c2.close();
 }
@@ -955,7 +955,10 @@ try {
   if (run('speed')) { await speed(browser, DESKTOP, 'speed desktop'); await speed(browser, PHONE, 'speed iPhone'); }
   if (run('mix')) await mixOver(browser);
   if (run('timed')) await timedPreload(browser);
-  if (run('cut')) { await cutCountdown(browser, DESKTOP, 'cut desktop'); await cutCountdown(browser, PHONE, 'cut iPhone'); }
+  if (run('cut')) {
+    await cutCountdown(browser, DESKTOP, 'cut desktop'); await cutCountdown(browser, PHONE, 'cut iPhone');
+    await cutCountdown(browser, { ...devices['iPhone 13 landscape'] }, 'cut iPhone sideways');
+  }
   if (run('engine')) { const s = await startStreamServer(STREAM_PORT); try { await engineMode(browser, s); } finally { await s.close(); } }
 } finally {
   await browser.close();
