@@ -319,6 +319,37 @@ const SCENARIOS = {
     firstHeard: { src: 't', from: 4.8, to: 5.4 },
     overlapOf: ['d', 't'], end: { src: 't', minT: 2.5, maxT: 4.2 },
   },
+  // A hard time check announced only 2 s before it is due (less than the 3 s warm-up),
+  // with a file slow to start: no warm-up happens, but it must still sound within about
+  // a second of its time and the song must not go quiet before it does
+  'hard-time-check-short-notice-slow-start': {
+    start: { ...D, nextId: 'a' }, wait: 1, watch: 6.5, ranges: true, coldStartMs: 1000,
+    change: (set, startA) => {
+      const due = inSeconds(2);
+      set({ ...D, nextId: 't', startedAt: startA, cut: { preempt_at: due, asset_id: 't' } });
+      setTimeout(() => set({ ...T, nextId: 'a', startedAt: due }), 2400);
+    },
+    firstHeard: { src: 't', from: 1.8, to: 3.2 },
+    overlapOf: ['d', 't'], end: { src: 't', minT: 2.5, maxT: 5 },
+  },
+  // Operator Next to "c" while the time check is warming up (due in 5 s, warm-up from
+  // 2 s): "c" comes in at once, nothing of the warming deck is heard, and the time check
+  // still sounds at its time, cutting "c"
+  'next-during-timed-warm-up': {
+    start: { ...D, nextId: 't' }, wait: 1, watch: 9, ranges: true, coldStartMs: 1000,
+    change: (set, startA) => {
+      const due = inSeconds(5);
+      set({ ...D, nextId: 't', startedAt: startA, cut: { preempt_at: due, asset_id: 't' } });
+      setTimeout(() => set({ ...C, nextId: 't', startedAt: now(), fade: 0.5, cut: { preempt_at: due, asset_id: 't' } }), 3000);
+      setTimeout(() => set({ ...T, nextId: 'a', startedAt: due }), 5400);
+    },
+    firstHeard: { src: 't', from: 4.8, to: 5.4 },
+    // Next takes the deck the time check was warming on; the old song's deck frees only
+    // once "c" sounds (1 s here), 0.3 s before the time, too late to warm: the time
+    // check is 1.1 s late (no silence: "c" stays low until it sounds). Needs a third deck.
+    firstHeardBug: 'next-during-warm-up: time check 1.1 s late, needs a deck of its own',
+    overlapOf: ['c', 't'], end: { src: 't', minT: 2.5, maxT: 4.2 },
+  },
   // Switching while the station's own crossfade is under way
   'switch-station-during-crossfade': {
     start: { ...A, nextId: 'b' }, wait: 17.5, watch: 4,
@@ -432,7 +463,9 @@ async function run(name, sc) {
   }
   if (sc.firstHeard) {
     const { src, from, to } = sc.firstHeard;
-    check(`${name}: "${src}" heard from ${from} to ${to} s`, firstHeard !== null && firstHeard >= from && firstHeard <= to,
+    // sc.firstHeardBug: a known, recorded bug (XFAIL until fixed)
+    (sc.firstHeardBug ? (n, ok, d) => xfail(n, ok, sc.firstHeardBug, d) : check)(
+      `${name}: "${src}" heard from ${from} to ${to} s`, firstHeard !== null && firstHeard >= from && firstHeard <= to,
       firstHeard === null ? 'never' : `${firstHeard.toFixed(2)} s`);
   }
   if (sc.overlapOf) {

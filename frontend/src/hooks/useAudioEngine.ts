@@ -62,6 +62,9 @@ const LATE_SHORT_FROM_TOP_SECONDS = 3.0;
 const AFTER_SHORT_FROM_TOP_SECONDS = 8.0;
 // A timed item's lead-in fade ends this long after its due time (see the preempt fade)
 const PREEMPT_FADE_OVERHANG_MS = 400;
+// Where the pre-fade before a hard timed item stops (share of the song's level) until
+// the item really sounds
+const PREEMPT_FLOOR = 0.12;
 // A hard timed item is loaded on the idle deck this long before its time
 const TIMED_PRELOAD_AHEAD_MS = 60_000;
 // The page starts a pre-loaded hard timed item itself at its time (see the pre-arm),
@@ -74,10 +77,16 @@ const PREARM_LATE_MS = 500;
 // before the due time. 16:00Z 2026-11-17: play() was called on time but the element
 // only began sounding 1.0 s later, on two stations.
 const PREARM_WARM_AHEAD_MS = 3000;
+// No warm-up starts closer to the time than this (it would still be running then)
+const PREARM_WARM_MIN_LEAD_MS = 1200;
+// The warm-up plays (muted) this far into the item, or for at most WARM_MAX_MS
+const WARM_PLAY_SECONDS = 0.3;
+const WARM_MAX_MS = 1800;
 // The item on air keeps playing until the new one really sounds, at most this long
 const OUT_WAITS_FOR_IN_MAX_MS = 1500;
 // How far past its start a warmed-up deck may stand and still play on from there
 const WARM_POSITION_SLACK_SECONDS = 0.25;
+const DECK_EVENTS = ['loadstart', 'canplay', 'canplaythrough', 'play', 'playing', 'pause', 'waiting', 'seeking', 'seeked', 'stalled', 'ended'];
 
 /** Seek only when it moves the position: even a seek to where the element already
  *  is makes Safari re-decode and can repeat a few hundred milliseconds. */
@@ -342,6 +351,18 @@ export function useAudioEngine(
     const audio = new Audio();
     audio.crossOrigin = 'anonymous';
     audio.preload = 'auto';
+    // Every media event of the decks, for live timing checks (window.__kbrDeckEvents,
+    // the last 80): which deck, item, event, server time and position
+    for (const type of DECK_EVENTS) {
+      audio.addEventListener(type, () => {
+        const w = window as unknown as { __kbrDeckEvents?: unknown[] };
+        const label = deckARef.current?.audio === audio ? 'A' : deckBRef.current?.audio === audio ? 'B' : '?';
+        const log = (w.__kbrDeckEvents ??= []);
+        log.push({ deck: label, item: label === '?' ? null : deckAssetRef.current[label as DeckLabel], type,
+          at: new Date(serverNow()).toISOString(), pos: +audio.currentTime.toFixed(3), ready: audio.readyState });
+        if (log.length > 80) log.splice(0, log.length - 80);
+      });
+    }
     const source = ctx.createMediaElementSource(audio);
     const gain = ctx.createGain();
     gain.gain.value = 0; // start silent
@@ -711,7 +732,13 @@ export function useAudioEngine(
       // How long the element took to really start (live checks: window.__kbrLastStart)
       inDeck.audio.addEventListener('playing', () => {
         const info = { id: assetId, playingAfterMs: Math.round(performance.now() - playCalledAt), at: new Date(serverNow()).toISOString() };
-        (window as unknown as { __kbrLastStart?: unknown }).__kbrLastStart = info;
+        const w = window as unknown as { __kbrLastStart?: unknown; __kbrStarts?: unknown[] };
+        w.__kbrLastStart = info;
+        // (each start, the last 10: the item after a time check overwrote the time
+        // check's own entry in __kbrLastStart at 17:00Z)
+        const starts = (w.__kbrStarts ??= []);
+        starts.push(info);
+        if (starts.length > 10) starts.shift();
         console.info('[kbr] item sounding', info);
       }, { once: true });
 
@@ -737,8 +764,8 @@ export function useAudioEngine(
       if (outWasShort && startPos - cueIn < AFTER_SHORT_FROM_TOP_SECONDS) startPos = cueIn;
       // A deck warmed up for this item stands a moment past its start: play on from
       // there rather than seek back
-      const warmedAt = inDeck.audio.paused ? inDeck.audio.currentTime - cueIn : NaN;
-      if (!(startPos === cueIn && warmedAt >= 0 && warmedAt < WARM_POSITION_SLACK_SECONDS)) {
+      const warmedAt = inDeck.audio.paused ? Math.abs(inDeck.audio.currentTime - cueIn) : NaN;
+      if (!(startPos === cueIn && warmedAt < WARM_POSITION_SLACK_SECONDS)) {
         seekIfNeeded(inDeck.audio, startPos);
       }
       inDeck.gain.gain.cancelScheduledValues(now);
@@ -905,7 +932,9 @@ export function useAudioEngine(
       if (!ctx || ctx.state !== 'running') { note('sound off'); return; }
       const idle = otherDeck(activeDeckRef.current);
       const deck = getDeck(idle);
-      if (!deck || deckAssetRef.current[idle] !== id || deck.audio.readyState < 2) {
+      // (ready state 1 is enough: the warm-up may still be putting it back on its cue-in;
+      // it sounds as soon as that is done, sooner than waiting for the server's message)
+      if (!deck || deckAssetRef.current[idle] !== id || deck.audio.readyState < 1) {
         note(`not loaded (idle deck holds ${deckAssetRef.current[idle] ?? 'nothing'}, ready ${deck?.audio.readyState ?? '-'})`);
         return;
       }
@@ -920,42 +949,55 @@ export function useAudioEngine(
         at: due,
       });
     }, Math.max(0, wait));
-    // Warm the idle deck's start-up a few seconds ahead (silently), then back to its start
-    let warmTimer: ReturnType<typeof setTimeout> | null = null;
-    if (wait > PREARM_WARM_AHEAD_MS + 500) {
-      warmTimer = setTimeout(() => {
-        const ctx = ctxRef.current;
-        const idle = otherDeck(activeDeckRef.current);
-        const deck = getDeck(idle);
-        if (!ctx || ctx.state !== 'running' || !deck || deckAssetRef.current[idle] !== id) return;
-        if (!deck.audio.paused || crossfadingRef.current) return;
-        const cue = nextAssetIdRef.current === id ? nextCueInRef.current : 0;
-        const a = deck.audio;
-        deck.gain.gain.cancelScheduledValues(ctx.currentTime);
-        deck.gain.gain.setValueAtTime(0, ctx.currentTime);
-        const t0 = performance.now();
-        let done = false;
-        const back = () => {
-          if (done) return;
-          done = true;
-          // Only if nothing has claimed the deck meanwhile
-          // Paused at once, a few hundredths of a second in: no seek back (an MP3 seek
-          // can drop the element's ready state, and the pre-arm then found it not loaded)
-          if (deckAssetRef.current[idle] === id && activeDeckRef.current !== idle && !crossfadingRef.current) {
-            a.pause();
-            if (Math.abs(a.currentTime - cue) > WARM_POSITION_SLACK_SECONDS) seekIfNeeded(a, cue);
-          }
-          const info = { id, warmMs: Math.round(performance.now() - t0), ready: a.readyState };
-          (window as unknown as { __kbrTimedWarm?: unknown }).__kbrTimedWarm = info;
-          console.info('[kbr] timed warm-up', info);
-        };
-        seekIfNeeded(a, cue);
-        a.addEventListener('playing', back, { once: true });
-        setTimeout(back, 2500);
-        a.play().catch(() => back());
-      }, wait - PREARM_WARM_AHEAD_MS);
-    }
-    return () => { clearTimeout(timer); if (warmTimer) clearTimeout(warmTimer); };
+    // Warm the idle deck's start-up ahead of time (silently), then leave it paused there.
+    // Checked every 250 ms from 3 s before the time, so a deck that gets the item only
+    // later (announced at short notice, or an operator's Next took the deck it was
+    // warming on and the pre-loader put it on the other one) is warmed too.
+    const warmedSrc: Record<DeckLabel, string | null> = { A: null, B: null };
+    const tryWarm = () => {
+      if (due - serverNow() < PREARM_WARM_MIN_LEAD_MS) return;
+      const ctx = ctxRef.current;
+      const idle = otherDeck(activeDeckRef.current);
+      const deck = getDeck(idle);
+      if (!ctx || ctx.state !== 'running' || !deck || deckAssetRef.current[idle] !== id) return;
+      if (!deck.audio.paused || crossfadingRef.current || deck.audio.readyState < 2) return;
+      if (warmedSrc[idle] === deck.audio.src) return;
+      if (performance.now() < fadeBusyUntilRef.current) return;
+      warmedSrc[idle] = deck.audio.src;
+      const cue = nextAssetIdRef.current === id ? nextCueInRef.current : 0;
+      const a = deck.audio;
+      deck.gain.gain.cancelScheduledValues(ctx.currentTime);
+      deck.gain.gain.setValueAtTime(0, ctx.currentTime);
+      const t0 = performance.now();
+      // Played muted until its position really moves (decoded audio is flowing, not just
+      // the `playing` event, which fired after 1 ms live at 17:00Z while the real start
+      // still took 1 s), then paused and put back on its cue-in well before the time.
+      let done = false;
+      const stillOurs = () => deckAssetRef.current[idle] === id && activeDeckRef.current !== idle && !crossfadingRef.current;
+      const finish = (how: string) => {
+        if (done) return;
+        done = true;
+        a.removeEventListener('timeupdate', onProgress);
+        if (stillOurs()) {
+          a.pause();
+          seekIfNeeded(a, cue);
+        }
+        const info = { id, deck: idle, warmMs: Math.round(performance.now() - t0), how, ready: a.readyState };
+        (window as unknown as { __kbrTimedWarm?: unknown }).__kbrTimedWarm = info;
+        console.info('[kbr] timed warm-up', info);
+      };
+      const onProgress = () => { if (a.currentTime >= cue + WARM_PLAY_SECONDS) finish('played'); };
+      seekIfNeeded(a, cue);
+      a.addEventListener('timeupdate', onProgress);
+      setTimeout(() => finish('timeout'), WARM_MAX_MS);
+      a.play().catch(() => finish('refused'));
+    };
+    let warmPoll: ReturnType<typeof setInterval> | null = null;
+    const warmStart = setTimeout(() => {
+      tryWarm();
+      warmPoll = setInterval(tryWarm, 250);
+    }, Math.max(0, wait - PREARM_WARM_AHEAD_MS));
+    return () => { clearTimeout(timer); clearTimeout(warmStart); if (warmPoll) clearInterval(warmPoll); };
   }, [nextPreemptAt, nextPreemptAssetId, isPlaying, audioReady, getDeck]);
 
   // ── Preempt fade-out: schedule precise fade before hourly announcements ──
@@ -983,9 +1025,19 @@ export function useAudioEngine(
       const ctx = ctxRef.current;
       if (!activeDeck || !ctx) return;
 
-      activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
-      activeDeck.gain.gain.setValueAtTime(activeDeck.gain.gain.value, ctx.currentTime);
-      activeDeck.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + actualFadeDuration / 1000);
+      // Down to a low level by the time, not to silence: the timed item takes it out
+      // once it really sounds (goLive waits for its `playing`). Only if nothing comes
+      // does the song go out after OUT_WAITS_FOR_IN_MAX_MS. Fading to silence at the
+      // time left a gap whenever the item took a moment to start.
+      const g = activeDeck.gain.gain;
+      const now = ctx.currentTime;
+      const level = g.value;
+      const reachAt = now + actualFadeDuration / 1000;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(level, now);
+      g.linearRampToValueAtTime(level * PREEMPT_FLOOR, reachAt);
+      g.setValueAtTime(level * PREEMPT_FLOOR, reachAt + OUT_WAITS_FOR_IN_MAX_MS / 1000);
+      g.linearRampToValueAtTime(0, reachAt + OUT_WAITS_FOR_IN_MAX_MS / 1000 + 0.3);
     }, actualDelay);
 
     return () => clearTimeout(fadeTimer);

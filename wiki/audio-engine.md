@@ -207,6 +207,21 @@ play that sounds late; scenario `hard-time-check-slow-starting-file-on-time` (1.
 late with 0.6 s silence without the warm-up). The emulation is a model of what was
 seen live, not the cause itself; check `playingAfterMs` live.
 
+Follow-ups (same day). The warm-up is retried every 250 ms from 3 s before the time,
+so a deck that gets the item late (short notice, or an operator's Next took the warming
+deck) is warmed too, if at least 1.2 s remain. The pre-fade before a hard item now
+stops at 12 % of the song's level (`PREEMPT_FLOOR`) instead of silence; the item takes
+it out once it sounds, or it goes out 1.5 s after the time if nothing comes. Live at
+17:00Z the warm-up's `playing` fired after 1 ms and it was paused at once, yet the
+time check still sounded at +1.05 s: a paused, pre-loaded element seems to need its
+pipeline really started (Chrome suspends idle players). The warm-up now plays muted
+until its position has moved 0.3 s (`WARM_PLAY_SECONDS`, at most 1.8 s), then pauses
+and seeks back to the cue-in well before the time. Every deck media event is kept in
+`window.__kbrDeckEvents` (last 80, with server time and position) and each start's
+`playingAfterMs` in `window.__kbrStarts` (last 10). Known bug, recorded as XFAIL:
+an operator Next during the warm-up leaves no deck to warm on in time (1.1 s late, no
+silence); it needs a deck of its own.
+
 ## Server clock, not the device clock (2026-11-17)
 Every position and due time (`started_at`, `preempt_at`, `ends_at`, a push's `at`) is server time, so the player compares them with `serverNow()` from `src/lib/serverClock.ts`, never `Date.now()`. The offset is measured from `server_time` in the release policy (`lib/appUpdate.ts`, on connect and every minute). Before, a PC 20 s fast joined every song 20 s in and faded the song for the hourly time check 20 s early. Used by useAudioEngine (live position, timed fades, crossfade, playNextNow), useNowPlayingWS (overdue check), Listen, Dashboard, `controlroom/timing.ts nextCut` and the transport clock. Checked by `e2e/listen-page.mjs` ONLY=clock (device clock 20 s fast and 30 s slow).
 
