@@ -163,6 +163,11 @@ of the item on air); the server's message confirms it a moment later. Pages were
 `next_asset.cut_at` in the now-playing message (control room: from the queue,
 `nextCut`). Scenarios `story-resumes-after-time-check`,
 `story-resumes-after-late-time-check`, `hard-time-check-starts-on-time-before-the-message`.
+On the real Listen page: `e2e/listen-page.mjs` ONLY=handover (short item at its end and
+when the server moves on 3 s early, time check 2 s and 3.6 s late, pre-armed time check
+confirmed 1.5 s late or never: back to the song once the item ends, 4 s or more after).
+The fake station sends `cut_at` like the server. `backend/tests/test_next_asset_cut_at.py`
+covers the soft limit, a hard ad slot and the polling answer.
 
 ## Server clock, not the device clock (2026-11-17)
 Every position and due time (`started_at`, `preempt_at`, `ends_at`, a push's `at`) is server time, so the player compares them with `serverNow()` from `src/lib/serverClock.ts`, never `Date.now()`. The offset is measured from `server_time` in the release policy (`lib/appUpdate.ts`, on connect and every minute). Before, a PC 20 s fast joined every song 20 s in and faded the song for the hourly time check 20 s early. Used by useAudioEngine (live position, timed fades, crossfade, playNextNow), useNowPlayingWS (overdue check), Listen, Dashboard, `controlroom/timing.ts nextCut` and the transport clock. Checked by `e2e/listen-page.mjs` ONLY=clock (device clock 20 s fast and 30 s slow).
