@@ -294,6 +294,31 @@ const SCENARIOS = {
     firstHeard: { src: 't', from: 2.8, to: 3.4 },
     overlapOf: ['t', 'c'], noSeekOn: 'c', end: { src: 'c', minT: 1, maxT: 2.5 },
   },
+  // A time check with a cue-in: positioned at its cue-in while pre-loading, so starting
+  // it at its time needs no seek and no fetch (16:00Z 2026-11-17: pages called play()
+  // on time but sound came 1 s later, the song playing on meanwhile)
+  'hard-time-check-with-cue-in-starts-at-once': {
+    start: { ...D, nextId: 't', nextCueIn: 0.6 }, wait: 1, watch: 7, ranges: true, slowAfterStart: { t: 1000 },
+    change: (set, startA) => {
+      const due = inSeconds(3);
+      set({ ...D, nextId: 't', nextCueIn: 0.6, startedAt: startA, cut: { preempt_at: due, asset_id: 't' } });
+      setTimeout(() => set({ ...T, cueIn: 0.6, nextId: 'a', startedAt: due }), 3400);
+    },
+    firstHeard: { src: 't', from: 2.8, to: 3.4 },
+    overlapOf: ['d', 't'], end: { src: 't', minT: 3.5, maxT: 4.9 },
+  },
+  // Same, with a file that takes 1 s to start sounding on its first play: the page warms
+  // it up silently a few seconds ahead, so it still sounds at its time
+  'hard-time-check-slow-starting-file-on-time': {
+    start: { ...D, nextId: 't' }, wait: 1, watch: 9, ranges: true, coldStartMs: 1000,
+    change: (set, startA) => {
+      const due = inSeconds(5);
+      set({ ...D, nextId: 't', startedAt: startA, cut: { preempt_at: due, asset_id: 't' } });
+      setTimeout(() => set({ ...T, nextId: 'a', startedAt: due }), 5400);
+    },
+    firstHeard: { src: 't', from: 4.8, to: 5.4 },
+    overlapOf: ['d', 't'], end: { src: 't', minT: 2.5, maxT: 4.2 },
+  },
   // Switching while the station's own crossfade is under way
   'switch-station-during-crossfade': {
     start: { ...A, nextId: 'b' }, wait: 17.5, watch: 4,
@@ -317,10 +342,30 @@ const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gestur
 
 async function run(name, sc) {
   const page = await browser.newPage();
+  let changed = false;
+  // sc.coldStartMs: the first play() after an element loads a file sounds only this much
+  // later (as real MP3s from the file store did live, 16:00Z 2026-11-17); later plays of
+  // the same file start at once
+  if (sc.coldStartMs) {
+    await page.addInitScript((ms) => {
+      const P = HTMLMediaElement.prototype;
+      const realPlay = P.play, realLoad = P.load;
+      P.load = function () { this.__warm = false; return realLoad.call(this); };
+      P.play = function () {
+        if (this.__warm) return realPlay.call(this);
+        this.__warm = true;
+        return new Promise((resolve, reject) => setTimeout(() => realPlay.call(this).then(resolve, reject), ms));
+      };
+    }, sc.coldStartMs);
+  }
   let urlDelay = 30;
   await page.route('**/__tone/*.wav', (r) => {
     const id = r.request().url().split('/').pop().replace('.wav', '');
     // sc.ranges: byte ranges like the real file store, so positions can be checked
+    // sc.slowAfterStart: each request for that item once the scenario runs waits this long
+    // (a seek or a re-fetch at play time on a real file store)
+    const slow = sc.slowAfterStart?.[id];
+    if (slow && changed) return sleep(slow).then(() => serveRange(r, wav(...TONES[id])));
     if (sc.ranges) return serveRange(r, wav(...TONES[id]));
     return r.fulfill({ contentType: 'audio/wav', body: wav(...TONES[id]) });
   });
@@ -338,6 +383,7 @@ async function run(name, sc) {
   if (sc.urlDelay) urlDelay = sc.urlDelay;
 
   const t0 = Date.now();
+  changed = true;
   await page.evaluate(() => { window.__seeks.length = 0; });
   const nextNow = (id, fade) => page.evaluate(([i, f]) => window.__nextNow(i, f), [id, fade]);
   sc.change(set, startA, nextNow);
