@@ -360,3 +360,70 @@ def test_analysis_numbers():
 
     with pytest.raises(ValueError):
         analyze_audio_bytes(b"not audio")
+
+
+# --- V2-7 ---
+
+def test_audience_detection():
+    """Quiet (between -45 and -25 dB) stretches are audience; true silence is not."""
+    from app.services.enhance_service import detect_audience_segments
+
+    def sine(d, gain_db=0):
+        return ["-f", "lavfi", "-i", f"sine=frequency=300:sample_rate=44100:duration={d},volume={gain_db}dB"]
+
+    inputs = [*sine(3), *sine(2, -15), *sine(2), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=2", *sine(2)]
+    data = subprocess.run(
+        ["ffmpeg", "-v", "error", *inputs, "-filter_complex", "[0:a][1:a][2:a][3:a][4:a]concat=n=5:v=0:a=1[o]",
+         "-map", "[o]", "-f", "wav", "pipe:1"], capture_output=True, check=True,
+    ).stdout
+    segs = detect_audience_segments(data)
+    assert len(segs) == 1
+    assert abs(segs[0]["start"] - 3) < 0.1 and abs(segs[0]["end"] - 5) < 0.1
+    assert segs[0]["duration"] == round(segs[0]["end"] - segs[0]["start"], 2)
+
+
+# --- V2-14 ---
+
+@pytest.mark.xfail(strict=True, reason="BUG: bulk analyse/auto-trim job status lives in one process's memory; after a restart the poll gets 404 'Job not found'")
+@pytest.mark.asyncio
+async def test_bulk_job_status_survives_a_restart(client, auth_headers, monkeypatch):
+    from app.api.v1 import assets as assets_api
+
+    monkeypatch.setattr(assets_api, "_bulk_analyze_jobs", {})  # the process restarted
+    r = await client.get(f"/api/v1/assets/bulk-analyze/status/{uuid.uuid4()}", headers=auth_headers)
+    assert r.status_code != 404
+
+
+# --- V2-19 ---
+
+@pytest.mark.asyncio
+async def test_studio_mix(client, auth_headers, db_session, local_storage):
+    bed = await _stored_asset(db_session, _audio("mp3", 6, freq=200), title="Bed")
+    voice = await _stored_asset(db_session, _audio("mp3", 3, freq=900), title="Voice")
+    t0 = time.perf_counter()
+    r = await client.post("/api/v1/studio/mix", json={
+        "backtrack_asset_id": str(bed.id), "overlay_asset_id": str(voice.id), "output_title": "Promo",
+    }, headers=auth_headers)
+    assert time.perf_counter() - t0 < 10
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["asset_type"] == "spot" and out["category"] == "studio"
+    assert out["metadata_extra"] == {"source": "mixer", "backtrack_asset_id": str(bed.id), "overlay_asset_id": str(voice.id)}
+    p = _probe(await storage_service.download_file(out["file_path"]))
+    assert p["codec"] == "mp3" and abs(p["duration"] - 6) < 0.5  # as long as the longer input
+
+    r = await client.post("/api/v1/studio/mix", json={
+        "backtrack_asset_id": str(uuid.uuid4()), "overlay_asset_id": str(voice.id), "output_title": "x",
+    }, headers=auth_headers)
+    assert r.status_code == 404
+
+
+@pytest.mark.xfail(strict=True, reason="BUG: a studio mix that ffmpeg cannot make answers a bare 500, not a clear error")
+@pytest.mark.asyncio
+async def test_studio_mix_failure_is_explained(client, auth_headers, db_session, local_storage):
+    bed = await _stored_asset(db_session, b"not audio", title="Bed")
+    voice = await _stored_asset(db_session, _audio("mp3", 2), title="Voice")
+    r = await client.post("/api/v1/studio/mix", json={
+        "backtrack_asset_id": str(bed.id), "overlay_asset_id": str(voice.id), "output_title": "x",
+    }, headers=auth_headers)
+    assert r.status_code in (400, 422, 502)
