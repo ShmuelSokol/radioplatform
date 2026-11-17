@@ -28,3 +28,5 @@ Tests: `backend/tests/test_air_watch.py`. Stations on "UTC" are read as New York
 like the hourly time checks.
 
 With HS (hard start) off a station's time check waits for the song on air by design, so `hour_missing` is not checked then (`station_modes.hard_start_on`). Test: `test_no_hour_alarm_while_hard_start_is_off`.
+
+Known gap (strict xfail `test_hung_stream_servers_keep_a_pass_under_five_seconds`): stations are checked one after another and `engine_status` waits up to 3 s each, so every hung stream server adds 3 s to a pass. An operator's Remove of a time check is quiet by design (the row is deleted); a Panic cut on air is reported as "cut short".
