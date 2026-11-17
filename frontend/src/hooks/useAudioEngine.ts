@@ -829,12 +829,23 @@ export function useAudioEngine(
     if (wait < -PREARM_LATE_MS || wait > 300000) return;
     const id = nextPreemptAssetId;
     const timer = setTimeout(() => {
-      if (lastAssetId.current === id || crossfadingRef.current) return; // already announced
+      // Why the page did or did not start it, for live checks (console and window.__kbrTimedStart)
+      const note = (result: string) => {
+        const info = { id, due: nextPreemptAt, at: new Date(serverNow()).toISOString(), result };
+        (window as unknown as { __kbrTimedStart?: unknown }).__kbrTimedStart = info;
+        console.info('[kbr] timed start', info);
+      };
+      if (lastAssetId.current === id) { note('already announced'); return; }
+      if (crossfadingRef.current) { note('crossfading'); return; }
       const ctx = ctxRef.current;
-      if (!ctx || ctx.state !== 'running') return;
+      if (!ctx || ctx.state !== 'running') { note('sound off'); return; }
       const idle = otherDeck(activeDeckRef.current);
       const deck = getDeck(idle);
-      if (!deck || deckAssetRef.current[idle] !== id || deck.audio.readyState < 2) return;
+      if (!deck || deckAssetRef.current[idle] !== id || deck.audio.readyState < 2) {
+        note(`not loaded (idle deck holds ${deckAssetRef.current[idle] ?? 'nothing'}, ready ${deck?.audio.readyState ?? '-'})`);
+        return;
+      }
+      note('started here');
       const known = nextAssetIdRef.current === id;
       setLocalNext({
         asset: { id, title: id, artist: null, asset_type: 'music', category: null, duration: null },
