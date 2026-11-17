@@ -1,9 +1,9 @@
 """Engine-mode backend checks (checklist rows B-PLAYOUT-*, B-MODE-*, engine B-JOB-*).
 
 The playout engine (infra/streaming/radio.liq) is faked: every command the backend sends
-it is recorded instead of going over HTTP. Tests marked xfail(strict=True) reproduce engine
-bugs that belong to the engine team (playout_engine.py / playout.py / radio.liq are not
-changed here); each reason line says what goes wrong on air.
+it is recorded instead of going over HTTP. Tests whose docstring starts with
+"Reproduction" were strict xfails for engine bugs, fixed 2026-11-17
+(wiki/streaming-architecture.md, "Engine gaps found by tests, fixed").
 """
 
 import asyncio
@@ -237,9 +237,6 @@ async def test_entry_without_audio_is_dropped_and_next_handed(client, db_session
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: pick_next step 2 orders a past-due HARD timed item by queue position, so a time "
-    "check whose 45 s hand-over was missed airs only after the songs queued before it"))
 async def test_past_due_hard_time_check_is_next(client, db_session, eng):
     """B-PLAYOUT-10 / B-MODE-12 / B-JOB-20.
 
@@ -351,9 +348,6 @@ async def test_restart_at_59_50_still_hands_the_time_check(db_session, eng):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: tick only hands hard items with preempt_at > now; a time check whose 45 s "
-    "window was missed (restart / slow pass) never goes to the timed lane and does not air at once"))
 async def test_missed_hand_over_still_airs_at_once(db_session, eng):
     """B-JOB-30 / B-JOB-19 (window missed). Reproduction: backend down from hh:59:10 to
     hh:00:02 (deploy), time check due hh:00:00, first tick at hh:00:02 -> no /timed sent;
@@ -385,9 +379,6 @@ async def test_failed_hand_over_is_retried_in_the_window(db_session, eng):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: a hard timed item the engine never accepted (every /timed failed until its time "
-    "passed) is silently dropped from the timed lane; no alert is raised"))
 async def test_never_delivered_time_check_raises_an_alert(db_session, eng):
     """B-JOB-31 (alert). Reproduction: engine control URL answers 502 for the whole 45 s
     window before hh:00; at hh:00:01 nothing records that the time check was missed."""
@@ -468,10 +459,6 @@ async def test_blackout_end_clears_silence_on_the_engine(client, db_session, eng
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: silence handed to the engine's timed lane (a future blackout's silence is hard-timed "
-    "at its start) stays there when the blackout ends; /flush only clears the main lane, so "
-    "/skip just starts the next silence"))
 async def test_blackout_end_leaves_no_silence_in_the_timed_lane(client, db_session, eng):
     """Reproduction: fill_blackout_queue gives every silence entry of an upcoming blackout
     preempt_at = start and no timing_mode, so all are hard-timed and the tick hands all of
@@ -479,6 +466,9 @@ async def test_blackout_end_leaves_no_silence_in_the_timed_lane(client, db_sessi
     remains). The tick sends /flush + /skip; radio.liq's timed lane stays open while its
     queue has items, so the next silence goes on air (one more per tick)."""
     station, _, engine, _ = eng
+    # A current engine (radio.liq proto 2) announces itself; it understands /timed_drop
+    r = await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS, json={"proto": 2})
+    assert r.status_code == 200
     now = datetime.now(UTC)
     start = now + timedelta(seconds=20)
     first = await _add(db_session, station, title="Silence", duration=300.0, kind="silence",
@@ -499,9 +489,37 @@ async def test_blackout_end_leaves_no_silence_in_the_timed_lane(client, db_sessi
     timed_lane.pop(0)
     await playout_engine.tick(db_session, station)
     assert "/skip" in engine.paths()
-    # Model of radio.liq: /skip on the timed lane plays the next item of the timed queue
+    # Model of radio.liq: /skip on the timed lane plays the next item of the timed queue,
+    # except one the backend took back with /timed_drop (skipped the moment it would start)
+    dropped = {i for path, p in engine.sent if path == "/timed_drop" for i in p["ids"]}
+    timed_lane = [i for i in timed_lane if i not in dropped]
     on_air_next = timed_lane[0] if timed_lane else None
     assert on_air_next is None, "engine goes on with silence after the blackout ended"
+    # Dropped before the skip, so the skip cannot start one of them; closed here as well
+    assert engine.paths().index("/timed_drop") < engine.paths().index("/skip")
+    for s in silences[1:]:
+        assert (await _fresh(db_session, s.id)).status == "played"
+
+
+@pytest.mark.asyncio
+async def test_blackout_end_on_an_old_engine_sends_no_timed_drop(client, db_session, eng):
+    """An engine with no `proto` has no /timed_drop: at blackout end it gets the old
+    flush + skip only, and the silences still in its timed lane stay queued here."""
+    station, _, engine, _ = eng
+    start = datetime.now(UTC) + timedelta(seconds=20)
+    first = await _add(db_session, station, title="Silence", duration=300.0, kind="silence",
+                       position=1, preempt_at=start)
+    second = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=first.asset_id, position=2,
+                        status="pending", source="auto", preempt_at=start)
+    db_session.add(second)
+    await db_session.commit()
+    await playout_engine.tick(db_session, station)
+    assert [c["id"] for c in engine.timed()] == [str(first.id), str(second.id)]
+    await _on_air(client, station, first.id, lane="timed")
+    await playout_engine.tick(db_session, station)
+    assert "/timed_drop" not in engine.paths()
+    assert engine.paths()[-2:] == ["/flush", "/skip"]
+    assert (await _fresh(db_session, second.id)).status == "pending"
 
 
 @pytest.mark.asyncio
@@ -531,9 +549,6 @@ async def test_watchdog_alerts_once_per_half_hour(db_session, eng, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: _alert compares time.monotonic() with last_alert=0, so during the first 30 min after "
-    "the host booted (monotonic < 1800 s) the watchdog alert is never raised"))
 async def test_watchdog_alerts_soon_after_host_boot(db_session, eng, monkeypatch):
     """Reproduction: this test VM's time.monotonic() was 1024 s; engine silent for 130 s ->
     tick -> no alert, because `mono - state.last_alert < ALERT_REPEAT_SECONDS` with last_alert 0."""
@@ -545,9 +560,6 @@ async def test_watchdog_alerts_soon_after_host_boot(db_session, eng, monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: watchdog only runs once the engine has called at least once (last_contact 0 is "
-    "skipped); an engine that is down when the backend starts is never alerted"))
 async def test_watchdog_alerts_when_the_engine_never_called(db_session, eng, monkeypatch):
     """Reproduction: deploy the backend while the engine server is down; tick for 3 minutes;
     no 'not responding' alert, listeners on the stream hear nothing."""
@@ -561,10 +573,6 @@ async def test_watchdog_alerts_when_the_engine_never_called(db_session, eng, mon
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: watchdog raises 'not responding' whenever an item runs past 120 s: the engine "
-    "only calls /next and /started between tracks (prefetch=1), so any song or shiur longer "
-    "than 2 minutes looks like a dead engine"))
 async def test_watchdog_quiet_while_a_long_item_plays(client, db_session, eng, monkeypatch):
     """Reproduction: engine asks /next and reports the start of a 30 min shiur, then (correctly)
     says nothing; 3 minutes later the tick creates a critical alert."""
@@ -635,9 +643,6 @@ async def test_tick_leaves_the_engine_alone_during_a_live_show(db_session, eng):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: during a live show /playout/next still hands the engine the queue: music plays on "
-    "the stream under the host and the song the show paused (its resume entry) is used up"))
 async def test_engine_gets_no_music_during_a_live_show(client, db_session, eng):
     """B-MODE-19. Reproduction: song on air on the engine, live show starts
     (_pause_automation queues 'resume@N' first); the engine's prefetch asks /next and is
@@ -658,9 +663,6 @@ async def test_engine_gets_no_music_during_a_live_show(client, db_session, eng):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: ending a live show on an engine station calls start_from_queue, which marks an "
-    "entry 'playing' in the database that the engine was never given (site shows it on air)"))
 async def test_show_end_on_engine_station_leaves_start_to_the_engine(client, db_session, eng):
     """Reproduction: start then end a live show on the engine station with nothing on air;
     afterwards Song 0 is 'playing' in the database without any start report."""
@@ -722,6 +724,26 @@ async def test_pause_policy_resumes_the_shiur_on_the_engine(client, db_session, 
     )).scalars().all()
     resumed = [e for e in pending if e.asset_id == shiur.asset_id and resume_offset(e) > 500]
     assert resumed
+
+
+@pytest.mark.asyncio
+async def test_pause_drops_the_preloaded_song_even_after_a_restart(client, db_session, eng):
+    """V1-11 (Jerusalem 2026-11-17 14:00Z): the backend restarted a minute before the hour,
+    so it no longer knew which song the engine had pre-loaded and never swapped it for the
+    resume. The song aired and the shiur came back 6 minutes late. Making the resume entry
+    must always make the engine drop its pre-loaded track."""
+    station, _, engine, _ = eng
+    st, shiur, _ = await _shiur_on_air(client, db_session, station, "pause")
+    state = playout_engine.get_state(station.id)
+    state.cued_entry_id = None  # what a restart leaves
+    state.last_auto_flush = 0.0
+    await playout_engine.tick(db_session, st)
+    pending = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending")
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    assert [e for e in pending if e.asset_id == shiur.asset_id and resume_offset(e) > 500]
+    assert "/flush" in engine.paths()
 
 
 @pytest.mark.asyncio
@@ -912,15 +934,12 @@ async def test_start_leaves_starting_to_the_engine(client, db_session, auth_head
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: engine commands run one after another inside the shared scheduler pass with a 4 s "
-    "timeout each; a hung engine and a 5-item top-of-hour block hold every other station's "
-    "song change for ~20 s"))
 async def test_a_hung_engine_does_not_stall_the_scheduler_pass(db_session, eng):
     """Reproduction (scaled 1/10): each /timed takes 0.4 s instead of the 4 s timeout; five
     hard block items due in 30 s -> the tick takes 2 s. The scheduler loop (every 3 s) runs
     stations in turn, so browser stations wait as well."""
     station, _, engine, _ = eng
+    await playout_engine.handle_hello(station.id, 2)  # current radio.liq: proto 2
     at = datetime.now(UTC) + timedelta(seconds=30)
     for i in range(5):
         await _add(db_session, station, title=f"Block {i}", duration=20.0, kind="spot",
@@ -930,6 +949,61 @@ async def test_a_hung_engine_does_not_stall_the_scheduler_pass(db_session, eng):
     await playout_engine.tick(db_session, station)
     assert len(engine.timed()) == 5
     assert time.perf_counter() - t0 < limit(0.5)
+    # Each carries its place in the group, so the engine can put the group back in order
+    assert sorted((c["seq"], c["of"]) for c in engine.timed()) == [(i, 5) for i in range(5)]
+
+
+@pytest.mark.asyncio
+async def test_old_engine_gets_the_group_one_at_a_time(client, db_session, eng):
+    """An engine on the old radio.liq (no `proto` in /hello) queues timed items in the
+    order they arrive, so a group goes to it one item after another, in play order, with
+    no seq/of. KBR Jerusalem ran such an engine when the parallel hand-over was added."""
+    station, _, engine, _ = eng
+    r = await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS)  # old: no body
+    assert r.status_code == 200
+    assert playout_engine.get_state(station.id).engine_proto == 0
+    at = datetime.now(UTC) + timedelta(seconds=30)
+    block = [
+        await _add(db_session, station, title=f"Block {i}", duration=20.0, kind="spot",
+                   position=40 + i, source="block", timing_mode="hard", preempt_at=at)
+        for i in range(3)
+    ]
+    in_flight = {"now": 0, "max": 0}
+    real = engine.command
+
+    async def one_at_a_time(path, payload=None, **kw):
+        in_flight["now"] += 1
+        in_flight["max"] = max(in_flight["max"], in_flight["now"])
+        try:
+            await asyncio.sleep(0.05)
+            return await real(path, payload, **kw)
+        finally:
+            in_flight["now"] -= 1
+
+    playout_engine._command = one_at_a_time
+    await playout_engine.tick(db_session, station)
+    timed = engine.timed()
+    assert [c["id"] for c in timed] == [str(e.id) for e in block]
+    assert in_flight["max"] == 1
+    assert all("seq" not in c and "of" not in c for c in timed)
+
+
+@pytest.mark.asyncio
+async def test_engine_proto_comes_from_hello_and_next(client, db_session, eng):
+    """/hello sets the engine's protocol (a hello without it is an old engine again);
+    /next carries it too, so a restarted backend learns it within one item."""
+    station, _, _, _ = eng
+    state = lambda: playout_engine.get_state(station.id)  # noqa: E731
+    assert state().engine_proto == 0
+    await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS, json={"proto": 2})
+    assert state().engine_proto == 2
+    await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS, json={})
+    assert state().engine_proto == 0
+    playout_engine.reset_state()  # backend restart
+    await _next(client, station)
+    assert state().engine_proto == 0
+    await client.get(f"/api/v1/playout/{station.id}/next?given=&proto=2", headers=HEADERS)
+    assert state().engine_proto == 2
 
 
 # ── Verifier round 1, section B (V1-29..40) ──────────────────────────────────
@@ -967,9 +1041,6 @@ async def test_unknown_entry_start_closes_the_previous_one(client, db_session, e
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: the `handed` map is in memory only; after a backend restart a start report for "
-    "an entry the engine was handed and a redraw then deleted shows nothing on air (Offline)"))
 async def test_deleted_entry_still_on_air_after_backend_restart(client, db_session, eng):
     """V1-32. Reproduction: engine pre-loads Song 0; backend restarts (memory gone); a
     schedule redraw deletes Song 0's entry; the engine starts it and reports it -> no
@@ -1058,9 +1129,6 @@ async def test_next_drops_at_most_five_unplayable_entries(client, db_session, en
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: when no entry has a playable URL (relative file paths, storage not configured) "
-    "/next skips them all and answers 204 with no alert; the stream sits on emergency files"))
 async def test_no_playable_audio_raises_an_alert(client, db_session, eng, monkeypatch):
     """V1-36. Reproduction: SUPABASE_URL unset, every queued item has a relative file_path;
     the engine asks /next -> every entry 'skipped', 204, alerts table empty."""

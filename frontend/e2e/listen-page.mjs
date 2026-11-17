@@ -861,7 +861,7 @@ async function streamMode(browser, stream) {
     const ms = await timeClick(p2, listenBtn(p2), `() => { const a = document.querySelector('audio'); return !a.paused && a.currentTime > 0.05; }`, 8000, 'tap');
     const src = await p2.evaluate(() => document.querySelector('audio').src);
     check(`${tag}: without MSE the plain <audio> plays the stream URL`, src === stream.url(st2.SID) && ms >= 0, `${src}, ${ms} ms`);
-    // Chromium without MSE is only a stand-in for Safari: the timing is checked in real WebKit (e2e/webkit-player.py)
+    // Chromium without MSE is only a stand-in for Safari: the real WebKit run is e2e/webkit/listener-webkit.py
     console.log(`info   ${tag}: plain element (Chromium, MSE removed) first sound after ${ms} ms`);
     check(`${tag}: no script errors (no MSE)`, e2.length === 0, e2.join(' | '));
     await c2.close();
