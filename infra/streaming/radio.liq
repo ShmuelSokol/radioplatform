@@ -588,8 +588,13 @@ end)
 
 control("/status", fun (_) -> begin
   m = program.last_metadata() ?? []
+  # Before the music lane's first track its remaining time is infinite, which JSON
+  # cannot carry: the handler failed and the connection closed with no answer (Main's
+  # engine while it had no station routed, 2026-11-17). -1 = no track.
+  left = main.remaining()
+  left = if left >= 0. and left < 1000000. then left else -1. end
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
-                  main_remaining=main.remaining(), timed_waiting=timed_queue.length(),
+                  main_remaining=left, timed_waiting=timed_queue.length(),
                   live=live_on()})
 end)
 

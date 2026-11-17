@@ -310,3 +310,18 @@ def test_the_stream_is_quiet_while_a_host_is_on_air():
     assert "&live=#{if live_on() then 1 else 0 end}" in liq
     assert "live_release := time() + 12." in liq
 
+
+
+def test_status_answers_before_the_first_track_and_setup_tries_a_new_script_for_real():
+    # Main's engine, started with no station routed, closed every /status call with no
+    # answer: the music lane's remaining time is infinite before its first track and
+    # JSON cannot carry that. And a script that passes `--check` can still hang at
+    # start, so setup.sh starts a new script once on a spare port before any restart.
+    liq = (INFRA / "radio.liq").read_text()
+    assert "left = if left >= 0. and left < 1000000. then left else -1. end" in liq
+    assert "main_remaining=left" in liq
+    setup = (INFRA / "setup.sh").read_text()
+    trial = setup.index("TRIAL_PORT=8990")
+    assert setup.index("liquidsoap --check /etc/kbr-engine/radio.liq.new") < trial
+    assert trial < setup.index("mv /etc/kbr-engine/radio.liq.new /etc/kbr-engine/radio.liq")
+    assert "The new engine script does not start" in setup
