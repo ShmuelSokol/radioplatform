@@ -61,6 +61,10 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB, ENUM as PG_EN
 def _set_sqlite_pragma(dbapi_conn, connection_record):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # Every test creates and drops all tables: some 300 statements, each waiting
+    # for the disk to confirm the write. A test database need not survive a crash.
+    cursor.execute("PRAGMA synchronous=OFF")
+    cursor.execute("PRAGMA journal_mode=MEMORY")
     cursor.close()
 
 
