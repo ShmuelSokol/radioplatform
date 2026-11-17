@@ -65,7 +65,8 @@ def _build_single_filter(f: dict) -> str:
     p = f.get("params", {})
 
     if name == "afftdn":
-        nf = _validate_numeric(p.get("noise_floor", -25), -80, 0, "noise_floor")
+        # FFmpeg's afftdn accepts -80..-20 only; above -20 it refused the whole chain (500)
+        nf = _validate_numeric(p.get("noise_floor", -25), -80, -20, "noise_floor")
         return f"afftdn=nf={nf}"
 
     if name == "highpass":
@@ -331,7 +332,7 @@ def build_auto_filters(stats: dict[str, Any]) -> tuple[list[dict], list[str]]:
     if noise_floor > -50:
         # Set denoise floor slightly above the detected noise floor
         denoise_level = max(noise_floor + 5, -40)
-        denoise_level = min(denoise_level, -10)
+        denoise_level = min(denoise_level, -20)  # afftdn's top (was -10: ffmpeg refused it)
         filters.append({"name": "afftdn", "params": {"noise_floor": round(denoise_level, 1)}})
         reasons.append(f"Noise reduction: noise floor at {noise_floor:.0f}dB is high, denoising at {denoise_level:.0f}dB")
 
