@@ -22,8 +22,13 @@ fi
 # project settings, and the first merge with it built the website into the
 # "studio-kolbramah-api" project. A deployment address is cut short
 # ("studio-kolbramah-<hash>"), so the project is told by its production address.
+# That project has two addresses, studio-kolbramah-api.vercel.app and
+# backend-gamma-six-68.vercel.app, and Vercel reports the second: matching only
+# the first let it build again. "frontend" is frontend-kappa-three-42.vercel.app.
+# The website itself is kbrlive.com.
+echo "Project production address: ${VERCEL_PROJECT_PRODUCTION_URL:-unknown}"
 case "${VERCEL_PROJECT_PRODUCTION_URL:-}" in
-  *kolbramah-api*|frontend*)
+  *kolbramah-api*|backend-*|frontend*)
     echo "Not the website project (${VERCEL_PROJECT_PRODUCTION_URL}): skip."
     exit 0
     ;;
