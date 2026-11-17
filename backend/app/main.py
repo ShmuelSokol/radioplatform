@@ -639,8 +639,11 @@ async def _resume_playback_on_startup():
                                 message=f"Station '{station.name}' has no pending entries after queue replenish on startup",
                                 station_id=station.id,
                             )
+                            # create_alert only flushes: without a commit the alert was
+                            # lost whenever no stale entry was recovered at the same start
+                            await db.commit()
                         except Exception:
-                            pass
+                            logger.warning("Could not record the empty-queue alert", exc_info=True)
                 except Exception as e:
                     logger.error("Failed to resume station %s: %s", station.name, e, exc_info=True)
 
