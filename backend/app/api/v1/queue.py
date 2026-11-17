@@ -967,6 +967,11 @@ async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntr
     )
 
 
+# How far ahead a soft item that will pause a shiur is made hard on the browser player:
+# beyond the control room's 60 s pre-load, plus a queue refresh
+SOFT_PAUSE_LOOKAHEAD_SECONDS = 90.0
+
+
 async def _soft_items_pause_long(
     db: AsyncSession,
     station_id,
@@ -974,13 +979,17 @@ async def _soft_items_pause_long(
     policy: str | None,
     now_utc: datetime,
     horizon: datetime | None = None,
+    include_due: bool = True,
 ) -> int:
     """Soft timed items due while a shiur or story has more than five minutes left
     become hard, so the station's rule (pause by default) lets them in; with less
     left they keep waiting for its end (Shmuel, 2026-11-17: the 7:30 weather aired at
-    7:49 behind a shiur). With `horizon` (the engine, which needs timed items ahead of
-    time) items due up to then are looked at; without it, those due now. Nothing
-    changes while HS is off. Returns how many entries were made hard."""
+    7:49 behind a shiur). Items due up to `horizon` are looked at (default: now), so
+    they turn hard ahead of time: the control room then pre-loads them and fades the
+    shiur exactly on time, and the scheduler arms its exact timer. Done only when due,
+    the weather started on the next 3 s poll (+1.7 s live) without a pre-load. The
+    engine passes include_due=False (an overdue item cannot go to its timed lane).
+    Nothing changes while HS is off. Returns how many entries were made hard."""
     from app.models.queue_entry import soft_timed
     from app.models.station import Station
     from app.services import long_items
@@ -1003,7 +1012,7 @@ async def _soft_items_pause_long(
                 QueueEntry.preempt_at.isnot(None),
                 soft_timed(),
                 QueueEntry.preempt_at <= (horizon or now_utc),
-                *([QueueEntry.preempt_at > now_utc] if horizon is not None else []),
+                *([] if include_due else [QueueEntry.preempt_at > now_utc]),
             )
             .distinct()
         )
@@ -1131,7 +1140,10 @@ async def _check_advance_locked(
         # The station lets a shiur finish: timed items due before its end wait for it
         await _defer_hard_until_end(db, station_id, current)
     elif long_policy:
-        await _soft_items_pause_long(db, station_id, current, long_policy, now_utc)
+        await _soft_items_pause_long(
+            db, station_id, current, long_policy, now_utc,
+            horizon=now_utc + timedelta(seconds=SOFT_PAUSE_LOOKAHEAD_SECONDS),
+        )
     preempt_result = await db.execute(
         select(QueueEntry)
         .where(
@@ -2572,9 +2584,47 @@ async def remove_from_queue(
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
+    if entry.status == "playing" and not settings.engine_drives(station_id):
+        # Removing what is on air moves on to the next item at once, like Next; a
+        # browser station would otherwise be silent until dead-air recovery.
+        async with advance_lock(station_id):
+            await _remove_on_air_locked(db, station_id, entry)
+        return
     await db.delete(entry)
     await _replenish_queue(db, station_id)
     await db.commit()
+
+
+async def _remove_on_air_locked(db: AsyncSession, station_id, entry: QueueEntry) -> None:
+    await db.delete(entry)
+    await db.flush()
+    still_playing = (await db.execute(
+        select(QueueEntry.id)
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .limit(1)
+    )).scalar_one_or_none()
+    if still_playing is not None:
+        await db.commit()
+        return
+    # During a blackout only its silence may start (same rule as Next)
+    blacked_out = await _is_blacked_out(db, station_id)
+    next_entry = await _pick_next_pending(db, station_id, datetime.now(timezone.utc), silence_only=blacked_out)
+    refilled = False
+    if not next_entry and not blacked_out:
+        next_entry = await _refill_for_next(db, station_id)
+        refilled = True
+    if next_entry is None:
+        if not refilled:
+            await _replenish_queue(db, station_id)
+        await db.commit()
+        return
+    mark_started(next_entry, datetime.now(timezone.utc))
+    await _drop_timed_twins(db, next_entry)
+    next_id = next_entry.id
+    await db.commit()
+    await _broadcast_now_playing_entry(db, station_id, next_id)
+    if not refilled:
+        _replenish_soon(station_id)
 
 
 @router.post("/start")

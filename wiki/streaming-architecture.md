@@ -71,7 +71,15 @@ and broadcast now_playing messages that browsers obeyed. With the queue writing 
 Jerusalem, "Night Chill" block): stops after Fade and songs faded early. `_check_channel`
 (a per-channel copy of it) and the emergency jingle fallback were removed for the same
 reason. Test: `tests/test_one_player_per_station.py`. Schedule blocks still matter: they
-feed the queue through replenish.
+feed the queue through replenish. The old `/controls/play-now` was a second player too
+(ffmpeg HLS); since 2026-11-17 it goes through the queue (see [operator-actions](operator-actions.md)).
+
+Generated Yom Tov windows (`shabbos_service.generate_yom_tov_windows`) follow the station's
+time zone: Asia/Jerusalem (or Israel, Asia/Tel_Aviv) gets the 1-day Israel calendar (Rosh
+Hashanah stays 2 days), anywhere else the 2-day diaspora one. Windows generated before
+2026-11-17 for an Israel station still hold the second days; regenerate or delete them.
+A sun-relative schedule block where the sun does not rise or set that day (polar) uses its
+fixed clock time instead of raising (`SchedulingService._resolve_sun_time`).
 
 ## Timed items start on time
 
