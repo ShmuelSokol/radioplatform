@@ -100,10 +100,6 @@ async def test_dayparts_share_the_week_by_hours_owned(db_session):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: a rotation rule ('a jingle every N songs') puts its items after the whole 7-day fill "
-    "(positions max_pos + k*N counted from the end of the fill), so they all play back to back "
-    "a week later instead of between songs"))
 async def test_rotation_rule_puts_an_item_every_n_songs(db_session):
     """B-JOB-69: rotation rule with songs_between=4: the jingle comes after every 4 songs."""
     st = await _station(db_session)
@@ -118,9 +114,6 @@ async def test_rotation_rule_puts_an_item_every_n_songs(db_session):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: interval rules ('every N minutes', offered on the Rules page) are never applied: "
-    "replenish runs daypart, fixed_time and rotation rules, and _apply_interval_rule is never called"))
 async def test_interval_rule_queues_its_item(db_session):
     """B-JOB-69: interval rule every 30 minutes: its item is queued."""
     st = await _station(db_session)
