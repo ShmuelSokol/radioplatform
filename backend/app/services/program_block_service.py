@@ -304,6 +304,16 @@ class _Resolver:
             else:
                 out.problem = f"{label}: unknown kind of item"
             occurrence.items.append(out)
+        # The block's programme (its last recording) has nothing to play: what comes
+        # before it (an announcement of it) is left out too, so listeners never hear
+        # "Daf Yomi" announced and then music (Jerusalem 2026-11-17)
+        recordings = [i for i in occurrence.items if i.kind in ("asset", "category")]
+        if len(recordings) > 1 and recordings[-1].problem:
+            for item in recordings[:-1]:
+                if not item.problem:
+                    item.problem = (f"{item.label}: left out, as {recordings[-1].label} "
+                                    "after it has nothing to play")
+                    item.asset_id, item.duration = None, None
 
 
 async def plan_blocks(

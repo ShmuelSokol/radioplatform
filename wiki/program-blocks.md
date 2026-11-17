@@ -94,3 +94,6 @@ engine has the block's first item pre-loaded, and never cuts into a block alread
 
 `GET /program-blocks/preview?station_id&hours` plans without preparing time or
 weather audio (that can call the voice service), so run lengths leave those out.
+
+## An announcement never airs without its programme (2026-11-17)
+When a block's last recording (its programme) has nothing to play, the recordings before it (the announcement of it) are left out too, with the reason in the preview and Schedule Check (`_Resolver.resolve`). Jerusalem 20:00Z 2026-11-17 was a different case that code cannot catch: the "Hourly schedule announcement" block (every hour) plays a clip titled "KBR schedule: Daf Yomi (Jerusalem)" on its own, while the Daf Yomi block itself was switched off. Put an announcement in the same block as what it announces.

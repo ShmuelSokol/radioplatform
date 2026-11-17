@@ -1271,3 +1271,69 @@ async def test_blackout_starting_now_moves_the_engine_on(client, db_session, eng
     sent = len(engine.paths())
     assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
     assert len(engine.paths()) == sent
+
+
+@pytest.mark.asyncio
+async def test_item_gets_its_level_before_it_is_handed_over(client, db_session, eng, monkeypatch):
+    """V1-4e. Jerusalem 20:00Z 2026-11-17: items with no analysis were analysed only once
+    the item before them was on air, which is also when the engine asks for them, so
+    they aired without their level (-19.9 to -10.6 LUFS). /next now waits (briefly) for
+    the analysis, and a slow one is not waited for past LEVEL_WAIT_SECONDS."""
+    from app.services import upcoming_analysis
+
+    station, entries, _, _ = eng
+    monkeypatch.setattr(upcoming_analysis, "ENABLED", True)
+    monkeypatch.setattr(playout_engine, "_level_jobs", {})
+    analysed = []
+
+    async def fake_analysis(asset_id):
+        await asyncio.sleep(0.2)
+        asset = await db_session.get(Asset, uuid.UUID(asset_id))
+        asset.metadata_extra = {"audio_analysis": {
+            "version": 99, "loudness_lufs": -10.6, "replay_gain_db": -7.4, "cue_out_seconds": 170.0}}
+        await db_session.commit()
+        analysed.append(asset_id)
+
+    monkeypatch.setattr(playout_engine, "_analyse_alone", fake_analysis)
+    r = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert r.json()["entry_id"] == str(entries[0].id)
+    assert 'liq_amplify="-7.40 dB"' in r.json()["uri"]
+    assert analysed == [str(entries[0].asset_id)]
+
+    # Too slow: handed over without waiting longer than the limit
+    async def slow_analysis(asset_id):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(playout_engine, "_analyse_alone", slow_analysis)
+    monkeypatch.setattr(playout_engine, "LEVEL_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(playout_engine.ensure_level, "__defaults__", (0.2,))
+    t0 = time.perf_counter()
+    r = await client.get(f"/api/v1/playout/{station.id}/next?given={entries[0].id}", headers=HEADERS)
+    assert time.perf_counter() - t0 < 2.0
+    assert r.json()["entry_id"] == str(entries[1].id)
+    assert "liq_amplify" not in r.json()["uri"]
+    for job in playout_engine._level_jobs.values():
+        job.cancel()
+
+
+@pytest.mark.asyncio
+async def test_upcoming_items_are_analysed_ahead(db_session, eng, monkeypatch):
+    """The tick starts the analysis of the next few items and of timed items due soon."""
+    from app.services import upcoming_analysis
+
+    station, entries, _, _ = eng
+    monkeypatch.setattr(upcoming_analysis, "ENABLED", True)
+    monkeypatch.setattr(playout_engine, "_level_jobs", {})
+    started = []
+
+    async def record(asset_id):
+        started.append(asset_id)
+
+    monkeypatch.setattr(playout_engine, "_analyse_alone", record)
+    soon = await _add(db_session, station, title="Daf", duration=3000.0, kind="shiur", position=50,
+                      preempt_at=datetime.now(UTC) + timedelta(minutes=10), timing_mode="hard")
+    await playout_engine._analyse_ahead(db_session, station.id, datetime.now(UTC))
+    await asyncio.sleep(0)
+    assert str(soon.asset_id) in started
+    assert {str(e.asset_id) for e in entries[:playout_engine.LOOK_AHEAD_ITEMS]} <= set(started)
+    assert str(entries[3].asset_id) not in started
