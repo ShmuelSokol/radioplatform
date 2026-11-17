@@ -21,6 +21,10 @@ const readOutput = (): string => {
 export function usePfl() {
   const audioRef = useRef<SinkAudio | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  // The item in the pre-listen player (shown in the PFL deck), playing or paused
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
   const [outputId, setOutputId] = useState<string>(readOutput);
   const [outputs, setOutputs] = useState<PflOutput[]>([]);
   const outputRef = useRef(outputId);
@@ -34,16 +38,34 @@ export function usePfl() {
     audioRef.current?.pause();
     audioRef.current = null;
     setPlayingId(null);
+    setLoadedId(null);
+    setPaused(false);
+    setUrl(null);
   }, []);
   useEffect(() => () => { audioRef.current?.pause(); }, []);
 
   const toggle = useCallback(async (id: string) => {
+    const cur = audioRef.current;
+    if (cur?.dataset.pflId === id && cur.paused && cur.src) {
+      // Paused in the deck: ▶ carries on from where it stopped
+      if (cur.ended) cur.currentTime = 0;
+      try { await cur.play(); setPaused(false); setPlayingId(id); } catch { /* blocked */ }
+      return;
+    }
     const wasPlaying = audioRef.current?.dataset.pflId === id;
     audioRef.current?.pause();
     audioRef.current = null;
-    if (wasPlaying) { setPlayingId(null); return; }
+    if (wasPlaying) { setPlayingId(null); setLoadedId(null); setPaused(false); setUrl(null); return; }
     setPlayingId(id);
-    const clear = () => setPlayingId(cur => (cur === id ? null : cur));
+    setLoadedId(id);
+    setPaused(false);
+    setUrl(null);
+    // At the end the deck stays open, paused at the end, so it can be played again
+    const ended = () => { setPlayingId(cur => (cur === id ? null : cur)); setPaused(true); };
+    const clear = () => {
+      setPlayingId(cur => (cur === id ? null : cur));
+      setLoadedId(cur => (cur === id ? null : cur));
+    };
     try {
       const a = new Audio() as SinkAudio;
       a.dataset.pflId = id;
@@ -55,8 +77,10 @@ export function usePfl() {
         await a.setSinkId(outputRef.current).catch(() => undefined);
       }
       a.src = url;
-      a.onended = clear;
+      a.preload = 'auto';
+      a.onended = ended;
       a.onerror = clear;
+      setUrl(url);
       await a.play();
     } catch {
       clear();
@@ -98,7 +122,33 @@ export function usePfl() {
     if (a?.setSinkId) a.setSinkId(id).catch(() => undefined);
   }, []);
 
-  return { playingId, toggle, stop, canChooseOutput, outputs, outputId, loadOutputs, chooseOutput };
+  /** Pause or carry on with the item in the deck (Space in the deck). */
+  const playPause = useCallback(async () => {
+    const a = audioRef.current;
+    if (!a) return;
+    const id = a.dataset.pflId ?? null;
+    if (a.paused) {
+      if (a.ended || (a.duration && a.currentTime >= a.duration - 0.05)) a.currentTime = 0;
+      try { await a.play(); setPaused(false); setPlayingId(id); } catch { /* blocked */ }
+    } else {
+      a.pause();
+      setPaused(true);
+      setPlayingId(null);
+    }
+  }, []);
+
+  /** Jump to a point in the item (seconds); keeps playing or paused as it was. */
+  const seek = useCallback((seconds: number) => {
+    const a = audioRef.current;
+    if (!a) return;
+    const d = Number.isFinite(a.duration) ? a.duration : 0;
+    a.currentTime = Math.max(0, d ? Math.min(d - 0.01, seconds) : seconds);
+  }, []);
+
+  /** The pre-listen audio element, for the deck to read the time from. */
+  const getAudio = useCallback(() => audioRef.current, []);
+
+  return { playingId, loadedId, paused, url, playPause, seek, getAudio, toggle, stop, canChooseOutput, outputs, outputId, loadOutputs, chooseOutput };
 }
 
 export type Pfl = ReturnType<typeof usePfl>;
