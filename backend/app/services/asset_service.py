@@ -240,6 +240,28 @@ async def set_album_art(db: AsyncSession, asset_id: uuid.UUID, art_path: str) ->
     return asset
 
 
+async def _scheduled_uses(db: AsyncSession, asset_id: uuid.UUID) -> list[str]:
+    """Spot schedules and program blocks that name this item. Deleting it would remove
+    the spot schedule with it (database cascade) without a word, and leave the block
+    pointing at nothing, so the delete is refused while any of these use it."""
+    from app.models.program_block import ProgramBlock
+    from app.models.spot_schedule import SpotSchedule
+
+    uses = []
+    rows = (await db.execute(
+        select(SpotSchedule.name, Sponsor.name)
+        .outerjoin(Sponsor, Sponsor.id == SpotSchedule.sponsor_id)
+        .where(SpotSchedule.asset_id == asset_id)
+    )).all()
+    for schedule_name, sponsor_name in rows:
+        uses.append(f"spot schedule '{schedule_name or sponsor_name or 'unnamed'}'")
+    key = str(asset_id)
+    for name, items in (await db.execute(select(ProgramBlock.name, ProgramBlock.items))).all():
+        if any(isinstance(i, dict) and str(i.get("asset_id") or "") == key for i in items or []):
+            uses.append(f"program block '{name}'")
+    return uses
+
+
 async def delete_asset(db: AsyncSession, asset_id: uuid.UUID) -> None:
     from app.models.queue_entry import QueueEntry
 
@@ -251,6 +273,11 @@ async def delete_asset(db: AsyncSession, asset_id: uuid.UUID) -> None:
     )).scalar_one_or_none()
     if on_air is not None:
         raise ConflictError("This item is on air. Press Next (or wait for it to end), then delete it.")
+    used_in = await _scheduled_uses(db, asset_id)
+    if used_in:
+        raise ConflictError(
+            f"This item is used by {'; '.join(used_in)}. Take it out of there first, then delete it."
+        )
     await db.delete(asset)
     await db.flush()
 
