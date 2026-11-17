@@ -157,8 +157,11 @@ export const useNowPlayingWS = (stationId: string) => {
           if (!current()) return;
           try {
             const message = JSON.parse(event.data);
-            if (message.type === 'now_playing' && message.data) {
-              setNowPlaying(message.data);
+            // data: null is how the server says nothing is on air (on connect, and
+            // when the station stops): the page must drop the old item, not keep it
+            // "On Air" for ever
+            if (message.type === 'now_playing') {
+              setNowPlaying(message.data ?? null);
             }
             if (message.type === 'mix_over' && message.data) {
               // A jingle to play on top of what is on air; the audio engine picks it up
@@ -241,9 +244,10 @@ export const useNowPlayingWS = (stationId: string) => {
       hiddenAt = 0;
       if (away < STALE_AFTER_HIDDEN_MS) return;
       const gen = generation.current;
+      // A null answer means nothing is on air: it clears the old item too
       fetch(`${API_BASE}/now-playing/${stationId}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => { if (data && gen === generation.current) setNowPlaying(data); })
+        .then((r) => (r.ok ? r.json() : undefined))
+        .then((data) => { if (data !== undefined && gen === generation.current) setNowPlaying(data ?? null); })
         .catch(() => {});
       const old = wsRef.current;
       if (old) { old.onclose = null; old.close(); wsRef.current = null; }
@@ -267,9 +271,11 @@ export const useNowPlayingWS = (stationId: string) => {
     const check = () => {
       if (serverNow() < end + OVERDUE_AFTER_MS || gen !== generation.current) return;
       fetch(`${API_BASE}/now-playing/${stationId}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!data || gen !== generation.current) return;
+        .then((r) => (r.ok ? r.json() : undefined))
+        .then((data: NowPlayingData | null | undefined) => {
+          if (data === undefined || gen !== generation.current) return;
+          // null: nothing on air any more (the server sends no message for that)
+          if (!data) { setNowPlaying(null); return; }
           setNowPlaying((prev) => (prev && prev.started_at === data.started_at && prev.asset_id === data.asset_id ? prev : data));
         })
         .catch(() => {});

@@ -175,6 +175,7 @@ export function makeStation(opts = {}) {
     skipReply: null,          // extra fields for the skip answer: { protected: true } ...
     panicReply: null,         // answer for /queue/panic instead of cutting, e.g. { message: 'The playout engine did not respond' }
     failNext: new Set(),      // paths that answer 500 once
+    replyNext: new Map(),     // path -> [{ status, detail } | 'network', ...]: the next answers for that path, one per request
     playout: opts.playout || { stations: {}, default: { mode: 'browser' } },
     weather: opts.weather ?? { time_url: '/__tone/tc.wav', weather_url: '/__tone/wx.wav' },
     nextEntryId: undefined,   // override next_entry_id in the queue answer
@@ -222,10 +223,14 @@ export function makeStation(opts = {}) {
     }
     return new Date(e.preempt_at).toISOString();
   };
-  /** What the server pushes on the now-playing channel for the item on air. */
+  /** What the server pushes on the now-playing channel for the item on air.
+   *  Nothing on air: null, as the real server sends ({type:'now_playing', data:null}
+   *  on the socket, null from GET /now-playing). s.legacyStopShape = true sends the
+   *  shape this fake used before ({station_id, started_at:null}); pages handle both. */
+  s.legacyStopShape = !!opts.legacyStopShape;
   s.nowPlaying = (extra = {}) => {
     const cur = playing();
-    if (!cur) return { station_id: SID, started_at: null };
+    if (!cur) return s.legacyStopShape ? { station_id: SID, started_at: null } : null;
     const a = byId[cur.asset_id];
     const nxt = pending()[0];
     const na = nxt && byId[nxt.asset_id];
@@ -238,7 +243,7 @@ export function makeStation(opts = {}) {
     };
   };
   s.onPush = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
-  s.push = (data) => listeners.forEach((fn) => fn(data ?? s.nowPlaying()));
+  s.push = (data) => { const d = data === undefined ? s.nowPlaying() : data; listeners.forEach((fn) => fn(d)); };
   const announce = (extra) => { if (s.pushOnChange) setTimeout(() => s.push(s.nowPlaying(extra)), 0); };
   /** Put `assetId` on air now (as the scheduler would), and announce it. */
   s.goOnAir = (assetId, extra = {}) => {
@@ -290,7 +295,7 @@ export function makeStation(opts = {}) {
       return { assets: list.slice(skip, skip + limit), total: list.length };
     }
     if (/^\/assets\/[^/?]+$/.test(path)) { const a = byId[path.split('/')[2]]; return a ? { ...a, metadata_extra: {} } : { __status: 404 }; }
-    if (/^\/now-playing\/[^/]+$/.test(path) || path === `/stations/${SID}/now-playing`) return s.nowPlaying();
+    if (/^\/now-playing\/[^/]+$/.test(path) || path === `/stations/${SID}/now-playing`) { const np = s.nowPlaying(); return np === null ? { __body: 'null' } : np; }
     if (path.startsWith('/stations/') && path.split('/')[2] !== SID && path.endsWith('/queue')) return { entries: [], total: 0, total_all: 0, now_playing: null, queue_duration_seconds: 0, next_entry_id: null };
     if (path.startsWith('/stations/') && path.split('/')[2] !== SID) return {};
     if (path === q && method === 'GET') return s.view(+(query.limit || Infinity));
@@ -386,15 +391,28 @@ export function makeStation(opts = {}) {
       return /fail/i.test(body.song_title) ? { __status: 500 } : { id: 'r1', status: 'approved', auto_approved: true, matched_asset_title: 'Song number 12', matched_asset_artist: 'Artist 3', songs_ahead: 2, estimated_wait_minutes: 7 };
     }
     if (path === '/listeners/heartbeat' || path === '/listeners/disconnect' || path === '/listeners/leave') return { ok: true };
-    if (path === '/crm/login') return ['123456', '654321'].includes(body.pin) ? s.crmProfile() : { __status: 401 };
+    if (path === '/crm/login') return ['123456', '654321'].includes(body.pin) ? s.crmProfile() : { __status: 401, detail: 'Invalid PIN or inactive member' };
     if (path === '/crm/register') { if (!body.name) return { __status: 422 }; s.crmName = body.name; return { id: 'cm1', name: body.name, pin: '654321' }; }
-    if (path === '/crm/rate') { s.rated = (s.rated || 0) + 1; if (body.is_favorite) s.favs = 1; else s.favs = 0; return { asset_id: body.asset_id, rating: body.rating, is_favorite: body.is_favorite }; }
-    if (path === '/crm/raffles/active') return [{ id: 'rf1', title: 'Win a Shabbos package', prize: 'Wine and challah', entry_count: 12, status: 'open' }];
-    if (/^\/crm\/raffles\/[^/]+\/enter$/.test(path)) return {};
-    if (path === '/crm/my-ratings') return [];
+    if (path === '/crm/rate') {
+      // As the server: rating 1-5 is required, one row per song (upsert)
+      if (!(body.rating >= 1 && body.rating <= 5)) return { __status: 422, detail: 'rating must be 1-5' };
+      s.ratings.set(body.asset_id, { rating: body.rating, is_favorite: !!body.is_favorite });
+      return { id: `r-${body.asset_id}`, asset_id: body.asset_id, rating: body.rating, is_favorite: !!body.is_favorite, asset_title: byId[body.asset_id]?.title ?? null, asset_artist: null, created_at: null };
+    }
+    if (path === '/crm/raffles/active') return s.raffles;
+    if (/^\/crm\/raffles\/[^/]+\/enter$/.test(path)) {
+      const id = path.split('/')[3];
+      if (s.raffleEntered.has(id)) return { __status: 409, detail: 'Already entered this raffle' };
+      s.raffleEntered.add(id);
+      return { status: 'entered', raffle_id: id };
+    }
+    if (path === '/crm/my-ratings') return [...s.ratings.entries()].map(([asset_id, r]) => ({ id: `r-${asset_id}`, asset_id, ...r, asset_title: byId[asset_id]?.title ?? null, asset_artist: null, created_at: null }));
     return {};
   };
-  s.crmProfile = () => ({ id: 'cm1', name: s.crmName || 'Test Listener', ratings_count: s.rated || 0, favorites_count: s.favs || 0, taste_profile: { label: 'Kumzitz lover', description: 'Slow and soulful', top_category: null, stats: null } });
+  s.ratings = new Map();          // CRM: asset id -> { rating, is_favorite } for the one member
+  s.raffleEntered = new Set();    // CRM: raffles the member entered (a second entry answers 409)
+  s.raffles = [{ id: 'rf1', title: 'Win a Shabbos package', prize: 'Wine and challah', entry_count: 12, status: 'open' }];
+  s.crmProfile = () => ({ id: 'cm1', name: s.crmName || 'Test Listener', ratings_count: s.ratings.size, favorites_count: [...s.ratings.values()].filter((r) => r.is_favorite).length, taste_profile: { label: 'Kumzitz lover', description: 'Slow and soulful', top_category: null, stats: null } });
   return s;
 }
 
@@ -407,6 +425,15 @@ export async function routeApi(target, station, { delay = () => 0, down = [] } =
     if (down.some((d) => path.startsWith(d))) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"down"}' });
     let body = null;
     try { body = req.postDataJSON(); } catch { /* none */ }
+    const queued = station.replyNext.get(path);
+    if (queued && queued.length) {
+      const r = queued.shift();
+      station.calls.push({ method: req.method(), path, query: Object.fromEntries(url.searchParams), body, at: Date.now(), failed: true });
+      const d = delay(path, req.method());
+      if (d) await sleep(d);
+      if (r === 'network') return route.abort('failed').catch(() => {});
+      return route.fulfill({ status: r.status, contentType: 'application/json', body: JSON.stringify({ detail: r.detail ?? 'error' }) }).catch(() => {});
+    }
     if (station.failNext.has(path)) {
       station.failNext.delete(path);
       station.calls.push({ method: req.method(), path, query: Object.fromEntries(url.searchParams), body, at: Date.now(), failed: true });
@@ -417,6 +444,8 @@ export async function routeApi(target, station, { delay = () => 0, down = [] } =
     const data = station.handle(req.method(), path, Object.fromEntries(url.searchParams), body);
     const d = delay(path, req.method());
     if (d) await sleep(d);
+    // { __body: 'null' }: a 200 whose JSON is null (GET /now-playing with nothing on air)
+    if (data && typeof data.__body === 'string') return route.fulfill({ status: 200, contentType: 'application/json', body: data.__body }).catch(() => {});
     const status = data && data.__status ? data.__status : data === null ? 204 : 200;
     await route.fulfill({ status, contentType: 'application/json', body: data === null ? '' : JSON.stringify(data) }).catch(() => {});
   });
