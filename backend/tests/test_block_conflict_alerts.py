@@ -61,9 +61,6 @@ async def test_overlapping_block_raises_a_conflict_alert(client, auth_headers, d
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: conflict detection compares clock times only, not days: a weekly Monday block and a "
-    "weekly Tuesday block at the same hours raise a false 'Schedule conflict' alert"))
 async def test_blocks_on_different_days_do_not_conflict(client, auth_headers, db_session):
     """B-JOB-83: weekly blocks on different days at the same time are not a conflict."""
     sc = await _schedule(db_session)
@@ -75,9 +72,6 @@ async def test_blocks_on_different_days_do_not_conflict(client, auth_headers, db
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: a block that runs past midnight (22:00-02:00) is never found to overlap anything: "
-    "start < other.end and end > other.start cannot both hold when end is before start"))
 async def test_overnight_block_conflict_is_found(client, auth_headers, db_session):
     """B-JOB-83: a block inside an overnight block is a conflict."""
     sc = await _schedule(db_session)
