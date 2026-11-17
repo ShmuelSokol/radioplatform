@@ -887,8 +887,6 @@ async def update_asset(
     from datetime import date as date_type
     asset = await get_asset(db, asset_id)
     updates = body.model_dump(exclude_unset=True)
-    # Track old values for audit
-    old_values = {k: getattr(asset, k, None) for k in updates}
     # Auto-clear sponsor_id when type changes away from "spot"
     if "asset_type" in updates and updates["asset_type"] != "spot" and "sponsor_id" not in updates:
         updates["sponsor_id"] = None
@@ -902,16 +900,6 @@ async def update_asset(
         setattr(asset, key, value)
     await db.flush()
     await db.refresh(asset)
-    # Audit log
-    from app.services.audit_service import log_action
-    changes = {k: {"old": str(old_values.get(k)), "new": str(v)} for k, v in updates.items() if old_values.get(k) != v}
-    if changes:
-        await log_action(
-            db, user_id=_user.id, user_email=_user.email, action="update",
-            resource_type="asset", resource_id=str(asset_id),
-            detail=f"Updated asset '{asset.title}'", changes=changes,
-            request_id=getattr(request.state, "request_id", None),
-        )
     return asset
 
 
