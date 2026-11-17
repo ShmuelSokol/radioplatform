@@ -33,10 +33,16 @@ settings.harbor.bind_addrs := ["127.0.0.1"]
 
 auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")]
 
+# What this engine understands, sent with /hello and every /next. 2 = timed groups handed
+# over in parallel (seq/of) and /timed_drop. The backend keeps to the old serial hand-over
+# for an engine that sends nothing.
+engine_proto = 2
+
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
 # track is requested, so the two cannot cross.
 try
-  ignore(http.post(headers=auth_headers, timeout=8., data="{}",
+  ignore(http.post(headers=auth_headers, timeout=8., data='{"proto":#{engine_proto}}',
+
                    "#{backend_url}/playout/#{station_id}/hello"))
 catch err do
   log.important("hello: backend unreachable: #{err}")
@@ -53,7 +59,7 @@ def next_request() =
   try
     handed = string.concat(separator=",", given())
     resp = http.get(headers=auth_headers, timeout=8.,
-                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}")
+                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}")
     if resp.status_code == 200 then
       let json.parse (data : {uri : string, entry_id : string}) = resp
       log.important("next: backend gave entry #{data.entry_id}")
@@ -226,11 +232,18 @@ def keep_for_emergency(played) =
   end
 end
 
+# Timed items the backend took back (/timed_drop): skipped the moment they would start.
+# Silence left in the timed lane when a blackout ended went on air one item per Next.
+timed_dropped = ref([])
+
 def send_started(m) =
   entry = m["kbr_entry"]
   lane = if entry == "" then "emergency" else m["kbr_lane"] end
   on_air_lane := lane
-  if lane == "main" and main_interrupted() then
+  if lane == "timed" and entry != "" and list.mem(entry, timed_dropped()) then
+    log.important("timed: entry #{entry} was dropped by the backend; skipping it")
+    timed_queue.skip()
+  elsif lane == "main" and main_interrupted() and entry == last_main_entry() then
     # Back from a timed item: leave the interrupted song and start the next one. The
     # interrupted song is not reported again (it already ended for the backend).
     main_interrupted := false
@@ -238,6 +251,14 @@ def send_started(m) =
     main.skip()
     thread.run(delay=0.15, {main_gain := 1.})
   else
+    if lane == "main" and main_interrupted() then
+      # The music lane came back on a new track, not the interrupted song (after a long
+      # block it can start afresh). That track is the one meant to air next, often the
+      # paused shiur resuming: skipping it played a song instead (Jerusalem, 2026-11-17
+      # 14:00Z, the shiur came back for half a second).
+      main_interrupted := false
+      main_gain := 1.
+    end
     if lane == "main" then last_main_entry := entry end
     report_to_backend(entry, lane, m["title"])
     if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end
@@ -299,13 +320,49 @@ end)
 # Timed items already taken, newest first. The backend may offer one again after it
 # restarts; it must not air twice.
 timed_seen = ref([])
+
+# The backend hands a group (items due at the same time) over in parallel, each with its
+# place (`seq`) and the group's size (`of`), so a slow engine does not hold up its other
+# work. The requests can arrive in any order: the group is held until all of it is here
+# (or for at most a second, so a part whose hand-over failed holds nothing back), then
+# queued in `seq` order, the order it plays in.
+timed_buffer = ref([])
+def flush_timed_group(at) =
+  mine = list.filter(fun (x) -> abs(x.at - at) <= 0.5, timed_buffer())
+  timed_buffer := list.filter(fun (x) -> abs(x.at - at) > 0.5, timed_buffer())
+  mine = list.sort(fun (a, b) -> a.seq - b.seq, mine)
+  list.iter(fun (x) -> schedule_timed(uri=x.uri, at=x.at), mine)
+end
+
 control("/timed", fun (req) -> begin
-  let json.parse (body : {uri : string, at : float, id : string?}) = req.body()
+  let json.parse (body : {uri : string, at : float, id : string?, seq : int?, of : int?}) = req.body()
   id = null.default(body.id, {""})
   if id == "" or not list.mem(id, timed_seen()) then
     if id != "" then timed_seen := list.prefix(50, id :: timed_seen()) end
-    schedule_timed(uri=body.uri, at=body.at)
+    of = null.default(body.of, {1})
+    if of <= 1 then
+      schedule_timed(uri=body.uri, at=body.at)
+    else
+      at = body.at
+      timed_buffer := {at=at, seq=null.default(body.seq, {0}), uri=body.uri} :: timed_buffer()
+      have = list.length(list.filter(fun (x) -> abs(x.at - at) <= 0.5, timed_buffer()))
+      if have >= of then
+        flush_timed_group(at)
+      else
+        wait = at - time() - skip_fade - 0.2
+        delay = if wait > 1. then 1. elsif wait > 0.1 then wait else 0.1 end
+        thread.run(delay=delay, {flush_timed_group(at)})
+      end
+    end
   end
+  '{"ok":true}'
+end)
+
+# Take timed items back: {"ids": [...]}. Any of them still waiting in the timed lane is
+# skipped when it would start (see send_started).
+control("/timed_drop", fun (req) -> begin
+  let json.parse (body : {ids : [string]}) = req.body()
+  timed_dropped := list.prefix(100, list.append(body.ids, timed_dropped()))
   '{"ok":true}'
 end)
 

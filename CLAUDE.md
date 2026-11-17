@@ -113,6 +113,7 @@ radioplatform/
 | ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit |
 | AuditLog | audit_log.py | Activity log row: who, what (label, category), station, before/after, status, IP, device, place (see `wiki/activity-log.md`) |
 | HsSoftened | hs_softened.py | A timed queue item that HS off made wait, with its old timing so HS on restores it (see `wiki/station-modes.md`) |
+| EngineHandoff | engine_handoff.py | A queue entry handed to the playout engine and its asset, so a start report for an entry deleted meanwhile still shows what is on air after a backend restart (pruned after 6 h; see `wiki/streaming-architecture.md`) |
 | SiteRelease | site_release.py | One row: how open tabs take a new website release (auto/manual) and the admin's last push (see `wiki/release-pickup.md`) |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
@@ -153,7 +154,7 @@ radioplatform/
 | spot_schedules | spot_schedules.py | /spot-schedules |
 | spot_recordings | spot_recordings.py | /spot-recordings |
 | program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
-| databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
+| databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, every type of a table, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
 | copy_review | copy_review.py | /sponsorship (rules + copy review) |
 | campaigns | campaigns.py | /campaigns |
 | billing | billing.py | /billing |
