@@ -100,39 +100,7 @@ async def _fetch_weather(lat: float, lon: float, timezone_name: str) -> dict:
     weather_desc = data["weather"][0]["description"] if data.get("weather") else "unknown conditions"
     wind_deg = data.get("wind", {}).get("deg", 0)
 
-    # Build daily forecast from 3-hour data
-    from datetime import datetime, timezone
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        from backports.zoneinfo import ZoneInfo
-
-    eastern = ZoneInfo(timezone_name)
-    today = datetime.now(timezone.utc).astimezone(eastern).date()
-    days: dict[str, dict] = {}
-
-    for item in forecast_data.get("list", []):
-        dt = datetime.fromtimestamp(item["dt"], tz=timezone.utc).astimezone(eastern)
-        day_key = dt.strftime("%A")
-        d = dt.date()
-        if d <= today:
-            continue
-        if day_key not in days:
-            days[day_key] = {"highs": [], "lows": [], "descriptions": []}
-        days[day_key]["highs"].append(item["main"]["temp_max"])
-        days[day_key]["lows"].append(item["main"]["temp_min"])
-        desc = item["weather"][0]["description"] if item.get("weather") else ""
-        if desc and desc not in days[day_key]["descriptions"]:
-            days[day_key]["descriptions"].append(desc)
-
-    forecast = []
-    for day_name, info in list(days.items())[:3]:
-        forecast.append({
-            "day": day_name,
-            "high": round(max(info["highs"])),
-            "low": round(min(info["lows"])),
-            "description": info["descriptions"][0] if info["descriptions"] else "unknown",
-        })
+    forecast = daily_forecast(forecast_data.get("list", []), timezone_name)
 
     return {
         "temp_f": round(data["main"]["temp"]),
@@ -142,3 +110,36 @@ async def _fetch_weather(lat: float, lon: float, timezone_name: str) -> dict:
         "humidity": data["main"]["humidity"],
         "forecast": forecast,
     }
+
+
+def daily_forecast(items: list[dict], timezone_name: str, now=None, days: int = 3) -> list[dict]:
+    """The next `days` days after today from OpenWeatherMap's 3-hour forecast list.
+
+    Days are the station's own calendar days (today left out); high is the highest
+    temp_max and low the lowest temp_min of that day's 3-hour values; the description
+    is the day's first one."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(timezone_name)
+    today = (now or datetime.now(timezone.utc)).astimezone(zone).date()
+    by_day: dict = {}
+    for item in sorted(items, key=lambda i: i["dt"]):
+        d = datetime.fromtimestamp(item["dt"], tz=timezone.utc).astimezone(zone).date()
+        if d <= today:
+            continue
+        info = by_day.setdefault(d, {"highs": [], "lows": [], "descriptions": []})
+        info["highs"].append(item["main"]["temp_max"])
+        info["lows"].append(item["main"]["temp_min"])
+        desc = item["weather"][0]["description"] if item.get("weather") else ""
+        if desc and desc not in info["descriptions"]:
+            info["descriptions"].append(desc)
+    return [
+        {
+            "day": d.strftime("%A"),
+            "high": round(max(info["highs"])),
+            "low": round(min(info["lows"])),
+            "description": info["descriptions"][0] if info["descriptions"] else "unknown",
+        }
+        for d, info in sorted(by_day.items())[:days]
+    ]

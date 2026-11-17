@@ -867,11 +867,11 @@ async def sc_two_groups(h: Harness, apart: float) -> None:
     h.check(name, late is not None and -1 <= late <= 2.0, f"first group {'never' if late is None else f'{late:+.1f} s'}")
     h.check(name, len(a) == 1 and len(b) == 1, f"each item played once ({len(a)}, {len(b)})")
     h.check(name, bool(a and b) and a[0][0] < b[0][0], f"in order: time {_fmt(a[0][0] if a else None)}, weather {_fmt(b[0][0] if b else None)}")
-    # Known bug V1-10b: a hard group due while another timed item plays cuts it (1 s apart:
-    # the time check is cut after 1 s). Logged, not failed, until server, page and engine agree.
-    whole = bool(a and b) and b[0][0] - a[0][0] >= TONES["time"][1] - 0.5
-    log(f"{'OK   ' if whole else 'KNOWN BUG V1-10b'} {name}: time check played "
-        f"{(b[0][0] - a[0][0]) if a and b else 0:.1f} s of {TONES['time'][1]} s before the weather")
+    # V1-10b: a hard group due while another timed item plays follows it (the backend
+    # moves it to the end of the first and hands it over as part of that take-over)
+    played = (b[0][0] - a[0][0]) if a and b else 0.0
+    h.check(name, played >= TONES["time"][1] - 0.5,
+            f"time check played whole before the weather ({played:.1f} s of {TONES['time'][1]} s)")
     cur = await h.on_air()
     h.check(name, bool(cur) and cur.asset.asset_type == "music", f"music back on air ({cur.asset.title if cur else None})")
     heard = h.heard(t1.timestamp() - 3, t1.timestamp() + 22)

@@ -209,7 +209,7 @@ export default function Dashboard() {
   // Stopped: the last now-playing message can still be around, so show no time at all
   const duration = isPlaying ? (serverDuration || (nowAsset?.duration ?? 0)) : 0;
   const shownElapsed = isPlaying ? realElapsed : 0;
-  const remaining = isPlaying ? Math.max(0, duration - realElapsed) : 0;
+  const naturalRemaining = isPlaying ? Math.max(0, duration - realElapsed) : 0;
   // Intro length is counted from where the item starts on air, so the countdown is simply intro minus elapsed.
   const introLength = Number((nowAsset as { intro_seconds?: number | null } | null)?.intro_seconds ?? wsNowPlaying?.asset?.intro_seconds ?? 0);
   const introSeconds = isPlaying && introLength > realElapsed ? introLength - realElapsed : 0;
@@ -242,6 +242,15 @@ export default function Dashboard() {
   // player must not fade for it, or the song goes silent until it would have ended.
   const nextPreempt = useMemo(() => nextCut(queueEntries), [queueEntries]);
   const preemptFadeMs = queueData?.preempt_fade_ms ?? 2000;
+  // A hard timed item (time check, hard block) cuts the song at its time: Remaining and the
+  // progress bar count down to that cut, not to the end of the file (Shmuel, 9:59 AM:
+  // "Why does it show 1:45 remaining if it'll fade for the 10am time report?").
+  const cutInSec = isPlaying && nextPreempt
+    ? (new Date(nextPreempt.preempt_at).getTime() - serverNow()) / 1000
+    : null;
+  const cutsShort = cutInSec !== null && cutInSec > 0 && cutInSec < naturalRemaining;
+  const remaining = cutsShort ? cutInSec : naturalRemaining;
+  const cutAtIso = cutsShort ? nextPreempt!.preempt_at : null;
 
   const dashStreamUrl = wsNowPlaying?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
@@ -720,6 +729,7 @@ export default function Dashboard() {
     elapsed: shownElapsed,
     remaining: remaining,
     duration: duration,
+    cutAt: cutAtIso,
     introSeconds: introSeconds,
     onStart: handleStart,
     starting: startMut.isPending,

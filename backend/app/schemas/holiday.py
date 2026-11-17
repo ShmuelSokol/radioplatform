@@ -3,7 +3,15 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _all_stations_if_no_list(v):
+    """{"station_ids": null} or {} means every station: store it as null, the
+    one form every blackout check reads as "all stations"."""
+    if isinstance(v, dict) and v.get("station_ids") is None:
+        return None
+    return v
 
 
 class HolidayWindowBase(BaseModel):
@@ -14,6 +22,11 @@ class HolidayWindowBase(BaseModel):
     affected_stations: dict[str, Any] | None = None  # {"station_ids": [...]} or null for all
     replacement_content: str | None = None
     reason: str | None = None
+
+    @field_validator("affected_stations")
+    @classmethod
+    def _norm_affected(cls, v):
+        return _all_stations_if_no_list(v)
 
 
 class HolidayWindowCreate(HolidayWindowBase):
@@ -28,6 +41,11 @@ class HolidayWindowUpdate(BaseModel):
     affected_stations: dict[str, Any] | None = None
     replacement_content: str | None = None
     reason: str | None = None
+
+    @field_validator("affected_stations")
+    @classmethod
+    def _norm_affected(cls, v):
+        return _all_stations_if_no_list(v)
 
 
 class HolidayWindowInDB(HolidayWindowBase):
