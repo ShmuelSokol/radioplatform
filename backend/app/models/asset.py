@@ -83,13 +83,26 @@ NEVER_AUTO_TITLES = (
 )
 
 
-def not_placeholder():
-    """SQL condition: the asset is not a placeholder that no automatic pick may use."""
-    from sqlalchemy import func, or_
+# Categories no automatic pick may use, even a rule, playlist or block that names
+# them: do_not_play means off the air (missing or broken files, 2026-11-17). Only an
+# operator's own pick plays them. Lower case; the check ignores case and spaces.
+NEVER_AUTO_CATEGORIES = ("do_not_play",)
 
-    return or_(
-        Asset.title.is_(None),
-        func.lower(func.trim(Asset.title)).notin_(NEVER_AUTO_TITLES),
+
+def not_placeholder():
+    """SQL condition: the asset is neither a placeholder nor marked do-not-play, so an
+    automatic pick may use it (operators can still queue it themselves)."""
+    from sqlalchemy import and_, func, or_
+
+    return and_(
+        or_(
+            Asset.title.is_(None),
+            func.lower(func.trim(Asset.title)).notin_(NEVER_AUTO_TITLES),
+        ),
+        or_(
+            Asset.category.is_(None),
+            func.lower(func.trim(Asset.category)).notin_(NEVER_AUTO_CATEGORIES),
+        ),
     )
 
 

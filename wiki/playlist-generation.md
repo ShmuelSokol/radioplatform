@@ -37,6 +37,10 @@ Test note: the draw is random, so `tests/test_playlist_generation.py` seeds `ran
 
 `fit_for_random_pick()` (models/asset.py) skips categories do_not_play/test (any case) and one-moment clips. Placeholders listed by title in `NEVER_AUTO_TITLES` (the old "KOL BRAMAH TEST SPONSOR", category "Spots"; also "Kol bramah sponsor" and "Kol bramah ad", confirmed placeholders by Shmuel 2026-11-16; exact title match, any case) are skipped by **every** automatic pick through `not_placeholder()`, including rotations, rules and program blocks that name the category. Each refill (and each restart) deletes pending copies an automatic pick queued; operator, request and loop entries stay. Test: `tests/test_placeholder_never_auto.py`.
 
+Category **do_not_play** (any case, `NEVER_AUTO_CATEGORIES`) is in `not_placeholder()` too since 2026-11-17, so a rule, block or playlist that names it gets nothing. At pick time `_skip_placeholders` (queue.py) marks pending automatic entries of either kind `skipped`; the playout engine's `pick_next` runs the same guard (before that it did not, so an engine station could air a queued placeholder). Only an operator's own pick (manual, request, loop) still plays one. Test: `tests/test_do_not_play_and_codec.py`.
+
+Uploads are checked by codec, not extension: `convert_audio` probes the first audio stream and re-encodes when a file named `.mp3` is not MP3 (160 old files were MP2 inside `.mp3`; Safari and the engine refuse those). `.mp2`/`.mpg` uploads now become MP3 instead of being kept as MP2.
+
 ## Editing steps is instant
 
 Adding, removing or moving a step changes the cached playlists before the server answers (`usePlaylists.ts`, optimistic with rollback on error). The server answers at once too: the queue rebuild after a playlist edit runs 1.5 s later in its own session (`_schedule_refresh` in `api/v1/playlists.py`), and edits within that window share one rebuild per station. Tests set `REFRESH_INLINE = True` (conftest) to see the rebuilt queue in the response.
