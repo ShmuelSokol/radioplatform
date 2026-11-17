@@ -2497,6 +2497,493 @@ section('live', async () => {
   }
 });
 
+// ── Library: assets, upload, asset detail, enhance, reviews ─────────────────
+// Real audio for players. With local storage the backend hands out the relative
+// /api/v1/assets/:id/download (behind a login; production hands out a public storage URL).
+// Send those requests on to the real backend with the page's token.
+async function proxyAudio(page, role) {
+  await page.route(`${BASE}/api/v1/**`, async r => {
+    const url = API + r.request().url().slice(`${BASE}/api/v1`.length);
+    const resp = await r.fetch({ url, headers: { ...r.request().headers(), authorization: `Bearer ${USERS[role].token}` } });
+    await r.fulfill({ response: resp });
+  });
+}
+function makeSilenceTone(file) {
+  // 3 s silence, 10 s tone, 3 s silence: something for silence detection and auto-clip to find
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', "aevalsrc='if(between(t,3,13),0.5*sin(440*2*PI*t),0)':s=44100:d=16",
+    '-ac', '2', '-b:a', '128k', file]);
+  return file;
+}
+async function uploadFixture(title, { type = 'music', file } = {}) {
+  const f = file || makeSilenceTone(path.join(TMP, `${title.replace(/\W+/g, '_')}.mp3`));
+  const form = new FormData();
+  form.append('file', new Blob([fs.readFileSync(f)], { type: 'audio/mpeg' }), path.basename(f));
+  form.append('title', title);
+  form.append('asset_type', type);
+  form.append('artist', 'E2E Library Artist');
+  return api('POST', '/assets/upload', { token: USERS.admin.token, form });
+}
+const libRow = (page, title) => page.locator('tbody tr', { has: page.locator(`td[title="${title}"]`) }).first();
+
+section('assets', async () => {
+  const cat = await api('POST', '/categories', { token: USERS.admin.token, body: { name: `e2e-cat-${RUN}` } });
+  const throwA = await uploadFixture(`E2E Lib A ${RUN}`);
+  const throwB = await uploadFixture(`E2E Lib B ${RUN}`);
+  const spot = FX.assets[2];
+  const page = await newPage('manager');
+  await proxyAudio(page, 'manager');
+  const titleBox = page.getByPlaceholder('Search title...');
+  const titles = async () => (await page.locator('tbody tr td[title]:not([title=""])').evaluateAll(tds => tds.filter(td => td.cellIndex === 2).map(td => td.getAttribute('title'))));
+  await step('F-ASSETS-1 column filters: title, artist, type, duration min/max; Clear filters', async () => {
+    await page.goto(`${BASE}/admin/assets`);
+    await page.getByRole('heading', { name: 'Library' }).waitFor();
+    await titleBox.fill(`E2E Lib A ${RUN}`);
+    await until(async () => { const t = await titles(); return t.length === 1 && t[0] === `E2E Lib A ${RUN}`; }, 'title filter to one row');
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    assert(await titleBox.inputValue() === '', 'title filter not cleared');
+    await page.getByPlaceholder('Search artist...').fill('E2E Library Artist');
+    await until(async () => { const t = await titles(); return t.length >= 2 && t.every(x => x.startsWith('E2E Lib')); }, 'artist filter');
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    const typeSel = page.locator('thead select', { has: page.locator('option[value="spot"]') }).first();
+    await typeSel.selectOption('spot');
+    await until(async () => {
+      const types = await page.locator('tbody tr td:nth-child(7)').allInnerTexts();
+      return types.length && types.every(t => t.trim().startsWith('spot'));
+    }, 'type filter: only spots');
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    await page.getByPlaceholder('e.g. 3:00').fill('2:55');
+    await page.getByPlaceholder('e.g. 6:30').fill('3:10');
+    await until(async () => {
+      const d = (await page.locator('tbody tr td:nth-child(8)').allInnerTexts()).map(x => x.trim()).filter(x => x !== '--');
+      return d.length && d.every(x => { const [m, s] = x.split(':').map(Number); const t = m * 60 + s; return t >= 175 && t <= 190; });
+    }, 'duration filter 2:55–3:10');
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    await page.getByRole('button', { name: 'Clear filters' }).waitFor({ state: 'detached' });
+  }, page);
+  await step('F-ASSETS-2 Rows select asks for that many; pager', async () => {
+    const rowsSel = page.locator('select', { has: page.locator('option[value="200"]') }).first();
+    const r = await timedResponse(page, (m, p, resp) => m === 'GET' && p === '/assets' && resp.url().includes('limit=100'), () => rowsSel.selectOption('100'));
+    assert(r.status === 200, `list ${r.status}`);
+    await rowsSel.selectOption('50');
+    const next = page.getByRole('button', { name: 'Next' });
+    const summary = page.getByText(/\d+–\d+ of \d+/).first();
+    await summary.waitFor();
+    const total = Number((await summary.innerText()).match(/of (\d+)/)[1]);
+    if (total > 50) {
+      await next.click();
+      await until(async () => /^51–/.test((await summary.innerText()).trim()), 'page 2');
+      await page.getByRole('button', { name: 'Previous' }).click();
+      await until(async () => /^1–/.test((await summary.innerText()).trim()), 'page 1');
+      return `${total} items, paged`;
+    }
+    assert(await next.isDisabled(), 'Next enabled on the only page');
+    return `${total} items (one page)`;
+  }, page);
+  await step('F-ASSETS-3 row Play plays the real file, Stop stops it', async () => {
+    await titleBox.fill(`E2E Lib A ${RUN}`);
+    const row = libRow(page, `E2E Lib A ${RUN}`);
+    await row.waitFor();
+    await row.getByRole('button', { name: 'Play', exact: true }).click();
+    await row.getByRole('button', { name: 'Stop', exact: true }).waitFor({ timeout: 8000 });
+    const playing = await page.evaluate(() => [...document.querySelectorAll('audio')].some(a => !a.paused && a.currentTime > 0));
+    await page.waitForTimeout(500);
+    assert(playing || await page.evaluate(() => [...document.querySelectorAll('audio')].some(a => !a.paused)), 'audio element not playing');
+    await row.getByRole('button', { name: 'Stop', exact: true }).click();
+    await row.getByRole('button', { name: 'Play', exact: true }).waitFor();
+  }, page);
+  await step('F-ASSETS-4 row Download menu: a format downloads the file', async () => {
+    const row = libRow(page, `E2E Lib A ${RUN}`);
+    await row.getByRole('button', { name: 'Download' }).click();
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 15000 }), row.getByRole('button', { name: 'Original' }).click()]);
+    assert(/E2E Lib A .*\.mp3$/.test(dl.suggestedFilename()), `file name ${dl.suggestedFilename()}`);
+    const p = await dl.path();
+    assert(fs.statSync(p).size > 10000, 'downloaded file is tiny');
+    return dl.suggestedFilename();
+  }, page);
+  await step('F-ASSETS-6 category badge sets and clears a category; sponsor badge search sets and clears a sponsor', async () => {
+    const row = libRow(page, `E2E Lib A ${RUN}`);
+    await row.getByTitle('Change category').click();
+    await timedSave(page, 'set category', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => row.getByRole('button', { name: cat.name }).click());
+    await until(async () => (await row.getByTitle('Change category').innerText()).includes(cat.name), 'badge shows the category');
+    await row.getByTitle('Change category').click();
+    await timedSave(page, 'clear category', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => row.getByRole('button', { name: 'Clear category' }).click());
+    await until(async () => !(await row.getByTitle('Change category').innerText()).includes(cat.name), 'category cleared');
+    await titleBox.fill(spot.title);
+    const srow = libRow(page, spot.title);
+    await srow.waitFor();
+    await srow.getByTitle(/Set sponsor|Change sponsor/).click();
+    await page.getByPlaceholder('Search sponsors...').fill(FX.sponsor.name.slice(0, 12));
+    await timedSave(page, 'set sponsor', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => srow.getByRole('button', { name: FX.sponsor.name }).click());
+    await srow.getByTitle('Change sponsor').waitFor();
+    await srow.getByTitle('Change sponsor').click();
+    await timedSave(page, 'clear sponsor', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => srow.getByRole('button', { name: 'Clear sponsor' }).click());
+    await srow.getByTitle('Set sponsor').waitFor();
+  }, page);
+  await step('F-ASSETS-7 row checkboxes, select all on the page, "Select all N", "Clear, keep only this page"', async () => {
+    await titleBox.fill('');
+    await page.locator('tbody tr').nth(2).waitFor();
+    const rowsSel = page.locator('select', { has: page.locator('option[value="200"]') }).first();
+    await rowsSel.selectOption('50');
+    const head = page.locator('thead input[type=checkbox]');
+    await head.check();
+    await page.getByText(/\d+ selected/).waitFor();
+    const selectAll = page.getByRole('button', { name: /Select all \d+ results/ });
+    if (await selectAll.count()) {
+      await selectAll.click();
+      await page.getByText(/All \d+ results selected/).waitFor();
+      await page.getByRole('button', { name: 'Clear, keep only this page' }).click();
+      await page.getByText(/\d+ selected/).waitFor();
+    }
+    await head.uncheck();
+    await page.getByText(/\d+ selected/).waitFor({ state: 'detached' });
+    await titleBox.fill(`E2E Lib A ${RUN}`);
+    await libRow(page, `E2E Lib A ${RUN}`).locator('input[type=checkbox]').check();
+    await page.getByText('1 selected').waitFor();
+    return (await selectAll.count()) ? 'all-filtered banner checked' : 'one page only (no "Select all N")';
+  }, page);
+  await step('F-ASSETS-8 bulk: Set Category, Download, Auto-Clip Silence (dialog, Close), Create Review Queue', async () => {
+    await titleBox.fill(`E2E Lib `);
+    await until(async () => (await titles()).filter(t => t.endsWith(RUN)).length >= 2, 'both library fixtures listed');
+    for (const t of [`E2E Lib A ${RUN}`, `E2E Lib B ${RUN}`]) await libRow(page, t).locator('input[type=checkbox]').check();
+    await page.getByText('2 selected').waitFor();
+    await page.getByRole('button', { name: 'Set Category' }).click();
+    await timedSave(page, 'bulk category', (m, p) => m !== 'GET' && p.startsWith('/assets'), () => page.getByRole('button', { name: cat.name, exact: true }).last().click());
+    await until(async () => (await libRow(page, `E2E Lib B ${RUN}`).getByTitle('Change category').innerText()).includes(cat.name), 'bulk category shown');
+    for (const t of [`E2E Lib A ${RUN}`, `E2E Lib B ${RUN}`]) await libRow(page, t).locator('input[type=checkbox]').check();
+    await page.getByRole('button', { name: 'Download', exact: true }).first().click();
+    const downloads = [];
+    page.on('download', d => downloads.push(d.suggestedFilename()));
+    await page.getByRole('button', { name: 'MP3', exact: true }).first().click();
+    await until(async () => downloads.length >= 2, 'two downloads', 20000);
+    await page.getByRole('button', { name: 'Auto-Clip Silence' }).click();
+    await page.getByText(/Complete!|Failed/).waitFor({ timeout: 30000 });
+    assert(await page.getByText('Complete!').count(), 'auto-clip job failed');
+    await page.getByRole('button', { name: 'Close' }).click();
+    await page.getByText('Complete!').waitFor({ state: 'detached' });
+    for (const t of [`E2E Lib A ${RUN}`, `E2E Lib B ${RUN}`]) { const c = libRow(page, t).locator('input[type=checkbox]'); if (!(await c.isChecked())) await c.check(); }
+    await page.getByRole('button', { name: 'Create Review Queue' }).click();
+    await page.waitForURL(/\/admin\/reviews\/[0-9a-f-]{36}$/);
+    return `downloads: ${downloads.join(', ')}`;
+  }, page);
+  await step('F-ASSETS-5 View opens the item page; Del removes an item', async () => {
+    await page.goto(`${BASE}/admin/assets`);
+    await titleBox.fill(`E2E Lib B ${RUN}`);
+    await libRow(page, `E2E Lib B ${RUN}`).getByRole('link', { name: 'View' }).click();
+    await waitPath(page, `/admin/assets/${throwB.id}`);
+    await page.goBack();
+    await titleBox.fill(`E2E Lib B ${RUN}`);
+    const { ms } = await timedSave(page, 'delete', (m, p) => m === 'DELETE' && p.startsWith('/assets/'), () => libRow(page, `E2E Lib B ${RUN}`).getByRole('button', { name: 'Del' }).click());
+    await libRow(page, `E2E Lib B ${RUN}`).waitFor({ state: 'detached' });
+    return `deleted in ${ms} ms (no confirm asked)`;
+  }, page);
+  await closePage(page);
+  void throwA;
+  for (const view of ['desktop', 'iphone']) {
+    const dj = await newPage('dj', view);
+    await step(`F-ASSETS-9 ${view}: a DJ gets no Upload link and no Del; a manager does`, async () => {
+      await dj.goto(`${BASE}/admin/assets`);
+      await dj.getByRole('heading', { name: 'Library' }).waitFor();
+      await dj.locator('tbody tr').first().waitFor();
+      assert(!(await dj.getByRole('link', { name: /Upload/ }).count()) && !(await dj.getByRole('button', { name: /Upload/ }).count()), 'DJ sees Upload');
+      assert(!(await dj.getByRole('button', { name: 'Del' }).count()), 'DJ sees Del');
+    }, dj);
+    await closePage(dj);
+  }
+  {
+    const m = await newPage('manager', 'iphone');
+    await step('F-ASSETS-9 iphone: manager sees the Upload link', async () => {
+      await m.goto(`${BASE}/admin/assets`);
+      await m.getByRole('link', { name: /Upload/ }).or(m.getByRole('button', { name: /Upload/ })).first().waitFor();
+    }, m);
+    await closePage(m);
+  }
+});
+
+section('upload', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    await proxyAudio(page, 'manager');
+    const a = makeTone(path.join(TMP, `up-a-${view}.mp3`), 20, 600);
+    const b = makeTone(path.join(TMP, `up-b-${view}.mp3`), 20, 700);
+    // S-10: a 5 MB file (about 5 min at 128 kbit/s)
+    const big = makeTone(path.join(TMP, `up-big-${view}.mp3`), 330, 500, '128k');
+    const input = page.locator('input[type=file]');
+    await step(`F-UPLOAD-1/3 ${view}: pick files (list shows each), drop a file, Remove one, Clear All`, async () => {
+      await page.goto(`${BASE}/admin/assets/upload`);
+      await input.setInputFiles([a, b]);
+      await page.getByText('Files (2)').waitFor();
+      // drop a file on the drop zone
+      const buf = fs.readFileSync(a).toString('base64');
+      const dt = await page.evaluateHandle(async (b64) => {
+        const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        const d = new DataTransfer(); d.items.add(new File([bytes], 'dropped.mp3', { type: 'audio/mpeg' })); return d;
+      }, buf);
+      const zone = page.locator('[class*="border-dashed"]').first();
+      await zone.dispatchEvent('dragover', { dataTransfer: dt });
+      await zone.dispatchEvent('drop', { dataTransfer: dt });
+      await page.getByText('Files (3)').waitFor();
+      await page.getByTitle('Remove').last().click();
+      await page.getByText('Files (2)').waitFor();
+      await page.getByRole('button', { name: 'Clear All' }).click();
+      await page.getByText(/Files \(/).waitFor({ state: 'detached' });
+    }, page);
+    await step(`F-UPLOAD-2/4 + S-10 ${view}: type, category, format, artist, album; Upload All shows progress at once; 5 MB file playable in the library within 10 s`, async () => {
+      const title = `E2E Upload ${view} ${RUN}`;
+      await input.setInputFiles([big]);
+      await page.locator('input[value^="up-big"]').fill(title);
+      await field(page, 'Artist').fill('E2E Upload Artist');
+      await field(page, 'Album').fill('E2E Album');
+      await field(page, 'Type').selectOption('music');
+      const catOpts = await field(page, 'Category').locator('option').evaluateAll(o => o.map(x => x.value).filter(Boolean));
+      if (catOpts.length) await field(page, 'Category').selectOption(catOpts[0]);
+      await field(page, 'Convert To').selectOption({ index: 0 });
+      const size = fs.statSync(big).size;
+      const t0 = Date.now();
+      const respP = page.waitForResponse(r => r.url().includes('/assets/upload') && r.request().method() === 'POST', { timeout: 60000 });
+      await page.getByRole('button', { name: /Upload All/ }).click();
+      await page.getByText(/Uploading 1 of 1/).waitFor({ timeout: LIMIT.progressShown });
+      const progressMs = Date.now() - t0;
+      const resp = await respP;
+      assert(resp.status() < 300, `upload ${resp.status()} ${(await resp.text()).slice(0, 150)}`);
+      const tEnd = Date.now();
+      const created = await resp.json();
+      await page.getByRole('link', { name: 'View Assets' }).waitFor();
+      // playable: listed in the library and its audio loads and plays
+      await page.getByRole('link', { name: 'View Assets' }).click();
+      await waitPath(page, '/admin/assets');
+      await page.getByPlaceholder('Search title...').fill(title);
+      const row = libRow(page, title);
+      await row.waitFor();
+      await row.getByRole('button', { name: 'Play', exact: true }).click();
+      await row.getByRole('button', { name: 'Stop', exact: true }).waitFor({ timeout: LIMIT.uploadPlayable });
+      const playableMs = Date.now() - tEnd;
+      assertFast(playableMs, LIMIT.uploadPlayable, 'upload end to playable');
+      await row.getByRole('button', { name: 'Stop', exact: true }).click();
+      const got = await api('GET', `/assets/${created.id}`, { token: USERS.admin.token });
+      assert(got.artist === 'E2E Upload Artist' && got.album === 'E2E Album', `artist/album not saved: ${got.artist} / ${got.album}`);
+      return `${(size / 1048576).toFixed(1)} MB, progress after ${progressMs} ms, playable ${playableMs} ms after upload end`;
+    }, page);
+    await closePage(page);
+  }
+});
+
+section('asset-detail', async () => {
+  const asset = await uploadFixture(`E2E Detail ${RUN}`);
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    await proxyAudio(page, 'manager');
+    const url = `${BASE}/admin/assets/${asset.id}`;
+    await step(`F-ASSETDETAIL-1 ${view}: metadata shown; vote saves on blur; release date saves`, async () => {
+      await page.goto(url);
+      await page.getByText(`E2E Detail ${RUN}`).first().waitFor();
+      const vote = page.locator('input[type=number]').first();
+      await vote.fill(view === 'desktop' ? '77' : '150');
+      await timedSave(page, 'vote', (m, p) => (m === 'PATCH' || m === 'PUT') && p === `/assets/${asset.id}`, () => vote.blur());
+      const want = view === 'desktop' ? 77 : 100; // 150 is held to the 0-100 range
+      await until(async () => (await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token })).vote === want, `vote ${want} stored`);
+      await timedSave(page, 'release date', (m, p) => (m === 'PATCH' || m === 'PUT') && p === `/assets/${asset.id}`, () => page.locator('input[type=date]').first().fill(view === 'desktop' ? '2024-05-01' : '2023-02-03'));
+      const day = view === 'desktop' ? '2024-05-01' : '2023-02-03';
+      await until(async () => (await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token })).release_date?.startsWith(day), 'release date stored');
+    }, page);
+    await step(`F-ASSETDETAIL-2/3 ${view}: waveform loads; Play/Pause, Stop, speed, seek; Play first/last N s; Save as default`, async () => {
+      await page.getByText('Loading waveform...').waitFor({ state: 'detached', timeout: 10000 });
+      const time = page.getByText(/\d+:\d\d \/ \d+:\d\d/).first();
+      await page.getByRole('button', { name: 'Play', exact: true }).first().click();
+      await page.getByRole('button', { name: 'Pause', exact: true }).first().waitFor();
+      await until(async () => !/^0:00 \//.test((await time.innerText()).trim()), 'play position moving', 5000);
+      await page.getByRole('button', { name: 'Pause', exact: true }).first().click();
+      await page.getByRole('button', { name: 'Stop', exact: true }).first().click();
+      await until(async () => /^0:00 \//.test((await time.innerText()).trim()), 'Stop back to 0:00');
+      const speed = page.getByRole('button', { name: /^1\.5x$|^2x$/ }).first();
+      if (await speed.count()) await speed.click();
+      // seek: click the middle of the waveform (there is no seek slider; Zoom is the slider)
+      const wave = page.locator('xpath=//div[contains(@class,"gap-x-4")][.//button[normalize-space()="Stop"]]/preceding-sibling::div[1]').first();
+      const box = await wave.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await until(async () => !/^0:00 \//.test((await time.innerText()).trim()), 'click on the waveform moved the position');
+      await page.locator('input[type=range]').first().fill('50'); // zoom
+      await page.getByRole('button', { name: /Play First \d+s/ }).click();
+      await page.getByRole('button', { name: /Play Last \d+s/ }).click();
+      await page.getByRole('button', { name: 'Stop', exact: true }).first().click();
+      await timedSave(page, 'save preview default', (m, p) => m !== 'GET', () => page.getByRole('button', { name: 'Save as Default' }).click());
+    }, page);
+    if (view === 'desktop') {
+      await step('F-ASSETDETAIL-4 silence: Detect finds regions; Play / Deselect; Trim Out (confirm) then Undo Trim; Auto-Clip then Restore Original', async () => {
+        await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/detect-silence'), () => page.getByRole('button', { name: 'Detect Silence' }).click());
+        const region = page.locator('button', { hasText: /^#1/ }).first();
+        await region.waitFor({ timeout: 10000 });
+        await region.click();
+        await page.getByRole('button', { name: 'Play Region' }).click();
+        await page.getByRole('button', { name: 'Deselect' }).click();
+        await page.getByRole('button', { name: 'Play Region' }).waitFor({ state: 'detached' });
+        await region.click();
+        await page.getByRole('button', { name: 'Trim Out' }).click();
+        await page.getByText('Confirm Region Trim').waitFor();
+        const r = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/trim'), () => page.getByRole('button', { name: 'Trim', exact: true }).click());
+        assert(r.status < 300, `trim ${r.status}`);
+        await page.getByRole('button', { name: 'Undo Trim' }).click();
+        await page.getByRole('button', { name: 'Undo Trim' }).waitFor({ state: 'detached', timeout: 10000 });
+        await page.getByRole('button', { name: 'Detect Silence' }).click(); // auto-clip is offered after a detection
+        await page.getByRole('button', { name: 'Auto-Clip Start & End' }).click();
+        await page.getByText('Confirm Auto-Clip').waitFor();
+        await page.getByRole('button', { name: 'Trim', exact: true }).click();
+        await page.getByRole('button', { name: 'Save', exact: true }).first().waitFor({ timeout: 15000 });
+        await page.getByRole('button', { name: 'Save', exact: true }).first().click();
+        await page.getByText('Trim saved.').waitFor();
+        const after = await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token });
+        assert(after.duration < 14, `auto-clip left ${after.duration} s of a 16 s file with 6 s of silence`);
+        await page.getByRole('button', { name: 'Restore Original' }).click();
+        await until(async () => (await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token })).duration > 15, 'original restored');
+        return `auto-clip → ${after.duration.toFixed(1)} s, restored`;
+      }, page);
+      await step('F-ASSETDETAIL-5 enhance panel: preset, Preview, Apply, Undo Enhancement; full editor link', async () => {
+        await page.getByRole('button', { name: 'Broadcast Polish' }).first().click();
+        const pv = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/enhance-preview'), () => page.getByRole('button', { name: /Preview/ }).first().click());
+        assert(pv.status < 300, `preview ${pv.status}`);
+        const ap = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/enhance'), () => page.getByRole('button', { name: 'Apply', exact: true }).click());
+        assert(ap.status < 300, `apply ${ap.status}`);
+        await page.getByRole('button', { name: 'Undo Enhancement' }).click();
+        await page.getByRole('button', { name: 'Undo Enhancement' }).waitFor({ state: 'detached', timeout: 15000 });
+        await page.getByRole('link', { name: /Full Editor/ }).click();
+        await waitPath(page, `/admin/audio-enhance/${asset.id}`);
+        await page.goBack();
+      }, page);
+      await step('F-ASSETDETAIL-6 audience detection: Detect Questions runs and lists segments (or says none)', async () => {
+        const r = await timedResponse(page, (m, p) => m === 'POST' && /audience|question/.test(p), () => page.getByRole('button', { name: 'Detect Questions' }).click());
+        assert(r.status < 300, `detect ${r.status}`);
+        await page.getByRole('button', { name: 'Detect Questions' }).waitFor();
+      }, page);
+    }
+    await step(`F-ASSETDETAIL-7 ${view}: a comment posts and shows in the history`, async () => {
+      const text = `E2E comment ${view} ${RUN}`;
+      await page.getByPlaceholder('Write a comment...').fill(text);
+      await timedSave(page, 'comment', (m, p) => m === 'POST', () => page.getByRole('button', { name: 'Post Comment' }).click());
+      await page.getByText(text).first().waitFor();
+    }, page);
+    await step(`F-ASSETDETAIL-8 ${view}: Back to Assets`, async () => {
+      await page.getByRole('link', { name: /Back to Assets/ }).click();
+      await waitPath(page, '/admin/assets');
+    }, page);
+    await closePage(page);
+  }
+});
+
+section('enhance', async () => {
+  const asset = await uploadFixture(`E2E Enhance ${RUN}`);
+  const page = await newPage('manager');
+  await proxyAudio(page, 'manager');
+  await step('F-ENHANCE-1 presets and Custom Filters: toggles show their sliders', async () => {
+    await page.goto(`${BASE}/admin/audio-enhance/${asset.id}`);
+    await page.getByRole('button', { name: 'Custom Filters' }).first().click();
+    const sec = page.locator('div.border.rounded-lg.p-3', { hasText: 'High-Pass Filter' }).last();
+    await sec.locator('label.relative').click();
+    await sec.locator('input[type=range]').first().waitFor();
+    await sec.locator('label.relative').click();
+    await sec.locator('input[type=range]').waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: 'Warm Up' }).first().click();
+    await page.getByText('Preset: Warm Up').waitFor();
+  }, page);
+  await step('F-ENHANCE-2 Play Original / preview enhanced', async () => {
+    await page.getByRole('button', { name: 'Play Original' }).click();
+    const pv = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/enhance-preview'), () => page.getByRole('button', { name: 'Preview Enhanced 15s' }).click());
+    assert(pv.status < 300, `preview ${pv.status}`);
+  }, page);
+  await step('F-ENHANCE-3 Apply Enhancement, Undo Enhancement, AI Auto-Enhance, Save; back link', async () => {
+    const ap = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/enhance'), () => page.getByRole('button', { name: 'Apply Enhancement' }).click());
+    assert(ap.status < 300, `apply ${ap.status}`);
+    await page.getByRole('button', { name: 'Undo Enhancement' }).click();
+    await page.getByRole('button', { name: 'Undo Enhancement' }).waitFor({ state: 'detached', timeout: 15000 });
+    const ai = await timedResponse(page, (m, p) => m === 'POST' && /auto-enhance/.test(p), () => page.getByRole('button', { name: /AI Auto-Enhance/ }).click());
+    assert(ai.status < 300, `auto-enhance ${ai.status} ${(await ai.resp.text()).slice(0, 120)}`);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByText('Enhancement saved.').waitFor();
+    await page.getByRole('link', { name: /Back to Asset/ }).click();
+    await waitPath(page, `/admin/assets/${asset.id}`);
+  }, page);
+  await closePage(page);
+});
+
+section('reviews', async () => {
+  const items = [];
+  for (const x of ['1', '2', '3', '4']) items.push(await uploadFixture(`E2E Review Item ${x} ${RUN}`));
+  const q = await api('POST', '/reviews/queues', { token: USERS.admin.token, body: { name: `E2E Flow ${RUN}`, asset_ids: items.map(a => a.id) } });
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    await proxyAudio(page, 'manager');
+    if (view === 'desktop') {
+      await step('F-REVIEWS-1 queue list links to the flow', async () => {
+        await page.goto(`${BASE}/admin/reviews`);
+        await page.getByRole('link', { name: new RegExp(`E2E Flow ${RUN}`) }).click();
+        await waitPath(page, `/admin/reviews/${q.id}`);
+      }, page);
+    } else {
+      await page.goto(`${BASE}/admin/reviews/${q.id}`);
+    }
+    const status = async () => (await page.locator('span.rounded-full', { hasText: /^(pending|approved|rejected|flagged|skipped)$/ }).first().innerText()).trim();
+    const counter = page.getByText(/Reviewing \d+ of \d+/);
+    await step(`F-REVIEWS-3 ${view}: Next / Previous and the item list move between items`, async () => {
+      await counter.waitFor();
+      assert(await page.getByRole('button', { name: /Previous/ }).first().isDisabled(), 'Previous allowed on the first item');
+      await page.getByRole('button', { name: /Next/ }).first().click();
+      await page.getByText('Reviewing 2 of 4').waitFor();
+      await page.getByRole('button', { name: /Previous/ }).first().click();
+      await page.getByText('Reviewing 1 of 4').waitFor();
+      await page.locator('button', { hasText: `E2E Review Item 3 ${RUN}` }).click();
+      await page.getByText('Reviewing 3 of 4').waitFor();
+      await page.locator('button', { hasText: `E2E Review Item 1 ${RUN}` }).click();
+      await page.getByText('Reviewing 1 of 4').waitFor();
+    }, page);
+    if (view === 'desktop') {
+      await step('V1-140 keyboard A/R/F/S do nothing while typing in the notes; work outside it', async () => {
+        const notes = page.getByPlaceholder('Add notes about this asset...');
+        await notes.click();
+        await page.keyboard.type('a rafs');
+        await page.waitForTimeout(400);
+        assert(await counter.innerText() === 'Reviewing 1 of 4', `typing moved the flow: ${await counter.innerText()}`);
+        assert(await notes.inputValue() === 'a rafs', 'keys not typed into the notes');
+        await notes.fill('E2E note by keyboard');
+        await page.locator('h1, h2').first().click();
+        const { ms } = await timedSave(page, 'A key', (m, p) => m !== 'GET' && p.includes('/reviews'), () => page.keyboard.press('a'));
+        await page.getByText('Reviewing 2 of 4').waitFor();
+        await timedSave(page, 'S key', (m, p) => m !== 'GET' && p.includes('/reviews'), () => page.keyboard.press('s'));
+        await page.getByText('Reviewing 3 of 4').waitFor();
+        const it = await api('GET', `/reviews/queues/${q.id}/items`, { token: USERS.admin.token }).catch(() => null);
+        const list = it?.items || it || [];
+        const first = Array.isArray(list) ? list.find(i => i.asset_id === items[0].id) : null;
+        if (first) assert(first.status === 'approved' && (first.notes || '').includes('E2E note by keyboard'), `item 1 ${first.status} notes "${first.notes}"`);
+        return `A saved in ${ms} ms`;
+      }, page);
+    }
+    await step(`F-REVIEWS-2 ${view}: Approve / Reject / Flag / Skip buttons with notes save and advance`, async () => {
+      for (const [btn, st] of [['Reject (R)', 'rejected'], ['Flag (F)', 'flagged']]) {
+        await page.locator('button', { hasText: `E2E Review Item ${btn.startsWith('R') ? 3 : 4} ${RUN}` }).click();
+        await page.getByPlaceholder('Add notes about this asset...').fill(`E2E ${st} note`);
+        const n = btn.startsWith('R') ? 3 : 4;
+        await timedSave(page, btn, (m, p) => m !== 'GET' && p.includes('/reviews'), () => page.getByRole('button', { name: btn }).click());
+        await until(async () => (await page.locator('button', { hasText: `E2E Review Item ${n} ${RUN}` }).innerText()).includes(st), `item ${n} listed as ${st}`);
+        if (n === 3) await until(async () => !/Reviewing 3 of/.test(await counter.innerText()), 'Reject advances');
+      }
+      await page.locator('button', { hasText: `E2E Review Item 2 ${RUN}` }).click();
+      await timedSave(page, 'Skip', (m, p) => m !== 'GET' && p.includes('/reviews'), () => page.getByRole('button', { name: 'Skip (S)' }).click());
+      await page.locator('button', { hasText: `E2E Review Item 1 ${RUN}` }).click();
+      await timedSave(page, 'Approve', (m, p) => m !== 'GET' && p.includes('/reviews'), () => page.getByRole('button', { name: 'Approve (A)' }).click());
+      await page.locator('button', { hasText: `E2E Review Item 3 ${RUN}` }).click();
+      assert(await status() === 'rejected', `item 3 shows ${await status()}`);
+    }, page);
+    await step(`F-REVIEWS-4 ${view}: change the tempo/category in the flow; waveform, silence, enhance, comments panels present`, async () => {
+      const sel = page.locator('select', { has: page.locator('option', { hasText: 'Uncategorized' }) }).first();
+      const opts = await sel.locator('option').evaluateAll(o => o.map(x => x.value).filter(Boolean));
+      if (opts.length) {
+        await timedSave(page, 'category in flow', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => sel.selectOption(opts[0]));
+      }
+      for (const t of ['Detect Silence', 'Detect Questions', 'Post Comment']) await page.getByRole('button', { name: t }).first().waitFor();
+      await page.getByText('Loading waveform...').waitFor({ state: 'detached', timeout: 10000 });
+      return opts.length ? `set ${opts[0]}` : 'no categories to pick';
+    }, page);
+    await closePage(page);
+  }
+});
+
 // ── S-5 page load speed, every page, desktop and iPhone ─────────────────────
 section('load', async () => {
   for (const view of ['desktop', 'iphone']) {
