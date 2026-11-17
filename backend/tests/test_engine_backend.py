@@ -727,6 +727,26 @@ async def test_pause_policy_resumes_the_shiur_on_the_engine(client, db_session, 
 
 
 @pytest.mark.asyncio
+async def test_pause_drops_the_preloaded_song_even_after_a_restart(client, db_session, eng):
+    """V1-11 (Jerusalem 2026-11-17 14:00Z): the backend restarted a minute before the hour,
+    so it no longer knew which song the engine had pre-loaded and never swapped it for the
+    resume. The song aired and the shiur came back 6 minutes late. Making the resume entry
+    must always make the engine drop its pre-loaded track."""
+    station, _, engine, _ = eng
+    st, shiur, _ = await _shiur_on_air(client, db_session, station, "pause")
+    state = playout_engine.get_state(station.id)
+    state.cued_entry_id = None  # what a restart leaves
+    state.last_auto_flush = 0.0
+    await playout_engine.tick(db_session, st)
+    pending = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.status == "pending")
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    assert [e for e in pending if e.asset_id == shiur.asset_id and resume_offset(e) > 500]
+    assert "/flush" in engine.paths()
+
+
+@pytest.mark.asyncio
 async def test_wait_policy_holds_the_time_check_until_the_shiur_ends(client, db_session, eng):
     """Reproduction: policy wait, shiur 10 of 60 min in; the tick 30 s before hh:00 sends /timed."""
     station, _, engine, _ = eng

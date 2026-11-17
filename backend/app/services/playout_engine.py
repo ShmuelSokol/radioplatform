@@ -866,6 +866,13 @@ async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, n
         "Station %s: %s pauses at %.0f s for the timed group at %s; it resumes after",
         station_id, current.asset_id, resume_at, at,
     )
+    # The engine has already pre-loaded the next song for the music lane. Drop it so it
+    # asks again and gets the resume. Done here unconditionally: the automatic swap only
+    # runs while we remember what it pre-loaded, and a backend restart a minute before
+    # the hour forgot that, so a song aired and the shiur came back 6 minutes late
+    # (Jerusalem, 2026-11-17 14:00Z).
+    if await engine_flush(station_id):
+        state.last_auto_flush = time.monotonic()
 
 
 # The engine downloads a whole file before it can play it. Its pre-loaded track is kept,

@@ -243,7 +243,7 @@ def send_started(m) =
   if lane == "timed" and entry != "" and list.mem(entry, timed_dropped()) then
     log.important("timed: entry #{entry} was dropped by the backend; skipping it")
     timed_queue.skip()
-  elsif lane == "main" and main_interrupted() then
+  elsif lane == "main" and main_interrupted() and entry == last_main_entry() then
     # Back from a timed item: leave the interrupted song and start the next one. The
     # interrupted song is not reported again (it already ended for the backend).
     main_interrupted := false
@@ -251,6 +251,14 @@ def send_started(m) =
     main.skip()
     thread.run(delay=0.15, {main_gain := 1.})
   else
+    if lane == "main" and main_interrupted() then
+      # The music lane came back on a new track, not the interrupted song (after a long
+      # block it can start afresh). That track is the one meant to air next, often the
+      # paused shiur resuming: skipping it played a song instead (Jerusalem, 2026-11-17
+      # 14:00Z, the shiur came back for half a second).
+      main_interrupted := false
+      main_gain := 1.
+    end
     if lane == "main" then last_main_entry := entry end
     report_to_backend(entry, lane, m["title"])
     if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end
