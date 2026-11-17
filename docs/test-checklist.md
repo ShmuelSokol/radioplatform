@@ -582,10 +582,10 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-USERS-11 `PATCH /users/me/preferences` [get_current_user] update my preferences | modes: n.a. | covered: tests/test_admin_crud.py::test_users_round_trip_preferences_and_hosts
 
 ### weather_readouts.py (prefix `/weather-readouts`)
-- [ ] B-WEATHERREA-1 `GET /weather-readouts` [require_staff] list readouts | modes: both | NOT COVERED
+- [x] B-WEATHERREA-1 `GET /weather-readouts` [require_staff] list readouts | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_readout_list_get_and_template_preview
 - [ ] B-WEATHERREA-2 `POST /weather-readouts` [require_manager] create readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
-- [ ] B-WEATHERREA-3 `GET /weather-readouts/template-preview` [require_staff] template preview | modes: both | NOT COVERED
-- [ ] B-WEATHERREA-4 `GET /weather-readouts/{readout_id}` [require_staff] get readout | modes: both | NOT COVERED
+- [x] B-WEATHERREA-3 `GET /weather-readouts/template-preview` [require_staff] template preview | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_readout_list_get_and_template_preview, ::test_readout_pages_say_weather_is_not_set_up
+- [x] B-WEATHERREA-4 `GET /weather-readouts/{readout_id}` [require_staff] get readout | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_readout_list_get_and_template_preview
 - [ ] B-WEATHERREA-5 `PATCH /weather-readouts/{readout_id}` [require_manager] update readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
 - [ ] B-WEATHERREA-6 `POST /weather-readouts/{readout_id}/regenerate` [require_manager] regenerate readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
 - [ ] B-WEATHERREA-7 `POST /weather-readouts/{readout_id}/queue` [require_manager] queue readout | modes: both | covered: tests/test_station_write_permissions.py::test_queuing_a_weather_readout_needs_the_station (BUG fixed: no station check)
@@ -658,8 +658,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-45 Dead air timer reset when something plays; not counted during blackout | modes: browser | covered: tests/test_scheduler_jobs.py::test_dead_air_timer_resets_and_ignores_blackouts
 - [ ] B-JOB-46 Engine station: no backend dead-air recovery (engine emergency playlist instead) | modes: engine | NOT COVERED
 - [ ] B-JOB-47 Daily: holiday coverage extended when < 365 days ahead or no window in next 7 days (`_maybe_extend_holidays`) | modes: both | covered: tests/test_scheduler_jobs.py::test_daily_holiday_extension_is_per_station (per station, fixed)
-- [ ] B-JOB-48 Daily weather readout generated at station local generate_time (default 06:00) when weather_readout.enabled | modes: both | NOT COVERED
-- [ ] B-JOB-49 Weather readout auto-queued at queue_time when weather_readout.auto_queue | modes: both | NOT COVERED
+- [x] B-JOB-48 Daily weather readout generated at station local generate_time (default 06:00) when weather_readout.enabled | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_daily_readout_made_at_the_stations_generate_time, ::test_failed_readout_is_tried_again_the_same_day (BUG xfail: a failed fetch at generate_time still marks the day as done, so no readout that day)
+- [x] B-JOB-49 Weather readout auto-queued at queue_time when weather_readout.auto_queue | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_recorded_readout_queued_at_its_time_when_auto_queue, ::test_tomorrows_readout_waits_for_tomorrow (BUG xfail: readout_date is not checked, so tomorrow's readout is queued tonight)
 - [x] B-JOB-50 Legacy Liquidsoap health check / push / skip only when LIQUIDSOAP_ENABLED (must stay off) | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_legacy_liquidsoap_is_off_by_default, ::test_legacy_liquidsoap_when_switched_on
 
 ### 2b. Queue replenish (`services/queue_replenish_service.py`)
@@ -674,7 +674,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-59 Each station announces its own local hour (station timezone); wrong-hour clips removed after timezone change | modes: both | covered: tests/test_time_announcement.py (text only); tests/test_restart_holidays_timezones.py::test_wrong_hour_time_checks_are_replaced
 - [ ] B-JOB-60 Weather and time clips realigned to the station's weather_region | modes: both | covered: tests/test_weather_regions.py, tests/test_time_clip_regions.py
 - [ ] B-JOB-61 Uploaded time clip used for the hour; ElevenLabs only fallback (default region only); missing both -> no entry, no crash | modes: both | covered: tests/test_weather_spots.py
-- [ ] B-JOB-62 ElevenLabs failure pauses generation (backoff) then resumes | modes: both | NOT COVERED
+- [x] B-JOB-62 ElevenLabs failure pauses generation (backoff) then resumes | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_generation_resumes_after_the_pause, tests/test_weather_fetch_cache.py::test_failed_generation_pauses_instead_of_retrying_every_slot
 - [ ] B-JOB-63 Weather fetch cached per 15-min slot; OpenWeatherMap 429 handled | modes: both | covered: tests/test_weather_fetch_cache.py
 - [ ] B-JOB-64 Program blocks replace built-in hourly time/weather once a station has any; blocks_keep_hourly keeps both (hour first, block after) | modes: both | covered: tests/test_blocks_keep_hourly.py
 - [ ] B-JOB-65 Ad slots at ad_slot_minutes (default 15/30/45) soft-timed; legacy test sponsor placeholder off unless ad_slot_legacy_spot | modes: both | covered: tests/test_spot_schedules.py
@@ -756,7 +756,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SET-14 `live_show_id` (set by live show start; cleared on end/hard stop/stale) | modes: both | covered: tests/test_live_show_lifecycle.py
 - [ ] B-SET-15 `loop_asset_id` (set by /queue/loop) | modes: both | covered: tests/test_operator_actions.py
 - [ ] B-SET-16 `playlist_generation` {enabled, hours, artist_distance, min_vote, cursor} | modes: both | covered: tests/test_playlist_generation.py
-- [ ] B-SET-17 `weather_readout` {enabled, generate_time, auto_queue, queue_time, template, city_name, brand_name} | modes: both | NOT COVERED
+- [x] B-SET-17 `weather_readout` {enabled, generate_time, auto_queue, queue_time, template, city_name, brand_name} | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_daily_readout_made_at_the_stations_generate_time, ::test_recorded_readout_queued_at_its_time_when_auto_queue, ::test_readout_list_get_and_template_preview
 - [ ] B-SET-18 `hourly_station_id` (scheduling._check_automation_insertions, legacy path) - verify still used or dead | modes: both | covered: tests/test_station_settings.py::test_hourly_station_id_legacy_insertion (legacy SchedulingService path only; queue engine never reads it)
 - [ ] B-SET-19 Station.timezone drives announced hour, dayparts, blackouts, spot clock | modes: both | covered: tests/test_spot_schedules.py (partial)
 - [ ] B-SET-20 Station lat/lon drive sunrise/sunset blocks and Shabbos generation | modes: both | covered: tests/test_schedule_lookahead.py (sun blocks)
@@ -770,7 +770,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [x] B-SET-26 LIQUIDSOAP_ENABLED (legacy telnet) must stay off; when on, skip/push calls made | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_legacy_liquidsoap_is_off_by_default, ::test_legacy_liquidsoap_when_switched_on
 - [ ] B-SET-27 SILENCE_DETECTION_SECONDS default 30 | modes: browser | covered: tests/test_station_settings.py::test_dead_air_alert_follows_silence_threshold
 - [ ] B-SET-28 ELEVENLABS_API_KEY/VOICE_ID unset -> no TTS fallback, uploaded clips only | modes: both | covered: tests/test_weather_spots.py
-- [ ] B-SET-29 OPENWEATHERMAP_API_KEY unset -> weather disabled gracefully | modes: both | NOT COVERED
+- [x] B-SET-29 OPENWEATHERMAP_API_KEY unset -> weather disabled gracefully | modes: both | covered: tests/test_weather_without_key_and_readouts.py::test_no_weather_key_never_calls_the_api, ::test_no_weather_key_does_not_stop_time_announcements, ::test_readout_pages_say_weather_is_not_set_up (FIXED: with no key the API was still called with an empty key; the failed weather attempt paused all announcement generation, so generated time checks stopped; readout pages gave a bare server error, now 503 with the reason)
 - [x] B-SET-30 SUPABASE_URL/SERVICE_KEY unset -> uploads/local storage path; hourly announcements skipped | modes: both | covered: tests/test_station_changes_on_air.py::test_no_storage_skips_hourly_time_checks, ::test_no_storage_keeps_uploads_on_local_disk
 - [ ] B-SET-31 ICECAST_* (icecast_enabled) -> /icecast start/stop usable | modes: n.a. | NOT COVERED
 - [ ] B-SET-32 STRIPE_* (stripe_enabled) -> checkout/webhook enabled else refused | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_off_when_stripe_not_configured, tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart

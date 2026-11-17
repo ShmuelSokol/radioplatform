@@ -18,6 +18,10 @@ _cache: dict[tuple, tuple[float, dict]] = {}
 _failed: dict[tuple, tuple[float, Exception]] = {}
 
 
+class WeatherNotConfiguredError(RuntimeError):
+    """OPENWEATHERMAP_API_KEY is not set: there is no weather to fetch."""
+
+
 def clear_weather_cache() -> None:
     _cache.clear()
     _failed.clear()
@@ -49,6 +53,9 @@ async def get_current_weather(
     Cached for CACHE_SECONDS per location. After a failure the same error is
     raised again without calling the API until the back-off has passed.
     """
+    if not settings.weather_enabled:
+        # No key: calling the API anyway only earned a 401 and an hour's back-off
+        raise WeatherNotConfiguredError("Weather is not set up (OPENWEATHERMAP_API_KEY is empty)")
     key = (round(lat, 3), round(lon, 3), timezone_name)
     now = time.monotonic()
     hit = _cache.get(key)
