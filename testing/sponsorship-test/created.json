@@ -8,10 +8,10 @@
    "n": 1,
    "business": "Authentic Kosher Chinese",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "17605c31-67a6-4e64-909c-6542e8c16dfa",
-   "asset_title": "TEST SPONSOR 01 - Authentic Kosher Chinese (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 34.85,
+   "asset_id": "f334478f-f869-4886-a41f-b9b1aae0d216",
+   "asset_title": "TEST SPONSOR 01 - Authentic Kosher Chinese",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 29.7,
    "sponsor_id": "517f6fe5-21ef-4796-a1e7-3ec4ad3cdbb9",
    "schedule_id": "407fb243-2e15-4e6f-aa5b-4f9409400be8",
    "contract": {
@@ -25,16 +25,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "ends TODAY: nothing after today"
-   }
+   },
+   "standin_asset_id": "17605c31-67a6-4e64-909c-6542e8c16dfa"
   },
   {
    "n": 2,
    "business": "Glatt Bite",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "31e1fd62-cc98-468d-b530-7a8cbf41a81b",
-   "asset_title": "TEST SPONSOR 02 - Glatt Bite (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 27.53,
+   "asset_id": "4c972650-1b71-4d41-aee5-bdd4140095ba",
+   "asset_title": "TEST SPONSOR 02 - Glatt Bite",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.75,
    "sponsor_id": "6b4bff8c-2ca4-412d-afed-b4767397211f",
    "schedule_id": "dda8d963-dede-433a-a374-17cf32fac212",
    "contract": {
@@ -48,16 +49,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "ends TOMORROW: nothing from 11-19"
-   }
+   },
+   "standin_asset_id": "31e1fd62-cc98-468d-b530-7a8cbf41a81b"
   },
   {
    "n": 3,
    "business": "Bun Burger Kitchen",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "2805a444-cb6c-4b09-b01d-aeb24d2227b7",
-   "asset_title": "TEST SPONSOR 03 - Bun Burger Kitchen (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 34.29,
+   "asset_id": "0b220a8d-a58b-4b4b-81c2-ecd64e1390c0",
+   "asset_title": "TEST SPONSOR 03 - Bun Burger Kitchen",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 28.18,
    "sponsor_id": "38d25fdd-1e1c-4f9a-82e8-32489bf1e655",
    "schedule_id": "5560d8dd-9df1-4cc2-bce1-48fae76078e9",
    "contract": {
@@ -71,16 +73,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "ends tomorrow, 3 per afternoon cap"
-   }
+   },
+   "standin_asset_id": "2805a444-cb6c-4b09-b01d-aeb24d2227b7"
   },
   {
    "n": 4,
    "business": "Estreia",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "8536ff5a-1953-4967-b39a-5281b7e34000",
-   "asset_title": "TEST SPONSOR 04 - Estreia (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 32.11,
+   "asset_id": "b2e97ed9-f8e3-4132-909f-c7ce508f2d8c",
+   "asset_title": "TEST SPONSOR 04 - Estreia",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 26.7,
    "sponsor_id": "156d0e00-9c33-42e4-a0db-d96b498efc35",
    "schedule_id": "c92575d6-2e95-48b2-915d-55a3978677db",
    "contract": {
@@ -94,16 +97,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "starts in 2 days: nothing before 11-19"
-   }
+   },
+   "standin_asset_id": "8536ff5a-1953-4967-b39a-5281b7e34000"
   },
   {
    "n": 5,
    "business": "Kepshuto",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "6266733b-b39a-4f42-b9f4-2235b8cfd6c1",
-   "asset_title": "TEST SPONSOR 05 - Kepshuto (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 32.22,
+   "asset_id": "370b1271-9d3f-4e78-88bf-d20367e50b66",
+   "asset_title": "TEST SPONSOR 05 - Kepshuto",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 26.14,
    "sponsor_id": "90060858-16f0-4263-ae19-b5027646420b",
    "schedule_id": "422bdd39-a82d-415b-be7b-f251ff24ff94",
    "contract": {
@@ -117,16 +121,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "runs through Shabbos: nothing in the blackout"
-   }
+   },
+   "standin_asset_id": "6266733b-b39a-4f42-b9f4-2235b8cfd6c1"
   },
   {
    "n": 6,
    "business": "Taquito",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "502a93a5-5789-4062-bef2-47f3cd0c24b1",
-   "asset_title": "TEST SPONSOR 06 - Taquito (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 33.13,
+   "asset_id": "4b535e7c-caf3-4bd5-8cb4-8bfe8d472da3",
+   "asset_title": "TEST SPONSOR 06 - Taquito",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 27.46,
    "sponsor_id": "2de61d38-bbde-4166-a493-2501791d0555",
    "schedule_id": "8cf5c39d-6a8c-494c-9c43-70682a2cb6fa",
    "contract": {
@@ -140,16 +145,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "Mon-Thu only"
-   }
+   },
+   "standin_asset_id": "502a93a5-5789-4062-bef2-47f3cd0c24b1"
   },
   {
    "n": 7,
    "business": "Pita Hut",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "963449e8-8e7a-41bf-b410-ed2de5df29a8",
-   "asset_title": "TEST SPONSOR 07 - Pita Hut (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 30.43,
+   "asset_id": "3f01b103-5e65-4027-8cd0-ad40cffd7e44",
+   "asset_title": "TEST SPONSOR 07 - Pita Hut",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 25.54,
    "sponsor_id": "3017af6c-3d13-427b-b83e-d55b6da0b81e",
    "schedule_id": "949c6d92-fc4c-4dd5-b9b9-661ecf3e155c",
    "contract": {
@@ -163,16 +169,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "Sunday only"
-   }
+   },
+   "standin_asset_id": "963449e8-8e7a-41bf-b410-ed2de5df29a8"
   },
   {
    "n": 8,
    "business": "Southside Smokehouse",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "06e729d1-8731-40a7-8957-bfe1f84bf589",
-   "asset_title": "TEST SPONSOR 08 - Southside Smokehouse (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 33.41,
+   "asset_id": "783b6892-34f9-4d2c-92f6-d918893ed24e",
+   "asset_title": "TEST SPONSOR 08 - Southside Smokehouse",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 28.34,
    "sponsor_id": "709cef81-9ac3-4444-af81-ba9f35a32a55",
    "schedule_id": "abbaf7a3-c8c2-4f4f-b930-cf459beb3660",
    "contract": {
@@ -186,16 +193,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "overnight only (midnight-6 AM)"
-   }
+   },
+   "standin_asset_id": "06e729d1-8731-40a7-8957-bfe1f84bf589"
   },
   {
    "n": 9,
    "business": "Cafotteria Modern Eatery",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "6468bb18-a312-4d94-a66b-09d1f39909e4",
-   "asset_title": "TEST SPONSOR 09 - Cafotteria Modern Eatery (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 33.54,
+   "asset_id": "3459d38d-0bbd-455f-a924-930abab348d4",
+   "asset_title": "TEST SPONSOR 09 - Cafotteria Modern Eatery",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 29.99,
    "sponsor_id": "321791c0-bca5-4322-81b6-5a6cb7a66126",
    "schedule_id": "2f7fdb09-c53a-49cd-8f53-482c3dbaf81d",
    "contract": {
@@ -209,16 +217,17 @@
     "fixed_times": "08:15,17:45",
     "timing_mode": null,
     "checks": "exact times 8:15 and 5:45 PM"
-   }
+   },
+   "standin_asset_id": "6468bb18-a312-4d94-a66b-09d1f39909e4"
   },
   {
    "n": 10,
    "business": "Pizzaleh",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "990f4c17-7022-420b-91fb-0aff5ff2b1d2",
-   "asset_title": "TEST SPONSOR 10 - Pizzaleh (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 31.51,
+   "asset_id": "503554c6-5bc5-45a3-a70c-ccf8cca32510",
+   "asset_title": "TEST SPONSOR 10 - Pizzaleh",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 25.66,
    "sponsor_id": "57827f2d-0283-4a06-8cfb-17147d708eb3",
    "schedule_id": "a4c871dc-9318-42db-a632-ad69b3c7beed",
    "contract": {
@@ -232,16 +241,17 @@
     "fixed_times": "14:00",
     "timing_mode": "hard",
     "checks": "hard on the hour, must not break the 2 PM time check"
-   }
+   },
+   "standin_asset_id": "990f4c17-7022-420b-91fb-0aff5ff2b1d2"
   },
   {
    "n": 11,
    "business": "Pizza Plus",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "bbb18546-9660-4753-9051-7514d28b83e5",
-   "asset_title": "TEST SPONSOR 11 - Pizza Plus (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 29.36,
+   "asset_id": "bb199208-89a5-4369-96e3-6c50d5fddb42",
+   "asset_title": "TEST SPONSOR 11 - Pizza Plus",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 24.59,
    "sponsor_id": "938df3ed-94b8-4e6b-857b-7e8e54c5abb5",
    "schedule_id": "f155de2b-575c-4aa3-a92b-1725b4fa8fe9",
    "contract": {
@@ -255,16 +265,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "open-ended; will be CANCELLED (is_active=false) during the test"
-   }
+   },
+   "standin_asset_id": "bbb18546-9660-4753-9051-7514d28b83e5"
   },
   {
    "n": 12,
    "business": "Goldstar Caterers",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "ad1174e0-dab9-45f7-9db2-e37f65cb432b",
-   "asset_title": "TEST SPONSOR 12 - Goldstar Caterers (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 31.72,
+   "asset_id": "35b76db2-90d3-4b77-b1ec-48ddf289d60b",
+   "asset_title": "TEST SPONSOR 12 - Goldstar Caterers",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 27.91,
    "sponsor_id": "f19d91a4-f3ff-497a-a2f4-72eb2078bad4",
    "schedule_id": "40f0a005-4935-4fbe-b423-16a0706fbe06",
    "contract": {
@@ -278,16 +289,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "heavy: 4 per evening"
-   }
+   },
+   "standin_asset_id": "ad1174e0-dab9-45f7-9db2-e37f65cb432b"
   },
   {
    "n": 13,
    "business": "Gourmet Glatt North",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "0e85c55b-5a8b-4145-9219-f556148d0e56",
-   "asset_title": "TEST SPONSOR 13 - Gourmet Glatt North (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 36.54,
+   "asset_id": "67350f9c-74a6-4ece-b730-38a58c2553e2",
+   "asset_title": "TEST SPONSOR 13 - Gourmet Glatt North",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 33.1,
    "sponsor_id": "2fd4a3c8-1562-43c0-8e5f-9850ece30971",
    "schedule_id": "ce17ac01-1b43-4339-acc2-1a5ea76a7dd2",
    "contract": {
@@ -301,16 +313,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "will be EDITED to end 11-18 during the test"
-   }
+   },
+   "standin_asset_id": "0e85c55b-5a8b-4145-9219-f556148d0e56"
   },
   {
    "n": 14,
    "business": "Evergreen Kosher Market",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "9290e6b5-5e94-4725-994b-96e2db804794",
-   "asset_title": "TEST SPONSOR 14 - Evergreen Kosher Market (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 31.41,
+   "asset_id": "3fd00f1d-6179-4235-ab17-85d3ea666325",
+   "asset_title": "TEST SPONSOR 14 - Evergreen Kosher Market",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 27.62,
    "sponsor_id": "cac7acc3-4e93-41c4-848c-87005bdde7c1",
    "schedule_id": "acbeb0d6-9e1b-4027-81b5-27499742ed93",
    "contract": {
@@ -324,16 +337,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "will be DELETED during the test"
-   }
+   },
+   "standin_asset_id": "9290e6b5-5e94-4725-994b-96e2db804794"
   },
   {
    "n": 15,
    "business": "Gelbstein's Bakery and Cafe",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "67d435f1-ac07-45c8-933c-da290f2d3e1e",
-   "asset_title": "TEST SPONSOR 15 - Gelbstein's Bakery and Cafe (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 33.55,
+   "asset_id": "7cc0d6d8-31b9-4aea-95dd-3303511e8869",
+   "asset_title": "TEST SPONSOR 15 - Gelbstein's Bakery and Cafe",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 28.62,
    "sponsor_id": "50da4110-5ce6-4cb3-8cf1-6bd9a58212ec",
    "schedule_id": "80620f49-78bd-4104-898c-847560d796a5",
    "contract": {
@@ -347,16 +361,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "Tue/Wed/Thu only"
-   }
+   },
+   "standin_asset_id": "67d435f1-ac07-45c8-933c-da290f2d3e1e"
   },
   {
    "n": 16,
    "business": "Bagel Nosh",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "ca1eee67-01d7-4f6d-b009-b0cd09c2e67b",
-   "asset_title": "TEST SPONSOR 16 - Bagel Nosh (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 28.87,
+   "asset_id": "1b21e5bc-0836-47c3-bc93-cdeee00b001b",
+   "asset_title": "TEST SPONSOR 16 - Bagel Nosh",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 21.19,
    "sponsor_id": "e4632e14-9339-48de-b5df-447fb0b67b50",
    "schedule_id": "9f033a31-0e58-4a87-8b52-4065e2294227",
    "contract": {
@@ -370,16 +385,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "overbooked: 6 per daypart, expect 'unplaced' not double-booking"
-   }
+   },
+   "standin_asset_id": "ca1eee67-01d7-4f6d-b009-b0cd09c2e67b"
   },
   {
    "n": 17,
    "business": "Lakewood Gingerbread House",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "c2ac5282-bd7e-40c6-8ab9-c78e46b3d198",
-   "asset_title": "TEST SPONSOR 17 - Lakewood Gingerbread House (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 31.75,
+   "asset_id": "f09cfa94-396c-499a-9ff2-21be65171dbb",
+   "asset_title": "TEST SPONSOR 17 - Lakewood Gingerbread House",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 28.26,
    "sponsor_id": "bc11c838-10f2-4101-a4e6-a1ea13fd366c",
    "schedule_id": "96636417-5d76-4576-9197-5285f29350e1",
    "contract": {
@@ -393,16 +409,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "one day only: 11-18"
-   }
+   },
+   "standin_asset_id": "c2ac5282-bd7e-40c6-8ab9-c78e46b3d198"
   },
   {
    "n": 18,
    "business": "Judaica Square North",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "5e659203-c52e-454b-9e4b-756ba9b0a111",
-   "asset_title": "TEST SPONSOR 18 - Judaica Square North (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 36.37,
+   "asset_id": "f1c75af4-5cc7-4b2f-b2fa-2ee5cfe728ba",
+   "asset_title": "TEST SPONSOR 18 - Judaica Square North",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 28.99,
    "sponsor_id": "f0f8f365-8456-4fed-8e2d-857b7b30057a",
    "schedule_id": "77bc1440-2b4d-46ea-b498-cf93e90ced7d",
    "contract": {
@@ -416,16 +433,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "future start 11-22"
-   }
+   },
+   "standin_asset_id": "5e659203-c52e-454b-9e4b-756ba9b0a111"
   },
   {
    "n": 19,
    "business": "Israel Bookshop Publications",
    "station_id": "d0740efe-3f25-4067-96f8-d8bc84c64dc3",
-   "asset_id": "57e658ff-83fa-4f28-8b66-c1e71356ded0",
-   "asset_title": "TEST SPONSOR 19 - Israel Bookshop Publications (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 44.32,
+   "asset_id": "e4a1af33-a4f1-432f-b5b4-6b3a666dba97",
+   "asset_title": "TEST SPONSOR 19 - Israel Bookshop Publications",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 35.86,
    "sponsor_id": "44b906e9-f1ff-4c0d-aecf-635f5ec9bf46",
    "schedule_id": "4a8ce74d-8d4a-4021-a5a6-0609f6d01db5",
    "contract": {
@@ -439,16 +457,17 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "overnight + morning"
-   }
+   },
+   "standin_asset_id": "57e658ff-83fa-4f28-8b66-c1e71356ded0"
   },
   {
    "n": 20,
    "business": "Ice Cream House Lakewood",
    "station_id": "13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e",
-   "asset_id": "8a2486e9-ffee-43f8-893b-2839d0b71fb8",
-   "asset_title": "TEST SPONSOR 20 - Ice Cream House Lakewood (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 30.8,
+   "asset_id": "99abceac-2b04-4a53-9dbb-ac7512f1e6ea",
+   "asset_title": "TEST SPONSOR 20 - Ice Cream House Lakewood",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 25.31,
    "sponsor_id": "4f0c526c-5d98-4e59-82be-7ded737be79c",
    "schedule_id": "499056d5-4b13-47bc-bc95-203244113f5c",
    "contract": {
@@ -462,7 +481,8 @@
     "fixed_times": null,
     "timing_mode": "hard",
     "checks": "hard timing at :15/:30/:45"
-   }
+   },
+   "standin_asset_id": "8a2486e9-ffee-43f8-893b-2839d0b71fb8"
   }
  ]
 }
