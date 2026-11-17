@@ -13,6 +13,7 @@ from app.models.queue_entry import QueueEntry
 from tests.test_operator_actions import _finish_current
 from tests.test_playout_engine import HEADERS as ENGINE_HEADERS
 from tests.test_playout_engine import engine_station  # noqa: F401  (fixture)
+from tests.test_controls_streams_scheduler import fake_redis  # noqa: F401  (fixture)
 from tests.test_queue_advance import _station_with_two_tracks
 from tests.test_queue_endpoints import _pending_ids, _station_with_queue, _url
 from tests.test_restart_holidays_timezones import restart  # noqa: F401  (fixture)
@@ -199,23 +200,39 @@ async def test_loop_survives_a_restart_after_the_item_ended(client, auth_headers
 # ── V1-59: the old /controls ──────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_old_controls_never_start_a_second_player(client, auth_headers, db_session, monkeypatch):
-    """V1-59: play / pause / stop / enqueue answer cleanly (no 500) whether or not Redis
-    is there; play-now goes on air through the queue and never through the old HLS path"""
+def _record_old_player(monkeypatch):
+    """Record any use of the old HLS player (download + ffmpeg segments)."""
     from app.services import playback_service
 
-    async def must_not_run(*a, **k):
-        raise AssertionError("old HLS player used")
+    used = []
 
-    monkeypatch.setattr(playback_service, "download_file", must_not_run)
-    monkeypatch.setattr(playback_service, "generate_hls_segments", must_not_run)
+    async def download(path):
+        used.append(("download", path))
+        return b"ID3"
+
+    async def hls(path, station_id):
+        used.append(("hls", station_id))
+        return "/tmp/x.m3u8", None
+
+    monkeypatch.setattr(playback_service, "download_file", download)
+    monkeypatch.setattr(playback_service, "generate_hls_segments", hls)
+    return used
+
+
+@pytest.mark.asyncio
+async def test_old_controls_never_start_a_second_player(client, auth_headers, db_session, monkeypatch):
+    """V1-59: with REDIS_URL empty (production) play / pause / stop / enqueue answer 409
+    with a reason (no 500); play-now goes on air through the queue, never the old HLS path"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "REDIS_URL", "")
+    used = _record_old_player(monkeypatch)
     station, assets, _ = await _station_with_queue(db_session)
     base = f"/api/v1/stations/{station.id}/controls"
     for path, body in (("/pause", None), ("/enqueue", {"asset_id": str(assets[1].id)}),
                        ("/play", None), ("/stop", None)):
         res = await client.post(base + path, headers=auth_headers, json=body)
-        assert res.status_code in (200, 409), (path, res.status_code, res.text)
+        assert res.status_code == 409, (path, res.status_code, res.text)
     res = await client.post(f"{base}/play-now", headers=auth_headers, json={"asset_id": str(assets[3].id)})
     assert res.status_code in (200, 201), res.text
     on_air = (await db_session.execute(
@@ -223,3 +240,23 @@ async def test_old_controls_never_start_a_second_player(client, auth_headers, db
         .execution_options(populate_existing=True)
     )).scalars().all()
     assert [e.asset_id for e in on_air] == [assets[3].id]
+    assert used == []
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "BUG: with a Redis configured, /controls/enqueue then /controls/play downloads the file "
+    "and starts the old ffmpeg HLS player beside the queue (a second audio source on the "
+    "station). Not live: production has no REDIS_URL, so these answer 409 there; nothing "
+    "in the site calls /controls/play"))
+@pytest.mark.asyncio
+async def test_old_play_with_redis_never_starts_the_hls_player(
+    client, auth_headers, db_session, monkeypatch, fake_redis  # noqa: F811
+):
+    """V1-59 with Redis set up: the old play must not start a player beside the queue"""
+    used = _record_old_player(monkeypatch)
+    station, assets, _ = await _station_with_queue(db_session)
+    base = f"/api/v1/stations/{station.id}/controls"
+    await client.post(f"{base}/enqueue", headers=auth_headers, json={"asset_id": str(assets[1].id)})
+    res = await client.post(f"{base}/play", headers=auth_headers)
+    assert res.status_code < 500
+    assert used == []
