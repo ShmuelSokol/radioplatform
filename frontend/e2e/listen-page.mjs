@@ -3,7 +3,10 @@
  * and a fake now-playing channel, desktop and iPhone size. Covers the buttons, the
  * now-playing card, the phone's lock-screen controls, song requests, the listener
  * profile, network loss and coming back to the tab, the server-stream mode (with a
- * small MP3 stream server on STREAM_PORT) and the hourly time check heard on time.
+ * small MP3 stream server on STREAM_PORT), the hourly time check heard on time, and
+ * short items and hard timed items handed over on the second (ONLY=handover).
+ * Parts: basics forms network polling switch player elapsed clock timecheck stream handover.
+ * The socket back-off and polling part runs on a fake clock (page.clock).
  *
  *   cd frontend && npm run build && (npx vite preview --port 4311 --strictPort &)
  *   BASE_URL=http://localhost:4311 node e2e/listen-page.mjs      # optional: ONLY=<part>
@@ -24,9 +27,23 @@ const ONLY = process.env.ONLY || '';
 const KNOWN_BUGS = {};
 const { check, done } = checker(KNOWN_BUGS);
 
+/** Init script: counts play() calls made while a click is being handled (browsers,
+ *  Safari above all, allow sound only from inside the press). React handles the
+ *  click at its root, between the window's capture and bubble listeners. */
+function CLICK_PROBE() {
+  window.__inClick = false;
+  window.__playsInClick = 0;
+  window.__playedInClick = [];
+  addEventListener('click', () => { window.__inClick = true; }, true);
+  addEventListener('click', () => { window.__inClick = false; });
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...a) { if (window.__inClick) { window.__playsInClick++; window.__playedInClick.push(this); } return play.apply(this, a); };
+}
+
 async function listenContext(browser, contextOpts, station, { initScripts = [], delay } = {}) {
   const ctx = await browser.newContext(contextOpts);
   await ctx.addInitScript(AUDIO_PROBE);
+  await ctx.addInitScript(CLICK_PROBE);
   for (const s of initScripts) await (Array.isArray(s) ? ctx.addInitScript(...s) : ctx.addInitScript(s));
   await routeApi(ctx, station, { delay });
   const np = await routeNowPlaying(ctx, station);
@@ -67,6 +84,8 @@ async function basics(browser, contextOpts, tag) {
   // S-7: Listen Live is heard within 1.5 s of the press
   const heardMs = await timeClick(page, listenBtn(page), `() => window.__audible().some(d => d.src === '${cur.id}')`, 5000, contextOpts.isMobile ? 'tap' : 'click');
   check(`${tag}: Listen Live heard within 1.5 s of the press (S-7)`, heardMs >= 0 && heardMs <= 1500, `${heardMs} ms`);
+  const inClick = await page.evaluate(() => window.__playsInClick);
+  check(`${tag}: Listen Live starts the player inside the click (F-LISTEN-2)`, inClick >= 1, `${inClick} play() calls in the click`);
   const live = await page.evaluate((sid) => window.__decks(), station.SID);
   const deck = live.find((d) => d.src === cur.id && d.playing);
   const liveAt = (Date.now() - new Date(station.playing().started_at).getTime()) / 1000;
@@ -132,10 +151,18 @@ async function basics(browser, contextOpts, tag) {
   // Stop and listen again from the page
   await stopBtn(page).click();
   await sleep(400);
-  check(`${tag}: Stop silences at once`, (await audibleSrc(page)).length === 0);
+  check(`${tag}: Stop silences at once (F-LISTEN-3)`, (await audibleSrc(page)).length === 0);
+  // Stay stopped a while, so "live" and "where it stopped" are 3 s apart
+  await sleep(3000);
+  check(`${tag}: stays silent while stopped (F-LISTEN-3)`, (await audibleSrc(page)).length === 0);
   await listenBtn(page).click();
   const again = await timeUntil(page, `() => window.__audible().length === 1`, 3000);
   check(`${tag}: Listen again is heard`, again >= 0, `${again} ms`);
+  await sleep(300);
+  const rejoined = (await page.evaluate(() => window.__audible()))[0];
+  const liveAgain = (Date.now() - new Date(station.playing().started_at).getTime()) / 1000;
+  check(`${tag}: Listen again joins live, not where Stop left it (F-LISTEN-3)`, !!rejoined && rejoined.src === station.playing().asset_id && Math.abs(rejoined.t - liveAgain) < 2.5,
+    rejoined ? `${rejoined.src}@${rejoined.t}, live ${liveAgain.toFixed(1)}` : 'silent');
 
   // Station stops: "Offline" and "Nothing playing right now"
   station.playing().status = 'played';
@@ -213,7 +240,7 @@ async function forms(browser) {
   await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 3000 }).catch(() => {});
   check(`${tag}: right PIN logs in`, await page.getByText('Welcome, Test Listener!').count() === 1 && await page.getByText('Kumzitz lover', { exact: false }).count() === 1);
   // Rate the song on air and favourite it; counts refresh
-  await page.getByRole('button', { name: '★' }).nth(3).click();
+  await page.getByRole('button', { name: 'Rate 4 stars' }).click();
   await page.getByText('1 songs rated').waitFor({ timeout: 3000 }).catch(() => {});
   const rate = station.calls.filter((c) => c.path === '/crm/rate').pop();
   check(`${tag}: 4 stars sent for the song on air`, rate?.body.rating === 4 && rate.body.asset_id === station.playing().asset_id, JSON.stringify(rate?.body));
@@ -307,40 +334,93 @@ async function network(browser) {
   await ctx.close();
 }
 
+// V1-125 on a fake clock (page.clock), so minutes of back-off and polling pass in moments
 async function pollingFallback(browser) {
   const tag = 'listen polling';
-  const station = makeStation();
+  const station = makeStation({ startedAgo: 5 });
+  // A long item, so it is not overdue (which re-reads and reconnects) while minutes pass
+  station.byId[station.playing().asset_id].duration = 3600;
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.addInitScript(AUDIO_PROBE);
+  // Mix-overs the page heard
+  await ctx.addInitScript(() => {
+    window.__mixOvers = 0;
+    window.addEventListener('kbr-mix-over', () => { window.__mixOvers++; });
+  });
   await routeApi(ctx, station);
-  let attempts = 0;
-  const at = [];
-  await ctx.routeWebSocket(/\/ws\/now-playing\//, (ws) => { attempts++; at.push(Date.now()); ws.close({ code: 1011 }).catch(() => {}); });
+  let accept = false;
+  const open = [];
+  // When, on the page's (fake) clock, each now-playing socket was asked for. The
+  // clock only moves in runFor() steps, so reading it here is exact to one step.
+  const attemptsAt = [];
+  let pg = null;
+  await ctx.routeWebSocket(/\/ws\/now-playing\//, async (ws) => {
+    attemptsAt.push(pg ? await pg.evaluate(() => Date.now()).catch(() => NaN) : NaN);
+    if (!accept) { ws.close({ code: 1011 }).catch(() => {}); return; }
+    open.push(ws);
+    ws.send(JSON.stringify({ type: 'now_playing', data: station.nowPlaying() }));
+  });
   await ctx.routeWebSocket(/\/ws\/(live|site|listeners)/, () => {});
-  const { page, errors } = await openListen(ctx, station.SID);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  pg = page;
+  await page.clock.install();
+  await page.goto(`${BASE}/listen/${station.SID}`);
+  await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
   const reads = () => station.calls.filter((c) => c.path === `/now-playing/${station.SID}`).length;
-  const t0 = Date.now();
-  while (reads() === 0 && Date.now() - t0 < 45000) await sleep(200);
-  check(`${tag}: after repeated socket failures it polls now playing`, reads() > 0, `${attempts} socket attempts, first poll after ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  await page.getByText('On Air', { exact: true }).waitFor({ timeout: 4000 }).catch(() => {});
+  const wsAt = async () => attemptsAt.slice();
+  const now = () => page.evaluate(() => Date.now());
+  // Move the page's clock on in small steps, giving the socket and fetches real time between
+  const advance = async (ms, until = null) => {
+    for (let left = ms; left > 0; left -= 200) {
+      await page.clock.runFor(Math.min(200, left));
+      await sleep(15);
+      if (until && (await until())) return true;
+    }
+    return false;
+  };
+  await advance(45000, async () => reads() > 0);
+  const at = await wsAt();
+  check(`${tag}: after repeated socket failures it polls now playing (V1-125)`, reads() > 0, `${at.length} socket attempts`);
+  await advance(400);
   check(`${tag}: polled now playing is shown`, await page.getByText(station.byId[station.playing().asset_id].title, { exact: true }).count() === 1);
-  // V1-125: back-off 1, 2, 4, 8, 16 s between attempts, then polls every 3 s
+  // Back-off 1, 2, 4, 8, 16 s between attempts (5 retries: the 30 s cap is never reached), then polling
   const gaps = at.slice(1).map((t, i) => (t - at[i]) / 1000);
   const want = [1, 2, 4, 8, 16];
-  check(`${tag}: reconnects back off 1, 2, 4, 8, 16 s`, gaps.length >= 5 && want.every((w, i) => Math.abs(gaps[i] - w) < 0.6), gaps.map((g) => g.toFixed(1)).join(', '));
+  check(`${tag}: reconnects back off 1, 2, 4, 8, 16 s, then polls (V1-125)`, gaps.length === 5 && want.every((w, i) => Math.abs(gaps[i] - w) < 0.5), gaps.map((g) => g.toFixed(1)).join(', '));
+  const pollStart = await now();
   const r0 = reads();
-  await sleep(6500);
+  await advance(9000);
   const polls = reads() - r0;
-  check(`${tag}: then polls every 3 s`, polls >= 2 && polls <= 3, `${polls} polls in 6.5 s`);
-  const stillPolling = attempts;
-  await sleep(1000);
-  check(`${tag}: stays on polling (no more socket attempts)`, attempts === stillPolling);
-  // Hidden and shown again: tries the socket again
+  check(`${tag}: then polls every 3 s (V1-125)`, polls >= 3 && polls <= 4, `${polls} polls in 9 s`);
+  // Stays on polling; the socket is tried again only after a minute
+  await advance(40000);
+  check(`${tag}: stays on polling, no socket attempt for the next minute (V1-125)`, (await wsAt()).length === at.length, `${(await wsAt()).length - at.length} attempts`);
+  await advance(15000, async () => (await wsAt()).length > at.length);
+  const retry = ((await wsAt())[at.length] - pollStart) / 1000;
+  check(`${tag}: while polling, the socket is tried again every 60 s (V1-125, fixed)`, Math.abs(retry - 60) < 1, `retry ${retry.toFixed(1)} s after polling began`);
+  await advance(3500);
+  check(`${tag}: a failed retry keeps polling`, reads() > r0 + polls + 10, `${reads() - r0} polls`);
+  // Hidden and shown again: tries the socket at once
+  const before = (await wsAt()).length;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
-  await sleep(5500);
+  await advance(5600);
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: false, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
-  await sleep(800);
-  check(`${tag}: shown again after the background, it tries the socket again`, attempts > stillPolling, `${stillPolling} -> ${attempts}`);
+  await advance(200);
+  check(`${tag}: shown again after the background, it tries the socket at once`, (await wsAt()).length > before, `${before} -> ${(await wsAt()).length}`);
+  // The socket server is back: the next retry gets through, mix-overs arrive again, polling stops
+  await advance(32000);
+  accept = true;
+  await advance(62000, async () => open.length > 0);
+  check(`${tag}: once the socket server is back, a retry connects while visible (V1-125, fixed)`, open.length === 1);
+  await advance(400);
+  open[0]?.send(JSON.stringify({ type: 'mix_over', data: { asset_id: 'j1', audio_url: '/__tone/j1.wav' } }));
+  await advance(400);
+  check(`${tag}: mix-over messages arrive again after the socket is back`, (await page.evaluate(() => window.__mixOvers)) === 1);
+  const r1 = reads();
+  await advance(9000);
+  check(`${tag}: polling stops once the socket is back`, reads() === r1, `${reads() - r1} polls in 9 s`);
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 }
@@ -433,8 +513,141 @@ async function timeCheck(browser, where, { preload = true, clock = 0 } = {}) {
   if (where === 'control room') {
     check(`${tag}: the song is faded down by the time check's time`, songAt.every((g) => g < 0.5), songAt.join());
   } else {
-    // Informational: the Listen page has no pre-fade (it does not know the queue)
+    // Informational: the Listen page pre-fades only when next_asset carries cut_at
     console.log(`info   ${tag}: song level at the due time ${songAt.join() || 'n/a'}`);
+  }
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// ── PR 157: short items are never crossfaded, a short item a little late starts from
+//    its first word, a hard item starts here at its time (next_asset.cut_at) and the
+//    page goes back to the server if the server never says it started ──
+async function startListening(browser, station) {
+  const { ctx } = await listenContext(browser, { viewport: { width: 1280, height: 900 } }, station);
+  const { page, errors } = await openListen(ctx, station.SID);
+  await page.getByText('On Air', { exact: true }).waitFor();
+  await listenBtn(page).click();
+  return { ctx, page, errors };
+}
+const heardIn = (s, id, min = 0.05) => s.decks.some((d) => d.src === id && d.playing && d.gain > min);
+const deckOf = (s, id) => s.decks.find((d) => d.src === id && d.playing);
+function longestSilence(samples, from = -Infinity, rel = (s) => s.at / 1000) {
+  let gap = 0, longest = 0, last = null;
+  for (const s of samples) {
+    if (rel(s) < from) continue;
+    const step = last === null ? 0 : (s.at - last) / 1000;
+    last = s.at;
+    gap = s.decks.some((d) => d.playing && d.gain > 0.05) ? 0 : gap + step;
+    longest = Math.max(longest, gap);
+  }
+  return longest;
+}
+
+// A 7 s station ID on air, a song next. The server moves on at the file's end, or
+// early at the item's crossfade point (3 s before the end): either way the song comes
+// in only when the station ID has finished, never faded over it.
+async function shortItemHandover(browser, serverAt) {
+  const tag = `short item (server moves on ${serverAt === 'end' ? 'at its end' : 'at its crossfade point, 3 s early'})`;
+  const station = makeStation();
+  const cur = station.playing();
+  cur.asset_id = 'j1';
+  const dur = station.byId.j1.duration;
+  const start = Date.now() + 500; // started just as the listener arrives
+  cur.started_at = new Date(start).toISOString();
+  const nextId = station.pending()[0].asset_id;
+  const { ctx, page, errors } = await startListening(browser, station);
+  await timeUntil(page, `() => window.__audible().some(d => d.src === 'j1')`, 4000);
+  const moveAt = serverAt === 'end' ? start + dur * 1000 + 300 : start + (dur - 3) * 1000;
+  setTimeout(() => station.goOnAir(nextId, { started_at: new Date(serverAt === 'end' ? start + dur * 1000 : moveAt).toISOString() }), moveAt - Date.now());
+  const samples = await watchDecks(page, start + dur * 1000 + 2500 - Date.now(), 25);
+  const first = samples.find((s) => heardIn(s, nextId));
+  const idAt = first ? deckOf(first, 'j1') : null;
+  check(`${tag}: the song is not heard until the station ID has finished`,
+    !!first && (!idAt || idAt.t >= dur - 0.4), !first ? 'song never heard' : idAt ? `song in with ${(dur - idAt.t).toFixed(2)} s of the ID left` : 'after the ID');
+  let both = 0;
+  for (let i = 1; i < samples.length; i++) if (heardIn(samples[i], 'j1', 0.2) && heardIn(samples[i], nextId, 0.2)) both += (samples[i].at - samples[i - 1].at) / 1000;
+  check(`${tag}: never crossfaded (heard together at most 0.2 s)`, both <= 0.2, `${both.toFixed(2)} s together`);
+  const hole = longestSilence(samples);
+  check(`${tag}: no hole between them`, hole < 0.5, `longest silence ${hole.toFixed(2)} s`);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// The song on air, then the server's message that the time check went on air arrives
+// `late` seconds after it started (and it was not pre-loaded). Up to 3 s late it is
+// heard from its first word; later than that the page joins it where it is now.
+async function lateShortItem(browser, late) {
+  const tag = `time check announced ${late} s late`;
+  const station = makeStation();
+  const songId = station.playing().asset_id;
+  const { ctx, page, errors } = await startListening(browser, station);
+  await timeUntil(page, `() => window.__audible().some(d => d.src === '${songId}')`, 4000);
+  await sleep(1500);
+  const tcStart = Date.now() - late * 1000;
+  station.goOnAir('tc', { started_at: new Date(tcStart).toISOString() });
+  const nextId = station.pending()[0].asset_id;
+  // The server moves on when the time check ends by its clock (5 s after it started)
+  const serverEnd = tcStart + station.byId.tc.duration * 1000;
+  setTimeout(() => station.goOnAir(nextId, { started_at: new Date(serverEnd).toISOString() }), Math.max(0, serverEnd - Date.now()));
+  const samples = await watchDecks(page, 6500, 25);
+  const first = samples.find((s) => heardIn(s, 'tc'));
+  const from = first ? deckOf(first, 'tc').t : null;
+  if (late <= 3) {
+    check(`${tag}: heard from its first word`, from !== null && from < 0.6, from === null ? 'never heard' : `first heard at ${from} s into it`);
+    const cut = samples.find((s) => heardIn(s, nextId, 0.2) && deckOf(s, 'tc') && deckOf(s, 'tc').t < station.byId.tc.duration - 0.4);
+    check(`${tag}: the next item waits for it to finish`, !cut, cut ? `next item in at ${deckOf(cut, 'tc').t} s of the time check` : '');
+  } else {
+    check(`${tag}: joined where it is now, not from the top`, from !== null && from >= 3, from === null ? 'never heard' : `first heard at ${from} s into it`);
+  }
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// A hard time check due at T, pre-loaded as next_asset with cut_at = T. The server's
+// message that it started arrives 1.5 s after T (`confirm`), or never: then the page
+// goes back to the song after 4 s.
+async function prearmedTimeCheck(browser, confirm) {
+  const tag = `hard time check started on the page (${confirm ? 'server confirms 1.5 s late' : 'server never confirms'})`;
+  const station = makeStation();
+  const T = Date.now() + 9000;
+  station.pending().forEach((e) => { e.position += 1; });
+  station.add({ asset_id: 'tc', position: 2, source: 'block', preempt_at: new Date(T).toISOString(), hard_timed: true });
+  const songId = station.playing().asset_id;
+  const sent = station.nowPlaying();
+  check(`${tag}: next_asset carries cut_at`, sent.next_asset?.id === 'tc' && sent.next_asset?.cut_at === new Date(T).toISOString(), JSON.stringify(sent.next_asset));
+  const { ctx, page, errors } = await startListening(browser, station);
+  await timeUntil(page, `() => window.__audible().some(d => d.src === '${songId}')`, 4000);
+  await timeUntil(page, `() => window.__decks().some(d => d.src === 'tc' && !d.playing)`, 6000);
+  if (confirm) setTimeout(() => station.goOnAir('tc', { started_at: new Date(T).toISOString() }), T + 1500 - Date.now());
+  const samples = await watchDecks(page, T + (confirm ? 4000 : 7500) - Date.now(), 25);
+  const rel = (s) => (s.now - T) / 1000;
+  const first = samples.find((s) => heardIn(s, 'tc'));
+  const heardAt = first ? rel(first) : null;
+  check(`${tag}: heard at its time, before the server's message`, heardAt !== null && heardAt >= -0.1 && heardAt <= 0.35,
+    heardAt === null ? 'never' : `${heardAt.toFixed(2)} s after its time`);
+  // 0.3 s fade from the moment it starts (its deck starts playing). The 2 s pre-fade on
+  // its own reaches silence only 0.4 s after the time, still above 0.01 0.34 s in.
+  const started = samples.find((s) => deckOf(s, 'tc'));
+  const t0 = started ? rel(started) : 0;
+  const songLate = samples.filter((s) => rel(s) >= t0 + 0.34 && rel(s) <= t0 + 1).map((s) => deckOf(s, songId)?.gain ?? 0);
+  check(`${tag}: the song is out 0.3 s after the time check starts`, songLate.length > 0 && songLate.every((g) => g < 0.01),
+    `started ${t0.toFixed(2)} s after its time; song level then ${songLate.slice(0, 4).join()}`);
+  const hole = longestSilence(samples, -2, rel);
+  check(`${tag}: no hole`, hole < 0.5, `longest silence ${hole.toFixed(2)} s`);
+  if (confirm) {
+    const restarts = samples.filter((s, i) => i > 0 && deckOf(s, 'tc') && deckOf(samples[i - 1], 'tc') && deckOf(s, 'tc').t + 0.5 < deckOf(samples[i - 1], 'tc').t);
+    const songBack = samples.filter((s) => rel(s) > 0.5 && heardIn(s, songId));
+    check(`${tag}: the server's message does not restart it or bring the song back`, restarts.length === 0 && songBack.length === 0,
+      `${restarts.length} restarts, song heard in ${songBack.length} samples`);
+  } else {
+    const songBefore4 = samples.filter((s) => rel(s) > 0.5 && rel(s) < 3.8 && heardIn(s, songId));
+    check(`${tag}: stays on the time check until the 4 s are up`, songBefore4.length === 0, `song heard in ${songBefore4.length} samples`);
+    const back = samples.find((s) => rel(s) > 3.8 && heardIn(s, songId, 0.2));
+    const live = back ? (back.now - new Date(station.playing().started_at).getTime()) / 1000 : 0;
+    const pos = back ? deckOf(back, songId).t : null;
+    check(`${tag}: goes back to the song on air, at its live position`, !!back && rel(back) <= 6 && Math.abs(pos - live) < 2,
+      back ? `back ${rel(back).toFixed(2)} s after the time, at ${pos} s (live ${live.toFixed(1)})` : 'song never came back');
   }
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
@@ -451,6 +664,8 @@ async function playerExtras(browser) {
   await timeUntil(page, `() => window.__audible().length === 1`, 3000);
   await page.locator('input[type=range]').fill('0.35');
   await page.getByRole('button', { name: 'Mute' }).click();
+  const stored = await page.evaluate(() => ({ v: localStorage.getItem('radio_volume'), m: localStorage.getItem('radio_muted') }));
+  check(`${tag}: volume and mute saved as radio_volume / radio_muted (V1-127)`, stored.v === '0.35' && stored.m === 'true', JSON.stringify(stored));
   await page.reload();
   await page.getByText('On Air', { exact: true }).waitFor();
   await listenBtn(page).click();
@@ -497,6 +712,59 @@ async function playerExtras(browser) {
   await c2.close();
 }
 
+// ── V1-133: the elapsed time the page keeps for the item on air ─────────────
+// It is not shown; the player uses it to put a listener who fell behind back on the
+// live position (checked every 10 s). So: a player put 8 s behind lands on the live
+// position (the time ticked every second), and after ends_at it lands on ends_at, not
+// beyond (an overdue item counts its full length only).
+async function elapsedTime(browser) {
+  const tag = 'listen elapsed';
+  const station = makeStation({ startedAgo: 40 });
+  const cur = station.playing();
+  station.byId[cur.asset_id].duration = 600; // the file is long; the server says it ends at +80 s
+  const ENDS = 80;
+  const base = station.nowPlaying;
+  station.nowPlaying = (extra) => {
+    const d = base(extra);
+    if (d.asset_id === cur.asset_id) d.ends_at = new Date(new Date(cur.started_at).getTime() + ENDS * 1000).toISOString();
+    return d;
+  };
+  const { ctx } = await listenContext(browser, { viewport: { width: 1280, height: 900 } }, station);
+  const { page, errors } = await openListen(ctx, station.SID);
+  await page.getByText('On Air', { exact: true }).waitFor();
+  await listenBtn(page).click();
+  await timeUntil(page, `() => window.__audible().length === 1`, 3000);
+  const live = () => (Date.now() - new Date(cur.started_at).getTime()) / 1000;
+  const pos = () => page.evaluate(() => { const a = window.__deckEls().find((x) => !x.paused); return a ? a.currentTime : null; });
+  const putAt = (t) => page.evaluate((t) => { const a = window.__deckEls().find((x) => !x.paused); a.currentTime = t; }, t);
+  // Wait out the 15 s after a track change in which the player is left alone
+  await sleep(15500);
+  await putAt((await pos()) - 8);
+  const setAt = Date.now();
+  let landed = null;
+  while (Date.now() - setAt < 11000) {
+    const p = await pos();
+    if (p !== null && p > live() - 4) { landed = { p, live: live() }; break; }
+    await sleep(100);
+  }
+  check(`${tag}: elapsed ticks every second from started_at (player put 8 s behind lands on the live position) (V1-133)`,
+    !!landed && Math.abs(landed.p - landed.live) < 1.5, landed ? `landed at ${landed.p.toFixed(1)}, live ${landed.live.toFixed(1)}` : 'not corrected');
+  // Past ends_at: elapsed stops there
+  while (live() < ENDS + 3) await sleep(200);
+  await putAt(20);
+  const set2 = Date.now();
+  let landed2 = null;
+  while (Date.now() - set2 < 11000) {
+    const p = await pos();
+    if (p !== null && p > 30) { landed2 = { p, live: live() }; break; }
+    await sleep(100);
+  }
+  check(`${tag}: after ends_at the elapsed time stops at the item's length, not beyond (V1-133)`,
+    !!landed2 && Math.abs(landed2.p - ENDS) < 1, landed2 ? `landed at ${landed2.p.toFixed(1)}, ends at ${ENDS}, live ${landed2.live.toFixed(1)}` : 'not corrected');
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // Listen pressed on a device whose clock is off: the item must start where the station is
 async function joinWithSkew(browser, off) {
   const tag = `device clock ${off > 0 ? '+' : ''}${off / 1000} s`;
@@ -537,6 +805,8 @@ async function streamMode(browser, stream) {
   });
   const heard = await timeClick(page, listenBtn(page), `() => { const a = document.querySelector('audio'); return !a.paused && a.currentTime > 0.05; }`, 5000);
   check(`${tag}: stream heard within 1.5 s of Listen (S-7)`, heard >= 0 && heard <= 1500, `${heard} ms`);
+  const streamInClick = await page.evaluate(() => window.__playedInClick.filter((a) => a === document.querySelector('audio')).length);
+  check(`${tag}: Listen Live starts the stream inside the click (F-LISTEN-2)`, streamInClick >= 1, `${streamInClick} play() calls on the stream element in the click`);
   let s = await el();
   check(`${tag}: played through Media Source (starts on first data)`, s.src.startsWith('blob:'), s.src);
   await sleep(4000);
@@ -620,6 +890,7 @@ try {
   if (run('polling')) await pollingFallback(browser);
   if (run('switch')) await stationSwitch(browser);
   if (run('player')) await playerExtras(browser);
+  if (run('elapsed')) await elapsedTime(browser);
   if (run('clock')) {
     // V2-121: a device clock 20 s off must not move songs or the time check
     for (const off of [20000, -20000]) {
@@ -633,6 +904,15 @@ try {
     await timeCheck(browser, 'Listen', { preload: false });
     await timeCheck(browser, 'control room');
     await timeCheck(browser, 'control room', { preload: false });
+  }
+  if (run('handover')) {
+    // PR 157: short items, late short items, hard items started here at cut_at
+    await shortItemHandover(browser, 'end');
+    await shortItemHandover(browser, 'cross');
+    await lateShortItem(browser, 2);
+    await lateShortItem(browser, 3.6);
+    await prearmedTimeCheck(browser, true);
+    await prearmedTimeCheck(browser, false);
   }
   if (run('stream')) {
     const stream = await startStreamServer(STREAM_PORT);

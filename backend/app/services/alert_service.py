@@ -214,6 +214,75 @@ async def list_alerts(
     return alerts, total, unresolved
 
 
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def _block_days(block):
+    """The days a block starts on: None for every day (daily, or no pattern), else
+    ("wd", weekday numbers), ("md", days of the month) or ("date", (first, last))."""
+    kind = getattr(block.recurrence_type, "value", block.recurrence_type)
+    pattern = block.recurrence_pattern or []
+    if kind == "weekly" and pattern:
+        return "wd", {_WEEKDAYS.index(str(d).lower()) for d in pattern if str(d).lower() in _WEEKDAYS}
+    if kind == "monthly" and pattern:
+        days = set()
+        for d in pattern:
+            try:
+                days.add(int(d))
+            except (TypeError, ValueError):
+                pass
+        return "md", days
+    if kind == "one_time" and block.start_date:
+        return "date", (block.start_date, block.end_date or block.start_date)
+    return None
+
+
+def _next_days(days):
+    """The same days moved one day on (where the part after midnight airs)."""
+    if days is None:
+        return None
+    kind, value = days
+    if kind == "wd":
+        return kind, {(d + 1) % 7 for d in value}
+    if kind == "md":
+        return kind, {d + 1 if d < 31 else 1 for d in value}
+    first, last = value
+    return kind, (first + timedelta(days=1), last + timedelta(days=1))
+
+
+def _days_meet(a, b) -> bool:
+    if a is None or b is None or a[0] != b[0]:
+        return True  # every day, or kinds that cannot be compared: assume they meet
+    if a[0] == "date":
+        return a[1][0] <= b[1][1] and b[1][0] <= a[1][1]
+    return bool(a[1] & b[1])
+
+
+def _segments(block) -> list[tuple[int, float, float]]:
+    """(day offset, start minute, end minute); a block past midnight has two parts."""
+    def minutes(t):
+        return t.hour * 60 + t.minute + t.second / 60
+
+    start, end = minutes(block.start_time), minutes(block.end_time)
+    if end >= start:
+        return [(0, start, end)]
+    return [(0, start, 24 * 60), (1, 0, end)]
+
+
+def blocks_overlap(a, b) -> bool:
+    """Whether two blocks air at the same time on a shared day."""
+    days_a, days_b = _block_days(a), _block_days(b)
+    for off_a, start_a, end_a in _segments(a):
+        for off_b, start_b, end_b in _segments(b):
+            if not (start_a < end_b and end_a > start_b):
+                continue
+            da = _next_days(days_a) if off_a else days_a
+            db = _next_days(days_b) if off_b else days_b
+            if _days_meet(da, db):
+                return True
+    return False
+
+
 async def detect_schedule_conflicts(
     db: AsyncSession,
     schedule_id: UUID | str,
@@ -244,9 +313,9 @@ async def detect_schedule_conflicts(
         # Start-only blocks hand over to each other; they cannot overlap.
         if getattr(target, "until_next", False) or getattr(other, "until_next", False):
             continue
-        # Check time overlap (simple comparison — same start_time/end_time ranges)
+        # Overlap on a shared day, counting the part of a block that runs past midnight
         if target.start_time is not None and other.start_time is not None:
-            if target.start_time < other.end_time and target.end_time > other.start_time:
+            if blocks_overlap(target, other):
                 alert = await create_alert(
                     db,
                     alert_type=AlertType.SCHEDULE_CONFLICT,
