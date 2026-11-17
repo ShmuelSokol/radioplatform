@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getDayLog, type DayLogEntry } from '../../../api/databank';
 
@@ -15,8 +15,7 @@ export function localDay(d: Date, tz?: string): string {
 }
 
 /** The station's today and the days before it, newest first. */
-export function recentDays(tz?: string, back = DAYS_BACK): string[] {
-  const today = localDay(new Date(), tz);
+export function recentDays(tz?: string, back = DAYS_BACK, today = localDay(new Date(), tz)): string[] {
   const [y, m, d] = today.split('-').map(Number);
   return Array.from({ length: back }, (_, i) => {
     const day = new Date(Date.UTC(y, m - 1, d - i));
@@ -55,7 +54,10 @@ function linesOf(logs: DayLogEntry[]): Line[] {
     lines.push({ at: e.start_utc, what: 'Started', entry: e });
     if (e.end_utc) lines.push({ at: e.end_utc, what: 'Ended', entry: e });
   }
-  return lines.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.what === 'Ended' ? -1 : 1));
+  // By the moment (to the millisecond), not the text: "…31+00:00" and "…31.672000+00:00"
+  // compare wrongly as text. On the same millisecond, Ended comes before Started.
+  const ms = (iso: string) => Math.floor(Date.parse(iso));
+  return lines.sort((a, b) => ms(a.at) - ms(b.at) || (a.what === b.what ? 0 : a.what === 'Ended' ? -1 : 1));
 }
 
 function nameOf(e: DayLogEntry): string {
@@ -69,8 +71,20 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
   /** Phone: day picker on top instead of on the left */
   compact?: boolean;
 }) {
-  const days = useMemo(() => recentDays(stationTz), [stationTz]);
-  const [day, setDay] = useState(days[0]);
+  // The station's today, checked every 30 s so a page left open over station
+  // midnight moves on to the new day (and keeps refreshing it) without a reload
+  const [today, setToday] = useState(() => localDay(new Date(), stationTz));
+  useEffect(() => {
+    const check = () => setToday(localDay(new Date(), stationTz));
+    check();
+    const t = setInterval(check, 30_000);
+    return () => clearInterval(t);
+  }, [stationTz]);
+  const days = useMemo(() => recentDays(stationTz, DAYS_BACK, today), [stationTz, today]);
+  // null = follow the station's today
+  const [picked, setPicked] = useState<string | null>(null);
+  const day = picked && days.includes(picked) && picked !== days[0] ? picked : days[0];
+  const setDay = (d: string) => setPicked(d === days[0] ? null : d);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['day-log', stationId, day],
     queryFn: () => getDayLog(stationId!, day),

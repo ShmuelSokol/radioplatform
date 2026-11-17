@@ -495,8 +495,10 @@ async function timeCheck(browser, where, { preload = true, clock = 0 } = {}) {
   }
   const songId = station.playing().asset_id;
   await timeUntil(page, `() => window.__audible().some(d => d.src === '${songId}')`, 4000);
-  // The server: at T the time check goes on air, announced 0.25 s later
-  const wait = T + 250 - Date.now();
+  // The server: at T the time check goes on air; its message reaches pages 1.2 s later
+  // (measured live 13:00Z and 14:00Z 2026-11-17: pages started it 1.1-1.8 s late
+  // while they waited for it)
+  const wait = T + 1200 - Date.now();
   setTimeout(() => station.goOnAir('tc', { started_at: new Date(T).toISOString() }), wait);
   const samples = await watchDecks(page, T + 4000 - Date.now(), 25);
   const rel = (s) => (s.now - clock - T) / 1000;
@@ -510,8 +512,10 @@ async function timeCheck(browser, where, { preload = true, clock = 0 } = {}) {
     longest = Math.max(longest, gap);
   }
   const songAt = samples.filter((s) => Math.abs(rel(s)) < 0.05).map((s) => s.decks.find((d) => d.src === songId)?.gain ?? 0);
-  const songAfter = samples.filter((s) => rel(s) > 1.5).map((s) => s.decks.find((d) => d.src === songId && d.playing)?.gain ?? 0);
-  check(`${tag}: time check heard within 1 s of its time`, heardAt !== null && heardAt >= -0.1 && heardAt <= 1, heardAt === null ? 'never' : `${heardAt.toFixed(2)} s after`);
+  const songAfter = samples.filter((s) => rel(s) > 2.7).map((s) => s.decks.find((d) => d.src === songId && d.playing)?.gain ?? 0);
+  // Pre-loaded, the page starts it itself at its time; not pre-loaded, it waits for the message
+  const within = preload ? 0.3 : 2;
+  check(`${tag}: time check heard within ${within} s of its time`, heardAt !== null && heardAt >= -0.1 && heardAt <= within, heardAt === null ? 'never' : `${heardAt.toFixed(2)} s after`);
   check(`${tag}: no hole before the time check`, longest < 0.5, `longest silence ${longest.toFixed(2)} s`);
   check(`${tag}: the song is out once the time check plays`, songAfter.every((g) => g < 0.05), songAfter.slice(0, 5).join());
   if (where === 'control room') {
@@ -861,7 +865,7 @@ async function streamMode(browser, stream) {
     const ms = await timeClick(p2, listenBtn(p2), `() => { const a = document.querySelector('audio'); return !a.paused && a.currentTime > 0.05; }`, 8000, 'tap');
     const src = await p2.evaluate(() => document.querySelector('audio').src);
     check(`${tag}: without MSE the plain <audio> plays the stream URL`, src === stream.url(st2.SID) && ms >= 0, `${src}, ${ms} ms`);
-    // Chromium without MSE is only a stand-in for Safari: the timing is checked in real WebKit (e2e/webkit-player.py)
+    // Chromium without MSE is only a stand-in for Safari: the real WebKit run is e2e/webkit/listener-webkit.py
     console.log(`info   ${tag}: plain element (Chromium, MSE removed) first sound after ${ms} ms`);
     check(`${tag}: no script errors (no MSE)`, e2.length === 0, e2.join(' | '));
     await c2.close();

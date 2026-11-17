@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import PlayoutBadge from '../../../components/audio/PlayoutBadge';
 import { Link } from 'react-router-dom';
 import { assetLabel, fmtDur } from './shared';
@@ -44,6 +45,12 @@ interface Props {
   audio: TransportAudio;
   stationTz?: string;
   liveShow: { id: string; title: string } | null;
+  /** Phone held sideways: the compact left column (classic.css "phone landscape"). */
+  landscape?: boolean;
+  /** Sideways only: HS, Spots and Panic, in the button grid under Go next. */
+  modeButtons?: ReactNode;
+  /** Sideways only: the pre-listen deck, under the buttons (so the queue keeps its rows). */
+  pflDeck?: ReactNode;
 }
 
 function Clock({ tz }: { tz?: string }) {
@@ -112,27 +119,30 @@ function fmtCountdown(sec: number): string {
 }
 
 /** Loop, Go next, Fade, Soft fade: the transport buttons, stacked on a desktop, in a row on a phone. */
-export function TransportButtons({ p, stacked }: { p: Props; stacked: boolean }) {
-  const btn = `qn-btn shrink-0 ${stacked ? 'w-full h-9 text-sm' : 'h-11 px-2.5 text-xs'}`;
+export function TransportButtons({ p, stacked, grid = false }: { p: Props; stacked: boolean; grid?: boolean }) {
+  // grid: the phone-sideways button grid (Go next two cells wide first, then Fade,
+  // Soft fade, and Loop on the next row); the parent is the 4-column grid.
+  const btn = grid ? 'qn-btn h-11 px-1 text-xs min-w-0'
+    : `qn-btn shrink-0 ${stacked ? 'w-full h-9 text-sm' : 'h-11 px-2.5 text-xs'}`;
   return (
-    <div className={stacked ? 'flex flex-col gap-1' : 'flex items-center gap-1 shrink-0'} role="group" aria-label="Go to the next item">
+    <div className={grid ? 'contents' : stacked ? 'flex flex-col gap-1' : 'flex items-center gap-1 shrink-0'} role="group" aria-label="Go to the next item">
       <button type="button" onClick={p.onLoop} disabled={!p.isPlaying || p.loopBusy}
         data-testid="loop" aria-pressed={p.looping}
         title={p.looping ? 'Loop is on: this item repeats. Press to switch it off.' : 'Repeat this item until you switch Loop off or press Next'}
-        className={`${btn} ${p.looping ? '!bg-fuchsia-300' : ''}`}>
+        className={`${btn} ${grid ? 'order-4' : ''} ${p.looping ? '!bg-fuchsia-300' : ''}`}>
         Loop
       </button>
       <button type="button" onClick={() => p.onNext('hard')} disabled={!p.isPlaying || p.nextBusy}
-        title="Go to the next item now, with no fade (N)"
-        className={`${btn} ${stacked ? '!h-11 !text-base' : '!px-3 !text-sm'} font-bold`}>
+        title="Go to the next item now, with no fade (N)" data-testid="go-next"
+        className={`${btn} ${grid ? 'order-1 col-span-2 !text-base' : stacked ? '!h-11 !text-base' : '!px-3 !text-sm'} font-bold`}>
         {p.nextBusy ? '…' : <><u>G</u>o next</>}
       </button>
       <button type="button" onClick={() => p.onNext('fade')} disabled={!p.isPlaying || p.nextBusy}
-        data-testid="next-fade" title="Fade this item out quickly, then go to the next" className={btn}>
+        data-testid="next-fade" title="Fade this item out quickly, then go to the next" className={`${btn} ${grid ? 'order-2' : ''}`}>
         Fade
       </button>
       <button type="button" onClick={() => p.onNext('soft')} disabled={!p.isPlaying || p.nextBusy}
-        data-testid="next-soft" title="Fade this item out slowly (3 seconds), then go to the next" className={btn}>
+        data-testid="next-soft" title="Fade this item out slowly (3 seconds), then go to the next" className={`${btn} ${grid ? 'order-3' : ''}`}>
         Soft fade
       </button>
     </div>
@@ -201,6 +211,97 @@ export default function TransportBar(p: Props) {
 
   const nowType = p.nowAsset?.category || p.nowAsset?.asset_type || '';
   const nextType = p.nextAsset?.category || p.nextAsset?.asset_type || '';
+
+  if (p.landscape) {
+    // Phone held sideways: a compact left column that fits a 300 px tall screen.
+    // One LCD row (status, remaining, clock), on air and next, then the buttons in a
+    // grid of 44 px cells: Go next first, Panic always on screen, Listen and station last.
+    return (
+      <header className="shrink-0 qn-lcd cr-land" data-testid="transport-landscape">
+        <div className="flex items-center gap-1.5 px-1.5 py-1 bg-black min-w-0">
+          <div className="flex flex-col items-start gap-0.5 shrink-0 leading-none">
+            {p.isPlaying ? status : (
+              <button type="button" onClick={p.onStart} disabled={p.starting || !p.stationId}
+                className="qn-btn h-11 px-3 text-sm font-bold shrink-0">
+                {p.starting ? 'Starting…' : '▶ Start'}
+              </button>
+            )}
+            {p.isPlaying && (
+              <span className={`qn-digits text-[13px] ${p.isPlaying ? '' : '!text-green-900'}`} title="On air: elapsed / length">
+                {fmtDur(p.elapsed)}<span className="opacity-70"> / {fmtDur(p.duration)}</span>
+              </span>
+            )}
+          </div>
+          <div className="leading-none shrink-0">
+            <div className="qn-lcd-label">Remaining</div>
+            <div className={`qn-digits text-[28px] ${remainingCls}`} data-testid="remaining">{remainingText}</div>
+          </div>
+          {p.introSeconds > 0 && intro}
+          <div className="flex-1" />
+          <div className="leading-none shrink-0 text-right">
+            <div className="qn-lcd-label">Clock</div>
+            <div className="qn-digits text-base"><Clock tz={p.stationTz} /></div>
+          </div>
+        </div>
+        <div className="px-1 pb-1 pt-0.5 space-y-[3px] bg-[#1c1c1c]">
+          <div className="bg-black qn-sunken px-2 h-8 flex items-center" title={nowType}>
+            <span className="truncate text-base font-bold text-[var(--qn-digit)] leading-none">
+              {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
+            </span>
+          </div>
+          <div className="bg-black qn-sunken px-2 h-7 flex items-center" title={nextType}>
+            <span className="truncate text-sm font-bold text-[var(--qn-yellow)] leading-none">
+              <span className="sr-only">Next: </span>{p.nextAsset ? assetLabel(p.nextAsset) : 'nothing queued'}
+            </span>
+          </div>
+        </div>
+        <div className="h-1 bg-black" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
+          <div className={`h-full ${ending ? 'bg-red-500' : 'bg-[var(--qn-digit)]'}`} style={{ width: `${progress}%` }} />
+        </div>
+        <div className="bg-[#c0c0c0] p-1 space-y-1 text-black">
+          <div className="grid grid-cols-4 gap-1" data-testid="landscape-buttons">
+            <TransportButtons p={p} stacked={false} grid />
+            {p.modeButtons}
+          </div>
+          {p.pflDeck}
+          <div className="flex items-center gap-1">
+            {!audio.audioReady ? (
+              <button type="button" onClick={audio.initAudio} title="Hear the station in this browser"
+                className="qn-btn h-11 px-2.5 text-xs shrink-0">
+                🔊 Listen
+              </button>
+            ) : (
+              <button type="button" onClick={audio.toggleMute} aria-label={audio.muted ? 'Unmute' : 'Mute'}
+                className="qn-btn h-11 w-11 flex items-center justify-center text-base shrink-0">
+                {audio.muted ? '🔇' : audio.volume > 0.5 ? '🔊' : '🔉'}
+              </button>
+            )}
+            {p.liveShow && (
+              <Link to={`/admin/live/${p.liveShow.id}/host`}
+                className="inline-flex items-center gap-1 h-11 px-2 bg-red-700 text-white text-xs font-bold shrink-0 max-w-[110px]"
+                title="A live show is on. Open the host console.">
+                <span className="w-2 h-2 rounded-full bg-white animate-pulse shrink-0" />
+                <span className="truncate">LIVE</span>
+              </Link>
+            )}
+            {p.stations.length > 1 ? (
+              <select
+                aria-label="Station"
+                value={p.stationId ?? ''}
+                onChange={(e) => p.onStation(e.target.value)}
+                className="qn-field h-11 flex-1 min-w-0 text-sm px-1.5"
+              >
+                {p.stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            ) : (
+              <span className="flex-1 min-w-0 truncate text-sm font-bold">{p.stations[0]?.name ?? 'No station'}</span>
+            )}
+          </div>
+          <PlayoutBadge stationId={p.stationId} className="!text-black" />
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="shrink-0 qn-lcd border-b-2 border-[#808080]">

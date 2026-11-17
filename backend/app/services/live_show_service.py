@@ -168,6 +168,12 @@ async def _resume_automation(db: AsyncSession, station_id, now: datetime) -> Non
         .execution_options(synchronize_session=False)
     )
     await db.flush()
+    from app.config import settings
+    if settings.engine_drives(station_id):
+        # The playout engine starts the next item itself (it asks /next again once the
+        # show is over). start_from_queue would mark an entry "playing" here that the
+        # engine was never given, and the site would show it on air.
+        return
     try:
         from app.api.v1.queue import start_from_queue
         await start_from_queue(db, station_id)

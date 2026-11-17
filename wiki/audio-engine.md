@@ -164,7 +164,13 @@ starts on the page at its due time by itself (pre-arm, via `localNext` with a 0.
 of the item on air); the server's message confirms it a moment later. Pages were
 1.1-1.8 s late waiting for that message. Listen gets the due time from
 `next_asset.cut_at` in the now-playing message (control room: from the queue,
-`nextCut`). Scenarios `story-resumes-after-time-check`,
+`nextCut`). Live at 14:00Z the pre-arm still did not fire: the message pages hold is
+the one sent when the item on air started, and a time check queued later (or during a
+30 min story) was not in it, so nothing was pre-loaded. The scheduler now sends the
+now-playing message again once a hard timed item is under a minute away
+(`SchedulerEngine._announce_timed`, `TIMED_ANNOUNCE_AHEAD_SECONDS = 60`, once per due
+time). The page records each decision in `window.__kbrTimedStart` and a console line
+`[kbr] timed start` (started here / not loaded / sound off). Scenarios `story-resumes-after-time-check`,
 `story-resumes-after-late-time-check`, `hard-time-check-starts-on-time-before-the-message`.
 On the real Listen page: `e2e/listen-page.mjs` ONLY=handover (short item at its end and
 when the server moves on 3 s early, time check 2 s and 3.6 s late, pre-armed time check
@@ -186,3 +192,5 @@ The server counts an item from the top of the file (hand-over at `started_at + c
 
 ## Browser checks
 `e2e/lib/fake-station.mjs` is a fake backend for page.route (queue, actions, live shows, CRM, now-playing socket, site socket, ranged tone files, `skewClock`) with an audio probe (`window.__decks()`, `__audible()`, `__outLevel()`, Media Session handlers). Suites on the built site (`npx vite preview --port 4311 --strictPort`): `control-room-actions.mjs` (every control room button, desktop + iPhone, S-1/S-2 timings), `listen-page.mjs` (Listen page, lock screen, network loss, socket back-off/polling, stream mode with `lib/stream-server.mjs`, time check on the second), `listener-pages.mjs` (a11y basics of the public pages, global player bar), `call-in.mjs`, `release-timing.mjs` (release pickup limits under a fake clock). Each takes `ONLY=<part>`.
+
+Real WebKit (Safari's engine): `e2e/webkit/listener-webkit.py` drives WebKitGTK's MiniBrowser through Selenium (`apt-get install webkit2gtk-driver xvfb gstreamer1.0-plugins-good gstreamer1.0-libav`, `pip install selenium`, `xvfb-run -a python3 e2e/webkit/listener-webkit.py` with the site on `vite preview --port 4183`). `e2e/webkit/fake-server.mjs` serves the same `makeStation()` answers over plain HTTP + WebSocket and proxies the site. WebKitGTK refuses sound without a tap like Safari (`--autoplay-policy=allow` turns that off), has MSE for MP3 and, under WebDriver, ignores `--enable-mediasource=false`, so `?kbr_no_mse=1` removes `window.MediaSource` to get the iPhone's path. No native HLS, so the iPhone's HLS branch is not reachable; narrowest window about 447 px. It does not stand in for iOS (audio session, lock screen, background, CarPlay): a real iPhone is still needed.
