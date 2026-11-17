@@ -261,6 +261,8 @@ class Stack:
             "APP_ENV": "development",
             "APP_DEBUG": "false",
             "JWT_SECRET_KEY": "harness-jwt-secret",
+            # A full run takes longer than the default 30 min login: late scenarios got 401
+            "JWT_ACCESS_TOKEN_EXPIRE_MINUTES": "600",
             "REDIS_URL": "",
             "S3_ENDPOINT_URL": "",
             "SUPABASE_URL": "",
