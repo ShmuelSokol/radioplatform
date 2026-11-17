@@ -154,6 +154,24 @@ async def _queue_follows_schedule(db: AsyncSession, schedule_id, *, had_playlist
         await db.rollback()
 
 
+async def _block_has_songs(db: AsyncSession, block_id) -> bool:
+    row = await db.execute(
+        select(PlaylistEntryModel.id)
+        .where(PlaylistEntryModel.block_id == block_id, PlaylistEntryModel.is_enabled.is_(True))
+        .limit(1)
+    )
+    return row.first() is not None
+
+
+async def _queue_follows_block(db: AsyncSession, block_id, *, had_playlists: bool = False) -> None:
+    """A song added to, changed on or removed from a block reaches the queue on time."""
+    schedule_id = (
+        await db.execute(select(ScheduleBlockModel.schedule_id).where(ScheduleBlockModel.id == block_id))
+    ).scalar_one_or_none()
+    if schedule_id is not None:
+        await _queue_follows_schedule(db, schedule_id, had_playlists=had_playlists)
+
+
 # ==================== Schedules ====================
 # Also answered without the trailing slash: the site calls /schedules, and the
 # automatic redirect to /schedules/ points at http:// behind the proxy, which the
@@ -270,7 +288,7 @@ async def update_schedule_block(
     if not block:
         raise HTTPException(status_code=404, detail="Schedule block not found")
 
-    had_playlist = block.playlist_template_id is not None
+    had_playlist = block.playlist_template_id is not None or await _block_has_songs(db, block.id)
     for key, value in data.model_dump(exclude_unset=True).items():
         if key == "playlist_template_id" and isinstance(value, str):
             value = UUID(value)
@@ -305,7 +323,8 @@ async def delete_schedule_block(
     if not block:
         raise HTTPException(status_code=404, detail="Schedule block not found")
 
-    schedule_id, had_playlist = block.schedule_id, block.playlist_template_id is not None
+    schedule_id = block.schedule_id
+    had_playlist = block.playlist_template_id is not None or await _block_has_songs(db, block.id)
     await db.delete(block)
     await db.commit()
     await _queue_follows_schedule(db, schedule_id, had_playlists=had_playlist)
@@ -328,6 +347,7 @@ async def set_prerecorded_show(
     if not block:
         raise NotFoundError("Block not found")
 
+    had_songs = await _block_has_songs(db, block_id)
     # Clear existing entries
     existing = (await db.execute(
         select(PlaylistEntryModel).where(PlaylistEntryModel.block_id == block_id)
@@ -343,7 +363,8 @@ async def set_prerecorded_show(
         is_enabled=True,
     )
     db.add(entry)
-    await db.flush()
+    await db.commit()
+    await _queue_follows_block(db, block_id, had_playlists=had_songs)
 
     return {"status": "ok", "block_id": str(block_id), "asset_id": body["asset_id"]}
 
@@ -357,8 +378,10 @@ async def create_playlist_entry(
 ):
     """Add an asset to a schedule block's playlist."""
     entry = PlaylistEntryModel(**data.model_dump())
+    block_id = entry.block_id
     db.add(entry)
     await db.commit()
+    await _queue_follows_block(db, block_id)
     await db.refresh(entry)
     return entry
 
@@ -406,10 +429,13 @@ async def update_playlist_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Playlist entry not found")
 
+    block_id = entry.block_id
+    had_songs = await _block_has_songs(db, block_id)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(entry, key, value)
 
     await db.commit()
+    await _queue_follows_block(db, block_id, had_playlists=had_songs)
     await db.refresh(entry)
     return entry
 
@@ -427,8 +453,11 @@ async def delete_playlist_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Playlist entry not found")
 
+    block_id = entry.block_id
+    had_songs = await _block_has_songs(db, block_id)
     await db.delete(entry)
     await db.commit()
+    await _queue_follows_block(db, block_id, had_playlists=had_songs)
 
 
 # ==================== Timeline Preview ====================
