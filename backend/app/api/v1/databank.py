@@ -218,10 +218,6 @@ async def set_spot_end_date(
     schedules = (await db.execute(sq)).scalars().all()
     if not schedules:
         raise HTTPException(status_code=409, detail="This spot has no schedule yet. Make one in Spot Schedule first.")
-    if station_id is None and any(s.station_id is not None for s in schedules):
-        # No station chosen (station list still loading, none remembered): moving
-        # every station's schedules at once is not what the row on screen showed.
-        raise HTTPException(status_code=400, detail="Choose a station first, then change the end date.")
     every_station_checked = False
     for s in schedules:
         if s.station_id is None:
@@ -235,6 +231,10 @@ async def set_spot_end_date(
             raise HTTPException(status_code=403, detail="You are not assigned to this station")
         if body.end_date and s.start_date and body.end_date < s.start_date:
             raise HTTPException(status_code=422, detail="The end date is before the schedule starts")
+    if station_id is None and any(s.station_id is not None for s in schedules):
+        # No station chosen (station list still loading, none remembered): moving
+        # every station's schedules at once is not what the row on screen showed.
+        raise HTTPException(status_code=400, detail="Choose a station first, then change the end date.")
     for s in schedules:
         s.end_date = body.end_date
     await db.flush()
