@@ -195,10 +195,6 @@ async def test_panic_with_empty_up_next_fills_then_plays(client, auth_headers, d
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: Panic during Shabbos/Yom Tov silence picks the next pending entry with "
-    "_pick_next_pending(silence_only=False) (queue.py _skip_current_locked), so a song "
-    "queued for after the blackout goes on air inside it"))
 async def test_panic_never_puts_music_inside_a_blackout(client, auth_headers, db_session):
     """F-MODES-31. Decision: Panic during a blackout cuts the silence item on air and starts
     the next silence (or nothing); music must never air inside the blackout."""
@@ -215,10 +211,6 @@ async def test_panic_never_puts_music_inside_a_blackout(client, auth_headers, db
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: Panic during a live show (queue paused, nothing 'playing') starts the next queue "
-    "entry (the show's resume entry): automation music goes on air under the host and the "
-    "item the show paused is used up (queue.py panic -> _skip_current_locked)"))
 async def test_panic_during_a_live_show_starts_no_music(client, auth_headers, db_session):
     """F-MODES-32. Decision: the live show owns the air; Panic starts nothing from the queue
     while it runs (ending the show is the host's End show)."""
@@ -242,10 +234,6 @@ async def test_panic_during_a_live_show_starts_no_music(client, auth_headers, db
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: the station lock only serialises two Panics; the second one then cuts the item the "
-    "first one just started (keep_incoming=False, force=True), so two items are cut "
-    "(queue.py panic)"))
 async def test_two_panics_at_once_cut_one_item(db_session):
     """F-MODES-33: two control rooms press Panic at the same moment, each with its own
     database session: the bad item is cut and the next song stays on air."""

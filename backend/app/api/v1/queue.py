@@ -1932,9 +1932,12 @@ async def _skip_current_locked(
     # 1. Check for soft-preempt ad slots whose time has arrived
     # 2. Then find next regular entry (skip future preempts)
     now_skip = datetime.now(timezone.utc)
-    next_entry = await _pick_next_pending(db, station_id, now_skip)
+    # During a Shabbos / Yom Tov blackout, Next and Panic may only start the blackout's
+    # silence, never a queued song (the scheduler's own advance follows the same rule).
+    blacked_out = await _is_blacked_out(db, station_id)
+    next_entry = await _pick_next_pending(db, station_id, now_skip, silence_only=blacked_out)
     refilled = False
-    if not next_entry and not await _is_blacked_out(db, station_id):
+    if not next_entry and not blacked_out:
         # The last item was skipped: fill the queue and carry on, never stop
         next_entry = await _refill_for_next(db, station_id)
         refilled = True
@@ -2113,6 +2116,12 @@ async def set_station_modes(
     return {"modes": result, "queue": await _queue_after_action(db, station_id)}
 
 
+# A second Panic within this many seconds (another control room, a double press) is the
+# same emergency: it does not cut the item the first one just started.
+PANIC_REPEAT_SECONDS = 1.5
+_last_panic: dict[str, float] = {}
+
+
 @router.post("/panic")
 async def panic(
     station_id: uuid.UUID,
@@ -2121,10 +2130,23 @@ async def panic(
 ):
     """Panic: cut whatever is on air at once (even a time check or a looping item)
     and play the next good item; an empty queue is filled first. Logged as an alert."""
+    from app.models.station import Station
     from app.services.alert_service import create_alert
+
+    station = await db.get(Station, station_id)
+    if station is not None and (station.automation_config or {}).get("live_show_id"):
+        # The live show owns the air: Panic starts nothing from the queue under the host
+        # (ending the show is the host's End show).
+        return {"message": "A live show is on air: Panic does nothing until it ends",
+                "queue": await _queue_after_action(db, station_id)}
 
     if settings.engine_drives(station_id):
         from app.services import playout_engine
+        last = _last_panic.get(str(station_id))
+        if last is not None and time.monotonic() - last < PANIC_REPEAT_SECONDS:
+            return {"message": "Already cut by another Panic just now",
+                    "queue": await _queue_after_action(db, station_id)}
+        _last_panic[str(station_id)] = time.monotonic()
         await stop_loop(db, station_id)
         await db.commit()
         await playout_engine.engine_flush(station_id)
@@ -2132,9 +2154,16 @@ async def panic(
         done = {"message": "Skipped" if ok else "The playout engine did not respond"}
     else:
         async with advance_lock(station_id):
-            done = await _skip_current_locked(
-                station_id, db, fade_seconds=SKIP_FADE_SECONDS["hard"], keep_incoming=False, force=True
-            )
+            # Two control rooms pressing Panic at the same moment: the second press arrives
+            # just after the first started the next item; it must not cut that one too.
+            last = _last_panic.get(str(station_id))
+            if last is not None and time.monotonic() - last < PANIC_REPEAT_SECONDS:
+                done = {"message": "Already cut by another Panic just now"}
+            else:
+                done = await _skip_current_locked(
+                    station_id, db, fade_seconds=SKIP_FADE_SECONDS["hard"], keep_incoming=False, force=True
+                )
+                _last_panic[str(station_id)] = time.monotonic()
     try:
         await create_alert(
             db, alert_type="system", severity="warning",

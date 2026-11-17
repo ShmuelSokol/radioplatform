@@ -14,4 +14,4 @@ Not built: **Auto** (the station is always automated here; switching automation 
 
 Tests: `backend/tests/test_station_modes.py`, `test_panic.py`, `test_hs_timing.py`; `frontend/e2e/station-modes.mjs` (real backend, real audio, meters sampled every 200 ms around Panic and the switches).
 
-Known Panic gaps, kept as strict xfail in `tests/test_panic.py` (2026-11-17): during a blackout Panic picks the next entry without `silence_only`, so a queued song airs inside Shabbos; during a live show (nothing playing) it starts the show's resume entry under the host; two Panics at once are serialised by `advance_lock` but the second cuts the item the first one started.
+Panic edge cases (fixed 2026-11-17, tests in `tests/test_panic.py`): during a blackout Next and Panic start only the blackout's silence (`_pick_next_pending(silence_only=True)`); during a live show Panic does nothing (the host owns the air); a second Panic on the same station within `PANIC_REPEAT_SECONDS` (1.5 s, another control room or a double press) is ignored so it cannot cut the item the first one started.

@@ -78,6 +78,7 @@ class _StationState:
 
 class AirWatch:
     def __init__(self) -> None:
+        self._engine_status: dict[str, dict | None] = {}  # one pass's engine answers
         self.reported: set[str] = set()
         self.recent: deque[dict] = deque(maxlen=RECENT_KEEP)
         self.states: dict[str, _StationState] = {}
@@ -233,7 +234,10 @@ class AirWatch:
         if settings.engine_drives(station.id):
             from app.services import playout_engine
 
-            status = await playout_engine.engine_status(station.id)
+            if sid in self._engine_status:
+                status = self._engine_status[sid]
+            else:
+                status = await playout_engine.engine_status(station.id)
             engine_entry = (status or {}).get("entry_id") or None
             shown = str(current.id) if current else None
             if status is None or engine_entry != shown:
@@ -291,6 +295,17 @@ class AirWatch:
         now = now or datetime.now(UTC)
         station_ids = (await db.execute(select(Station.id).where(Station.is_active.is_(True)))).scalars().all()
         found: list[Finding] = []
+        # Ask every stream server at once: one hung server (3 s timeout) must not add its
+        # wait to every other station's check and push the pass past 5 s.
+        self._engine_status = {}
+        engine_ids = [sid for sid in station_ids if settings.engine_drives(sid)]
+        if engine_ids:
+            from app.services import playout_engine
+
+            answers = await asyncio.gather(*(playout_engine.engine_status(sid) for sid in engine_ids),
+                                           return_exceptions=True)
+            self._engine_status = {str(sid): (None if isinstance(a, BaseException) else a)
+                                   for sid, a in zip(engine_ids, answers)}
         for station_id in station_ids:
             try:
                 # get() reloads a station expired by a rollback after another station failed
@@ -302,6 +317,7 @@ class AirWatch:
                 logger.warning("Air watch check failed for %s: %s", station_id, e)
                 # One station's database error must not abort the session for the rest
                 await db.rollback()
+        self._engine_status = {}
         await self.report(db, found)
         await db.commit()
         self.last_run = now.isoformat()

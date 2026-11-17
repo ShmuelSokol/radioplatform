@@ -414,11 +414,6 @@ async def _hung_server():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: run_once checks stations one after another and engine_status waits up to 3 s "
-    "(httpx timeout) per engine station, so two hung stream servers make one pass take "
-    "about 6 s and every further one adds 3 s (air_watch.py engine_drift, playout_engine.py "
-    "engine_status)"))
 async def test_hung_stream_servers_keep_a_pass_under_five_seconds(db_session, monkeypatch):
     """F-AIRWATCH-17: engine stations whose stream server hangs. Enough of them that waiting
     for each in turn (3 s apiece) passes the limit, also where limit() is tripled (CI)."""
