@@ -343,3 +343,37 @@ async def test_ahead_rule_uses_time_left_when_due(db_session):
     await queue_module._check_advance(db_session, station.id)
     row = next(e for e in await _pending(db_session, station.id) if e.asset_id == weather.id)
     assert row.timing_mode == "soft"
+
+
+# ── The queue's shown times ──────────────────────────────────────────────────
+
+
+def _shown(body, title):
+    row = next(r for r in body["entries"] if (r.get("asset") or {}).get("title") == title)
+    return datetime.fromisoformat(row["estimated_start"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy,soft_wait,song_wait", [
+    (None, 600, 40 * 60 + 30),      # pause: the item airs on time, the shiur ends 30 s later
+    ("wait", 40 * 60, 40 * 60 + 30),  # wait: it follows the shiur
+])
+async def test_queue_shows_a_soft_item_at_the_time_it_will_pause_the_shiur(
+        client, auth_headers, db_session, policy, soft_wait, song_wait):
+    """Main's 8:30 PM sponsorship was shown at 9:00:45, behind the whole Daf Yomi,
+    though it airs at 8:30 by pausing it."""
+    station, _talk, _softs, _song = await _setup(db_session, left=40 * 60, policy=policy, due_ago=-600)
+    now = datetime.now(UTC)
+    r = await client.get(f"/api/v1/stations/{station.id}/queue", headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert abs((_shown(body, "Soft 0") - now).total_seconds() - soft_wait) < 5
+    assert abs((_shown(body, "Song") - now).total_seconds() - song_wait) < 5
+
+
+@pytest.mark.asyncio
+async def test_queue_shows_a_soft_item_after_a_shiur_that_is_nearly_over(client, auth_headers, db_session):
+    station, *_ = await _setup(db_session, left=8 * 60, due_ago=-300)  # 3 min left when due
+    now = datetime.now(UTC)
+    body = (await client.get(f"/api/v1/stations/{station.id}/queue", headers=auth_headers)).json()
+    assert abs((_shown(body, "Soft 0") - now).total_seconds() - 8 * 60) < 5

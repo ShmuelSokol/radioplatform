@@ -1332,6 +1332,39 @@ async def _get_queue_impl(station_id, limit, db):
 
         ri, hi, si = 0, 0, 0
         _safety = len(entries) * 3  # prevent infinite loops
+
+        # A soft item due while a shiur or story has more than 5 minutes left pauses
+        # it (long_items, Shmuel 2026-11-17). The estimate left the sponsorship waiting
+        # behind the whole shiur: an 8:30 PM slot was shown at 9:00:45 behind the Daf Yomi.
+        from app.models.station import Station as _Station
+        from app.services import long_items as _long
+        from app.services.station_modes import hard_start_on as _hs_on
+
+        _st = await db.get(_Station, station_id)
+        _long_policy = _long.policy(_st) if _st is not None and _hs_on(_st) else "wait"
+
+        def _soft_into_long(asset, start, end):
+            """Place the soft items that will pause the long item playing start..end;
+            returns when the air is free again."""
+            nonlocal si
+            if _long_policy not in ("pause", "cut") or not _long.is_long_form(asset):
+                return end
+            while si < len(soft_preempts):
+                due = max(_tz(soft_preempts[si].preempt_at), start)
+                if due >= end or (end - due).total_seconds() <= _long.SOFT_PAUSE_MIN_LEFT_SECONDS:
+                    break
+                _d = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
+                _est_map[soft_preempts[si].id] = due
+                # paused: it carries on afterwards; cut: the air is free after the item
+                end = end + timedelta(seconds=_d) if _long_policy == "pause" else due + timedelta(seconds=_d)
+                si += 1
+                if _long_policy == "cut":
+                    break
+            return end
+
+        if now_playing_entry is not None and _np_sa:
+            _cursor = _soft_into_long(now_playing_entry.asset, now_utc_sort, _cursor)
+
         while (ri < len(regulars) or hi < len(hard_preempts) or si < len(soft_preempts)) and _safety > 0:
             _safety -= 1
             # 1. Fire hard preempt if its time has arrived
@@ -1341,7 +1374,9 @@ async def _get_queue_impl(station_id, limit, db):
                     _cursor = hp_pa
                     _est_map[hard_preempts[hi].id] = _cursor
                     _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
-                    _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    _cursor = _soft_into_long(
+                        hard_preempts[hi].asset, _cursor, _cursor + timedelta(seconds=_dur or DEFAULT_DURATION)
+                    )
                     hi += 1
                     continue
 
@@ -1372,7 +1407,7 @@ async def _get_queue_impl(station_id, limit, db):
                         continue
 
                 _est_map[song.id] = _cursor
-                _cursor += timedelta(seconds=song_dur)
+                _cursor = _soft_into_long(song.asset, _cursor, _cursor + timedelta(seconds=song_dur))
                 ri += 1
             else:
                 # No regular songs left — process remaining preempts by time
