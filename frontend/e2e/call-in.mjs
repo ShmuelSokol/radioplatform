@@ -251,6 +251,7 @@ async function more(browser) {
   {
     const st = stationWith(showRow);
     const { ctx, page, call } = await openCallIn(browser, DESK, st);
+    await page.locator('input').nth(1).fill('Shabbos question');
     await startCall(page);
     call.status('approved');
     await sleep(300);
@@ -259,11 +260,43 @@ async function more(browser) {
     const t = await page.locator('body').innerText();
     check(`${tag} F-CALLIN-20: an unknown call_status keeps the call panel (status text and Hang up)`,
       t.includes('Approved. The host will bring you on shortly.') && await page.getByRole('button', { name: 'Hang up' }).count() === 1, t.slice(0, 160).replace(/\n/g, ' / '));
+    // Each way a call ends offers "Call again": back to the form, name and topic kept, no reload
+    await page.evaluate(() => { window.__sameDocument = true; });
+    const again = page.getByRole('button', { name: 'Call again' });
+    for (const [how, end] of [
+      ['completed', () => call.status('completed')],
+      ['rejected', () => call.status('rejected')],
+      ['hung up', () => page.getByRole('button', { name: 'Hang up' }).click()],
+    ]) {
+      if (how !== 'completed') {
+        // A new call from the form: a new request and a new socket
+        const before = call.sockets.length;
+        st.callBody = null;
+        await page.getByRole('button', { name: 'Call in' }).click();
+        await timeUntil(page, `() => document.body.innerText.includes('Hang up')`, 5000);
+        await sleep(300);
+        check(`${tag} F-CALLIN-16: after "Call again" the next call goes out (${how} run)`,
+          st.callBody?.name === 'Yaakov' && call.sockets.length === before + 1, JSON.stringify(st.callBody));
+      }
+      await end();
+      await sleep(400);
+      const back = page.getByRole('link', { name: 'Back to listening' });
+      const ok = (await back.getAttribute('href').catch(() => '')) === '/listen/st-1' && await again.count() === 1 && !(await micLive(page));
+      await again.click({ timeout: 3000 }).catch(() => {});
+      await sleep(300);
+      const nameNow = await page.getByPlaceholder('Name').inputValue().catch(() => '');
+      const noteNow = await page.locator('input').nth(1).inputValue().catch(() => '');
+      check(`${tag} F-CALLIN-16: call ${how} -> "Call again" and "Back to listening" (/listen/:stationId); Call again shows the form with name and topic kept, no reload`,
+        ok && nameNow === 'Yaakov' && noteNow === 'Shabbos question' && await page.getByRole('button', { name: 'Call in' }).isEnabled().catch(() => false)
+          && await page.evaluate(() => window.__sameDocument === true), `name="${nameNow}" note="${noteNow}"`);
+    }
+    // Then "Back to listening" from an ended call
+    await page.getByRole('button', { name: 'Call in' }).click();
+    await timeUntil(page, `() => document.body.innerText.includes('Hang up')`, 5000);
+    await sleep(300);
     call.status('completed');
     await sleep(400);
     const back = page.getByRole('link', { name: 'Back to listening' });
-    check(`${tag} F-CALLIN-16: call ended -> "Back to listening" goes to /listen/:stationId; no Call in button until a reload (decide)`,
-      (await back.getAttribute('href')) === '/listen/st-1' && await page.getByRole('button', { name: 'Call in' }).count() === 0);
     await back.click();
     await page.waitForURL(/\/listen\/st-1/, { timeout: 5000 }).catch(() => {});
     check(`${tag} F-CALLIN-16: the link opens the Listen page`, page.url().endsWith('/listen/st-1'), page.url());

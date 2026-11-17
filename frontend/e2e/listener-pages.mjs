@@ -229,7 +229,8 @@ async function stationListChecks(browser) {
     await ctx.close();
   }
   const list = pagedStations(120, (i) => (i === 2 ? { is_active: false, name: 'Feed 003 (old)' } : i === 0 ? { description: 'Torah, music and news. '.repeat(20) } : {}));
-  const st = stationFor({ '/stations': (m, q) => pageOf(list, q, 'stations') }, {
+  // On air: Kol Berama (st-1) and the inactive st-3; Feed 002 is switched on with nothing playing
+  const st = stationFor({ '/stations': (m, q) => pageOf(list, q, 'stations'), '/now-playing': () => ({ playing: ['st-1', 'st-3'] }) }, {
     playout: { stations: { 'st-2': { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } },
   });
   for (const [view, opts] of [['desktop', DESKTOP], ['iPhone', IPHONE]]) {
@@ -241,8 +242,13 @@ async function stationListChecks(browser) {
       check(`${tag}-4 ${view}: an inactive station is listed with an "Offline" pill and a working /listen link (today's behaviour; decide)`,
         await off.count() === 1 && (await off.innerText()).includes('Offline') && (await off.getAttribute('href')) === '/listen/st-3');
       const first = cards.filter({ hasText: 'Kol Berama' });
-      check(`${tag}-5 ${view}: the pill follows station.is_active: an active station says "On Air" whether or not it plays (decide)`,
-        (await first.innerText()).includes('On Air'));
+      const pill = async (name) => (await cards.filter({ hasText: name }).locator('span.rounded-full').last().innerText()).trim();
+      const p1 = await pill('Kol Berama'), p2 = await pill('Feed 002'), p3 = await pill('Feed 003 (old)');
+      const onAirReads = st.calls.filter((c) => c.path === '/now-playing').length;
+      const perCard = st.calls.filter((c) => /^\/(now-playing|stations)\/[^/]+(\/now-playing)?$/.test(c.path)).length;
+      check(`${tag}-5 ${view}: "On Air" only when something plays; a switched-on station with nothing playing says Offline; an inactive one stays Offline`,
+        p1 === 'On Air' && p2 === 'Offline' && p3 === 'Offline', `${p1} / ${p2} / ${p3}`);
+      check(`${tag}-5 ${view}: one request for the whole list, not one per card`, onAirReads === 1 && perCard === 0, `/now-playing x${onAirReads}, per-station reads ${perCard}`);
       const firstText = await first.innerText();
       const clamp = await first.locator('p.line-clamp-2').evaluate((el) => getComputedStyle(el).webkitLineClamp).catch(() => '');
       const feed2 = await cards.filter({ hasText: 'Feed 002' }).innerText();

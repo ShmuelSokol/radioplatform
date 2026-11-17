@@ -220,7 +220,12 @@ export default function CallIn() {
             {callOver && (
               <div className="space-y-3">
                 <p className="text-gray-700">{STATUS_TEXT[status]}</p>
-                <Link to={`/listen/${stationId}`} className="text-brand-600 underline">Back to listening</Link>
+                {/* Back to the form, name and topic still filled, no reload */}
+                <button onClick={() => { setError(null); setStatus('idle'); }}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-full text-lg font-medium">
+                  Call again
+                </button>
+                <Link to={`/listen/${stationId}`} className="inline-flex items-center min-h-[44px] text-brand-600 underline">Back to listening</Link>
               </div>
             )}
           </>
