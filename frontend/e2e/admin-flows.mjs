@@ -59,6 +59,11 @@ const VIEWS = {
 // A listed check that passes is reported as FIXED? so the list stays honest.
 const KNOWN_BUGS = {
   'F-BLOCKS-5': 'songs added to a block ("+ Add song") never reach the queue: SchedulingService.get_next_asset_for_block has no caller; the queue fills from rotation',
+  'F-STUDIO-1 dj': 'a DJ may open the recording studio and record, but Save is refused (POST /assets/upload is manager-only: 403 "Manager access required"); the take is lost',
+  'V2-101 a11y-gaps': 'basic accessibility gaps (fields without labels, grey-on-dark text under 4.5:1, see the detail per page); totals printed after the a11y section',
+  'V2-101 Esc': 'Esc does not close the New Archive, New Show or bug report dialogs',
+  'F-SPOTSCHED-1 dayparts': 'S-6: saving a spot schedule for all stations re-plans every active station\'s queue inside the request, one after another (api/v1/spot_schedules.py _refresh_queues); with 81 stations it took 1.9-3 s (limit 1 s); fast with a handful',
+  'V2-105':'the program guide lists stored times only: sunset/sunrise blocks show their placeholder time and overlapping blocks are both listed (priority ignored)',
 };
 
 // ── Result bookkeeping ──────────────────────────────────────────────────────
@@ -2504,8 +2509,11 @@ section('live', async () => {
 async function proxyAudio(page, role) {
   await page.route(`${BASE}/api/v1/**`, async r => {
     const url = API + r.request().url().slice(`${BASE}/api/v1`.length);
-    const resp = await r.fetch({ url, headers: { ...r.request().headers(), authorization: `Bearer ${USERS[role].token}` } });
-    await r.fulfill({ response: resp });
+    // A page closed while its audio was loading cancels the request: not an error
+    try {
+      const resp = await r.fetch({ url, headers: { ...r.request().headers(), authorization: `Bearer ${USERS[role].token}` } });
+      await r.fulfill({ response: resp });
+    } catch { await r.abort().catch(() => {}); }
   });
 }
 function makeSilenceTone(file) {
@@ -2520,7 +2528,7 @@ async function uploadFixture(title, { type = 'music', file } = {}) {
   form.append('file', new Blob([fs.readFileSync(f)], { type: 'audio/mpeg' }), path.basename(f));
   form.append('title', title);
   form.append('asset_type', type);
-  form.append('artist', 'E2E Library Artist');
+  form.append('artist', `E2E Library Artist ${RUN}`);
   return api('POST', '/assets/upload', { token: USERS.admin.token, form });
 }
 const libRow = (page, title) => page.locator('tbody tr', { has: page.locator(`td[title="${title}"]`) }).first();
@@ -2537,11 +2545,14 @@ section('assets', async () => {
   await step('F-ASSETS-1 column filters: title, artist, type, duration min/max; Clear filters', async () => {
     await page.goto(`${BASE}/admin/assets`);
     await page.getByRole('heading', { name: 'Library' }).waitFor();
+    const countText = page.getByText(/^\d+ assets?$/).first();
+    await countText.waitFor();
+    const all = await countText.innerText();
     await titleBox.fill(`E2E Lib A ${RUN}`);
     await until(async () => { const t = await titles(); return t.length === 1 && t[0] === `E2E Lib A ${RUN}`; }, 'title filter to one row');
     await page.getByRole('button', { name: 'Clear filters' }).click();
     assert(await titleBox.inputValue() === '', 'title filter not cleared');
-    await page.getByPlaceholder('Search artist...').fill('E2E Library Artist');
+    await page.getByPlaceholder('Search artist...').fill(`E2E Library Artist ${RUN}`);
     await until(async () => { const t = await titles(); return t.length >= 2 && t.every(x => x.startsWith('E2E Lib')); }, 'artist filter');
     await page.getByRole('button', { name: 'Clear filters' }).click();
     const typeSel = page.locator('thead select', { has: page.locator('option[value="spot"]') }).first();
@@ -2559,6 +2570,8 @@ section('assets', async () => {
     }, 'duration filter 2:55–3:10');
     await page.getByRole('button', { name: 'Clear filters' }).click();
     await page.getByRole('button', { name: 'Clear filters' }).waitFor({ state: 'detached' });
+    // Filters reach the server 300 ms after typing stops: wait for the whole library again
+    await until(async () => (await countText.innerText()) === all, `count back to ${all}`);
   }, page);
   await step('F-ASSETS-2 Rows select asks for that many; pager', async () => {
     const rowsSel = page.locator('select', { has: page.locator('option[value="200"]') }).first();
@@ -2566,8 +2579,10 @@ section('assets', async () => {
     assert(r.status === 200, `list ${r.status}`);
     await rowsSel.selectOption('50');
     const next = page.getByRole('button', { name: 'Next' });
-    const summary = page.getByText(/\d+–\d+ of \d+/).first();
+    const summary = page.getByText(/^\d+–\d+ of \d+$/).first();
     await summary.waitFor();
+    // wait for the 50-row page (the 100-row answer may still be on screen)
+    await until(async () => { const m = (await summary.innerText()).match(/^\d+–(\d+) of (\d+)/); return m && Number(m[1]) <= 50; }, '50 rows a page');
     const total = Number((await summary.innerText()).match(/of (\d+)/)[1]);
     if (total > 50) {
       await next.click();
@@ -2576,7 +2591,7 @@ section('assets', async () => {
       await until(async () => /^1–/.test((await summary.innerText()).trim()), 'page 1');
       return `${total} items, paged`;
     }
-    assert(await next.isDisabled(), 'Next enabled on the only page');
+    assert(!(await next.count()) || await next.isDisabled(), `Next enabled on the only page (${await summary.innerText()})`);
     return `${total} items (one page)`;
   }, page);
   await step('F-ASSETS-3 row Play plays the real file, Stop stops it', async () => {
@@ -2608,6 +2623,8 @@ section('assets', async () => {
     await row.getByTitle('Change category').click();
     await timedSave(page, 'clear category', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => row.getByRole('button', { name: 'Clear category' }).click());
     await until(async () => !(await row.getByTitle('Change category').innerText()).includes(cat.name), 'category cleared');
+    // Another section may have linked this spot to the sponsor already: start without one
+    await api('PATCH', `/assets/${spot.id}`, { token: USERS.admin.token, body: { sponsor_id: null } }).catch(() => {});
     await titleBox.fill(spot.title);
     const srow = libRow(page, spot.title);
     await srow.waitFor();
@@ -2982,6 +2999,747 @@ section('reviews', async () => {
     }, page);
     await closePage(page);
   }
+});
+
+// ── Recording studio (fake microphone) ──────────────────────────────────────
+section('studio', async () => {
+  // A browser of its own with Chrome's fake microphone (a steady tone) and no permission prompt
+  const fake = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+  try {
+    for (const view of ['desktop', 'iphone']) {
+      const ctx = await fake.newContext({ ...VIEWS[view], permissions: ['microphone'] });
+      const u = USERS.manager; // a DJ may open the studio but not save (see F-STUDIO-1 dj below)
+      await ctx.addInitScript(([a, r]) => { localStorage.setItem('access_token', a); localStorage.setItem('refresh_token', r); }, [u.token, u.refresh]);
+      const page = await ctx.newPage();
+      page.setDefaultTimeout(8000);
+      page.on('dialog', d => d.accept().catch(() => {}));
+      const rec = page.locator('section', { hasText: 'General Recorder' });
+      const title = `E2E Studio ${view} ${RUN}`;
+      await step(`F-STUDIO-1${view === 'iphone' ? '/4' : ''} ${view}: Record / Pause / Resume / Stop; Discard; record again and Save to Library (title, type, category)`, async () => {
+        await page.goto(`${BASE}/admin/studio`);
+        await rec.getByRole('button', { name: 'Start recording' }).click();
+        await rec.getByRole('button', { name: 'Pause' }).click();
+        await rec.getByText('(paused)').waitFor();
+        await rec.getByRole('button', { name: 'Resume' }).click();
+        await page.waitForTimeout(1500);
+        await rec.getByRole('button', { name: 'Stop' }).click();
+        await rec.getByRole('button', { name: 'Discard' }).click();
+        await rec.getByRole('button', { name: 'Start recording' }).click();
+        await page.waitForTimeout(1200);
+        await rec.getByRole('button', { name: 'Cancel' }).click();
+        await rec.getByRole('button', { name: 'Start recording' }).click();
+        await page.waitForTimeout(2000);
+        await rec.getByRole('button', { name: 'Stop' }).click();
+        const save = rec.getByRole('button', { name: 'Save to Library' });
+        assert(await save.isDisabled(), 'Save allowed with no title');
+        await rec.getByPlaceholder('Title *').fill(title);
+        await rec.locator('select').first().selectOption('jingle');
+        await rec.getByPlaceholder('Category (optional)').fill('e2e');
+        const r = await timedResponse(page, (m, p) => m === 'POST' && p.startsWith('/assets/upload'), () => save.click());
+        assert(r.status < 300, `save ${r.status}`);
+        const a = await r.resp.json();
+        // V2-100: the take is stored as an uncompressed WAV
+        assert(/\.wav$/i.test(a.file_path || ''), `stored as ${a.file_path}`);
+        assert(a.asset_type === 'jingle', `type ${a.asset_type}`);
+        return `saved ${a.duration ? a.duration.toFixed(1) + ' s ' : ''}${a.file_path.split('.').pop()}`;
+      }, page);
+      if (view === 'desktop') {
+        await step('V2-100 leaving the studio while recording asks first (the take lives only in this tab)', async () => {
+          await rec.getByRole('button', { name: 'Start recording' }).click();
+          await page.waitForTimeout(800);
+          let asked = false;
+          page.removeAllListeners('dialog');
+          page.on('dialog', d => { if (d.type() === 'beforeunload') asked = true; d.dismiss().catch(() => {}); });
+          await page.reload({ timeout: 3000 }).catch(() => {});
+          await page.waitForTimeout(500);
+          page.removeAllListeners('dialog');
+          page.on('dialog', d => d.accept().catch(() => {}));
+          assert(asked, 'no warning before the take is thrown away');
+        }, page);
+        await page.goto(`${BASE}/admin/studio`);
+        await step('F-STUDIO-2 weather readouts: station + date, Generate Readout, Template Config toggle', async () => {
+          const sec = page.locator('section', { hasText: 'Weather Readouts' });
+          await sec.locator('select').first().selectOption(FX.station.id);
+          await sec.getByRole('button', { name: 'Template Config' }).click();
+          await sec.getByRole('button', { name: 'Hide Template' }).click();
+          const r = await timedResponse(page, (m, p, r) => m === 'POST' && p.includes('readout') && r.status() !== 307, () => sec.getByRole('button', { name: 'Generate Readout' }).click());
+          if (r.status >= 400) return `generate answered ${r.status} (the weather service cannot be reached from this test setup)`;
+          await sec.getByRole('button', { name: 'Regenerate' }).first().waitFor();
+          const n = await sec.getByRole('button', { name: 'Regenerate' }).count();
+          await sec.getByRole('button', { name: /^Record$|^Re-record$/ }).first().click();
+          await sec.getByRole('button', { name: 'Close Recorder' }).click();
+          await timedResponse(page, (m, p) => m !== 'GET' && p.includes('readout'), () => sec.getByRole('button', { name: 'Regenerate' }).first().click());
+          await timedSave(page, 'delete readout', (m, p) => m === 'DELETE', () => sec.getByRole('button', { name: 'Delete' }).first().click());
+          await until(async () => (await sec.getByRole('button', { name: 'Regenerate' }).count()) === n - 1, 'readout removed');
+          return 'generated, recorder opened and closed, regenerated, deleted';
+        }, page);
+        await step('F-STUDIO-3 audio mixer: pick bed and voice-over by search, Mix & Save to Library', async () => {
+          const sec = page.locator('section', { hasText: 'Audio Mixer' });
+          const searches = sec.getByPlaceholder('Search assets...');
+          const lists = sec.locator('select[size]');
+          await searches.nth(0).fill(FX.assets[0].title);
+          await lists.nth(0).selectOption(FX.assets[0].id);
+          await searches.nth(1).fill(FX.assets[3].title);
+          await lists.nth(1).selectOption(FX.assets[3].id);
+          await sec.getByRole('button', { name: /Show .* Waveform/ }).first().click();
+          await sec.getByPlaceholder('Title *').fill(`E2E Mix ${RUN}`);
+          const r = await timedResponse(page, (m, p) => m === 'POST' && /mix/.test(p), () => sec.getByRole('button', { name: 'Mix & Save to Library' }).click());
+          assert(r.status < 300, `mix ${r.status} ${(await r.resp.text()).slice(0, 150)}`);
+          return `mixed in ${r.ms} ms`;
+        }, page);
+      }
+      await ctx.close();
+    }
+    {
+      const ctx = await fake.newContext({ ...VIEWS.desktop, permissions: ['microphone'] });
+      await ctx.addInitScript(([a, r]) => { localStorage.setItem('access_token', a); localStorage.setItem('refresh_token', r); }, [USERS.dj.token, USERS.dj.refresh]);
+      const page = await ctx.newPage();
+      page.setDefaultTimeout(8000);
+      await step('F-STUDIO-1 dj: a DJ (who may open the studio) can save a recording to the library', async () => {
+        await page.goto(`${BASE}/admin/studio`);
+        const rec = page.locator('section', { hasText: 'General Recorder' });
+        await rec.getByRole('button', { name: 'Start recording' }).click();
+        await page.waitForTimeout(1200);
+        await rec.getByRole('button', { name: 'Stop' }).click();
+        await rec.getByPlaceholder('Title *').fill(`E2E DJ take ${RUN}`);
+        const r = await timedResponse(page, (m, p) => m === 'POST' && p.startsWith('/assets/upload'), () => rec.getByRole('button', { name: 'Save to Library' }).click());
+        assert(r.status < 300, `save refused ${r.status} ${(await r.resp.text()).slice(0, 100)}`);
+      }, page);
+      await ctx.close();
+    }
+  } finally { await fake.close(); }
+});
+
+// ── CRM ─────────────────────────────────────────────────────────────────────
+section('crm', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const member = await api('POST', '/crm/register', { body: { name: `E2E Member ${view} ${RUN}` } });
+    const page = await newPage('manager', view);
+    await step(`F-CRM-1 ${view}: members tab: search finds the member; Deactivate (confirm)`, async () => {
+      await page.goto(`${BASE}/admin/crm`);
+      await page.getByPlaceholder('Search by name...').fill(`E2E Member ${view} ${RUN}`);
+      const row = page.locator('tr', { hasText: `E2E Member ${view} ${RUN}` }).first();
+      await row.waitFor();
+      await timedSave(page, 'deactivate', (m, p) => m !== 'GET' && p.includes(member.id), () => row.getByRole('button', { name: 'Deactivate' }).click());
+      await until(async () => !(await row.getByRole('button', { name: 'Deactivate' }).count()) || !(await row.count()), 'member deactivated');
+    }, page);
+    await step(`F-CRM-2 ${view}: song rankings tab loads`, async () => {
+      await page.getByRole('button', { name: 'Song Rankings' }).click();
+      await page.waitForTimeout(300);
+      assert(!(await page.getByText(/Something went wrong|Could not load|Failed/).count()), 'error shown');
+    }, page);
+    await step(`F-CRM-3 ${view}: create a raffle (title, dates), Entries, Draw Winner (confirm)`, async () => {
+      await page.getByRole('button', { name: 'Raffles' }).click();
+      const t = `E2E Raffle ${view} ${RUN}`;
+      await field(page, 'Title *').fill(t);
+      await field(page, 'Prize').fill('A mug');
+      await field(page, 'Start *').fill(localInput(new Date(Date.now() - 3600e3)));
+      await field(page, 'End *').fill(localInput(new Date(Date.now() + 86400e3)));
+      await timedSave(page, 'create raffle', (m, p) => m === 'POST' && p.includes('raffle'), () => page.getByRole('button', { name: 'Create Raffle' }).click());
+      const r = page.locator('div', { has: page.getByText(t, { exact: true }) }).filter({ has: page.getByRole('button', { name: 'Draw Winner' }) }).last();
+      await r.waitFor();
+      await r.getByRole('button', { name: 'Entries' }).click();
+      await r.getByRole('button', { name: 'Hide' }).click();
+      const d = await timedResponse(page, (m, p) => m === 'POST' && p.includes('draw'), () => r.getByRole('button', { name: 'Draw Winner' }).click());
+      return `draw answered ${d.status} (no entries)`;
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Program clock ───────────────────────────────────────────────────────────
+section('program-clock', async () => {
+  // Rules are admin-only on the server (as on the Rules screen), so rule changes run as admin
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('admin', view);
+    const name = `E2E Clock Rule ${view} ${RUN}`;
+    await step(`F-CLOCK-1 ${view}: station select, day buttons, 24 hours listed; clicking an hour opens the panel`, async () => {
+      await page.goto(`${BASE}/admin/program-clock`);
+      await page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).first().selectOption(FX.station.id);
+      await page.getByRole('button', { name: 'Tue', exact: true }).click();
+      await until(async () => (await page.getByText(/No rule — default fill|· p\d+/).count()) >= 24, '24 hour rows');
+      await page.getByText(/No rule — default fill|· p\d+/).nth(9).click();
+      await page.getByRole('heading', { name: /New Rule|Edit Rule/ }).waitFor();
+    }, page);
+    await step(`F-CLOCK-3 ${view}: New Rule (name, type, asset type, hours, days, priority) creates; Edit updates; Delete (confirm); Cancel`, async () => {
+      await page.getByRole('button', { name: '+ New Rule' }).click();
+      await field(page, 'Name').fill(name);
+      await field(page, 'Hour Start').fill('3');
+      await field(page, 'Hour End').fill('4');
+      const { ms } = await timedSave(page, 'create rule', (m, p) => m === 'POST' && p.startsWith('/rules'), () => page.getByRole('button', { name: 'Create Rule' }).click());
+      await page.getByText(name).first().waitFor();
+      await page.getByText(name).first().click();
+      await field(page, 'Priority').fill('7');
+      await timedSave(page, 'update rule', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/rules/'), () => page.getByRole('button', { name: 'Update Rule' }).click());
+      await page.getByText(name).first().click();
+      await timedSave(page, 'delete rule', (m, p) => m === 'DELETE' && p.startsWith('/rules/'), () => page.getByRole('button', { name: 'Delete' }).click());
+      await page.getByText(name).first().waitFor({ state: 'detached' });
+      await page.getByRole('button', { name: '+ New Rule' }).click();
+      await page.getByRole('button', { name: 'Cancel' }).click();
+      return `created in ${ms} ms`;
+    }, page);
+    if (view === 'desktop') {
+      await step('F-CLOCK-2 ⚙ Automation: an ad minute toggles and is saved to the station', async () => {
+        await page.getByRole('button', { name: '⚙ Automation' }).click();
+        const m = page.getByRole('button', { name: ':45', exact: true });
+        const on = (await m.getAttribute('class')).includes('bg-orange-700');
+        await timedSave(page, 'ad minute', (mm, p) => mm !== 'GET' && p.startsWith('/stations'), () => m.click());
+        await until(async () => (await m.getAttribute('class')).includes('bg-orange-700') !== on, 'minute toggled');
+        await timedSave(page, 'ad minute back', (mm, p) => mm !== 'GET' && p.startsWith('/stations'), () => m.click());
+      }, page);
+    }
+    await closePage(page);
+  }
+  for (const role of ['manager', 'dj', 'viewer']) {
+    const page = await newPage(role);
+    await step(`F-CLOCK-4 ${role}: ${role === 'manager' ? 'no New Rule (rules are admin-only); the clock still shows' : 'program clock is view only (no New Rule)'}`, async () => {
+      await page.goto(`${BASE}/admin/program-clock`);
+      if (role === 'manager') await page.getByRole('button', { name: 'Tue', exact: true }).waitFor();
+      else await page.getByTestId('view-only').waitFor();
+      assert(!(await page.getByRole('button', { name: '+ New Rule' }).count()) || await page.getByRole('button', { name: '+ New Rule' }).isDisabled(), 'New Rule offered');
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Public pages ────────────────────────────────────────────────────────────
+section('public', async () => {
+  const T = USERS.admin.token;
+  // A station in Jerusalem with blocks around "now" there, for the guide's clock checks.
+  const jz = 'Asia/Jerusalem';
+  const gst = await api('POST', '/stations', { token: T, body: { name: `E2E Guide St ${RUN}`, timezone: jz, latitude: 31.77, longitude: 35.21 } });
+  const gsc = await api('POST', '/schedules', { token: T, body: { name: `E2E Guide ${RUN}`, station_id: gst.id } });
+  const hm = d => new Intl.DateTimeFormat('en-GB', { timeZone: jz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+  const now = new Date();
+  const s = hm(new Date(now.getTime() - 30 * 60e3)), e = hm(new Date(now.getTime() + 30 * 60e3));
+  const block = (name, start, end, extra = {}) => api('POST', '/schedules/blocks', { token: T, body: { schedule_id: gsc.id, name, recurrence_type: 'daily', start_time: `${start}:00`, end_time: `${end}:00`, priority: 1, playback_mode: 'shuffle', ...extra } });
+  await block(`E2E On Now ${RUN}`, s, e);
+  await block(`E2E Sunset Show ${RUN}`, '12:00', '13:00', { start_sun_event: 'sunset', start_sun_offset: 0 });
+  await block(`E2E Overlap A ${RUN}`, '05:00', '06:00', { priority: 5 });
+  await block(`E2E Overlap B ${RUN}`, '05:00', '06:00', { priority: 1 });
+  // A public host with no display name (V2-127)
+  const hostEmail = `e2e-secret-login-${RUN}@example.test`;
+  const host = await api('POST', '/users', { token: T, body: { email: hostEmail, password: `pw-${RUN}-${crypto.randomBytes(4).toString('hex')}`, role: 'dj' } });
+  await api('PUT', `/users/${host.id}`, { token: T, body: { is_public: true, bio: 'E2E bio' } }).catch(() => api('PATCH', `/users/${host.id}`, { token: T, body: { is_public: true, bio: 'E2E bio' } }));
+  // A published and a draft archive
+  const pub = await api('POST', '/archives', { token: T, body: { station_id: FX.station.id, title: `E2E Public Archive ${RUN}`, audio_url: `${API}/assets/${FX.assets[0].id}/download`, is_published: true } });
+  const draft = await api('POST', '/archives', { token: T, body: { station_id: FX.station.id, title: `E2E Draft Archive ${RUN}`, audio_url: 'https://example.test/x.mp3' } });
+  await api('PATCH', `/archives/${draft.id}`, { token: T, body: { is_published: false } });
+
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage(null, view);
+    await step(`F-STLIST-1 ${view}: active stations listed; a card opens /listen/:id`, async () => {
+      await page.goto(`${BASE}/stations`);
+      const cardL = page.getByRole('link', { name: new RegExp(FX.station.name) });
+      await cardL.waitFor();
+      await cardL.click();
+      await waitPath(page, `/listen/${FX.station.id}`);
+    }, page);
+    await step(`F-STLIST-2 ${view}: loading then list (no error), empty state text exists for no stations`, async () => {
+      await page.route(`${API}/stations**`, r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ stations: [], total: 0 }) }));
+      await page.goto(`${BASE}/stations`);
+      await page.getByText(/No stations|no active stations|No live stations/i).first().waitFor();
+      await page.unroute(`${API}/stations**`);
+    }, page);
+    await step(`F-GUIDE-1/2 + V2-104 ${view}: station + date load the EPG; "today" and "Now" follow the station's clock (Jerusalem) not the viewer's`, async () => {
+      await page.goto(`${BASE}/guide`);
+      const sel = page.locator('select', { has: page.locator(`option[value="${gst.id}"]`) }).first();
+      const r = await timedResponse(page, (m, p) => m === 'GET' && p === `/schedules/epg/${gst.id}`, () => sel.selectOption(gst.id));
+      const want = new Intl.DateTimeFormat('en-CA', { timeZone: jz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      await until(async () => (await page.locator('input[type=date]').inputValue()) === want, `date ${want} (station's today)`);
+      const card = page.locator('div.rounded-lg', { hasText: `E2E On Now ${RUN}` }).last();
+      await card.waitFor();
+      await until(async () => (await card.innerText()).includes('Now'), '"Now" on the block running in Jerusalem');
+      // a different day: no "Now"
+      await page.locator('input[type=date]').fill('2031-01-01');
+      await page.getByText(`E2E On Now ${RUN}`).waitFor();
+      assert(!(await page.getByText('Now', { exact: true }).count()), '"Now" shown on another day');
+      void r;
+    }, page);
+    await step(`V2-104 ${view}: EPG with no date answers the station's date, not the server's`, async () => {
+      const d = await api('GET', `/schedules/epg/${gst.id}`);
+      const want = new Intl.DateTimeFormat('en-CA', { timeZone: jz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      assert(d.date === want, `EPG default date ${d.date}, station date ${want}`);
+    }, page);
+    await step(`V2-105 ${view}: a sunset block shows today's sunset time, not its stored placeholder`, async () => {
+      await page.locator('input[type=date]').fill(new Intl.DateTimeFormat('en-CA', { timeZone: jz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()));
+      const c = page.locator('div.rounded-lg', { hasText: `E2E Sunset Show ${RUN}` }).last();
+      await c.waitFor();
+      assert(!(await c.innerText()).includes('12:00 PM'), 'shows the stored 12:00 PM placeholder');
+    }, page);
+    await step(`V2-105 ${view}: of two overlapping blocks only the one that airs (higher priority) is listed`, async () => {
+      await page.getByText(`E2E Overlap A ${RUN}`).waitFor();
+      assert(!(await page.getByText(`E2E Overlap B ${RUN}`).count()), 'the block that loses is listed too');
+    }, page);
+    await step(`F-GUIDE-3 ${view}: no sideways scroll`, async () => {
+      const w = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+      assert(w[0] <= w[1] + 1, `page ${w[0]} px wide in a ${w[1]} px window`);
+    }, page);
+    await step(`F-HOSTS-1 + V2-127 ${view}: public host card with bio; a host without a display name does not show their login name`, async () => {
+      await page.goto(`${BASE}/hosts`);
+      const c = page.locator('div', { hasText: 'E2E bio' }).last();
+      await c.waitFor();
+      assert(!(await page.getByText(`e2e-secret-login-${RUN}`).count()), 'login name (e-mail before @) shown publicly');
+    }, page);
+    await step(`F-PARCH-1/2 ${view}: only published archives; station filter; play overlay plays the audio`, async () => {
+      await page.route(/\/assets\/[^/]+\/download/, async r => {
+        try {
+          const resp = await r.fetch({ headers: { ...r.request().headers(), authorization: `Bearer ${USERS.admin.token}` } });
+          await r.fulfill({ response: resp });
+        } catch { await r.abort().catch(() => {}); }
+      });
+      // The page plays through `new Audio()` (never in the document), so watch play() itself
+      await page.addInitScript(() => {
+        const play = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function (...args) {
+          const p = play.apply(this, args);
+          p.then(() => { window.__e2eAudio = true; }, e => { window.__e2eAudioErr = String(e); });
+          return p;
+        };
+      });
+      await page.goto(`${BASE}/archives`);
+      const cardA = page.locator('div', { has: page.getByRole('heading', { name: `E2E Public Archive ${RUN}` }) }).last();
+      await cardA.waitFor();
+      assert(!(await page.getByText(`E2E Draft Archive ${RUN}`).count()), 'a draft is shown to the public');
+      const filter = page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).first();
+      // Any other station: the archive belongs to FX.station only
+      const other = await filter.locator('option').evaluateAll((os, keep) => os.map(o => o.value).find(v => v && v !== keep), FX.station.id);
+      assert(other, 'only one station in the filter');
+      await filter.selectOption(other);
+      await page.getByRole('heading', { name: `E2E Public Archive ${RUN}` }).waitFor({ state: 'detached' });
+      await filter.selectOption(FX.station.id);
+      await page.getByRole('heading', { name: `E2E Public Archive ${RUN}` }).waitFor();
+      await page.getByRole('button', { name: `Play E2E Public Archive ${RUN}` }).click({ force: true });
+      await until(async () => page.evaluate(() => { if (window.__e2eAudioErr) throw new Error(window.__e2eAudioErr); return !!window.__e2eAudio; }), 'archive audio playing', 8000);
+      await page.getByRole('button', { name: `Pause E2E Public Archive ${RUN}` }).waitFor();
+    }, page);
+    await closePage(page);
+  }
+  void pub;
+});
+
+// ── Sponsor portal ──────────────────────────────────────────────────────────
+section('sponsor', async () => {
+  const T = USERS.admin.token;
+  await api('PATCH', `/assets/${FX.assets[2].id}`, { token: T, body: { sponsor_id: FX.sponsor.id } }).catch(() => {});
+  const inv = await api('POST', '/billing/invoices', { token: T, body: { sponsor_id: FX.sponsor.id, amount_cents: 12345, description: `E2E Invoice ${RUN}` } });
+  for (const view of ['desktop', 'iphone']) {
+    // F-SPLOGIN-1: real sign-in through the form
+    const ctx = await browser.newContext(VIEWS[view]);
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(8000);
+    page.on('dialog', d => d.accept().catch(() => {}));
+    await step(`F-SPLOGIN-1 ${view}: sign in lands on /sponsor/dashboard; "Signing in..." while waiting`, async () => {
+      await page.goto(`${BASE}/sponsor/login`);
+      await page.locator('input[type=email], input[type=text]').first().fill(USERS.sponsor.email);
+      await page.locator('input[type=password]').fill(USERS.sponsor.password);
+      await loginSlot();
+      await page.route(`${API}/auth/login`, async r => { await new Promise(x => setTimeout(x, 400)); await r.continue(); });
+      await page.getByRole('button', { name: 'Sign In' }).click();
+      await page.getByText('Signing in...').waitFor({ timeout: 1000 });
+      await waitPath(page, '/sponsor/dashboard', 8000);
+      await page.unroute(`${API}/auth/login`);
+    }, page);
+    await step(`F-SPLAYOUT-1 ${view}: nav Dashboard / Campaigns / Check Wording / Billing; ${view === 'iphone' ? 'F-SPLAYOUT-2 no sideways scroll' : 'all reachable'}`, async () => {
+      for (const [label, p] of [['Campaigns', '/sponsor/campaigns'], ['Check Wording', '/sponsor/wording'], ['Billing', '/sponsor/billing'], ['Dashboard', '/sponsor/dashboard']]) {
+        await page.locator('nav').getByRole('link', { name: label }).click();
+        await waitPath(page, p);
+        const w = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+        assert(w[0] <= w[1] + 1, `${p}: page ${w[0]} px wide in a ${w[1]} px window`);
+      }
+    }, page);
+    await step(`F-SPDASH-1 ${view}: stats, my spots (the linked spot), play history, upcoming`, async () => {
+      await page.getByRole('heading', { name: 'My Spots' }).waitFor();
+      await page.getByText(FX.assets[2].title).first().waitFor();
+      await page.getByRole('heading', { name: 'Play History' }).waitFor();
+      await page.getByText('Next Scheduled').waitFor();
+    }, page);
+    await step(`F-SPCAMP-1/2 ${view}: New Campaign → Create Campaign; detail: Submit Draft (versioned), comment Send`, async () => {
+      const name = `E2E Campaign ${view} ${RUN}`;
+      await page.locator('nav').getByRole('link', { name: 'Campaigns' }).click();
+      await page.getByRole('button', { name: 'New Campaign' }).click();
+      await field(page, 'Campaign Name').fill(name);
+      await field(page, 'Description').fill('E2E');
+      const { ms } = await timedSave(page, 'create campaign', (m, p) => m === 'POST' && p.startsWith('/campaigns'), () => page.getByRole('button', { name: 'Create Campaign' }).click());
+      await page.getByRole('link', { name: new RegExp(name) }).click();
+      await page.waitForURL(/\/sponsor\/campaigns\/[0-9a-f-]{36}$/);
+      for (const v of [1, 2]) {
+        await page.getByRole('button', { name: 'New Draft' }).click();
+        await page.getByPlaceholder('Write your ad script here...').fill(`E2E script v${v}`);
+        await page.getByPlaceholder('Any notes for the team...').fill('note');
+        await timedSave(page, 'draft', (m, p) => m === 'POST' && p.includes('/drafts'), () => page.getByRole('button', { name: 'Submit Draft' }).click());
+        await page.getByText(`E2E script v${v}`).waitFor();
+      }
+      await page.getByText(/v2|Version 2|#2/).first().waitFor();
+      await page.getByPlaceholder('Add a comment...').fill(`E2E comment ${RUN}`);
+      await timedSave(page, 'comment', (m, p) => m === 'POST' && p.includes('/comments'), () => page.getByRole('button', { name: 'Send' }).click());
+      await page.getByText(`E2E comment ${RUN}`).waitFor();
+      return `created in ${ms} ms`;
+    }, page);
+    await step(`F-SPBILL-1 ${view}: invoice listed with summary; Pay Now asks for a checkout; ?payment=success / cancelled messages`, async () => {
+      await page.locator('nav').getByRole('link', { name: 'Billing' }).click();
+      const row = page.locator('tr', { hasText: `E2E Invoice ${RUN}` });
+      await row.waitFor();
+      assert((await row.innerText()).includes('123.45'), 'amount not shown');
+      const r = await timedResponse(page, (m, p) => m === 'POST' && p.includes(`/invoices/${inv.id}/checkout`), () => row.getByRole('button', { name: 'Pay Now' }).click());
+      await page.goto(`${BASE}/sponsor/billing?payment=success`);
+      await page.getByText('Payment successful!').waitFor();
+      await page.goto(`${BASE}/sponsor/billing?payment=cancelled`);
+      await page.getByText('Payment was cancelled').waitFor();
+      return `checkout answered ${r.status}${r.status >= 400 ? ' (Stripe is off in this test setup)' : ''}`;
+    }, page);
+    await step(`F-SPWORD-1 ${view}: wording check shows what must change and why; Use this wording`, async () => {
+      await page.goto(`${BASE}/sponsor/wording`);
+      await page.getByPlaceholder('Burger Bar').fill('E2E Bakery');
+      const box = page.getByPlaceholder('Write it the way you would say it. We will show you what needs to change.');
+      await box.fill('E2E Bakery: the best and cheapest bread in town, guaranteed! Call now for 50% off!');
+      const r = await timedResponse(page, (m, p) => m === 'POST' && p === '/sponsorship/copy-review', () => page.getByRole('button', { name: 'Check my wording' }).click());
+      assert(r.status < 300, `review ${r.status}`);
+      await page.getByText(/Some wording needs to change\.|This wording is fine\./).waitFor();
+      const use = page.getByRole('button', { name: 'Use this wording' });
+      if (await use.count()) { await use.click(); assert(!(await box.inputValue()).includes('cheapest'), 'suggestion not put in'); }
+    }, page);
+    await step(`F-GLOBAL-5 ${view}: sponsor Logout returns to /sponsor/login and clears the tokens`, async () => {
+      await page.locator('nav').getByRole('button', { name: 'Logout' }).click();
+      await waitPath(page, '/sponsor/login');
+      assert(!(await page.evaluate(() => localStorage.getItem('access_token'))), 'token kept');
+    }, page);
+    await ctx.close();
+  }
+});
+
+// ── Release pickup on screens (F-GLOBAL-15/21/22), with a fake clock ────────
+section('release', async () => {
+  const current = (await (await fetch(`${BASE}/version.json?t=${Date.now()}`)).json()).version;
+  const site = await api('GET', '/site-release');
+  if (site.mode !== 'auto') await api('PUT', '/site-release', { token: USERS.admin.token, body: { mode: 'auto' } });
+  async function releasePage(path) {
+    const ctx = await browser.newContext(VIEWS.desktop);
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(8000);
+    let next = false;
+    await page.route(/\/version\.json/, r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: next ? `e2e-next-${RUN}` : current }) }));
+    await page.clock.install();
+    let loads = 0;
+    page.on('load', () => { loads++; });
+    await page.goto(`${BASE}${path}`);
+    await page.waitForLoadState('networkidle').catch(() => {});
+    return { page, ctx, publish: () => { next = true; }, loads: () => loads };
+  }
+  {
+    const { page, ctx, publish, loads } = await releasePage('/stations');
+    await step('F-GLOBAL-15 auto mode: an idle tab with no audio reloads onto the new release', async () => {
+      const before = loads();
+      publish();
+      await page.clock.runFor(70_000); // the minute check sees the new id
+      await page.clock.runFor(35_000); // 30 s with no input
+      await until(async () => loads() > before, 'reload', 10000);
+    }, page);
+    await ctx.close();
+  }
+  {
+    const { page, ctx, publish, loads } = await releasePage('/admin/login');
+    await step('F-GLOBAL-22 a tab never reloads while the person is typing (field focused)', async () => {
+      const before = loads();
+      await page.locator('input').first().click();
+      await page.keyboard.type('someone');
+      publish();
+      await page.clock.runFor(70_000);
+      await page.clock.runFor(200_000);
+      await page.waitForTimeout(1000);
+      assert(loads() === before, 'reloaded while typing');
+      assert(await page.locator('input').first().inputValue() === 'someone', 'typed text lost');
+    }, page);
+    await ctx.close();
+  }
+  {
+    const { page, ctx, publish, loads } = await releasePage('/stations');
+    await step('F-GLOBAL-21 a waiting release is picked up when the person moves to another screen', async () => {
+      const before = loads();
+      publish();
+      // keep the tab "busy" (input every few seconds) so the idle rule cannot fire first
+      // (a key press counts as input; a bare mouse move does not)
+      for (let i = 0; i < 14; i++) { await page.keyboard.press('Shift'); await page.clock.runFor(5_000); }
+      assert(loads() === before, 'reloaded while in use');
+      await page.getByRole('link', { name: /Program Guide/ }).first().click();
+      await until(async () => loads() > before, 'reload on navigation', 10000);
+    }, page);
+    await ctx.close();
+  }
+});
+
+// ── Errors, sessions, diagnostics, accessibility (V2-95..101, V1-144/145, F-ACCESS-15) ──
+section('errors', async () => {
+  {
+    const page = await newPage('manager');
+    await step('F-ACCESS-15 / V2-97 a page that throws shows "Something went wrong" with the error and Reload Page; another route clears it', async () => {
+      await page.route(/\/assets\/Holidays-[^/]+\.js$/, r => r.fulfill({ contentType: 'text/javascript', body: 'throw new Error("e2e page crash");' }));
+      await page.goto(`${BASE}/admin/holidays`);
+      const box = page.getByTestId('error-boundary');
+      await box.waitFor();
+      assert((await box.innerText()).includes('Something went wrong') && (await box.innerText()).includes('e2e page crash'), 'error text not shown');
+      await box.getByRole('button', { name: 'Reload Page' }).waitFor();
+      await page.locator('nav').getByRole('link', { name: 'Stations', exact: true }).first().click().catch(async () => { await page.goto(`${BASE}/admin/stations`); });
+      await waitPath(page, '/admin/stations');
+      await page.getByRole('heading', { name: 'Manage Stations' }).waitFor();
+      assert(!(await box.count()), 'error box stayed after moving on');
+      await page.unroute(/\/assets\/Holidays-[^/]+\.js$/);
+    }, page);
+    await closePage(page);
+  }
+  {
+    // Its own tab: a load failure above may already have used the tab's one reload per 2 minutes
+    const page = await newPage('manager');
+    await step('F-ACCESS-16 / V2-97 a screen whose code file is gone after a release shows "site was updated" and reloads by itself', async () => {
+      let loads = 0;
+      page.on('load', () => { loads++; });
+      await page.route(/\/assets\/Sponsors-[^/]+\.js$/, r => r.fulfill({ status: 404, body: 'gone' }));
+      await page.goto(`${BASE}/admin/stations`);
+      await page.getByRole('heading', { name: 'Manage Stations' }).waitFor();
+      loads = 0;
+      await page.evaluate(() => { window.history.pushState({}, '', '/admin/sponsors'); window.dispatchEvent(new PopStateEvent('popstate')); });
+      await page.getByText('The site was updated while this tab was open').waitFor();
+      await until(async () => loads > 0, 'reload after 0.3 s', 5000);
+      await page.unroute(/\/assets\/Sponsors-[^/]+\.js$/);
+    }, page);
+    await closePage(page);
+  }
+  // V2-95 renewal fails: both tokens removed, back to the right login
+  for (const [where, login] of [['/admin/stations', '/admin/login'], ['/sponsor/campaigns', '/sponsor/login']]) {
+    const ctx = await browser.newContext(VIEWS.desktop);
+    await ctx.addInitScript(() => {
+      if (!sessionStorage.getItem('e2e-once')) {
+        sessionStorage.setItem('e2e-once', '1');
+        localStorage.setItem('access_token', 'bad.access.token');
+        localStorage.setItem('refresh_token', 'bad.refresh.token');
+      }
+    });
+    const page = await ctx.newPage();
+    const refreshes = [];
+    page.on('request', r => { if (r.url().endsWith('/auth/refresh')) refreshes.push(r.url()); });
+    await step(`V2-95 ${short(where)}: failed renewal removes both tokens and goes to ${login}`, async () => {
+      await page.goto(`${BASE}${where}`);
+      await waitPath(page, login, 8000);
+      const t = await page.evaluate(() => [localStorage.getItem('access_token'), localStorage.getItem('refresh_token')]);
+      assert(!t[0] && !t[1], `tokens left: ${t}`);
+      return `${refreshes.length} refresh call(s) for the failing requests (one per request, not shared)`;
+    }, page);
+    await ctx.close();
+  }
+  // V1-144 / V2-96 two devices
+  {
+    const a = await loginApi(USERS.viewer.email, USERS.viewer.password);
+    const b = await loginApi(USERS.viewer.email, USERS.viewer.password);
+    const ctxA = await browser.newContext(VIEWS.desktop), ctxB = await browser.newContext(VIEWS.iphone);
+    for (const [c, t] of [[ctxA, a], [ctxB, b]]) await c.addInitScript(([x, y]) => { if (!localStorage.getItem('e2e-set')) { localStorage.setItem('e2e-set', '1'); localStorage.setItem('access_token', x); localStorage.setItem('refresh_token', y); } }, [t.access_token, t.refresh_token]);
+    const pa = await ctxA.newPage(), pb = await ctxB.newPage();
+    await step('V1-144 same user on two devices: logging out on one leaves the other signed in', async () => {
+      await pa.goto(`${BASE}/admin/schedules`); await pb.goto(`${BASE}/admin/schedules`);
+      await pa.getByRole('button', { name: 'Logout' }).click();
+      await waitPath(pa, '/admin/login');
+      await pb.reload();
+      await pb.getByRole('heading').first().waitFor();
+      assert(await pathOf(pb) === '/admin/schedules', `other device sent to ${await pathOf(pb)}`);
+      const r = await api('POST', '/auth/refresh', { body: { refresh_token: b.refresh_token }, raw: true });
+      assert(r.status === 200, `other device's renewal refused ${r.status}`);
+    }, pb);
+    await step('V2-96 deactivating the user ends their other sessions at once', async () => {
+      await api('PATCH', `/users/${USERS.viewer.id}`, { token: USERS.admin.token, body: { is_active: false } }).catch(() => api('PUT', `/users/${USERS.viewer.id}`, { token: USERS.admin.token, body: { is_active: false } }));
+      try {
+        const r = await api('GET', '/auth/me', { token: b.access_token, raw: true });
+        assert(r.status === 401 || r.status === 403, `deactivated user still served (${r.status})`);
+        const rr = await api('POST', '/auth/refresh', { body: { refresh_token: b.refresh_token }, raw: true });
+        assert(rr.status >= 400, `deactivated user's renewal accepted (${rr.status})`);
+      } finally {
+        await api('PATCH', `/users/${USERS.viewer.id}`, { token: USERS.admin.token, body: { is_active: true } }).catch(() => api('PUT', `/users/${USERS.viewer.id}`, { token: USERS.admin.token, body: { is_active: true } }));
+      }
+      return 'a password change does not end other sessions (by design per V2-96; only deactivation does)';
+    }, pb);
+    await ctxA.close(); await ctxB.close();
+  }
+  // V2-98 / V2-99 request ids and the bug report payload
+  {
+    const page = await newPage('manager');
+    await step('V2-98 every API call carries an X-Request-ID; the bug report leaves out tokens', async () => {
+      const seen = [];
+      page.on('request', r => { if (r.url().startsWith(API)) seen.push([r.url().slice(API.length).split('?')[0], r.headers()['x-request-id'] || '']); });
+      await page.goto(`${BASE}/admin/stations`);
+      await page.getByRole('heading', { name: 'Manage Stations' }).waitFor();
+      await page.evaluate(() => localStorage.setItem('my_secret_password', 'e2e-not-a-real-password'));
+      // The id is added by the axios client. A few calls are plain fetch() and go without
+      // one (the release policy in lib/appUpdate.ts, now-playing polls): reported, not failed.
+      const PLAIN_FETCH = ['/site-release', '/now-playing/'];
+      const without = seen.filter(x => !x[1]).map(x => x[0]);
+      const bad = without.filter(u => !PLAIN_FETCH.some(f => u.startsWith(f)));
+      assert(seen.length > 2 && !bad.length, `${bad.length} of ${seen.length} axios calls without X-Request-ID: ${[...new Set(bad)].join(', ')}`);
+      const plainNote = without.length ? `; plain fetch without id: ${[...new Set(without)].join(', ')}` : '';
+      await page.locator('button[aria-label="Report a bug"]').click();
+      const dlg = page.getByRole('dialog', { name: 'Report a bug' });
+      await dlg.locator('#bug-what').fill(`E2E diagnostics ${RUN}`);
+      const { resp } = await timedResponse(page, (m, p) => m === 'POST' && p === '/bug-reports', () => dlg.getByRole('button', { name: 'Send report' }).click());
+      const body = resp.request().postData() || '';
+      const tk = await page.evaluate(() => localStorage.getItem('access_token'));
+      assert(!body.includes(tk) && !/eyJ[a-zA-Z0-9_-]{10,}\./.test(body), 'a token is in the report');
+      assert(!body.includes('e2e-not-a-real-password'), 'a password-like storage key is in the report');
+      const j = JSON.parse(body);
+      // V2-99 screenshot: JPEG of the visible window, at most 1600 px wide
+      if (j.screenshot) {
+        assert(j.screenshot.startsWith('data:image/jpeg'), 'screenshot is not a JPEG');
+        const buf = Buffer.from(j.screenshot.split(',')[1], 'base64');
+        let w = 0, h = 0;
+        for (let i = 2; i < buf.length - 9;) {
+          if (buf[i] !== 0xff) { i++; continue; }
+          const m = buf[i + 1];
+          if (m >= 0xc0 && m <= 0xc3) { h = buf.readUInt16BE(i + 5); w = buf.readUInt16BE(i + 7); break; }
+          i += 2 + buf.readUInt16BE(i + 2);
+        }
+        const vp = page.viewportSize();
+        assert(w > 0 && w <= 1600, `screenshot ${w} px wide`);
+        assert(Math.abs(w / h - vp.width / vp.height) < 0.05, `screenshot ${w}x${h} is not the visible window (${vp.width}x${vp.height})`);
+        return `screenshot ${w}x${h} JPEG${plainNote}`;
+      }
+      return `no screenshot taken${plainNote}`;
+    }, page);
+    await closePage(page);
+  }
+  // V1-145 copy review rate limit (12 a minute): the page says to try again
+  {
+    const page = await newPage('sponsor');
+    await step('V1-145 wording check after 12 checks in a minute: the page says to try again in a minute', async () => {
+      let limited = false;
+      for (let i = 0; i < 14 && !limited; i++) {
+        const r = await api('POST', '/sponsorship/copy-review', { token: USERS.sponsor.token, body: { script_text: 'E2E rate limit check text', sponsor_name: 'E2E' }, raw: true });
+        limited = r.status === 429;
+      }
+      assert(limited, 'no 429 after 14 checks');
+      await page.goto(`${BASE}/sponsor/wording`);
+      await page.getByPlaceholder('Write it the way you would say it. We will show you what needs to change.').fill('E2E Bakery has bread.');
+      await page.getByRole('button', { name: 'Check my wording' }).click();
+      await page.getByText('The check could not be run. Please try again in a minute.').waitFor();
+    }, page);
+    await closePage(page);
+  }
+  {
+    await step('V1-145 song requests: the 11th in a minute from one address is refused (429)', async () => {
+      let n = 0, limited = false;
+      for (; n < 12 && !limited; n++) {
+        const r = await api('POST', '/song-requests', { body: { station_id: FX.station.id, requester_name: 'E2E', song_title: `E2E rate ${n}` }, raw: true });
+        limited = r.status === 429;
+      }
+      assert(limited && n <= 11, `limited=${limited} after ${n}`);
+      return `refused at request ${n}`;
+    });
+  }
+});
+
+// ── V2-101 accessibility basics on every page ───────────────────────────────
+function a11yScan() {
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const text = el => (el.innerText || el.textContent || '').trim();
+  const nameOf = el => (el.getAttribute('aria-label') || '').trim()
+    || (el.getAttribute('aria-labelledby') ? (document.getElementById(el.getAttribute('aria-labelledby'))?.textContent || '').trim() : '')
+    || text(el) || (el.getAttribute('title') || '').trim() || [...el.querySelectorAll('img[alt],svg[aria-label]')].map(i => i.getAttribute('alt') || i.getAttribute('aria-label')).join('').trim();
+  const out = { unnamed: [], unlabeled: [], lowContrast: [], lang: document.documentElement.lang };
+  for (const b of document.querySelectorAll('button, [role=button], a[href]')) {
+    if (b.closest('[data-bug-reporter]') && !vis(b)) continue;
+    if (vis(b) && !nameOf(b)) out.unnamed.push(b.outerHTML.slice(0, 70));
+  }
+  for (const f of document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea')) {
+    if (!vis(f) && !f.closest('label')) continue;
+    const lab = (f.labels && [...f.labels].map(l => l.textContent).join('').trim()) || f.getAttribute('aria-label') || f.getAttribute('aria-labelledby') || f.getAttribute('title') || f.getAttribute('placeholder');
+    if (!lab) out.unlabeled.push(f.outerHTML.slice(0, 70));
+  }
+  const rgb = c => { const m = c.match(/rgba?\(([^)]+)\)/); if (!m) return null; const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
+  const lum = ({ r, g, b }) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const bgOf = el => { for (let e = el; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c && c.a > 0.5) return c; } return { r: 255, g: 255, b: 255, a: 1 }; };
+  const root = document.querySelector('main') || document.body;
+  let checked = 0;
+  for (const el of root.querySelectorAll('p, span, td, th, li, h1, h2, h3, label, a, button, div')) {
+    if (!vis(el)) continue;
+    const own = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim().length > 1);
+    if (!own) continue;
+    const s = getComputedStyle(el);
+    // Gradient text (transparent fill over a painted background) cannot be measured this way
+    if (s.webkitTextFillColor && rgb(s.webkitTextFillColor)?.a === 0) continue;
+    if ((s.backgroundClip || s.webkitBackgroundClip) === 'text') continue;
+    const fg = rgb(s.color); if (!fg) continue;
+    if (el.closest('[disabled], .disabled\\:opacity-50:disabled') || el.matches(':disabled')) continue;
+    const bg = bgOf(el);
+    const L1 = lum(fg), L2 = lum(bg);
+    const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+    const size = parseFloat(s.fontSize), bold = Number(s.fontWeight) >= 700;
+    const need = (size >= 24 || (bold && size >= 18.66)) ? 3 : 4.5;
+    checked++;
+    if (ratio < need) out.lowContrast.push(`${ratio.toFixed(1)}:1 "${[...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent.trim()).join(' ').slice(0, 30)}"`);
+  }
+  out.checked = checked;
+  return out;
+}
+// Pages the first scan found gaps on (listed under KNOWN_BUGS 'V2-101 a11y-gaps'); every
+// other page must stay clean. Remove a page here once it scans clean.
+const A11Y_GAP_PAGES = new Set([
+  '/admin/dashboard', '/admin/assets', '/admin/assets/upload', '/admin/assets/:id', '/admin/reviews/:id',
+  '/admin/users', '/admin/rules', '/admin/schedules', '/admin/holidays', '/admin/sponsors',
+  '/admin/spot-schedule', '/admin/spot-recordings', '/admin/schedule-check', '/admin/sponsorship-rules',
+  '/admin/playlists', '/admin/alerts', '/admin/bug-reports', '/admin/site-updates', '/admin/activity',
+  '/admin/analytics', '/admin/live', '/admin/live/:id/host', '/admin/live/:id/screen', '/admin/requests',
+  '/admin/archives', '/admin/audio-enhance/:id', '/admin/studio', '/admin/listeners', '/admin/crm',
+  '/admin/program-clock', '/sponsor/dashboard', '/guide', '/archives', '/listen/:id',
+]);
+section('a11y', async () => {
+  const jobs = [
+    ...adminRoutes().map(([p]) => ['admin', p]),
+    ...SPONSOR_ROUTES.map(p => ['sponsor', p]),
+    ...PUBLIC_ROUTES.map(p => [null, p]),
+    [null, '/admin/login'], [null, '/sponsor/login'], [null, `/listen/${FX.station.id}`], [null, `/call/${FX.station.id}`],
+  ];
+  const pages = {};
+  const summary = { unnamed: 0, unlabeled: 0, lowContrast: 0, clean: 0 };
+  for (const [role, p] of jobs) {
+    const k = role || 'anon';
+    if (!pages[k]) pages[k] = await newPage(role);
+    const page = pages[k];
+    const known = A11Y_GAP_PAGES.has(short(p));
+    await step(`V2-101 a11y${known ? '-gaps' : ''} ${short(p)}: buttons named, fields labelled, main text contrast AA, lang="en"`, async () => {
+      await page.goto(`${BASE}${p}`);
+      await page.waitForFunction(defaultReady, null, { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(400);
+      const r = await page.evaluate(a11yScan);
+      const probs = [];
+      if (r.lang !== 'en') probs.push(`lang="${r.lang}"`);
+      if (r.unnamed.length) probs.push(`${r.unnamed.length} unnamed button/link (${r.unnamed[0]})`);
+      if (r.unlabeled.length) probs.push(`${r.unlabeled.length} unlabelled field (${r.unlabeled[0]})`);
+      if (r.lowContrast.length) probs.push(`${r.lowContrast.length}/${r.checked} low-contrast text (${r.lowContrast.slice(0, 2).join(', ')})`);
+      summary.unnamed += r.unnamed.length; summary.unlabeled += r.unlabeled.length; summary.lowContrast += r.lowContrast.length;
+      if (!probs.length) summary.clean++;
+      assert(!probs.length, probs.join('; '));
+      return `clean (${r.checked} text items)`;
+    }, page);
+  }
+  for (const pg of Object.values(pages)) await closePage(pg);
+  // Esc closes modals; the "not allowed" notice is announced
+  const page = await newPage('manager');
+  await step('V2-101 Esc closes the New Archive, New Show and bug report dialogs', async () => {
+    const fails = [];
+    await page.goto(`${BASE}/admin/archives`);
+    await page.getByRole('button', { name: '+ New Archive' }).click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    if (await page.getByRole('heading', { name: 'New Archive' }).count()) fails.push('New Archive');
+    await page.goto(`${BASE}/admin/live`);
+    await page.getByRole('button', { name: '+ New Show' }).click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    if (await page.getByRole('heading', { name: 'Create Live Show' }).count()) fails.push('New Show');
+    await page.locator('button[aria-label="Report a bug"]').click();
+    await page.getByRole('dialog', { name: 'Report a bug' }).waitFor({ timeout: 10000 });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    if (await page.getByRole('dialog', { name: 'Report a bug' }).count()) fails.push('bug report');
+    assert(!fails.length, `Esc does not close: ${fails.join(', ')}`);
+  }, page);
+  await closePage(page);
+  console.log(`  a11y totals: ${summary.clean}/${jobs.length} pages clean; ${summary.unnamed} unnamed buttons/links, ${summary.unlabeled} unlabelled fields, ${summary.lowContrast} low-contrast text items`);
 });
 
 // ── S-5 page load speed, every page, desktop and iPhone ─────────────────────

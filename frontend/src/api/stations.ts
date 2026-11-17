@@ -6,6 +6,19 @@ export const listStations = async (skip = 0, limit = 50): Promise<StationListRes
   return res.data;
 };
 
+/** Every station, page by page: the server sends at most 100 at a time, and with one
+ *  call the station pickers left out every station after the first 50. */
+export const listAllStations = async (): Promise<StationListResponse> => {
+  const first = await listStations(0, 100);
+  const stations = [...first.stations];
+  while (stations.length < first.total) {
+    const next = await listStations(stations.length, 100);
+    if (!next.stations.length) break;
+    stations.push(...next.stations);
+  }
+  return { ...first, stations, total: Math.max(first.total, stations.length) };
+};
+
 export const getStation = async (id: string): Promise<Station> => {
   const res = await apiClient.get<Station>(`/stations/${id}`);
   return res.data;

@@ -39,8 +39,9 @@ export default function Login() {
           <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>
         )}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+          <label htmlFor="login-username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
           <input
+            id="login-username"
             type="text"
             autoCapitalize="none"
             autoCorrect="off"
@@ -51,8 +52,9 @@ export default function Login() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+          <label htmlFor="login-password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
           <input
+            id="login-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

@@ -30,7 +30,8 @@ async def list_public_hosts(db: AsyncSession = Depends(get_db)):
         "hosts": [
             {
                 "id": str(h.id),
-                "display_name": h.display_name or h.email.split("@")[0],
+                # Never the e-mail's user name: it is a staff login, not a public name
+                "display_name": h.display_name or "KBR host",
                 "title": h.title,
                 "bio": h.bio if hasattr(h, 'bio') else None,
                 "photo_url": h.photo_url if hasattr(h, 'photo_url') else None,

@@ -58,7 +58,23 @@ async def get_epg(
     """Public EPG: returns all schedule blocks for a station on a given day, sorted by start_time."""
     from datetime import date as date_type
 
-    target_date = date_type.fromisoformat(date) if date else datetime.now().date()
+    if date:
+        target_date = date_type.fromisoformat(date)
+    else:
+        # The station's own date (block times are station-local), not the server's
+        from zoneinfo import ZoneInfo
+
+        from app.models.station import Station
+        tz_name = None
+        try:
+            st = (await db.execute(select(Station).where(Station.id == UUID(station_id)))).scalar_one_or_none()
+            tz_name = st.timezone if st else None
+        except (ValueError, AttributeError):
+            pass
+        try:
+            target_date = datetime.now(ZoneInfo(tz_name or "UTC")).date()
+        except Exception:
+            target_date = datetime.now(ZoneInfo("UTC")).date()
     day_name = target_date.strftime("%A").lower()  # "monday", etc.
 
     # Get active schedules for station

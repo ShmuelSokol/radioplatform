@@ -23,16 +23,17 @@ export default function SponsorLayout() {
     <div className="min-h-screen flex flex-col bg-gray-50">
       {/* Top nav */}
       <nav className="bg-indigo-700 text-white shadow-md">
-        <div className="px-4 sm:px-6 lg:px-8 flex items-center justify-between h-14">
-          <div className="flex items-center gap-6">
+        {/* Wraps on a phone: in one row the links ran off the right edge (Billing and Logout unreachable) */}
+        <div className="px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 min-h-14">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 min-w-0">
             <span className="font-bold text-lg text-indigo-200">Sponsor Portal</span>
-            <div className="flex gap-1">
+            <div className="flex flex-wrap gap-1">
               {navItems.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
                   className={({ isActive }) =>
-                    `px-3 py-1.5 rounded text-sm font-medium transition ${
+                    `px-3 py-1.5 rounded text-sm font-medium whitespace-nowrap transition ${
                       isActive
                         ? 'bg-indigo-800 text-white'
                         : 'text-indigo-100 hover:bg-indigo-600'
@@ -45,7 +46,7 @@ export default function SponsorLayout() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-indigo-200">{user?.display_name || user?.email}</span>
+            <span className="hidden sm:inline text-sm text-indigo-200">{user?.display_name || user?.email}</span>
             <button
               onClick={handleLogout}
               className="text-sm text-indigo-200 hover:text-white transition"

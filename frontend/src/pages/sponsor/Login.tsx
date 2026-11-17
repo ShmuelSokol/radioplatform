@@ -41,8 +41,9 @@ export default function SponsorLogin() {
             <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label htmlFor="sponsor-login-email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
             <input
+            id="sponsor-login-email"
               type="text"
               autoCapitalize="none"
               autoCorrect="off"
@@ -53,8 +54,9 @@ export default function SponsorLogin() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <label htmlFor="sponsor-login-password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
             <input
+            id="sponsor-login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
