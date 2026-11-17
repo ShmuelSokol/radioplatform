@@ -713,6 +713,45 @@ async def sc_empty_queue(h: Harness) -> None:
     h.check(name, await h.on_air() is not None, "something is on air on the site")
 
 
+async def sc_slow_started(h: Harness) -> None:
+    """Main, 02:57 2026-11-16: the engine asked for its next track while the start report
+    of the item on air was still being written, was handed that same item again, and
+    stalled. Here every start report takes 3 s to reach the backend; across two Next
+    presses and a natural song change no item may air twice and nothing may stall."""
+    name = "slow_started"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song5", {}), ("song6", {}), ("song1", {}), ("song2", {}), ("song3", {})])
+    h.stack.slow_started = 3.0
+    try:
+        await asyncio.sleep(2)
+        t_start = time.time()
+        for _ in range(2):
+            h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+            await asyncio.sleep(8)
+        cur = await h.on_air()
+        song_end = cur.started_at.timestamp() + (cur.asset.duration or 40) if cur and cur.started_at else time.time() + 40
+        await asyncio.sleep(max(0, song_end - time.time()) + 15)
+    finally:
+        h.stack.slow_started = 0.0
+    rows = [e for e in await h.rows() if e.started_at and e.started_at.timestamp() >= t_start - 1]
+    by_asset: dict = {}
+    for e in rows:
+        by_asset.setdefault(e.asset_id, []).append(e)
+    twice = [es[0].asset.title for es in by_asset.values() if len(es) > 1]
+    h.check(name, not twice, f"no item started twice ({len(rows)} starts; twice: {twice})")
+    heard = h.heard(t_start - 1, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    segs = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(segs) if i == 0 or segs[i - 1] != n]
+    repeats = sorted({n for n in runs if runs.count(n) > 1 and n.startswith("song")})
+    h.check(name, not repeats, f"heard in order {runs}; heard twice: {repeats}")
+    gap, gap_at = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    playing = [e for e in await h.rows() if e.status == "playing"]
+    h.check(name, len(playing) == 1, f"one item on air at the end ({len(playing)})")
+
+
 SCENARIOS = {
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
@@ -724,6 +763,7 @@ SCENARIOS = {
     "soft_timed_waits_for_song": sc_soft_waits_for_song,
     "rapid_next": sc_rapid_next,
     "empty_queue": sc_empty_queue,
+    "slow_started": sc_slow_started,
 }
 
 
@@ -738,6 +778,7 @@ async def main_async(names: list[str], keep: bool) -> int:
     stack.make_audio()
     stack.serve_audio()
     stack.serve_proxy()
+    stack.serve_backend_proxy()
     stack.fresh_database()
     os.environ.update(stack.backend_env())
     sys.path.insert(0, str(BACKEND))

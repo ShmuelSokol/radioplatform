@@ -36,6 +36,23 @@ def split_title_artist(song_title: str, song_artist: str | None) -> tuple[str, s
     return m.group("title").strip(), m.group("artist").strip()
 
 
+def _score_text(norm_title: str, norm_artist: str, title: str, artist: str, beat: float = 0.0) -> float:
+    """Title x 0.7 + artist x 0.3 on normalized text. Returns 0 early when even the
+    upper bound (SequenceMatcher.quick_ratio) cannot beat `beat`."""
+    t_sm = SequenceMatcher(None, norm_title, title)
+    if norm_artist and artist:
+        a_sm = SequenceMatcher(None, norm_artist, artist)
+        if t_sm.quick_ratio() * 0.7 + a_sm.quick_ratio() * 0.3 <= beat:
+            return 0.0
+        artist_score = a_sm.ratio()
+    else:
+        a_sm = None
+        artist_score = 1.0 if not norm_artist and not artist else 0.0  # both empty: no penalty
+        if t_sm.quick_ratio() * 0.7 + artist_score * 0.3 <= beat:
+            return 0.0
+    return t_sm.ratio() * 0.7 + artist_score * 0.3
+
+
 def _score(norm_title: str, norm_artist: str, asset: Asset) -> float:
     title_score = SequenceMatcher(None, norm_title, _normalize(asset.title)).ratio()
     if norm_artist and asset.artist:
@@ -59,12 +76,14 @@ async def fuzzy_match_asset(
     Title weighted 70%, artist 30%.
     """
     # Only songs an automatic pick may air: never do-not-play, test items,
-    # placeholders, block-only recordings or rejected songs.
+    # placeholders, block-only recordings or rejected songs. Only the columns the
+    # score needs are read (the library has ~23,000 songs; loading whole rows took
+    # about a second per request), and only the winner is loaded in full.
     result = await db.execute(
-        select(Asset).where(Asset.asset_type == "music", fit_for_random_pick())
+        select(Asset.id, Asset.title, Asset.artist).where(Asset.asset_type == "music", fit_for_random_pick())
     )
-    assets = result.scalars().all()
-    if not assets:
+    rows = result.all()
+    if not rows:
         return None, 0.0
 
     # Score the request as typed and, if the title reads "X by Y", also as
@@ -74,17 +93,20 @@ async def fuzzy_match_asset(
         (_normalize(t), _normalize(a) if a else "") for t, a in readings
     ]
 
-    best_asset = None
+    best_id = None
     best_score = 0.0
 
-    for asset in assets:
-        score = max(_score(nt, na, asset) for nt, na in norm_readings)
-        if score > best_score:
-            best_score = score
-            best_asset = asset
+    for row in rows:
+        title = _normalize(row.title or "")
+        artist = _normalize(row.artist) if row.artist else ""
+        for nt, na in norm_readings:
+            score = _score_text(nt, na, title, artist, best_score)
+            if score > best_score:
+                best_score = score
+                best_id = row.id
 
-    if best_score >= 0.6:
-        return best_asset, best_score
+    if best_id is not None and best_score >= 0.6:
+        return await db.get(Asset, best_id), best_score
     return None, 0.0
 
 
