@@ -598,6 +598,8 @@ export default function Dashboard() {
       const res = await panicRequest(sid);
       if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
       else refreshQueue();
+      // The server logs a "Panic pressed" alert: show it in the Errors tab now (F-MODES-42)
+      void qc.invalidateQueries({ queryKey: ['alerts'] });
       setToast(res.message === 'Skipped'
         ? { text: 'Panic: cut what was on air and started the next item.', type: 'warn' }
         : { text: `Panic: ${res.message}`, type: 'error' });
@@ -883,8 +885,11 @@ export default function Dashboard() {
             <aside className="w-28 xl:w-32 shrink-0 min-h-0 overflow-y-auto bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white [&>*]:shrink-0" aria-label="Controls">
               <TransportButtons p={transport} stacked />
               <div className="h-2" />
-              {/* HS, Spots mode and Panic right under the transport, so Panic is on screen even on a short window */}
+              {/* HS, Spots mode, Panic and DB right under the transport, so they are on screen even on a
+                  1280x720 window (F-MODES-54); the lower-pane tabs come after and may scroll */}
               <ModeButtons p={modeProps} stacked />
+              <Link to="/admin/databank" className="qn-btn h-8 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
+                data-testid="cr-databank">DB</Link>
               <div className="h-2" />
               <div className="flex flex-col gap-1" role="tablist" aria-label="Lower pane">
                 {SIDE_TABS.map(t => (
@@ -894,9 +899,6 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
-              <div className="h-2" />
-              <Link to="/admin/databank" className="qn-btn h-8 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
-                data-testid="cr-databank">DB</Link>
             </aside>
           </div>
           <PflDeck pfl={pfl} />

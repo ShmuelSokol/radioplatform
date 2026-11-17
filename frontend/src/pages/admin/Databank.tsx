@@ -312,17 +312,19 @@ export default function Databank() {
 
   // Arrow keys move the selection; Space pre-listens
   const onKey = (e: React.KeyboardEvent) => {
-    if (editing || ids.length === 0) return;
-    // Typing in Find, a drop-down or any other field keeps its own keys
+    // The Log tab has no selectable rows of its own: keys there never reach the hidden table
+    if (editing || ids.length === 0 || tab === 'log') return;
+    // Typing in Find, a drop-down or any other field keeps its own keys, and Space or an
+    // arrow on a focused toolbar button or tab is that button's (F-DATABANK-54)
     const t = e.target as HTMLElement;
-    if (t.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (t.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const i = recIdx < 0 ? 0 : Math.min(ids.length - 1, Math.max(0, recIdx + (e.key === 'ArrowDown' ? 1 : -1)));
       setSel(ids[i]);
       document.querySelector(`[data-row="${CSS.escape(ids[i])}"]`)?.scrollIntoView({ block: 'nearest' });
     }
-    if (e.key === ' ' && sel && tab !== 'blocks' && tab !== 'log') { e.preventDefault(); void pfl.toggle(sel); }
+    if (e.key === ' ' && sel && tab !== 'blocks') { e.preventDefault(); void pfl.toggle(sel); }
   };
 
   const canEdit = manager && editMode;
