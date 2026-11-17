@@ -571,6 +571,18 @@ async def _enforce_hard_by(db: AsyncSession, station_id, state: EngineState, now
         logger.info("Soft-timed group at %s reached its limit: fading the item on air", group)
 
 
+def _airs_until(entry) -> datetime | None:
+    """When the engine stops this entry: its start plus its cue-out point (or length)."""
+    if not entry.started_at or entry.asset is None:
+        return None
+    start = entry.started_at if entry.started_at.tzinfo else entry.started_at.replace(tzinfo=UTC)
+    cue_out = stored_analysis(entry.asset.metadata_extra).get("cue_out_seconds")
+    length = cue_out if isinstance(cue_out, (int, float)) and cue_out > 0 else entry.asset.duration
+    if not length:
+        return None
+    return start + timedelta(seconds=float(length))
+
+
 async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, now, horizon) -> None:
     """A shiur or story on air when the next hard timed group is about to be handed over:
     the station's rule (automation_config.timed_during_long_items) decides. "pause" queues
@@ -619,6 +631,29 @@ async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, n
     state.long_done.add(key)
 
     rule = long_items.policy(station)
+    if rule == "wait" and current.preempt_at is not None and not is_soft_timed(current):
+        # The shiur itself is in the engine's timed lane (part of an earlier hard block):
+        # a soft group would go to the music lane, which only takes over after the
+        # interrupted song comes back (34 s late in the harness). Keep the groups hard
+        # and move them to the moment the shiur ends.
+        end = _airs_until(current)
+        if end is not None:
+            await db.execute(
+                update(QueueEntry)
+                .where(
+                    QueueEntry.station_id == station_id,
+                    QueueEntry.status == "pending",
+                    hard_timed(),
+                    QueueEntry.preempt_at.isnot(None),
+                    QueueEntry.preempt_at < end,
+                    QueueEntry.preempt_at > now,
+                )
+                .values(preempt_at=end)
+                .execution_options(synchronize_session=False)
+            )
+            await db.commit()
+            logger.info("Station %s: timed groups wait for %s, now at %s", station_id, current.asset_id, end)
+        return
     if rule == "wait":
         await _defer_hard_until_end(db, station_id, current)
         await db.commit()

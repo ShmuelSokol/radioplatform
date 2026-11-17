@@ -585,7 +585,24 @@ async def test_time_check_pauses_a_long_shiur_and_it_resumes(client, db_session,
 
 
 @pytest.mark.asyncio
-async def test_wait_rule_lets_the_shiur_finish(client, db_session, engine_station):
+async def test_wait_rule_lets_a_queued_shiur_finish(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    on_air, timed = await _shiur_on_air(db_session, station, entries, rule="wait")
+    on_air.preempt_at = None  # it came up in the music lane
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+
+    assert not [p for path, p in sent if path == "/timed"]
+    await db_session.refresh(timed)
+    assert timed.timing_mode == "soft"
+    assert not await _resumes(db_session, station, on_air.asset_id)
+
+
+@pytest.mark.asyncio
+async def test_wait_rule_moves_the_group_to_the_end_of_a_block_shiur(client, db_session, engine_station):
+    # The shiur aired in the timed lane (part of a hard block): the time check stays
+    # hard and starts the moment the shiur ends, not after a song in the music lane.
     station, entries, sent = engine_station
     on_air, timed = await _shiur_on_air(db_session, station, entries, rule="wait")
 
@@ -593,7 +610,10 @@ async def test_wait_rule_lets_the_shiur_finish(client, db_session, engine_statio
 
     assert not [p for path, p in sent if path == "/timed"]
     await db_session.refresh(timed)
-    assert timed.timing_mode == "soft"
+    assert timed.timing_mode != "soft"
+    started = on_air.started_at if on_air.started_at.tzinfo else on_air.started_at.replace(tzinfo=UTC)
+    moved = timed.preempt_at if timed.preempt_at.tzinfo else timed.preempt_at.replace(tzinfo=UTC)
+    assert abs((moved - started).total_seconds() - 70 * 60) < 1
     assert not await _resumes(db_session, station, on_air.asset_id)
 
 
