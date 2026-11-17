@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useStations } from '../../hooks/useStations';
 import {
@@ -793,6 +794,9 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
+              <div className="h-2" />
+              <Link to="/admin/databank" className="qn-btn h-8 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
+                data-testid="cr-databank">DB</Link>
             </aside>
           </div>
           <PflDeck pfl={pfl} />
@@ -810,6 +814,7 @@ export default function Dashboard() {
                     {t === 'log' ? 'Played' : 'Schedule'}
                   </button>
                 ))}
+                <Link to="/admin/databank?tab=log" className="qn-btn flex-1 h-9 text-sm flex items-center justify-center" data-testid="cr-databank">Databank</Link>
               </div>
             )}
             <div className="flex-1 min-h-0">
