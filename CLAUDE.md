@@ -400,6 +400,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks | For live shows |
 | `EMERGENCY_FALLBACK_CATEGORY` | Unused since dead air restarts the queue instead (kept so old settings still load) | No |
 | `SILENCE_DETECTION_SECONDS` | Seconds of silence before alert (default: 30) | For silence detection |
+| `MAX_UPLOAD_MB` | Largest library upload in MB (default 600); bigger files get 413 | No |
 | `LIQUIDSOAP_ENABLED` | Enable Liquidsoap (remote VPS) | For streaming |
 | `LIQUIDSOAP_HOST` | VPS hostname for Liquidsoap telnet | For streaming |
 | `LIQUIDSOAP_TELNET_PORT` | Liquidsoap telnet port (default: 1234) | For streaming |

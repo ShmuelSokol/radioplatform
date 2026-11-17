@@ -166,7 +166,7 @@ def test_auto_enhance_rules():
     assert clean[-1]["params"] == {"i": -16, "tp": -1.5, "lra": 11}
 
     edge, _ = build_auto_filters({"noise_floor": -12, "mean_volume": -20, "loudness_range": 10, "dynamic_range": 30})
-    assert edge[0]["params"]["noise_floor"] == -10  # clamped
+    assert edge[0]["params"]["noise_floor"] == -20  # clamped to afftdn's top (ffmpeg refuses above -20)
     assert any(f["name"] == "acompressor" and f["params"]["ratio"] == 2.5 for f in edge)
 
 
@@ -202,12 +202,12 @@ def test_video_upload_keeps_only_the_audio():
     assert ext == ".mp3" and p["codec"] == "mp3" and abs(duration - 2) < 0.3
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: when ffmpeg cannot read an upload, the original bytes are stored with their own extension and the upload reports success")
 def test_unreadable_upload_is_refused():
-    from app.services.audio_convert_service import convert_audio
+    from app.services.audio_convert_service import UnreadableAudioError, convert_audio
 
-    _, _, ext = convert_audio(b"not audio at all" * 100, "broken.mkv", "mp3")
-    assert ext == ".mp3"
+    for name, fmt in (("broken.mkv", "mp3"), ("broken.mp3", "mp3"), ("broken.wav", "original"), ("doc.pdf", "flac")):
+        with pytest.raises(UnreadableAudioError, match="could not be read as audio"):
+            convert_audio(b"not audio at all" * 100, name, fmt)
 
 
 # --- V2-10, V2-11 ---

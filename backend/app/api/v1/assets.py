@@ -26,7 +26,7 @@ from app.schemas.asset import (
     TranscodeRequest,
 )
 from app.services.asset_service import bulk_update_category, create_asset, delete_asset, get_asset, list_assets
-from app.workers.tasks.media_tasks import task_clip_audio, task_extract_metadata, task_transcode_audio
+from app.workers.tasks.media_tasks import task_clip_audio, task_transcode_audio
 
 logger = logging.getLogger(__name__)
 
@@ -133,17 +133,21 @@ async def ffmpeg_check(_user: User = Depends(require_manager)):
 
             # Upload MP2 to Supabase
             key = generate_asset_key(f"roundtrip_{label}.mp2")
-            await upload_storage(converted, key, "audio/mpeg")
-            step["storage_key"] = key
+            try:
+                await upload_storage(converted, key, "audio/mpeg")
+                step["storage_key"] = key
 
-            # Download back
-            downloaded = await download_file(key)
-            step["downloaded_size"] = len(downloaded)
-            step["downloaded_md5"] = hashlib.md5(downloaded).hexdigest()
-            step["roundtrip_match"] = step["mp2_md5"] == step["downloaded_md5"]
-
-            # Clean up
-            await delete_file(key)
+                # Download back
+                downloaded = await download_file(key)
+                step["downloaded_size"] = len(downloaded)
+                step["downloaded_md5"] = hashlib.md5(downloaded).hexdigest()
+                step["roundtrip_match"] = step["mp2_md5"] == step["downloaded_md5"]
+            finally:
+                # Clean up even when the download failed (the test file stayed in storage)
+                try:
+                    await delete_file(key)
+                except Exception:
+                    logger.warning("ffmpeg-check could not delete %s", key)
 
         except Exception as e:
             step["error"] = str(e)
@@ -195,10 +199,15 @@ async def backfill_durations(
 
 @router.post("/backfill-release-dates")
 async def backfill_release_dates(
+    limit: int = Query(0, ge=0, description="At most this many items (0 = all)"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    """Batch-lookup release dates for music assets missing them."""
+    """Batch-lookup release dates for music assets missing them.
+
+    One MusicBrainz call a second, inside the request (1,000 items take about 17
+    minutes). Each date found is committed at once, so a request or proxy timeout
+    keeps the work already done and a second run carries on with what is left."""
     from sqlalchemy import select as sa_select
     from app.models.asset import Asset as AssetModel
     from app.services.musicbrainz_service import lookup_release_date
@@ -208,9 +217,11 @@ async def backfill_release_dates(
             AssetModel.asset_type == "music",
             AssetModel.artist.isnot(None),
             AssetModel.release_date.is_(None),
-        )
+        ).order_by(AssetModel.created_at, AssetModel.id)
     )
     assets = result.scalars().all()
+    if limit:
+        assets = assets[:limit]
     total = len(assets)
     updated = 0
 
@@ -219,13 +230,14 @@ async def backfill_release_dates(
             rd = await lookup_release_date(asset.title, asset.artist)
             if rd:
                 asset.release_date = rd
+                await db.commit()  # keep it even if the request is cut off later
                 updated += 1
                 logger.info("Backfill: '%s' by %s → %s", asset.title, asset.artist, rd)
         except Exception as e:
             logger.warning("Backfill failed for '%s': %s", asset.title, e)
         # MusicBrainz rate limit is handled internally (1 req/sec)
 
-    await db.flush()
+    await db.commit()
     return {"updated": updated, "total": total}
 
 
@@ -241,41 +253,106 @@ async def upload_asset(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_dj_or_manager),  # DJs save Recording Studio takes (owner, 2026-11-17)
 ):
+    from app.config import settings as app_settings
+    from app.services.audio_convert_service import CONVERT_FORMATS, UnreadableAudioError
+
+    max_bytes = app_settings.MAX_UPLOAD_MB * 1024 * 1024
+    too_big = HTTPException(
+        status_code=413,
+        detail=f"The file is larger than {app_settings.MAX_UPLOAD_MB} MB. Split it or export it at a lower bitrate.",
+    )
+    if file.size is not None and file.size > max_bytes:
+        raise too_big
     file_data = await file.read()
+    if len(file_data) > max_bytes:
+        raise too_big
+    if not file_data:
+        raise HTTPException(status_code=422, detail="The file is empty")
     original_filename = file.filename or "upload.mp3"
     raw_hash = hashlib.md5(file_data[:4096]).hexdigest()
 
-    # MP2/MPG files become MP3 like everything else: Safari and the playout engine do
-    # not play MP2, and a file named .mp3 that holds MP2 is caught by the codec check
-    # in convert_audio (160 such files had to be fixed by hand, 2026-11-17).
-    target = format
+    # MP2 becomes MP3 like everything else: Safari and the playout engine do not play
+    # MP2 (the form still offered it, and its choice used to win). A file named .mp3
+    # that holds MP2 is caught by the codec check in convert_audio (160 such files had
+    # to be fixed by hand, 2026-11-17).
+    target = "mp3" if format == "mp2" else format
+    if target != "original" and target not in CONVERT_FORMATS:
+        raise HTTPException(status_code=422, detail=f"Unknown format: {format}")
 
     logger.info(
         "UPLOAD endpoint: filename='%s', content_type='%s', size=%d, hash_4k=%s, format='%s'",
         original_filename, file.content_type, len(file_data), raw_hash, target,
     )
-    asset = await create_asset(
-        db,
-        title=title,
-        filename=original_filename,
-        file_data=file_data,
-        content_type=file.content_type or "audio/mpeg",
-        user_id=user.id,
-        original_filename=original_filename,
-        target_format=target,
-        artist=artist or None,
-        album=album or None,
-        asset_type=asset_type,
-        category=category or None,
-    )
+    try:
+        asset = await create_asset(
+            db,
+            title=title,
+            filename=original_filename,
+            file_data=file_data,
+            content_type=file.content_type or "audio/mpeg",
+            user_id=user.id,
+            original_filename=original_filename,
+            target_format=target,
+            artist=artist or None,
+            album=album or None,
+            asset_type=asset_type,
+            category=category or None,
+        )
+    except UnreadableAudioError as e:
+        raise HTTPException(status_code=415, detail=str(e))
     # Save the row before anything else looks for it: the analysis task opens its
     # own session and ran before the request's commit ("Asset not found").
     await db.commit()
-    # Dispatch metadata extraction task
-    task_extract_metadata.delay(str(asset.id), asset.file_path)
+    # Save the embedded album art from the uploaded file. This was a Celery task that
+    # never ran without Redis (and only returned the art key, never saved it).
+    _run_detached(_save_album_art(str(asset.id), file_data, original_filename))
     # Fire background audio analysis (loudness, cue points)
     _run_detached(_run_analysis_background(str(asset.id)))
     return asset
+
+
+async def _save_album_art(asset_id: str, file_data: bytes, filename: str) -> str | None:
+    """Pull the embedded cover picture out of an uploaded file, store it next to the
+    audio and point the item's album_art_path at it. No picture: nothing changes."""
+    import os
+    import tempfile
+
+    from app.db.session import async_session_factory
+    from app.services.media_service import extract_album_art
+    from app.services.storage_service import generate_art_key, upload_file as upload_storage
+
+    ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ".bin"
+    in_path = art_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+            f.write(file_data)
+            in_path = f.name
+        art_path = in_path + "_art.jpg"
+        if not await extract_album_art(in_path, art_path):
+            return None
+        with open(art_path, "rb") as f:
+            art = f.read()
+        if not art:
+            return None
+        key = generate_art_key(asset_id)
+        await upload_storage(art, key, "image/jpeg")
+        async with async_session_factory() as db:
+            asset = await db.get(AssetModel, uuid.UUID(asset_id))
+            if asset is None:
+                return None
+            asset.album_art_path = key
+            await db.commit()
+        return key
+    except Exception as e:
+        logger.warning("Album art for asset %s not saved: %s", asset_id, e)
+        return None
+    finally:
+        for path in (in_path, art_path):
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
 
 async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: float, min_silence: float):
@@ -437,8 +514,17 @@ async def analyze_audio_endpoint(
     _user: User = Depends(require_manager),
 ):
     """Manually trigger audio analysis for a single asset."""
+    import httpx
+
     from app.services.audio_analysis_service import analyze_audio
-    analysis = await analyze_audio(db, str(asset_id), full=True)
+    await get_asset(db, asset_id)  # 404 for an unknown item
+    try:
+        analysis = await analyze_audio(db, str(asset_id), full=True)
+    except ValueError as e:
+        # The file is not audio FFmpeg can measure (was a bare 500)
+        raise HTTPException(status_code=422, detail=f"The audio could not be analysed: {e}")
+    except (OSError, httpx.HTTPError) as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch the audio file from storage: {e}")
     await db.commit()
     return {"analysis": analysis}
 
@@ -504,7 +590,10 @@ async def bulk_auto_trim(
     """Start a bulk auto-trim job. Returns a job_id to poll for status."""
     # Resolve asset IDs
     if body.asset_ids:
-        asset_ids = body.asset_ids
+        try:
+            asset_ids = [str(uuid.UUID(a)) for a in body.asset_ids]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="asset_ids must be item ids")
     else:
         conditions = _build_filter_conditions(
             asset_type=body.asset_type,
@@ -559,7 +648,10 @@ async def bulk_set_category(
 ):
     if body.asset_ids:
         # Explicit IDs
-        ids = [uuid.UUID(str(aid)) for aid in body.asset_ids]
+        try:
+            ids = [uuid.UUID(str(aid)) for aid in body.asset_ids]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="asset_ids must be item ids")  # was a 500
         count = await bulk_update_category(db, ids, body.category)
     else:
         # Filter-based selection
@@ -679,9 +771,16 @@ async def update_request_settings(
     extra = dict(asset.metadata_extra or {})
 
     if "auto_approve_requests" in body:
-        extra["auto_approve_requests"] = bool(body["auto_approve_requests"])
+        value = body["auto_approve_requests"]
+        if not isinstance(value, bool):
+            raise HTTPException(status_code=422, detail="auto_approve_requests must be true or false")
+        extra["auto_approve_requests"] = value
     if "max_requests_per_day" in body:
-        extra["max_requests_per_day"] = int(body["max_requests_per_day"])
+        value = body["max_requests_per_day"]
+        # bool is an int in Python; "abc" or 2.5 used to answer 500 or be cut silently
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1000:
+            raise HTTPException(status_code=422, detail="max_requests_per_day must be a whole number from 0 to 1000")
+        extra["max_requests_per_day"] = value
 
     asset.metadata_extra = extra
     await db.flush()
@@ -714,15 +813,37 @@ def _check_filters(filters: list[dict]) -> None:
 
 
 async def _download_asset_data(file_path: str) -> bytes:
-    """Download asset audio data from storage or URL."""
-    if file_path.startswith("http://") or file_path.startswith("https://"):
-        import httpx
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(file_path, follow_redirects=True)
-            return resp.content
-    else:
+    """Download asset audio data from storage or URL. A missing file or a storage
+    error answers 502 with a clear message (it was a bare 500, or for a URL the
+    error page itself was treated as audio)."""
+    try:
+        if file_path.startswith("http://") or file_path.startswith("https://"):
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(file_path, follow_redirects=True)
+                resp.raise_for_status()
+                return resp.content
         from app.services.storage_service import download_file
         return await download_file(file_path)
+    except Exception as e:
+        logger.warning("Could not fetch %s from storage: %s", file_path, e)
+        raise HTTPException(status_code=502, detail="Failed to fetch the audio file from storage")
+
+
+def _resolve_filters(body) -> list[dict]:
+    """Preset or custom filters, checked before any download (400 on a bad request)."""
+    from app.services.enhance_service import ENHANCEMENT_PRESETS
+
+    if body.preset:
+        if body.preset not in ENHANCEMENT_PRESETS:
+            raise HTTPException(status_code=400, detail=f"Unknown preset: {body.preset}")
+        filters = ENHANCEMENT_PRESETS[body.preset]
+    else:
+        filters = [f.model_dump() for f in body.filters]
+    if not filters:
+        raise HTTPException(status_code=400, detail="No filters or preset specified")
+    _check_filters(filters)
+    return filters
 
 
 @router.post("/{asset_id}/enhance", response_model=AssetResponse)
@@ -733,23 +854,12 @@ async def enhance_asset_endpoint(
     _user: User = Depends(require_manager),
 ):
     """Apply enhancement filters to an asset. Non-destructive: keeps original."""
-    from app.services.enhance_service import ENHANCEMENT_PRESETS, enhance_audio
+    from app.services.enhance_service import enhance_audio
     from app.services.storage_service import generate_asset_key, upload_file as upload_storage
 
     asset = await get_asset(db, asset_id)
+    filters = _resolve_filters(body)
     data = await _download_asset_data(asset.file_path)
-
-    # Resolve filters
-    if body.preset:
-        if body.preset not in ENHANCEMENT_PRESETS:
-            raise HTTPException(status_code=400, detail=f"Unknown preset: {body.preset}")
-        filters = ENHANCEMENT_PRESETS[body.preset]
-    else:
-        filters = [f.model_dump() for f in body.filters]
-
-    if not filters:
-        raise HTTPException(status_code=400, detail="No filters or preset specified")
-    _check_filters(filters)
 
     input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
     enhanced_data, new_duration = await asyncio.to_thread(enhance_audio, data, filters, input_ext)
@@ -834,22 +944,11 @@ async def enhance_preview_endpoint(
     _user: User = Depends(require_staff),
 ):
     """Preview enhancement on a short segment. Returns audio/mpeg blob."""
-    from app.services.enhance_service import ENHANCEMENT_PRESETS, enhance_preview
+    from app.services.enhance_service import enhance_preview
 
     asset = await get_asset(db, asset_id)
+    filters = _resolve_filters(body)
     data = await _download_asset_data(asset.file_path)
-
-    # Resolve filters
-    if body.preset:
-        if body.preset not in ENHANCEMENT_PRESETS:
-            raise HTTPException(status_code=400, detail=f"Unknown preset: {body.preset}")
-        filters = ENHANCEMENT_PRESETS[body.preset]
-    else:
-        filters = [f.model_dump() for f in body.filters]
-
-    if not filters:
-        raise HTTPException(status_code=400, detail="No filters or preset specified")
-    _check_filters(filters)
 
     input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
     preview_data = await asyncio.to_thread(
@@ -947,25 +1046,17 @@ async def download_asset(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_staff),
 ):
-    from fastapi import HTTPException
     asset = await get_asset(db, asset_id)
     file_path = asset.file_path
     safe_title = "".join(c for c in asset.title if c.isalnum() or c in " -_").strip() or "download"
+    if format != "original" and format not in EXPORT_FORMATS:
+        raise HTTPException(status_code=400, detail=f"Unsupported format: {format}. Use: {', '.join(EXPORT_FORMATS.keys())}")
 
     # Always fetch the raw bytes server-side.
     # Never redirect to Supabase — the frontend Axios client forwards the JWT
     # Authorization header on redirects, which triggers a CORS preflight that
     # Supabase rejects.
-    if file_path.startswith("http://") or file_path.startswith("https://"):
-        import httpx
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(file_path, follow_redirects=True)
-            if resp.status_code >= 400:
-                raise HTTPException(status_code=502, detail="Failed to fetch file from storage")
-            data = resp.content
-    else:
-        from app.services.storage_service import download_file
-        data = await download_file(file_path)
+    data = await _download_asset_data(file_path)
 
     # Return original format as-is
     if format == "original":
@@ -977,19 +1068,24 @@ async def download_asset(
         )
 
     # Convert using the shared service (includes temp-file fallback for MPEG etc.)
-    fmt_config = EXPORT_FORMATS.get(format)
-    if not fmt_config:
-        raise HTTPException(status_code=400, detail=f"Unsupported format: {format}. Use: {', '.join(EXPORT_FORMATS.keys())}")
-
-    from app.services.audio_convert_service import convert_audio
+    fmt_config = EXPORT_FORMATS[format]
+    from app.services.audio_convert_service import UnreadableAudioError, convert_audio
     input_ext = "." + file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ".mp3"
-    converted, _duration, _ext = await asyncio.to_thread(convert_audio, data, f"download{input_ext}", format)
+    try:
+        converted, _duration, _ext = await asyncio.to_thread(convert_audio, data, f"download{input_ext}", format)
+    except UnreadableAudioError:
+        raise HTTPException(status_code=422, detail=f"The stored file could not be converted to {format.upper()}")
 
     return Response(
         content=converted,
         media_type=fmt_config["mime"],
         headers={"Content-Disposition": f'attachment; filename="{safe_title}.{format}"'},
     )
+
+
+# Without Redis the Celery stub's .delay() returns None (the request used to fail
+# with a 500 on result.id).
+_NO_WORKER = "Background media processing is not available on this server (no Redis worker). Use Download with a format instead."
 
 
 @router.post("/{asset_id}/transcode", response_model=TaskStatusResponse)
@@ -1001,6 +1097,8 @@ async def transcode(
 ):
     asset = await get_asset(db, asset_id)
     result = task_transcode_audio.delay(str(asset.id), asset.file_path, body.codec, body.bitrate)
+    if result is None:
+        raise HTTPException(status_code=503, detail=_NO_WORKER)
     return TaskStatusResponse(task_id=result.id, status="queued")
 
 
@@ -1013,6 +1111,8 @@ async def clip(
 ):
     asset = await get_asset(db, asset_id)
     result = task_clip_audio.delay(str(asset.id), asset.file_path, body.start, body.duration)
+    if result is None:
+        raise HTTPException(status_code=503, detail=_NO_WORKER)
     return TaskStatusResponse(task_id=result.id, status="queued")
 
 
@@ -1028,15 +1128,7 @@ async def detect_silence_endpoint(
     asset = await get_asset(db, asset_id)
     file_path = asset.file_path
 
-    # Get file data
-    if file_path.startswith("http://") or file_path.startswith("https://"):
-        import httpx
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(file_path, follow_redirects=True)
-            data = resp.content
-    else:
-        from app.services.storage_service import download_file
-        data = await download_file(file_path)
+    data = await _download_asset_data(file_path)
 
     from app.services.silence_service import detect_silence
     regions = await asyncio.to_thread(detect_silence, data, threshold_db=threshold_db, min_duration=min_duration)
@@ -1063,15 +1155,7 @@ async def trim_asset_endpoint(
     asset = await get_asset(db, asset_id)
     file_path = asset.file_path
 
-    # Get file data
-    if file_path.startswith("http://") or file_path.startswith("https://"):
-        import httpx
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(file_path, follow_redirects=True)
-            data = resp.content
-    else:
-        from app.services.storage_service import download_file
-        data = await download_file(file_path)
+    data = await _download_asset_data(file_path)
 
     from app.services.silence_service import trim_audio
     trimmed_data, new_duration = await asyncio.to_thread(trim_audio, data, trim_start, trim_end)
@@ -1109,7 +1193,6 @@ async def restore_original(
     extra = dict(asset.metadata_extra or {})
     original = extra.get("original_file_path")
     if not original:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="No original file to restore — asset has not been trimmed")
 
     # Restore original file path
