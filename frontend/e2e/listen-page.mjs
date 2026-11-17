@@ -13,7 +13,7 @@
  */
 import {
   chromium, devices, checker, sleep, makeStation, routeApi, routeNowPlaying, AUDIO_PROBE,
-  watchDecks, timeClick, timeUntil,
+  watchDecks, timeClick, timeUntil, routeSiteSocket, skewClock,
 } from './lib/fake-station.mjs';
 import { startStreamServer } from './lib/stream-server.mjs';
 
@@ -27,11 +27,10 @@ const { check, done } = checker(KNOWN_BUGS);
 async function listenContext(browser, contextOpts, station, { initScripts = [], delay } = {}) {
   const ctx = await browser.newContext(contextOpts);
   await ctx.addInitScript(AUDIO_PROBE);
-  for (const s of initScripts) await ctx.addInitScript(s);
+  for (const s of initScripts) await (Array.isArray(s) ? ctx.addInitScript(...s) : ctx.addInitScript(s));
   await routeApi(ctx, station, { delay });
   const np = await routeNowPlaying(ctx, station);
-  // The live-show and site channels: held open and quiet
-  await ctx.routeWebSocket(/\/ws\/(live|site|listeners)/, () => {});
+  await routeSiteSocket(ctx);
   return { ctx, np };
 }
 async function openListen(ctx, sid) {
@@ -374,8 +373,9 @@ async function stationSwitch(browser) {
 // The fake station plays the role of the server: the time check is due at T (as
 // at hh:00:00), queued with its exact time, and the server announces it 0.25 s
 // after T (the scheduler starts it at T, then the message travels).
-async function timeCheck(browser, where, { preload = true } = {}) {
-  const tag = `time check (${where}${preload ? '' : ', not pre-loaded'})`;
+async function timeCheck(browser, where, { preload = true, clock = 0 } = {}) {
+  const tag = `time check (${where}${preload ? '' : ', not pre-loaded'}${clock ? `, device clock ${clock > 0 ? '+' : ''}${clock / 1000} s` : ''})`;
+  const initScripts = clock ? [[skewClock, clock]] : [];
   const station = makeStation();
   if (!preload) {
     // The time check was queued after the last announcement: the page was told the next song
@@ -390,7 +390,7 @@ async function timeCheck(browser, where, { preload = true } = {}) {
   const opts = { viewport: { width: 1440, height: 900 } };
   let page, errors, ctx;
   if (where === 'Listen') {
-    ({ ctx } = await listenContext(browser, opts, station));
+    ({ ctx } = await listenContext(browser, opts, station, { initScripts }));
     ({ page, errors } = await openListen(ctx, station.SID));
     await page.getByText('On Air', { exact: true }).waitFor();
     await listenBtn(page).click();
@@ -398,9 +398,10 @@ async function timeCheck(browser, where, { preload = true } = {}) {
     ctx = await browser.newContext(opts);
     await ctx.addInitScript(() => { localStorage.setItem('access_token', 'test'); localStorage.setItem('refresh_token', 'test'); });
     await ctx.addInitScript(AUDIO_PROBE);
+    for (const sc of initScripts) await ctx.addInitScript(...sc);
     await routeApi(ctx, station);
     await routeNowPlaying(ctx, station);
-    await ctx.routeWebSocket(/\/ws\/(live|site|listeners)/, () => {});
+    await routeSiteSocket(ctx);
     page = await ctx.newPage();
     errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
@@ -414,7 +415,7 @@ async function timeCheck(browser, where, { preload = true } = {}) {
   const wait = T + 250 - Date.now();
   setTimeout(() => station.goOnAir('tc', { started_at: new Date(T).toISOString() }), wait);
   const samples = await watchDecks(page, T + 4000 - Date.now(), 25);
-  const rel = (s) => (s.now - T) / 1000;
+  const rel = (s) => (s.now - clock - T) / 1000;
   const first = samples.find((s) => s.decks.some((d) => d.src === 'tc' && d.playing && d.gain > 0.05));
   const heardAt = first ? rel(first) : null;
   let gap = 0, longest = 0;
@@ -494,6 +495,24 @@ async function playerExtras(browser) {
   const late = heard < 0 ? null : (Date.now() - crossAt) / 1000;
   check(`${tag}: crossfade on time with no animation frames (V1-128)`, late !== null && Math.abs(late) < 1.2, late === null ? 'never' : `${late.toFixed(2)} s from the crossfade point`);
   await c2.close();
+}
+
+// Listen pressed on a device whose clock is off: the item must start where the station is
+async function joinWithSkew(browser, off) {
+  const tag = `device clock ${off > 0 ? '+' : ''}${off / 1000} s`;
+  const station = makeStation();
+  const { ctx } = await listenContext(browser, { viewport: { width: 1280, height: 900 } }, station, { initScripts: [[skewClock, off]] });
+  const { page, errors } = await openListen(ctx, station.SID);
+  await page.getByText('On Air', { exact: true }).waitFor();
+  await sleep(500);
+  await listenBtn(page).click();
+  await timeUntil(page, `() => window.__audible().length === 1`, 3000);
+  await sleep(500);
+  const d = (await page.evaluate(() => window.__audible()))[0];
+  const live = (Date.now() - new Date(station.playing().started_at).getTime()) / 1000;
+  check(`${tag}: Listen joins the item at the station's position, not the device clock's`, !!d && Math.abs(d.t - live) < 2.5, d ? `at ${d.t}, live ${live.toFixed(1)}` : 'silent');
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
 }
 
 // ── Server stream mode ─────────────
@@ -601,6 +620,14 @@ try {
   if (run('polling')) await pollingFallback(browser);
   if (run('switch')) await stationSwitch(browser);
   if (run('player')) await playerExtras(browser);
+  if (run('clock')) {
+    // V2-121: a device clock 20 s off must not move songs or the time check
+    for (const off of [20000, -20000]) {
+      await joinWithSkew(browser, off);
+      await timeCheck(browser, 'Listen', { clock: off });
+      await timeCheck(browser, 'control room', { clock: off });
+    }
+  }
   if (run('timecheck')) {
     await timeCheck(browser, 'Listen');
     await timeCheck(browser, 'Listen', { preload: false });

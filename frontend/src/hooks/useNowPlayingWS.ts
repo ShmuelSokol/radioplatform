@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { serverNow } from '../lib/serverClock';
 
 export interface NowPlayingData {
   station_id: string;
@@ -248,7 +249,7 @@ export const useNowPlayingWS = (stationId: string) => {
     if (!isFinite(end)) return;
     const gen = generation.current;
     const check = () => {
-      if (Date.now() < end + OVERDUE_AFTER_MS || gen !== generation.current) return;
+      if (serverNow() < end + OVERDUE_AFTER_MS || gen !== generation.current) return;
       fetch(`${API_BASE}/now-playing/${stationId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {

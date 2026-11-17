@@ -12,6 +12,7 @@ import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { holdUpdates } from '../../lib/appUpdate';
+import { serverNow } from '../../lib/serverClock';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
 import type { AssetInfo } from '../../types';
 
@@ -163,7 +164,7 @@ export default function Listen() {
     const startMs = new Date(wsNowPlaying.started_at).getTime();
     const maxDuration = wsEndsAt ? (new Date(wsEndsAt).getTime() - startMs) / 1000 : 0;
     const update = () => {
-      const raw = Math.max(0, (Date.now() - startMs) / 1000);
+      const raw = Math.max(0, (serverNow() - startMs) / 1000);
       setElapsed(maxDuration > 0 ? Math.min(raw, maxDuration) : raw);
     };
     update();

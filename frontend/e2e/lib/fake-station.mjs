@@ -255,6 +255,7 @@ export function makeStation(opts = {}) {
     if (path === '/asset-types') return types.map((name, i) => ({ id: `t${i}`, name }));
     if (path === '/categories') return [];
     if (path === '/playout-status') return s.playout;
+    if (path === '/site-release' && method === 'GET') return { mode: 'auto', push: null, server_time: new Date().toISOString() };
     if (/^\/assets\/[^/]+\/audio-url$/.test(path)) return { url: `/__tone/${path.split('/')[2]}.wav` };
     if (path === '/alerts/unresolved-count') return { unresolved_count: 0 };
     if (path === '/alerts') return { alerts: [], total: 0 };
@@ -428,6 +429,26 @@ export async function routeNowPlaying(target, station, { greet = true } = {}) {
     raw: (msg) => sockets.forEach((e) => { if (e.open) { try { e.ws.send(JSON.stringify(msg)); } catch { /* closed */ } } }),
     dropAll: (code = 1006) => sockets.forEach((e) => { if (e.open) { e.open = false; e.ws.close({ code: code === 1006 ? 1011 : code }).catch(() => {}); } }),
   };
+}
+
+/** The site channel every tab keeps open: sends the release policy with the
+ *  server's clock (as the backend does on connect), then stays quiet. */
+export async function routeSiteSocket(target) {
+  await target.routeWebSocket(/\/ws\/site/, (ws) => {
+    ws.send(JSON.stringify({ type: 'release', data: { mode: 'auto', push: null, server_time: new Date().toISOString() } }));
+  });
+  await target.routeWebSocket(/\/ws\/(live|listeners)/, () => {});
+}
+
+/** Init script: this device's clock is `ms` off (a PC whose clock is 20 s fast). */
+export function skewClock(ms) {
+  const Real = Date;
+  const realNow = Real.now.bind(Real);
+  class Skewed extends Real {
+    constructor(...a) { if (a.length === 0) super(realNow() + ms); else super(...a); }
+    static now() { return realNow() + ms; }
+  }
+  window.Date = Skewed;
 }
 
 /** A new context signed in to the admin site, with the probe and the fake station wired. */
