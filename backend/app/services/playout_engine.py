@@ -59,6 +59,8 @@ class EngineState:
     # Asset of each entry handed to the engine (newest last), so a start report for an
     # entry deleted meanwhile (a schedule redraw) still shows what is on air
     handed: dict[str, str] = field(default_factory=dict)
+    # "<entry on air>@<group time>" pairs whose long-item rule (pause/wait/cut) was applied
+    long_done: set[str] = field(default_factory=set)
 
 
 HANDED_KEEP = 30
@@ -569,6 +571,88 @@ async def _enforce_hard_by(db: AsyncSession, station_id, state: EngineState, now
         logger.info("Soft-timed group at %s reached its limit: fading the item on air", group)
 
 
+async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, now, horizon) -> None:
+    """A shiur or story on air when the next hard timed group is about to be handed over:
+    the station's rule (automation_config.timed_during_long_items) decides. "pause" queues
+    the shiur to carry on from where the group stops it, "wait" makes the group wait for
+    its end (soft), "cut" just cuts it. Same rule as the browser-player path in queue.py;
+    the engine path had none, and a Daf Yomi aired as part of a block held the 21:00 time
+    check until 21:09 (2026-11-16)."""
+    from app.api.v1.queue import _defer_hard_until_end, _same_timed_group
+    from app.models.queue_entry import resume_source
+    from app.services import long_items
+
+    station_id = station.id
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            hard_timed(),
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at > now,
+            QueueEntry.preempt_at <= horizon,
+        )
+        .order_by(QueueEntry.preempt_at, QueueEntry.position)
+    )
+    upcoming = [e for e in res.unique().scalars().all() if str(e.id) not in state.timed_sent]
+    if not upcoming:
+        return
+    timed = upcoming[0]
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current = res.unique().scalars().first()
+    if current is None or not long_items.is_long_form(current.asset):
+        return
+    if _same_timed_group(current, timed):
+        return
+    at = timed.preempt_at if timed.preempt_at.tzinfo else timed.preempt_at.replace(tzinfo=UTC)
+    key = f"{current.id}@{at.isoformat()}"
+    if key in state.long_done:
+        return
+    state.long_done = {k for k in state.long_done if k.startswith(f"{current.id}@")}
+    state.long_done.add(key)
+
+    rule = long_items.policy(station)
+    if rule == "wait":
+        await _defer_hard_until_end(db, station_id, current)
+        await db.commit()
+        logger.info("Station %s: timed group at %s waits for %s to end", station_id, at, current.asset_id)
+        return
+    if rule != "pause":
+        return
+    resume_at = long_items.resume_point(current, at)
+    if resume_at is None:
+        return
+    # The shiur carries on first thing in the music lane, which takes over again when
+    # the timed group has played (the engine re-asks for its next track: queue head changed)
+    head = (current.position or 0) + 1
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.position >= head,
+        )
+        .values(position=QueueEntry.position + 1)
+        .execution_options(synchronize_session=False)
+    )
+    db.add(QueueEntry(
+        id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
+        position=head, status="pending", source=resume_source(resume_at),
+    ))
+    await db.commit()
+    logger.info(
+        "Station %s: %s pauses at %.0f s for the timed group at %s; it resumes after",
+        station_id, current.asset_id, resume_at, at,
+    )
+
+
 async def tick(db: AsyncSession, station) -> None:
     """Called by the scheduler loop for the engine-driven station."""
     station_id = station.id
@@ -581,6 +665,10 @@ async def tick(db: AsyncSession, station) -> None:
 
     # 1. Hand hard-timed items (hourly ID, time, weather) to the engine ahead of time
     horizon = now + timedelta(seconds=TIMED_LEAD_SECONDS)
+    try:
+        await _apply_long_item_rule(db, station, state, now, horizon)
+    except Exception as e:
+        logger.warning("Long-item rule for station %s failed: %s", station_id, e)
     res = await db.execute(
         select(QueueEntry)
         .options(joinedload(QueueEntry.asset))

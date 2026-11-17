@@ -136,12 +136,21 @@ def schedule_timed(~uri, ~at) =
       # Mute the music lane, put the timed item on air at full level. The interrupted
       # song does not resume: when the music lane comes back it moves to its next song
       # (see report_started).
+      timed_armed := true
       if on_air_lane() == "main" then
         main_gain := 0.
         main_interrupted := true
+        master_gain := 1.
+      elsif on_air_lane() == "timed" then
+        # An earlier timed item is still on air (a block's shiur, a Play Now): end it,
+        # or this group waits behind it. The 21:00 time check aired at 21:09 after the
+        # 20:00 block's Daf Yomi (2026-11-16). The backend has already queued the
+        # shiur to carry on afterwards when the station pauses long items.
+        timed_queue.skip()
+        thread.run(delay=0.1, {master_gain := 1.})
+      else
+        master_gain := 1.
       end
-      timed_armed := true
-      master_gain := 1.
       thread.run(delay=1.5, {timed_armed := false})
     end)
   end

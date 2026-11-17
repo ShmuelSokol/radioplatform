@@ -96,7 +96,7 @@ On KBR Jerusalem the hard :00 time check cut a shiur 14 minutes in and the rest 
 
 Also fixed then: the weather (same `preempt_at`, hard) used to cut the time check that had just started; `_same_timed_group` lets the group play in order. Due soft items with the same time now go by position (time check before weather).
 
-The engine path (`playout_engine.py` timed commands) does not yet queue a resume itself; do that when the engine is switched on.
+On an engine station (since 2026-11-17) `playout_engine._apply_long_item_rule` applies the same rule in `tick`, when the next hard group is about to be handed over (45 s early): `pause` queues the resume entry at the head of the music lane (the engine re-asks for its pre-loaded track because the queue head changed), `wait` turns the group soft via `_defer_hard_until_end` and hands nothing, `cut` does nothing extra. In `radio.liq`, a group that goes on air while an earlier timed item is still on air (a block's Daf Yomi, a Play Now) now skips that item; before, the new group sat in the same timed queue behind it (the 21:00 time check aired at 21:09 after the 20:00 block's Daf Yomi, 2026-11-16). A `radio.liq` change reaches the server only when `setup.sh` is run again there.
 
 ## The top-of-hour block plays as one (2026-11-16)
 
