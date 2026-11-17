@@ -314,7 +314,9 @@ def test_old_nowplaying_socket_is_not_mounted():
     is /ws/now-playing/{id} from websocket.py."""
     from app.main import create_app
 
-    paths = {getattr(r, "path", "") for r in create_app().routes}
+    from tests.route_list import app_routes
+
+    paths = {r.path for r in app_routes(create_app())}
     assert not any(p.startswith("/api/v1/ws/nowplaying") for p in paths)
     assert "/api/v1/ws/now-playing/{station_id}" in paths
 

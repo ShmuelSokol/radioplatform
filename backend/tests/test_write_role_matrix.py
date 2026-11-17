@@ -18,6 +18,8 @@ import uuid
 
 import pytest
 from fastapi.routing import APIRoute
+
+from tests.route_list import app_routes
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -256,8 +258,8 @@ def _write_routes():
     from app.main import create_app
 
     out = set()
-    for r in create_app().routes:
-        if isinstance(r, APIRoute) and r.path.startswith("/api/v1/"):
+    for r in app_routes(create_app()):
+        if isinstance(r.route, APIRoute) and r.path.startswith("/api/v1/"):
             for m in r.methods:
                 if m in ("POST", "PUT", "PATCH", "DELETE"):
                     out.add((m, r.path[len("/api/v1"):]))

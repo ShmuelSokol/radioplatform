@@ -12,6 +12,8 @@ from datetime import datetime, time as dtime, timedelta, timezone
 
 import pytest
 from fastapi.routing import APIRoute
+
+from tests.route_list import app_routes
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,8 +50,8 @@ def _public_gets():
         return acc
 
     out = []
-    for r in create_app().routes:
-        if isinstance(r, APIRoute) and "GET" in r.methods and r.path.startswith("/api/v1/"):
+    for r in app_routes(create_app()):
+        if isinstance(r.route, APIRoute) and "GET" in r.methods and r.path.startswith("/api/v1/"):
             if "/playout/" in r.path:
                 continue  # engine only, X-Playout-Token (test_playout_engine.py)
             if not any(n.startswith(LOGIN_DEPS) for n in deps(r.dependant, [])):

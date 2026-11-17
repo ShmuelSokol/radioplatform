@@ -182,6 +182,8 @@ async def test_now_playing_socket_route_is_public():
 
     from app.main import create_app
 
-    routes = {r.path: r for r in create_app().routes if isinstance(r, APIWebSocketRoute)}
+    from tests.route_list import app_routes
+
+    routes = {r.path: r.route for r in app_routes(create_app()) if isinstance(r.route, APIWebSocketRoute)}
     assert "/api/v1/ws/now-playing/{station_id}" in routes or any("now-playing" in p for p in routes)
 
