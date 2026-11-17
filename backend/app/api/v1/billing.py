@@ -164,7 +164,7 @@ async def stripe_webhook(
         try:
             invoice_id = UUID(str(invoice_id)) if invoice_id else None
         except ValueError:
-            invoice_id = None  # not one of ours: acknowledge and ignore
+            invoice_id = None  # not one of ours
         if invoice_id:
             result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
             invoice = result.scalar_one_or_none()

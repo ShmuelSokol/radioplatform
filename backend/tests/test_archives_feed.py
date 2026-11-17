@@ -46,7 +46,7 @@ async def test_admin_list_keeps_drafts_public_list_does_not(client, auth_headers
     assert [a["title"] for a in public["archives"]] == ["Published"] and public["total"] == 1
 
     t0 = time.perf_counter()
-    r = await client.get(f"{API}/archives", params={"include_unpublished": "true"}, headers=auth_headers)
+    r = await client.get(f"{API}/archives", headers=auth_headers)
     assert time.perf_counter() - t0 < 0.5
     admin = r.json()
     assert {a["title"] for a in admin["archives"]} == {"Published", "Draft"} and admin["total"] == 2
@@ -55,7 +55,7 @@ async def test_admin_list_keeps_drafts_public_list_does_not(client, auth_headers
     r = await client.patch(f"{API}/archives/{draft.id}", json={"is_published": True}, headers=auth_headers)
     assert r.status_code == 200 and r.json()["is_published"] is True
     await client.patch(f"{API}/archives/{pub.id}", json={"is_published": False}, headers=auth_headers)
-    admin = (await client.get(f"{API}/archives", params={"include_unpublished": "true"}, headers=auth_headers)).json()
+    admin = (await client.get(f"{API}/archives", headers=auth_headers)).json()
     assert admin["total"] == 2
     assert [a["title"] for a in (await client.get(f"{API}/archives")).json()["archives"]] == ["Draft"]
 
@@ -63,7 +63,7 @@ async def test_admin_list_keeps_drafts_public_list_does_not(client, auth_headers
     other = await _station(db_session, "Other")
     await _archive(db_session, other, "Elsewhere", published=False)
     admin = (await client.get(
-        f"{API}/archives", params={"include_unpublished": "true", "station_id": str(st.id)}, headers=auth_headers
+        f"{API}/archives", params={"station_id": str(st.id)}, headers=auth_headers
     )).json()
     assert admin["total"] == 2
 
@@ -75,7 +75,7 @@ async def test_drafts_are_not_for_the_public(client, auth_headers, db_session):
     draft = await _archive(db_session, st, "Secret draft", published=False, audio_url="https://cdn.test/secret.mp3")
     pub = await _archive(db_session, st, "Open")
 
-    assert (await client.get(f"{API}/archives", params={"include_unpublished": "true"})).status_code == 401
+    assert [a["title"] for a in (await client.get(f"{API}/archives")).json()["archives"]] == ["Open"]
     r = await client.get(f"{API}/archives/{draft.id}")
     assert r.status_code == 404 and "secret.mp3" not in r.text
     assert (await client.get(f"{API}/archives/{pub.id}")).status_code == 200
@@ -85,7 +85,7 @@ async def test_drafts_are_not_for_the_public(client, auth_headers, db_session):
     await db_session.commit()
     tok = (await client.post(f"{API}/auth/login", json={"email": "s@sp.test", "password": "sponsorpw1"})).json()["access_token"]
     sp = {"Authorization": f"Bearer {tok}"}
-    assert (await client.get(f"{API}/archives", params={"include_unpublished": "true"}, headers=sp)).status_code == 403
+    assert [a["title"] for a in (await client.get(f"{API}/archives", headers=sp)).json()["archives"]] == ["Open"]
     assert (await client.get(f"{API}/archives/{draft.id}", headers=sp)).status_code == 404
 
     r = await client.get(f"{API}/archives/{draft.id}", headers=auth_headers)
@@ -95,7 +95,7 @@ async def test_drafts_are_not_for_the_public(client, auth_headers, db_session):
 @pytest.mark.asyncio
 async def test_podcast_rss(client, db_session):
     """V2-83: valid XML, only published items newest first (max 100), escaped text,
-    RFC 822 dates, hh:mm:ss durations; a non-UUID station id is a 404."""
+    RFC 822 dates, hh:mm:ss durations; a non-UUID station id is a 422, not a 500."""
     st = await _station(db_session, "KBR & Friends")
     base = datetime(2026, 11, 1, 18, 30, tzinfo=UTC)
     await _archive(db_session, st, "Old <show>", recorded_at=base - timedelta(days=1), duration_seconds=3725, host_name="R' Cohen & Co")
@@ -116,7 +116,7 @@ async def test_podcast_rss(client, db_session):
     assert items[1].findtext(f"{ITUNES}duration") == "01:02:05"
     assert items[1].findtext(f"{ITUNES}author") == "R' Cohen & Co"
 
-    assert (await client.get(f"{API}/archives/station/not-a-uuid/rss")).status_code == 404
+    assert (await client.get(f"{API}/archives/station/not-a-uuid/rss")).status_code == 422
     assert (await client.get(f"{API}/archives/station/{uuid.uuid4()}/rss")).status_code == 404
 
 

@@ -140,6 +140,10 @@ async def add_to_queue(
     """
     from sqlalchemy import update
 
+    # Callers pass ids as strings; the columns are UUIDs.
+    station_id = uuid.UUID(str(station_id))
+    asset_id = uuid.UUID(str(asset_id))
+
     # Find the highest position among request-sourced pending entries
     result = await db.execute(
         select(func.max(QueueEntry.position)).where(

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getArchives, createArchive, updateArchive, deleteArchive } from '../api/archives';
 
-export function useArchives(params?: { station_id?: string; include_unpublished?: boolean }) {
+export function useArchives(params?: { station_id?: string }) {
   return useQuery({
     queryKey: ['archives', params],
     queryFn: () => getArchives(params),
