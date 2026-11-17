@@ -138,19 +138,11 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
 
     # Compact positions after fill to prevent bloat from repeated bump operations
     if total > 0:
-        compact_result = await db.execute(
-            select(QueueEntry)
-            .where(
-                QueueEntry.station_id == station_id,
-                QueueEntry.status.in_(["pending", "playing"]),
-            )
-            .order_by(QueueEntry.position)
-        )
-        compact_entries = compact_result.scalars().all()
-        for i, entry in enumerate(compact_entries):
-            entry.position = i + 1
+        from app.services.queue_positions import compact_positions
+
+        await compact_positions(db, station_id, playing_first=False)
         await db.commit()
-        logger.info("Compacted %d queue positions for station %s", len(compact_entries), station_id)
+        logger.info("Compacted queue positions for station %s", station_id)
 
     return total
 
@@ -1119,21 +1111,11 @@ async def _check_advance_locked(
 
         # Compact positions: ensure playing entry is at position 1
         # and pending entries follow sequentially (prevents stale position drift)
-        compact_result = await db.execute(
-            select(QueueEntry)
-            .where(
-                QueueEntry.station_id == station_id,
-                QueueEntry.status.in_(["pending", "playing"]),
-            )
-            .order_by(
-                # Playing first, then pending by position
-                QueueEntry.status.desc(),  # "playing" > "pending" alphabetically
-                QueueEntry.position,
-            )
-        )
-        for idx, entry in enumerate(compact_result.scalars().all()):
-            entry.position = idx + 1
+        # (one statement: row by row it was hundreds of UPDATEs on a two-day queue,
+        # all before the new item was saved and announced)
+        from app.services.queue_positions import compact_positions
 
+        await compact_positions(db, station_id)
         await db.commit()
         # Top the queue up afterwards, not here: the caller announces the new item
         # first. A refill that took long (one did at the top of an hour) used to

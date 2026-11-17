@@ -216,6 +216,7 @@ radioplatform/
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
 | air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship; alerts + ntfy (see `wiki/air-watch.md`) |
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
+| queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement; shared by the browser player's song change, the engine's start report and the blackout fill |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details

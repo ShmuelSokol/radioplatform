@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -736,25 +736,10 @@ async def handle_started(
     if entry.status != "playing":
         mark_started(entry, now)
 
-    # Keep positions compact: playing first, then pending in order. One statement: row by
-    # row it was ~690 UPDATEs on Main and made every start report take over 3 s.
-    await db.flush()
-    ranked = (
-        select(
-            QueueEntry.id.label("id"),
-            func.row_number()
-            .over(order_by=(QueueEntry.status.desc(), QueueEntry.position))
-            .label("rn"),
-        )
-        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
-        .subquery()
-    )
-    await db.execute(
-        update(QueueEntry)
-        .where(QueueEntry.id == ranked.c.id, QueueEntry.position != ranked.c.rn)
-        .values(position=ranked.c.rn)
-        .execution_options(synchronize_session=False)
-    )
+    # Keep positions compact: playing first, then pending in order
+    from app.services.queue_positions import compact_positions
+
+    await compact_positions(db, station_id)
     entry_pk = entry.id
     await db.commit()
 
