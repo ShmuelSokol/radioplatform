@@ -378,6 +378,7 @@ export default function Listen() {
               step={0.01}
               value={volume}
               onChange={(e) => setVolume(Number(e.target.value))}
+              aria-label="Volume"
               className="flex-1 max-w-48 h-11"
             />
             <span className="text-gray-400 text-sm w-10 text-right">{Math.round(volume * 100)}%</span>
@@ -452,9 +453,10 @@ export default function Listen() {
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Your Name *</label>
+                <label htmlFor="req-name" className="block text-sm font-medium text-gray-700 mb-1">Your Name *</label>
                 <input
                   type="text"
+                  id="req-name"
                   value={reqName}
                   onChange={e => setReqName(e.target.value)}
                   placeholder="Enter your name"
@@ -462,9 +464,10 @@ export default function Listen() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Song Title *</label>
+                <label htmlFor="req-song" className="block text-sm font-medium text-gray-700 mb-1">Song Title *</label>
                 <input
                   type="text"
+                  id="req-song"
                   value={reqSong}
                   onChange={e => setReqSong(e.target.value)}
                   placeholder="What song would you like to hear?"
@@ -472,9 +475,10 @@ export default function Listen() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Artist (optional)</label>
+                <label htmlFor="req-artist" className="block text-sm font-medium text-gray-700 mb-1">Artist (optional)</label>
                 <input
                   type="text"
+                  id="req-artist"
                   value={reqArtist}
                   onChange={e => setReqArtist(e.target.value)}
                   placeholder="Artist name"
@@ -482,8 +486,9 @@ export default function Listen() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Message (optional)</label>
+                <label htmlFor="req-message" className="block text-sm font-medium text-gray-700 mb-1">Message (optional)</label>
                 <textarea
+                  id="req-message"
                   value={reqMessage}
                   onChange={e => setReqMessage(e.target.value)}
                   placeholder="Dedication or message..."
@@ -538,6 +543,8 @@ export default function Listen() {
                 <input
                   type="text"
                   maxLength={6}
+                  inputMode="numeric"
+                  aria-label="Listener PIN"
                   value={crmPinInput}
                   onChange={e => { setCrmPinInput(e.target.value.replace(/\D/g, '')); setCrmLoginError(''); }}
                   placeholder="Enter 6-digit PIN"
@@ -574,19 +581,19 @@ export default function Listen() {
                   )}
                   {crmRegError && <p className="text-red-600 text-sm">{crmRegError}</p>}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                    <input type="text" value={crmRegName} onChange={e => setCrmRegName(e.target.value)}
+                    <label htmlFor="crm-name" className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input id="crm-name" type="text" value={crmRegName} onChange={e => setCrmRegName(e.target.value)}
                       placeholder="Your name" className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Phone (optional)</label>
-                      <input type="text" value={crmRegPhone} onChange={e => setCrmRegPhone(e.target.value)}
+                      <label htmlFor="crm-phone" className="block text-sm font-medium text-gray-700 mb-1">Phone (optional)</label>
+                      <input id="crm-phone" type="text" value={crmRegPhone} onChange={e => setCrmRegPhone(e.target.value)}
                         placeholder="Phone" className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
-                      <input type="email" value={crmRegEmail} onChange={e => setCrmRegEmail(e.target.value)}
+                      <label htmlFor="crm-email" className="block text-sm font-medium text-gray-700 mb-1">Email (optional)</label>
+                      <input id="crm-email" type="email" value={crmRegEmail} onChange={e => setCrmRegEmail(e.target.value)}
                         placeholder="Email" className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                     </div>
                   </div>
@@ -635,6 +642,8 @@ export default function Listen() {
                   <div className="flex items-center gap-1">
                     {[1, 2, 3, 4, 5].map(star => (
                       <button key={star}
+                        aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
+                        aria-pressed={star <= myRating}
                         onClick={() => {
                           setMyRating(star);
                           rateMutation.mutate(
@@ -659,6 +668,8 @@ export default function Listen() {
                     }}
                     className={`min-w-[44px] min-h-[44px] text-xl transition ${myFavorite ? 'text-red-500' : 'text-gray-300 hover:text-red-400'}`}
                     title={myFavorite ? 'Unfavorite' : 'Favorite'}
+                    aria-label={myFavorite ? 'Unfavorite' : 'Favorite'}
+                    aria-pressed={myFavorite}
                   >
                     &#9829;
                   </button>
