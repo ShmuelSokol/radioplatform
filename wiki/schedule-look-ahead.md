@@ -27,3 +27,14 @@ Candle lighting is not its own sun event: use `sunset` with offset -18 (so "Cand
 ## What plays (`kind="plays"`)
 
 One finding per run of the winning block (`rank_matching_blocks(...)[0]`, start-only blocks included), with the playlist name in `detail`, `needs_attention=False`. Added 2026-11-16 because a lone block that collided with nothing never appeared, so a Mac test could not tell a new block was scheduled. Schedule Check shows these under "What plays".
+
+
+## Conflict alerts on save (`detect_schedule_conflicts`)
+
+Saving a block raises a "Schedule conflict" alert only for blocks that air at the same time
+on a shared day (`blocks_overlap` in `alert_service.py`). Days come from the recurrence
+(weekly names, monthly day numbers, one-time date range; daily or no pattern = every day;
+kinds that cannot be compared are assumed to meet). A block past midnight (22:00-02:00) is
+two parts, the second on the next day. Before 2026-11-17 days were ignored (false alerts
+for Monday vs Tuesday shows) and overnight blocks never matched. Start-only blocks still
+never conflict. Test: `backend/tests/test_block_conflict_alerts.py`.
