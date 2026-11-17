@@ -218,6 +218,15 @@ async def list_requests(
     return SongRequestListResponse(requests=request_dicts, total=total)
 
 
+async def _check_operator(db: AsyncSession, user: User, station_id) -> None:
+    """Putting a song on a station's air needs the same right as operating it."""
+    from app.models.station import Station
+
+    station = await db.get(Station, uuid.UUID(str(station_id)))
+    if station is not None and not may_operate_station(user, station):
+        raise ForbiddenError("Your login is not set up to operate this station")
+
+
 @router.patch("/{request_id}", response_model=SongRequestInDB)
 async def update_request(
     request_id: uuid.UUID,
@@ -235,15 +244,26 @@ async def update_request(
 
     if body.asset_id is not None:
         # Matched by hand ("Match to a song"): the song must exist in the library
+        # and be one that automatic picks may air (music, not do-not-play, not a placeholder).
+        from app.models.asset import fit_for_random_pick
+
         try:
-            matched = await db.get(Asset, uuid.UUID(str(body.asset_id)))
+            matched_id = uuid.UUID(str(body.asset_id))
         except ValueError:
-            matched = None
+            matched_id = None
+        matched = None
+        if matched_id is not None:
+            matched = (await db.execute(
+                select(Asset).where(
+                    Asset.id == matched_id, Asset.asset_type == "music", fit_for_random_pick()
+                )
+            )).scalar_one_or_none()
         if matched is None:
             raise NotFoundError("Song not found in the library")
         req.asset_id = matched.id
         # Approved earlier without a match: it goes to the queue now
         if not body.status and req.status in (RequestStatus.APPROVED, RequestStatus.APPROVED.value):
+            await _check_operator(db, user, req.station_id)
             req.status = RequestStatus.QUEUED
             req.reviewed_by = user.id
             req.reviewed_at = datetime.now(timezone.utc)
@@ -257,11 +277,7 @@ async def update_request(
         if body.status in (RequestStatus.APPROVED.value, RequestStatus.QUEUED.value,
                            RequestStatus.APPROVED, RequestStatus.QUEUED) and req.asset_id:
             # Approving puts the song on that station's air: same rule as operating it.
-            from app.models.station import Station
-
-            station = await db.get(Station, uuid.UUID(str(req.station_id)))
-            if station is not None and not may_operate_station(user, station):
-                raise ForbiddenError("Your login is not set up to operate this station")
+            await _check_operator(db, user, req.station_id)
             req.status = RequestStatus.QUEUED
             await add_to_queue(db, str(req.asset_id), str(req.station_id))
 
