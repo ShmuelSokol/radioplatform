@@ -513,6 +513,16 @@ class Harness:
                          metadata_extra={"audio_analysis": {
                              "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": 40.0,
                              "cross_start_seconds": 37.0, "replay_gain_db": -6.0}}))
+            # song1's file at -6 dB, a jingle for mix-over (its own tone, so it can be told
+            # apart from a timed song3quiet still playing)
+            aid = uuid.uuid4()
+            self.assets["song1quiet"] = aid
+            db.add(Asset(id=aid, title="song1 at -6 dB", artist="Harness", duration=40.0,
+                         file_path=f"http://127.0.0.1:{AUDIO_PORT}/song1.mp3", asset_type="jingle",
+                         review_status="approved",
+                         metadata_extra={"audio_analysis": {
+                             "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": 40.0,
+                             "cross_start_seconds": 37.0, "replay_gain_db": -6.0}}))
             await db.commit()
 
     def api(self, method: str, path: str, body=None) -> tuple[int, dict]:
@@ -1311,6 +1321,75 @@ async def sc_level_song_muted(h: Harness) -> None:
             f"song at {before:.1f} dBFS before, {under:.1f} dBFS under the time check")
 
 
+async def sc_lane_levels(h: Harness) -> None:
+    """V1-4: the per-track level applies on the timed lane and on mix-over too, once.
+    A file with -6 dB plays at about -30.5 dBFS (unity tones play at -24.5)."""
+    name = "timed_and_mix_over_levels"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song5", {}), ("song6", {}), ("song4", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    s5 = await h.wait_on_air("song5", 60)
+    if s5 is None:
+        h.check(name, False, "song5 never went on air")
+        return
+    w, t0 = h.stack.wav, h.stack.wav_t0
+    # Mix-over: song1's file at -6 dB on top of song5, which carries on
+    t_mix = time.time()
+    code, body = h.api("POST", f"/stations/{STATION_ID}/queue/mix-over",
+                       {"asset_id": str(h.assets["song1quiet"])})
+    h.check(name, code == 200, f"mix-over answered {code} {body if code != 200 else ''}")
+    # Timed lane: song3's file at -6 dB as a hard timed item, 12 s later
+    t1 = at(12)
+    await h.queue([("song3quiet", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 9)
+    time.sleep(1.5)
+    over = tone_db(w, t0, t_mix + 3, t_mix + 8, TONES["song1"][0])
+    under = tone_db(w, t0, t_mix + 3, t_mix + 8, TONES["song5"][0])
+    h.check(name, -32.5 <= over <= -28.5, f"mix-over item at {over:.1f} dBFS (expected about -30.5)")
+    h.check(name, under > -27, f"song on air carries on under it ({under:.1f} dBFS)")
+    started = await h.started_times("song3quiet", t1.timestamp() - 5)
+    h.check(name, bool(started), f"timed item started ({[_fmt(x[0]) for x in started]})")
+    timed = tone_db(w, t0, t1.timestamp() + 2, t1.timestamp() + 7, TONES["song3"][0])
+    h.check(name, -32.5 <= timed <= -28.5, f"timed item at {timed:.1f} dBFS (expected about -30.5)")
+
+async def sc_engine_crash_restart(h: Harness) -> None:
+    """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
+    the backend up. It says hello, plays station music (not emergency files) within a few
+    seconds, the site follows it, and a time check handed over before the crash still airs
+    on time."""
+    name = "engine_crash_restart"
+    await wait_music(h)
+    due = at(40)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(6)
+    before = await h.on_air()
+    h.stack.restart_engine()
+    started = h.stack.wav_t0
+    await asyncio.sleep(15)
+    heard = h.heard(started, time.time() - 1)
+    first = next((t for t, db, _ in heard if db > -45), None)
+    h.check(name, first is not None and first - started <= 5.0,
+            f"sound {'never' if first is None else f'{first - started:.1f} s'} after the restart")
+    names = [n for _, n in timeline(h.heard(started + 6, time.time() - 1))]
+    h.check(name, bool(names) and all(n.startswith("song") for n in names),
+            f"station music after the restart, no emergency files: {names}")
+    st = await h.on_air()
+    h.check(name, st is not None and st.started_at is not None and st.started_at.timestamp() >= started - 1,
+            f"the site shows the item the restarted engine plays ({st.asset.title if st else None}; "
+            f"before the crash {before.asset.title if before else None})")
+    playing = [e for e in await h.rows() if e.status == "playing"]
+    h.check(name, len(playing) == 1, f"one item on air ({len(playing)})")
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + 10)
+    starts = await h.started_times("time", due.timestamp() - 5)
+    late = starts[0][0] - due.timestamp() if starts else None
+    h.check(name, late is not None and abs(late) <= 2.0,
+            f"time check handed over before the crash aired on time: "
+            f"{'never' if late is None else f'{late:+.1f} s'}")
+    gap, _ = longest_silence(h.heard(started + 6, time.time() - 1))
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s after the restart")
+
+
 SCENARIOS = {
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
@@ -1337,6 +1416,8 @@ SCENARIOS = {
     "icecast_output": sc_icecast_output,
     "track_level": sc_track_level,
     "song_with_level_muted_under_time_check": sc_level_song_muted,
+    "timed_and_mix_over_levels": sc_lane_levels,
+    "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
