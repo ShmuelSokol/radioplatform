@@ -19,7 +19,9 @@ export default function Layout() {
 
   if (isAppShell(pathname)) {
     return (
-      <div className="app-shell flex flex-col overflow-hidden">
+      // cr-shell: the control room's own phone-sideways rules (controlroom/classic.css),
+      // set here rather than found with :has() so older Safari and Firefox get them too
+      <div className={`app-shell flex flex-col overflow-hidden ${pathname === '/admin/dashboard' ? 'cr-shell' : ''}`}>
         <Navbar />
         <main className="flex-1 min-h-0">
           <Outlet />

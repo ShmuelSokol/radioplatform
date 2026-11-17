@@ -210,6 +210,7 @@ radioplatform/
 | upcoming_analysis.py | Analyses the item on air and the next one in the background when their audio analysis is missing or older than `ANALYSIS_VERSION`, so song changes use real end and crossfade points (see `wiki/audio-engine.md`) |
 | last_played.py | When each item last aired per station, kept in memory: one full read per station per process (and hourly), then only new plays are fetched. Used by playlist and program-block rotation and `GET /queue/last-played` |
 | long_items.py | What a hard timed item does to a shiur or story on air: station `automation_config.timed_during_long_items` = pause (default; it resumes where it stopped), wait or cut; a soft item due with more than 5 min of the shiur left pauses it too (see `wiki/hourly-slots.md`) |
+| timed_groups.py | A hard timed group due while an earlier short one still plays is moved to follow it (browser check 90 s ahead, engine before hand-over; the engine gets it at the first group's time) (see `wiki/hourly-slots.md`) |
 | tail_analysis.py | Song end and crossfade point from HTTP range reads (MP3 header + last 20 s), so re-analysis does not download whole files |
 | call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |
 | activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
@@ -400,6 +401,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks | For live shows |
 | `EMERGENCY_FALLBACK_CATEGORY` | Unused since dead air restarts the queue instead (kept so old settings still load) | No |
 | `SILENCE_DETECTION_SECONDS` | Seconds of silence before alert (default: 30) | For silence detection |
+| `MAX_UPLOAD_MB` | Largest library upload in MB (default 600); bigger files get 413 | No |
 | `LIQUIDSOAP_ENABLED` | Enable Liquidsoap (remote VPS) | For streaming |
 | `LIQUIDSOAP_HOST` | VPS hostname for Liquidsoap telnet | For streaming |
 | `LIQUIDSOAP_TELNET_PORT` | Liquidsoap telnet port (default: 1234) | For streaming |
@@ -468,8 +470,14 @@ cd frontend && npx vercel --prod --yes
 # Browser check of the control room against a fake backend (desktop + phone sizes)
 cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/control-room.mjs
 
+# The control room with a phone held sideways (9 phone sizes, tap targets, every control, turning the phone)
+cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-landscape.mjs
+
 # Every control room button, the Listen page, call-in and release-pickup timings, same fake backend (ONLY=<part> for one part; see wiki/audio-engine.md)
 cd frontend && for s in control-room-actions listen-page call-in release-timing; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+
+# Listener pages in real WebKit (Safari's engine, WebKitGTK + Selenium; setup in the script's docstring and wiki/audio-engine.md)
+cd frontend && (npx vite preview --port 4183 --strictPort &) && xvfb-run -a python3 e2e/webkit/listener-webkit.py
 
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs

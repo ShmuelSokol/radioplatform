@@ -900,6 +900,39 @@ async function engineMode(browser, stream) {
   }
 }
 
+// A hard timed item due before the song ends: Remaining and the bar count to the cut,
+// with "fades <time>" by the label; a soft item (waits for the song) changes nothing.
+async function cutCountdown(browser, contextOpts, tag) {
+  const station = makeStation();
+  const cur = station.playing();
+  const dur = station.byId[cur.asset_id].duration;
+  const cutIn = 30;
+  station.add({ asset_id: 'm5', position: 1.5, source: 'block', preempt_at: new Date(Date.now() + cutIn * 1000).toISOString(), hard_timed: true });
+  const { ctx, page, errors } = await openRoom(browser, contextOpts, station);
+  await sleep(500);
+  const rem = async () => { const [m, s] = (await page.getByTestId('remaining').innerText()).split(':'); return +m * 60 + +s; };
+  const r = await rem();
+  check(`${tag}: remaining counts to the hard item's time, not the song's end`, Math.abs(r - (cutIn - 1)) <= 2 && dur - 20 > cutIn + 5, `${r}s (song has ${dur - 20}s left)`);
+  const label = await page.getByTestId('remaining-label').innerText();
+  check(`${tag}: label says when it fades`, /fades \d{1,2}:\d\d/i.test(label), label);
+  const prog = +(await page.getByRole('progressbar').getAttribute('aria-valuenow'));
+  const want = (21 / (21 + cutIn - 1)) * 100;
+  check(`${tag}: progress bar fills toward the cut`, Math.abs(prog - want) < 5, `${prog}% vs ${want.toFixed(0)}%`);
+  await ctx.close();
+
+  // Soft: waits for the song, so the full time is shown
+  const st2 = makeStation();
+  st2.add({ asset_id: 'm5', position: 1.5, source: 'ad_slot', preempt_at: new Date(Date.now() + cutIn * 1000).toISOString(), hard_timed: false });
+  const { ctx: c2, page: p2 } = await openRoom(browser, contextOpts, st2);
+  await sleep(500);
+  const [m, s2] = (await p2.getByTestId('remaining').innerText()).split(':');
+  const r2 = +m * 60 + +s2;
+  const d2 = st2.byId[st2.playing().asset_id].duration;
+  check(`${tag}: a soft timed item leaves Remaining at the song's end`, Math.abs(r2 - (d2 - 21)) <= 2 && !/fades/i.test(await p2.getByTestId('remaining-label').innerText()), `${r2}s`);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await c2.close();
+}
+
 const browser = await chromium.launch();
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 try {
@@ -922,6 +955,10 @@ try {
   if (run('speed')) { await speed(browser, DESKTOP, 'speed desktop'); await speed(browser, PHONE, 'speed iPhone'); }
   if (run('mix')) await mixOver(browser);
   if (run('timed')) await timedPreload(browser);
+  if (run('cut')) {
+    await cutCountdown(browser, DESKTOP, 'cut desktop'); await cutCountdown(browser, PHONE, 'cut iPhone');
+    await cutCountdown(browser, { ...devices['iPhone 13 landscape'] }, 'cut iPhone sideways');
+  }
   if (run('engine')) { const s = await startStreamServer(STREAM_PORT); try { await engineMode(browser, s); } finally { await s.close(); } }
 } finally {
   await browser.close();

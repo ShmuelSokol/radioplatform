@@ -85,6 +85,8 @@ class EngineState:
     timed_alerted: set[str] = field(default_factory=set)
     # Monotonic time of the first tick, the watchdog's reference until the engine calls
     watch_since: float = 0.0
+    # Timed entries moved to follow an earlier group: the time of that group (epoch)
+    follows: dict[str, float] = field(default_factory=dict)
     # Monotonic time old EngineHandoff rows were last pruned
     last_handoff_prune: float = 0.0
     # Protocol version the engine last reported (0 = an engine that reports none)
@@ -1010,15 +1012,23 @@ async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now
     handed: list[tuple[str, str]] = []
     parallel = state.engine_proto >= ENGINE_PROTO_GROUPS
     for at, items in groups.items():
+        # A group moved to follow an earlier one (timed_groups) is handed over at that
+        # group's time, so the engine plays it after it as part of the same take-over
+        # instead of taking over again and cutting it. Only while it is still ahead:
+        # handed later, the earlier group has ended and it must take over on its own.
+        send_at = at.timestamp()
+        leader = state.follows.get(str(items[0][0].id))
+        if leader is not None and (at - now).total_seconds() > 1.0:
+            send_at = leader
         if parallel:
             oks = await asyncio.gather(*(
-                engine_timed(station_id, uri, at.timestamp(), str(entry.id), seq=i, of=len(items))
+                engine_timed(station_id, uri, send_at, str(entry.id), seq=i, of=len(items))
                 for i, (entry, uri) in enumerate(items)
             ))
         else:
             # An older engine plays a group in the order it receives it: one at a time
             oks = [
-                await engine_timed(station_id, uri, at.timestamp(), str(entry.id))
+                await engine_timed(station_id, uri, send_at, str(entry.id))
                 for entry, uri in items
             ]
         for (entry, _), ok in zip(items, oks):
@@ -1090,6 +1100,20 @@ async def tick(db: AsyncSession, station) -> None:
         logger.warning("Long-item rule for station %s failed: %s", station_id, e)
         # A database error would otherwise fail the rest of the tick, including
         # handing the time check to the engine.
+        await db.rollback()
+        await db.refresh(station)
+    # A group due while an earlier short group is still playing follows it (V1-10b)
+    try:
+        from app.services.timed_groups import space_hard_groups
+
+        moved = await space_hard_groups(db, station_id, now, horizon, frozen=set(state.timed_sent))
+        if moved:
+            await db.commit()
+            state.follows.update({k: v.timestamp() for k, v in moved.items()})
+            if len(state.follows) > 200:
+                state.follows = dict(list(state.follows.items())[-100:])
+    except Exception as e:
+        logger.warning("Spacing timed groups for station %s failed: %s", station_id, e)
         await db.rollback()
         await db.refresh(station)
     await _hand_over_timed(db, station_id, state, now, horizon)

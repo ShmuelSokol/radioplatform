@@ -1150,6 +1150,14 @@ async def _check_advance_locked(
             # Save it now: the poll rolls back after a check that changes nothing on
             # air, and pages must see the item turn hard ahead to pre-load it
             await db.commit()
+    # A hard group due while an earlier short group is still playing follows it instead
+    # of cutting it (V1-10b). Done ahead, so pages pre-load the new time.
+    from app.services.timed_groups import space_hard_groups
+
+    if await space_hard_groups(
+        db, station_id, now_utc, now_utc + timedelta(seconds=SOFT_PAUSE_LOOKAHEAD_SECONDS)
+    ):
+        await db.commit()
     preempt_result = await db.execute(
         select(QueueEntry)
         .where(
