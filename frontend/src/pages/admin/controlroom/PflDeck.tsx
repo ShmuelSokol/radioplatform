@@ -79,7 +79,8 @@ function markersOf(asset: { intro_seconds?: number | null; metadata_extra?: Reco
   return out.filter(m => m.at >= 0 && m.at <= duration);
 }
 
-export function PflDeck({ pfl, compact = false }: { pfl: Pfl; compact?: boolean }) {
+/** column: phone held sideways, in the transport column (title row, then the buttons beside the wave). */
+export function PflDeck({ pfl, compact = false, column = false }: { pfl: Pfl; compact?: boolean; column?: boolean }) {
   const id = pfl.loadedId;
   const { data: asset } = useQuery({
     queryKey: ['pfl-asset', id],
@@ -280,6 +281,45 @@ export function PflDeck({ pfl, compact = false }: { pfl: Pfl; compact?: boolean 
     ...markers.map(m => ({ label: m.label === 'START' ? 'Start' : m.label === 'INTRO' ? 'Intro end' : m.label === 'MIX' ? 'Mix' : 'End', at: m.key === 'end' || m.key === 'mix' ? Math.max(0, m.at - 5) : m.at, title: m.key === 'end' || m.key === 'mix' ? `5 s before ${m.label.toLowerCase()}` : m.title })),
     ...(duration > 30 ? [{ label: 'Last 15 s', at: Math.max(0, duration - 15), title: 'Hear how it ends' }] : []),
   ];
+
+  if (column) {
+    return (
+      <section data-testid="pfl-deck" aria-label="Pre-listen player (only you hear it)"
+        className="shrink-0 bg-black border-2 border-[#2bff4a] text-[#d0d0d0] px-1.5 py-1 select-none">
+        <div className="flex items-center gap-1.5">
+          <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-bold bg-[#2bff4a] text-black rounded-sm" title="Pre-listen: only you hear it, not on air">PFL</span>
+          <div className="flex-1 min-w-0 leading-tight">
+            <div className="text-[#ffff40] font-bold text-sm truncate" title={title}>{title}</div>
+          </div>
+          <div className="shrink-0 leading-none text-right" aria-live="off">
+            <div className="qn-digits text-base" data-testid="pfl-elapsed">{fmt(shown)}</div>
+            <div className="qn-digits text-[11px] !text-[#ffa64d]" data-testid="pfl-remaining">-{fmt(remaining)}</div>
+          </div>
+          <button type="button" onClick={pfl.stop} aria-label="Close pre-listen" title="Stop and close (Esc)"
+            className="qn-btn shrink-0 w-11 h-11 text-sm">✕</button>
+        </div>
+        <div className="mt-1 flex items-center gap-1">
+          <button type="button" onClick={onPlay} data-testid="pfl-playpause" disabled={unplayable}
+            aria-label={playing ? 'Pause pre-listen' : failed ? 'Try loading again' : 'Play pre-listen'}
+            className="qn-btn shrink-0 w-11 h-11 text-lg leading-none disabled:opacity-40">{playing ? '❚❚' : '▶'}</button>
+          <button type="button" onClick={() => jump(-10)} disabled={!!failed} aria-label="Back 10 seconds" title="Back 10 s"
+            className="qn-btn shrink-0 w-11 h-11 text-xs disabled:opacity-40">−10</button>
+          <button type="button" onClick={() => jump(10)} disabled={!!failed} aria-label="Forward 10 seconds" title="Forward 10 s"
+            className="qn-btn shrink-0 w-11 h-11 text-xs disabled:opacity-40">+10</button>
+          {failed ? (
+            <div role="alert" data-testid="pfl-error"
+              className="flex-1 min-w-0 flex items-center gap-1 min-h-[44px] px-1.5 rounded-sm border border-[#ff4040] bg-[#3a0000] text-[#ffb0b0] text-[11px] leading-snug">
+              <span className="min-w-0">{failed}</span>
+            </div>
+          ) : (
+            <div className="flex-1 min-w-0 flex [&>div]:!min-w-0">
+              <Scrub {...{ wrapRef, canvasRef, onDown, onMove, onUp, onKey, duration, shown, hoverX, hoverTime, dragAt, markers, setHoverX }} />
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section data-testid="pfl-deck" aria-label="Pre-listen player (only you hear it)"
