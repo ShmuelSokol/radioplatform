@@ -947,7 +947,7 @@ async def sc_song_ends_before_hour(h: Harness) -> None:
         names = [n for _, n in timeline(heard)]
         runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
         clock = tone_name(TONES["time"][0])
-        before = runs[:runs.index(clock)] if clock in runs else runs
+        before = [n for n in (runs[:runs.index(clock)] if clock in runs else runs) if n != "silence"]
         after = runs[runs.index(clock) + 1:] if clock in runs else []
         h.check(name, before == [tone_name(TONES["song5"][0])],
                 f"only the song on air before the time check, no song started to be cut: {before}")

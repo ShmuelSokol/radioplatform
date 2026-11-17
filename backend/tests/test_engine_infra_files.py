@@ -245,3 +245,14 @@ def test_take_over_waits_for_the_timed_file():
     assert sched.index("timed_pending := timed_pending() + 1") < sched.index("timed_queue.push(r)")
     started = liq[liq.index("def send_started"):]
     assert 'was == "timed" and lane != "timed" and timed_pending() > 0 and not timed_waiting()' in started
+
+
+def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
+    # Jerusalem 23:00Z 2026-11-17: with no song handed out for the last seconds before a
+    # hard item, the emergency lane must not fill in. The hold lane sits above it, is
+    # open only while a timed item is loaded and due within 8 s, and is not reported.
+    liq = (INFRA / "radio.liq").read_text()
+    assert "[timed, main, hold, emergency]" in liq
+    assert "timed_pending() > 0 and left < 8. and left > -2." in liq
+    assert 'elsif hold_open() then "hold" else "emergency"' in liq
+    assert "engine_proto = 3" in liq
