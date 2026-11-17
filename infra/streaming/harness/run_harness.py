@@ -45,6 +45,7 @@ BACKEND_PORT = 8100
 CONTROL_PORT = 8181          # Liquidsoap harbor (one engine)
 PROXY_PORT = 8190            # stands in for nginx: /<station id>/<cmd> -> harbor /<cmd>
 AUDIO_PORT = 8191
+BACKEND_PROXY_PORT = 8192    # the engine reaches the backend through this, so a scenario can slow it
 ICECAST_PORT = 8010
 TOKEN = "harness-token"
 STATION_ID = uuid.UUID("0e0e0e0e-0000-4000-8000-00000000a001")
@@ -84,6 +85,8 @@ class Stack:
         self.servers: list[ThreadingHTTPServer] = []
         self.wav = workdir / "out.wav"
         self.wav_t0: float | None = None
+        # seconds the engine's POST .../started waits before it reaches the backend
+        self.slow_started = 0.0
 
     # audio files
     def make_audio(self) -> None:
@@ -144,6 +147,45 @@ class Stack:
                 pass
 
         self._serve(Proxy, PROXY_PORT)
+
+    def serve_backend_proxy(self) -> None:
+        """Between the engine and the backend, like Railway's edge. `slow_started` holds
+        back the engine's start reports (Main, 02:57 2026-11-16: a slow start report let
+        the engine be handed the same item twice)."""
+        stack = self
+
+        class BackendProxy(SimpleHTTPRequestHandler):
+            def _forward(self, method: str):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method != "GET" else None
+                if method == "POST" and self.path.rstrip("/").endswith("/started") and stack.slow_started:
+                    time.sleep(stack.slow_started)
+                headers = {k: v for k, v in self.headers.items()
+                           if k.lower() in ("x-playout-token", "content-type", "accept")}
+                req = urllib.request.Request(f"http://127.0.0.1:{BACKEND_PORT}{self.path}", data=body,
+                                             method=method, headers=headers)
+                try:
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        data, code, ctype = resp.read(), resp.status, resp.headers.get("Content-Type", "")
+                except urllib.error.HTTPError as e:
+                    data, code, ctype = e.read(), e.code, e.headers.get("Content-Type", "")
+                except Exception as e:
+                    data, code, ctype = str(e).encode(), 502, "text/plain"
+                self.send_response(code)
+                self.send_header("Content-Type", ctype or "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):  # noqa: N802
+                self._forward("GET")
+
+            def do_POST(self):  # noqa: N802
+                self._forward("POST")
+
+            def log_message(self, *a):
+                pass
+
+        self._serve(BackendProxy, BACKEND_PROXY_PORT)
 
     def _serve(self, handler, port: int) -> None:
         srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
@@ -213,7 +255,7 @@ class Stack:
     def start_engine(self) -> None:
         env = dict(os.environ)
         env.update({
-            "KBR_BACKEND_URL": f"http://127.0.0.1:{BACKEND_PORT}/api/v1",
+            "KBR_BACKEND_URL": f"http://127.0.0.1:{BACKEND_PROXY_PORT}/api/v1",
             "KBR_STATION_ID": str(STATION_ID),
             "KBR_PLAYOUT_TOKEN": TOKEN,
             "KBR_CONTROL_PORT": str(CONTROL_PORT),

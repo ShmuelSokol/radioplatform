@@ -114,3 +114,13 @@ The audio engine always runs silently for the LEFT/RIGHT meters once the page ha
 Listen is remembered across reloads (`kbr-cr-listen`, like Mute): the header keeps its speaker controls and the first click anywhere turns the sound back on.
 
 Meter scale: each side is the RMS level of the on-air bus in dBFS over about 46 ms (`getFloatTimeDomainData`, fftSize 2048), with a quick rise and a ~20 dB/s fall. 30 segments span -40 to 0 dBFS; red (last 6) is above -8 dBFS. The old meter averaged FFT bins times 2.5, which sat in the red on normal music. The e2e plays a -5.1 dBFS tone and expects 26 segments a side.
+
+## Phone held sideways
+
+`(orientation: landscape) and (max-height: 500px) and (max-width: 1023.98px)`: the
+transport bar becomes a left column (about 42%) and the queue with its tabs fills the
+right one at full height; the page scrolls so the site menu sits just above the control
+room, and the page starts scrolled to it. Before (Shmuel, 2026-11-16), menu, transport
+and tabs filled the ~300 px and no queue row showed. CSS in `controlroom/classic.css`,
+query `PHONE_LANDSCAPE` in `Dashboard.tsx` (keep both in step). Checked by
+`e2e/control-room.mjs` `phoneLandscape` at 750x342 and 932x300.
