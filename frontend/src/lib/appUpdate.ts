@@ -130,13 +130,40 @@ export function takeResume(path: string = window.location.pathname): boolean {
   }
 }
 
-function reloadedRecently(): boolean {
+/** When this tab last reloaded for a release. sessionStorage normally; when the
+ *  browser refuses it (cookies/site data blocked makes it throw) window.name, which
+ *  also survives a reload of the same tab. Without the fallback a blocked storage
+ *  turned the guard off and a stale CDN copy reloaded the tab every minute. */
+const NAME_TAG = 'kbr_release_reload_at=';
+function lastReloadAt(): number {
   try {
-    const at = Number(sessionStorage.getItem(RELOAD_KEY) || 0);
-    return at > 0 && Date.now() - at < MIN_RELOAD_GAP_MS;
+    return Number(sessionStorage.getItem(RELOAD_KEY) || 0);
   } catch {
-    return false;
+    const m = window.name.match(/kbr_release_reload_at=(\d+)/);
+    return m ? Number(m[1]) : 0;
   }
+}
+function noteReloadAt(at: number) {
+  try {
+    sessionStorage.setItem(RELOAD_KEY, String(at));
+  } catch {
+    window.name = NAME_TAG + at;
+  }
+}
+
+function reloadedRecently(): boolean {
+  const age = Date.now() - lastReloadAt();
+  // A time "in the future" means the device clock was set back since: ignore it
+  // rather than holding every release until the clock catches up.
+  return age >= 0 && age < MIN_RELOAD_GAP_MS;
+}
+
+/** A screen's code file from an older release no longer exists on the server. Every
+ *  merge publishes a new release, so a tab left open (the control room) hits this
+ *  when it opens a screen it had not opened yet ("sometimes the Library gives an error"). */
+export function isStaleCodeError(error: unknown): boolean {
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError|Loading (CSS )?chunk .* failed|Unable to preload CSS/i.test(text);
 }
 
 /** A screen's code could not load because a newer release replaced it (the old
@@ -153,8 +180,8 @@ export function reloadForStaleCode(): boolean {
 
 function reloadForRelease(resume: boolean) {
   if (reloadedRecently()) return;
+  noteReloadAt(Date.now());
   try {
-    sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
     if (resume) sessionStorage.setItem(RESUME_KEY, JSON.stringify({ path: window.location.pathname, at: Date.now() }));
   } catch { /* private mode: reload anyway */ }
   window.location.reload();
@@ -436,8 +463,9 @@ export function startAppUpdates() {
     void check().then(() => {
       // Back after a long time away (screen locked for hours): the browser has
       // throttled this tab and nothing is actually sounding, so a switched-on
-      // player alone does not hold the update. Reload onto the new release now.
-      if (pending && away >= LONG_AWAY_MS && !soundingNow() && (policy.mode === 'auto' || activePush())) reloadForRelease(false);
+      // player alone does not hold the update. Reload onto the new release now,
+      // unless a form field still has focus (a half-written message would be lost).
+      if (pending && away >= LONG_AWAY_MS && !soundingNow() && !isTyping() && (policy.mode === 'auto' || activePush())) reloadForRelease(false);
       else applyIfQuiet();
     });
   });
@@ -445,9 +473,13 @@ export function startAppUpdates() {
 
   // A screen whose code was replaced by a newer release fails to load in an
   // old tab. Reload to the new release instead of showing an error.
+  // Vite raises this for any failed lazy import, including a screen whose code throws
+  // while loading: that is a real bug, not a release, so it must show the error box
+  // (a reload would only hide it behind a reload). The import still fails, so the
+  // error box says "The site was updated" while the reload starts.
   window.addEventListener('vite:preloadError', (event) => {
+    if (!isStaleCodeError((event as Event & { payload?: unknown }).payload)) return;
     if (isAudioActive() || reloadedRecently()) return;
-    event.preventDefault();
     reloadForRelease(false);
   });
 }

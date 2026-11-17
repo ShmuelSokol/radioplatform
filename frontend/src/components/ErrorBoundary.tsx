@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from 'react';
-import { reloadForStaleCode } from '../lib/appUpdate';
+import { isStaleCodeError, reloadForStaleCode } from '../lib/appUpdate';
 
 const STALE_RELOAD_DELAY_MS = 300;
 
@@ -15,13 +15,7 @@ interface State {
   error: Error | null;
 }
 
-/** A screen's code file from an older release no longer exists on the server. Every
- *  merge publishes a new release, so a tab left open (the control room) hits this
- *  when it opens a screen it had not opened yet ("sometimes the Library gives an error"). */
-export function isStaleCodeError(error: unknown): boolean {
-  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
-  return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError|Loading (CSS )?chunk .* failed|Unable to preload CSS/i.test(text);
-}
+export { isStaleCodeError };
 
 export default class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false, error: null };
