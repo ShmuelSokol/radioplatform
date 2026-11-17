@@ -24,7 +24,7 @@ async def create_show(
 ) -> LiveShow:
     """Create a new live show."""
     show = LiveShow(
-        station_id=data.station_id,
+        station_id=UUID(str(data.station_id)),  # the schema allows str (SQLite tests); the column wants a UUID
         host_user_id=host_user_id,
         title=data.title,
         description=data.description,

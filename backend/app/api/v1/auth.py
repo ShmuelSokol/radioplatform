@@ -124,8 +124,15 @@ async def seed_reset_admin(
 
 
 @router.post("/migrate", status_code=200)
-async def run_migrations(db: AsyncSession = Depends(get_db)):
-    """Add new columns to existing tables (safe to run multiple times)."""
+async def run_migrations(
+    db: AsyncSession = Depends(get_db),
+    _admin: "User" = Depends(require_admin),
+):
+    """Add new columns to existing tables (safe to run multiple times).
+
+    Admin only: it was open to anyone, so any visitor could make the database
+    take table locks (ALTER TABLE) and read raw database error text back.
+    Startup already runs these through main._add_missing_columns()."""
     migrations = [
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS asset_type VARCHAR(50) DEFAULT 'music'",
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS category VARCHAR(100)",

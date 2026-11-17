@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_dj_or_manager
+from app.core.dependencies import get_db, require_dj_or_manager, require_station_operator
 from app.models.user import User
 from app.schemas.schedule import NowPlaying, NowPlayingUpdate
 from app.services.scheduling import SchedulingService
@@ -62,9 +62,11 @@ async def get_active_block(
     }
 
 
-@router.patch("/{station_id}", response_model=NowPlaying)
+# Changing what a station shows on air is operating it: a DJ limited to other
+# stations (or any non-assigned login on the protected FM feed) is refused.
+@router.patch("/{station_id}", response_model=NowPlaying, dependencies=[Depends(require_station_operator)])
 async def update_now_playing(
-    station_id: UUID | str,
+    station_id: UUID,
     data: NowPlayingUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_dj_or_manager),
@@ -86,9 +88,9 @@ async def update_now_playing(
     return record
 
 
-@router.delete("/{station_id}", status_code=204)
+@router.delete("/{station_id}", status_code=204, dependencies=[Depends(require_station_operator)])
 async def clear_now_playing(
-    station_id: UUID | str,
+    station_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_dj_or_manager),
 ):

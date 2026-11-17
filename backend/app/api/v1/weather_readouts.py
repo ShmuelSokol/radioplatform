@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_manager, require_staff
+from app.core.dependencies import may_operate_station, require_manager, require_staff
 from app.db.session import get_db
 from app.models.queue_entry import QueueEntry
 from app.models.station import Station
@@ -218,6 +218,10 @@ async def queue_readout(
     readout = await db.get(WeatherReadout, readout_id)
     if not readout:
         raise HTTPException(404, "Readout not found")
+    # Queuing puts it on that station's air: same rule as operating the station.
+    station = await db.get(Station, readout.station_id)
+    if station is not None and not may_operate_station(_user, station):
+        raise HTTPException(403, "Your login is not set up to operate this station")
 
     if not readout.asset_id:
         raise HTTPException(400, "Readout has no recorded asset — record it first")

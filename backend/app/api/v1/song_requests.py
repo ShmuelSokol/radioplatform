@@ -7,8 +7,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.core.dependencies import get_db, require_manager
-from app.core.exceptions import NotFoundError
+from app.core.dependencies import get_db, may_operate_station, require_manager
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.asset import Asset
 from app.models.song_request import SongRequest, RequestStatus
 from app.models.user import User
@@ -235,6 +235,12 @@ async def update_request(
         # When approving a matched request, add the asset to the queue
         if body.status in (RequestStatus.APPROVED.value, RequestStatus.QUEUED.value,
                            RequestStatus.APPROVED, RequestStatus.QUEUED) and req.asset_id:
+            # Approving puts the song on that station's air: same rule as operating it.
+            from app.models.station import Station
+
+            station = await db.get(Station, uuid.UUID(str(req.station_id)))
+            if station is not None and not may_operate_station(user, station):
+                raise ForbiddenError("Your login is not set up to operate this station")
             req.status = RequestStatus.QUEUED
             await add_to_queue(db, str(req.asset_id), str(req.station_id))
 
