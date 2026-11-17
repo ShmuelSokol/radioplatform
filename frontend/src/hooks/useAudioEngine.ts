@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAssetAudioUrl } from '../api/assets';
 import { holdUpdates, noteItemChange } from '../lib/appUpdate';
+import { serverNow } from '../lib/serverClock';
 import type { AssetInfo } from '../types';
 
 const VOLUME_KEY = 'radio_volume';
@@ -264,7 +265,7 @@ export function useAudioEngine(
     const startedAt = startedAtRef.current;
     if (startedAt) {
       const startMs = new Date(startedAt).getTime();
-      if (isFinite(startMs)) return Math.max(cueIn, (Date.now() - startMs) / 1000);
+      if (isFinite(startMs)) return Math.max(cueIn, (serverNow() - startMs) / 1000);
     }
     return Math.max(cueIn, elapsedRef.current);
   }, []);
@@ -743,7 +744,7 @@ export function useAudioEngine(
     const dur = nowPlayingAsset?.duration ?? null;
     // Due after the song on air ends by itself: the next track comes first
     if (isFinite(startMs) && dur && due >= startMs + dur * 1000 - CROSSFADE_DURATION * 1000) return;
-    const wait = due - TIMED_PRELOAD_AHEAD_MS - Date.now();
+    const wait = due - TIMED_PRELOAD_AHEAD_MS - serverNow();
     if (wait <= 0) { setTimedSoon(true); return; }
     const t = setTimeout(() => setTimedSoon(true), wait);
     return () => clearTimeout(t);
@@ -809,11 +810,11 @@ export function useAudioEngine(
     // message travels). Ending at the due time itself left a gap of dead air.
     const preemptTime = new Date(nextPreemptAt).getTime() + PREEMPT_FADE_OVERHANG_MS;
     const fadeStartTime = preemptTime - preemptFadeMs;
-    const msUntilFade = fadeStartTime - Date.now();
+    const msUntilFade = fadeStartTime - serverNow();
 
     if (msUntilFade > 300000) return;
     const actualDelay = Math.max(0, msUntilFade);
-    const remainingMs = preemptTime - Date.now();
+    const remainingMs = preemptTime - serverNow();
     const actualFadeDuration = msUntilFade < 0
       ? Math.max(500, remainingMs)
       : preemptFadeMs;
@@ -943,7 +944,7 @@ export function useAudioEngine(
         const startedAt = startedAtRef.current;
         const startMs = startedAt ? new Date(startedAt).getTime() : NaN;
         if (isFinite(startMs)) {
-          const serverPos = (Date.now() - startMs) / 1000;
+          const serverPos = (serverNow() - startMs) / 1000;
           if (serverPos < crossPoint - MAX_LEAD_SECONDS) return;
         }
         crossfadeTriggeredRef.current = true;
@@ -987,7 +988,7 @@ export function useAudioEngine(
 
   const playNextNow = useCallback((asset: AssetInfo, fadeSeconds: number | null) => {
     if (!ctxRef.current || ctxRef.current.state !== 'running') return; // not listening here
-    const now = Date.now();
+    const now = serverNow(); // compared with the server's start times
     setLocalNext({
       asset,
       startedAt: new Date(now).toISOString(),

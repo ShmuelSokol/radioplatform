@@ -14,14 +14,14 @@ the limits in section S. A row passes only when it does the right thing **and** 
 
 ## S. Speed limits (apply to every action row)
 
-- [ ] S-1 Button press to visible change on screen (optimistic or confirmed): under 150 ms | both | covered: NOT COVERED
+- [ ] S-1 Button press to visible change on screen (optimistic or confirmed): under 150 ms | both | covered: e2e/control-room-actions.mjs::speed "... within 150 ms (S-1)"; e2e/control-room-actions.mjs::actions "placeholder row shows at once (S-1)"
 - [ ] S-2 Go next / Fade / Soft fade / Play now: next item audible in the control room within 0.5 s (browser) or 1.5 s (engine, incl. stream delay) | both | covered: partial (e2e/audio-engine.mjs browser only)
 - [ ] S-3 Every operator API call (skip, fire-now, insert, loop, mix-over, move, remove, reorder) answers in under 300 ms server time, 1 s round trip from the US East Coast | both | covered: tests/test_speed_operator_actions.py::test_operator_calls_answer_within_300_ms (server time, test DB); live: backend/loadtests/operator_speed.py
 - [ ] S-4 Queue, now-playing and library search reads: under 300 ms server time; library search results on screen under 500 ms | n.a. | covered: NOT COVERED
 - [ ] S-5 Every admin page: first content under 1.5 s, interactive under 2.5 s on a warm load (desktop and iPhone) | n.a. | covered: NOT COVERED
 - [ ] S-6 Saves (schedule, block, playlist, station settings, program block, spot schedule): confirmed under 1 s; on-air effect on time | both | covered: NOT COVERED
 - [ ] S-7 Listen (control room or public): sound within 1.5 s of the press; stream mode stays about 1 s behind live | both | covered: partial
-- [ ] S-8 Now-playing on every open screen updates within 1 s of a real change on air | both | covered: NOT COVERED
+- [ ] S-8 Now-playing on every open screen updates within 1 s of a real change on air | both | covered: e2e/listen-page.mjs::basics "now playing updates within 1 s of a change on air (S-8)" + e2e/control-room-actions.mjs::transport "a change on air shows in the header within 1 s (S-8)"
 - [ ] S-9 Hard timed item (time check, hard block, hard spot) heard within 1 s of its time | both | covered: harness (engine), pw10 scripts (browser, not in repo)
 - [ ] S-11 iPhone Safari, server-stream station: Listen (control room and public Listen page) to sound within 2 s; never silent for 10 s or more (Shmuel, 2026-11-16 9:54 PM: about 10 s, then over 2 minutes of nothing) | engine | covered: NOT COVERED
 - [ ] S-10 Upload: progress shown at once; item playable in the library within 10 s of upload end for a 5 MB file | n.a. | covered: NOT COVERED
@@ -903,45 +903,45 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 
 - [ ] F-CR-TRANSPORT-1 Station switcher dropdown (shown when >1 station) changes station; choice remembered in localStorage radio_last_station across reloads | sizes: both | both | covered: NOT COVERED
 - [ ] F-CR-TRANSPORT-2 Station switch: old station's now-playing socket closes, only the new station is heard/shown (no double audio) | sizes: both | both | covered: e2e/control-room.mjs + e2e/audio-engine.mjs
-- [ ] F-CR-TRANSPORT-3 Station switch cancels a pending insert marker and day filter | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-4 Single station: name shown instead of dropdown | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-5 PLAYING indicator when on air; '▶ Start' button when stopped; Start calls /queue start; 'Starting…' state; empty queue message 'The queue is empty. Add something…' | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-6 Remaining countdown counts down from server started_at/ends_at; turns red and pulses in the last 10 s | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-3 Station switch cancels a pending insert marker and day filter | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::actions "station switch cancels the insert marker and day filter"
+- [ ] F-CR-TRANSPORT-4 Single station: name shown instead of dropdown | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::transport "a single station shows its name, no dropdown"
+- [ ] F-CR-TRANSPORT-5 PLAYING indicator when on air; '▶ Start' button when stopped; Start calls /queue start; 'Starting…' state; empty queue message 'The queue is empty. Add something…' | sizes: both | both | covered: e2e/control-room-actions.mjs::transport "Start calls /queue/start and goes on air" + "Start on an empty queue says so"
+- [ ] F-CR-TRANSPORT-6 Remaining countdown counts down from server started_at/ends_at; turns red and pulses in the last 10 s | sizes: both | both | covered: e2e/control-room-actions.mjs::transport "remaining counts down each second" + "last 10 s: remaining red and pulsing"
 - [ ] F-CR-TRANSPORT-7 Intro countdown shows while the intro runs and disappears after | sizes: both | both | covered: e2e/control-room.mjs
-- [ ] F-CR-TRANSPORT-8 On air elapsed / total time display (hidden on phone) | sizes: desktop | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-8 On air elapsed / total time display (hidden on phone) | sizes: desktop | both | covered: e2e/control-room-actions.mjs::transport "on air elapsed / total shown on a desktop" + "on air elapsed hidden on a phone"
 - [ ] F-CR-TRANSPORT-9 Now-playing title + type and Next title + type boxes; Next shows the server's next_entry_id (skips items timed for later); 'nothing queued' when empty | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-10 Progress bar fills and turns red near the end | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-11 Clock shows station timezone time, ticking each second | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-10 Progress bar fills and turns red near the end | sizes: both | both | covered: e2e/control-room-actions.mjs::transport "progress bar matches elapsed" + "last 10 s: progress bar red"
+- [ ] F-CR-TRANSPORT-11 Clock shows station timezone time, ticking each second | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::transport "clock shows station time and ticks" + "clock follows the station's time zone"
 - [ ] F-CR-TRANSPORT-12 'Can't reach the station' / 'Loading the queue…' instead of 'Stopped' when queue fails to load | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-TRANSPORT-13 Go next (hard cut) button calls /queue/skip?fade=hard; disabled when stopped or busy (shows …) | sizes: both | both | covered: e2e/control-room.mjs
 - [ ] F-CR-TRANSPORT-14 N key = Go next (hard); ignored with modifiers, while typing in an input, on key repeat, and inside the PFL deck | sizes: desktop | both | covered: e2e/control-room.mjs
 - [ ] F-CR-TRANSPORT-15 Fade button = skip?fade=fade (0.5 s); Soft fade = skip?fade=soft (3 s); audible fade of those lengths | sizes: both | both | covered: e2e/control-room.mjs (request only)
-- [ ] F-CR-TRANSPORT-16 Next pressed on a protected timed item (time/weather/sponsor) shows the 'always play to the end' toast and nothing changes | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-17 Next pressed right after an automatic change shows 'just started, keeps playing' toast (kept_incoming) | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-16 Next pressed on a protected timed item (time/weather/sponsor) shows the 'always play to the end' toast and nothing changes | sizes: both | both | covered: e2e/control-room-actions.mjs::refused "nothing changes on air or in the queue" + "the toast explains"
+- [ ] F-CR-TRANSPORT-17 Next pressed right after an automatic change shows 'just started, keeps playing' toast (kept_incoming) | sizes: both | both | covered: e2e/control-room-actions.mjs::refused "the toast explains" (kept_incoming)
 - [ ] F-CR-TRANSPORT-18 Next is heard at once in this browser before the server answers (playNextNow) and lands on the server's item | sizes: both | browser | covered: e2e/audio-engine.mjs
 - [ ] F-CR-TRANSPORT-19 Loop toggles on (button lit, aria-pressed) / off via /queue/loop; on-toast and off-toast; disabled when stopped | sizes: both | both | covered: e2e/control-room.mjs
-- [ ] F-CR-TRANSPORT-20 Loop on: the item really repeats at its end (server + engine), Next or play-now ends the loop | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-20 Loop on: the item really repeats at its end (server + engine), Next or play-now ends the loop | sizes: both | both | covered: e2e/control-room-actions.mjs::loop "the item is heard again from its top" + "Next ends the loop" (browser; engine side not covered)
 - [ ] F-CR-TRANSPORT-21 Listen (🔊) button switches sound on in this browser; remembered across reloads (kbr-cr-listen) | sizes: both | browser | covered: e2e/control-room.mjs
 - [ ] F-CR-TRANSPORT-22 Mute/Unmute button; mute remembered after reload; meters keep moving while muted | sizes: both | browser | covered: e2e/control-room.mjs
-- [ ] F-CR-TRANSPORT-23 Monitor volume slider (visible at 2xl widths) changes level | sizes: desktop | browser | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-23 Monitor volume slider (visible at 2xl widths) changes level | sizes: desktop | browser | covered: e2e/control-room-actions.mjs::side "monitor volume sets the level heard and is remembered"
 - [ ] F-CR-TRANSPORT-24 Level meters (L/R) move without pressing Listen, at the real RMS level | sizes: desktop | browser | covered: e2e/control-room.mjs
 - [ ] F-CR-TRANSPORT-25 Level meters move when the station plays through the server stream (engine mode) too | sizes: desktop | engine | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-26 Only one control room tab makes sound: switching sound on in tab B silences tab A with message 'Sound moved to another control room tab' | sizes: desktop | browser | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-27 Full screen button enters/exits fullscreen (desktop only) | sizes: desktop | n.a. | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-28 LIVE: <show> badge appears when a live show is on and links to host console | sizes: desktop | n.a. | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-29 Playout badge: 'Browser player' / 'Server stream' / 'not answering' / 'out of step' from /playout-status | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-30 Engine mode: control room plays the stream_url through <audio> when listening, falls back to the browser player if the stream errors | sizes: both | engine | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-31 Back from a hidden tab (visibilitychange) the queue is re-fetched at once | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-26 Only one control room tab makes sound: switching sound on in tab B silences tab A with message 'Sound moved to another control room tab' | sizes: desktop | browser | covered: e2e/control-room-actions.mjs::tabs "switching sound on in tab B silences tab A" + "tab A says the sound moved" (BUG sound-moved message hidden, fixed)
+- [ ] F-CR-TRANSPORT-27 Full screen button enters/exits fullscreen (desktop only) | sizes: desktop | n.a. | covered: e2e/control-room-actions.mjs::badges "Full screen enters and leaves full screen"
+- [ ] F-CR-TRANSPORT-28 LIVE: <show> badge appears when a live show is on and links to host console | sizes: desktop | n.a. | covered: e2e/control-room-actions.mjs::badges "LIVE badge links to the host console"
+- [ ] F-CR-TRANSPORT-29 Playout badge: 'Browser player' / 'Server stream' / 'not answering' / 'out of step' from /playout-status | sizes: both | both | covered: e2e/control-room-actions.mjs::badges "playout badge "${label}""
+- [ ] F-CR-TRANSPORT-30 Engine mode: control room plays the stream_url through <audio> when listening, falls back to the browser player if the stream errors | sizes: both | engine | covered: e2e/control-room-actions.mjs::engine "listening plays the server stream" + "a broken stream falls back to the built-in player"
+- [ ] F-CR-TRANSPORT-31 Back from a hidden tab (visibilitychange) the queue is re-fetched at once | sizes: both | both | covered: e2e/control-room-actions.mjs::transport "back from a hidden tab the queue is read at once"
 - [ ] F-CR-TRANSPORT-32 A pushed track change (WS) refreshes queue and Played log at once, not at next poll | sizes: both | both | covered: e2e/control-room.mjs
-- [ ] F-CR-TRANSPORT-33 Toasts: ok auto-hide 2.5 s, warn/error 6 s, ✕ dismisses | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-34 Footer shows shortcuts, station + timezone, user email + role | sizes: desktop | n.a. | covered: NOT COVERED
-- [ ] F-CR-TRANSPORT-35 Time & weather preview button ('Preview time & weather') plays time then weather clips off air only; 'No weather announcement' toast when none; error toast on failure | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-33 Toasts: ok auto-hide 2.5 s, warn/error 6 s, ✕ dismisses | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::toasts "ok toast hides after about 2.5 s" + "warning toast stays about 6 s" + "✕ dismisses"
+- [ ] F-CR-TRANSPORT-34 Footer shows shortcuts, station + timezone, user email + role | sizes: desktop | n.a. | covered: e2e/control-room-actions.mjs::badges "footer shows shortcuts, station + timezone, user + role"
+- [ ] F-CR-TRANSPORT-35 Time & weather preview button ('Preview time & weather') plays time then weather clips off air only; 'No weather announcement' toast when none; error toast on failure | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::side "time & weather preview plays the time clip, nothing sent to air" + "No weather announcement"
 
 ## Control room: Up next queue
 
 - [ ] F-CR-QUEUE-1 Queue rows show air time to the second, length, artist + title, type, last played | sizes: desktop | both | covered: e2e/control-room.mjs
 - [ ] F-CR-QUEUE-2 Phone row layout: time, title (2 lines), artist · type, length; 66 px rows | sizes: phone | both | covered: e2e/control-room.mjs
-- [ ] F-CR-QUEUE-3 Count label 'N items · total duration' and 'loaded of total' when partially loaded | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-QUEUE-3 Count label 'N items · total duration' and 'loaded of total' when partially loaded | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::rows "count label "N items · h:mm:ss""
 - [ ] F-CR-QUEUE-4 Long queue: only first rows polled; scrolling to the end loads the rest; scrolling back to the top returns to first rows | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-QUEUE-5 Virtualised list: only rows near the screen drawn, scrollbar covers whole queue, correct rows mid-list and at end | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-QUEUE-6 Show day dropdown lists days in station tz; picking a day loads whole queue and filters; 'Nothing scheduled for that day'; back to All days | sizes: both | n.a. | covered: NOT COVERED
@@ -949,33 +949,33 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [ ] F-CR-QUEUE-8 Esc cancels insert mode (and blurs an input) | sizes: desktop | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-QUEUE-9 Arming insert switches to the library pane/tab | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-QUEUE-10 Insert from library lands exactly before the marked row (/queue/insert after the row above) | sizes: both | both | covered: e2e/control-room.mjs
-- [ ] F-CR-QUEUE-11 Insert from an instant button (cart) while armed inserts at the marker | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-11 Insert from an instant button (cart) while armed inserts at the marker | sizes: both | both | covered: e2e/control-room-actions.mjs::actions "an instant button inserts at the marker"
 - [ ] F-CR-QUEUE-12 Insert when the marked row already started: plays next instead with warn toast | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-QUEUE-13 Insert marker disappears when that row starts playing or is removed | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-QUEUE-14 Desktop hover quick actions on a row: ▲ move up, ▼ move down, ✕ remove (call queue move-up/move-down/remove) | sizes: desktop | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-13 Insert marker disappears when that row starts playing or is removed | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::actions "marker disappears when that row starts playing" + "... is removed"
+- [ ] F-CR-QUEUE-14 Desktop hover quick actions on a row: ▲ move up, ▼ move down, ✕ remove (call queue move-up/move-down/remove) | sizes: desktop | both | covered: e2e/control-room-actions.mjs::actions "▲ moves up, on screen at once (S-1)" + "▼ moves down..." + "✕ removes at once and on the server"
 - [ ] F-CR-QUEUE-15 Phone: tap a row opens action bar (+ Insert before, ▲, ▼, Remove); tap again closes | sizes: phone | both | covered: e2e/control-room.mjs (insert only)
-- [ ] F-CR-QUEUE-16 Drag a row onto another row reorders it (/queue reorder DnD); warnings shown as toast; the playing row is not draggable | sizes: desktop | both | covered: NOT COVERED
-- [ ] F-CR-QUEUE-17 Optimistic placeholder row appears at once on next/end/insert; failure restores old queue and shows error toast | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-QUEUE-18 Playing row marked ▶, not selectable, no actions | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-QUEUE-19 Timed rows (preempt_at / ad_slot / block) highlighted; ⏰ exact time shown; SPONSOR badge on ad_slot; RESUMES m:ss badge on resume@ rows | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-QUEUE-20 Items due at the same moment grouped with 'BLOCK · N ITEMS' badge | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-QUEUE-21 Blackout silence rows show 'Scheduled silence: <name>' in red | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-QUEUE-22 Hourly time announcement row appears with ⏰ at hh:00:00 and the projected air time of the rows around it matches | sizes: both | both | covered: NOT COVERED
-- [ ] F-CR-QUEUE-23 Empty queue text 'The queue is empty. Add songs from the library, or press Start.' | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-QUEUE-16 Drag a row onto another row reorders it (/queue reorder DnD); warnings shown as toast; the playing row is not draggable | sizes: desktop | both | covered: e2e/control-room-actions.mjs::actions "drag a row onto another reorders it" + "drag warnings shown as a toast"
+- [ ] F-CR-QUEUE-17 Optimistic placeholder row appears at once on next/end/insert; failure restores old queue and shows error toast | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::actions "placeholder row shows at once (S-1)" + "a failed change restores the queue and says so"
+- [ ] F-CR-QUEUE-18 Playing row marked ▶, not selectable, no actions | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::rows "playing row marked ▶ without insert or actions" + "playing row cannot be selected"
+- [ ] F-CR-QUEUE-19 Timed rows (preempt_at / ad_slot / block) highlighted; ⏰ exact time shown; SPONSOR badge on ad_slot; RESUMES m:ss badge on resume@ rows | sizes: both | both | covered: e2e/control-room-actions.mjs::rows "timed rows highlighted" + "⏰ exact time" + "SPONSOR badge" + "RESUMES badge"
+- [ ] F-CR-QUEUE-20 Items due at the same moment grouped with 'BLOCK · N ITEMS' badge | sizes: both | both | covered: e2e/control-room-actions.mjs::rows "items due together grouped as BLOCK · 3 ITEMS"
+- [ ] F-CR-QUEUE-21 Blackout silence rows show 'Scheduled silence: <name>' in red | sizes: both | both | covered: e2e/control-room-actions.mjs::rows "blackout silence row in red with its name"
+- [ ] F-CR-QUEUE-22 Hourly time announcement row appears with ⏰ at hh:00:00 and the projected air time of the rows around it matches | sizes: both | both | covered: e2e/control-room-actions.mjs::rows "hourly time check row airs at hh:00:00"
+- [ ] F-CR-QUEUE-23 Empty queue text 'The queue is empty. Add songs from the library, or press Start.' | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::transport "an empty, stopped station shows Start, "nothing queued" and the empty text"
 
 ## Control room: library (Songs tab)
 
 - [ ] F-CR-LIBRARY-1 '/' key opens library and focuses search; typed characters not lost | sizes: desktop | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-LIBRARY-2 Search is server-side (/assets?search=) debounced 250 ms; stale results dimmed; '· searching…'; error text 'Could not load the library.' | sizes: both | n.a. | covered: e2e/control-room.mjs
-- [ ] F-CR-LIBRARY-3 Clear search (✕) empties and refocuses | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-LIBRARY-4 Type tabs (all + each asset type) filter results | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-LIBRARY-5 Result count shown; 'Load more' adds 50 more | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-LIBRARY-3 Clear search (✕) empties and refocuses | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::library "✕ clears the search and keeps the focus"
+- [ ] F-CR-LIBRARY-4 Type tabs (all + each asset type) filter results | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::library "type tab filters (server asked for jingles)"
+- [ ] F-CR-LIBRARY-5 Result count shown; 'Load more' adds 50 more | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::library "result count shown" + "\"Show more\" adds 50"
 - [ ] F-CR-LIBRARY-6 Row 'Next' button queues right after current item (/queue next) | sizes: both | both | covered: e2e/control-room.mjs
-- [ ] F-CR-LIBRARY-7 Row 'End' (add to end) button (/queue end) | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-LIBRARY-7 Row 'End' (add to end) button (/queue end) | sizes: both | both | covered: e2e/control-room-actions.mjs::library "+ End adds to the end of the queue"
 - [ ] F-CR-LIBRARY-8 Row Insert button shown while insert armed; insert banner with Cancel | sizes: both | both | covered: e2e/control-room.mjs
 - [ ] F-CR-LIBRARY-9 ☆/★ pins/unpins a library item as an instant button on the current cart page | sizes: both | n.a. | covered: e2e/control-room.mjs
-- [ ] F-CR-LIBRARY-10 Row pre-listen (PFL) button opens the PFL deck for that item; pressing again stops | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-LIBRARY-11 Buttons disabled while that item is being sent (busy) and when no station | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-LIBRARY-10 Row pre-listen (PFL) button opens the PFL deck for that item; pressing again stops | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::library "row ▶ opens the pre-listen deck" + "pressing it again stops"
+- [ ] F-CR-LIBRARY-11 Buttons disabled while that item is being sent (busy) and when no station | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::library "while sending, the row's buttons show … and are disabled (S-1)"
 
 ## Control room: instant buttons / cart
 
@@ -984,16 +984,16 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [ ] F-CR-CART-3 Mix-over mode: plays on top, on-air item and queue unchanged (/queue/mix-over) | sizes: both | both | covered: e2e/control-room.mjs
 - [ ] F-CR-CART-4 Mix-over WS message is played on top by this browser's engine (kbr-mix-over) | sizes: both | browser | covered: e2e/control-room.mjs
 - [ ] F-CR-CART-5 Mix-over heard on the server stream (engine mode) | sizes: both | engine | covered: NOT COVERED
-- [ ] F-CR-CART-6 Fire mode choice remembered across reloads (kbr_ctl_fire_mode) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-6 Fire mode choice remembered across reloads (kbr_ctl_fire_mode) | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::cart "fire mode remembered across a reload"
 - [ ] F-CR-CART-7 Cart pages 1-10: each page separate; tabs show filled/empty titles | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-CART-8 Button sets: New set (prompt), Rename (prompt), Delete (confirm) work; switching sets restores buttons | sizes: both | n.a. | covered: e2e/control-room.mjs (new/switch only)
 - [ ] F-CR-CART-9 Sets and pages survive reload (per station localStorage) | sizes: both | n.a. | covered: e2e/control-room.mjs
-- [ ] F-CR-CART-10 Edit mode: ✕ removes a button from the page; buttons cannot fire while editing | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-CART-11 Jingles wall lists station IDs/sweepers automatically; empty hint when none | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-CART-12 Sponsor spots wall lists spots | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CR-CART-13 Empty page hint text | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-10 Edit mode: ✕ removes a button from the page; buttons cannot fire while editing | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::cart "✕ in edit mode removes the button" + "buttons cannot fire while editing"
+- [ ] F-CR-CART-11 Jingles wall lists station IDs/sweepers automatically; empty hint when none | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::cart "jingles wall lists station IDs" + "no jingles -> hint"
+- [ ] F-CR-CART-12 Sponsor spots wall lists spots | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::cart "sponsor spots wall lists spots"
+- [ ] F-CR-CART-13 Empty page hint text | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::cart "empty page hint"
 - [ ] F-CR-CART-14 PFL toggle: buttons pre-listen instead of airing; green banner with Done; nothing reaches the station | sizes: both | n.a. | covered: e2e/control-room.mjs
-- [ ] F-CR-CART-15 Headphones output picker (setSinkId) lists devices, choice remembered; 'find outputs' button | sizes: desktop | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-15 Headphones output picker (setSinkId) lists devices, choice remembered; 'find outputs' button | sizes: desktop | n.a. | covered: e2e/control-room-actions.mjs::cart "headphones picker lists the outputs" + "headphones choice remembered"
 - [ ] F-CR-CART-16 Desktop bottom strip layout (bar) vs phone Buttons tab grid | sizes: both | n.a. | covered: e2e/control-room.mjs
 
 ## Control room: pre-listen (PFL) deck
@@ -1002,29 +1002,29 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [ ] F-CR-PFL-2 Waveform drawn from the file (shimmer while loading, cached per asset) | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-PFL-3 Click/tap on the wave jumps there; drag moves playhead; hover shows time | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-PFL-4 Keys in deck: ←/→ 5 s, J/L 10 s, Space/K play-pause, Home start, End 10 s before end, 0-9 jump to tenths, Esc close | sizes: desktop | n.a. | covered: e2e/control-room.mjs (→, Space only)
-- [ ] F-CR-PFL-5 Back 10 s / Forward 10 s buttons | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-PFL-5 Back 10 s / Forward 10 s buttons | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::pfl "Forward 10 s / Back 10 s buttons"
 - [ ] F-CR-PFL-6 START / INTRO / MIX / END markers shown; jump buttons (Start, Intro end, Mix -5 s, End -5 s) | sizes: both | n.a. | covered: e2e/control-room.mjs (Mix only)
 - [ ] F-CR-PFL-7 Unplayable file (MP2 as .mp3): deck stays open with message, play disabled, close works | sizes: both | n.a. | covered: e2e/control-room.mjs
-- [ ] F-CR-PFL-8 Network error: retry message, ▶ retries | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-PFL-8 Network error: retry message, ▶ retries | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::pfl "network error -> retry message" + "▶ retries and plays" (BUG network error shown as unplayable, fixed)
 - [ ] F-CR-PFL-9 Nothing sent to the station from the deck; N in deck never skips | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-PFL-10 Close (Esc / ✕) hides the deck | sizes: both | n.a. | covered: e2e/control-room.mjs
-- [ ] F-CR-PFL-11 Compact deck on phone | sizes: phone | n.a. | covered: NOT COVERED
-- [ ] F-CR-PFL-12 PFL audio goes to chosen headphones output, not the monitor | sizes: desktop | n.a. | covered: NOT COVERED
+- [ ] F-CR-PFL-11 Compact deck on phone | sizes: phone | n.a. | covered: e2e/control-room-actions.mjs::pfl "compact deck on a phone (under a quarter of the screen, full width, no overflow)"
+- [ ] F-CR-PFL-12 PFL audio goes to chosen headphones output, not the monitor | sizes: desktop | n.a. | covered: e2e/control-room-actions.mjs::cart "pre-listen audio goes to the chosen output"
 
 ## Control room: Go live, Played, Schedule tabs and layout
 
 - [ ] F-CR-SIDE-1 Desktop side tabs Songs / Go live / Played / Schedule switch the lower pane; choice remembered (kbr_ctl_side_tab); Go live tab turns red '● Live' during a show | sizes: desktop | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-SIDE-2 Phone bottom nav Queue / Buttons / Library / Go live / More; More shows Played + Schedule switch | sizes: phone | n.a. | covered: e2e/control-room.mjs
-- [ ] F-CR-SIDE-3 Go live: type a show name + Go live now (Enter works) creates and starts a show | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-SIDE-3 Go live: type a show name + Go live now (Enter works) creates and starts a show | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::side "Go live (Enter) creates and starts the show, opens the host console"
 - [ ] F-CR-SIDE-4 Go live: scheduled shows listed with Start; Start disabled while another show is live | sizes: both | n.a. | covered: e2e/control-room.mjs (renders only)
-- [ ] F-CR-SIDE-5 Go live: End show asks 'Yes, end the show' / cancel; ends the show | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-SIDE-5 Go live: End show asks 'Yes, end the show' / cancel; ends the show | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::side "End show asks first; Keep going cancels" + "\"Yes, end the show\" ends it"
 - [ ] F-CR-SIDE-6 During a live show the control room hears the host instead of music; music returns after the show | sizes: both | browser | covered: NOT COVERED
 - [ ] F-CR-SIDE-7 Played log lists recently played items in station tz | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-SIDE-8 Schedule panel shows what is on now; datetime 'Check a time' previews another time; reset | sizes: both | n.a. | covered: e2e/control-room.mjs (renders only)
 - [ ] F-CR-SIDE-9 Drag bar between Up next and lower pane resizes; kept after reload; double-click resets; ArrowUp/Down keyboard | sizes: desktop | n.a. | covered: e2e/control-room.mjs (drag + reload only)
 - [ ] F-CR-SIDE-10 Desktop: fills window, no page scrollbars, header frozen while queue scrolls | sizes: desktop | n.a. | covered: e2e/control-room.mjs
 - [ ] F-CR-SIDE-11 Phone (iPhone 13 and SE): fits screen, no sideways scroll, every button ≥ tap size, header frozen | sizes: phone | n.a. | covered: e2e/control-room.mjs
-- [ ] F-CR-SIDE-12 Tablet width (768-1023 px) uses phone layout without breaking | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-CR-SIDE-12 Tablet width (768-1023 px) uses phone layout without breaking | sizes: phone | n.a. | covered: e2e/control-room-actions.mjs::phone "(tablet 768 / 900 / 1023 px) phone layout, no overflow, bottom tabs work"
 - [ ] F-CR-SIDE-13 No script errors through a full session | sizes: both | n.a. | covered: e2e/control-room.mjs
 
 ## Browser player engine (hooks/useAudioEngine.ts) and stream player (lib/liveStream.ts)
@@ -1038,63 +1038,63 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [ ] F-PLAYER-7 Stored length longer than file: no hole | sizes: both | browser | covered: e2e/audio-engine.mjs
 - [ ] F-PLAYER-8 Hard-timed item (time announcement): song fades preempt_fade_ms before the due time; timed item starts on the second, no hole | sizes: both | browser | covered: e2e/audio-engine.mjs
 - [ ] F-PLAYER-9 Soft timed item does not fade the song; soft item fades only at its hard_by limit; older-server ad_slot not faded | sizes: both | browser | covered: e2e/audio-engine.mjs
-- [ ] F-PLAYER-10 Hourly time announcement heard at hh:00:00 (±1 s) end-to-end against a real backend + scheduler, in control room | sizes: both | browser | covered: NOT COVERED
-- [ ] F-PLAYER-11 Hourly time announcement heard at hh:00:00 on the PUBLIC Listen page (note: Listen passes nextPreemptAt=null to the engine, so it has no pre-fade and switches only when the WS announcement arrives) | sizes: both | browser | covered: NOT COVERED
+- [ ] F-PLAYER-10 Hourly time announcement heard at hh:00:00 (±1 s) end-to-end against a real backend + scheduler, in control room | sizes: both | browser | covered: e2e/control-room-actions.mjs::timed "a hard time check due within 60 s waits on the idle deck instead of the next song" + e2e/listen-page.mjs::timecheck "time check heard within 1 s of its time" (control room; fake backend, not the real scheduler)
+- [ ] F-PLAYER-11 Hourly time announcement heard at hh:00:00 on the PUBLIC Listen page (note: Listen passes nextPreemptAt=null to the engine, so it has no pre-fade and switches only when the WS announcement arrives) | sizes: both | browser | covered: e2e/listen-page.mjs::timecheck "time check heard within 1 s of its time" + "no hole before the time check" (null next timed item: heard 0.27-0.29 s after its time, no gap; not a bug)
 - [ ] F-PLAYER-12 Hourly time announcement on air at hh:00:00 on the server stream (engine mode) | sizes: both | engine | covered: NOT COVERED
 - [ ] F-PLAYER-13 Weather spot at :30 (or station interval) heard on time; station ID jingle hourly | sizes: both | both | covered: NOT COVERED
-- [ ] F-PLAYER-14 Cue in/out and replay gain applied | sizes: both | browser | covered: NOT COVERED
+- [ ] F-PLAYER-14 Cue in/out and replay gain applied | sizes: both | browser | covered: e2e/audio-engine.mjs::cue-gain "cue-in: the item starts at its cue-in point (5 s), not at 0" + "replay gain: ..." (BUG cue-in-ahead, xfail)
 - [ ] F-PLAYER-15 Stereo files reach both speakers; mono file reaches both | sizes: both | browser | covered: e2e/audio-engine.mjs
 - [ ] F-PLAYER-16 Station switch (and back, during crossfade, old crossfade time) leaves only the new station on air | sizes: both | browser | covered: e2e/audio-engine.mjs
 - [ ] F-PLAYER-17 Safari: Listen pressed mid-item brings up the item on air at its position at once | sizes: both | browser | covered: e2e/audio-engine.mjs (Safari simulated)
 - [ ] F-PLAYER-18 Listen from cold: one press heard at once | sizes: both | browser | covered: e2e/audio-engine.mjs
 - [ ] F-PLAYER-19 Stop then Listen joins the station where it is now (not resume from pause point) | sizes: both | browser | covered: e2e/audio-engine.mjs
 - [ ] F-PLAYER-20 Release hold: a tab with audio playing never reloads; silent control room does | sizes: both | browser | covered: e2e/audio-engine.mjs
-- [ ] F-PLAYER-21 Stream mode: MSE playback starts on first data, kept near live; jumps forward after stall | sizes: both | engine | covered: NOT COVERED
-- [ ] F-PLAYER-22 Stream mode: browsers without MSE for MP3 (Safari/iOS) use plain <audio> | sizes: phone | engine | covered: NOT COVERED
-- [ ] F-PLAYER-23 Stream error falls back to the browser player | sizes: both | engine | covered: NOT COVERED
-- [ ] F-PLAYER-24 WS now-playing reconnects automatically after drop; falls back to REST polling after repeated failures | sizes: both | both | covered: NOT COVERED
-- [ ] F-PLAYER-25 Tab back from background > few seconds: re-reads now-playing and reconnects | sizes: both | both | covered: NOT COVERED
-- [ ] F-PLAYER-26 Overdue item (shown past its end with no update) triggers re-read + reconnect (car / locked phone) | sizes: phone | both | covered: NOT COVERED
-- [ ] F-PLAYER-27 Next item preloaded on the idle deck; not downloaded in stream mode | sizes: both | both | covered: NOT COVERED
-- [ ] F-PLAYER-28 Network loss mid-song and recovery: player keeps going / rejoins at live position | sizes: phone | both | covered: NOT COVERED
+- [ ] F-PLAYER-21 Stream mode: MSE playback starts on first data, kept near live; jumps forward after stall | sizes: both | engine | covered: e2e/listen-page.mjs::stream "played through Media Source (starts on first data)" + "after a 4 s stall it jumps back near live" + "after 46 s only about the last 20-40 s stay buffered (V1-132)"
+- [ ] F-PLAYER-22 Stream mode: browsers without MSE for MP3 (Safari/iOS) use plain <audio> | sizes: phone | engine | covered: e2e/listen-page.mjs::stream "without MSE the plain <audio> plays the stream URL" (Chromium with MSE removed; real WebKit not available here)
+- [ ] F-PLAYER-23 Stream error falls back to the browser player | sizes: both | engine | covered: e2e/listen-page.mjs::stream "a broken stream falls back to the built-in player" + e2e/control-room-actions.mjs::engine "a broken stream falls back to the built-in player"
+- [ ] F-PLAYER-24 WS now-playing reconnects automatically after drop; falls back to REST polling after repeated failures | sizes: both | both | covered: e2e/listen-page.mjs::polling "a dropped socket reconnects within 2 s" + "reconnects back off 1, 2, 4, 8, 16 s" + "after repeated socket failures it polls now playing"
+- [ ] F-PLAYER-25 Tab back from background > few seconds: re-reads now-playing and reconnects | sizes: both | both | covered: e2e/listen-page.mjs::network "back from the background re-reads now playing" + "back from the background opens a fresh socket" (BUG re-reads without VITE_API_URL, fixed)
+- [ ] F-PLAYER-26 Overdue item (shown past its end with no update) triggers re-read + reconnect (car / locked phone) | sizes: phone | both | covered: e2e/listen-page.mjs::network "an overdue item makes the page re-read now playing"
+- [ ] F-PLAYER-27 Next item preloaded on the idle deck; not downloaded in stream mode | sizes: both | both | covered: e2e/listen-page.mjs::basics "next item pre-loaded on the idle deck, silent" + e2e/listen-page.mjs::stream "built-in player silent and next item not downloaded"
+- [ ] F-PLAYER-28 Network loss mid-song and recovery: player keeps going / rejoins at live position | sizes: phone | both | covered: e2e/listen-page.mjs::network "no silence while the network is down for 4 s" + "still at the live position after the network returns"
 - [ ] F-PLAYER-29 Real Safari / iOS device run of all player scenarios (simulated only today) | sizes: phone | both | covered: NOT COVERED
 
 ## Public Listen page (/listen/:stationId)
 
-- [ ] F-LISTEN-1 Station header: name, type · timezone, description, playout badge; 'Station not found' for bad id; Loading… | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-1 Station header: name, type · timezone, description, playout badge; 'Station not found' for bad id; Loading… | sizes: both | n.a. | covered: e2e/listen-page.mjs::basics "a bad station id says "Station not found"" + "header shows type and timezone" + "playout badge says Browser player"
 - [ ] F-LISTEN-2 Listen Live button starts sound inside the click (browser player or stream) | sizes: both | both | covered: e2e/audio-engine.mjs (harness)
 - [ ] F-LISTEN-3 Stop button stops; Listen again joins live | sizes: both | both | covered: e2e/audio-engine.mjs (harness)
-- [ ] F-LISTEN-4 On Air / Offline / Connecting… status pill; stream playing counts as On Air | sizes: both | both | covered: NOT COVERED
-- [ ] F-LISTEN-5 Now Playing card: title, artist, album update on each change | sizes: both | both | covered: NOT COVERED
-- [ ] F-LISTEN-6 'Nothing playing right now' when stopped | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LISTEN-7 Mute button and volume slider (percent) control both stream and browser player | sizes: both | both | covered: NOT COVERED
-- [ ] F-LISTEN-8 Lock screen / Media Session metadata (title, artist, station) shown and updated per item (CarPlay / Android Auto / iOS lock screen) | sizes: phone | both | covered: NOT COVERED
-- [ ] F-LISTEN-9 Media Session play/pause/stop actions: pause stops, play rejoins live (not resume from pause); seek actions disabled | sizes: phone | both | covered: NOT COVERED
-- [ ] F-LISTEN-10 Media Session playbackState follows Listen/Stop | sizes: phone | both | covered: NOT COVERED
-- [ ] F-LISTEN-11 Preconnect link to stream origin added before Listen | sizes: both | engine | covered: NOT COVERED
-- [ ] F-LISTEN-12 Listener heartbeat sent while listening (shows in /admin/listeners) | sizes: both | both | covered: NOT COVERED
-- [ ] F-LISTEN-13 Live show banner 'LIVE: <title>' with description; 'Call in from here' link when calls enabled; polled every 15 s | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-4 On Air / Offline / Connecting… status pill; stream playing counts as On Air | sizes: both | both | covered: e2e/listen-page.mjs::basics "status pill says On Air while the station plays" + "\"Nothing playing right now\" and Offline when the station stops"
+- [ ] F-LISTEN-5 Now Playing card: title, artist, album update on each change | sizes: both | both | covered: e2e/listen-page.mjs::basics "Now Playing card shows title, artist and album" + "now playing updates within 1 s of a change on air (S-8)"
+- [ ] F-LISTEN-6 'Nothing playing right now' when stopped | sizes: both | n.a. | covered: e2e/listen-page.mjs::basics ""Nothing playing right now" and Offline when the station stops"
+- [ ] F-LISTEN-7 Mute button and volume slider (percent) control both stream and browser player | sizes: both | both | covered: e2e/listen-page.mjs::basics "volume slider shows percent and sets the level" + "Mute silences the player" + e2e/listen-page.mjs::stream "volume slider sets the stream level"
+- [ ] F-LISTEN-8 Lock screen / Media Session metadata (title, artist, station) shown and updated per item (CarPlay / Android Auto / iOS lock screen) | sizes: phone | both | covered: e2e/listen-page.mjs::basics "lock screen shows the item, artist and station" + "lock screen follows the change"
+- [ ] F-LISTEN-9 Media Session play/pause/stop actions: pause stops, play rejoins live (not resume from pause); seek actions disabled | sizes: phone | both | covered: e2e/listen-page.mjs::basics "lock screen play/pause/stop wired, seeking switched off" + "lock-screen pause stops the sound" + "lock-screen play rejoins where the station is now"
+- [ ] F-LISTEN-10 Media Session playbackState follows Listen/Stop | sizes: phone | both | covered: e2e/listen-page.mjs::basics "lock screen state is playing" + "lock screen state follows Stop"
+- [ ] F-LISTEN-11 Preconnect link to stream origin added before Listen | sizes: both | engine | covered: e2e/listen-page.mjs::stream "preconnect to the stream server before Listen"
+- [ ] F-LISTEN-12 Listener heartbeat sent while listening (shows in /admin/listeners) | sizes: both | both | covered: e2e/listen-page.mjs::basics "listener heartbeat sent for this station" + "stopping says so to the listener count"
+- [ ] F-LISTEN-13 Live show banner 'LIVE: <title>' with description; 'Call in from here' link when calls enabled; polled every 15 s | sizes: both | n.a. | covered: e2e/listen-page.mjs::forms "live banner appears within one 15 s poll" + "banner shows the description and a call-in link"
 - [ ] F-LISTEN-14 During a live show the host (and on-air caller) is heard instead of music; music resumes with a fresh now-playing after | sizes: both | both | covered: e2e/web-call-in.cjs (host/caller heard)
-- [ ] F-LISTEN-15 Song request: expand form; name + song required; artist + message optional; Submit posts /song-requests; success and error messages; Submitting… state | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LISTEN-16 CRM: 6-digit PIN login (digits only, error on wrong length), register form (name required, phone, email), Logout | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LISTEN-17 CRM: rate current song 1-5 stars, favorite toggle; profile counts refresh | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LISTEN-18 CRM: active raffles listed; Enter Raffle → 'entered' state | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-15 Song request: expand form; name + song required; artist + message optional; Submit posts /song-requests; success and error messages; Submitting… state | sizes: both | n.a. | covered: e2e/listen-page.mjs::forms "name and song are required" + "request sent with every field" + "success message..." + "a failed request says so"
+- [ ] F-LISTEN-16 CRM: 6-digit PIN login (digits only, error on wrong length), register form (name required, phone, email), Logout | sizes: both | n.a. | covered: e2e/listen-page.mjs::forms "PIN box keeps digits only" + "short PIN refused" + "wrong PIN says Invalid PIN" + "register sends name, phone, email and logs in" + "Logout goes back to the PIN box"
+- [ ] F-LISTEN-17 CRM: rate current song 1-5 stars, favorite toggle; profile counts refresh | sizes: both | n.a. | covered: e2e/listen-page.mjs::forms "4 stars sent for the song on air" + "favourite sent and counted" + "profile counts refresh after rating"
+- [ ] F-LISTEN-18 CRM: active raffles listed; Enter Raffle → 'entered' state | sizes: both | n.a. | covered: e2e/listen-page.mjs::forms "Enter Raffle -> Entered!"
 - [ ] F-LISTEN-19 Release while listening shows 'Tap to keep listening' on Safari and resumes | sizes: phone | both | covered: e2e/site-release/check.cjs
-- [ ] F-LISTEN-20 Phone layout: buttons ≥ 44 px, no sideways scroll | sizes: phone | n.a. | covered: NOT COVERED
-- [ ] F-LISTEN-21 Station switch: going from one /listen/A to /listen/B stops A | sizes: both | both | covered: NOT COVERED
+- [ ] F-LISTEN-20 Phone layout: buttons ≥ 44 px, no sideways scroll | sizes: phone | n.a. | covered: e2e/listen-page.mjs::basics "every button and field is at least 44 px tall" + "no sideways scrolling" (BUG fields under 44 px, fixed)
+- [ ] F-LISTEN-21 Station switch: going from one /listen/A to /listen/B stops A | sizes: both | both | covered: e2e/listen-page.mjs::switch "the first station is not heard after moving to the second" + "the first station's socket is closed"
 
 ## Web call-in page (/call/:stationId)
 
-- [ ] F-CALLIN-1 No live show / calls closed: says so (polls active show) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CALLIN-1 No live show / calls closed: says so (polls active show) | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "no live show -> says so" + "calls closed -> says so" + "the show appears within one 15 s poll"
 - [ ] F-CALLIN-2 Name (required) + note; Call in asks for the microphone inside the click | sizes: both | n.a. | covered: e2e/web-call-in.cjs
-- [ ] F-CALLIN-3 Mic permission denied shows an error | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CALLIN-3 Mic permission denied shows an error | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "microphone refused -> error, no call made"
 - [ ] F-CALLIN-4 Status text follows waiting → screening → approved → on_air (red pulse) | sizes: both | n.a. | covered: e2e/web-call-in.cjs
 - [ ] F-CALLIN-5 Waiting caller hears the show (host), not on air | sizes: both | n.a. | covered: e2e/web-call-in.cjs
 - [ ] F-CALLIN-6 On air: listeners hear host + caller; caller hears host not themselves | sizes: both | n.a. | covered: e2e/web-call-in.cjs
 - [ ] F-CALLIN-7 Hang up ends the call; screener sees completed | sizes: both | n.a. | covered: e2e/web-call-in.cjs
-- [ ] F-CALLIN-8 Rejected by screener shows rejected state | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CALLIN-9 Dropped connection reconnects and call is held | sizes: phone | n.a. | covered: NOT COVERED
-- [ ] F-CALLIN-10 Mic level meter moves | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CALLIN-8 Rejected by screener shows rejected state | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "rejected by the screener -> says so, mic released"
+- [ ] F-CALLIN-9 Dropped connection reconnects and call is held | sizes: phone | n.a. | covered: e2e/call-in.mjs::call-in "dropped connection reconnects within 1.5 s and authenticates again" + "the call is held"
+- [ ] F-CALLIN-10 Mic level meter moves | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "mic level meter moves"
 - [ ] F-CALLIN-11 iPhone Safari call-in | sizes: phone | n.a. | covered: NOT COVERED
 
 ## Public station list (/stations)

@@ -30,6 +30,7 @@ import { LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
+import { serverNow } from '../../lib/serverClock';
 
 type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule';
 type SideTab = 'library' | 'live' | 'log' | 'schedule';
@@ -187,7 +188,7 @@ export default function Dashboard() {
   useEffect(() => {
     const tick = () => {
       if (serverStartedAt && serverDuration > 0) {
-        const el = Math.min(Math.max(0, (Date.now() - new Date(serverStartedAt).getTime()) / 1000), serverDuration);
+        const el = Math.min(Math.max(0, (serverNow() - new Date(serverStartedAt).getTime()) / 1000), serverDuration);
         setRealElapsed(el);
       } else {
         setRealElapsed(0);
@@ -323,7 +324,10 @@ export default function Dashboard() {
         if (holdsSound.current) {
           holdsSound.current = false;
           setListenHere(false); // the other tab now remembers listening
-          setStatusMessage('Sound moved to another control room tab. Press the speaker here to hear it in this tab.');
+          const moved = 'Sound moved to another control room tab. Press the speaker here to hear it in this tab.';
+          setStatusMessage(moved);
+          // The status line only shows while nothing is on air: say it where it is seen
+          setToast({ text: moved, type: 'warn' });
         }
       } else if (e.data?.type === 'released') {
         soundElsewhere.current = false;
@@ -486,7 +490,7 @@ export default function Dashboard() {
     const { nextAsset: upNext, nextEntryId: upNextId, serverStartedAt: onAirSince, onAirTimed: timedOnAir } = nextNow.current;
     // Right after an automatic change the server keeps the incoming item (it is still
     // fading in), so nothing is played ahead then.
-    const justChanged = onAirSince ? Date.now() - new Date(onAirSince).getTime() < 4500 : true;
+    const justChanged = onAirSince ? serverNow() - new Date(onAirSince).getTime() < 4500 : true;
     if (upNext && upNextId && !justChanged && !timedOnAir) {
       playNextNow(
         { id: upNext.id, title: upNext.title, artist: upNext.artist ?? null, asset_type: upNext.asset_type,
