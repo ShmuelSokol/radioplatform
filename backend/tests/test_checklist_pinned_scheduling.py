@@ -427,9 +427,10 @@ async def test_block_edit_refreshes_queue_keeping_manual_and_timed(
     pending = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.station_id == station_id, QueueEntry.status == "pending"))).scalars().all()
     ids = {e.id for e in pending}
-    assert not ids & set(auto_ids)
+    # all redrawn but the next song, which stays in case it is about to start
+    assert ids & set(auto_ids) == {auto_ids[0]}
     assert manual_id in ids and timed_id in ids
-    fresh = [e for e in pending if e.source == "auto" and e.preempt_at is None]
+    fresh = [e for e in pending if e.source == "auto" and e.preempt_at is None and e.id != auto_ids[0]]
     assert fresh and {category[e.asset_id] for e in fresh} == {"Relax"}
 
 
@@ -449,8 +450,9 @@ async def test_block_playlists_fill_ahead_with_generation_off(db_session: AsyncS
     await db_session.commit()
     pending = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.station_id == station_id, QueueEntry.status == "pending"))).scalars().all()
-    assert not [e for e in pending if category[e.asset_id] == "Old"]
-    assert all(e.block_id is not None for e in pending)
+    # all replaced but the next song (kept in case it is about to start)
+    assert len([e for e in pending if category[e.asset_id] == "Old"]) <= 1
+    assert len([e for e in pending if e.block_id is None]) <= 1
     hours = sum(240 for _ in pending) / 3600
     assert 5.5 <= hours <= 7  # the default six hours ahead, not a week
 
