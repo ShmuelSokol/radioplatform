@@ -181,6 +181,7 @@ async def test_raffle_shows_only_on_its_station(client, db_session):
     b = Station(id=uuid.uuid4(), name="B", type=StationType.INTERNET)
     now = datetime.now(UTC)
     db_session.add_all([a, b])
+    await db_session.commit()
     db_session.add(Raffle(title="A only", station_id=a.id, starts_at=now - timedelta(hours=1), ends_at=now + timedelta(hours=1)))
     await db_session.commit()
     shown = (await client.get(f"{API}/raffles/active", params={"station_id": str(b.id)})).json()
