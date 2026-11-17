@@ -343,7 +343,7 @@ async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: f
                 if "original_file_path" not in extra:
                     extra["original_file_path"] = asset.file_path
                 trim_entry = {"from": asset.file_path, "to": new_key, "trim_start": trim_start, "trim_end": trim_end, "auto": True}
-                extra.setdefault("trim_history", []).append(trim_entry)
+                extra["trim_history"] = [*(extra.get("trim_history") or []), trim_entry]  # new list: an in-place append is not saved
                 extra.pop("silence_regions", None)
 
                 asset.file_path = new_key
@@ -690,6 +690,17 @@ async def get_enhance_presets(
     return {"presets": ENHANCEMENT_PRESETS}
 
 
+def _check_filters(filters: list[dict]) -> None:
+    """Refuse an unknown filter or an out-of-range value with a clear 400 before any
+    audio work (the values are range-checked numbers, so nothing else reaches ffmpeg)."""
+    from app.services.enhance_service import build_filter_chain
+
+    try:
+        build_filter_chain(filters)
+    except (ValueError, TypeError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=str(e) or "Invalid filter")
+
+
 async def _download_asset_data(file_path: str) -> bytes:
     """Download asset audio data from storage or URL."""
     if file_path.startswith("http://") or file_path.startswith("https://"):
@@ -726,6 +737,7 @@ async def enhance_asset_endpoint(
 
     if not filters:
         raise HTTPException(status_code=400, detail="No filters or preset specified")
+    _check_filters(filters)
 
     input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
     enhanced_data, new_duration = await asyncio.to_thread(enhance_audio, data, filters, input_ext)
@@ -744,7 +756,7 @@ async def enhance_asset_endpoint(
         "preset": body.preset,
         "filters": filters if not body.preset else None,
     }
-    extra.setdefault("enhance_history", []).append(enhance_entry)
+    extra["enhance_history"] = [*(extra.get("enhance_history") or []), enhance_entry]  # new list: an in-place append is not saved
 
     asset.file_path = new_key
     if new_duration > 0:
@@ -786,7 +798,7 @@ async def auto_enhance_endpoint(
         "filters": filters_applied,
         "reasons": reasons,
     }
-    extra.setdefault("enhance_history", []).append(enhance_entry)
+    extra["enhance_history"] = [*(extra.get("enhance_history") or []), enhance_entry]  # new list: an in-place append is not saved
 
     asset.file_path = new_key
     if new_duration > 0:
@@ -825,6 +837,7 @@ async def enhance_preview_endpoint(
 
     if not filters:
         raise HTTPException(status_code=400, detail="No filters or preset specified")
+    _check_filters(filters)
 
     input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
     preview_data = await asyncio.to_thread(
@@ -1061,7 +1074,7 @@ async def trim_asset_endpoint(
     if "original_file_path" not in extra:
         extra["original_file_path"] = asset.file_path
     trim_entry = {"from": asset.file_path, "to": new_key, "trim_start": trim_start, "trim_end": trim_end}
-    extra.setdefault("trim_history", []).append(trim_entry)
+    extra["trim_history"] = [*(extra.get("trim_history") or []), trim_entry]  # new list: an in-place append is not saved
     extra.pop("silence_regions", None)
 
     asset.file_path = new_key
@@ -1129,6 +1142,10 @@ async def bulk_create_assets(
     assets_data = body.get("assets", [])
     if not assets_data:
         return {"created": 0}
+
+    for i, item in enumerate(assets_data):
+        if not isinstance(item, dict) or not item.get("title") or not item.get("file_path"):
+            raise HTTPException(status_code=422, detail=f"Item {i + 1} needs a title and a file_path")
 
     created = []
     for item in assets_data:
