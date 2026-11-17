@@ -7,12 +7,16 @@ import { getStation } from '../../api/stations';
 import apiClient from '../../api/client';
 import { submitSongRequest, SongRequestSubmitResponse } from '../../api/songRequests';
 import { useListenerHeartbeat } from '../../hooks/useListeners';
-import { useCrmAuth, useRateSong, useActiveRaffles, useEnterRaffle } from '../../hooks/useCrm';
+import {
+  useCrmAuth, useRateSong, useActiveRaffles, useEnterRaffle, useMyRatings,
+  crmErrorStatus as httpStatus, crmErrorDetail, crmLoginErrorText,
+} from '../../hooks/useCrm';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { holdUpdates } from '../../lib/appUpdate';
 import { serverNow } from '../../lib/serverClock';
+import { displayTitle } from '../../lib/displayTitle';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
 import type { AssetInfo } from '../../types';
 
@@ -32,10 +36,14 @@ interface ActiveShowData {
 
 export default function Listen() {
   const { stationId } = useParams<{ stationId: string }>();
-  const { data: station, isLoading } = useQuery({
+  const { data: station, isLoading, error: stationError } = useQuery({
     queryKey: ['station', stationId],
     queryFn: () => getStation(stationId!),
     enabled: !!stationId,
+    // A station that does not exist is final; a network error or a 5xx is tried
+    // again twice, quickly, and then the page says it cannot reach the server
+    retry: (count, err) => httpStatus(err) !== 404 && httpStatus(err) !== 422 && count < 2,
+    retryDelay: 1000,
   });
 
   // Real-time now-playing via WebSocket (instant track changes, cue points, next track)
@@ -67,21 +75,79 @@ export default function Listen() {
   const [crmRegResult, setCrmRegResult] = useState<string | null>(null);
   const [crmLoginError, setCrmLoginError] = useState('');
   const [crmRegError, setCrmRegError] = useState('');
+  const [crmRegLoginFailed, setCrmRegLoginFailed] = useState(false);
   const [myRating, setMyRating] = useState(0);
   const [myFavorite, setMyFavorite] = useState(false);
+  // Heart pressed on a song with no stars yet: saved with the first star picked
+  // (a favourite alone used to be saved as a 5-star rating the listener never gave)
+  const [favPending, setFavPending] = useState(false);
+  const [rateError, setRateError] = useState('');
+  const [raffleError, setRaffleError] = useState<{ id: string; text: string } | null>(null);
   const [enteredRaffles, setEnteredRaffles] = useState<Set<string>>(new Set());
 
-  // Reset rating and favorite when track changes
+  // The listener's own rating and favourite of the song on air, from their saved ratings
+  const { data: myRatings } = useMyRatings(crm.isLoggedIn, crm.pin);
+  const currentAssetId = wsNowPlaying?.asset_id;
+  const savedRating = currentAssetId ? myRatings?.find((r) => String(r.asset_id) === String(currentAssetId)) : undefined;
   useEffect(() => {
-    setMyRating(0);
-    setMyFavorite(false);
-  }, [wsNowPlaying?.asset_id]);
+    setMyRating(savedRating?.rating ?? 0);
+    setMyFavorite(savedRating?.is_favorite ?? false);
+    setFavPending(false);
+    setRateError('');
+  }, [currentAssetId, savedRating?.rating, savedRating?.is_favorite]);
+
+  // Raffles this member entered, kept in this browser: the server's list does not
+  // say, and after a reload the button offered "Enter Raffle" again
+  const memberId = crm.profile?.id ?? null;
+  const enteredKey = memberId ? `crm_raffles_entered:${memberId}` : null;
+  useEffect(() => {
+    if (!enteredKey) { setEnteredRaffles(new Set()); return; }
+    try { setEnteredRaffles(new Set(JSON.parse(localStorage.getItem(enteredKey) || '[]') as string[])); }
+    catch { setEnteredRaffles(new Set()); }
+  }, [enteredKey]);
+  const markEntered = (raffleId: string) => {
+    setEnteredRaffles((prev) => {
+      const next = new Set(prev).add(raffleId);
+      if (enteredKey) { try { localStorage.setItem(enteredKey, JSON.stringify([...next])); } catch { /* storage off */ } }
+      return next;
+    });
+  };
+
+  const saveRating = (rating: number, isFavorite: boolean, before: { rating: number; favorite: boolean }) => {
+    if (!currentAssetId) return;
+    setRateError('');
+    rateMutation.mutate(
+      { asset_id: currentAssetId, rating, is_favorite: isFavorite },
+      {
+        onSuccess: () => { crm.refreshProfile().catch(() => {}); },
+        onError: (err) => {
+          // Put the stars back as they were and say so
+          setMyRating(before.rating);
+          setMyFavorite(before.favorite);
+          setRateError(httpStatus(err) === 401 ? 'Please log in again to rate songs.' : 'Could not save your rating. Please try again.');
+        },
+      },
+    );
+  };
 
   // Icecast stream: direct MP3 stream via <audio> element
   const streamUrl = wsNowPlaying?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
   const useStream = !!streamUrl && !streamFailed;
   const streamAudioRef = useRef<HTMLAudioElement>(null);
+  // Sound really comes out of the stream element (Safari can refuse play() with no
+  // error the page sees: "On Air" and Stop over silence)
+  const [streamSounding, setStreamSounding] = useState(false);
+
+  // The item on air; a stream that failed is tried again when it changes
+  const itemKey = `${wsNowPlaying?.asset_id ?? ''}|${wsNowPlaying?.started_at ?? ''}|${streamUrl ?? ''}`;
+  const itemKeyRef = useRef(itemKey);
+  itemKeyRef.current = itemKey;
+  const failedAtItem = useRef<string | null>(null);
+  const onStreamFail = useCallback(() => {
+    failedAtItem.current = itemKeyRef.current;
+    setStreamFailed(true);
+  }, []);
 
   // The stream playing now, and its URL (started inside the Listen click by handlePlay)
   const liveRef = useRef<{ url: string; stream: LiveStream } | null>(null);
@@ -93,8 +159,41 @@ export default function Listen() {
     const audio = streamAudioRef.current;
     if (!audio) return;
     stopLive();
-    liveRef.current = { url, stream: startLiveStream(audio, url, () => setStreamFailed(true)) };
-  }, [stopLive]);
+    liveRef.current = { url, stream: startLiveStream(audio, url, onStreamFail) };
+  }, [stopLive, onStreamFail]);
+
+  // After a stream failure the built-in player carries on. When the item on air
+  // changes, the stream is tried again, muted, beside it; once it really plays the
+  // page goes back to it. (One engine or Icecast restart used to leave the listener
+  // on the built-in player for the rest of the session, out of step with the stream.)
+  const probeRef = useRef<{ url: string; stream: LiveStream } | null>(null);
+  const stopProbe = useCallback(() => {
+    probeRef.current?.stream.stop();
+    probeRef.current = null;
+    if (streamAudioRef.current) streamAudioRef.current.muted = false;
+  }, []);
+  useEffect(() => {
+    if (!streamFailed || !userStarted || !streamUrl || probeRef.current) return;
+    if (failedAtItem.current === itemKey) return;
+    const audio = streamAudioRef.current;
+    if (!audio) return;
+    let done = false;
+    const finish = () => { done = true; audio.removeEventListener('playing', onPlaying); };
+    function onPlaying() {
+      if (done) return;
+      finish();
+      liveRef.current = probeRef.current;
+      probeRef.current = null;
+      audio!.muted = false;
+      failedAtItem.current = null;
+      setStreamFailed(false);
+    }
+    failedAtItem.current = itemKey;
+    audio.muted = true;
+    audio.addEventListener('playing', onPlaying);
+    probeRef.current = { url: streamUrl, stream: startLiveStream(audio, streamUrl, () => { if (!done) { finish(); stopProbe(); } }) };
+    return () => { if (!done) { finish(); stopProbe(); } };
+  }, [itemKey, streamFailed, userStarted, streamUrl, stopProbe]);
 
   useEffect(() => {
     if (!useStream || !userStarted || !streamUrl) { stopLive(); return; }
@@ -104,8 +203,9 @@ export default function Listen() {
 
   // What the phone shows on the lock screen and in the car (CarPlay, Android Auto):
   // the item on air, kept current as it changes
-  const nowTitle = wsNowPlaying?.asset?.title ?? null;
-  const nowArtist = wsNowPlaying?.asset?.artist ?? null;
+  // Underscores from file names shown as spaces (display only)
+  const nowTitle = displayTitle(wsNowPlaying?.asset?.title);
+  const nowArtist = displayTitle(wsNowPlaying?.asset?.artist);
   useEffect(() => {
     if (!userStarted || !('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
     try {
@@ -134,10 +234,10 @@ export default function Listen() {
   useEffect(() => {
     const audio = streamAudioRef.current;
     if (!audio || !useStream) return;
-    const onError = () => setStreamFailed(true);
+    const onError = () => onStreamFail();
     audio.addEventListener('error', onError);
     return () => audio.removeEventListener('error', onError);
-  }, [useStream]);
+  }, [useStream, onStreamFail]);
 
   // Once Listen is pressed, a new release must not reload the page and silence it
   useEffect(() => {
@@ -185,13 +285,25 @@ export default function Listen() {
   // A live show on air: the host is heard instead of the music. The now-playing
   // message held when the show began is stale afterwards (the station's queue was
   // paused), so the music waits for a fresh one.
-  const live = useLiveAudio(stationId ?? null, userStarted);
+  // The live socket opens only once Listen is pressed and closes on Stop: a visitor
+  // who never presses Listen downloads no show audio (F-LISTEN-44)
+  const live = useLiveAudio(stationId ?? null, userStarted, { onlyWhenEnabled: true });
+  // A show the 15 s poll says is live: right after Listen the music waits (at most
+  // 3 s) for the live socket to say so, so it does not play before the host is heard
+  const [liveWaitOver, setLiveWaitOver] = useState(false);
+  useEffect(() => {
+    setLiveWaitOver(false);
+    if (!userStarted) return;
+    const t = setTimeout(() => setLiveWaitOver(true), 3000);
+    return () => clearTimeout(t);
+  }, [userStarted]);
+  const waitingForLive = userStarted && !live.known && !!activeShow?.active && !liveWaitOver;
   const staleNowPlaying = useRef<typeof wsNowPlaying | undefined>(undefined);
   if (live.onAir && staleNowPlaying.current === undefined) staleNowPlaying.current = wsNowPlaying;
   if (!live.onAir && staleNowPlaying.current !== undefined && staleNowPlaying.current !== wsNowPlaying) {
     staleNowPlaying.current = undefined;
   }
-  const musicAllowed = !live.onAir && staleNowPlaying.current === undefined;
+  const musicAllowed = !live.onAir && staleNowPlaying.current === undefined && !waitingForLive;
 
   // Audio engine with crossfade support (fallback when HLS is not available)
   const {
@@ -246,17 +358,27 @@ export default function Listen() {
     live.unlock();
     // Start the stream inside the click: Safari refuses play() that a click did not
     // start, and the page then fell back to a player that was never switched on.
-    if (useStream && streamUrl) startLive(streamUrl);
+    // A stream that failed earlier is tried again on every press of Listen.
+    if (streamUrl) {
+      stopProbe();
+      failedAtItem.current = null;
+      setStreamFailed(false);
+      startLive(streamUrl);
+    }
     setUserStarted(true);
     // Always switch the built-in player on in the click too, so a fallback is heard
     await initAudio();
   };
 
-  // An admin-pushed release reloaded this page while it played: play on
-  const resume = useResumeAfterRelease(handlePlay, useStream ? userStarted : soundRunning);
+  // An admin-pushed release reloaded this page while it played: play on. On the
+  // server stream, what counts is that the stream element really plays: Safari
+  // refuses a stream started outside a tap, and the page then showed Stop and
+  // "On Air" over silence with no "Tap to keep listening".
+  const resume = useResumeAfterRelease(handlePlay, useStream ? streamSounding : soundRunning);
 
   const handleStop = () => {
     setUserStarted(false);
+    stopProbe();
     stopLive();
   };
 
@@ -300,22 +422,43 @@ export default function Listen() {
   }, [volume, muted]);
 
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
-  if (!station) return <div className="text-center py-10">Station not found</div>;
+  if (!station) {
+    const status = httpStatus(stationError);
+    // Only a station the server says does not exist is "not found"; a network
+    // error or a server fault is not the listener's wrong link
+    if (stationError && status !== 404 && status !== 422) {
+      return (
+        <div className="text-center py-10" role="alert">
+          <p>Cannot reach the server right now.</p>
+          <p className="text-sm text-gray-500 mt-1">Check your connection and reload the page.</p>
+        </div>
+      );
+    }
+    return <div className="text-center py-10">Station not found</div>;
+  }
 
   return (
     <div className="max-w-2xl mx-auto">
       {/* Hidden audio element for Icecast stream playback */}
-      <audio ref={streamAudioRef} className="hidden" />
+      <audio
+        ref={streamAudioRef}
+        className="hidden"
+        onPlaying={() => setStreamSounding(true)}
+        onPause={() => setStreamSounding(false)}
+        onEmptied={() => setStreamSounding(false)}
+        onEnded={() => setStreamSounding(false)}
+        onError={() => setStreamSounding(false)}
+      />
       {resume.asking && <ResumePrompt onTap={resume.tap} />}
-      <div className="bg-white shadow rounded-lg p-8">
-        <div className="flex items-center gap-6 mb-8">
-          <div className="w-24 h-24 bg-brand-50 rounded-lg flex items-center justify-center text-5xl text-brand-600">
+      <div className="bg-white shadow rounded-lg p-4 sm:p-8">
+        <div className="flex items-center gap-4 sm:gap-6 mb-8">
+          <div className="w-24 h-24 flex-shrink-0 bg-brand-50 rounded-lg flex items-center justify-center text-5xl text-brand-600">
             &#9835;
           </div>
-          <div>
-            <h1 className="text-3xl font-bold">{station.name}</h1>
+          <div className="min-w-0">
+            <h1 className="text-3xl font-bold break-words">{station.name}</h1>
             <p className="text-gray-500">{station.type} &middot; {station.timezone}</p>
-            <PlayoutBadge stationId={stationId} className="mt-1" />
+            <PlayoutBadge stationId={stationId} listener className="mt-1" />
             {station.description && <p className="text-gray-400 mt-1">{station.description}</p>}
           </div>
         </div>
@@ -339,7 +482,7 @@ export default function Listen() {
           </div>
         )}
 
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex flex-wrap items-center gap-4 mb-6">
           {userStarted ? (
             <button
               onClick={handleStop}
@@ -393,12 +536,12 @@ export default function Listen() {
                 &#9835;
               </div>
               <div className="flex-1">
-                <p className="font-medium">{wsAsset.title}</p>
+                <p className="font-medium">{displayTitle(wsAsset.title)}</p>
                 {wsAsset.artist && (
-                  <p className="text-sm text-gray-500">{wsAsset.artist}</p>
+                  <p className="text-sm text-gray-500">{displayTitle(wsAsset.artist)}</p>
                 )}
                 {wsAsset.album && (
-                  <p className="text-xs text-gray-400">{wsAsset.album}</p>
+                  <p className="text-xs text-gray-400">{displayTitle(wsAsset.album)}</p>
                 )}
               </div>
             </div>
@@ -429,16 +572,16 @@ export default function Listen() {
                 <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
                   {reqResult.auto_approved ? (
                     <>
-                      Your song has been added to the queue! Playing: <strong>{reqResult.matched_asset_title}</strong>
-                      {reqResult.matched_asset_artist && <> by {reqResult.matched_asset_artist}</>}.
+                      Your song has been added to the queue! Playing: <strong>{displayTitle(reqResult.matched_asset_title)}</strong>
+                      {reqResult.matched_asset_artist && <> by {displayTitle(reqResult.matched_asset_artist)}</>}.
                       {reqResult.songs_ahead != null && reqResult.estimated_wait_minutes != null && (
                         <> Will play in ~{reqResult.songs_ahead} song{reqResult.songs_ahead !== 1 ? 's' : ''} (~{reqResult.estimated_wait_minutes} min).</>
                       )}
                     </>
                   ) : reqResult.matched_asset_title ? (
                     <>
-                      We found: <strong>{reqResult.matched_asset_title}</strong>
-                      {reqResult.matched_asset_artist && <> by {reqResult.matched_asset_artist}</>}.
+                      We found: <strong>{displayTitle(reqResult.matched_asset_title)}</strong>
+                      {reqResult.matched_asset_artist && <> by {displayTitle(reqResult.matched_asset_artist)}</>}.
                       The station manager will review it shortly.
                     </>
                   ) : (
@@ -517,8 +660,14 @@ export default function Listen() {
                     setReqSong('');
                     setReqArtist('');
                     setReqMessage('');
-                  } catch {
-                    setReqError('Failed to submit request. Please try again.');
+                  } catch (err) {
+                    const status = httpStatus(err);
+                    setReqError(
+                      status === 429 ? 'Too many requests from here just now. Please wait a minute and try again.'
+                        : status === 404 ? 'This station could not be found, so the request was not sent.'
+                          : status === undefined ? 'Could not reach the server. Please check your connection and try again.'
+                            : 'Failed to submit request. Please try again.',
+                    );
                   } finally {
                     setReqSubmitting(false);
                   }
@@ -536,10 +685,35 @@ export default function Listen() {
         <div className="border-t mt-6 pt-6">
           <h3 className="text-sm font-medium text-gray-500 uppercase mb-3">My Radio Profile</h3>
 
-          {!crm.isLoggedIn ? (
+          {/* The new member's PIN. Registering also logs in, so this must stay outside
+              the logged-out panel: inside it, it vanished in the same moment and the
+              listener never saw their PIN. */}
+          {crmRegResult && (
+            <div role="status" data-testid="crm-new-pin" className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm mb-3">
+              Registered! Your PIN is: <strong className="text-lg">{crmRegResult}</strong>
+              <br /><span className="text-xs">Save this PIN — you'll need it to log in.</span>
+              {crmRegLoginFailed && (
+                <><br /><span className="text-xs">We could not sign you in just now. Press Login to sign in with this PIN.</span></>
+              )}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setCrmRegResult(null)}
+                  className="min-h-[44px] px-2 text-sm font-medium text-green-800 underline"
+                >
+                  I've saved my PIN
+                </button>
+              </div>
+            </div>
+          )}
+
+          {crm.autoLoginPending ? (
+            <p className="text-sm text-gray-500">Signing you in...</p>
+          ) : !crm.isLoggedIn ? (
             <div className="space-y-3">
+              {crm.autoLoginError && <p className="text-amber-700 text-sm">{crm.autoLoginError}</p>}
               {/* Login row */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
                   maxLength={6}
@@ -554,7 +728,7 @@ export default function Listen() {
                   onClick={async () => {
                     if (crmPinInput.length !== 6) { setCrmLoginError('PIN must be 6 digits'); return; }
                     try { await crm.login(crmPinInput); setCrmPinInput(''); setCrmLoginError(''); }
-                    catch { setCrmLoginError('Invalid PIN'); }
+                    catch (err) { setCrmLoginError(crmLoginErrorText(err)); }
                   }}
                   className="min-h-[44px] bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
                 >
@@ -573,19 +747,13 @@ export default function Listen() {
               {/* Registration form */}
               {crmRegOpen && (
                 <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-                  {crmRegResult && (
-                    <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
-                      Registered! Your PIN is: <strong className="text-lg">{crmRegResult}</strong>
-                      <br /><span className="text-xs">Save this PIN — you'll need it to log in.</span>
-                    </div>
-                  )}
                   {crmRegError && <p className="text-red-600 text-sm">{crmRegError}</p>}
                   <div>
                     <label htmlFor="crm-name" className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
                     <input id="crm-name" type="text" value={crmRegName} onChange={e => setCrmRegName(e.target.value)}
                       placeholder="Your name" className="w-full min-h-[44px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label htmlFor="crm-phone" className="block text-sm font-medium text-gray-700 mb-1">Phone (optional)</label>
                       <input id="crm-phone" type="text" value={crmRegPhone} onChange={e => setCrmRegPhone(e.target.value)}
@@ -607,7 +775,9 @@ export default function Listen() {
                           email: crmRegEmail.trim() || undefined,
                         });
                         setCrmRegResult(res.pin);
+                        setCrmRegLoginFailed(!res.loggedIn);
                         setCrmRegName(''); setCrmRegPhone(''); setCrmRegEmail(''); setCrmRegError('');
+                        if (!res.loggedIn) { setCrmPinInput(res.pin); setCrmRegOpen(false); }
                       } catch { setCrmRegError('Registration failed. Please try again.'); }
                     }}
                     className="min-h-[44px] bg-brand-600 hover:bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition"
@@ -645,11 +815,10 @@ export default function Listen() {
                         aria-label={`Rate ${star} star${star > 1 ? 's' : ''}`}
                         aria-pressed={star <= myRating}
                         onClick={() => {
+                          const before = { rating: myRating, favorite: favPending ? false : myFavorite };
                           setMyRating(star);
-                          rateMutation.mutate(
-                            { asset_id: wsNowPlaying.asset_id!, rating: star, is_favorite: myFavorite },
-                            { onSuccess: () => crm.refreshProfile() }
-                          );
+                          setFavPending(false);
+                          saveRating(star, myFavorite, before);
                         }}
                         className={`min-w-[44px] min-h-[44px] text-xl transition ${star <= myRating ? 'text-yellow-400' : 'text-gray-300 hover:text-yellow-300'}`}
                       >
@@ -661,10 +830,14 @@ export default function Listen() {
                     onClick={() => {
                       const newFav = !myFavorite;
                       setMyFavorite(newFav);
-                      rateMutation.mutate(
-                        { asset_id: wsNowPlaying.asset_id!, rating: myRating || 5, is_favorite: newFav },
-                        { onSuccess: () => crm.refreshProfile() }
-                      );
+                      if (myRating > 0) {
+                        // Saved with the listener's own rating, never a made-up one
+                        saveRating(myRating, newFav, { rating: myRating, favorite: myFavorite });
+                      } else {
+                        // No stars yet: the server keeps a favourite only with a rating,
+                        // so it is saved with the first star the listener picks
+                        setFavPending(newFav);
+                      }
                     }}
                     className={`min-w-[44px] min-h-[44px] text-xl transition ${myFavorite ? 'text-red-500' : 'text-gray-300 hover:text-red-400'}`}
                     title={myFavorite ? 'Unfavorite' : 'Favorite'}
@@ -676,6 +849,10 @@ export default function Listen() {
                   {rateMutation.isPending && <span className="text-xs text-gray-400">Saving...</span>}
                 </div>
               )}
+              {isWsPlaying && favPending && myRating === 0 && (
+                <p className="text-xs text-gray-500" data-testid="fav-needs-stars">Pick a star rating to save this favourite.</p>
+              )}
+              {rateError && <p className="text-red-600 text-sm" role="alert">{rateError}</p>}
 
               {/* Active raffles */}
               {activeRaffles && activeRaffles.length > 0 && (
@@ -690,18 +867,33 @@ export default function Listen() {
                       {enteredRaffles.has(raffle.id) ? (
                         <span className="text-green-600 text-sm font-medium">Entered!</span>
                       ) : (
-                        <button
-                          onClick={() => {
-                            enterRaffleMutation.mutate(raffle.id, {
-                              onSuccess: () => setEnteredRaffles(prev => new Set(prev).add(raffle.id)),
-                              onError: () => {},
-                            });
-                          }}
-                          disabled={enterRaffleMutation.isPending}
-                          className="min-h-[44px] bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50"
-                        >
-                          Enter Raffle
-                        </button>
+                        <div className="flex flex-col items-end gap-1">
+                          <button
+                            onClick={() => {
+                              setRaffleError(null);
+                              enterRaffleMutation.mutate(raffle.id, {
+                                onSuccess: () => markEntered(raffle.id),
+                                onError: (err) => {
+                                  const status = httpStatus(err);
+                                  // Already entered (409): that is what the listener wanted
+                                  if (status === 409) { markEntered(raffle.id); return; }
+                                  setRaffleError({
+                                    id: raffle.id,
+                                    text: status === 401 ? 'Please log in again to enter.'
+                                      : status === 400 || status === 404 ? (crmErrorDetail(err) ?? 'This raffle is not open right now.')
+                                        : status === undefined ? 'Could not reach the server. Please try again.'
+                                          : 'Could not enter the raffle. Please try again.',
+                                  });
+                                },
+                              });
+                            }}
+                            disabled={enterRaffleMutation.isPending}
+                            className="min-h-[44px] bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                          >
+                            Enter Raffle
+                          </button>
+                          {raffleError?.id === raffle.id && <p className="text-red-600 text-xs text-right" role="alert">{raffleError.text}</p>}
+                        </div>
                       )}
                     </div>
                   ))}

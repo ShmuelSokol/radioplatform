@@ -2054,6 +2054,15 @@ async def set_station_modes(
     async with advance_lock(station_id):
         result = await set_modes(db, station, body.hard_start, body.spots)
         await db.commit()
+    # Every other open control room shows the new state at once (not on its next 10 s poll)
+    try:
+        from app.api.v1.websocket import manager as ws_manager
+
+        await ws_manager.broadcast_to_station(str(station_id), {
+            "type": "modes", "data": {"station_id": str(station_id), **result},
+        })
+    except Exception:
+        logger.warning("Mode change broadcast failed", exc_info=True)
     if settings.engine_drives(station_id):
         # The engine may hold a timed item or a spot as its next track: make it ask again
         from app.services import playout_engine

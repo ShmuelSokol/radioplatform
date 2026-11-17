@@ -39,13 +39,33 @@ auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")
 engine_proto = 2
 
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
-# track is requested, so the two cannot cross.
-try
-  ignore(http.post(headers=auth_headers, timeout=8., data='{"proto":#{engine_proto}}',
-
-                   "#{backend_url}/playout/#{station_id}/hello"))
-catch err do
-  log.important("hello: backend unreachable: #{err}")
+# track is requested, so the two cannot cross. If the backend cannot be reached (or
+# answers with an error), keep trying every 5 s: until it hears this it still believes we
+# hold the timed items it handed the engine before the restart, never hands them over
+# again, and the time check is lost (harness engine_starts_backend_down, 2026-11-17). A
+# late hello is safe: the backend forgets what it handed us, but every /next sends `given`
+# again and /timed ignores an id it already holds.
+hello_done = ref(false)
+def send_hello() =
+  try
+    resp = http.post(headers=auth_headers, timeout=8., data='{"proto":#{engine_proto}}',
+                     "#{backend_url}/playout/#{station_id}/hello")
+    if resp.status_code == 200 then
+      hello_done := true
+      log.important("hello: backend answered")
+    else
+      log.important("hello: backend answered #{resp.status_code}; trying again in 5 s")
+    end
+  catch err do
+    log.important("hello: backend unreachable: #{err}; trying again in 5 s")
+  end
+end
+send_hello()
+if not hello_done() then
+  thread.run.recurrent(delay=5., fun () -> begin
+    send_hello()
+    if hello_done() then (-1.) else 5. end
+  end)
 end
 
 # ── Main lane: ask the backend for the next track ────────────────────────────
@@ -154,7 +174,17 @@ def schedule_timed(~uri, ~at) =
         # or this group waits behind it. The 21:00 time check aired at 21:09 after the
         # 20:00 block's Daf Yomi (2026-11-16). The backend has already queued the
         # shiur to carry on afterwards when the station pauses long items.
-        timed_queue.skip()
+        # But not an item that has only just started, or one about to end by itself:
+        # with the station set to wait, the group is due exactly when the shiur ends,
+        # so the item on air at this moment is the group's own first item (the time
+        # check), and skipping it dropped the time check (harness, 2026-11-17).
+        elapsed = timed_queue.elapsed()
+        left = timed_queue.remaining()
+        if elapsed > 1.0 and (left < 0. or left > 1.0) then
+          timed_queue.skip()
+        else
+          log.important("timed: item on air just started or is ending; not cut (elapsed #{elapsed}, left #{left})")
+        end
         thread.run(delay=0.1, {master_gain := 1.})
       else
         master_gain := 1.

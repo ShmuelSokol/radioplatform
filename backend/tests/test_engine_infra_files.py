@@ -21,15 +21,22 @@ def _liq() -> str:
 
 
 def test_engine_says_hello_before_asking_for_tracks():
-    """V1-1: hello is sent (and its failure only logged) before the main lane is built."""
+    """V1-1: hello is sent (and its failure only logged) before the main lane is built,
+    and retried every 5 s until the backend answers 200."""
     liq = _liq()
     hello = liq.index("/playout/#{station_id}/hello")
     assert hello < liq.index("request.dynamic(")
     # The hello call sits inside try ... catch, so a backend that is down does not stop the engine
-    assert re.search(r"^try\s*$", liq[:hello], re.M)
-    assert not re.search(r"^end\s*$", liq[liq.rindex("try", 0, hello):hello], re.M)
+    assert re.search(r"^\s*try\s*$", liq[:hello], re.M)
+    assert not re.search(r"^\s*end\s*$", liq[liq.rindex("try", 0, hello):hello], re.M)
     assert liq.index("catch err do", hello) < liq.index("request.dynamic(")
-    assert 'log.important("hello: backend unreachable: #{err}")' in liq
+    assert 'log.important("hello: backend unreachable: #{err}; trying again in 5 s")' in liq
+    # Only a 200 counts, and a failed hello is retried (the backend otherwise keeps the
+    # timed items it handed the engine before the restart and never sends them again)
+    assert "if resp.status_code == 200 then" in liq[hello:]
+    first_call = liq.index("send_hello()", liq.index("def send_hello()") + 20)
+    assert first_call < liq.index("request.dynamic(")
+    assert "thread.run.recurrent(delay=5." in liq[first_call:liq.index("request.dynamic(")]
 
 
 def test_main_lane_request_settings():

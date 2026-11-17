@@ -164,6 +164,14 @@ class QueueReplenishService:
             await self._schedule_top_of_hour(wants_hourly, wants_id)
 
         await self._schedule_ad_slots()
+        if self.automation_config.get("hard_start", True) is False:
+            # HS off: the time checks, block items and ad slots just written (or put
+            # back to their planned timing) must not stay hard until the scheduler's
+            # next pass, or one due meanwhile would cut the song (wiki/station-modes.md)
+            from app.services.station_modes import soften_hard_items
+
+            station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
+            await soften_hard_items(self.db, station)
         await self.db.commit()
 
         # Playlist generation: fill a few hours ahead from the schedule blocks'
@@ -679,6 +687,9 @@ class QueueReplenishService:
         logger.debug("Enqueued %s '%s' at position %d", asset.asset_type, asset.title, position)
 
     async def _insert_sponsors(self, shortfall: float) -> None:
+        # Spots mode off (control room): no sponsorship goes in the queue
+        if (self.automation_config or {}).get("spots_on", True) is False:
+            return
         now = datetime.now(timezone.utc)
         current_hour = now.hour
         result = await self.db.execute(select(Sponsor).order_by(Sponsor.priority.desc()))

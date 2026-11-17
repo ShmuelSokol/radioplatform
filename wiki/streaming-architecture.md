@@ -301,3 +301,23 @@ derived from the Icecast URL (`/live-<id>` -> `/hls/<id>/mp3.m3u8`), and falls b
 plain stream on an error or no sound within 8 s. In a local rig (hls.js in Chromium) the
 first sound came 0.2-0.6 s after load. Needs a `setup.sh` rerun on the server. Real iPhone
 and CarPlay not yet tested.
+
+## A take-over never cuts its own first item (2026-11-17)
+
+With the station set to wait, the backend moves the hour's group to the moment the
+block's shiur ends. The engine's take-over (`go_on_air` in `radio.liq`) fires then, and it
+skipped whatever the timed lane held, to end the shiur. At that instant the shiur had
+just ended and the time check had just started, so the time check was skipped and never
+aired (harness `block_shiur_spans_hour_wait`). Now it skips only an item that has played
+more than 1 s and has more than 1 s left (`timed_queue.elapsed()` / `.remaining()`). Needs
+`setup.sh` rerun on the droplet. Checklist V1-10c.
+
+## The engine's hello is retried until the backend answers (2026-11-17)
+
+`radio.liq` sent `/hello` once at start-up. An engine that restarted while the backend was
+unreachable (a droplet reboot during a Railway deploy) left the backend believing the
+engine still held the timed items handed over before; `timed_sent` kept them out of every
+hand-over and `/next`, so the time check never aired (harness `engine_starts_backend_down`).
+Now the hello is retried every 5 s until it answers 200. A late hello is safe: `/next`
+sends `given` each time and `/timed` ignores an id it already holds. Needs `setup.sh`
+rerun. Checklist V1-1.
