@@ -1,4 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
+import PlayoutBadge from '../../components/audio/PlayoutBadge';
 import { startLiveStream, type LiveStream } from '../../lib/liveStream';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -310,6 +311,7 @@ export default function Listen() {
           <div>
             <h1 className="text-3xl font-bold">{station.name}</h1>
             <p className="text-gray-500">{station.type} &middot; {station.timezone}</p>
+            <PlayoutBadge stationId={stationId} className="mt-1" />
             {station.description && <p className="text-gray-400 mt-1">{station.description}</p>}
           </div>
         </div>
