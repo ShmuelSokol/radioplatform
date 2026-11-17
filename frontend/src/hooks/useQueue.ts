@@ -32,6 +32,34 @@ export function useQueue(stationId: string | null, limit: number = QUEUE_FIRST_R
   return q;
 }
 
+/**
+ * Put the queue that came back with an action (Next, Loop, a mode switch) into
+ * the cache. The server sends the first QUEUE_FIRST_ROWS rows. When this screen
+ * has the whole queue loaded (the operator scrolled to the end or picked a day),
+ * the rows beyond those stay on screen and the full list is fetched again at
+ * once, so the list never shrinks under the operator. Returns false when the
+ * response carried no queue (the caller then refetches).
+ */
+export function applyActionQueue(
+  qc: QueryClient, stationId: string, sentQueue: { entries?: unknown[] } | null | undefined,
+): boolean {
+  if (!sentQueue?.entries) return false;
+  const queue = sentQueue as QueueDataLike;
+  const key = ['queue', stationId];
+  const cached = qc.getQueryData<QueueDataLike>(key);
+  const sent = queue.entries.length;
+  const cut = (queue.total_all ?? sent) > sent;
+  if (cached?.entries && cut && cached.entries.length > sent) {
+    const head = new Set(queue.entries.map((e) => e.id));
+    const tail = cached.entries.slice(sent).filter((e) => !head.has(e.id));
+    qc.setQueryData(key, { ...queue, entries: [...queue.entries, ...tail], total: sent + tail.length });
+    qc.invalidateQueries({ queryKey: key });
+    return true;
+  }
+  qc.setQueryData(key, queue);
+  return true;
+}
+
 export function usePlayLog(stationId: string | null, enabled = true) {
   return useQuery({
     queryKey: ['play-log', stationId],
@@ -118,8 +146,7 @@ export function useSkipCurrent(stationId: string) {
     },
     onSuccess: (res) => {
       // The skip response carries the new queue: no second request needed
-      if (res?.queue?.entries) qc.setQueryData(['queue', stationId], res.queue);
-      else qc.invalidateQueries({ queryKey: ['queue', stationId] });
+      if (!applyActionQueue(qc, stationId, res?.queue)) qc.invalidateQueries({ queryKey: ['queue', stationId] });
       // The play log catches up on its own poll
       qc.invalidateQueries({ queryKey: ['play-log', stationId], refetchType: 'none' });
     },

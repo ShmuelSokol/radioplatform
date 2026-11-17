@@ -698,3 +698,22 @@ async def test_ran_dry_fills_with_music_never_with_spots_or_silence(db_session):
     await db_session.commit()
     picked = await queue_module._refill_for_next(db_session, station_id)
     assert picked.asset_id == song.id
+
+
+async def test_an_action_returns_the_first_rows_of_a_long_queue(client, auth_headers, db_session):
+    """A button press answers with the rows the control room shows (150), not the
+    whole queue: on a two-day queue that was ten times the data on every Next. The
+    full count still comes with it, so the page knows there is more."""
+    station, _, entries = await _station_with_queue(db_session, n_pending=400)
+    res = await client.post(f"/api/v1/stations/{station.id}/queue/skip", headers=auth_headers)
+    assert res.status_code == 200, res.text
+    snapshot = res.json()["queue"]
+    assert len(snapshot["entries"]) == queue_module.ACTION_QUEUE_ROWS == 150
+    assert snapshot["total_all"] == 400  # one skipped, one of the 400 pending now on air
+    assert snapshot["entries"][0]["status"] == "playing"
+    assert snapshot["entries"][0]["id"] == str(entries[1].id)
+    # The same first rows as a read with that limit
+    listed = (await client.get(
+        f"/api/v1/stations/{station.id}/queue", params={"limit": 150}, headers=auth_headers
+    )).json()
+    assert [e["id"] for e in snapshot["entries"]] == [e["id"] for e in listed["entries"]]

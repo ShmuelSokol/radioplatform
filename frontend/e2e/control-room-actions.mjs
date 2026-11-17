@@ -434,6 +434,53 @@ async function queueRows(browser) {
   await ctx.close();
 }
 
+// ── A long queue: actions send back the first rows only ─────────────
+async function longQueue(browser) {
+  const tag = 'long queue';
+  const station = makeStation({ queueSize: 400 });
+  // Queue reads can be made slow, as over a phone connection: a list cut to the
+  // action's 150 rows would then stay cut until the next read came back
+  const slow = { reads: 0 };
+  const { ctx, page, errors } = await openRoom(browser, DESKTOP, station, {
+    delay: (path, method) => (method === 'GET' && /\/queue$/.test(path) ? slow.reads : 0),
+  });
+  const head = async () => (await page.locator('section[aria-label=Queue]').locator('div').first().innerText()).replace(/\s+/g, ' ');
+  const next = () => page.getByRole('button', { name: /Go next/ }).first();
+  check(`${tag}: the first 150 rows are loaded`, /\b150 of 400 items/.test(await head()), await head());
+  await sleep(5000); // past the "just changed" window
+  let second = station.pending()[0].id;
+  await next().click();
+  await rowOf(page, second).getByLabel('Playing now').waitFor({ timeout: 3000 }).catch(() => {});
+  check(`${tag}: Next shows the new item on air at once`, await rowOf(page, second).getByLabel('Playing now').count() === 1);
+  check(`${tag}: still the first 150 rows after Next`, /\b150 of 399 items/.test(await head()), await head());
+  const answer = station.calls.filter((c) => /\/queue\/skip/.test(c.path)).length;
+  check(`${tag}: one request for Next`, answer === 1, `${answer}`);
+  // The whole queue loaded (the operator opened the day list): Next must not shrink the list
+  await page.getByLabel('Show day').focus();
+  await timeUntil(page, `() => /\\b399 items/.test(document.querySelector('section[aria-label=Queue]').innerText.replace(/\\s+/g, ' '))`, 4000);
+  check(`${tag}: the whole queue loads on demand`, /\b399 items/.test(await head()) && !/ of 399/.test(await head()), await head());
+  await sleep(5000);
+  second = station.pending()[0].id;
+  slow.reads = 700;
+  const seen = page.evaluate(async () => {
+    const out = [];
+    const until = Date.now() + 2500;
+    while (Date.now() < until) {
+      out.push(document.querySelector('section[aria-label=Queue]').innerText.replace(/\s+/g, ' ').match(/(\d+ of )?\d+ items/)?.[0] ?? '');
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    return [...new Set(out)];
+  });
+  await next().click();
+  const labels = await seen;
+  slow.reads = 0;
+  check(`${tag}: with the whole queue loaded, Next never shrinks the list to 150`, !labels.some((l) => /^150 of/.test(l)), labels.join(' | '));
+  check(`${tag}: the whole queue is shown again after Next`, /\b398 items/.test(await head()) && !/ of 398/.test(await head()), await head());
+  check(`${tag}: and the new item is on air`, await rowOf(page, second).getByLabel('Playing now').count() === 1);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Queue actions: move, remove, drag, insert from a button, optimistic + failure ─────────────
 async function queueActions(browser) {
   const tag = 'queue actions';
@@ -1179,6 +1226,7 @@ try {
   if (run('badges')) await badges(browser);
   if (run('tabs')) await oneSoundingTab(browser);
   if (run('rows')) await queueRows(browser);
+  if (run('long')) await longQueue(browser);
   if (run('actions')) await queueActions(browser);
   if (run('days')) await dayFilter(browser);
   if (run('phone')) await phoneRows(browser);
