@@ -72,7 +72,17 @@ GET /queue has `loop_asset_id` (null when off). Stored in the station's
 `automation_config["loop_asset_id"]`; each repeat is a real queue entry with source `"loop"`,
 added just before it is needed (`add_loop_repeat` in `api/v1/queue.py`, called at the automatic
 advance and when the playout engine asks for its next track). A Next within 4 s of a repeat
-starting is the "kept incoming" case and leaves the loop on.
+starting is the "kept incoming" case and leaves the loop on. The loop survives a backend
+restart in the middle of the item; known gap (strict xfail in
+`tests/test_queue_transport_rows.py`): if the looped item ended while the backend was down,
+the restart settles it as played and starts the next song.
+
+## Moving entries
+
+move-up / move-down / reorder-dnd / `PUT reorder` / DELETE look the entry up within the URL's
+station (`_station_entry`) and move only waiting (`pending`) entries. `PUT reorder` (not used
+by the control room, which drags with reorder-dnd) shifts the waiting entries at or after the
+new position down by one, so no two share a position.
 
 ## Mix over
 
