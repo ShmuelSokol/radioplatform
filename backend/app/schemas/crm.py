@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ── Registration / Login ──────────────────────────────────────
@@ -99,6 +99,12 @@ class RaffleCreate(BaseModel):
     station_id: uuid.UUID | str | None = None
     starts_at: datetime
     ends_at: datetime
+
+    @model_validator(mode="after")
+    def _ends_after_start(self):
+        if self.ends_at <= self.starts_at:
+            raise ValueError("The raffle must end after it starts")
+        return self
 
 
 class RaffleUpdate(BaseModel):
