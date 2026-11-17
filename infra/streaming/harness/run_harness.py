@@ -95,6 +95,7 @@ class Stack:
         self.procs: list[subprocess.Popen] = []
         self.servers: list[ThreadingHTTPServer] = []
         self.wav = workdir / "out.wav"
+        self.hls = workdir / "hls"
         self.wav_t0: float | None = None
         # seconds the engine's POST .../started waits before it reaches the backend
         self.slow_started = 0.0
@@ -260,6 +261,8 @@ class Stack:
             "APP_ENV": "development",
             "APP_DEBUG": "false",
             "JWT_SECRET_KEY": "harness-jwt-secret",
+            # A full run takes longer than the default 30 min login: late scenarios got 401
+            "JWT_ACCESS_TOKEN_EXPIRE_MINUTES": "600",
             "REDIS_URL": "",
             "S3_ENDPOINT_URL": "",
             "SUPABASE_URL": "",
@@ -321,7 +324,10 @@ class Stack:
             "KBR_ICECAST_SOURCE_PASSWORD": TOKEN,
             "KBR_ICECAST_MOUNT": "/harness",
             "KBR_DEBUG_WAV": str(self.wav),
+            "KBR_HLS_DIR": str(self.hls),
         })
+        self.hls.mkdir(exist_ok=True)
+        os.chmod(self.hls, 0o777)  # the engine runs as another user here
         out = open(self.dir / "engine.log", "a")
         cmd = ["liquidsoap", str(RADIO_LIQ)]
         if os.geteuid() == 0:  # Liquidsoap refuses to run as root
@@ -1341,6 +1347,29 @@ async def sc_icecast_output(h: Harness) -> None:
     title = str(src.get("title") or "")
     h.check(name, bool(cur) and (cur.asset.title or "") in title,
             f"stream title shows the item on air: {title!r} (site: {cur.asset.title if cur else None})")
+    # The iPhone copy: the same encode cut into 1 s segments, each starting with the
+    # timestamp tag Apple's packed-audio HLS needs and then a whole MP3 frame
+    playlist = h.stack.hls / "mp3.m3u8"
+    lines = playlist.read_text().splitlines() if playlist.exists() else []
+    segs = [ln for ln in lines if ln.endswith(".mp3")]
+    h.check(name, len(segs) >= 5 and "#EXT-X-TARGETDURATION:1" in lines,
+            f"HLS playlist lists 1 s segments ({len(segs)} listed)")
+    if segs:
+        seg = h.stack.hls / segs[-2 if len(segs) > 1 else -1]
+        head = seg.read_bytes()[:200]
+        tag = b"com.apple.streaming.transportStreamTimestamp"
+        at = head.find(tag)
+        frame = head[at + len(tag) + 9:at + len(tag) + 11] if at >= 0 else b""
+        h.check(name, head[:3] == b"ID3" and at >= 0, "HLS segment starts with Apple's timestamp tag")
+        h.check(name, len(frame) == 2 and frame[0] == 0xFF and frame[1] & 0xE0 == 0xE0,
+                f"HLS segment's audio starts on an MP3 frame ({frame.hex()})")
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+                                "stream=codec_name,sample_rate,channels,bit_rate", "-of", "json", str(seg)],
+                               capture_output=True, text=True)
+        st = (json.loads(probe.stdout or "{}").get("streams") or [{}])[0]
+        h.check(name, st.get("codec_name") == "mp3" and st.get("sample_rate") == "44100"
+                and st.get("channels") == 2 and str(st.get("bit_rate", "")).startswith("320"),
+                f"HLS segment is MP3 44.1 kHz stereo 320 kbps: {st}")
 
 
 def _mean_db(windows) -> float | None:

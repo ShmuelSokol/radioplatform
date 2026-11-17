@@ -103,7 +103,13 @@ main = amplify(1., override="liq_amplify", main_requests)
 # After Next or a timed item the old song must not come back, so that change is a clean cut
 # (the music has already been faded out by then).
 hard_cut = ref(false)
+# When the music lane last changed song (`cross` calls transition() at that moment).
+# For up to 3 s after a change `cross` is still playing its transition, and a skip then
+# only ends the transition: the song stays on air. skip_main() uses this to see whether
+# a skip really changed the song.
+main_changed_at = ref(0.)
 def transition(ending, starting) =
+  main_changed_at := time()
   if hard_cut() then
     hard_cut := false
     add(normalize=false, [starting.source])
@@ -265,16 +271,37 @@ overlay_queue = request.queue(id="overlay", interactive=false)
 overlay = amplify(1., override="liq_amplify", overlay_queue)
 radio = add(normalize=false, [program, overlay])
 
+# Skip the song on air in the music lane. A second Next within 3 s of a song change was
+# lost (harness next_twice, 2026-11-17): the skip only ended cross's transition. So the
+# skip is checked: if no song change followed within 0.3 s, it is given once more.
+# The output stays faded down until the change (at most 0.4 s), so the old song is not
+# heard again in between.
+def skip_main() =
+  asked = time()
+  hard_cut := true
+  main.skip()
+  thread.run(delay=0.1, {if main_changed_at() >= asked then master_gain := 1. end})
+  thread.run(delay=0.3, {
+    if main_changed_at() < asked and on_air_lane() != "timed" then
+      log.important("skip: no song change after the skip (transition still playing); skipping again")
+      hard_cut := true
+      main.skip()
+      thread.run(delay=0.1, {master_gain := 1.})
+    else
+      master_gain := 1.
+    end
+  })
+end
+
 # Next: fade out quickly, skip whatever is on air, come back at full level on the new track
 def skip_on_air(~seconds) =
   ramp_master(target=0., duration=seconds, fun () -> begin
     if on_air_lane() == "timed" then
       timed_queue.skip()
+      thread.run(delay=0.1, {master_gain := 1.})
     else
-      hard_cut := true
-      main.skip()
+      skip_main()
     end
-    thread.run(delay=0.1, {master_gain := 1.})
   end)
 end
 
@@ -488,6 +515,17 @@ if debug_wav != "" then
   output.file(%wav, debug_wav, radio)
 end
 
+# ── One MP3 encode for both outputs ──────────────────────────────────────────
+# Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting
+# (compression_level 0 is LAME's quality 0). Encoded once and copied to Icecast and to
+# the HLS segments: two separate encoders cost 14.9% of a core against 8.7% for one
+# (measured 2026-11-17), and the server has a single core.
+encoded = ffmpeg.encode.audio(
+  %ffmpeg(%audio(codec="libmp3lame", b="320k", compression_level=0, ar=44100, channels=2)),
+  radio
+)
+mp3_copy = %ffmpeg(format="mp3", %audio.copy)
+
 # ── HLS copy for iPhone Safari ───────────────────────────────────────────────
 # Safari has no Media Source Extensions for MP3, and its plain <audio> waited about
 # 10 s on the Icecast stream before the first sound. It plays HLS natively: 1 s MP3
@@ -496,20 +534,23 @@ end
 hls_dir = environment.get("KBR_HLS_DIR")
 if hls_dir != "" then
   output.file.hls(
+    fallible=true,
     playlist="live.m3u8",
     segment_duration=1.0,
     segments=10,
     segments_overhead=5,
     hls_dir,
-    [("mp3", %mp3(bitrate=320, samplerate=44100, stereo=true, internal_quality=0))],
-    radio
+    [("mp3", mp3_copy)],
+    encoded
   )
 end
 
 # ── Out to Icecast ───────────────────────────────────────────────────────────
 output.icecast(
-  # Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting
-  %mp3(bitrate=320, samplerate=44100, stereo=true, internal_quality=0),
+  mp3_copy,
+  fallible=true,
+  # A copied stream does not say its bitrate to Icecast by itself
+  headers=[("ice-bitrate", "320"), ("ice-audio-info", "ice-samplerate=44100;ice-bitrate=320;ice-channels=2")],
   host=icecast_host,
   port=icecast_port,
   password=icecast_pass,
@@ -517,5 +558,5 @@ output.icecast(
   name=environment.get(default="Kol B'ramah", "KBR_STATION_NAME"),
   genre="Jewish Radio",
   url="https://kbrlive.com",
-  radio
+  encoded
 )

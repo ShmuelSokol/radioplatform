@@ -237,5 +237,8 @@ INGEST 2026-11-17 streaming-architecture.md engine commands share one kept httpx
 INGEST 2026-11-17 streaming-architecture.md engine items analysed before /next hands them over (liq_amplify was missing on late-analysed items); alimiter true-peak limiter replaces limit()
 INGEST 2026-11-17 program-blocks.md announcement left out when its programme has nothing to play; the hourly 'KBR schedule: Daf Yomi' clip is a separate block (data)
 INGEST 2026-11-17 streaming-architecture.md setup.sh rerun restarted Icecast + all engines at once (50 s off air, catch-up 7.6 s on 1 core); now script checked first, unchanged engines left running, changed ones one at a time
+INGEST 2026-11-17 streaming-architecture.md one MP3 encode shared by Icecast and HLS (ffmpeg.encode.audio + %audio.copy): output chain 14.9% -> 8.7% of a core; copied stream needs ice-bitrate header and fallible outputs
 INGEST 2026-11-17 engine-harness.md next_twice: a Next within ~3 s of a Next is lost on the engine (crossfade window); next_after_idle and Next-after-restart pass with PR 212's kept connection
 INGEST 2026-11-17 engine-harness.md fit_before_hour: PR 221's song fitting checked on the real engine (story swapped behind a 40 s song, time check +0.1 s, no silence)
+INGEST 2026-11-17 streaming-architecture.md Next within 3 s of a song change only ended cross's transition (lost Next); skip_main() checks main_changed_at and skips once more
+INGEST 2026-11-17 streaming-architecture.md emergency music folder is per station (was one shared folder holding only Jerusalem's songs); seeded from the shared one
