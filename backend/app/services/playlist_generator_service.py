@@ -270,6 +270,32 @@ async def block_songs(db: AsyncSession, schedules) -> dict[str, list]:
     return songs
 
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _run_start(svc: SchedulingService, block, at: datetime, station) -> datetime:
+    """When the run of `block` that is on at `at` began (UTC). A start-only block
+    began at its last start; a timed one at the start of the window holding `at`
+    (yesterday's window for the part of an overnight block after midnight)."""
+    local = svc.station_local(at, station)
+    naive = local.replace(tzinfo=None)
+    began = None
+    if getattr(block, "until_next", False):
+        began = svc.last_start(block, local, station)
+    else:
+        for day in (naive.date(), naive.date() - timedelta(days=1)):
+            try:
+                lo, hi = svc._block_window(block, day, station)
+            except Exception:
+                continue
+            if lo <= naive < hi:
+                began = lo
+                break
+    if began is None:
+        began = datetime.combine(naive.date(), datetime.min.time())
+    return began.replace(tzinfo=local.tzinfo).astimezone(UTC)
+
+
 def _mode(block) -> PlaybackMode:
     mode = getattr(block, "playback_mode", None) or PlaybackMode.SEQUENTIAL
     try:
@@ -338,11 +364,18 @@ async def generate(
         block = ranked[0][1] if ranked else None
         own = songs_by_block.get(str(block.id)) if block is not None else None
         named = block.playlist_template if block is not None and block.playlist_template_id else None
-        if own and named is not None and named.is_active and named.slots:
-            # A block that names a working playlist keeps playing it: its own songs
-            # only take over a block with no playlist, so a block already on air
-            # with stray songs listed does not suddenly change what it plays.
-            own = None
+        both = bool(own and named is not None and named.is_active and named.slots)
+        if both:
+            # Both: the songs added by hand play first, each once per run of the
+            # block, then the block's playlist fills the rest (Shmuel, 2026-11-17).
+            if library.last_used is None:
+                await library._load_last_used()
+            began = _run_start(svc, block, at, station)
+            own = [
+                r for r in own
+                if library.last_used.get(str(r.id), _EPOCH) < began
+                and not (str(r.id) in library.busy and began <= start)
+            ]
         if own:
             # The block's own songs, in the block's playback mode.
             if library.last_used is None:
@@ -353,6 +386,8 @@ async def generate(
                 row = library.shuffle(own, at)
             elif mode == PlaybackMode.WEIGHTED:
                 row = random.choices(own, weights=[max(int(r.weight or 1), 1) for r in own], k=1)[0]
+            elif both:
+                row = own[0]  # in the block's order; the playlist's cursor is left alone
             else:
                 index = int(cursor.get(key, 0)) % len(own)
                 row = own[index]

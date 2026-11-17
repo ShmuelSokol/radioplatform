@@ -3,6 +3,7 @@ import apiClient from './client';
 export interface Campaign {
   id: string;
   sponsor_id: string;
+  sponsor_name?: string | null;
   name: string;
   description: string | null;
   status: string;
@@ -39,8 +40,15 @@ export interface CampaignComment {
   user_display_name: string | null;
 }
 
-export const listCampaigns = async (): Promise<Campaign[]> => {
-  const res = await apiClient.get<Campaign[]>('/campaigns');
+export const CAMPAIGN_STATUSES = ['draft', 'in_review', 'approved', 'active', 'paused', 'completed'] as const;
+export type CampaignStatus = typeof CAMPAIGN_STATUSES[number];
+
+/** Staff may pass a sponsor to see only its campaigns; a sponsor login always gets its own. */
+export const listCampaigns = async (opts: { sponsorId?: string; limit?: number } = {}): Promise<Campaign[]> => {
+  const params: Record<string, string | number> = {};
+  if (opts.sponsorId) params.sponsor_id = opts.sponsorId;
+  if (opts.limit) params.limit = opts.limit;
+  const res = await apiClient.get<Campaign[]>('/campaigns', { params });
   return res.data;
 };
 
@@ -51,6 +59,8 @@ export const getCampaign = async (id: string): Promise<Campaign> => {
 
 export const createCampaign = async (data: {
   name: string;
+  /** Staff name the sponsor; ignored for a sponsor login (it always creates for itself). */
+  sponsor_id?: string;
   description?: string;
   start_date?: string;
   end_date?: string;
