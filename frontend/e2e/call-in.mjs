@@ -3,6 +3,8 @@
  * a fake call socket: no show / calls closed, microphone refused, the status line
  * through screening to on air, rejected, a dropped connection that comes back with
  * the call held, the mic meter, and Hang up. Uses Chromium's fake microphone.
+ * Then F-CALLIN-12..20: the call state wins over the show poll, refused calls, name
+ * rules, giving up after 5 reconnects, leaving mid-call, a failing show lookup, phone layout.
  * (e2e/web-call-in.cjs is the end-to-end run against a real backend.)
  *
  *   BASE_URL=http://localhost:4311 node e2e/call-in.mjs
@@ -12,15 +14,23 @@ import { chromium, devices, checker, sleep, makeStation, routeApi, routeSiteSock
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
 const { check, done } = checker({});
 
-async function openCallIn(browser, contextOpts, station, { denyMic = false } = {}) {
+async function openCallIn(browser, contextOpts, station, { denyMic = false, down = [], routes } = {}) {
   const ctx = await browser.newContext({ ...contextOpts, permissions: denyMic ? [] : ['microphone'] });
+  // Keep each microphone stream the page opens, so a check can see whether it was released
+  await ctx.addInitScript(() => {
+    window.__mics = [];
+    const gum = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+    if (gum) navigator.mediaDevices.getUserMedia = async (c) => { const s = await gum(c); window.__mics.push(s); return s; };
+  });
   if (denyMic) await ctx.addInitScript(() => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('denied', 'NotAllowedError')); });
-  await routeApi(ctx, station);
+  await routeApi(ctx, station, { down });
+  if (routes) await routes(ctx);
   await routeSiteSocket(ctx);
-  const call = { sockets: [], auths: [] };
+  const call = { sockets: [], auths: [], refuse: false };
   await ctx.routeWebSocket(/\/ws\/live\/call\//, (ws) => {
     const entry = { ws, open: true, url: ws.url() };
     call.sockets.push(entry);
+    if (call.refuse) { entry.open = false; ws.close({ code: 1011 }).catch(() => {}); return; }
     ws.onMessage((m) => { if (typeof m === 'string') { try { const j = JSON.parse(m); if (j.type === 'auth') call.auths.push(j.token); } catch { /* audio */ } } });
     ws.onClose(() => { entry.open = false; });
   });
@@ -128,10 +138,189 @@ async function run(browser, contextOpts, tag) {
   }
 }
 
+
+// ── F-CALLIN-12..20 ──
+const micLive = (page) => page.evaluate(() => (window.__mics || []).some((s) => s.getTracks().some((t) => t.readyState === 'live')));
+const startCall = async (page, name = 'Yaakov') => {
+  await page.getByPlaceholder('Name').fill(name);
+  await page.getByRole('button', { name: 'Call in' }).click();
+  await timeUntil(page, `() => document.body.innerText.includes('Hang up')`, 5000);
+  await sleep(400);
+};
+
+async function more(browser) {
+  const tag = 'call-in';
+  const DESK = { viewport: { width: 1280, height: 900 } };
+  const PHONE = { ...devices['iPhone 13'] };
+  const showRow = { id: 'ls5', station_id: 'st-1', title: 'Ask the Rav', status: 'live' };
+  // F-CALLIN-12: the 15 s poll says calls are off, then no show, while the caller is in line / on air
+  {
+    const st = stationWith(showRow);
+    let callsOn = true, showOn = true;
+    const base = st.handle;
+    st.handle = (m, p, q, b) => (p === '/live-shows/station/st-1/active'
+      ? (showOn ? { active: true, show: { id: 'ls5', title: 'Ask the Rav', calls_enabled: callsOn } } : { active: false, show: null })
+      : base(m, p, q, b));
+    const { ctx, page, call, errors } = await openCallIn(browser, DESK, st);
+    await startCall(page);
+    call.status('waiting');
+    await sleep(300);
+    callsOn = false;
+    await sleep(16000);
+    const hang1 = await page.getByRole('button', { name: 'Hang up' }).count();
+    const text1 = await page.locator('body').innerText();
+    check(`${tag} F-CALLIN-12: calls turned off mid-call -> status, mic meter and Hang up stay`,
+      hang1 === 1 && text1.includes("You're in line") && text1.includes('Your mic') && !text1.includes('not taking calls') && await micLive(page), text1.slice(0, 160).replace(/\n/g, ' / '));
+    call.status('on_air');
+    showOn = false;
+    await sleep(16000);
+    const hang2 = await page.getByRole('button', { name: 'Hang up' }).count();
+    const text2 = await page.locator('body').innerText();
+    check(`${tag} F-CALLIN-12: the poll says no show while on air -> still on air with Hang up`,
+      hang2 === 1 && text2.includes("You're on the air!") && !text2.includes('There is no live show'), text2.slice(0, 160).replace(/\n/g, ' / '));
+    await page.getByRole('button', { name: 'Hang up' }).click({ timeout: 3000 }).catch(() => {});
+    await sleep(300);
+    check(`${tag} F-CALLIN-12: Hang up then releases the mic and closes the socket`, !(await micLive(page)) && call.sockets.every((s) => !s.open));
+    check(`${tag} F-CALLIN-12: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+  // F-CALLIN-13: the server refuses the call
+  for (const [label, reply, expect] of [
+    ['no live show (409)', { status: 409, detail: 'There is no live show right now' }, 'There is no live show right now'],
+    ['calls closed (409)', { status: 409, detail: 'The show is not taking calls right now' }, 'The show is not taking calls right now'],
+    ['too many calls (429)', { status: 429, detail: 'Too many calls in a few minutes. Please wait and try again.' }, 'Too many calls in a few minutes'],
+    ['no network', null, 'Could not reach the show'],
+  ]) {
+    const st = stationWith(showRow);
+    const ctxOpts = DESK;
+    const { ctx, page, call } = await openCallIn(browser, ctxOpts, st, {
+      routes: (c) => c.route('**/api/v1/call-in/**', (r) => (reply ? r.fulfill({ status: reply.status, contentType: 'application/json', body: JSON.stringify({ detail: reply.detail }) }) : r.abort('internetdisconnected'))),
+    });
+    await page.getByPlaceholder('Name').fill('Yaakov');
+    await page.getByRole('button', { name: 'Call in' }).click();
+    await page.getByText(expect, { exact: false }).waitFor({ timeout: 5000 }).catch(() => {});
+    await sleep(300);
+    const shown = await page.getByText(expect, { exact: false }).count();
+    check(`${tag} F-CALLIN-13: ${label} -> shows "${expect}", mic released, no socket, can try again`,
+      shown >= 1 && !(await micLive(page)) && call.sockets.length === 0 && await page.getByRole('button', { name: 'Call in' }).isEnabled());
+    await ctx.close();
+  }
+  // F-CALLIN-14: name rules
+  {
+    const st = stationWith(showRow);
+    const { ctx, page } = await openCallIn(browser, DESK, st);
+    await page.getByPlaceholder('Name').fill('    ');
+    const disabledBlank = await page.getByRole('button', { name: 'Call in' }).isDisabled();
+    const maxName = await page.getByPlaceholder('Name').getAttribute('maxlength');
+    const maxNote = await page.locator('input').nth(1).getAttribute('maxlength');
+    await page.getByPlaceholder('Name').fill('x'.repeat(150));
+    const len = (await page.getByPlaceholder('Name').inputValue()).length;
+    check(`${tag} F-CALLIN-14: Call in disabled for a blank or spaces-only name; name max 100, note max 300`,
+      disabledBlank && maxName === '100' && maxNote === '300' && len === 100, `blank disabled=${disabledBlank} ${maxName}/${maxNote} typed=${len}`);
+    await ctx.close();
+  }
+  // F-CALLIN-15: reconnect gives up after 5 tries; 4001 / 4004 end at once (phone size)
+  {
+    const st = stationWith(showRow);
+    const { ctx, page, call } = await openCallIn(browser, PHONE, st);
+    await startCall(page);
+    call.status('waiting');
+    await sleep(200);
+    call.refuse = true;  // every new socket is closed at once
+    const t0 = Date.now();
+    call.drop();
+    await page.getByText('Your call has ended', { exact: false }).waitFor({ timeout: 25000 }).catch(() => {});
+    const took = Date.now() - t0;
+    const tries = call.sockets.length - 1;
+    check(`${tag} F-CALLIN-15 iPhone: reconnect gives up after 5 tries (1+2+3+4+5 s) and shows "Your call has ended"`,
+      tries === 5 && took >= 14000 && took < 20000 && await page.getByText('Your call has ended', { exact: false }).count() === 1 && !(await micLive(page)), `${tries} tries in ${took} ms`);
+    await ctx.close();
+  }
+  for (const code of [4001, 4004]) {
+    const st = stationWith(showRow);
+    const { ctx, page, call } = await openCallIn(browser, PHONE, st);
+    await startCall(page);
+    const n = call.sockets.length;
+    call.sockets.filter((s) => s.open).forEach((s) => { s.open = false; s.ws.close({ code }).catch(() => {}); });
+    await sleep(2500);
+    check(`${tag} F-CALLIN-15 iPhone: close ${code} ends the call at once (no reconnect)`,
+      call.sockets.length === n && await page.getByText('Your call has ended', { exact: false }).count() === 1 && !(await micLive(page)), `${call.sockets.length - n} new sockets`);
+    await ctx.close();
+  }
+  // F-CALLIN-16 and F-CALLIN-20
+  {
+    const st = stationWith(showRow);
+    const { ctx, page, call } = await openCallIn(browser, DESK, st);
+    await startCall(page);
+    call.status('approved');
+    await sleep(300);
+    call.status('on_hold_new_status');
+    await sleep(400);
+    const t = await page.locator('body').innerText();
+    check(`${tag} F-CALLIN-20: an unknown call_status keeps the call panel (status text and Hang up)`,
+      t.includes('Approved. The host will bring you on shortly.') && await page.getByRole('button', { name: 'Hang up' }).count() === 1, t.slice(0, 160).replace(/\n/g, ' / '));
+    call.status('completed');
+    await sleep(400);
+    const back = page.getByRole('link', { name: 'Back to listening' });
+    check(`${tag} F-CALLIN-16: call ended -> "Back to listening" goes to /listen/:stationId; no Call in button until a reload (decide)`,
+      (await back.getAttribute('href')) === '/listen/st-1' && await page.getByRole('button', { name: 'Call in' }).count() === 0);
+    await back.click();
+    await page.waitForURL(/\/listen\/st-1/, { timeout: 5000 }).catch(() => {});
+    check(`${tag} F-CALLIN-16: the link opens the Listen page`, page.url().endsWith('/listen/st-1'), page.url());
+    await ctx.close();
+  }
+  // F-CALLIN-17: leaving mid-call hangs up
+  {
+    const st = stationWith(showRow);
+    const { ctx, page, call } = await openCallIn(browser, DESK, st);
+    await startCall(page);
+    call.status('on_air');
+    await sleep(300);
+    const liveBefore = await micLive(page);
+    await page.evaluate(() => { history.pushState({}, '', '/stations'); dispatchEvent(new PopStateEvent('popstate')); });
+    await sleep(800);
+    check(`${tag} F-CALLIN-17: leaving the page mid-call releases the mic and closes the socket`,
+      liveBefore && !(await micLive(page)) && call.sockets.every((s) => !s.open), `mic before=${liveBefore}`);
+    await ctx.close();
+  }
+  {
+    const st = stationWith(showRow);
+    const { ctx, page, call } = await openCallIn(browser, DESK, st);
+    await startCall(page);
+    await page.close();
+    await sleep(800);
+    check(`${tag} F-CALLIN-17: closing the tab mid-call closes the socket (the server then drops the caller)`, call.sockets.every((s) => !s.open));
+    await ctx.close();
+  }
+  // F-CALLIN-18: the active-show lookup keeps failing
+  {
+    const st = stationWith(showRow);
+    const { ctx, page } = await openCallIn(browser, DESK, st, { down: ['/live-shows/station/'] });
+    await sleep(2500);
+    const t = await page.locator('body').innerText();
+    check(`${tag} F-CALLIN-18: active-show lookup failing -> says it could not reach the station and is retrying (not a bare "Loading…")`,
+      /could not reach the station/i.test(t), t.slice(0, 160).replace(/\n/g, ' / '));
+    await ctx.close();
+  }
+  // F-CALLIN-19: phone layout
+  {
+    const st = stationWith(showRow);
+    const { ctx, page } = await openCallIn(browser, PHONE, st);
+    await page.getByPlaceholder('Name').waitFor({ timeout: 5000 }).catch(() => {});
+    const hs = await page.locator('input').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    const hint = await page.getByText('Headphones work best', { exact: false }).isVisible();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    check(`${tag} F-CALLIN-19 iPhone: name and note fields at least 44 px tall, headphones hint visible, no sideways scroll`,
+      hs.length === 2 && hs.every((h) => h >= 44) && hint && sw <= 0, `heights ${hs} scroll ${sw}`);
+    await ctx.close();
+  }
+}
+
 const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
 try {
   await run(browser, { viewport: { width: 1280, height: 900 } }, 'call-in desktop');
   await run(browser, { ...devices['iPhone 13'] }, 'call-in iPhone');
+  await more(browser);
 } finally {
   await browser.close();
 }

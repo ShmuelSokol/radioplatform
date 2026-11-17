@@ -16,7 +16,7 @@ export default function StationList() {
       {isError && (
         <div className="text-center py-10">
           <p className="text-gray-500 mb-2">Unable to connect to the server.</p>
-          <p className="text-sm text-gray-400">The backend API is not yet configured.</p>
+          <p className="text-sm text-gray-400">Please try again in a moment.</p>
         </div>
       )}
 
