@@ -45,7 +45,7 @@ export default function StationList() {
                     {station.name}
                   </h2>
                   <p className="text-sm text-gray-500">{station.type} &middot; {station.timezone}</p>
-                  <PlayoutBadge stationId={station.id} className="mt-1" />
+                  <PlayoutBadge stationId={station.id} listener className="mt-1" />
                   {station.description && (
                     <p className="text-sm text-gray-400 mt-1 line-clamp-2">{station.description}</p>
                   )}

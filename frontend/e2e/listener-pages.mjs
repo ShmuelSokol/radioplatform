@@ -231,7 +231,11 @@ async function stationListChecks(browser) {
   const list = pagedStations(120, (i) => (i === 2 ? { is_active: false, name: 'Feed 003 (old)' } : i === 0 ? { description: 'Torah, music and news. '.repeat(20) } : {}));
   // On air: Kol Berama (st-1) and the inactive st-3; Feed 002 is switched on with nothing playing
   const st = stationFor({ '/stations': (m, q) => pageOf(list, q, 'stations'), '/now-playing': () => ({ playing: ['st-1', 'st-3'] }) }, {
-    playout: { stations: { 'st-2': { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } },
+    // st-2 on the server stream but out of step (engine title must not show), st-4 server not answering
+    playout: { stations: {
+      'st-2': { mode: 'server', engine: true, engine_ok: true, in_sync: false, engine_title: 'Engine Secret Track' },
+      'st-4': { mode: 'server', engine: true, engine_ok: false, in_sync: false, engine_title: null },
+    }, default: { mode: 'browser' } },
   });
   for (const [view, opts] of [['desktop', DESKTOP], ['iPhone', IPHONE]]) {
     const { ctx, page, errors } = await openAt(browser, opts, st, '/stations');
@@ -252,9 +256,15 @@ async function stationListChecks(browser) {
       const firstText = await first.innerText();
       const clamp = await first.locator('p.line-clamp-2').evaluate((el) => getComputedStyle(el).webkitLineClamp).catch(() => '');
       const feed2 = await cards.filter({ hasText: 'Feed 002' }).innerText();
-      check(`${tag}-6 ${view}: card shows type · timezone, playout badge (browser / server), description clamped to 2 lines`,
-        firstText.includes('internet · America/New_York') && firstText.includes('Browser player') && feed2.includes('Server stream') && clamp === '2',
-        `clamp=${clamp}`);
+      const feed4 = await cards.filter({ hasText: 'Feed 004' }).innerText();
+      const badges = await cards.locator('[data-testid="playout-badge"]').allInnerTexts();
+      const engineWords = /server stream|out of step|not answering|browser player|Engine Secret Track/i;
+      check(`${tag}-6 ${view}: card shows type · timezone and description clamped to 2 lines`,
+        firstText.includes('internet · America/New_York') && clamp === '2', `clamp=${clamp}`);
+      check(`${tag}-6 ${view}: listener badge: a server-stream station says plain "Live stream" (even out of step or not answering), a browser-player one shows none, no engine wording or titles`,
+        feed2.includes('Live stream') && feed4.includes('Live stream') && !firstText.includes('Live stream')
+          && badges.length === 2 && ![firstText, feed2, feed4].some((t) => engineWords.test(t)),
+        `badges=${JSON.stringify(badges)}`);
       check(`${tag}-6 ${view}: more than 100 stations all load (pages through)`, await cards.count() === 120, `${await cards.count()} cards`);
     } else {
       const xs = await cards.evaluateAll((els) => [...new Set(els.slice(0, 6).map((e) => Math.round(e.getBoundingClientRect().left)))]);
