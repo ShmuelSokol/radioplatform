@@ -30,7 +30,7 @@ commits): when the last published commit is not in it, the script builds.
 `vercel.json` at the repository root is read by every Vercel project that builds
 from the root, and its `ignoreCommand` replaces the project's own "Ignored Build
 Step" setting. The two unused projects (`studio-kolbramah-api`, `frontend`) are
-skipped by their production address (`VERCEL_PROJECT_PRODUCTION_URL`); the first
+skipped by their production address (`VERCEL_PROJECT_PRODUCTION_URL`: `backend-gamma-six-68.vercel.app` or `studio-kolbramah-api.vercel.app`, and `frontend-kappa-three-42.vercel.app`); the first
 merge with the script built the website into `studio-kolbramah-api` once before
 that guard was right. Disconnecting those two projects from Git in Vercel would
 remove the need for the guard.
