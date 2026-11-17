@@ -289,7 +289,7 @@ async function errorsTab(browser, contextOpts, tag) {
   const mk = (id, title, sev, station_id, at) => ({ id, title, message: `(${id}) details`, severity: sev, station_id, created_at: at, updated_at: at, is_resolved: false, alert_type: 'system' });
   const station = modesStation({
     alerts: [
-      mk('a1', 'Panic pressed in the control room', 'warning', 'st-1', now),
+      { ...mk('a1', 'Panic pressed in the control room', 'warning', 'st-1', now), created_at: new Date(Date.now() - 60e3).toISOString(), context: { repeats: 3, last_message: 'Pressed by Dana' } },
       mk('a2', 'Dead air last week', 'critical', 'st-1', week),
       mk('a3', 'Engine offline', 'info', null, now),
       mk('a4', 'Other station problem', 'critical', 'st-2', now),
@@ -309,6 +309,11 @@ async function errorsTab(browser, contextOpts, tag) {
   const oldDay = new Date(week).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: tz });
   check(`${tag}: an alert from last week shows its date, today's only the time (F-MODES-35)`,
     whens.some((w) => w.startsWith(oldDay)) && whens.some((w) => /^\d{1,2}:\d\d [AP]M$/.test(w)), whens.join(' | '));
+  // F-MODES-56: a Panic folded into the open alert shows how many times, first and last, and its newest wording
+  const rep = await panel.getByTestId('alert-repeats').allInnerTexts();
+  check(`${tag}: a folded alert shows its count, first and last time (F-MODES-56)`,
+    rep.length === 1 && /^3 times, first \d{1,2}:\d\d [AP]M, last \d{1,2}:\d\d [AP]M$/.test(rep[0]), rep.join(' | '));
+  check(`${tag}: a folded alert shows its newest message (F-MODES-56)`, text.includes('Pressed by Dana') && !text.includes('(a1) details'));
   const sevCls = await panel.getByText('Dead air last week', { exact: true }).getAttribute('class');
   check(`${tag}: severity colour (critical red)`, /red/.test(sevCls));
   check(`${tag}: "All alerts" link`, await panel.getByRole('link', { name: 'All alerts' }).getAttribute('href') === '/admin/alerts');

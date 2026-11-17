@@ -219,6 +219,17 @@ export function alertWhen(iso: string, tz?: string, now: Date = new Date()): str
   return day(d) === day(now) ? time : `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...zone })} ${time}`;
 }
 
+/** How many times the server folded this problem into one alert (context.repeats), and its
+ *  newest wording, so a second Panic visibly changes the row instead of looking like nothing. */
+function repeatsOf(a: { context?: Record<string, unknown> | null }): number {
+  const n = Number(a.context?.repeats);
+  return Number.isFinite(n) ? n : 1;
+}
+function lastMessage(a: { message: string; context?: Record<string, unknown> | null }): string {
+  const m = a.context?.last_message;
+  return typeof m === 'string' && m ? m : a.message;
+}
+
 export const ErrorsPanel = memo(function ErrorsPanel({ stationId, stationTz, canSee }: {
   stationId: string | null; stationTz?: string; canSee: boolean;
 }) {
@@ -241,7 +252,12 @@ export const ErrorsPanel = memo(function ErrorsPanel({ stationId, stationTz, can
           </span>
           <span className="flex-1 min-w-0 leading-tight">
             <span className={`block text-sm font-bold ${sev(a.severity)}`}>{a.title}</span>
-            <span className="block text-xs text-gray-300 break-words">{a.message}</span>
+            <span className="block text-xs text-gray-300 break-words">{lastMessage(a)}</span>
+            {repeatsOf(a) > 1 && (
+              <span className="block text-xs text-amber-200" data-testid="alert-repeats">
+                {repeatsOf(a)} times, first {alertWhen(a.created_at, stationTz)}, last {alertWhen(a.updated_at || a.created_at, stationTz)}
+              </span>
+            )}
           </span>
           <button type="button" onClick={() => resolve.mutate(a.id)} disabled={resolve.isPending}
             className="qn-btn shrink-0 h-9 px-2 text-xs" aria-label={`Mark "${a.title}" as dealt with`}>Done</button>
