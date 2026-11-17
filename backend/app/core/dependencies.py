@@ -141,6 +141,18 @@ def may_operate_station(user: User, station) -> bool:
     return assigned is None or str(station.id) in assigned
 
 
+async def may_operate_every_station(db: AsyncSession, user: User) -> bool:
+    """True for admins, and for staff allowed on every station (protected ones
+    included). Something that applies to all stations, such as a spot schedule
+    with no station, also airs on the protected FM station."""
+    if user.role == UserRole.ADMIN:
+        return True
+    from app.models.station import Station
+
+    stations = (await db.execute(select(Station))).scalars().all()
+    return all(may_operate_station(user, s) for s in stations)
+
+
 async def require_station_operator(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),

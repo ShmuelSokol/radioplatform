@@ -10,6 +10,8 @@ Who may operate (change) which station. Reading is not restricted by station.
 
 - Routes that do not carry the station in the path (schedules, schedule blocks, playlist entries, playlists and generation, spot schedules, live shows) use `station_write_guard` in `backend/app/core/station_guard.py`: a router-level dependency that finds the station from `station_id` in the query or body, or from the object named in the path or body (schedule, block, template, slot, show), and applies the same rule. A new write route on those routers is covered automatically if it uses the same parameter names; a new parameter name needs a line in that router's guard.
 
-Not restricted by station: holidays (one window can cover several stations, `affected_stations`), objects that belong to no station (shared playlist templates, spot schedules for all stations), the library, rules. Those are limited by role only.
+Not restricted by station: holidays (one window can cover several stations, `affected_stations`), objects that belong to no station (shared playlist templates), the library, rules. Those are limited by role only.
+
+Exception: a spot schedule for all stations (`station_id` null) airs on the protected FM station too, so creating, changing, deleting one, widening one to all stations, or moving its end date from the Databank needs `may_operate_every_station` (admins, or staff allowed on every station including the protected ones). Routes: `spot_schedules.py` (`_check_every_station`) and `databank.py` end-date. Test: `tests/test_every_station_spots.py` (review finding F-DATABANK-58).
 
 Tests: `backend/tests/test_station_permissions.py`.

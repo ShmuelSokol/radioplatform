@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import station_guard as sg
-from app.core.dependencies import get_db, require_manager
+from app.core.dependencies import get_db, may_operate_every_station, require_manager
 from app.core.exceptions import NotFoundError
 from app.models.asset import Asset
 from app.models.sponsor import Sponsor
@@ -62,6 +62,17 @@ async def _refresh_queues(db: AsyncSession, station_ids: set) -> None:
         except Exception:
             # The periodic queue refill will pick the change up.
             logger.exception("Spot slot refresh failed for station %s", station_id)
+
+
+EVERY_STATION_REFUSED = (
+    "A spot schedule for every station also airs on stations your login is not set up "
+    "to operate. Choose a station, or ask an admin."
+)
+
+
+async def _check_every_station(db: AsyncSession, user) -> None:
+    if not await may_operate_every_station(db, user):
+        raise HTTPException(status_code=403, detail=EVERY_STATION_REFUSED)
 
 
 async def _get_or_404(db: AsyncSession, model, obj_id, label: str):
@@ -193,8 +204,10 @@ async def set_timing_defaults(
 async def create_spot_schedule(
     data: SpotScheduleCreate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_manager),
+    user=Depends(require_manager),
 ):
+    if not data.station_id:
+        await _check_every_station(db, user)
     sponsor = await _get_or_404(db, Sponsor, data.sponsor_id, "Sponsor")
     asset = await _get_or_404(db, Asset, data.asset_id, "Spot audio")
     if data.station_id:
@@ -219,10 +232,13 @@ async def update_spot_schedule(
     schedule_id: UUID,
     data: SpotScheduleUpdate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_manager),
+    user=Depends(require_manager),
 ):
     record = await _get_or_404(db, SpotSchedule, schedule_id, "Spot schedule")
     changes = data.model_dump(exclude_unset=True)
+    # Changing an every-station schedule, or making one, needs every station
+    if record.station_id is None or ("station_id" in changes and not changes["station_id"]):
+        await _check_every_station(db, user)
     affected = {record.station_id}
 
     if changes.get("asset_id"):
@@ -253,9 +269,11 @@ async def update_spot_schedule(
 async def delete_spot_schedule(
     schedule_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_manager),
+    user=Depends(require_manager),
 ):
     record = await _get_or_404(db, SpotSchedule, schedule_id, "Spot schedule")
+    if record.station_id is None:
+        await _check_every_station(db, user)
     affected = {record.station_id}
     # Turn it off first so the queue drops its slots even if it was the last
     # schedule (an empty schedule list would fall back to the legacy single spot
