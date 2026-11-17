@@ -60,7 +60,9 @@ chown -R liquidsoap:liquidsoap /var/lib/kbr-engine
 
 secret() { openssl rand -hex 24; }
 old() { [ -f "$ENV_FILE" ] && grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2- || true; }
-TOKEN="$(old KBR_PLAYOUT_TOKEN)";            TOKEN="${TOKEN:-$(secret)}"
+TOKEN="$(old KBR_PLAYOUT_TOKEN)"
+# Shown at the end only when it is new (or KBR_SHOW_TOKEN=1): a rerun's output gets copied around
+TOKEN_IS_NEW=no; [ -n "$TOKEN" ] || { TOKEN="$(secret)"; TOKEN_IS_NEW=yes; }
 SOURCE_PW="$(old KBR_ICECAST_SOURCE_PASSWORD)"; SOURCE_PW="${SOURCE_PW:-$(secret)}"
 # Kept between runs, so an unchanged Icecast configuration stays byte for byte the same
 RELAY_PW="$(old KBR_ICECAST_RELAY_PASSWORD)"; RELAY_PW="${RELAY_PW:-$(secret)}"
@@ -253,7 +255,11 @@ echo "Backend settings (Railway):"
 echo "  PLAYOUT_ENGINE_ENABLED=true"
 echo "  PLAYOUT_ENGINE_STATION_ID=${IDS}"
 echo "  PLAYOUT_ENGINE_URL=https://${DOMAIN}/control"
-echo "  PLAYOUT_ENGINE_TOKEN=${TOKEN}"
+if [ "$TOKEN_IS_NEW" = yes ] || [ "${KBR_SHOW_TOKEN:-}" = 1 ]; then
+  echo "  PLAYOUT_ENGINE_TOKEN=${TOKEN}"
+else
+  echo "  PLAYOUT_ENGINE_TOKEN=(unchanged; KBR_SHOW_TOKEN=1 shows it, or see ${ENV_FILE})"
+fi
 echo "  ICECAST_STREAM_URL=https://${DOMAIN}/live"
 echo "  PLAYOUT_STREAM_LIVE=false   (set true when listeners should hear the engine)"
 echo "===================================================="

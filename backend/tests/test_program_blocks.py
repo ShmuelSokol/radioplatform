@@ -242,15 +242,18 @@ def test_sponsorships_fill_the_places_in_blocks():
     wanting.append(_spot("pinned", fixed_times="19:30"))
     placed, unplaced = plan_spots(wanting, NY, day, 1, breaks=breaks)
 
-    assert [(p.local.strftime("%H:%M"), p.seat, p.schedule.name) for p in placed] == [
-        ("19:00", 0, "b"),
-        ("19:00", 1, "c"),
-        ("19:30", 0, "pinned"),  # an exact time that is a block's start takes a place in it
-        ("19:30", 1, "a"),
+    # Five want the evening and three places are left: who waits takes turns by day
+    # (see tests/test_sponsorship_room.py); the exact time always gets its place.
+    assert [(p.local.strftime("%H:%M"), p.seat) for p in placed] == [
+        ("19:00", 0), ("19:00", 1), ("19:30", 0), ("19:30", 1),
     ]
+    assert placed[2].schedule.name == "pinned"  # an exact time that is a block's start takes a place in it
     assert all(p.block == "Sponsors" and p.timing_mode == "soft" for p in placed)
     assert all(p.hard_by == p.at + timedelta(minutes=3) for p in placed)
-    assert sorted(u.schedule.name for u in unplaced) == ["d", "e"]
+    assert len(unplaced) == 2
+    assert sorted([u.schedule.name for u in unplaced] + [p.schedule.name for p in placed]) == [
+        "a", "b", "c", "d", "e", "pinned",
+    ]
     assert {u.reason for u in unplaced} == {"no sponsor place left in this time of day's blocks"}
 
     # The morning has no block with places: said plainly, not spread over clock slots.

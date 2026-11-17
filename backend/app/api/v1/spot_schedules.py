@@ -37,6 +37,7 @@ from app.services.spot_schedule_service import (
     DEFAULT_TIMING,
     plan_for_station,
     reconcile_spot_slots,
+    room_warnings,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,6 +229,7 @@ async def preview_spot_plan(
                 timing_mode=p.timing_mode,
                 fixed=p.fixed,
                 block=p.block,
+                moved_from=p.moved_from,
                 schedule_id=p.schedule.id,
                 sponsor_id=p.schedule.sponsor_id,
                 sponsor_name=sponsors.get(str(p.schedule.sponsor_id), "Unknown"),
@@ -305,7 +307,7 @@ async def create_spot_schedule(
     await db.commit()
     refresh_in_background(later)
     await db.refresh(record)
-    return record
+    return await _with_warnings(db, record)
 
 
 @router.put("/{schedule_id}", response_model=SpotScheduleOut)
@@ -344,7 +346,7 @@ async def update_spot_schedule(
     await db.commit()
     refresh_in_background(later)
     await db.refresh(record)
-    return record
+    return await _with_warnings(db, record)
 
 
 @router.delete("/{schedule_id}", status_code=204)
@@ -370,6 +372,37 @@ async def delete_spot_schedule(
         return
     await db.delete(record)
     await db.commit()
+
+
+async def _with_warnings(db: AsyncSession, record: SpotSchedule) -> SpotScheduleOut:
+    """The saved sponsorship plus what does not fit because of it, said at once
+    (and as one folded alert per station), not found later on Schedule Check."""
+    out = SpotScheduleOut.model_validate(record)
+    if not record.is_active:
+        return out
+    try:
+        query = select(Station).where(Station.is_active.is_(True))
+        if record.station_id:
+            query = select(Station).where(Station.id == record.station_id)
+        for station in (await db.execute(query)).scalars().all():
+            lines = await room_warnings(db, station, record.id)
+            out.warnings.extend(lines)
+            if any("misses" in line for line in lines):
+                from app.services.alert_service import create_alert
+
+                await create_alert(
+                    db,
+                    "schedule_conflict",
+                    "warning",
+                    f"More sponsorships than room on {station.name}",
+                    " ".join(lines),
+                    station_id=station.id,
+                )
+        await db.commit()
+    except Exception:
+        logger.exception("Could not work out sponsorship room warnings")
+        await db.rollback()
+    return out
 
 
 def _grouped_unplaced(unplaced, sponsors: dict) -> list[UnplacedSpot]:

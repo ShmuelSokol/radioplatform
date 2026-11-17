@@ -109,7 +109,12 @@ async def update(
         raise ForbiddenError("Only an admin can protect or unprotect a station")
     if body.protected is None:
         body.model_fields_set.discard("protected")
-    return await update_station(db, station_id, body)
+    updated = await update_station(db, station_id, body)
+    # The song crossfade length takes effect at once (queue.handover_seconds)
+    from app.api.v1.queue import note_station_crossfade
+
+    note_station_crossfade(updated)
+    return updated
 
 
 @router.delete("/{station_id}", status_code=204)
