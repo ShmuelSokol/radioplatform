@@ -45,6 +45,7 @@ const AssetTypes = lazy(() => import('./pages/admin/AssetTypes'));
 const Alerts = lazy(() => import('./pages/admin/Alerts'));
 const BugReports = lazy(() => import('./pages/admin/BugReports'));
 const SiteUpdates = lazy(() => import('./pages/admin/SiteUpdates'));
+const Activity = lazy(() => import('./pages/admin/Activity'));
 const LiveShows = lazy(() => import('./pages/admin/LiveShows'));
 const HostConsole = lazy(() => import('./pages/admin/HostConsole'));
 const CallScreener = lazy(() => import('./pages/admin/CallScreener'));
@@ -175,6 +176,7 @@ export default function App() {
               <Route path="/admin/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
               <Route path="/admin/bug-reports" element={<ProtectedRoute><BugReports /></ProtectedRoute>} />
               <Route path="/admin/site-updates" element={<ProtectedRoute><SiteUpdates /></ProtectedRoute>} />
+              <Route path="/admin/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
               <Route path="/admin/live" element={<ProtectedRoute><LiveShows /></ProtectedRoute>} />
               <Route path="/admin/live/:showId/host" element={<ProtectedRoute><HostConsole /></ProtectedRoute>} />

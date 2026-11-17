@@ -571,6 +571,94 @@ async function stationSwitch(browser) {
   await ctx.close();
 }
 
+// The pre-listen deck: seek anywhere in the item, markers, keys; never touches air
+async function pflDeck(browser, contextOpts, tag) {
+  const { page, ctx, errors, backend } = await open(browser, contextOpts);
+  const tone = toneWav();
+  // Like the real file storage, answer byte ranges so the browser can seek
+  await page.route('**/tone.wav', (route) => {
+    const m = /bytes=(\d+)-(\d*)/.exec(route.request().headers().range || '');
+    if (!m) return route.fulfill({ status: 200, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes' }, body: tone });
+    const start = +m[1];
+    const end = m[2] ? Math.min(+m[2], tone.length - 1) : tone.length - 1;
+    return route.fulfill({ status: 206, contentType: 'audio/wav', body: tone.subarray(start, end + 1),
+      headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${tone.length}` } });
+  });
+  await page.route(/\/assets\/[^/]+\/audio-url$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: `${new URL(page.url()).origin}/tone.wav` }) }));
+  await page.route(/\/api\/v1\/assets\/[^/?]+$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    id: 'a1', title: 'Pre-listen test song', artist: 'Test artist', duration: 600, intro_seconds: 12, asset_type: 'music', category: null,
+    metadata_extra: { audio_analysis: { cue_in_seconds: 1.5, cross_start_seconds: 590, cue_out_seconds: 596, version: 2 } } }) }));
+  const phone = !!contextOpts.isMobile;
+  if (phone) await page.getByRole('button', { name: /Library/ }).first().click();
+  await page.getByTestId('library-pfl').first().click();
+  const deck = page.getByTestId('pfl-deck');
+  await deck.waitFor({ timeout: 5000 });
+  check(`${tag}: the deck opens with the title`, await deck.getByText('Pre-listen test song').count() > 0);
+  const secs = async () => {
+    const t = (await page.getByTestId('pfl-elapsed').textContent()) || '0:00.0';
+    const [m, s] = t.split(':');
+    return +m * 60 + parseFloat(s);
+  };
+  await page.waitForTimeout(1200);
+  check(`${tag}: time runs while it plays`, (await secs()) > 0.3, `${await secs()} s`);
+  const before = backend.calls.filter(c => c.method !== 'GET').length;
+  // Tap or click half way along the wave: jumps to about 5:00
+  const box = await page.getByTestId('pfl-scrub').boundingBox();
+  if (phone) await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  else await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(300);
+  const half = await secs();
+  check(`${tag}: a tap half way jumps to the middle`, half > 280 && half < 320, `${half} s`);
+  if (!phone) {
+    // Drag from 25% to 75%
+    await page.mouse.move(box.x + box.width * 0.25, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const dragged = await secs();
+    check(`${tag}: dragging the playhead jumps there`, dragged > 430 && dragged < 470, `${dragged} s`);
+    await page.getByTestId('pfl-scrub').focus();
+    const k0 = await secs();
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(200);
+    const k1 = await secs();
+    check(`${tag}: arrow right moves 5 s on`, k1 - k0 > 4 && k1 - k0 < 7, `${k0} -> ${k1}`);
+    await page.keyboard.press('n');
+    await page.keyboard.press(' ');
+    await page.waitForTimeout(400);
+    const p0 = await secs();
+    await page.waitForTimeout(700);
+    check(`${tag}: Space pauses it`, Math.abs((await secs()) - p0) < 0.05, `${p0} -> ${await secs()}`);
+    check(`${tag}: keys in the deck never reach the station (N did not skip)`, !backend.calls.some(c => c.path.endsWith('/skip')));
+    // Waveform drawn from the file
+    await page.waitForTimeout(800);
+    const lit = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid=pfl-scrub] canvas');
+      const g = c.getContext('2d'); const d = g.getImageData(0, 0, c.width, c.height).data;
+      let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 1] > 200 && d[i] < 120) n++;
+      return n;
+    });
+    check(`${tag}: the waveform is drawn`, lit > 500, `${lit} bright pixels`);
+  }
+  // Markers: Mix jumps to 5 s before the mix point
+  check(`${tag}: intro, mix and end markers shown`, await deck.getByText('MIX', { exact: true }).count() > 0 && await deck.getByText('INTRO', { exact: true }).count() > 0);
+  await deck.getByRole('button', { name: 'Mix', exact: true }).click();
+  await page.waitForTimeout(300);
+  const mix = await secs();
+  check(`${tag}: Jump to Mix lands just before the mix`, mix > 583 && mix < 590, `${mix} s`);
+  await deck.getByRole('button', { name: 'Intro end', exact: true }).click();
+  await page.waitForTimeout(600);
+  await shot(page, tag.replace(/ /g, '-'));
+  check(`${tag}: nothing was sent to the station`, backend.calls.filter(c => c.method !== 'GET').length === before);
+  await deck.getByRole('button', { name: 'Close pre-listen' }).click();
+  await page.waitForTimeout(200);
+  check(`${tag}: closing hides the deck`, await page.getByTestId('pfl-deck').count() === 0);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // Playlist steps change on screen at once, while the save is still on its way.
 async function playlistsInstant(browser) {
   const tag = 'playlists';
@@ -633,6 +721,8 @@ const browser = await chromium.launch();
 await stationSwitch(browser);
 await metersWithoutListening(browser);
 await playlistsInstant(browser);
+await pflDeck(browser, { viewport: { width: 1440, height: 900 } }, 'pfl deck desktop');
+await pflDeck(browser, { ...devices['iPhone 13'] }, 'pfl deck iPhone');
 if (process.env.ONLY === 'station-switch') { await browser.close(); process.exit(failures ? 1 : 0); }
 await desktop(browser, 1440, 900);
 await desktop(browser, 2560, 1440);

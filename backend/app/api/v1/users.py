@@ -84,13 +84,6 @@ async def create_user(
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    from app.services.audit_service import log_action
-    await log_action(
-        db, user_id=_admin.id, user_email=_admin.email, action="create",
-        resource_type="user", resource_id=str(user.id),
-        detail=f"Created user '{user.email}' with role '{role.value}'",
-        request_id=getattr(request.state, "request_id", None),
-    )
     return user
 
 
@@ -159,13 +152,6 @@ async def delete_user(
     user = result.scalar_one_or_none()
     if not user:
         raise NotFoundError("User not found")
-    from app.services.audit_service import log_action
-    await log_action(
-        db, user_id=admin.id, user_email=admin.email, action="delete",
-        resource_type="user", resource_id=str(user_id),
-        detail=f"Deleted user '{user.email}'",
-        request_id=getattr(request.state, "request_id", None),
-    )
     await db.delete(user)
     await db.commit()
 

@@ -126,6 +126,20 @@ async def _command(path: str, payload: dict | None = None, *, station_id) -> boo
         return False
 
 
+async def engine_status(station_id) -> dict | None:
+    """What the engine says is on air (its /status), or None when it does not answer."""
+    url = settings.engine_control_url(station_id) + "/status"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.post(url, json={}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN})
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) and data.get("ok") else None
+    except Exception:
+        return None
+
+
 async def engine_skip(station_id, fade_seconds: float | None = None) -> bool:
     """Fade out the current track and start the next one now.
 

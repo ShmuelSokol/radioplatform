@@ -115,6 +115,7 @@ export default function Navbar() {
       hoverColor: 'hover:text-purple-300',
       links: [
         { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
+        { to: '/admin/activity', label: 'Activity', color: 'hover:text-green-300' },
         { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
         { to: '/admin/spot-schedule', label: 'Spot Schedule', color: 'hover:text-yellow-300' },
         { to: '/admin/spot-recordings', label: 'Record Spots', color: 'hover:text-yellow-300' },

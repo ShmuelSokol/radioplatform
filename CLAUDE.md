@@ -117,6 +117,7 @@ radioplatform/
 | SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
 | BugReport | bug_report.py | Report from the 🐞 button: words, screenshot, browser state, server log slice, GitHub issue and fix link (see `wiki/bug-reports.md`) |
 | ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit |
+| AuditLog | audit_log.py | Activity log row: who, what (label, category), station, before/after, status, IP, device, place (see `wiki/activity-log.md`) |
 | SiteRelease | site_release.py | One row: how open tabs take a new website release (auto/manual) and the admin's last push (see `wiki/release-pickup.md`) |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
@@ -168,7 +169,9 @@ radioplatform/
 | archives | archives.py | /archives |
 | playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
+| playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen) |
 | call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
+| activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
 | weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); ElevenLabs is only the fallback |
 
@@ -211,6 +214,7 @@ radioplatform/
 | long_items.py | What a hard timed item does to a shiur or story on air: station `automation_config.timed_during_long_items` = pause (default; it resumes where it stopped), wait or cut (see `wiki/hourly-slots.md`) |
 | tail_analysis.py | Song end and crossfade point from HTTP range reads (MP3 header + last 20 s), so re-analysis does not download whole files |
 | call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |
+| activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
@@ -237,6 +241,7 @@ radioplatform/
 - Playlists.tsx — Playlist template rotation management
 - Analytics.tsx — Analytics & reporting dashboard
 - SiteUpdates.tsx — Choose when open browsers move to a new release: automatic or only on push, push now or at a time, optionally including tabs that are playing; live list of open tabs
+- Activity.tsx — Who did what (filters by person, station, kind, dates; search; paging; live) and a Listeners tab with each listening session
 - BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
@@ -319,6 +324,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/requests` → SongRequests (protected)
 - `/admin/archives` → AdminArchives (protected)
 - `/admin/site-updates` → SiteUpdates (admin)
+- `/admin/activity` → Activity (admin)
 - `/guide` → ProgramGuide
 - `/hosts` → Hosts
 - `/archives` → Archives

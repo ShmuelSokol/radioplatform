@@ -17,6 +17,7 @@ const SPONSOR: Role[] = ['sponsor'];
 const ROUTE_ROLES: [prefix: string, roles: Role[]][] = [
   ['/admin/users', ADMIN],
   ['/admin/site-updates', ADMIN],
+  ['/admin/activity', ADMIN],
   ['/admin/dashboard', STAFF],
   ['/admin/assets/upload', MANAGERS],
   ['/admin/assets', STAFF],
