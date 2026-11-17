@@ -10,7 +10,7 @@ import {
 } from '../../hooks/useQueue';
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
-import { useAudioEngine } from '../../hooks/useAudioEngine';
+import { useAudioEngine, METER_SEGMENTS } from '../../hooks/useAudioEngine';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { fireNow, insertAt, loopCurrent, mixOver, queueEnd, queueNext } from '../../api/liveControl';
 import type { SkipFade } from '../../api/queue';
@@ -380,8 +380,8 @@ export default function Dashboard() {
   const setLiveLevel = live.setLevel;
   useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
   useEffect(() => { setLiveEnabled(audioReady && listenHere); }, [audioReady, listenHere]);
-  const vuL = audioReady && isPlaying ? Math.round(vuLevels[0] * 30) : 0;
-  const vuR = audioReady && isPlaying ? Math.round(vuLevels[1] * 30) : 0;
+  const vuL = audioReady && isPlaying ? Math.round(vuLevels[0] * METER_SEGMENTS) : 0;
+  const vuR = audioReady && isPlaying ? Math.round(vuLevels[1] * METER_SEGMENTS) : 0;
 
   // ── Queue derived data ─────────────────────────────────────
   const queueDates = useMemo(() => {

@@ -10,6 +10,8 @@ const MUTE_KEY = 'radio_muted';
 // Meters: RMS level in dBFS. The bar spans METER_FLOOR_DB to 0 dBFS; the red
 // part (last 6 of 30 segments) starts at -8 dBFS, where only very hot audio goes.
 export const METER_FLOOR_DB = -40;
+// Segments of the control room's level meters; levels are reported in these steps
+export const METER_SEGMENTS = 30;
 const METER_FALL_DB_PER_FRAME = 0.35; // ~20 dB/s at 60 frames a second
 
 function dbfs(samples: Float32Array): number {
@@ -188,6 +190,9 @@ export function useAudioEngine(
   // passes false: the engine runs silently so the level meters always move, and
   // the speaker button turns the sound on for this computer only.
   monitorDefault: boolean = true,
+  // Whether the page shows level meters. Listener pages pass false: reading the
+  // levels re-drew the whole page many times a second for a meter nobody sees.
+  meter: boolean = true,
 ): AudioEngineState {
   // ── Operator's Next heard at once (control room) ──
   // The item the operator moved to, played here before the server confirms it. While
@@ -1097,8 +1102,11 @@ export function useAudioEngine(
     });
   }, [applyOut]);
 
-  // ── VU meter polling (~30fps) + client-driven crossfade check ──
+  // ── Level meters ──
+  // The page is told only when a meter segment changes (METER_SEGMENTS of them),
+  // not on every frame: each change re-draws the whole page that uses this hook.
   useEffect(() => {
+    if (!meter) return;
     const poll = () => {
       // VU metering
       const aL = analyserLRef.current;
@@ -1118,16 +1126,16 @@ export function useAudioEngine(
         ) as [number, number];
         meterDbRef.current = next;
         const frac = (db: number) => Math.min(1, Math.max(0, (db - METER_FLOOR_DB) / -METER_FLOOR_DB));
-        const l = frac(next[0]);
-        const r = frac(next[1]);
-        setVuLevels(v => (Math.abs(v[0] - l) < 0.005 && Math.abs(v[1] - r) < 0.005 ? v : [l, r]));
+        const l = Math.round(frac(next[0]) * METER_SEGMENTS) / METER_SEGMENTS;
+        const r = Math.round(frac(next[1]) * METER_SEGMENTS) / METER_SEGMENTS;
+        setVuLevels(v => (v[0] === l && v[1] === r ? v : [l, r]));
       }
 
       rafRef.current = requestAnimationFrame(poll);
     };
     rafRef.current = requestAnimationFrame(poll);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [audioReady]);
+  }, [audioReady, meter]);
 
   // ── Client-driven crossfade check (timer-based so it keeps running in background tabs) ──
   useEffect(() => {
