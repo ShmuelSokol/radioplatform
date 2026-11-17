@@ -17,6 +17,12 @@ apiClient.interceptors.request.use((config) => {
   // of recent calls so the two logs can be matched (see lib/diagnostics.ts).
   const rid = newRequestId();
   config.headers['X-Request-ID'] = rid;
+  // A file upload must go as multipart. With the default JSON content type axios
+  // turns a FormData into JSON and the server answers 422 (Record Spots "Upload a
+  // recording" never worked). Let the browser set multipart with its boundary.
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    config.headers.delete('Content-Type');
+  }
   (config as unknown as { _diag: { rid: string; t0: number } })._diag = { rid, t0: performance.now() };
   return config;
 });

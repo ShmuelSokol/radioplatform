@@ -579,6 +579,7 @@ section('shell', async () => {
     const page = await newPage(null, view);
     await step(`F-GLOBAL-1 ${view}: public nav links Stations / Program Guide / DJs / Archives navigate`, async () => {
       await page.goto(`${BASE}/stations`);
+      await page.locator("nav a", { hasText: "KBR Studio" }).waitFor();
       for (const [label, p] of [['Program Guide', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives'], ['Stations', '/stations']]) {
         const link = page.locator('nav').getByRole('link', { name: label, exact: true });
         if (view === 'iphone' && !(await link.first().isVisible())) {
@@ -587,8 +588,9 @@ section('shell', async () => {
           assert(await menu.isVisible().catch(() => false), `no way to reach "${label}" on a phone (links hidden, no menu)`);
           await menu.click();
         }
-        await page.locator('nav').getByRole('link', { name: label, exact: true }).first().click();
+        await page.locator("nav").getByRole("link", { name: label, exact: true }).locator("visible=true").first().click();
         await waitPath(page, p);
+        await page.locator("nav a", { hasText: "KBR Studio" }).waitFor();
       }
     }, page);
     await closePage(page);
@@ -761,6 +763,24 @@ section('shell', async () => {
           return { docW: document.documentElement.scrollWidth, mainW, vw, docH: document.documentElement.scrollHeight, vh: innerHeight };
         }, devW);
         if (m.docW > devW + 1) bad.push(`${short(p)} ${m.docW}px wide`);
+        if (view === 'iphone') {
+          // Every visible button and button-like link must sit fully inside the screen
+          // (the Archives "+ New Archive" was cut off at the right edge), unless it lives
+          // in its own sideways scroller.
+          const cut = await page.evaluate((vw) => {
+            const out = [];
+            for (const el of document.querySelectorAll('main button, main a[class*="bg-"], main [role="button"]')) {
+              const r = el.getBoundingClientRect();
+              if (!r.width || !r.height || getComputedStyle(el).visibility === 'hidden') continue;
+              let q = el.parentElement, scroller = false;
+              while (q && q !== document.body) { const o = getComputedStyle(q).overflowX; if (o === 'auto' || o === 'scroll') { scroller = true; break; } q = q.parentElement; }
+              if (scroller) continue;
+              if (r.left < -1 || r.right > vw + 1) out.push(`"${(el.innerText || el.getAttribute('aria-label') || el.title || '').trim().slice(0, 24)}" ${Math.round(r.left)}..${Math.round(r.right)}`);
+            }
+            return out.slice(0, 3);
+          }, devW);
+          if (cut.length) bad.push(`${short(p)} buttons off screen: ${cut.join(', ')}`);
+        }
         if (view === 'desktop' && m.mainW < devW * 0.9) bad.push(`${short(p)} main only ${Math.round(m.mainW)}px`);
         if (m.docH > m.vh + 60 && p !== '/admin/dashboard') {
           await page.evaluate(() => scrollTo(0, 400));
@@ -1640,6 +1660,174 @@ section('spot-schedule', async () => {
       await page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).last().selectOption(FX.station.id);
       assert(await page.locator('label', { hasText: 'Spots on the hour play' }).locator('select').inputValue() === to, 'not kept');
       await page.locator('label', { hasText: 'Spots on the hour play' }).locator('select').selectOption(was);
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Record spots ────────────────────────────────────────────────────────────
+section('spot-recordings', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    await serveAudio(page);
+    const title = `E2E Spot Rec ${view} ${RUN}`;
+    const cardR = () => page.locator('li', { hasText: title }).first();
+    await step(`F-SPOTREC-1 ${view}: Save is off until sponsor, name and script are filled; create checks the wording`, async () => {
+      await page.goto(`${BASE}/admin/spot-recordings`);
+      const save = page.getByRole('button', { name: 'Save and check wording' });
+      assert(await save.isDisabled(), 'Save enabled on an empty form');
+      await page.locator('select', { has: page.locator('option', { hasText: 'Choose a sponsor' }) }).selectOption(FX.sponsor.id);
+      await page.getByPlaceholder('Name for this spot').fill(title);
+      await page.getByPlaceholder("Kol B'ramah sponsor ...").fill('Kol Bramah is sponsored by E2E Company, call 555 0100 today.');
+      const { ms } = await timedResponse(page, (m, p) => m === 'POST' && p.startsWith('/spot-recordings'), () => save.click());
+      await cardR().waitFor();
+      await cardR().getByText(/Wording (fits the rules|needs changes)/).waitFor();
+      return `created and checked in ${ms} ms`;
+    }, page);
+    await step(`F-SPOTREC-2 ${view}: Make the audio gives placeholder tones (no Approve); ▶ Listen plays`, async () => {
+      await timedResponse(page, (m, p) => m === 'POST' && p.includes('/spot-recordings/'), () => cardR().getByRole('button', { name: 'Make the audio' }).click());
+      await cardR().getByText('Placeholder tones').waitFor();
+      assert(!(await cardR().getByRole('button', { name: 'Approve for air' }).count()), 'placeholder audio can be approved');
+      await cardR().getByRole('button', { name: '▶ Listen' }).click();
+      await cardR().locator('audio').waitFor({ state: 'attached' });
+    }, page);
+    await step(`F-SPOTREC-2 ${view}: Edit script / Cancel keeps text; Save and re-check updates it`, async () => {
+      await cardR().getByRole('button', { name: 'Edit script' }).click();
+      await cardR().locator('textarea').fill('changed then cancelled');
+      await cardR().getByRole('button', { name: 'Cancel' }).click();
+      await cardR().getByText('call 555 0100 today').waitFor();
+      await cardR().getByRole('button', { name: 'Edit script' }).click();
+      await cardR().locator('textarea').fill('Kol Bramah is brought to you by E2E Company.');
+      const { ms } = await timedResponse(page, (m, p) => (m === 'PUT' || m === 'PATCH') && p.includes('/spot-recordings/'), () => cardR().getByRole('button', { name: 'Save and re-check wording' }).click());
+      await cardR().getByText('brought to you by E2E Company').first().waitFor();
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-SPOTREC-2/3 ${view}: Upload a recording, then Approve for air puts it in the library`, async () => {
+      const f = makeTone(path.join(TMP, `rec-${view}.mp3`), 15, 660);
+      await timedResponse(page, (m, p) => m === 'POST' && p.includes('/spot-recordings/'), () => cardR().locator('input[type=file]').setInputFiles(f));
+      const approve = cardR().getByRole('button', { name: 'Approve for air' });
+      await approve.waitFor();
+      await timedResponse(page, (m, p) => m === 'POST' && p.includes('approve'), () => approve.click());
+      await cardR().getByRole('link', { name: 'Schedule this spot' }).waitFor();
+      const lib = await api('GET', `/assets?search=${encodeURIComponent(title)}&limit=5`, { token: USERS.admin.token }).catch(() => null);
+      return lib ? `library has ${(lib.assets || []).length} match(es)` : 'approved';
+    }, page);
+    await step(`F-SPOTREC-3 ${view}: Reject a second spot, then Remove both`, async () => {
+      const t2 = `${title} B`;
+      await page.locator('select', { has: page.locator('option', { hasText: 'Choose a sponsor' }) }).selectOption(FX.sponsor.id);
+      await page.getByPlaceholder('Name for this spot').fill(t2);
+      await page.getByPlaceholder("Kol B'ramah sponsor ...").fill('Kol Bramah thanks E2E Company.');
+      await page.getByRole('button', { name: 'Save and check wording' }).click();
+      const c2 = page.locator('li', { hasText: t2 }).first();
+      await c2.waitFor();
+      await timedResponse(page, (m, p) => m === 'POST' && p.includes('reject'), () => c2.getByRole('button', { name: 'Reject' }).click());
+      await c2.getByRole('button', { name: 'Reject' }).waitFor({ state: 'detached' });
+      for (const c of [c2, cardR()]) {
+        await timedSave(page, 'remove spot', (m, p) => m === 'DELETE' && p.includes('/spot-recordings/'), () => c.getByRole('button', { name: 'Remove' }).click());
+        await c.waitFor({ state: 'detached' });
+      }
+    }, page);
+    await closePage(page);
+  }
+});
+
+// ── Program blocks ──────────────────────────────────────────────────────────
+section('program-blocks', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    const name = `E2E PB ${view} ${RUN}`;
+    const form = page.locator('form');
+    const items = () => page.getByTestId('block-items').locator('li');
+    await step(`F-PROGBLOCKS-1 ${view}: Save with no name / no items says what is missing`, async () => {
+      await page.goto(`${BASE}/admin/program-blocks`);
+      await page.getByLabel('Station').selectOption(FX.takeover.id);
+      await page.getByRole('button', { name: 'New block' }).click();
+      await form.getByRole('button', { name: 'Save block' }).click();
+      await form.getByText('Give the block a name.').waitFor({ timeout: 2000 });
+      await form.getByPlaceholder('Weather Sponsors').fill(name);
+      await form.getByRole('button', { name: 'Save block' }).click();
+      await form.getByText(/Add at least one (time of day|item)|Choose at least one day/).waitFor({ timeout: 2000 });
+    }, page);
+    await step(`F-PROGBLOCKS-1 ${view}: timing soft-with-limit, days, every hour Set / Clear all, add and remove times`, async () => {
+      await form.locator('#block-timing').selectOption('soft-limit');
+      await form.getByLabel('Minutes to wait at most').fill('4');
+      for (const d of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) {
+        const b = form.getByRole('button', { name: d, exact: true });
+        if (await b.getAttribute('aria-pressed') !== 'true') await b.click();
+      }
+      await form.getByLabel('Minute of every hour').selectOption('30');
+      await form.getByRole('button', { name: 'Set', exact: true }).click();
+      assert(await form.getByRole('button', { name: /^Remove / }).count() === 24, 'every hour did not give 24 times');
+      await form.getByRole('button', { name: 'Clear all' }).click();
+      assert(await form.getByRole('button', { name: /^Remove / }).count() === 0, 'Clear all left times');
+      FX.pbTime = stationClock('UTC', 20);
+      for (const t of [FX.pbTime, '05:05']) {
+        await form.getByLabel('Time to add').fill(t);
+        await form.getByRole('button', { name: 'Add time', exact: true }).click();
+      }
+      await form.getByRole('button', { name: /^Remove 5:05/ }).click();
+      assert(await form.getByRole('button', { name: /^Remove / }).count() === 1, 'remove time failed');
+    }, page);
+    await step(`F-PROGBLOCKS-2 ${view}: items: library search, type that takes turns, sponsor places, time, weather; ↑/↓; remove`, async () => {
+      await form.locator('#block-search').fill(FX.assets[0].title.slice(0, 10));
+      await form.getByRole('button', { name: new RegExp(FX.assets[0].title) }).click();
+      await form.locator('#block-combo').selectOption({ index: 1 });
+      await form.locator('#block-combo').locator('xpath=..').getByRole('button', { name: 'Add' }).click();
+      await form.getByLabel('Number of sponsor places').fill('2');
+      await form.getByRole('button', { name: 'Add sponsor places' }).click();
+      await form.getByRole('button', { name: 'Add the time' }).click();
+      await form.getByRole('button', { name: 'Add the weather' }).click();
+      assert(await items().count() === 5, `items ${await items().count()}`);
+      await form.getByRole('button', { name: 'Move Time announcement up' }).click();
+      assert((await items().nth(2).innerText()).includes('Time announcement'), 'move up failed');
+      await form.getByRole('button', { name: 'Move Time announcement down' }).click();
+      assert((await items().nth(3).innerText()).includes('Time announcement'), 'move down failed');
+      await form.getByRole('button', { name: 'Remove Weather' }).click();
+      await form.getByRole('button', { name: 'Remove 2 sponsor places' }).click();
+      assert(await items().count() === 3, 'remove item failed');
+    }, page);
+    const cardP = () => page.getByTestId('block-card').filter({ hasText: name });
+    await step(`F-PROGBLOCKS-3 ${view}: Save block saves fast; card shows times, every day, timing`, async () => {
+      const { ms, resp } = await timedSave(page, 'save program block', (m, p) => m === 'POST' && p.startsWith('/program-blocks'), () => form.getByRole('button', { name: 'Save block' }).click());
+      const sent = resp.request().postDataJSON();
+      assert(sent.timing_mode === 'soft' && sent.latest_minutes === 4 && sent.items.length === 3, `sent ${JSON.stringify(sent).slice(0, 250)}`);
+      await cardP().waitFor();
+      assert((await cardP().innerText()).includes('every day'), 'card text');
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-PROGBLOCKS-4 ${view}: next-24-hours preview lists the block at its time`, async () => {
+      const sec = page.locator('section', { has: page.getByRole('heading', { name: 'Next 24 hours' }) });
+      await sec.getByText(name).first().waitFor({ timeout: 5000 });
+      const [hh, mm] = FX.pbTime.split(':').map(Number);
+      await sec.getByText(new RegExp(`(^|\\D)0?(${hh}|${hh % 12 || 12}):${String(mm).padStart(2, '0')}`)).first().waitFor();
+    }, page);
+    if (view === 'desktop') {
+      await step('F-PROGBLOCKS-5 the block is queued on the station at its clock time (source block)', async () => {
+        const [h, m] = FX.pbTime.split(':').map(Number);
+        const deadline = Date.now() + 10000;
+        let seen = [];
+        while (Date.now() < deadline) {
+          const q = await api('GET', `/stations/${FX.takeover.id}/queue?limit=200`, { token: USERS.admin.token });
+          const hit = q.entries.filter(e => e.source === 'block');
+          seen = hit.map(e => e.preempt_at || e.estimated_start);
+          const at = hit.find(e => { const d = new Date(e.preempt_at || e.estimated_start); return d.getUTCHours() === h && d.getUTCMinutes() === m; });
+          if (at) return `queued for ${at.preempt_at || at.estimated_start}`;
+          await new Promise(r => setTimeout(r, 500));
+        }
+        throw new Error(`no block entry at ${FX.pbTime} UTC (block entries: ${seen.slice(0, 3).join(', ') || 'none'})`);
+      }, page);
+    }
+    await step(`F-PROGBLOCKS-3 ${view}: Edit → Save changes; Turn off / on; Delete`, async () => {
+      await cardP().getByRole('button', { name: 'Edit' }).click();
+      await page.getByRole('heading', { name: 'Edit block' }).waitFor();
+      await form.locator('#block-timing').selectOption('hard');
+      await timedSave(page, 'save changes', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/program-blocks/'), () => form.getByRole('button', { name: 'Save changes' }).click());
+      await timedSave(page, 'turn off', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/program-blocks/'), () => cardP().getByRole('button', { name: 'Turn off' }).click());
+      await cardP().getByText('Off', { exact: true }).waitFor();
+      await timedSave(page, 'turn on', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/program-blocks/'), () => cardP().getByRole('button', { name: 'Turn on' }).click());
+      await cardP().getByRole('button', { name: 'Turn off' }).waitFor();
+      await timedSave(page, 'delete', (m, p) => m === 'DELETE' && p.startsWith('/program-blocks/'), () => cardP().getByRole('button', { name: 'Delete' }).click());
+      await cardP().waitFor({ state: 'detached' });
     }, page);
     await closePage(page);
   }

@@ -140,11 +140,11 @@ export default function AdminArchives() {
           Show Archives
           {data && <span className="ml-2 text-gray-500 text-sm font-normal">({data.total})</span>}
         </h1>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 min-w-0 max-w-full">
           <select
             value={stationFilter}
             onChange={e => setStationFilter(e.target.value)}
-            className="bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700"
+            className="min-w-0 max-w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700"
           >
             <option value="">All Stations</option>
             {stations.map(s => (
