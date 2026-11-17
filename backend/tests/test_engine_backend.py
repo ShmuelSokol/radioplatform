@@ -708,9 +708,6 @@ async def test_cut_policy_time_check_ends_the_shiur(client, db_session, eng):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: engine mode ignores timed_during_long_items=pause (the default): the time check "
-    "cuts the shiur and nothing queues it to carry on (radio.liq skips the interrupted track)"))
 async def test_pause_policy_resumes_the_shiur_on_the_engine(client, db_session, eng):
     """Reproduction: shiur 10 min in on the engine; hh:00 time check handed and started on the
     timed lane; no 'resume@' entry is queued, so the remaining 50 minutes are lost."""
@@ -727,9 +724,6 @@ async def test_pause_policy_resumes_the_shiur_on_the_engine(client, db_session, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: engine mode ignores timed_during_long_items=wait: the tick hands the time check "
-    "to the timed lane on the hour although the shiur on air should finish first"))
 async def test_wait_policy_holds_the_time_check_until_the_shiur_ends(client, db_session, eng):
     """Reproduction: policy wait, shiur 10 of 60 min in; the tick 30 s before hh:00 sends /timed."""
     station, _, engine, _ = eng
