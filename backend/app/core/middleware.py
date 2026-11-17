@@ -53,6 +53,39 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             log_buffer.request_id_var.reset(token)
 
 
+class ErrorsKeepCors:
+    """Turn an unhandled error into a plain 500 answer INSIDE the CORS layer.
+
+    Starlette answers unhandled errors in its outermost layer, outside CORS, so
+    the browser got a 500 with no CORS headers and reported a CORS error instead
+    of the real failure (seen on kbrlive.com 2026-11-17). Pure ASGI on purpose:
+    BaseHTTPMiddleware would add another task per request."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        started = False
+
+        async def send_wrapper(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            logger.exception("Unhandled error on %s %s", scope.get("method"), scope.get("path"))
+            if started:
+                raise
+            from fastapi.responses import JSONResponse
+            response = JSONResponse(status_code=500, content={"detail": "Server error. Please try again."})
+            await response(scope, receive, send)
+
+
 def setup_middleware(app: FastAPI) -> None:
     # GZip compression for responses > 500 bytes
     # Level 5, not the default 9: nearly the same size for JSON at a fraction of the
@@ -68,6 +101,9 @@ def setup_middleware(app: FastAPI) -> None:
 
     # Request ID correlation
     app.add_middleware(RequestIDMiddleware)
+
+    # Errors answered inside CORS, so the browser sees the real 500
+    app.add_middleware(ErrorsKeepCors)
 
     # CORS — locked down for production
     app.add_middleware(

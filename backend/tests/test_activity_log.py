@@ -163,3 +163,55 @@ def test_names_for_unlisted_routes():
     assert activity_log.describe_device(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
     ) == "Windows · Chrome"
+
+
+@pytest.mark.asyncio
+async def test_next_that_changes_nothing_says_why(client, auth_headers, db_session):
+    station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=10.0)
+    playing.source = "block"  # a timed item plays to the end
+    await db_session.commit()
+    from app.models.asset import Asset
+    title = (await db_session.get(Asset, playing.asset_id)).title
+    assert (await client.post(f"/api/v1/stations/{station.id}/queue/skip", headers=auth_headers)).status_code == 200
+    row = (await _activity(client, auth_headers, category="control"))["items"][0]
+    assert row["label"] == "Pressed Next"
+    assert row["detail"] == f"Timed item plays to the end: {title}"
+
+
+@pytest.mark.asyncio
+async def test_people_summary_counts_each_person(client, auth_headers, admin_user):
+    for path in ("/admin/dashboard", "/admin/playlists"):
+        await client.post("/api/v1/activity/page-view", json={"path": path, "title": path}, headers=auth_headers)
+    await client.post("/api/v1/stations", json={"name": "Kol B'ramah People"}, headers=auth_headers)
+    await client.post("/api/v1/auth/login", json={"email": "stranger@test.com", "password": "x"})
+    await activity_log.wait_idle()
+    res = await client.get("/api/v1/activity/people", headers=auth_headers)
+    assert res.status_code == 200
+    people = {p["user_email"]: p for p in res.json()["people"]}
+    me = people["testadmin@test.com"]
+    assert me["user_id"] == str(admin_user.id)
+    assert me["views"] == 2
+    assert me["actions"] == 2  # signed in + added station
+    assert me["by_category"]["settings"] == 1
+    stranger = people["stranger@test.com"]
+    assert stranger["user_id"] is None and stranger["failed"] == 1
+    # The stranger's own timeline
+    rows = await _activity(client, auth_headers, user_email="stranger@test.com")
+    assert [r["label"] for r in rows["items"]] == ["Sign-in failed"]
+
+
+@pytest.mark.asyncio
+async def test_server_errors_keep_cors_headers():
+    from app.main import create_app
+    from httpx import ASGITransport, AsyncClient
+
+    app = create_app()
+
+    @app.get("/api/v1/_boom")
+    async def _boom():
+        raise RuntimeError("database went away")
+
+    async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test") as ac:
+        res = await ac.get("/api/v1/_boom", headers={"Origin": "https://kbrlive.com"})
+    assert res.status_code == 500
+    assert res.headers.get("access-control-allow-origin") == "https://kbrlive.com"

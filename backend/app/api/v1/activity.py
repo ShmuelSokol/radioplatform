@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, require_admin
@@ -73,26 +73,18 @@ def _row(log: AuditLog, stations: dict[str, str]) -> dict:
     }
 
 
-@router.get("")
-async def list_activity(
-    user_id: str | None = Query(None),
-    station_id: str | None = Query(None),
-    category: str | None = Query(None, description="comma-separated"),
-    q: str | None = Query(None, max_length=200),
-    start: str | None = Query(None, description="ISO time, inclusive"),
-    end: str | None = Query(None, description="ISO time, exclusive"),
-    include_views: bool = Query(True),
-    failed_only: bool = Query(False),
-    after: str | None = Query(None, description="only rows newer than this ISO time (live updates)"),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
+def _conditions(
+    *, user_id: str | None, user_email: str | None, station_id: str | None, category: str | None,
+    q: str | None, start: str | None, end: str | None, include_views: bool, failed_only: bool,
+    after: str | None = None,
 ):
     conds = []
     uid = _uuid(user_id)
     if user_id and uid:
         conds.append(AuditLog.user_id == uid)
+    if user_email:
+        conds.append(AuditLog.user_id.is_(None))
+        conds.append(func.lower(AuditLog.user_email) == user_email.lower())
     sid = _uuid(station_id)
     if station_id and sid:
         conds.append(AuditLog.station_id == sid)
@@ -125,16 +117,107 @@ async def list_activity(
             func.lower(func.coalesce(AuditLog.ip_address, "")).like(like),
             func.lower(func.coalesce(AuditLog.location, "")).like(like),
         ))
-    where = and_(*conds) if conds else True
+    return and_(*conds) if conds else True
 
+
+@router.get("")
+async def list_activity(
+    user_id: str | None = Query(None),
+    user_email: str | None = Query(None, description="rows with no account (e.g. failed sign-ins) for this email"),
+    station_id: str | None = Query(None),
+    category: str | None = Query(None, description="comma-separated"),
+    q: str | None = Query(None, max_length=200),
+    start: str | None = Query(None, description="ISO time, inclusive"),
+    end: str | None = Query(None, description="ISO time, exclusive"),
+    include_views: bool = Query(True),
+    failed_only: bool = Query(False),
+    after: str | None = Query(None, description="only rows newer than this ISO time (live updates)"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    where = _conditions(
+        user_id=user_id, user_email=user_email, station_id=station_id, category=category, q=q,
+        start=start, end=end, include_views=include_views, failed_only=failed_only, after=after,
+    )
     stations = await _station_names(db)
     rows = (await db.execute(
         select(AuditLog).where(where).order_by(AuditLog.created_at.desc()).offset(skip).limit(limit)
     )).scalars().all()
     total = None
-    if not ta:  # live polls only need the new rows
+    if not after:  # live polls only need the new rows
         total = (await db.execute(select(func.count()).select_from(AuditLog).where(where))).scalar() or 0
     return {"total": total, "items": [_row(r, stations) for r in rows]}
+
+
+@router.get("/people")
+async def activity_by_person(
+    station_id: str | None = Query(None),
+    category: str | None = Query(None),
+    q: str | None = Query(None, max_length=200),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    include_views: bool = Query(True),
+    failed_only: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """One line per person for the period: how many actions, screens opened,
+    refused or failed, by kind, and when they last did something."""
+    where = _conditions(
+        user_id=None, user_email=None, station_id=station_id, category=category, q=q,
+        start=start, end=end, include_views=include_views, failed_only=failed_only,
+    )
+    failed = func.sum(case((AuditLog.status_code >= 400, literal_column("1")), else_=literal_column("0")))
+    # No bound parameters in the grouped expression: Postgres must see the same text
+    # in SELECT and GROUP BY (with "" as a parameter it saw $1 and $2 and refused)
+    email = func.lower(func.coalesce(AuditLog.user_email, literal_column("''")))
+    res = await db.execute(
+        select(
+            AuditLog.user_id, email, AuditLog.category,
+            func.count(), failed, func.max(AuditLog.created_at),
+        ).where(where).group_by(AuditLog.user_id, email, AuditLog.category)
+    )
+    people: dict[str, dict] = {}
+    for uid, email, cat, n, n_failed, last in res.all():
+        key = f"u:{uid}" if uid else f"e:{email}"
+        p = people.setdefault(key, {
+            "key": key, "user_id": str(uid) if uid else None, "user_email": email or None,
+            "actions": 0, "views": 0, "failed": 0, "last_at": None, "by_category": {},
+        })
+        cat = cat or "other"
+        if cat == "view":
+            p["views"] += n
+        else:
+            p["actions"] += n
+        p["failed"] += int(n_failed or 0)
+        p["by_category"][cat] = p["by_category"].get(cat, 0) + n
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if last is not None and (p["last_at"] is None or last > p["last_at"]):
+            p["last_at"] = last
+        if uid and email and not p["user_email"]:
+            p["user_email"] = email
+
+    ids = [uuid.UUID(p["user_id"]) for p in people.values() if p["user_id"]]
+    info: dict[str, tuple] = {}
+    if ids:
+        for i, e, n, r in (await db.execute(
+            select(User.id, User.email, User.display_name, User.role).where(User.id.in_(ids))
+        )).all():
+            info[str(i)] = (e, n, r.value if hasattr(r, "value") else r)
+    out = []
+    for p in people.values():
+        if p["user_id"] and p["user_id"] in info:
+            e, n, r = info[p["user_id"]]
+            p.update(user_email=e, user_name=n, user_role=r)
+        else:
+            p.update(user_name=None, user_role=None)
+        p["last_at"] = p["last_at"].isoformat() if p["last_at"] else None
+        out.append(p)
+    out.sort(key=lambda p: (p["actions"] + p["views"], p["last_at"] or ""), reverse=True)
+    return {"people": out}
 
 
 @router.get("/filters")

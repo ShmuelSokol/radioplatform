@@ -188,11 +188,24 @@ MAX_VALUE = 300
 
 
 class _Capture:
-    __slots__ = ("objects", "counts")
+    __slots__ = ("objects", "counts", "note", "note_assets")
 
     def __init__(self) -> None:
         self.objects: dict[tuple[str, str], dict] = {}
         self.counts: dict[tuple[str, str], int] = {}
+        self.note: str | None = None
+        self.note_assets: list[str] = []
+
+
+def note(text: str, asset_ids: list | None = None) -> None:
+    """Let a route say what happened when it changed nothing in the database
+    (e.g. Next kept a timed item on air). Shown as the row's detail, with the
+    titles of `asset_ids` after it."""
+    cap = _capture.get()
+    if cap is None:
+        return
+    cap.note = text[:200]
+    cap.note_assets = [str(a) for a in (asset_ids or []) if a][:5]
 
 
 _capture: contextvars.ContextVar[_Capture | None] = contextvars.ContextVar("activity_capture", default=None)
@@ -524,6 +537,10 @@ async def _insert(batch: list[dict]) -> None:
     from app.models.audit_log import AuditLog
     from app.models.user import User
 
+    # Place lookups are web calls: do them before taking a database connection
+    for r in batch:
+        r["location"] = await _location(r.get("ip_address"))
+
     async with _factory()() as db:
         # Who: email, name and role (cached for a few minutes)
         now = time.monotonic()
@@ -576,10 +593,13 @@ async def _insert(batch: list[dict]) -> None:
                     added = ", ".join(dict.fromkeys(titles[a] for a in extra if a in titles))
                     if added:
                         r["detail"] = f"{added} · {r['detail']}"[:500]
+            note_text, note_assets = r.pop("_note", None), r.pop("_note_assets", None) or []
+            if note_text:
+                on_air = ", ".join(titles[a] for a in note_assets if a in titles)
+                r["detail"] = f"{note_text}: {on_air}"[:500] if on_air else note_text
             names = [titles[a] for a in wanted if a in titles]
             if names and not r.get("detail"):
                 r["detail"] = ", ".join(dict.fromkeys(names))[:500]
-            r["location"] = await _location(r.get("ip_address"))
             for k in ("user_id", "station_id"):
                 if r.get(k):
                     try:
@@ -791,6 +811,8 @@ class ActivityMiddleware(BaseHTTPMiddleware):
                 elif o["op"] == "create":
                     asset_ids.append(o["asset_id"])
         asset_ids = list(dict.fromkeys(asset_ids))[:10]
+        note_text = cap.note if not (went_off or went_on) else None
+        note_assets = cap.note_assets if note_text else []
 
         counts = {f"{t}:{op}": n for (t, op), n in cap.counts.items()}
         resource_type = template.strip("/").split("/")[0] if template.strip("/") else "site"
@@ -832,8 +854,10 @@ class ActivityMiddleware(BaseHTTPMiddleware):
             "user_agent": (ua or "")[:400] or None,
             "device": describe_device(ua),
             "request_id": getattr(request.state, "request_id", None),
-            "_asset_ids": asset_ids + [a for a in (went_off, went_on) if a],
+            "_asset_ids": asset_ids + [a for a in (went_off, went_on) if a] + note_assets,
             "_asset_names_for": asset_ids,
             "_went_off": went_off,
             "_went_on": went_on,
+            "_note": note_text,
+            "_note_assets": note_assets,
         })
