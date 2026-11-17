@@ -36,3 +36,5 @@ heard again" can fail when the next song happens to be the same one (three_item_
 passed alone).
 
 Added 2026-11-17: `output_limiter` (true-peak limiter), `next_after_idle` (the backend's kept connection after 35 s idle), `next_twice` (a second Next 0.5 to 5 s after a Next; OPEN: lost within about 3 s, the crossfade window). `engine_crash_restart` also presses Next right after the restart. `fit_before_hour` (PR 221: a long item that would start just before a hard time check is swapped with a short song while the engine holds the next one; the time check stays on its second).
+
+Added 2026-11-17 (Main cutover): `next_skips_one` (every Next moves exactly one item, also right after a natural change and with nothing queued), `engine_restart_15s_before_hour`, `engine_restart_across_hour`, `backend_restart_before_hour` (a hard time check airs once whatever restarts around it). `h.rows()` returns every queue row since the run began: look entries up by the ids `h.queue` returned, not by asset. A scenario that takes the backend away must leave it at least 15 s before a timed item to hand it over again.

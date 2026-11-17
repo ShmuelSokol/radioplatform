@@ -106,11 +106,18 @@ Where: **H** = harness (`infra/streaming/harness/run_harness.py`, real Liquidsoa
 | C-11 | Friday | Shabbos blackout start and Motzei Shabbos return | silent on time, back on time, first item right |
 | C-12 | after 24 h | compare the play log with the planned queue | nothing skipped, nothing twice, every timed item within 1 s |
 
-## Open blockers (2026-11-17 22:30Z)
-1. A second Next within 3 s is lost (A2-2). Engine thread.
-2. Two engines on the 1-core droplet are unproven since PR 209/214 (A7-1, A7-2). If they do not pass, the droplet needs 2 vCPU / 2 GB, which costs money and needs Shmuel.
-3. Live show on a stream-server station has never been tested (A6-3). Main is the station that carries live shows.
-4. iPhone has only been checked in desktop WebKit (A6-2).
-5. Main's emergency music would be Jerusalem's (one shared folder). Not silence, so not a blocker; engine thread decides.
-6. FM transmitter: not fed by the site today (the station still runs KBR Studio), so the move does not touch FM. Closed.
-7. No Shabbos has yet passed on the engine (A5-2).
+## Results so far (2026-11-17 23:25Z)
+- Harness on the code Main will run (main with PR 224), 40 scenarios: 173 checks passed. Two failed and both were faults in the tests (a check that read an old queue row; a scenario that left the backend 3 s to hand a time check over), fixed and passed on re-run.
+- New: `engine_restart_15s_before_hour`, `engine_restart_across_hour`, `backend_restart_before_hour` (15 of 15), `next_skips_one` (14 of 14), `next_twice` (4 of 4).
+- A1-9 clock: pass. A3-6 emergency folder: per station since PR 224.
+- A5-1 test blackout on Jerusalem: pass (cut 3.6 s after the start, 304.9 s silent). Blemish at the end: 5.6 s of one song, 1.1 s of silence, then another song [H-10c].
+- A6-3 live show on Jerusalem: **FAILED**. The engine does not pause, so music and host go out together, and the host was still heard about 60 s after End show [F-LISTEN-42, -42b].
+- A1-7: at 23:00Z a song started 2 s before the time check and was cut [F-BLOCKS-8c].
+
+## Open blockers (2026-11-17 23:25Z)
+1. Live show on a stream-server station fails (A6-3). Main carries the live shows. Either fixed and re-tested, or Main moves with live shows known broken and none scheduled; that choice is Shmuel's.
+2. Host still heard after End show (F-LISTEN-42b): an open microphone on air. Must be fixed whichever player Main is on.
+3. Two engines for one hour with zero catch-up lines (A7-1): running since 23:16Z.
+4. Real iPhone (A6-2): not a gate, asked of Shmuel.
+5. Not gates, still open: the blackout-end blemish, a song starting seconds before a hard item, Shabbos on the engine (first one Friday on Jerusalem).
+Closed: lost second Next (PR 224), droplet clock, emergency folder, FM (the transmitter is not fed by the site today).
