@@ -58,6 +58,7 @@ const VIEWS = {
 // Checks that fail because the SITE is wrong. Key = check name prefix, value = the bug.
 // A listed check that passes is reported as FIXED? so the list stays honest.
 const KNOWN_BUGS = {
+  'F-BLOCKS-5': 'songs added to a block ("+ Add song") never reach the queue: SchedulingService.get_next_asset_for_block has no caller; the queue fills from rotation',
 };
 
 // ── Result bookkeeping ──────────────────────────────────────────────────────
@@ -266,10 +267,11 @@ async function setup() {
   // Sponsor linked to the sponsor login (the portal looks it up by user_id).
   FX.sponsor = await api('POST', '/sponsors', { token: T, body: { name: `E2E Sponsor ${RUN}`, length_seconds: 15, audio_file_path: 'spots/e2e.mp3', user_id: USERS.sponsor.id, company_name: 'E2E Co' } });
 
-  // A few short library items.
+  // A few library items, song length (short test files make the station queue thousands
+  // of entries long, which is not what a real station has).
   FX.assets = [];
   for (const [i, t] of [['1', 'music'], ['2', 'music'], ['3', 'spot']].entries()) {
-    const f = makeTone(path.join(TMP, `fx${i}.mp3`), 6 + i, 300 + i * 120);
+    const f = makeTone(path.join(TMP, `fx${i}.mp3`), t[1] === 'spot' ? 30 : 170 + i * 15, 300 + i * 120, '32k');
     const form = new FormData();
     form.append('file', new Blob([fs.readFileSync(f)], { type: 'audio/mpeg' }), `fx${i}.mp3`);
     form.append('title', `E2E Tone ${t[0]} ${RUN}`);
@@ -277,6 +279,7 @@ async function setup() {
     form.append('artist', `E2E Artist ${i}`);
     FX.assets.push(await api('POST', '/assets/upload', { token: T, form }));
   }
+  FX.takeover = await api('POST', '/stations', { token: T, body: { name: `E2E Takeover ${RUN}`, timezone: 'UTC' } });
   FX.schedule = await api('POST', '/schedules', { token: T, body: { name: `E2E Base Schedule ${RUN}`, station_id: st.id } });
   const start = new Date(Date.now() + 3 * 3600e3), end = new Date(Date.now() + 4 * 3600e3);
   FX.show = await api('POST', '/live-shows', { token: T, body: { station_id: st.id, title: `E2E Fixture Show ${RUN}`, scheduled_start: start.toISOString(), scheduled_end: end.toISOString() } });
@@ -1030,18 +1033,18 @@ section('users', async () => {
       assert(await form.getByTestId('station-access').getByText(FX.station.name).locator('input').isChecked(), 'station tick not loaded');
       await field(form, 'Display Name').fill(`E2E Host edited ${view} ${RUN}`);
       await form.getByText('Every station, except protected ones').click();
-      const { ms, resp } = await timedSave(page, 'update user', (m, p) => m === 'PUT' && p.startsWith('/users/'), () => form.getByRole('button', { name: 'Update User' }).click());
+      const { ms, resp } = await timedSave(page, 'update user', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/users/'), () => form.getByRole('button', { name: 'Update User' }).click());
       assert(!('password' in resp.request().postDataJSON()) || !resp.request().postDataJSON().password, 'blank password sent');
       await rowOf(page, `E2E Host edited ${view}`).waitFor();
       await loginApi(email, pass); // old password still works
       return `saved in ${ms} ms`;
     }, page);
     await step(`F-USERS-2 ${view}: Disable then Enable`, async () => {
-      await timedSave(page, 'disable', (m, p) => m === 'PUT' && p.startsWith('/users/'), () => rowOf(page, email).getByRole('button', { name: 'Disable' }).click());
+      await timedSave(page, 'disable', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/users/'), () => rowOf(page, email).getByRole('button', { name: 'Disable' }).click());
       await rowOf(page, email).getByText('Disabled').waitFor();
       const r = await api('POST', '/auth/login', { body: { email, password: pass }, raw: true }); loginTimes.push(Date.now());
       assert(r.status >= 400, `disabled user can still sign in (${r.status})`);
-      await timedSave(page, 'enable', (m, p) => m === 'PUT' && p.startsWith('/users/'), () => rowOf(page, email).getByRole('button', { name: 'Enable' }).click());
+      await timedSave(page, 'enable', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/users/'), () => rowOf(page, email).getByRole('button', { name: 'Enable' }).click());
       await rowOf(page, email).getByText('Active').waitFor();
     }, page);
     await step(`F-USERS-1 ${view}: duplicate username shows the server's error in the form`, async () => {
@@ -1074,6 +1077,449 @@ section('users', async () => {
     await closePage(page);
   }
   await api('DELETE', `/stations/${other.id}`, { token: T }).catch(() => {});
+});
+
+// ── Rules ───────────────────────────────────────────────────────────────────
+section('rules', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('admin', view);
+    const name = `E2E Rule ${view} ${RUN}`;
+    const form = page.locator('form');
+    await step(`F-RULES-2 ${view}: new rule needs a name (validation)`, async () => {
+      await page.goto(`${BASE}/admin/rules`);
+      await page.getByRole('button', { name: '+ New Rule' }).click();
+      await form.locator('button[type=submit]').click();
+      assert(await field(form, 'Rule Name').evaluate(el => el.validationMessage), 'no message on empty name');
+    }, page);
+    await step(`F-RULES-2 ${view}: create interval rule (type, asset type, station, numbers, days) saves fast`, async () => {
+      await field(form, 'Rule Name').fill(name);
+      await field(form, 'Rule Type').selectOption('interval');
+      await field(form, 'Asset Type').selectOption('spot');
+      await field(form, 'Interval (minutes)').fill('20');
+      await field(form, 'Priority').fill('42');
+      await field(form, 'Station (blank').selectOption(FX.station.id);
+      await form.getByRole('button', { name: 'Sun', exact: true }).click(); // turn Sunday (6: Mon is 0) off
+      const { ms, resp } = await timedSave(page, 'create rule', (m, p) => m === 'POST' && p === '/rules', () => form.locator('button[type=submit]').click());
+      const sent = resp.request().postDataJSON();
+      assert(sent.rule_type === 'interval' && sent.asset_type === 'spot' && sent.interval_minutes === 20 && sent.priority === 42 && sent.station_id === FX.station.id && sent.days_of_week === '0,1,2,3,4,5', `sent ${JSON.stringify(sent)}`);
+      const row = rowOf(page, name);
+      await row.waitFor();
+      const t = await row.innerText();
+      assert(t.includes('20m') && t.includes(FX.station.name) && t.includes('42'), `row "${t.replace(/\s+/g, ' ')}"`);
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-RULES-1 ${view}: Edit saves; Off/On toggles active; Del (confirm) removes`, async () => {
+      await rowOf(page, name).getByRole('button', { name: 'Edit' }).click();
+      assert(await field(form, 'Rule Name').inputValue() === name, 'form not filled');
+      await field(form, 'Priority').fill('43');
+      await timedSave(page, 'update rule', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/rules/'), () => form.locator('button[type=submit]').click());
+      await rowOf(page, name).filter({ hasText: '43' }).waitFor();
+      await timedSave(page, 'rule off', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/rules/'), () => rowOf(page, name).getByRole('button', { name: 'Off' }).click());
+      await rowOf(page, name).getByRole('button', { name: 'On' }).waitFor();
+      assert(/opacity-40/.test(await rowOf(page, name).getAttribute('class')), 'inactive rule not dimmed');
+      await timedSave(page, 'rule on', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/rules/'), () => rowOf(page, name).getByRole('button', { name: 'On' }).click());
+      await rowOf(page, name).getByRole('button', { name: 'Off' }).waitFor();
+      await timedSave(page, 'delete rule', (m, p) => m === 'DELETE' && p.startsWith('/rules/'), () => rowOf(page, name).getByRole('button', { name: 'Del' }).click());
+      await rowOf(page, name).waitFor({ state: 'detached' });
+    }, page);
+    await step(`F-RULES-3 ${view}: Preview Schedule shows generated slots; Hide Preview`, async () => {
+      await page.getByRole('button', { name: 'Preview Schedule' }).click();
+      await page.getByText(/\d+ slots generated/).waitFor({ timeout: 8000 });
+      await page.getByRole('button', { name: 'Hide Preview' }).click();
+      await page.getByText(/slots generated/).waitFor({ state: 'detached' });
+    }, page);
+    await closePage(page);
+  }
+  for (const role of ['manager', 'dj', 'viewer']) {
+    const page = await newPage(role);
+    await step(`F-RULES-4 ${role}: rules are view only (no New Rule, no Edit/Del)`, async () => {
+      await api('POST', '/rules', { token: USERS.admin.token, body: { name: `E2E RO Rule ${role} ${RUN}`, rule_type: 'rotation', asset_type: 'music', songs_between: 3 } });
+      await page.goto(`${BASE}/admin/rules`);
+      await rowOf(page, `E2E RO Rule ${role}`).waitFor();
+      assert(!(await page.getByRole('button', { name: '+ New Rule' }).count()), 'New Rule offered');
+      assert(!(await rowOf(page, `E2E RO Rule ${role}`).getByRole('button', { name: 'Edit' }).isVisible()), 'Edit visible');
+      await page.getByTestId('view-only').waitFor();
+    }, page);
+    await closePage(page);
+  }
+  // These rules feed the live queue of every station; do not leave them behind.
+  for (const r of (await api('GET', '/rules', { token: USERS.admin.token })).rules.filter(r => r.name.startsWith('E2E '))) {
+    await api('DELETE', `/rules/${r.id}`, { token: USERS.admin.token }).catch(() => {});
+  }
+});
+
+// ── Schedules and schedule blocks ───────────────────────────────────────────
+const card = (page, text) => page.locator('div.bg-white.p-6.rounded-lg', { hasText: text }).first();
+section('schedules', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    const name = `E2E Schedule ${view} ${RUN}`;
+    await step(`F-SCHED-2 ${view}: create needs a station (validation), then Create saves fast`, async () => {
+      await page.goto(`${BASE}/admin/schedules`);
+      await page.getByRole('button', { name: 'New Schedule' }).click();
+      await field(page, 'Name').fill(name);
+      await page.getByRole('button', { name: 'Create', exact: true }).click();
+      assert(await field(page, 'Station').evaluate(el => el.validationMessage), 'no message when no station is picked');
+      await field(page, 'Station').selectOption(FX.station.id);
+      await field(page, 'Priority').fill('7');
+      const { ms } = await timedSave(page, 'create schedule', (m, p) => m === 'POST' && p === '/schedules', () => page.getByRole('button', { name: 'Create', exact: true }).click());
+      await card(page, name).filter({ hasText: 'Priority: 7' }).waitFor();
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-SCHED-1 ${view}: station filter shows only that station's schedules`, async () => {
+      await field(page, 'Filter by Station').selectOption(FX.station.id);
+      await card(page, name).waitFor();
+      const other = await api('POST', '/stations', { token: USERS.admin.token, body: { name: `E2E Filter St ${view} ${RUN}` } });
+      const s2 = await api('POST', '/schedules', { token: USERS.admin.token, body: { name: `E2E Other Sched ${view} ${RUN}`, station_id: other.id } });
+      await page.reload();
+      await field(page, 'Filter by Station').selectOption(FX.station.id);
+      await card(page, name).waitFor();
+      assert(!(await card(page, `E2E Other Sched ${view}`).count()), 'other station schedule shown');
+      await field(page, 'Filter by Station').selectOption('');
+      await card(page, `E2E Other Sched ${view}`).waitFor();
+      await api('DELETE', `/schedules/${s2.id}`, { token: USERS.admin.token }).catch(() => {});
+      await api('DELETE', `/stations/${other.id}`, { token: USERS.admin.token }).catch(() => {});
+    }, page);
+    await step(`F-SCHED-2 ${view}: Edit (priority, inactive) saves; Cancel closes`, async () => {
+      await card(page, name).getByRole('button', { name: 'Edit' }).click();
+      await page.getByRole('heading', { name: 'Edit Schedule' }).waitFor();
+      await field(page, 'Priority').fill('9');
+      await page.locator('form').getByText('Active', { exact: true }).locator('xpath=..').locator('input').uncheck();
+      await timedSave(page, 'update schedule', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/schedules/'), () => page.getByRole('button', { name: 'Update', exact: true }).click());
+      await card(page, name).filter({ hasText: 'Priority: 9' }).filter({ hasText: 'Inactive' }).waitFor();
+      await page.getByRole('button', { name: 'New Schedule' }).click();
+      await page.locator('form').getByRole('button', { name: 'Cancel' }).click();
+      await page.getByRole('heading', { name: 'Create Schedule' }).waitFor({ state: 'detached' });
+    }, page);
+    await step(`F-SCHED-2 ${view}: a save the server refuses shows its reason (was console only)`, async () => {
+      await page.route(`${API}/schedules`, r => r.request().method() === 'POST'
+        ? r.fulfill({ status: 400, contentType: 'application/json', body: '{"detail":"E2E refused this schedule"}' }) : r.continue());
+      await page.getByRole('button', { name: 'New Schedule' }).click();
+      await field(page, 'Station').selectOption(FX.station.id);
+      await field(page, 'Name').fill('refused one');
+      await page.getByRole('button', { name: 'Create', exact: true }).click();
+      await page.getByRole('alert').filter({ hasText: 'E2E refused this schedule' }).waitFor({ timeout: 2000 });
+      await page.unroute(`${API}/schedules`);
+      await page.locator('form').getByRole('button', { name: 'Cancel' }).click();
+    }, page);
+    await step(`F-SCHED-3 / F-BLOCKS-1 ${view}: Blocks opens the block page; back link returns`, async () => {
+      await card(page, name).getByRole('button', { name: 'Blocks' }).click();
+      await page.waitForURL(/\/admin\/schedules\/[^/]+\/blocks$/);
+      await page.getByRole('heading', { name: `${name}: blocks` }).waitFor();
+      await page.getByRole('button', { name: '← Schedules' }).click();
+      await waitPath(page, '/admin/schedules');
+    }, page);
+    await step(`F-SCHED-2 ${view}: Delete (confirm) removes it`, async () => {
+      await timedSave(page, 'delete schedule', (m, p) => m === 'DELETE' && p.startsWith('/schedules/'), () => card(page, name).getByRole('button', { name: 'Delete' }).click());
+      await card(page, name).waitFor({ state: 'detached' });
+    }, page);
+    await closePage(page);
+  }
+  for (const role of ['dj', 'viewer']) {
+    const page = await newPage(role);
+    await step(`F-SCHED-4 ${role}: schedules view only (no New/Edit/Delete), Blocks still opens`, async () => {
+      await page.goto(`${BASE}/admin/schedules`);
+      await card(page, FX.schedule.name).waitFor();
+      assert(!(await page.getByRole('button', { name: 'New Schedule' }).count()), 'New Schedule offered');
+      assert(!(await card(page, FX.schedule.name).getByRole('button', { name: 'Edit' }).count()), 'Edit offered');
+      await page.getByTestId('view-only').waitFor();
+      await card(page, FX.schedule.name).getByRole('button', { name: 'Blocks' }).click();
+      await page.waitForURL(/\/blocks$/);
+    }, page);
+    await closePage(page);
+  }
+  // F-ACCESS-12: the server refusing a change shows the app-wide notice
+  {
+    const page = await newPage('viewer');
+    await step('F-ACCESS-12 viewer pressing a write the server refuses (New Block) sees "not allowed"', async () => {
+      await page.goto(`${BASE}/admin/schedules/${FX.schedule.id}/blocks`);
+      const nb = page.getByRole('button', { name: 'New Block' });
+      if (!(await nb.count())) return 'no write button offered to a viewer';
+      await nb.click();
+      await field(page, 'Block Name').fill('viewer try');
+      const { status } = await timedResponse(page, (m, p) => m === 'POST' && p.includes('/blocks'), () => page.getByRole('button', { name: 'Create Block' }).click());
+      assert(status === 403, `server answered ${status}`);
+      const note = page.getByTestId('not-allowed');
+      await note.waitFor({ timeout: 2000 });
+      assert((await note.innerText()).includes('viewer'), 'notice does not name the login');
+      return 'refused and told';
+    }, page);
+    await closePage(page);
+  }
+});
+
+section('blocks', async () => {
+  const T = USERS.admin.token;
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    const sched = await api('POST', '/schedules', { token: T, body: { name: `E2E Blocks Sched ${view} ${RUN}`, station_id: FX.station.id } });
+    const tpl = await api('POST', '/playlists', { token: T, body: { name: `E2E Tpl ${view} ${RUN}`, station_id: FX.station.id } }).catch(() => null);
+    const name = `E2E Block ${view} ${RUN}`;
+    const form = page.locator('form');
+    await step(`F-BLOCKS-2 ${view}: weekly block with no day picked says so (validation)`, async () => {
+      await page.goto(`${BASE}/admin/schedules/${sched.id}/blocks`);
+      await page.getByRole('button', { name: 'New Block' }).click();
+      await form.getByPlaceholder('Morning Show').fill(name);
+      await field(form, 'Repeats').selectOption('weekly');
+      // Untick every day that is on
+      for (const b of await form.locator('button[aria-pressed="true"]').all()) await b.click();
+      await form.getByRole('button', { name: 'Create Block' }).click();
+      await form.getByRole('alert').filter({ hasText: 'Pick at least one day' }).waitFor({ timeout: 2000 });
+    }, page);
+    await step(`F-BLOCKS-2 ${view}: days, times, priority, order, summary; Create Block saves fast`, async () => {
+      await form.getByRole('button', { name: 'Mon', exact: true }).click();
+      await form.getByRole('button', { name: 'Wed', exact: true }).click();
+      await field(form, 'Start Time').fill('06:30');
+      await field(form, 'End Time').fill('09:15');
+      await field(form, 'Priority (higher wins)').fill('5');
+      await field(form, 'Order of songs').selectOption('shuffle');
+      const summary = await page.getByTestId('block-summary').innerText();
+      assert(summary.includes('6:30 AM') && summary.includes('9:15 AM') && summary.includes('Mon, Wed'), `summary "${summary}"`);
+      const { ms } = await timedSave(page, 'create block', (m, p) => m === 'POST' && p.includes('blocks'), () => form.getByRole('button', { name: 'Create Block' }).click());
+      const head = page.locator('div.cursor-pointer', { hasText: name });
+      await head.waitFor();
+      const t = await head.innerText();
+      assert(t.includes('6:30 AM') && t.includes('9:15 AM') && t.includes('Mon, Wed') && t.includes('shuffle') && t.includes('Priority 5'), `block reads "${t.replace(/\s+/g, ' ')}"`);
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-BLOCKS-4 ${view}: + Add song from the library list, category badge, Remove`, async () => {
+      await page.locator('div.cursor-pointer', { hasText: name }).click();
+      await page.getByRole('button', { name: '+ Add song' }).click();
+      const sel = page.locator('select', { has: page.locator('option', { hasText: 'Pick a song…' }) });
+      await sel.selectOption(FX.assets[1].id);
+      const { ms } = await timedSave(page, 'add entry', (m, p) => m === 'POST' && p.includes('entries'), () => page.getByRole('button', { name: 'Add', exact: true }).click());
+      const entry = page.locator('div.bg-white.p-2.rounded.border', { hasText: FX.assets[1].title });
+      await entry.waitFor();
+      await timedSave(page, 'remove entry', (m, p) => m === 'DELETE' && p.includes('entries'), () => entry.getByRole('button', { name: 'Remove' }).click());
+      await entry.waitFor({ state: 'detached' });
+      return `added in ${ms} ms`;
+    }, page);
+    await step(`F-BLOCKS-2 ${view}: Edit: sun start (sunset -18), one-time dates, playlist, until next; Save changes`, async () => {
+      await page.locator('div.cursor-pointer', { hasText: name }).getByRole('button', { name: 'Edit' }).click();
+      await page.getByRole('heading', { name: `Edit "${name}"` }).waitFor();
+      await field(form, 'Or start by the sun').selectOption('sunset');
+      await field(form, 'Minutes after (− before)').fill('-18');
+      if (tpl) await field(form, 'Playlist').selectOption(tpl.id);
+      await field(form, 'Repeats').selectOption('one_time');
+      const today = new Date().toISOString().slice(0, 10);
+      await field(form, 'Start Date').fill(today);
+      await field(form, 'End Date').fill(today);
+      const summary = await page.getByTestId('block-summary').innerText();
+      assert(summary.includes('18 min before sunset'), `summary "${summary}"`);
+      const { ms, resp } = await timedSave(page, 'update block', (m, p) => (m === 'PUT' || m === 'PATCH') && p.includes('blocks'), () => form.getByRole('button', { name: 'Save changes' }).click());
+      const sent = resp.request().postDataJSON();
+      assert(sent.start_sun_event === 'sunset' && sent.start_sun_offset === -18 && sent.recurrence_type === 'one_time', `sent ${JSON.stringify(sent).slice(0, 200)}`);
+      await page.locator('div.cursor-pointer', { hasText: name }).filter({ hasText: '18 min before sunset' }).waitFor();
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-BLOCKS-2 ${view}: quick start preset "Friday, candle lighting + 1 min" fills the form`, async () => {
+      await page.getByRole('button', { name: 'New Block' }).click();
+      await form.getByRole('button', { name: 'Friday, candle lighting + 1 min' }).click();
+      const s = await page.getByTestId('block-summary').innerText();
+      assert(s.includes('17 min before sunset') && s.includes('Fri') && s.includes('next playlist'), `summary "${s}"`);
+      await form.getByRole('button', { name: 'Cancel' }).click();
+    }, page);
+    await step(`F-BLOCKS-3 ${view}: Delete block (confirm)`, async () => {
+      await timedSave(page, 'delete block', (m, p) => m === 'DELETE' && p.includes('blocks'), () => page.locator('div.cursor-pointer', { hasText: name }).getByRole('button', { name: 'Delete' }).click());
+      await page.locator('div.cursor-pointer', { hasText: name }).waitFor({ state: 'detached' });
+    }, page);
+    await closePage(page);
+    await api('DELETE', `/schedules/${sched.id}`, { token: T }).catch(() => {});
+    if (tpl) await api('DELETE', `/playlists/${tpl.id}`, { token: T }).catch(() => {});
+  }
+
+  // F-BLOCKS-5: a block made in the UI takes over the station's queue on time.
+  // Uses a station made at setup, whose queue is running by now (a brand-new station
+  // only starts when dead-air recovery kicks in after 30 s).
+  {
+    const page = await newPage('manager');
+    const st = FX.takeover;
+    const sched = await api('POST', '/schedules', { token: T, body: { name: `E2E Takeover Sched ${RUN}`, station_id: st.id } });
+    const song = FX.assets[0];
+    await step('F-BLOCKS-5 all-day block with one song: the queue plays only that song after the change', async () => {
+      const deadline = Date.now() + 45000;
+      while ((await api('GET', `/stations/${st.id}/queue?limit=3`, { token: T })).entries.length === 0) {
+        assert(Date.now() < deadline, 'test station never started');
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      await page.goto(`${BASE}/admin/schedules/${sched.id}/blocks`);
+      await page.getByRole('button', { name: 'New Block' }).click();
+      const form = page.locator('form');
+      await form.getByPlaceholder('Morning Show').fill(`E2E All Day ${RUN}`);
+      await field(form, 'Repeats').selectOption('daily');
+      await field(form, 'Start Time').fill('00:00');
+      await field(form, 'End Time').fill('23:59');
+      await timedSave(page, 'create block', (m, p) => m === 'POST' && p.includes('blocks'), () => form.getByRole('button', { name: 'Create Block' }).click());
+      await page.locator('div.cursor-pointer', { hasText: `E2E All Day ${RUN}` }).click();
+      await page.getByRole('button', { name: '+ Add song' }).click();
+      await page.locator('select', { has: page.locator('option', { hasText: 'Pick a song…' }) }).selectOption(song.id);
+      const t0 = Date.now();
+      await timedSave(page, 'add entry', (m, p) => m === 'POST' && p.includes('entries'), () => page.getByRole('button', { name: 'Add', exact: true }).click());
+      let titles = [];
+      while (Date.now() - t0 < 15000) {
+        const q = await api('GET', `/stations/${st.id}/queue?limit=8`, { token: T });
+        titles = q.entries.filter(e => e.status === 'pending').map(e => e.asset?.title);
+        if (titles.length >= 3 && titles.every(t => t === song.title)) return `queue switched after ${Date.now() - t0} ms`;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      throw new Error(`block has only "${song.title}" but the queue holds ${titles.slice(0, 4).join(' | ') || 'nothing'}`);
+    }, page);
+    await closePage(page);
+    await api('DELETE', `/schedules/${sched.id}`, { token: T }).catch(() => {});
+  }
+});
+
+// ── Blackouts ───────────────────────────────────────────────────────────────
+const localInput = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+section('holidays', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    const name = `E2E Blackout ${view} ${RUN}`;
+    const form = page.locator('form');
+    const start = new Date(Date.now() + 2 * 86400e3), end = new Date(start.getTime() + 25 * 3600e3);
+    await step(`F-HOLIDAYS-2 ${view}: end before start is refused with a message`, async () => {
+      await page.goto(`${BASE}/admin/holidays`);
+      await page.getByRole('button', { name: 'Add Blackout' }).click();
+      await form.getByPlaceholder('e.g. Shabbos Feb 20, 2026').fill(`${name} bad`);
+      await field(form, 'Music Off (Start)').fill(localInput(end));
+      await field(form, 'Music On (End)').fill(localInput(start));
+      const r = await Promise.race([
+        page.waitForResponse(x => x.url().includes('/holidays') && x.request().method() === 'POST', { timeout: 3000 }).then(x => x.status()).catch(() => null),
+        form.getByRole('button', { name: 'Create' }).click().then(() => new Promise(res => setTimeout(() => res('no-request'), 1500))),
+      ]);
+      // The end box has min=start, so the browser itself refuses and says why.
+      const shown = await page.getByText(/after the start|before the end|must be after|end.*before|invalid/i).count()
+        || (await field(form, 'Music On (End)').evaluate(el => el.validationMessage));
+      if (typeof r === 'number' && r < 300) {
+        const bad = (await api('GET', '/holidays?limit=200', { token: USERS.admin.token }));
+        for (const h of (bad.holidays || bad)) if (h.name === `${name} bad`) await api('DELETE', `/holidays/${h.id}`, { token: USERS.admin.token });
+        throw new Error('a blackout that ends before it starts was saved');
+      }
+      assert(shown, `no message shown (server answered ${r})`);
+    }, page);
+    await step(`F-HOLIDAYS-2 ${view}: add blackout (name, reason, times, one station) saves fast and is listed Upcoming`, async () => {
+      await page.goto(`${BASE}/admin/holidays`);
+      await page.getByRole('button', { name: 'Add Blackout' }).click();
+      await form.getByPlaceholder('e.g. Shabbos Feb 20, 2026').fill(name);
+      await field(form, 'Reason').selectOption('Pesach');
+      await field(form, 'Music Off (Start)').fill(localInput(start));
+      await field(form, 'Music On (End)').fill(localInput(end));
+      const all = form.getByText('All stations').locator('xpath=..').locator('input');
+      if (await all.isChecked()) await all.uncheck();
+      await form.getByRole('button', { name: FX.station.name }).click();
+      const { ms, resp } = await timedSave(page, 'create blackout', (m, p) => m === 'POST' && p.startsWith('/holidays'), () => form.getByRole('button', { name: 'Create' }).click());
+      const sent = resp.request().postDataJSON();
+      assert(JSON.stringify(sent).includes(FX.station.id), `station not sent: ${JSON.stringify(sent).slice(0, 200)}`);
+      const row = rowOf(page, name);
+      await row.waitFor();
+      const t = await row.innerText();
+      assert(t.includes('Pesach') && t.includes('Upcoming') && /25/.test(t), `row "${t.replace(/\s+/g, ' ')}"`);
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-HOLIDAYS-1 ${view}: filters by reason, status and station`, async () => {
+      await field(page, 'Reason').first().selectOption('Pesach');
+      await rowOf(page, name).waitFor();
+      await field(page, 'Reason').first().selectOption('Yom Kippur');
+      await rowOf(page, name).waitFor({ state: 'detached' });
+      await field(page, 'Reason').first().selectOption('');
+      await field(page, 'Status').selectOption('past');
+      await rowOf(page, name).waitFor({ state: 'detached' });
+      await field(page, 'Status').selectOption('upcoming');
+      await rowOf(page, name).waitFor();
+      await field(page, 'Station').first().selectOption(FX.station.id);
+      await rowOf(page, name).waitFor();
+      await field(page, 'Station').first().selectOption(FX.takeover.id);
+      await rowOf(page, name).waitFor({ state: 'detached' });
+      await field(page, 'Station').first().selectOption('');
+      await field(page, 'Status').selectOption('');
+    }, page);
+    await step(`F-HOLIDAYS-2 ${view}: Edit changes the name; Update saves`, async () => {
+      await rowOf(page, name).getByTitle('Edit').click();
+      await form.getByPlaceholder('e.g. Shabbos Feb 20, 2026').fill(`${name} edited`);
+      await timedSave(page, 'update blackout', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/holidays/'), () => form.getByRole('button', { name: 'Update' }).click());
+      await rowOf(page, `${name} edited`).waitFor();
+    }, page);
+    await step(`F-HOLIDAYS-3 ${view}: Delete (confirm)`, async () => {
+      await timedSave(page, 'delete blackout', (m, p) => m === 'DELETE' && p.startsWith('/holidays/'), () => rowOf(page, `${name} edited`).getByTitle('Delete').click());
+      await rowOf(page, `${name} edited`).waitFor({ state: 'detached' });
+    }, page);
+    await closePage(page);
+  }
+  // F-HOLIDAYS-4: a blackout that is on now puts silence in the queue
+  {
+    const page = await newPage('manager');
+    const name = `E2E Blackout Now ${RUN}`;
+    await step('F-HOLIDAYS-4 blackout starting now: the station queue gets silence at once', async () => {
+      await page.goto(`${BASE}/admin/holidays`);
+      await page.getByRole('button', { name: 'Add Blackout' }).click();
+      const form = page.locator('form');
+      await form.getByPlaceholder('e.g. Shabbos Feb 20, 2026').fill(name);
+      await field(form, 'Music Off (Start)').fill(localInput(new Date(Date.now() - 60e3)));
+      await field(form, 'Music On (End)').fill(localInput(new Date(Date.now() + 20 * 60e3)));
+      const all = form.getByText('All stations').locator('xpath=..').locator('input');
+      if (await all.isChecked()) await all.uncheck();
+      await form.getByRole('button', { name: FX.takeover.name }).click();
+      const t0 = Date.now();
+      await timedSave(page, 'create blackout', (m, p) => m === 'POST' && p.startsWith('/holidays'), () => form.getByRole('button', { name: 'Create' }).click());
+      await rowOf(page, name).getByText('Active').waitFor();
+      let seen = '';
+      while (Date.now() - t0 < 10000) {
+        const q = await api('GET', `/stations/${FX.takeover.id}/queue?limit=4`, { token: USERS.admin.token });
+        seen = q.entries.map(e => `${e.status}:${e.asset?.asset_type}`).join(' ');
+        if (q.entries.some(e => e.asset?.asset_type === 'silence')) return `silence queued after ${Date.now() - t0} ms`;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      throw new Error(`no silence in the queue: ${seen}`);
+    }, page);
+    const hs = await api('GET', '/holidays?limit=200', { token: USERS.admin.token }).catch(() => []);
+    for (const h of (hs.holidays || hs)) if (h.name === name) await api('DELETE', `/holidays/${h.id}`, { token: USERS.admin.token }).catch(() => {});
+    await closePage(page);
+  }
+});
+
+// ── Sponsors ────────────────────────────────────────────────────────────────
+section('sponsors', async () => {
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    const name = `E2E Ad ${view} ${RUN}`;
+    const form = page.locator('form');
+    const cardS = () => page.locator('div.bg-white.p-4', { hasText: name }).first();
+    await step(`F-SPONSORS-1 ${view}: name and audio path are required (validation)`, async () => {
+      await page.goto(`${BASE}/admin/sponsors`);
+      await page.getByRole('button', { name: 'New Sponsor' }).click();
+      await form.getByRole('button', { name: 'Create' }).click();
+      assert(await field(form, 'Name').evaluate(el => el.validationMessage), 'no message on empty name');
+    }, page);
+    await step(`F-SPONSORS-1 ${view}: create (policy every N songs, hours, max per hour) saves fast`, async () => {
+      await field(form, 'Name').fill(name);
+      await form.getByPlaceholder('sponsors/spot.mp3').fill('sponsors/e2e.mp3');
+      await field(form, 'Length (sec)').fill('20');
+      await field(form, 'Priority').fill('3');
+      await field(form, 'Insertion Policy').selectOption('every_n_songs');
+      await field(form, 'Songs Between').fill('4');
+      await field(form, 'Active Hours (start)').fill('6');
+      await field(form, 'Active Hours (end)').fill('22');
+      await field(form, 'Max per Hour').fill('2');
+      const { ms } = await timedSave(page, 'create sponsor', (m, p) => m === 'POST' && p === '/sponsors', () => form.getByRole('button', { name: 'Create' }).click());
+      await cardS().waitFor();
+      const t = await cardS().innerText();
+      assert(t.includes('20s') && t.includes('Priority 3') && t.includes('every n songs') && t.includes('6:00-22:00') && t.includes('max 2/hr') && t.includes('every 4 songs'), `card "${t.replace(/\s+/g, ' ')}"`);
+      return `saved in ${ms} ms`;
+    }, page);
+    await step(`F-SPONSORS-1 ${view}: Edit saves; Delete (confirm)`, async () => {
+      await cardS().getByRole('button', { name: 'Edit' }).click();
+      await field(form, 'Priority').fill('5');
+      await timedSave(page, 'update sponsor', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/sponsors/'), () => form.getByRole('button', { name: 'Update' }).click());
+      await cardS().filter({ hasText: 'Priority 5' }).waitFor();
+      await timedSave(page, 'delete sponsor', (m, p) => m === 'DELETE' && p.startsWith('/sponsors/'), () => cardS().getByRole('button', { name: 'Delete' }).click());
+      await cardS().waitFor({ state: 'detached' });
+    }, page);
+    await step(`F-SPONSORS-2 ${view}: Client Portal link opens the sponsor login`, async () => {
+      await page.getByRole('link', { name: 'Client Portal' }).click();
+      await waitPath(page, '/sponsor/login');
+    }, page);
+    await closePage(page);
+  }
 });
 
 // ── S-5 page load speed, every page, desktop and iPhone ─────────────────────
