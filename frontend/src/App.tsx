@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/layout/Layout';
 import SponsorLayout from './components/layout/SponsorLayout';
@@ -129,6 +129,14 @@ function RouteErrorBoundary({ children }: { children: React.ReactNode }) {
 
 const Loading = () => <div className="text-center py-10 text-gray-400">Loading...</div>;
 
+const NotFound = () => (
+  <div className="text-center py-10">
+    <h1 className="text-xl font-bold text-gray-700">Page not found</h1>
+    <p className="mt-2 text-gray-500">This address does not match any screen.</p>
+    <Link to="/" className="mt-4 inline-block text-indigo-600 hover:underline">Go to the home page</Link>
+  </div>
+);
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -188,6 +196,8 @@ export default function App() {
               <Route path="/admin/listeners" element={<ProtectedRoute><LiveListeners /></ProtectedRoute>} />
               <Route path="/admin/crm" element={<ProtectedRoute><CrmDashboard /></ProtectedRoute>} />
               <Route path="/admin/program-clock" element={<ProtectedRoute><ProgramClock /></ProtectedRoute>} />
+              {/* A mistyped or old link: say so, with the nav still there (was a blank white page). */}
+              <Route path="*" element={<NotFound />} />
             </Route>
 
             {/* Sponsor portal login (no layout) */}

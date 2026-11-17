@@ -292,9 +292,9 @@ export default function Navbar() {
                 Admin Login
               </Link>
             )}
-            {/* Hamburger button - shown on mobile */}
-            {isAuthenticated && (
-              <button onClick={() => setMenuOpen(!menuOpen)}
+            {/* Hamburger button - shown on mobile (also to visitors: the public links are hidden on phones) */}
+            {(
+              <button onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu"
                 className="md:hidden text-gray-400 hover:text-white p-1">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {menuOpen ? (
@@ -358,6 +358,21 @@ export default function Navbar() {
                 Logout
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile menu for visitors who are not signed in */}
+      {menuOpen && !isAuthenticated && (
+        <div className="md:hidden border-t border-[#2a2a5e] bg-[#0c0c30]">
+          <div className="px-4 py-2 space-y-1">
+            {publicLinks.map(link => (
+              <Link key={link.to} to={link.to}
+                onClick={() => setMenuOpen(false)}
+                className={`block py-2 px-3 text-sm text-gray-400 ${link.color} transition rounded hover:bg-[#1a1a4e]`}>
+                {link.label}
+              </Link>
+            ))}
           </div>
         </div>
       )}
