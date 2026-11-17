@@ -251,3 +251,25 @@ async def test_queue_activity_lists_this_queues_decisions(client, auth_headers, 
     assert all(a["user_email"] == "testadmin@test.com" for a in act)
     assert [a["created_at"] for a in act] == sorted((a["created_at"] for a in act), reverse=True)
     assert (await client.get(f"/api/v1/reviews/queues/{uuid.uuid4()}/activity", headers=auth_headers)).json() == []
+
+
+# ── B-SET-38 ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("dsn,on", [("", False), ("https://public@o0.ingest.invalid/1", True)])
+def test_sentry_only_with_a_dsn(dsn, on):
+    """B-SET-38: SENTRY_DSN set -> Sentry is started when the app loads (no PII, the app's
+    environment); unset -> never started."""
+    code = (
+        "import sentry_sdk\n"
+        "import app.main\n"
+        "client = sentry_sdk.get_client()\n"
+        "print(client.is_active(), client.options.get('send_default_pii'), client.options.get('environment'))\n"
+    )
+    env = {"SENTRY_DSN": dsn, "APP_ENV": "staging", "PATH": "/usr/bin:/bin"}
+    out = subprocess.run([sys.executable, "-c", code], cwd=BACKEND, env=env, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr[-2000:]
+    active, pii, environment = out.stdout.strip().splitlines()[-1].split()
+    assert active == str(on)
+    if on:
+        assert pii == "False" and environment == "staging"

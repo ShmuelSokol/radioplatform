@@ -690,14 +690,14 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 
 ### 2c. Schedule refresh / spots / blocks
 - [ ] B-JOB-75 Schedule, block, playlist-entry or template change -> refresh_station replaces unplayed automatic songs; manual and timed items kept | modes: both | covered: tests/test_schedule_refresh.py
-- [ ] B-JOB-76 Removing automatic songs rewinds the generation cursor by the number dropped per block | modes: both | NOT COVERED
+- [x] B-JOB-76 Removing automatic songs rewinds the generation cursor by the number dropped per block | modes: both | covered: tests/test_generation_cursor_rewind.py::test_removing_automatic_songs_rewinds_each_blocks_cursor
 - [ ] B-JOB-77 Spot planning: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range, fixed times, two sponsors never share a slot | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-JOB-78 Spot planning skips Shabbos/blackouts and DST spring-forward missing times | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-JOB-79 reconcile_spot_slots keeps pending ad_slot entries in step; slots about to air left alone | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-JOB-80 Program block expansion: items in order, hard/soft/soft-with-limit (hard_by), sponsor places, rotation by last played | modes: both | covered: tests/test_program_blocks.py
 - [ ] B-JOB-81 A due slot deleted while about to play does not leave dead air | modes: both | covered: tests/test_due_slot_deleted.py
 - [ ] B-JOB-82 7-day look-ahead: overlaps, gaps, off-air windows, unplaced spots, using the engine's resolver | modes: n.a. | covered: tests/test_schedule_lookahead.py
-- [ ] B-JOB-83 detect_schedule_conflicts raises an alert when a new/edited block overlaps | modes: n.a. | NOT COVERED
+- [x] B-JOB-83 detect_schedule_conflicts raises an alert when a new/edited block overlaps | modes: n.a. | covered: tests/test_block_conflict_alerts.py::test_overlapping_block_raises_a_conflict_alert, ::test_blocks_on_different_days_do_not_conflict (BUG xfail: days are ignored, so weekly blocks on different days raise false conflicts), ::test_overnight_block_conflict_is_found (BUG xfail: a block past midnight never conflicts)
 
 ### 2d. Long items (`services/long_items.py`) and resume
 - [ ] B-JOB-84 policy pause (default): time check plays, shiur re-queued as resume@<seconds> and continues where it stopped | modes: browser | covered: tests/test_timed_pauses_shiur.py
@@ -779,7 +779,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SET-35 TWILIO_* (twilio_enabled / twilio_voice_enabled) -> SMS alerts and phone call-ins | modes: n.a. | NOT COVERED
 - [ ] B-SET-36 BUG_REPORTS_GITHUB_TOKEN / BUG_REPORTS_REPO -> mirror to GitHub | modes: n.a. | covered: tests/test_bug_reports.py
 - [x] B-SET-37 NTFY_TOPIC / NTFY_SERVER -> push notifications | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_ntfy_only_with_a_topic_and_on_its_server
-- [ ] B-SET-38 SENTRY_DSN -> Sentry enabled | modes: n.a. | NOT COVERED
+- [x] B-SET-38 SENTRY_DSN -> Sentry enabled | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_sentry_only_with_a_dsn
 - [ ] B-SET-39 ADMIN_SEED_PASSWORD / ALLOW_DESTRUCTIVE_SEED / APP_ENV=production | modes: n.a. | covered: tests/test_auth.py
 - [ ] B-SET-40 JWT expiry (30 min access, 7 day refresh) honoured | modes: n.a. | covered: tests/test_auth_security.py::test_token_lifetimes
 - [x] B-SET-41 CORS_ORIGINS parsing (JSON array or CSV) and error responses still carry CORS | modes: n.a. | covered: tests/test_settings_and_small_admin_routes.py::test_cors_origins_json_or_comma_list, ::test_server_error_still_carries_cors
