@@ -10,6 +10,12 @@ Who may operate (change) which station. Reading is not restricted by station.
 
 - Routes that do not carry the station in the path (schedules, schedule blocks, playlist entries, playlists and generation, spot schedules, live shows) use `station_write_guard` in `backend/app/core/station_guard.py`: a router-level dependency that finds the station from `station_id` in the query or body, or from the object named in the path or body (schedule, block, template, slot, show), and applies the same rule. A new write route on those routers is covered automatically if it uses the same parameter names; a new parameter name needs a line in that router's guard.
 
-Not restricted by station: holidays (one window can cover several stations, `affected_stations`), objects that belong to no station (shared playlist templates, spot schedules for all stations), the library, rules. Those are limited by role only.
+- Routes that check the station inside the handler with `may_operate_station`: program blocks, now-playing PATCH/DELETE (`require_station_operator` on the route), song-request approval, weather readouts (create, edit, regenerate, queue, delete), archives (create, edit, delete), live-show sockets (manager or host must also be allowed on the show's station).
+- Queue entry lookups (move-up/down, reorder, reorder-dnd, DELETE) are filtered by the station in the URL, so another station's entry id cannot be changed through a station the login may operate.
+- Rules that cover several stations: a blackout (holiday window) may be created, edited or deleted only by a login allowed on EVERY station it covers (`affected_stations` null = every active station, the protected one included). A weather spot or hourly time clip upload for a region needs every station of that region (default-region time clips are every station's fallback, so they need all stations).
 
-Tests: `backend/tests/test_station_permissions.py`.
+Not restricted by station: objects that belong to no station (shared playlist templates, spot schedules for all stations), the library, rules. Those are limited by role only. Reading is never restricted by station.
+
+Role matrix for every write route: `backend/tests/test_write_role_matrix.py` (a new write route must be added to its policy table); frontend `auth/access.ts` is checked against it by `test_access_mirror.py`.
+
+Tests: `backend/tests/test_station_permissions.py`, `backend/tests/test_station_write_permissions.py`, `backend/tests/test_websocket_auth.py`.

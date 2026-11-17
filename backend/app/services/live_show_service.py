@@ -94,6 +94,7 @@ async def delete_show(db: AsyncSession, show_id: UUID | str) -> bool:
     if not show:
         return False
     await db.delete(show)
+    await db.flush()  # surface a failure here, not after the answer was sent
     return True
 
 

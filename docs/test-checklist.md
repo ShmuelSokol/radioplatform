@@ -1,0 +1,1754 @@
+# KBR Live: full test checklist
+
+Every feature and function the site offers, one line per testable behaviour. Built from the
+code (every route, page, button, API endpoint, background job, setting, role, and stream
+server (engine) vs browser-player station), then checked by an independent verifier until it
+found nothing missing.
+
+Row format: `- [ ] <id> <behaviour> | modes | covered: <test file or NOT COVERED>`.
+Modes: **engine** = station played by the stream server (Liquidsoap), **browser** = station
+played by the in-browser player, **both**, or n.a.
+
+Every action row is also a speed row: the result must show (on screen and on air) within
+the limits in section S. A row passes only when it does the right thing **and** is fast.
+
+## S. Speed limits (apply to every action row)
+
+- [ ] S-1 Button press to visible change on screen (optimistic or confirmed): under 150 ms | both | covered: NOT COVERED
+- [ ] S-2 Go next / Fade / Soft fade / Play now: next item audible in the control room within 0.5 s (browser) or 1.5 s (engine, incl. stream delay) | both | covered: partial (e2e/audio-engine.mjs browser only)
+- [ ] S-3 Every operator API call (skip, fire-now, insert, loop, mix-over, move, remove, reorder) answers in under 300 ms server time, 1 s round trip from the US East Coast | both | covered: NOT COVERED
+- [ ] S-4 Queue, now-playing and library search reads: under 300 ms server time; library search results on screen under 500 ms | n.a. | covered: NOT COVERED
+- [ ] S-5 Every admin page: first content under 1.5 s, interactive under 2.5 s on a warm load (desktop and iPhone) | n.a. | covered: NOT COVERED
+- [ ] S-6 Saves (schedule, block, playlist, station settings, program block, spot schedule): confirmed under 1 s; on-air effect on time | both | covered: NOT COVERED
+- [ ] S-7 Listen (control room or public): sound within 1.5 s of the press; stream mode stays about 1 s behind live | both | covered: partial
+- [ ] S-8 Now-playing on every open screen updates within 1 s of a real change on air | both | covered: NOT COVERED
+- [ ] S-9 Hard timed item (time check, hard block, hard spot) heard within 1 s of its time | both | covered: harness (engine), pw10 scripts (browser, not in repo)
+- [ ] S-10 Upload: progress shown at once; item playable in the library within 10 s of upload end for a 5 MB file | n.a. | covered: NOT COVERED
+
+## H. On-air timing on a real engine (infra/streaming/harness/run_harness.py)
+
+- [ ] H-1 Shiur inside a hard block when the next hour's time check is due: time check on time (pause), shiur carries on after time and weather | engine | covered: harness block_shiur_spans_hour (FAILS on main: the 9 PM bug)
+- [ ] H-2 Same with the station set to wait: time check after the shiur | engine | covered: harness block_shiur_spans_hour_wait
+- [ ] H-3 Same with cut: time check on time, shiur does not come back | engine | covered: harness block_shiur_spans_hour_cut
+- [ ] H-4 Shiur queued as an ordinary item across the hour: pause / wait / cut | engine | covered: harness queued_shiur_spans_hour[_wait|_cut]
+- [ ] H-5 Song across the hour: time check on time, no silence | engine | covered: harness song_spans_hour
+- [ ] H-6 Soft timed item waits for the song, no silence | engine | covered: harness soft_timed_waits_for_song
+- [ ] H-7 Rapid Next (6 presses, hard/fade/soft): one item on air, what the site shows is what is heard, no silence | engine | covered: harness rapid_next
+- [ ] H-8 Queue runs out: no silence, no emergency files, something on air | engine | covered: harness empty_queue
+
+## W. Production self-check (runs on the live backend all the time)
+
+- [ ] W-1 At every hh:00 each station's hourly time check (or the hard item due then) started within a few seconds; alert and push if not | both | covered: NOT COVERED
+- [ ] W-2 Any hard timed item late by more than a few seconds or never started: alert | both | covered: NOT COVERED
+- [ ] W-3 Dead air: nothing on air, or the item on air ran past its length: alert | both | covered: partial (scheduler dead-air alert)
+- [ ] W-4 Engine station: what the engine plays differs from what the site shows for more than 20 s: alert | engine | covered: NOT COVERED
+- [ ] W-5 A time check, weather or sponsorship skipped without an operator doing it: alert | both | covered: NOT COVERED
+
+# Backend test checklist (exhaustive, from code)
+
+Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api/v1` unless noted. Guard in [brackets]; PUBLIC = no auth dependency. Coverage = path/function grep of backend/tests/ ("covered" means a test touches it, not that every branch is asserted). Row prefix ↳ = a behaviour/branch of the endpoint above it.
+
+## 1. API by router
+
+### main.py
+- [ ] B-MAIN-1 `GET /health` [PUBLIC] Liveness + DB check (not under /api/v1) | modes: n.a. | covered: tests/test_health.py
+- [ ] B-MAIN-2 `GET /api/v1/init` [PUBLIC] Create tables on demand (Vercel compat) | modes: n.a. | covered: tests/test_auth_security.py::test_init_is_harmless_to_repeat
+
+### activity.py (prefix `/activity`)
+- [ ] B-ACTIVITY-1 `GET /activity` [require_admin] list activity | modes: n.a. | covered: tests/test_activity_log.py
+- [ ] B-ACTIVITY-2 `GET /activity/people` [require_admin] One line per person for the period: how many actions, screens opened | modes: n.a. | covered: tests/test_activity_log.py
+- [ ] B-ACTIVITY-3 `GET /activity/filters` [require_admin] People and stations to filter by, and the action groups. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ACTIVITY-4 `POST /activity/page-view` [get_current_user] The admin site reports the screens a signed-in user opens. | modes: n.a. | covered: tests/test_activity_log.py
+- [ ] B-ACTIVITY-5 `GET /activity/listeners` [require_admin] Each listening session: station, when, how long, where from, which device. | modes: n.a. | covered: tests/test_activity_log.py
+
+### ai_emails.py (prefix `/ai-emails`)
+- [ ] B-AIEMAILS-1 `POST /ai-emails/draft` [require_manager] generate draft | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-AIEMAILS-2 `POST /ai-emails/send` [require_manager] send drafted email | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+
+### alerts.py (prefix `/alerts`)
+- [ ] B-ALERTS-1 `GET /alerts` [require_manager] List alerts with optional filters. | modes: n.a. | covered: tests/test_alert_repeats.py, tests/test_role_access.py
+- [ ] B-ALERTS-2 `GET /alerts/unresolved-count` [require_manager] Get unresolved alert count for notification badge. | modes: n.a. | covered: tests/test_alert_repeats.py
+- [ ] B-ALERTS-3 `POST /alerts/resolve-all` [require_manager] Resolve every open alert (a fresh start). | modes: n.a. | covered: tests/test_alert_repeats.py
+- [ ] B-ALERTS-4 `PATCH /alerts/{alert_id}/resolve` [require_manager] Mark an alert as resolved. | modes: n.a. | covered: tests/test_admin_crud.py::test_alerts_resolve_reopen_delete
+- [ ] B-ALERTS-5 `PATCH /alerts/{alert_id}/reopen` [require_manager] Reopen a resolved alert. | modes: n.a. | covered: tests/test_admin_crud.py::test_alerts_resolve_reopen_delete
+- [ ] B-ALERTS-6 `DELETE /alerts/{alert_id}` [require_admin] Delete an alert (admin only). | modes: n.a. | covered: tests/test_alert_repeats.py
+
+### analytics.py (prefix `/analytics`)
+- [ ] B-ANALYTICS-1 `GET /analytics/play-counts` [require_manager] Get play counts by asset, grouped by day. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ANALYTICS-2 `GET /analytics/top-assets` [require_manager] Get most played assets. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ANALYTICS-3 `GET /analytics/category-breakdown` [require_manager] Get play counts grouped by asset category. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ANALYTICS-4 `GET /analytics/hourly-distribution` [require_manager] Get play distribution by hour of day. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-ANALYTICS-5 `GET /analytics/summary` [require_manager] Get high-level analytics summary. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+
+### archives.py (prefix `/archives`)
+- [ ] B-ARCHIVES-1 `POST /archives` [require_manager] create archive | modes: n.a. | covered: tests/test_admin_crud.py::test_archives_round_trip
+- [ ] B-ARCHIVES-2 `GET /archives` [PUBLIC] Public: list published archives. Admin sees all. | modes: n.a. | covered: tests/test_public_endpoints.py::test_archives_public_sees_published_only_manager_sees_all (BUG fixed: managers never saw drafts)
+- [ ] B-ARCHIVES-3 ↳ public sees published only; manager sees all | modes: n.a. | covered: tests/test_public_endpoints.py::test_archives_public_sees_published_only_manager_sees_all (BUG fixed: managers never saw drafts)
+- [ ] B-ARCHIVES-4 `GET /archives/{archive_id}` [PUBLIC] get archive | modes: n.a. | covered: tests/test_admin_crud.py::test_archives_round_trip
+- [ ] B-ARCHIVES-5 `PATCH /archives/{archive_id}` [require_manager] update archive | modes: n.a. | covered: tests/test_admin_crud.py::test_archives_round_trip
+- [ ] B-ARCHIVES-6 `DELETE /archives/{archive_id}` [require_manager] delete archive | modes: n.a. | covered: tests/test_admin_crud.py::test_archives_round_trip
+- [ ] B-ARCHIVES-7 `GET /archives/station/{station_id}/rss` [PUBLIC] Public: RSS feed for a station's show archives (podcast format). | modes: n.a. | covered: tests/test_public_endpoints.py::test_archives_public_sees_published_only_manager_sees_all (BUG fixed: managers never saw drafts)
+
+### asset_types.py (prefix `/asset-types`)
+- [ ] B-ASSETTYPES-1 `GET /asset-types` [require_staff] list asset types | modes: n.a. | covered: tests/test_role_access.py
+- [ ] B-ASSETTYPES-2 `POST /asset-types` [require_manager] create asset type | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+- [ ] B-ASSETTYPES-3 `PATCH /asset-types/{asset_type_id}` [require_manager] update asset type | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+- [ ] B-ASSETTYPES-4 `DELETE /asset-types/{asset_type_id}` [require_manager] delete asset type | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+
+### assets.py (prefix `/assets`)
+- [ ] B-ASSETS-1 `GET /assets/ffmpeg-check` [require_manager] Diagnostic: check FFmpeg, run conversion test, and do full roundtrip. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-2 `POST /assets/refresh-requested-category` [require_manager] Manually refresh the dynamic 'requested' category. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-3 `POST /assets/backfill-durations` [require_manager] Measure the length of items that have none (they broke the queue view). | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-4 ↳ measures assets with no duration | modes: n.a. | covered: tests/test_items_without_length.py
+- [ ] B-ASSETS-5 `POST /assets/backfill-release-dates` [require_manager] Batch-lookup release dates for music assets missing them. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-6 `POST /assets/upload` [require_manager] upload asset | modes: n.a. | covered: tests/test_assets.py, tests/test_mpeg_conversion.py
+- [ ] B-ASSETS-7 ↳ mp3/wav/etc. converted; duration measured; codec check | modes: n.a. | covered: tests/test_mpeg_conversion.py
+- [ ] B-ASSETS-8 `POST /assets/{asset_id}/analyze-audio` [require_manager] Manually trigger audio analysis for a single asset. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-9 `POST /assets/bulk-analyze` [require_manager] Batch-analyse items with no analysis or one older than ANALYSIS_VERSION (those | modes: n.a. | covered: tests/test_safe_migrations.py
+- [ ] B-ASSETS-10 `GET /assets/bulk-analyze/status/{job_id}` [require_manager] Poll the status of a bulk audio analysis job. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-11 `POST /assets/bulk-auto-trim` [require_manager] Start a bulk auto-trim job. Returns a job_id to poll for status. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-12 `GET /assets/bulk-auto-trim/status/{job_id}` [require_manager] Poll the status of a bulk auto-trim job. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-13 `PATCH /assets/bulk-category` [require_manager] bulk set category | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-14 `GET /assets` [require_staff] list all | modes: n.a. | covered: tests/test_assets.py, tests/test_assets_hide_generated.py, tests/test_playlist_generation.py
+- [ ] B-ASSETS-15 ↳ generated weather/time clips hidden from library list | modes: n.a. | covered: tests/test_assets_hide_generated.py
+- [ ] B-ASSETS-16 `GET /assets/{asset_id}/audio-url` [require_staff] Return a public URL for wavesurfer.js to fetch audio directly. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-17 `PATCH /assets/{asset_id}/request-settings` [require_manager] Update auto_approve_requests and max_requests_per_day in metadata_extra. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-18 `GET /assets/enhance-presets` [require_staff] Return all available audio enhancement presets. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-19 `POST /assets/{asset_id}/enhance` [require_manager] Apply enhancement filters to an asset. Non-destructive: keeps original. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-20 `POST /assets/{asset_id}/auto-enhance` [require_manager] AI auto-enhancement: analyze audio and apply optimal filters. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-21 `POST /assets/{asset_id}/enhance-preview` [require_staff] Preview enhancement on a short segment. Returns audio/mpeg blob. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-22 `POST /assets/{asset_id}/detect-audience` [require_staff] Detect audience/student questions in a shiur recording. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-23 `GET /assets/{asset_id}` [require_staff] get one | modes: n.a. | covered: tests/test_assets.py, tests/test_mpeg_conversion.py, tests/test_operator_actions.py
+- [ ] B-ASSETS-24 `PATCH /assets/{asset_id}` [require_manager] update asset | modes: n.a. | covered: tests/test_assets.py, tests/test_mpeg_conversion.py, tests/test_operator_actions.py
+- [ ] B-ASSETS-25 `GET /assets/{asset_id}/download` [require_staff] download asset | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-26 `POST /assets/{asset_id}/transcode` [require_manager] transcode | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-27 `POST /assets/{asset_id}/clip` [require_manager] clip | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-28 `POST /assets/{asset_id}/detect-silence` [require_staff] Detect silence regions in an asset's audio file. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-29 `POST /assets/{asset_id}/trim` [require_manager] Trim audio to [trim_start, trim_end]. Non-destructive: keeps original. | modes: n.a. | covered: tests/test_activity_log.py
+- [ ] B-ASSETS-30 ↳ non-destructive trim, restore-original returns file | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-31 `POST /assets/{asset_id}/restore-original` [require_manager] Restore asset to its original file before any trims. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-32 `POST /assets/bulk-create` [require_manager] Create asset records for files already uploaded to Supabase Storage. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ASSETS-33 `DELETE /assets/{asset_id}` [require_manager] delete | modes: n.a. | covered: tests/test_assets.py, tests/test_mpeg_conversion.py, tests/test_operator_actions.py
+
+### auth.py (prefix `/auth`)
+- [ ] B-AUTH-1 `POST /auth/login` [PUBLIC] login | modes: n.a. | covered: tests/conftest.py, tests/test_activity_log.py, tests/test_auth.py
+- [ ] B-AUTH-2 ↳ wrong password -> 401; inactive user refused | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-AUTH-3 ↳ sponsor and staff both can log in; token type access+refresh returned | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-AUTH-4 ↳ rate limit (slowapi 200/min default) answers 429 when exceeded | modes: n.a. | covered: tests/test_auth_security.py::test_login_is_rate_limited_per_address (limit is 10/min; BUG V1-104 xfail test_login_limit_counts_each_real_client_separately)
+- [ ] B-AUTH-5 `POST /auth/refresh` [PUBLIC] refresh | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-AUTH-6 ↳ refresh with an access token (wrong type) refused; expired refresh refused | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-AUTH-7 `GET /auth/me` [get_current_user] me | modes: n.a. | covered: tests/test_auth.py, tests/test_cold_start.py, tests/test_role_access.py
+- [ ] B-AUTH-8 ↳ any_role incl. sponsor gets 200; anonymous 401/403 | modes: n.a. | covered: tests/test_role_access.py
+- [ ] B-AUTH-9 `POST /auth/seed` [PUBLIC] seed admin | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-AUTH-10 ↳ refused (503) when ADMIN_SEED_PASSWORD unset; refused (403) when an admin already exists | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-AUTH-11 `POST /auth/seed-reset` [require_admin] Reset admin credentials — requires existing admin auth. | modes: n.a. | covered: tests/test_auth_security.py::test_seed_reset, test_seed_reset_with_two_admins_does_not_crash (BUG fixed: 500 with two admins)
+- [ ] B-AUTH-12 `POST /auth/migrate` [PUBLIC] Add new columns to existing tables (safe to run multiple times). | modes: n.a. | covered: tests/test_auth_security.py::test_migrate_is_admin_only (BUG fixed: was public)
+- [ ] B-AUTH-13 ↳ PUBLIC (no guard): safe to repeat; confirm it cannot be abused (idempotent ALTERs only) | modes: n.a. | covered: tests/test_auth_security.py::test_migrate_is_admin_only (BUG fixed: was public)
+- [ ] B-AUTH-14 `POST /auth/seed-all` [require_admin] Drop all data and re-seed everything: admin, station, assets, rules. | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-AUTH-15 ↳ refused in production unless ALLOW_DESTRUCTIVE_SEED=true; wipes library/stations/rules otherwise | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-AUTH-16 `POST /auth/seed-assets` [require_admin] Redirect to seed-all. | modes: n.a. | covered: tests/test_auth_security.py::test_seed_assets_and_reset_refused_for_managers
+
+### billing.py (prefix `/billing`)
+- [ ] B-BILLING-1 `GET /billing/invoices` [require_sponsor_or_manager] list invoices | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-BILLING-2 `POST /billing/invoices` [require_manager] create invoice | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-BILLING-3 `POST /billing/invoices/{invoice_id}/checkout` [require_sponsor] create checkout session | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-BILLING-4 ↳ sponsor can only checkout own invoice; stripe disabled -> error | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-BILLING-5 `POST /billing/webhook` [PUBLIC] stripe webhook | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_off_when_stripe_not_configured, test_stripe_webhook_checks_the_signature
+- [ ] B-BILLING-6 ↳ Stripe signature verified; invoice marked paid | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_checks_the_signature
+- [ ] B-BILLING-7 `GET /billing/summary` [require_sponsor] get billing summary | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+
+### bug_reports.py (prefix `/bug-reports`)
+- [ ] B-BUGREPORTS-1 `POST /bug-reports` [_optional_user] create bug report | modes: n.a. | covered: tests/test_bug_reports.py
+- [ ] B-BUGREPORTS-2 ↳ anonymous allowed; mirrored to GitHub when token set; ntfy push on receipt | modes: n.a. | covered: tests/test_bug_reports.py
+- [ ] B-BUGREPORTS-3 `GET /bug-reports` [require_staff] list bug reports | modes: n.a. | covered: tests/test_bug_reports.py
+- [ ] B-BUGREPORTS-4 `GET /bug-reports/{report_id}` [require_staff] get bug report | modes: n.a. | covered: tests/test_bug_reports.py
+- [ ] B-BUGREPORTS-5 `GET /bug-reports/{report_id}/screenshot` [require_staff] get bug screenshot | modes: n.a. | covered: tests/test_bug_reports.py
+- [ ] B-BUGREPORTS-6 `PATCH /bug-reports/{report_id}` [require_admin] set bug status | modes: n.a. | covered: tests/test_bug_reports.py
+- [ ] B-BUGREPORTS-7 `POST /bug-reports/{report_id}/resend` [require_admin] Copy a report to GitHub again (e.g. one sent before the token was set). | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-BUGREPORTS-8 ↳ admin only; copies to GitHub again | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+
+### call_in.py (prefix `/call-in`)
+- [ ] B-CALLIN-1 `POST /call-in/{station_id}` [PUBLIC] Join the queue of the station's live show. Returns the call and the token its | modes: n.a. | covered: tests/test_web_call_in.py
+- [ ] B-CALLIN-2 ↳ no live show -> 409; show not taking calls -> 409; burst -> 429 | modes: n.a. | covered: tests/test_web_call_in.py
+
+### campaigns.py (prefix `/campaigns`)
+- [ ] B-CAMPAIGNS-1 `GET /campaigns` [require_sponsor_or_manager] list campaigns | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-2 ↳ sponsor sees only own campaigns; manager sees all | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-3 `POST /campaigns` [require_sponsor_or_manager] create campaign | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-4 `GET /campaigns/{campaign_id}` [require_sponsor_or_manager] get campaign | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-5 `PATCH /campaigns/{campaign_id}` [require_sponsor_or_manager] update campaign | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-6 `PATCH /campaigns/{campaign_id}/status` [require_manager] update campaign status | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-7 `GET /campaigns/{campaign_id}/drafts` [require_sponsor_or_manager] list drafts | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-8 `POST /campaigns/{campaign_id}/drafts` [require_sponsor_or_manager] create draft | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-9 `POST /campaigns/{campaign_id}/drafts/{draft_id}/upload-audio` [require_sponsor_or_manager] upload draft audio | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-CAMPAIGNS-10 `GET /campaigns/{campaign_id}/comments` [require_sponsor_or_manager] list comments | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-CAMPAIGNS-11 `POST /campaigns/{campaign_id}/comments` [require_sponsor_or_manager] create comment | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+
+### categories.py (prefix `/categories`)
+- [ ] B-CATEGORIES-1 `GET /categories` [require_staff] list categories | modes: n.a. | covered: tests/test_role_access.py
+- [ ] B-CATEGORIES-2 `POST /categories` [require_manager] create category | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+- [ ] B-CATEGORIES-3 `PATCH /categories/{category_id}` [require_manager] update category | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+- [ ] B-CATEGORIES-4 `DELETE /categories/{category_id}` [require_manager] delete category | modes: n.a. | covered: tests/test_admin_crud.py::test_named_lists_round_trip (BUG fixed: duplicate name 500 -> 409)
+
+### channels.py (prefix `/channels`)
+- [ ] B-CHANNELS-1 `GET /channels` [PUBLIC] list channels | modes: n.a. | covered: tests/test_admin_crud.py::test_channels_round_trip
+- [ ] B-CHANNELS-2 `POST /channels` [require_manager] create channel | modes: n.a. | covered: tests/test_admin_crud.py::test_channels_round_trip
+- [ ] B-CHANNELS-3 `PUT /channels/{channel_id}` [require_manager] update channel | modes: n.a. | covered: tests/test_admin_crud.py::test_channels_round_trip
+- [ ] B-CHANNELS-4 `DELETE /channels/{channel_id}` [require_manager] delete channel | modes: n.a. | covered: tests/test_admin_crud.py::test_channels_round_trip
+
+### controls.py (prefix `/stations`) — router guard: require_station_operator on writes
+- [ ] B-CONTROLS-1 `POST /stations/{station_id}/controls/play` [require_dj_or_manager] play | modes: both | NOT COVERED
+- [ ] B-CONTROLS-2 ↳ play/pause/stop/play-now/enqueue respect require_station_operator (protected station) | modes: both | covered: tests/test_station_permissions.py
+- [ ] B-CONTROLS-3 `POST /stations/{station_id}/controls/pause` [require_dj_or_manager] pause | modes: both | NOT COVERED
+- [ ] B-CONTROLS-4 `POST /stations/{station_id}/controls/stop` [require_dj_or_manager] stop | modes: both | covered: tests/test_station_permissions.py
+- [ ] B-CONTROLS-5 `POST /stations/{station_id}/controls/play-now` [require_dj_or_manager] play now endpoint | modes: both | NOT COVERED
+- [ ] B-CONTROLS-6 ↳ play-now starts the asset immediately; interplay with queue's single player | modes: both | NOT COVERED
+- [ ] B-CONTROLS-7 `POST /stations/{station_id}/controls/enqueue` [require_dj_or_manager] enqueue | modes: both | NOT COVERED
+
+### copy_review.py (prefix `/sponsorship`)
+- [ ] B-COPYREVIEW-1 `GET /sponsorship/rules` [require_sponsor_or_manager] get rules | modes: n.a. | covered: tests/test_copy_review.py
+- [ ] B-COPYREVIEW-2 `PUT /sponsorship/rules` [require_manager] Save edited rules as a new version. Reviews use it immediately. | modes: n.a. | covered: tests/test_copy_review.py
+- [ ] B-COPYREVIEW-3 `GET /sponsorship/rules/history` [require_manager] rules history | modes: n.a. | covered: tests/test_copy_review.py
+- [ ] B-COPYREVIEW-4 `POST /sponsorship/copy-review` [require_sponsor_or_manager] Check proposed sponsorship wording against the rules in force. | modes: n.a. | covered: tests/test_copy_review.py
+
+### crm.py (prefix `/crm`)
+- [ ] B-CRM-1 `POST /crm/register` [PUBLIC] Register a new CRM member. Returns a 6-digit PIN (shown once). | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-2 `POST /crm/login` [PUBLIC] Login with a 6-digit PIN. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-3 `POST /crm/rate` [get_crm_member] Rate or favorite a song. Upserts if a rating already exists. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-4 `DELETE /crm/rate/{asset_id}` [get_crm_member] Remove a rating for a song. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-5 `GET /crm/my-ratings` [get_crm_member] List all ratings/favorites for the authenticated member. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-6 `GET /crm/raffles/active` [PUBLIC] List open raffles. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-7 `POST /crm/raffles/{raffle_id}/enter` [get_crm_member] Enter a raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-8 `GET /crm/members` [require_manager] List CRM members with optional search. | modes: n.a. | covered: tests/test_crm.py::test_admin_member_list_and_soft_delete
+- [ ] B-CRM-9 `GET /crm/members/{member_id}` [require_manager] Get a single member detail. | modes: n.a. | covered: tests/test_crm.py::test_admin_member_list_and_soft_delete
+- [ ] B-CRM-10 `DELETE /crm/members/{member_id}` [require_manager] Deactivate a CRM member (soft delete). | modes: n.a. | covered: tests/test_crm.py::test_admin_member_list_and_soft_delete
+- [ ] B-CRM-11 `GET /crm/song-rankings` [require_manager] Songs ranked by listener ratings — useful for playlist curation. | modes: n.a. | covered: tests/test_crm.py::test_register_login_rate_and_unrate
+- [ ] B-CRM-12 `GET /crm/raffles` [require_manager] List all raffles (admin). | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-13 `POST /crm/raffles` [require_manager] Create a new raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-14 `PATCH /crm/raffles/{raffle_id}` [require_manager] Update a raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-15 `POST /crm/raffles/{raffle_id}/draw` [require_manager] Randomly draw a winner for a raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+- [ ] B-CRM-16 `GET /crm/raffles/{raffle_id}/entries` [require_manager] List entries for a raffle. | modes: n.a. | covered: tests/test_crm.py::test_raffle_lifecycle
+
+### holidays.py (prefix `/holidays`)
+- [ ] B-HOLIDAYS-1 `GET /holidays` [require_manager] list holidays | modes: both | covered: tests/test_holidays.py
+- [ ] B-HOLIDAYS-2 `POST /holidays` [require_manager] create holiday | modes: both | covered: tests/test_holidays.py
+- [ ] B-HOLIDAYS-3 `PUT /holidays/{holiday_id}` [require_manager] update holiday | modes: both | covered: tests/test_holidays.py
+- [ ] B-HOLIDAYS-4 `DELETE /holidays/{holiday_id}` [require_manager] delete holiday | modes: both | covered: tests/test_holidays.py
+- [ ] B-HOLIDAYS-5 `POST /holidays/preview` [require_manager] Preview auto-generated blackout windows without saving to DB. | modes: both | NOT COVERED
+- [ ] B-HOLIDAYS-6 `POST /holidays/auto-generate` [require_manager] Auto-generate Shabbos & Yom Tov blackout windows based on station location. | modes: both | covered: partial (tests/test_station_write_permissions.py::test_blackouts_follow_station_permissions: station check only)
+- [ ] B-HOLIDAYS-7 ↳ Shabbos/Yom Tov windows from station location (candle-lighting/havdalah) | modes: both | NOT COVERED
+- [ ] B-HOLIDAYS-8 `POST /holidays/ensure-silence-asset` [require_manager] Ensure a silence audio asset exists. Creates one via FFmpeg if needed. | modes: both | NOT COVERED
+- [ ] B-HOLIDAYS-9 ↳ creates silence asset via FFmpeg if missing | modes: n.a. | NOT COVERED
+
+### icecast.py (prefix `/icecast`)
+- [ ] B-ICECAST-1 `GET /icecast/status` [require_admin] Get Icecast configuration status. | modes: n.a. | NOT COVERED
+- [ ] B-ICECAST-2 `POST /icecast/{station_id}/start` [require_admin] Start Icecast OTA stream for a station. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-ICECAST-3 `POST /icecast/{station_id}/stop` [require_admin] Stop Icecast OTA stream for a station. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+
+### listeners.py (prefix `/listeners`)
+- [ ] B-LISTENERS-1 `POST /listeners/heartbeat` [PUBLIC] Public endpoint — called by the Listen page every 30s to track active listeners. | modes: both | covered: tests/test_listeners_live.py
+- [ ] B-LISTENERS-2 ↳ new session created with geo lookup; rejoin within window reuses session | modes: both | covered: tests/test_listeners_live.py
+- [ ] B-LISTENERS-3 `POST /listeners/disconnect` [PUBLIC] Called when a listener stops — finalizes the session and drops it from the live count. | modes: both | covered: tests/test_listeners_live.py
+- [ ] B-LISTENERS-4 `POST /listeners/leave` [PUBLIC] Same as /disconnect, for navigator.sendBeacon when the page closes. | modes: both | covered: tests/test_listeners_live.py
+- [ ] B-LISTENERS-5 `WEBSOCKET /listeners/ws` [PUBLIC] Admin pages keep this open and refetch /live when told something changed. | modes: both | NOT COVERED
+- [ ] B-LISTENERS-6 ↳ admin watchers told to refetch on change; dead socket dropped | modes: n.a. | NOT COVERED
+- [ ] B-LISTENERS-7 `GET /listeners/live` [require_manager] Current active listeners across all stations, grouped by station + region. | modes: both | covered: tests/test_listeners_live.py
+- [ ] B-LISTENERS-8 `GET /listeners/today` [require_manager] Today's listener stats: total sessions, unique listeners, total minutes. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-LISTENERS-9 ↳ total sessions, unique, minutes, peak concurrent | modes: n.a. | covered: partial (tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads: answers, values not checked)
+- [ ] B-LISTENERS-10 `GET /listeners/history` [require_manager] Daily listener aggregates for charting. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-LISTENERS-11 `GET /listeners/regions` [require_manager] Listener breakdown by country/region over a period. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+
+### live_shows.py (prefix `/live-shows`) — router guard: station_write_guard(show_id)
+- [ ] B-LIVESHOWS-1 `POST /live-shows` [require_dj_or_manager] Create a new live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-2 `GET /live-shows` [require_staff] List live shows with optional filters. | modes: both | covered: tests/test_role_access.py
+- [ ] B-LIVESHOWS-3 `GET /live-shows/{show_id}` [require_dj_or_manager] Get a live show by ID. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-4 `PATCH /live-shows/{show_id}` [require_dj_or_manager] Update a live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-5 `DELETE /live-shows/{show_id}` [require_admin] Delete a live show (admin only). | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-6 `POST /live-shows/{show_id}/start` [require_dj_or_manager] Start a live show (go live). | modes: both | covered (indirect, calls handler): tests/test_live_show_lifecycle.py, tests/test_live_show_on_air.py
+- [ ] B-LIVESHOWS-7 ↳ start pauses automation (live_show_id set), queue resumes after end | modes: both | covered: tests/test_live_show_on_air.py
+- [ ] B-LIVESHOWS-8 ↳ station not operable by user -> 403 (station_write_guard) | modes: n.a. | covered: tests/test_station_write_permissions.py::test_live_shows_follow_station_permissions
+- [ ] B-LIVESHOWS-9 `POST /live-shows/{show_id}/end` [require_dj_or_manager] End a live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-10 ↳ end clears live_show_id and resumes automation; archive created? | modes: both | covered: tests/test_live_show_on_air.py
+- [ ] B-LIVESHOWS-11 `GET /live-shows/{show_id}/time-remaining` [require_dj_or_manager] Get seconds until hard stop. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-12 `GET /live-shows/{show_id}/calls` [require_dj_or_manager] List all callers for a show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-13 `POST /live-shows/{show_id}/calls/{call_id}/approve` [require_dj_or_manager] Approve a caller. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-14 `POST /live-shows/{show_id}/calls/{call_id}/reject` [require_dj_or_manager] Reject a caller. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-15 `POST /live-shows/{show_id}/calls/{call_id}/on-air` [require_dj_or_manager] Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted). | modes: both | covered: tests/test_web_call_in.py
+- [ ] B-LIVESHOWS-16 ↳ only one caller on air at a time -> 409 | modes: n.a. | covered: tests/test_web_call_in.py
+- [ ] B-LIVESHOWS-17 `POST /live-shows/{show_id}/calls/{call_id}/end-call` [require_dj_or_manager] End an active call. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [ ] B-LIVESHOWS-18 `PATCH /live-shows/{show_id}/calls/{call_id}` [require_dj_or_manager] Update caller name/notes. | modes: both | covered: tests/test_web_call_in.py
+- [ ] B-LIVESHOWS-19 `GET /live-shows/station/{station_id}/active` [PUBLIC] Public endpoint: get the active live show for a station (if any). | modes: both | covered: tests/test_public_endpoints.py::test_active_live_show_is_public_without_callers
+- [ ] B-LIVESHOWS-20 `POST /live-shows/twilio/inbound` [PUBLIC] Twilio inbound call webhook — find active show, create CallInRequest, return hold TwiML. | modes: both | covered: tests/test_auth_security.py::test_twilio_inbound_with_no_live_show_answers_politely, test_twilio_inbound_queues_the_caller_and_status_ends_it
+- [ ] B-LIVESHOWS-21 ↳ Twilio signature/no active show -> polite TwiML; creates CallInRequest | modes: n.a. | covered: BUG unsigned Twilio webhooks accepted (tests/test_auth_security.py::test_unsigned_twilio_webhook_is_refused xfail)
+- [ ] B-LIVESHOWS-22 `POST /live-shows/twilio/status` [PUBLIC] Twilio call status callback — update call status when caller hangs up. | modes: both | covered: tests/test_auth_security.py::test_twilio_inbound_queues_the_caller_and_status_ends_it
+- [ ] B-LIVESHOWS-23 `GET /live-shows/twilio/hold-music` [PUBLIC] Return TwiML with hold music URL for Twilio conference waitUrl. | modes: both | covered: tests/test_auth_security.py::test_twilio_hold_music_is_twiml
+
+### live_shows_ws.py
+- [ ] B-LIVESHOWSW-1 `WEBSOCKET /ws/live/station/{station_id}/listen` [PUBLIC] Public: a listener page hears the station's live show here while one is on air. | modes: both | NOT COVERED
+- [ ] B-LIVESHOWSW-2 `WEBSOCKET /ws/live/{show_id}/events` [PUBLIC] Real-time show state + caller updates WebSocket. | modes: both | NOT COVERED
+- [ ] B-LIVESHOWSW-3 `WEBSOCKET /ws/live/{show_id}/audio` [PUBLIC] Binary audio WebSocket — receives MP3 chunks from host browser, forwards to Icecast. | modes: both | NOT COVERED
+- [ ] B-LIVESHOWSW-4 ↳ host MP3 chunks relayed to station listeners only; dead listener dropped | modes: both | covered: tests/test_live_show_on_air.py
+- [ ] B-LIVESHOWSW-5 `WEBSOCKET /ws/live/call/{call_id}` [PUBLIC] A web caller (public page): first message {"type":"auth","token":...} with the | modes: both | NOT COVERED
+- [ ] B-LIVESHOWSW-6 ↳ first message must be auth token; wrong token closes | modes: n.a. | covered: tests/test_web_call_in.py
+
+### mixer.py (prefix `/studio`)
+- [ ] B-MIXER-1 `POST /studio/mix` [require_manager] Mix two assets (backtrack + overlay) and save as a new asset. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+
+### now_playing.py (prefix `/now-playing`)
+- [ ] B-NOWPLAYING-1 `GET /now-playing/{station_id}` [PUBLIC] Get current now-playing state for a station. | modes: both | covered: tests/test_now_playing_broadcast.py
+- [ ] B-NOWPLAYING-2 `GET /now-playing/{station_id}/active-block` [PUBLIC] get active block | modes: both | NOT COVERED
+- [ ] B-NOWPLAYING-3 ↳ returns schedule block active now (sun-relative times resolved) | modes: both | NOT COVERED
+- [ ] B-NOWPLAYING-4 `PATCH /now-playing/{station_id}` [require_dj_or_manager] update now playing | modes: both | covered: tests/test_now_playing_broadcast.py
+- [ ] B-NOWPLAYING-5 `DELETE /now-playing/{station_id}` [require_dj_or_manager] Clear now-playing state for a station. | modes: both | covered: tests/test_now_playing_broadcast.py
+
+### nowplaying.py (prefix `/ws`) — NOT MOUNTED (dead code)
+- [ ] B-NOWPLAYING-6 `WEBSOCKET /ws/nowplaying/{station_id}` [PUBLIC] nowplaying websocket | modes: both | NOT COVERED
+- [ ] B-NOWPLAYING-7 ↳ DEAD CODE: nowplaying.py router is not mounted in api/v1/__init__.py - confirm/remove | modes: n.a. | NOT COVERED
+
+### playlists.py (prefix `/playlists`) — router guard: station_write_guard(template/slot)
+- [ ] B-PLAYLISTS-1 `GET /playlists` [require_manager] list templates | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
+- [ ] B-PLAYLISTS-2 `POST /playlists` [require_manager] create template | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
+- [ ] B-PLAYLISTS-3 `GET /playlists/asset-types` [require_manager] Return distinct asset_type + category combinations from the assets table. | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
+- [ ] B-PLAYLISTS-4 `GET /playlists/generation` [require_manager] Settings, plus a dry run of what generation would queue next. Changes nothing. | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
+- [ ] B-PLAYLISTS-5 `PUT /playlists/generation` [require_manager] set generation | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
+- [ ] B-PLAYLISTS-6 ↳ enable generation: queue fills from block sequences N hours ahead; artist distance, min vote | modes: both | covered: tests/test_playlist_generation.py
+- [ ] B-PLAYLISTS-7 `POST /playlists/generation/regenerate` [require_manager] Throw away the automatically queued songs that have not started and generate again. | modes: both | covered: tests/test_station_permissions.py
+- [ ] B-PLAYLISTS-8 ↳ drops unplayed automatic songs and regenerates; manual items kept | modes: both | covered: tests/test_playlist_generation.py
+- [ ] B-PLAYLISTS-9 `GET /playlists/{template_id}` [require_manager] get template | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
+- [ ] B-PLAYLISTS-10 `PATCH /playlists/{template_id}` [require_manager] update template | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
+- [ ] B-PLAYLISTS-11 `DELETE /playlists/{template_id}` [require_manager] delete template | modes: both | covered: tests/test_playlist_generation.py, tests/test_station_permissions.py
+- [ ] B-PLAYLISTS-12 `POST /playlists/slots` [require_manager] create slot | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
+- [ ] B-PLAYLISTS-13 `PATCH /playlists/slots/{slot_id}` [require_manager] update slot | modes: both | covered: tests/test_schedule_refresh.py
+- [ ] B-PLAYLISTS-14 `DELETE /playlists/slots/{slot_id}` [require_manager] delete slot | modes: both | covered: tests/test_schedule_refresh.py
+
+### playout.py (prefix `/playout`) — X-Playout-Token, engine stations only
+- [ ] B-PLAYOUT-1 `POST /playout/{station_id}/hello` [_require_engine] The engine announces that it (re)started. | modes: engine | NOT COVERED
+- [ ] B-PLAYOUT-2 ↳ engine restart resets in-memory state (cued, timed_sent) | modes: engine | NOT COVERED
+- [ ] B-PLAYOUT-3 `GET /playout/{station_id}/next` [_require_engine] What should play next. 204 when the queue is empty (the engine retries). | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-4 ↳ missing/wrong X-Playout-Token -> 403 | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-5 ↳ station not engine-driven -> 404 | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-6 ↳ empty queue -> 204 after one refill attempt (no refill during blackout) | modes: engine | NOT COVERED
+- [ ] B-PLAYOUT-7 ↳ due soft ad slots first, then by position; future-timed wait | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-8 ↳ cued entry already handed out is not handed again; lost start report caught up | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-9 ↳ entry with no playable file is dropped and next tried | modes: engine | NOT COVERED
+- [ ] B-PLAYOUT-10 ↳ PAST-DUE hard time/weather not handed to timed lane is picked by position (late) - should be first | modes: engine | NOT COVERED
+- [ ] B-PLAYOUT-11 `POST /playout/{station_id}/started` [_require_engine] The engine reports what just went on air. | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-12 ↳ closes previous playing entry, logs PlayLog (>=1 s), marks played/skipped | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-13 ↳ no entry id -> emergency playlist alert once | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-14 ↳ entry deleted by redraw but handed -> still shown as on air | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-PLAYOUT-15 ↳ broadcasts now-playing and replenishes (not during blackout) | modes: engine | NOT COVERED
+
+### playout_status.py (prefix `/playout-status`)
+- [ ] B-PLAYOUTSTA-1 `GET /playout-status` [PUBLIC] {station_id: status} for every engine station; any other station is "browser". | modes: both | covered: tests/test_playout_status.py
+- [ ] B-PLAYOUTSTA-2 ↳ per station: browser vs server; engine status fields | modes: both | covered: tests/test_playout_status.py
+
+### program_blocks.py (prefix `/program-blocks`)
+- [ ] B-PROGRAMBLO-1 `GET /program-blocks` [require_manager] list program blocks | modes: both | covered: tests/test_program_blocks.py
+- [ ] B-PROGRAMBLO-2 `GET /program-blocks/capabilities` [require_manager] What blocks can do on this server, for scripts that set blocks up (the Daf Yomi job | modes: both | covered: tests/test_blocks_keep_hourly.py
+- [ ] B-PROGRAMBLO-3 `GET /program-blocks/preview` [require_manager] What the blocks will air over the coming hours, with each run's length. | modes: both | covered: tests/test_program_blocks.py
+- [ ] B-PROGRAMBLO-4 ↳ next 24h runs with lengths; changes nothing | modes: n.a. | covered: tests/test_program_blocks.py
+- [ ] B-PROGRAMBLO-5 `POST /program-blocks` [require_manager] create program block | modes: both | covered: tests/test_program_blocks.py
+- [ ] B-PROGRAMBLO-6 ↳ block items expanded into source=block queue entries at clock times (hard/soft/soft+limit) | modes: both | covered: tests/test_program_blocks.py
+- [ ] B-PROGRAMBLO-7 ↳ blocks replace built-in hourly time/weather unless blocks_keep_hourly | modes: both | covered: tests/test_blocks_keep_hourly.py
+- [ ] B-PROGRAMBLO-8 ↳ non-assigned station -> 403 | modes: n.a. | covered: tests/test_station_write_permissions.py::test_program_blocks_follow_station_permissions
+- [ ] B-PROGRAMBLO-9 `PUT /program-blocks/{block_id}` [require_manager] update program block | modes: both | covered: tests/test_blocks_keep_hourly.py, tests/test_program_blocks.py
+- [ ] B-PROGRAMBLO-10 `DELETE /program-blocks/{block_id}` [require_manager] delete program block | modes: both | covered: tests/test_blocks_keep_hourly.py, tests/test_program_blocks.py
+
+### queue.py (prefix `/stations/{station_id}/queue`) — router guard: require_station_operator on writes
+- [ ] B-QUEUE-1 `GET /stations/{station_id}/queue` [require_staff] get queue | modes: both | covered: tests/test_items_without_length.py, tests/test_next_shown_is_next_played.py, tests/test_operator_actions.py
+- [ ] B-QUEUE-2 ↳ next_due/up-next shows a timed item due before the song ends | modes: both | covered: tests/test_up_next_shows_timed_item.py
+- [ ] B-QUEUE-3 ↳ items with no duration do not break the read | modes: both | covered: tests/test_items_without_length.py
+- [ ] B-QUEUE-4 ↳ queue read failure returns graceful error, not 500 storm | modes: both | covered: tests/test_queue_read_failure.py
+- [ ] B-QUEUE-5 ↳ viewer may read; sponsor 403 | modes: n.a. | NOT COVERED
+- [ ] B-QUEUE-6 `GET /stations/{station_id}/queue/log` [require_staff] Get recent play history. | modes: both | NOT COVERED
+- [ ] B-QUEUE-7 ↳ recent play history ordered newest first, limit param | modes: both | NOT COVERED
+- [ ] B-QUEUE-8 `GET /stations/{station_id}/queue/last-played` [require_staff] Get the most recent play time for each asset. | modes: both | NOT COVERED
+- [ ] B-QUEUE-9 ↳ served from last_played in-memory cache; new plays appear without full re-read | modes: both | covered: tests/test_last_played_cache.py
+- [ ] B-QUEUE-10 `POST /stations/{station_id}/queue/add` [require_dj_or_manager] add to queue | modes: both | NOT COVERED
+- [ ] B-QUEUE-11 ↳ appends at end with source=manual; unknown asset -> error | modes: both | NOT COVERED
+- [ ] B-QUEUE-12 `POST /stations/{station_id}/queue/bulk-add` [require_dj_or_manager] bulk add to queue | modes: both | NOT COVERED
+- [ ] B-QUEUE-13 `POST /stations/{station_id}/queue/play-next` [require_dj_or_manager] play next | modes: both | NOT COVERED
+- [ ] B-QUEUE-14 ↳ shifts pending positions +1 and inserts after the playing item; empty queue -> position 1 | modes: both | NOT COVERED
+- [ ] B-QUEUE-15 `POST /stations/{station_id}/queue/fire-now` [require_dj_or_manager] Put an asset on air now (one call instead of play-next + skip). | modes: both | covered: tests/test_operator_actions.py, tests/test_playout_engine.py
+- [ ] B-QUEUE-16 ↳ browser: item starts immediately, current skipped, response carries new queue | modes: browser | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-17 ↳ engine: item handed to engine timed lane; engine down -> 503 and item stays queued as next | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-QUEUE-18 ↳ mode=after-current only queues it | modes: both | covered: tests/test_playout_engine.py
+- [ ] B-QUEUE-19 ↳ client_request_id repeat returns duplicate:true without firing twice | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-20 ↳ fire-now while a timed item (time/weather) is on air still puts the item on air | modes: browser | NOT COVERED
+- [ ] B-QUEUE-21 `POST /stations/{station_id}/queue/mix-over` [require_dj_or_manager] Play an asset on top of what is on air. The item on air carries on and the queue | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-22 ↳ browser: WS mix_over broadcast to station listeners; queue does not move | modes: browser | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-23 ↳ engine: engine_overlay; engine down -> 503 | modes: engine | NOT COVERED
+- [ ] B-QUEUE-24 ↳ asset without audio file -> 409; unknown asset -> 404 | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-25 ↳ PlayLog row written with source=manual | modes: both | NOT COVERED
+- [ ] B-QUEUE-26 `POST /stations/{station_id}/queue/skip` [require_dj_or_manager] skip current | modes: both | covered: tests/test_activity_log.py, tests/test_operator_actions.py, tests/test_playout_engine.py
+- [ ] B-QUEUE-27 ↳ fade=hard -> 0 s, fade (default) -> 0.5 s, soft -> 3 s returned and broadcast | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-28 ↳ timed item on air (time/weather/sponsor) is protected: 'Timed item plays to the end' | modes: both | covered: tests/test_rapid_next.py
+- [ ] B-QUEUE-29 ↳ Next during an automatic change keeps the incoming song (no double skip) | modes: browser | covered: tests/test_queue_advance.py
+- [ ] B-QUEUE-30 ↳ Next on last item refills queue and carries on; blackout -> no refill | modes: browser | covered: tests/test_queue_never_runs_dry.py
+- [ ] B-QUEUE-31 ↳ skip ends loop; engine: flush + skip, engine down -> 503 'Nothing was skipped' | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-QUEUE-32 ↳ PlayLog source=manual for skipped item; status=skipped | modes: both | covered: tests/test_playout_engine.py
+- [ ] B-QUEUE-33 ↳ rapid repeated Next presses advance one item each, no skipped weather | modes: browser | covered: tests/test_rapid_next.py
+- [ ] B-QUEUE-34 `POST /stations/{station_id}/queue/loop` [require_dj_or_manager] Loop on: the item on air plays again each time it ends. Off (or Next) ends it; | modes: both | covered: tests/test_operator_actions.py, tests/test_playout_engine.py
+- [ ] B-QUEUE-35 ↳ loop on with nothing on air -> 409 | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-36 ↳ loop on: item re-queued after each end; Next ends the loop | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-37 ↳ engine: loop on/off flushes the pre-loaded track; engine plays same item again | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-QUEUE-38 `POST /stations/{station_id}/queue/insert` [require_dj_or_manager] Insert assets, in order, right after a queue entry (or at the top). One call: | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-39 ↳ insert after a given entry, or at top when no anchor; multiple assets keep order | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-40 ↳ no asset ids -> 422; unknown asset -> 404 | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-QUEUE-41 ↳ engine: flush so engine re-asks | modes: engine | NOT COVERED
+- [ ] B-QUEUE-42 `POST /stations/{station_id}/queue/move-up` [require_dj_or_manager] Move a queue entry up (lower position number). | modes: both | NOT COVERED
+- [ ] B-QUEUE-43 ↳ swap with previous pending; top entry stays | modes: both | NOT COVERED
+- [ ] B-QUEUE-44 `POST /stations/{station_id}/queue/move-down` [require_dj_or_manager] Move a queue entry down (higher position number). | modes: both | NOT COVERED
+- [ ] B-QUEUE-45 ↳ swap with next pending; last entry stays | modes: both | NOT COVERED
+- [ ] B-QUEUE-46 `PUT /stations/{station_id}/queue/reorder` [require_dj_or_manager] reorder queue | modes: both | NOT COVERED
+- [ ] B-QUEUE-47 ↳ bulk reorder by ids; engine pre-load flushed by next tick when head changes | modes: both | NOT COVERED
+- [ ] B-QUEUE-48 `POST /stations/{station_id}/queue/reorder-dnd` [require_dj_or_manager] Drag-and-drop reorder: move entry to new position with rule validation. | modes: both | NOT COVERED
+- [ ] B-QUEUE-49 ↳ non-pending entry -> 404 | modes: both | NOT COVERED
+- [ ] B-QUEUE-50 ↳ warnings for category transitions, rule conflicts and do_not_play | modes: both | NOT COVERED
+- [ ] B-QUEUE-51 `DELETE /stations/{station_id}/queue/{entry_id}` [require_dj_or_manager] remove from queue | modes: both | covered: tests/test_activity_log.py, tests/test_operator_actions.py, tests/test_playout_engine.py
+- [ ] B-QUEUE-52 ↳ remove pending entry; engine flush when it was the cued one | modes: both | covered: tests/test_playout_engine.py
+- [ ] B-QUEUE-53 `POST /stations/{station_id}/queue/start` [require_dj_or_manager] start playback | modes: both | covered: tests/test_queue_never_runs_dry.py
+- [ ] B-QUEUE-54 ↳ already playing -> 'Already playing', no second item started | modes: browser | covered: tests/test_one_player_per_station.py
+- [ ] B-QUEUE-55 ↳ blackout active -> silence entries queued | modes: browser | NOT COVERED
+- [ ] B-QUEUE-56 ↳ engine station -> 'Playout engine will start the next track' (no local start) | modes: engine | NOT COVERED
+- [ ] B-QUEUE-57 ↳ empty library -> 'Queue empty' | modes: browser | covered: tests/test_queue_never_runs_dry.py
+- [ ] B-QUEUE-58 `POST /stations/{station_id}/queue/preview-weather` [require_staff] Generate (or return cached) weather + time TTS for preview — does NOT insert into queue. | modes: both | NOT COVERED
+- [ ] B-QUEUE-59 ↳ returns cached time+weather audio for preview, inserts nothing | modes: n.a. | NOT COVERED
+- [ ] B-QUEUE-60 `POST /stations/{station_id}/queue/insert-weather` [require_manager] Force-insert time announcement + weather spot into queue (admin trigger). | modes: both | NOT COVERED
+- [ ] B-QUEUE-61 ↳ force-insert time + weather now (manager only) | modes: both | NOT COVERED
+- [ ] B-QUEUE-62 `POST /stations/{station_id}/queue/schedule-hourly` [require_manager] Force-run hourly announcement scheduling for this station. | modes: both | NOT COVERED
+- [ ] B-QUEUE-63 ↳ forces _schedule_hourly_announcements for station; no duplicates per hour | modes: both | NOT COVERED
+- [ ] B-QUEUE-64 `POST /stations/{station_id}/queue/force-replenish` [require_manager] Force a full queue replenish for debugging. | modes: both | NOT COVERED
+- [ ] B-QUEUE-65 ↳ full replenish runs, returns counts | modes: both | NOT COVERED
+
+### rds.py (prefix `/stations`)
+- [ ] B-RDS-1 `GET /stations/{station_id}/rds.txt` [PUBLIC] rds text | modes: both | covered: tests/test_rds.py
+- [ ] B-RDS-2 ↳ plain text title for RDS encoder; unknown station 404 | modes: both | covered: tests/test_rds.py
+
+### reviews.py (prefix `/reviews`)
+- [ ] B-REVIEWS-1 `POST /reviews/queues` [require_manager] create queue | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-REVIEWS-2 `GET /reviews/queues` [require_staff] list queues | modes: n.a. | covered: tests/test_role_access.py
+- [ ] B-REVIEWS-3 `GET /reviews/queues/{queue_id}` [require_staff] get queue | modes: n.a. | NOT COVERED
+- [ ] B-REVIEWS-4 `GET /reviews/queues/{queue_id}/items` [require_staff] list queue items | modes: n.a. | NOT COVERED
+- [ ] B-REVIEWS-5 `GET /reviews/queues/{queue_id}/next` [require_staff] Get the next unreviewed item and assign to current user. | modes: n.a. | NOT COVERED
+- [ ] B-REVIEWS-6 `PATCH /reviews/items/{item_id}` [require_staff] update item | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-REVIEWS-7 `POST /reviews/queues/{queue_id}/batch-update` [require_manager] batch update | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-REVIEWS-8 `GET /reviews/assets/{asset_id}/history` [require_staff] get asset history | modes: n.a. | NOT COVERED
+- [ ] B-REVIEWS-9 `POST /reviews/assets/{asset_id}/comment` [require_staff] add comment | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-REVIEWS-10 `GET /reviews/queues/{queue_id}/activity` [require_staff] get queue activity | modes: n.a. | NOT COVERED
+
+### rules.py (prefix `/rules`)
+- [ ] B-RULES-1 `GET /rules` [require_staff] list rules | modes: n.a. | covered: tests/test_role_access.py
+- [ ] B-RULES-2 `POST /rules` [require_admin] create rule | modes: n.a. | covered: tests/test_admin_crud.py::test_rules_round_trip_and_preview
+- [ ] B-RULES-3 `PUT /rules/{rule_id}` [require_admin] update rule | modes: n.a. | covered: tests/test_admin_crud.py::test_rules_round_trip_and_preview
+- [ ] B-RULES-4 `DELETE /rules/{rule_id}` [require_admin] delete rule | modes: n.a. | covered: tests/test_admin_crud.py::test_rules_round_trip_and_preview
+- [ ] B-RULES-5 `GET /rules/preview` [require_staff] Generate a preview of what the schedule would look like for a given date. | modes: n.a. | covered: tests/test_admin_crud.py::test_rules_round_trip_and_preview
+
+### scheduler.py (prefix `/scheduler`)
+- [ ] B-SCHEDULER-1 `POST /scheduler/start` [require_manager] Start the automatic scheduling engine. | modes: both | covered: tests/test_admin_crud.py::test_scheduler_status_is_public_and_start_stop_are_managers
+- [ ] B-SCHEDULER-2 `POST /scheduler/stop` [require_manager] Stop the automatic scheduling engine. | modes: both | covered: tests/test_admin_crud.py::test_scheduler_status_is_public_and_start_stop_are_managers
+- [ ] B-SCHEDULER-3 ↳ stopping scheduler halts browser-station advance; engine stations keep playing but timed hand-over stops | modes: both | NOT COVERED
+- [ ] B-SCHEDULER-4 `GET /scheduler/status` [PUBLIC] Get current scheduler status. | modes: both | covered: tests/test_admin_crud.py::test_scheduler_status_is_public_and_start_stop_are_managers
+
+### schedules.py (prefix `/schedules`) — router guard: station_write_guard(schedule/block/entry, body winner/other ids)
+- [ ] B-SCHEDULES-1 `GET /schedules/epg/{station_id}` [PUBLIC] Public EPG: returns all schedule blocks for a station on a given day, sorted by start_time. | modes: both | covered: tests/test_public_endpoints.py::test_epg_lists_the_days_blocks_in_time_order
+- [ ] B-SCHEDULES-2 ↳ public EPG for a date sorted by start; one-time blocks only on their date | modes: n.a. | covered: partial (tests/test_public_endpoints.py::test_epg_lists_the_days_blocks_in_time_order: order; one-time blocks not)
+- [ ] B-SCHEDULES-3 `POST /schedules` [require_manager] Create a new schedule for a station. | modes: both | covered: tests/test_schedules.py
+- [ ] B-SCHEDULES-4 `GET /schedules` [PUBLIC] List all schedules, optionally filtered by station. | modes: both | covered: tests/test_schedules.py
+- [ ] B-SCHEDULES-5 `POST /schedules/blocks` [require_manager] Create a new schedule block. | modes: both | covered: tests/test_block_waits_for_its_time.py, tests/test_schedule_refresh.py, tests/test_schedules.py
+- [ ] B-SCHEDULES-6 ↳ creating/updating a block triggers refresh_station (unplayed automatic songs replaced) | modes: both | covered: tests/test_schedule_refresh.py
+- [ ] B-SCHEDULES-7 ↳ sun-relative start (start_sun_event/offset) and start_date honoured | modes: both | covered: tests/test_schedule_lookahead.py
+- [ ] B-SCHEDULES-8 `GET /schedules/blocks` [PUBLIC] List all schedule blocks, optionally filtered by schedule. | modes: both | covered: tests/test_block_waits_for_its_time.py, tests/test_schedule_refresh.py, tests/test_schedules.py
+- [ ] B-SCHEDULES-9 `GET /schedules/blocks/{block_id}` [PUBLIC] Get a single schedule block by ID. | modes: both | covered: tests/test_schedule_lookahead.py, tests/test_schedules.py
+- [ ] B-SCHEDULES-10 `PATCH /schedules/blocks/{block_id}` [require_manager] Update a schedule block. | modes: both | covered: tests/test_schedule_lookahead.py, tests/test_schedules.py
+- [ ] B-SCHEDULES-11 ↳ block waits for its time; starts on time (realign 15 min before) | modes: both | covered: tests/test_block_waits_for_its_time.py
+- [ ] B-SCHEDULES-12 `DELETE /schedules/blocks/{block_id}` [require_manager] Delete a schedule block. | modes: both | covered: tests/test_schedule_lookahead.py, tests/test_schedules.py
+- [ ] B-SCHEDULES-13 `POST /schedules/blocks/{block_id}/set-prerecorded` [require_manager] Set a block to play a single pre-recorded show asset. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-14 ↳ block plays a single pre-recorded show asset at its time | modes: both | covered: partial (tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block: entry set, airing not)
+- [ ] B-SCHEDULES-15 `POST /schedules/playlist-entries` [require_manager] Add an asset to a schedule block's playlist. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-16 ↳ adds asset to block playlist; refresh_station queued | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-17 `GET /schedules/playlist-entries` [PUBLIC] List all playlist entries, optionally filtered by block. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-18 `GET /schedules/playlist-entries/{entry_id}` [PUBLIC] Get a single playlist entry by ID. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-19 `PATCH /schedules/playlist-entries/{entry_id}` [require_manager] Update a playlist entry. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-20 `DELETE /schedules/playlist-entries/{entry_id}` [require_manager] Delete a playlist entry. | modes: both | covered: tests/test_admin_crud.py::test_schedule_playlist_entries_and_prerecorded_block
+- [ ] B-SCHEDULES-21 `GET /schedules/timeline-preview` [PUBLIC] Preview what block is active and blackout status at a given time. | modes: both | covered: tests/test_admin_crud.py::test_timeline_preview
+- [ ] B-SCHEDULES-22 ↳ active block + blackout flag at given time | modes: n.a. | covered: tests/test_admin_crud.py::test_timeline_preview
+- [ ] B-SCHEDULES-23 `GET /schedules/look-ahead` [require_manager] What collides over the coming days, how each collision is settled | modes: both | covered: tests/test_program_blocks.py, tests/test_schedule_lookahead.py, tests/test_schedule_refresh.py
+- [ ] B-SCHEDULES-24 `POST /schedules/look-ahead/settle` [require_manager] Choose which of the overlapping blocks plays, by raising its priority above the others. | modes: both | covered: tests/test_schedule_lookahead.py
+- [ ] B-SCHEDULES-25 ↳ raises winner priority above others; other station's block -> 403 | modes: n.a. | covered: tests/test_schedule_lookahead.py
+- [ ] B-SCHEDULES-26 `GET /schedules/{schedule_id}` [PUBLIC] Get a single schedule by ID. | modes: both | covered: tests/test_block_waits_for_its_time.py, tests/test_program_blocks.py, tests/test_schedule_lookahead.py
+- [ ] B-SCHEDULES-27 `PATCH /schedules/{schedule_id}` [require_manager] Update a schedule. | modes: both | covered: tests/test_block_waits_for_its_time.py, tests/test_program_blocks.py, tests/test_schedule_lookahead.py
+- [ ] B-SCHEDULES-28 `DELETE /schedules/{schedule_id}` [require_manager] Delete a schedule. | modes: both | covered: tests/test_block_waits_for_its_time.py, tests/test_program_blocks.py, tests/test_schedule_lookahead.py
+
+### site_release.py
+- [ ] B-SITERELEAS-1 `GET /site-release` [PUBLIC] The release policy. Public: every tab needs it, and it holds nothing private. | modes: n.a. | covered: tests/test_site_release.py
+- [ ] B-SITERELEAS-2 `PUT /site-release` [require_admin] set mode | modes: n.a. | covered: tests/test_site_release.py
+- [ ] B-SITERELEAS-3 ↳ admin only; mode auto/manual broadcast to all tabs over /ws/site | modes: n.a. | covered: tests/test_site_release.py
+- [ ] B-SITERELEAS-4 `POST /site-release/push` [require_admin] push release | modes: n.a. | covered: tests/test_site_release.py
+- [ ] B-SITERELEAS-5 ↳ scheduled push at time; cancel push; tabs reload after their audio ends | modes: n.a. | covered: tests/test_site_release.py
+- [ ] B-SITERELEAS-6 `DELETE /site-release/push` [require_admin] cancel push | modes: n.a. | covered: tests/test_site_release.py
+- [ ] B-SITERELEAS-7 `GET /site-release/tabs` [require_admin] Every open tab of the site right now: its release, screen and whether it plays audio. | modes: n.a. | covered: tests/test_site_release.py
+- [ ] B-SITERELEAS-8 `WEBSOCKET /ws/site` [PUBLIC] site socket | modes: n.a. | NOT COVERED
+- [ ] B-SITERELEAS-9 ↳ tab registers with info (cleaned), receives release state; silent tab expires | modes: n.a. | NOT COVERED
+
+### song_requests.py (prefix `/song-requests`)
+- [ ] B-SONGREQUES-1 `POST /song-requests` [PUBLIC] Public: submit a song request with fuzzy matching and auto-approval. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-2 ↳ fuzzy match to library asset; unmatched saved pending | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-3 ↳ auto-approve when asset allows and under max_requests_per_day -> queued | modes: both | NOT COVERED
+- [ ] B-SONGREQUES-4 `GET /song-requests/analytics/top-requested` [require_manager] Admin: get most-requested songs grouped by matched asset. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-5 `GET /song-requests` [require_manager] Admin: list song requests with optional filters. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-6 `PATCH /song-requests/{request_id}` [require_manager] Admin: approve/reject/update a song request. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-7 ↳ approving matched request adds asset to the station queue | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow, tests/test_station_write_permissions.py::test_approving_a_song_request_needs_the_station
+- [ ] B-SONGREQUES-8 `DELETE /song-requests/{request_id}` [require_manager] Admin: delete a song request. | modes: both | covered: tests/test_admin_crud.py::test_song_request_flow
+- [ ] B-SONGREQUES-9 `GET /song-requests/station/{station_id}/count` [PUBLIC] Public: count pending song requests for a station. | modes: both | covered: tests/test_public_endpoints.py::test_song_request_count_counts_pending_only
+
+### sponsor_portal.py (prefix `/sponsor-portal`)
+- [ ] B-SPONSORPOR-1 `GET /sponsor-portal/spots` [require_sponsor] get my spots | modes: n.a. | covered: tests/test_spot_schedules.py
+- [ ] B-SPONSORPOR-2 `GET /sponsor-portal/play-history` [require_sponsor] get play history | modes: n.a. | covered: tests/test_spot_schedules.py
+- [ ] B-SPONSORPOR-3 `GET /sponsor-portal/upcoming-schedule` [require_sponsor] The sponsor's spots that are actually in the station queues, soonest first. | modes: n.a. | covered: tests/test_spot_schedules.py
+- [ ] B-SPONSORPOR-4 ↳ only spots in station queues for this sponsor, soonest first | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-SPONSORPOR-5 `GET /sponsor-portal/stats` [require_sponsor] get sponsor stats | modes: n.a. | covered: tests/test_spot_schedules.py
+
+### sponsors.py (prefix `/sponsors`)
+- [ ] B-SPONSORS-1 `GET /sponsors` [require_manager] list sponsors | modes: n.a. | covered: tests/test_program_blocks.py, tests/test_role_access.py, tests/test_sponsors.py
+- [ ] B-SPONSORS-2 `POST /sponsors` [require_manager] create sponsor | modes: n.a. | covered: tests/test_program_blocks.py, tests/test_sponsors.py
+- [ ] B-SPONSORS-3 `PUT /sponsors/{sponsor_id}` [require_manager] update sponsor | modes: n.a. | covered: tests/test_sponsors.py
+- [ ] B-SPONSORS-4 `DELETE /sponsors/{sponsor_id}` [require_manager] delete sponsor | modes: n.a. | covered: tests/test_sponsors.py
+
+### spot_recordings.py (prefix `/spot-recordings`)
+- [ ] B-SPOTRECORD-1 `GET /spot-recordings` [require_manager] list spot recordings | modes: n.a. | covered: tests/test_spot_recordings.py
+- [ ] B-SPOTRECORD-2 `POST /spot-recordings` [require_manager] create spot recording | modes: n.a. | covered: tests/test_spot_recordings.py
+- [ ] B-SPOTRECORD-3 `PUT /spot-recordings/{recording_id}` [require_manager] update spot recording | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+- [ ] B-SPOTRECORD-4 `POST /spot-recordings/{recording_id}/generate` [require_manager] Make the audio from the script (Shprach when connected, placeholder until then). | modes: n.a. | covered: tests/test_spot_recordings.py
+- [ ] B-SPOTRECORD-5 `POST /spot-recordings/{recording_id}/audio` [require_manager] upload audio | modes: n.a. | covered: tests/test_spot_recordings.py
+- [ ] B-SPOTRECORD-6 `GET /spot-recordings/{recording_id}/audio` [require_manager] get audio | modes: n.a. | covered: tests/test_spot_recordings.py
+- [ ] B-SPOTRECORD-7 `POST /spot-recordings/{recording_id}/approve` [require_manager] Put the spot in the library as this sponsor's audio so it can be scheduled. | modes: n.a. | covered: tests/test_spot_recordings.py
+- [ ] B-SPOTRECORD-8 `POST /spot-recordings/{recording_id}/reject` [require_manager] reject spot recording | modes: n.a. | covered: tests/test_spot_recordings.py
+- [ ] B-SPOTRECORD-9 `DELETE /spot-recordings/{recording_id}` [require_manager] delete spot recording | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
+
+### spot_schedules.py (prefix `/spot-schedules`) — router guard: station_write_guard(schedule_id)
+- [ ] B-SPOTSCHEDU-1 `GET /spot-schedules` [require_manager] list spot schedules | modes: both | covered: tests/test_program_blocks.py, tests/test_spot_recordings.py, tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-2 `GET /spot-schedules/preview` [require_manager] Look ahead: every sponsor spot planned for the next N days on a station | modes: both | covered: tests/test_program_blocks.py, tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-3 `GET /spot-schedules/timing-defaults` [require_manager] get timing defaults | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-4 `PUT /spot-schedules/timing-defaults` [require_manager] How a sponsor spot honours its time when its own schedule does not say. | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-5 ↳ station spot_timing default on_the_hour/other hard|soft | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-6 `POST /spot-schedules` [require_manager] create spot schedule | modes: both | covered: tests/test_program_blocks.py, tests/test_spot_recordings.py, tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-7 ↳ pending ad_slot entries reconciled for station; start_date > end_date -> 422 | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-8 ↳ audio of another sponsor -> 422 | modes: n.a. | covered: tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-9 `PUT /spot-schedules/{schedule_id}` [require_manager] update spot schedule | modes: both | covered: tests/test_program_blocks.py, tests/test_spot_schedules.py
+- [ ] B-SPOTSCHEDU-10 `DELETE /spot-schedules/{schedule_id}` [require_manager] delete spot schedule | modes: both | covered: tests/test_program_blocks.py, tests/test_spot_schedules.py
+
+### stations.py (prefix `/stations`)
+- [ ] B-STATIONS-1 `POST /stations` [require_manager] create | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
+- [ ] B-STATIONS-2 ↳ manager+ only; dj/viewer/sponsor 403 | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix
+- [ ] B-STATIONS-3 ↳ timezone, lat/lon, automation_config saved; new station gets queue on next replenish | modes: both | NOT COVERED
+- [ ] B-STATIONS-4 `GET /stations` [PUBLIC] list all | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
+- [ ] B-STATIONS-5 `GET /stations/geocode` [require_manager] Search for cities by name using OpenStreetMap Nominatim. Returns up to 5 results. | modes: n.a. | NOT COVERED
+- [ ] B-STATIONS-6 ↳ Nominatim lookup returns <=5 results; upstream failure handled | modes: n.a. | NOT COVERED
+- [ ] B-STATIONS-7 `GET /stations/{station_id}` [PUBLIC] get one | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
+- [ ] B-STATIONS-8 `PUT /stations/{station_id}` [require_manager] update | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
+- [ ] B-STATIONS-9 ↳ non-admin cannot toggle `protected` (403) | modes: n.a. | covered: tests/test_station_permissions.py
+- [ ] B-STATIONS-10 ↳ manager not assigned to station gets 403 | modes: n.a. | covered: tests/test_station_permissions.py
+- [ ] B-STATIONS-11 ↳ changing automation_config (weather_region, spot_timing, timed_during_long_items...) takes effect at next replenish | modes: both | NOT COVERED
+- [ ] B-STATIONS-12 ↳ changing timezone moves hourly time clips to the new local hour (_drop_wrong_hour_announcements) | modes: both | NOT COVERED
+- [ ] B-STATIONS-13 `DELETE /stations/{station_id}` [require_manager] delete | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
+- [ ] B-STATIONS-14 ↳ protected station: only admin may delete | modes: n.a. | covered: tests/test_station_permissions.py
+- [ ] B-STATIONS-15 ↳ delete cascades queue/schedules/now-playing without orphan errors in scheduler loop | modes: both | NOT COVERED
+
+### streams.py (prefix `/stations`)
+- [ ] B-STREAMS-1 `GET /stations/{station_id}/stream` [PUBLIC] stream info | modes: both | covered: tests/test_stations.py
+- [ ] B-STREAMS-2 ↳ stream_url only when PLAYOUT_STREAM_LIVE and engine drives station; else null (browser) | modes: both | covered: tests/test_playout_engine.py
+- [ ] B-STREAMS-3 `GET /stations/{station_id}/now-playing` [PUBLIC] now playing | modes: both | covered (indirect, calls handler): tests/test_items_without_length.py, tests/test_next_shown_is_next_played.py
+- [ ] B-STREAMS-4 ↳ returns current queue item + next (predict_next_entry) for listener pre-load | modes: both | covered: tests/test_next_shown_is_next_played.py
+- [ ] B-STREAMS-5 `GET /stations/{station_id}/live-audio` [PUBLIC] Public endpoint: returns audio URL + timing for the currently playing track. | modes: both | NOT COVERED
+- [ ] B-STREAMS-6 ↳ audio URL + elapsed timing for current track; nothing playing -> empty; liquidsoap branch when LIQUIDSOAP_ENABLED | modes: browser | NOT COVERED
+
+### users.py (prefix `/users`)
+- [ ] B-USERS-1 `GET /users/public/hosts` [PUBLIC] Public: list all hosts/DJs with public profiles. | modes: n.a. | covered: tests/test_admin_crud.py::test_users_round_trip_preferences_and_hosts
+- [ ] B-USERS-2 `GET /users` [require_admin] list users | modes: n.a. | covered: tests/test_activity_log.py, tests/test_role_access.py
+- [ ] B-USERS-3 `POST /users` [require_admin] create user | modes: n.a. | covered: tests/test_activity_log.py
+- [ ] B-USERS-4 ↳ admin creates user with role and station_ids | modes: n.a. | covered: tests/test_station_permissions.py
+- [ ] B-USERS-5 `PUT /users/{user_id}` [require_admin] update user | modes: n.a. | covered: tests/test_auth.py, tests/test_station_permissions.py
+- [ ] B-USERS-6 ↳ cannot disable own account / remove own admin role -> 400 | modes: n.a. | covered: tests/test_auth_security.py::test_admin_cannot_lock_themselves_out
+- [ ] B-USERS-7 `DELETE /users/{user_id}` [require_admin] delete user | modes: n.a. | covered: tests/test_auth.py, tests/test_station_permissions.py
+- [ ] B-USERS-8 ↳ cannot delete yourself -> 400 | modes: n.a. | covered: tests/test_auth_security.py::test_admin_cannot_lock_themselves_out
+- [ ] B-USERS-9 `GET /users/audit-log` [require_admin] Admin: view persistent audit log of all write actions. | modes: n.a. | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
+- [ ] B-USERS-10 `GET /users/me/preferences` [get_current_user] get my preferences | modes: n.a. | covered: tests/test_admin_crud.py::test_users_round_trip_preferences_and_hosts
+- [ ] B-USERS-11 `PATCH /users/me/preferences` [get_current_user] update my preferences | modes: n.a. | covered: tests/test_admin_crud.py::test_users_round_trip_preferences_and_hosts
+
+### weather_readouts.py (prefix `/weather-readouts`)
+- [ ] B-WEATHERREA-1 `GET /weather-readouts` [require_staff] list readouts | modes: both | NOT COVERED
+- [ ] B-WEATHERREA-2 `POST /weather-readouts` [require_manager] create readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
+- [ ] B-WEATHERREA-3 `GET /weather-readouts/template-preview` [require_staff] template preview | modes: both | NOT COVERED
+- [ ] B-WEATHERREA-4 `GET /weather-readouts/{readout_id}` [require_staff] get readout | modes: both | NOT COVERED
+- [ ] B-WEATHERREA-5 `PATCH /weather-readouts/{readout_id}` [require_manager] update readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
+- [ ] B-WEATHERREA-6 `POST /weather-readouts/{readout_id}/regenerate` [require_manager] regenerate readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
+- [ ] B-WEATHERREA-7 `POST /weather-readouts/{readout_id}/queue` [require_manager] queue readout | modes: both | covered: tests/test_station_write_permissions.py::test_queuing_a_weather_readout_needs_the_station (BUG fixed: no station check)
+- [ ] B-WEATHERREA-8 ↳ queues readout into station queue | modes: both | covered: tests/test_station_write_permissions.py::test_queuing_a_weather_readout_needs_the_station
+- [ ] B-WEATHERREA-9 `DELETE /weather-readouts/{readout_id}` [require_manager] delete readout | modes: both | covered: partial (tests/test_station_write_permissions.py::test_weather_readout_writes_follow_station_permissions: station check only)
+
+### weather_spots.py (prefix `/weather-spots`)
+- [ ] B-WEATHERSPO-1 `GET /weather-spots/{spot_date}` [require_manager] The weather spot stations of this region will play on this date (404 if none exists yet). | modes: both | covered: tests/test_weather_regions.py, tests/test_weather_spots.py
+- [ ] B-WEATHERSPO-2 `PUT /weather-spots/{spot_date}` [require_manager] Upload a finished recording as the weather spot for a date (the region's local date, YYYY-MM-DD). | modes: both | covered: tests/test_weather_regions.py, tests/test_weather_spots.py
+- [ ] B-WEATHERSPO-3 ↳ upload per region (lowercase) ; empty -> 422; too large -> 413; bad date -> 422 | modes: n.a. | covered: tests/test_weather_spots.py
+- [ ] B-WEATHERSPO-4 ↳ uploaded spot replaces ElevenLabs fallback in queued weather for that date | modes: both | covered: tests/test_weather_regions.py
+- [ ] B-WEATHERSPO-5 `GET /time-announcements` [require_manager] Hourly time clips (per region) | modes: n.a. | covered: tests/test_time_clip_regions.py, tests/test_weather_spots.py
+- [ ] B-WEATHERSPO-6 ↳ lists hourly clips per region | modes: n.a. | covered: tests/test_time_clip_regions.py
+- [ ] B-WEATHERSPO-7 `PUT /time-announcements/{hour}` [require_manager] Upload a ready-made clip for an hour (0-23) | modes: n.a. | covered: tests/test_time_clip_regions.py, tests/test_weather_spots.py
+- [ ] B-WEATHERSPO-8 ↳ hour outside 0-23 -> 422; uploaded clip used for that hour, per region | modes: n.a. | covered: tests/test_weather_spots.py
+- [ ] B-WEATHERSPO-9 ↳ re-upload realigns already queued time clips (_realign_time_clips) | modes: both | covered: tests/test_time_clip_regions.py
+
+### websocket.py
+- [ ] B-WEBSOCKET-1 `WEBSOCKET /ws/alerts` [PUBLIC] WebSocket endpoint for real-time alert notifications to admin clients. | modes: both | NOT COVERED
+- [ ] B-WEBSOCKET-2 `WEBSOCKET /ws/now-playing/{station_id}` [PUBLIC] websocket now playing | modes: both | NOT COVERED
+- [ ] B-WEBSOCKET-3 ↳ receives now_playing on every change (incl. engine started reports), stream_url field | modes: both | covered: tests/test_now_playing_broadcast.py
+- [ ] B-WEBSOCKET-4 ↳ mix_over and fade_seconds messages delivered | modes: browser | NOT COVERED
+## 2. Background jobs and periodic behaviour
+
+### 2a. Scheduler loop (`services/scheduler_engine.py`, every 3 s, leader-only)
+- [ ] B-JOB-1 Scheduler takes a 15 s DB lease; only the leader process advances stations; second process stays idle | modes: both | covered: tests/test_scheduler_lease.py
+- [ ] B-JOB-2 Lease handover when leader dies: follower takes over within ~15 s, no double advance | modes: both | covered: tests/test_scheduler_lease.py
+- [ ] B-JOB-3 Each pass uses its own session and ends its transaction (no "idle in transaction" blocking deploy migrations) | modes: both | NOT COVERED
+- [ ] B-JOB-4 One station's exception rolls back, raises critical "Station check failed" alert, other stations still advance in the same pass | modes: both | NOT COVERED
+- [ ] B-JOB-5 Browser station: `_advance_queue` -> `_check_advance` advances when duration elapsed (minus crossfade) | modes: browser | covered: tests/test_queue_advance.py
+- [ ] B-JOB-6 Browser: precise timer armed at cross_start (default 3 s before end; short/timed items 0.3 s) so server switch = client crossfade start | modes: browser | covered: tests/test_queue_advance.py, tests/test_song_change_gaps.py
+- [ ] B-JOB-7 Browser: poll does not advance before the end; precise timer does not advance too early | modes: browser | covered: tests/test_queue_advance.py
+- [ ] B-JOB-8 Browser: two concurrent advances (timer + poll + Next) promote only one entry (advance_lock) | modes: browser | covered: tests/test_queue_advance.py
+- [ ] B-JOB-9 Browser: duplicate "playing" rows cleaned to one (most recent) | modes: browser | NOT COVERED
+- [ ] B-JOB-10 Browser: playing entry with no started_at gets started_at=now | modes: browser | NOT COVERED
+- [ ] B-JOB-11 Browser: `_arm_timed_start` arms an exact timer for a hard timed item due within 10 s (top-of-hour time check starts on the second, not up to 3 s late) | modes: browser | covered: tests/test_timed_start_on_time.py
+- [ ] B-JOB-12 Browser: soft timed item with hard_by fires when its wait runs out; without hard_by waits for the song end | modes: browser | covered: tests/test_timed_start_on_time.py
+- [ ] B-JOB-13 Browser: hard timed item due (preempt_at <= now) cuts the current song exactly at its time; current logged and marked played | modes: browser | covered: tests/test_timed_start_on_time.py, tests/test_top_of_hour_block.py
+- [ ] B-JOB-14 Browser: time check then weather (same timed group) - weather follows time with no song in between, does not cut it | modes: browser | covered: tests/test_top_of_hour_block.py
+- [ ] B-JOB-15 Browser: a time check queued twice for the same hour plays once (`_drop_timed_twins`) | modes: both | covered: tests/test_top_of_hour_block.py
+- [ ] B-JOB-16 Browser: timed item due within TIMED_EARLY_START_SECONDS starts early when the song ends a few seconds before (no gap) | modes: browser | covered: tests/test_timed_item_starts_early.py
+- [ ] B-JOB-17 END-TO-END: hourly time announcement starts at hh:00:00 (+/- 0.5 s) in a real running server with a song crossing the hour | modes: both | NOT COVERED
+- [ ] B-JOB-18 END-TO-END: time announcement on the hour while a shiur plays, for each timed_during_long_items policy (pause/wait/cut) | modes: both | covered: tests/test_timed_pauses_shiur.py (browser only)
+- [ ] B-JOB-19 Time announcement on the hour when the scheduler pass is slow / a deploy restarts the backend at :59:50 | modes: both | NOT COVERED
+- [ ] B-JOB-20 Time announcement when the hourly entry was created late (preempt_at already past when queued) - must still air immediately, not by queue position | modes: both | NOT COVERED
+- [ ] B-JOB-21 Browser: precise advance does nothing when the process lost leadership or station is engine-driven | modes: browser | NOT COVERED
+- [ ] B-JOB-22 Browser: blackout ended while silence plays -> silence stopped at once, remaining silence entries cleared, next real song starts | modes: browser | NOT COVERED
+- [ ] B-JOB-23 Browser: queue ran out on advance -> `_refill_for_next` fills and continues (not during blackout) | modes: browser | covered: tests/test_queue_never_runs_dry.py
+- [ ] B-JOB-24 After each automatic change positions are compacted (playing=1) and replenish runs in background after the broadcast | modes: browser | NOT COVERED
+- [ ] B-JOB-25 Now-playing WS payload sent on every change; unchanged message not resent; older song never announced after newer | modes: both | covered: tests/test_now_playing_broadcast.py
+- [ ] B-JOB-26 Payload includes next entry = what the server will really pick at switch time (predict_next_entry) | modes: browser | covered: tests/test_next_shown_is_next_played.py, tests/test_next_follows_soft_slot.py
+- [ ] B-JOB-27 Upcoming analysis requested for on-air and next item when analysis missing/old (ANALYSIS_VERSION) | modes: both | covered: tests/test_song_change_gaps.py
+- [ ] B-JOB-28 Engine station: scheduler calls `playout_engine.tick` instead of advancing by duration | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-JOB-29 Engine tick: hard-timed items handed to engine 45 s ahead, once each (timed_sent) | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-JOB-30 Engine tick: hard-timed entry whose preempt_at already passed is never handed to the timed lane (falls back to position order) | modes: engine | NOT COVERED
+- [ ] B-JOB-31 Engine tick: engine_timed failure is retried next tick while still in the 45 s window; alert if never delivered | modes: engine | NOT COVERED
+- [ ] B-JOB-32 Engine tick: block items with same time are handed in queue order | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-JOB-33 Engine tick: blackout ended with silence on air -> silence cleared, engine flush + skip | modes: engine | NOT COVERED
+- [ ] B-JOB-34 Engine tick: queue head changed after engine pre-loaded -> engine_flush | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-JOB-35 Engine tick: soft group's hard_by reached while song still on -> engine_skip once | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-JOB-36 Engine tick watchdog: no engine contact > 120 s -> alert, repeated at most every 30 min | modes: engine | NOT COVERED
+- [ ] B-JOB-37 Engine tick skipped during a live show (live_show_id set) - verify timed items due during the show are dropped/handled | modes: engine | NOT COVERED
+- [ ] B-JOB-38 `_check_station`: live show active -> hard stop check only; stale live_show_id cleared and committed | modes: both | covered: tests/test_live_show_lifecycle.py
+- [ ] B-JOB-39 Live show reaches scheduled_end -> hard_stop_show committed once (not repeated every pass), WS show_hard_stopped broadcast | modes: both | covered: tests/test_live_show_lifecycle.py
+- [ ] B-JOB-40 Blackout check: HolidayWindow is_blackout covering now; affected_stations null = all stations, else listed ids only | modes: both | NOT COVERED
+- [ ] B-JOB-41 `fill_blackout_queue` queues silence for active AND upcoming blackouts each pass (no duplicates) | modes: both | NOT COVERED
+- [ ] B-JOB-42 Leftover now_playing rows (old second player) are deleted | modes: both | covered: tests/test_one_player_per_station.py
+- [ ] B-JOB-43 Station check never plays anything beside the queue | modes: browser | covered: tests/test_one_player_per_station.py
+- [ ] B-JOB-44 Dead air: nothing playing for silence_threshold_seconds (default SILENCE_DETECTION_SECONDS=30) -> one critical alert per spell + start_from_queue | modes: browser | covered: tests/test_one_player_per_station.py
+- [ ] B-JOB-45 Dead air timer reset when something plays; not counted during blackout | modes: browser | NOT COVERED
+- [ ] B-JOB-46 Engine station: no backend dead-air recovery (engine emergency playlist instead) | modes: engine | NOT COVERED
+- [ ] B-JOB-47 Daily: holiday coverage extended when < 365 days ahead or no window in next 7 days (`_maybe_extend_holidays`) | modes: both | NOT COVERED
+- [ ] B-JOB-48 Daily weather readout generated at station local generate_time (default 06:00) when weather_readout.enabled | modes: both | NOT COVERED
+- [ ] B-JOB-49 Weather readout auto-queued at queue_time when weather_readout.auto_queue | modes: both | NOT COVERED
+- [ ] B-JOB-50 Legacy Liquidsoap health check / push / skip only when LIQUIDSOAP_ENABLED (must stay off) | modes: browser | NOT COVERED
+
+### 2b. Queue replenish (`services/queue_replenish_service.py`)
+- [ ] B-JOB-51 requests_only station: fill from approved song requests / popular (popular_request_threshold, default 3) | modes: both | NOT COVERED
+- [ ] B-JOB-52 Dated weather/time queued as ordinary songs are dropped (drop_dated_clips) | modes: both | covered: tests/test_schedule_refresh.py
+- [ ] B-JOB-53 Station with block playlists fills from them a few hours ahead even with generation off; >2x hours of old fill is replaced | modes: both | covered: tests/test_schedule_refresh.py
+- [ ] B-JOB-54 15 min before a block's playlist takes over, automatic songs are redrawn so the block starts on time (realign_before_block_change) | modes: both | covered: tests/test_block_on_time.py, tests/test_schedule_refresh.py
+- [ ] B-JOB-55 Hourly time + weather scheduled for next 48 h at each hh:00 with preempt_at, one set per hour (exact-minute dedupe, ad_slot/block excluded) | modes: both | covered: tests/test_spot_schedules.py, tests/test_blocks_keep_hourly.py
+- [ ] B-JOB-56 Hourly entries get timing_mode from spot_timing default (hard on the hour, soft elsewhere); legacy NULL timing_mode backfilled | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-JOB-57 Half-hour weather at hh:30 only when weather_enabled and weather_interval_minutes == 30 | modes: both | covered: tests/test_blocks_keep_hourly.py
+- [ ] B-JOB-58 No hourly announcements when Supabase storage is not configured (logs skip) | modes: both | NOT COVERED
+- [ ] B-JOB-59 Each station announces its own local hour (station timezone); wrong-hour clips removed after timezone change | modes: both | covered: tests/test_time_announcement.py (text only); _drop_wrong_hour_announcements NOT COVERED
+- [ ] B-JOB-60 Weather and time clips realigned to the station's weather_region | modes: both | covered: tests/test_weather_regions.py, tests/test_time_clip_regions.py
+- [ ] B-JOB-61 Uploaded time clip used for the hour; ElevenLabs only fallback (default region only); missing both -> no entry, no crash | modes: both | covered: tests/test_weather_spots.py
+- [ ] B-JOB-62 ElevenLabs failure pauses generation (backoff) then resumes | modes: both | NOT COVERED
+- [ ] B-JOB-63 Weather fetch cached per 15-min slot; OpenWeatherMap 429 handled | modes: both | covered: tests/test_weather_fetch_cache.py
+- [ ] B-JOB-64 Program blocks replace built-in hourly time/weather once a station has any; blocks_keep_hourly keeps both (hour first, block after) | modes: both | covered: tests/test_blocks_keep_hourly.py
+- [ ] B-JOB-65 Ad slots at ad_slot_minutes (default 15/30/45) soft-timed; legacy test sponsor placeholder off unless ad_slot_legacy_spot | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-JOB-66 Placeholders and do_not_play items never auto-queued; skipped if found at play time | modes: both | covered: tests/test_placeholder_never_auto.py, tests/test_do_not_play_and_codec.py, tests/test_no_test_items_in_fill.py
+- [ ] B-JOB-67 Playlist generation (playlist_generation.enabled): picks from block sequences, cursor saved, artist distance, min vote | modes: both | covered: tests/test_playlist_generation.py
+- [ ] B-JOB-68 Generation finds no sequence -> ordinary music fill only as far as `hours` | modes: both | covered: tests/test_playlist_generation.py
+- [ ] B-JOB-69 Rule-based 7-day fill: daypart, fixed_time, interval, rotation rules; time-aware across dayparts | modes: both | NOT COVERED
+- [ ] B-JOB-70 Global sponsors inserted only for stations using global rules | modes: both | NOT COVERED
+- [ ] B-JOB-71 oldies_only filter (oldies_min_years, default 10) | modes: both | NOT COVERED
+- [ ] B-JOB-72 No rules -> random music fill; library empty -> queue_empty alert | modes: both | NOT COVERED
+- [ ] B-JOB-73 Replenish skipped during blackout after advance; serialized per station (_refill_lock); slow refill (>5 s) logged | modes: both | NOT COVERED
+- [ ] B-JOB-74 Quick successive playlist edits share one background rebuild | modes: both | covered: tests/test_listeners_live.py
+
+### 2c. Schedule refresh / spots / blocks
+- [ ] B-JOB-75 Schedule, block, playlist-entry or template change -> refresh_station replaces unplayed automatic songs; manual and timed items kept | modes: both | covered: tests/test_schedule_refresh.py
+- [ ] B-JOB-76 Removing automatic songs rewinds the generation cursor by the number dropped per block | modes: both | NOT COVERED
+- [ ] B-JOB-77 Spot planning: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range, fixed times, two sponsors never share a slot | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-JOB-78 Spot planning skips Shabbos/blackouts and DST spring-forward missing times | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-JOB-79 reconcile_spot_slots keeps pending ad_slot entries in step; slots about to air left alone | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-JOB-80 Program block expansion: items in order, hard/soft/soft-with-limit (hard_by), sponsor places, rotation by last played | modes: both | covered: tests/test_program_blocks.py
+- [ ] B-JOB-81 A due slot deleted while about to play does not leave dead air | modes: both | covered: tests/test_due_slot_deleted.py
+- [ ] B-JOB-82 7-day look-ahead: overlaps, gaps, off-air windows, unplaced spots, using the engine's resolver | modes: n.a. | covered: tests/test_schedule_lookahead.py
+- [ ] B-JOB-83 detect_schedule_conflicts raises an alert when a new/edited block overlaps | modes: n.a. | NOT COVERED
+
+### 2d. Long items (`services/long_items.py`) and resume
+- [ ] B-JOB-84 policy pause (default): time check plays, shiur re-queued as resume@<seconds> and continues where it stopped | modes: browser | covered: tests/test_timed_pauses_shiur.py
+- [ ] B-JOB-85 policy wait: hard timed items due before the shiur ends are deferred to its end (_defer_hard_until_end) | modes: browser | NOT COVERED
+- [ ] B-JOB-86 policy cut: time check cuts the shiur | modes: browser | NOT COVERED
+- [ ] B-JOB-87 Long-item policies in ENGINE mode (engine timed lane always cuts? resume supported?) | modes: engine | NOT COVERED
+
+### 2e. Startup (`main.py` lifespan)
+- [ ] B-JOB-88 ensure_tables + `_add_missing_columns` migrations run each in own transaction; failed ones retried every 30 s up to 40 times | modes: n.a. | covered: tests/test_safe_migrations.py
+- [ ] B-JOB-89 migrations_to_run skips already-applied/unsafe statements (no lock storms at deploy) | modes: n.a. | covered: tests/test_safe_migrations.py
+- [ ] B-JOB-90 Connection pool warmed (timeout 20 s) before serving | modes: n.a. | NOT COVERED
+- [ ] B-JOB-91 Default categories and asset types seeded idempotently | modes: n.a. | NOT COVERED
+- [ ] B-JOB-92 Dynamic "requested" category refreshed at startup | modes: n.a. | NOT COVERED
+- [ ] B-JOB-93 Restart: song still within its duration keeps playing (not cut); its open PlayLog kept | modes: browser | covered: tests/test_cold_start.py
+- [ ] B-JOB-94 Restart: only recent (STARTUP_OPEN_LOG_DAYS) open play logs closed | modes: both | covered: tests/test_cold_start.py
+- [ ] B-JOB-95 Restart: finished playing entries marked played + logged, EXCEPT engine stations (engine reports itself) | modes: both | NOT COVERED
+- [ ] B-JOB-96 Restart: every active station replenished; browser stations started via start_from_queue; engine stations not started locally | modes: both | covered: tests/test_items_without_length.py (partial)
+- [ ] B-JOB-97 Restart with empty queue -> "Queue empty after restart" warning alert; recovered stale entries -> "Server restarted" info alert | modes: both | NOT COVERED
+- [ ] B-JOB-98 Scheduler started after resume; stopped cleanly on shutdown (lease released) | modes: both | covered: tests/test_scheduler_lease.py
+- [ ] B-JOB-99 Duration backfill runs once 60 s after start in background (limit 100) | modes: n.a. | covered: tests/test_items_without_length.py
+- [ ] B-JOB-100 Concurrent indexes built in background without blocking | modes: n.a. | NOT COVERED
+- [ ] B-JOB-101 Fallback HTTP middleware creates tables when lifespan unsupported (Vercel) | modes: n.a. | NOT COVERED
+
+### 2f. Other background services
+- [ ] B-JOB-102 last_played cache: one full read per station per process (and hourly), then incremental | modes: both | covered: tests/test_last_played_cache.py
+- [ ] B-JOB-103 tail_analysis: song end/crossfade point from HTTP range reads (no full download) | modes: both | covered: tests/test_song_change_gaps.py
+- [ ] B-JOB-104 Alert creation dedupes repeats; _notify_users dispatches SMS/WhatsApp/email per user preference | modes: n.a. | covered: tests/test_alert_repeats.py
+- [ ] B-JOB-105 Bug report notify_loop: first check after 60 s, then every NOTIFY_EVERY_SECONDS; pushes "fix ready" to ntfy when labels/PR appear | modes: n.a. | covered: tests/test_bug_reports.py (check_github_once); notify_loop NOT COVERED
+- [ ] B-JOB-106 send_ntfy disabled when NTFY_TOPIC empty; uses NTFY_SERVER | modes: n.a. | NOT COVERED
+- [ ] B-JOB-107 Activity log middleware: records every write with user, station, objects changed, redacts secrets, device/IP/location; batched inserts | modes: n.a. | covered: tests/test_activity_log.py
+- [ ] B-JOB-108 last_seen_at written at most once a minute per user | modes: n.a. | covered: tests/test_cold_start.py
+- [ ] B-JOB-109 Site release: scheduled push fires at its time to all open tabs; tabs silent past TAB_SILENT_LIMIT dropped from list | modes: n.a. | covered: tests/test_site_release.py (API); timing NOT COVERED
+- [ ] B-JOB-110 Listener sessions finalised on disconnect/leave; stale sessions (no heartbeat) expire from live count | modes: both | covered: tests/test_listeners_live.py
+- [ ] B-JOB-111 Live show start pauses automation (_pause_automation) and end resumes it (_resume_automation) without a song restart | modes: both | covered: tests/test_live_show_on_air.py
+- [ ] B-JOB-112 Host opening broadcast WS starts a scheduled show (start_if_scheduled) | modes: both | covered: tests/test_live_show_on_air.py
+- [ ] B-JOB-113 Live show with no end gets an hour; show started late keeps planned length | modes: both | covered: tests/test_live_show_lifecycle.py
+- [ ] B-JOB-114 Request "requested" category refresh endpoint and auto-approve daily caps | modes: both | NOT COVERED
+- [ ] B-JOB-115 App logging/log buffer: logs configured, errors keep CORS headers, request id header | modes: n.a. | covered: tests/test_app_logging.py (log lines only; CORS-on-error and request id NOT COVERED)
+
+## 3. Settings
+
+### 3a. Station `automation_config` keys
+- [ ] B-SET-1 `weather_enabled` (bool) - schedules weather after time check (scheduling + replenish) | modes: both | covered: tests/test_blocks_keep_hourly.py
+- [ ] B-SET-2 `hourly_time_announcement` (bool) - enables hourly time check; off -> no time clips queued | modes: both | covered: tests/test_station_settings.py::test_hourly_time_check_only_when_switched_on
+- [ ] B-SET-3 `weather_interval_minutes` (default 30; 30 = extra :30 weather, other = hourly only) | modes: both | covered: tests/test_blocks_keep_hourly.py
+- [ ] B-SET-4 `weather_region` (default lakewood; normalised lowercase) - which uploaded weather/time clips the station uses | modes: both | covered: tests/test_weather_regions.py, tests/test_time_clip_regions.py
+- [ ] B-SET-5 `spot_timing` {on_the_hour, other} hard|soft - default timing of spots and of time/weather; on_the_hour=soft makes the time check wait for the song (NOT on the hour) | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-SET-6 `timed_during_long_items` pause|wait|cut (default pause) | modes: both | covered: tests/test_timed_pauses_shiur.py (pause only)
+- [ ] B-SET-7 `blocks_keep_hourly` (bool) | modes: both | covered: tests/test_blocks_keep_hourly.py
+- [ ] B-SET-8 `ad_slot_minutes` (default [15,30,45]) - custom list honoured by replenish and spot planner | modes: both | covered: partial (tests/test_station_settings.py::test_spot_slots_follow_ad_slot_minutes: spot planner; replenish legacy ad slots not)
+- [ ] B-SET-9 `ad_slot_legacy_spot` (default false) + `ad_slot_asset_title` | modes: both | covered: tests/test_spot_schedules.py
+- [ ] B-SET-10 `requests_only` (bool) | modes: both | covered: tests/test_station_settings.py::test_requests_only_station_plays_requests_not_the_library
+- [ ] B-SET-11 `popular_request_threshold` (default 3) | modes: both | covered: tests/test_station_settings.py::test_popular_request_threshold
+- [ ] B-SET-12 `oldies_only` + `oldies_min_years` (default 10) | modes: both | covered: tests/test_station_settings.py::test_oldies_only_filters_by_release_date
+- [ ] B-SET-13 `silence_threshold_seconds` (default SILENCE_DETECTION_SECONDS) | modes: browser | covered: tests/test_station_settings.py::test_dead_air_alert_follows_silence_threshold
+- [ ] B-SET-14 `live_show_id` (set by live show start; cleared on end/hard stop/stale) | modes: both | covered: tests/test_live_show_lifecycle.py
+- [ ] B-SET-15 `loop_asset_id` (set by /queue/loop) | modes: both | covered: tests/test_operator_actions.py
+- [ ] B-SET-16 `playlist_generation` {enabled, hours, artist_distance, min_vote, cursor} | modes: both | covered: tests/test_playlist_generation.py
+- [ ] B-SET-17 `weather_readout` {enabled, generate_time, auto_queue, queue_time, template, city_name, brand_name} | modes: both | NOT COVERED
+- [ ] B-SET-18 `hourly_station_id` (scheduling._check_automation_insertions, legacy path) - verify still used or dead | modes: both | covered: tests/test_station_settings.py::test_hourly_station_id_legacy_insertion (legacy SchedulingService path only; queue engine never reads it)
+- [ ] B-SET-19 Station.timezone drives announced hour, dayparts, blackouts, spot clock | modes: both | covered: tests/test_spot_schedules.py (partial)
+- [ ] B-SET-20 Station lat/lon drive sunrise/sunset blocks and Shabbos generation | modes: both | covered: tests/test_schedule_lookahead.py (sun blocks)
+- [ ] B-SET-21 Station.is_active false -> scheduler ignores station, restart does not resume it | modes: both | covered: partial (tests/test_station_settings.py::test_inactive_station_is_not_advanced: scheduler skips; restart not)
+- [ ] B-SET-22 Station.protected (see roles) | modes: n.a. | covered: tests/test_station_permissions.py
+
+### 3b. Env flags (`app/config.py`) that change behaviour
+- [ ] B-SET-23 PLAYOUT_ENGINE_ENABLED + PLAYOUT_ENGINE_STATION_ID(s) -> engine_drives(station) true only for listed stations | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-SET-24 PLAYOUT_ENGINE_URL / engine_control_url per station; PLAYOUT_ENGINE_TOKEN both ways | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-SET-25 PLAYOUT_STREAM_LIVE -> stream_url published, site plays engine stream | modes: engine | covered: tests/test_playout_status.py
+- [ ] B-SET-26 LIQUIDSOAP_ENABLED (legacy telnet) must stay off; when on, skip/push calls made | modes: browser | NOT COVERED
+- [ ] B-SET-27 SILENCE_DETECTION_SECONDS default 30 | modes: browser | covered: tests/test_station_settings.py::test_dead_air_alert_follows_silence_threshold
+- [ ] B-SET-28 ELEVENLABS_API_KEY/VOICE_ID unset -> no TTS fallback, uploaded clips only | modes: both | covered: tests/test_weather_spots.py
+- [ ] B-SET-29 OPENWEATHERMAP_API_KEY unset -> weather disabled gracefully | modes: both | NOT COVERED
+- [ ] B-SET-30 SUPABASE_URL/SERVICE_KEY unset -> uploads/local storage path; hourly announcements skipped | modes: both | NOT COVERED
+- [ ] B-SET-31 ICECAST_* (icecast_enabled) -> /icecast start/stop usable | modes: n.a. | NOT COVERED
+- [ ] B-SET-32 STRIPE_* (stripe_enabled) -> checkout/webhook enabled else refused | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_off_when_stripe_not_configured, tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-SET-33 RESEND_API_KEY -> emails sent else skipped | modes: n.a. | NOT COVERED
+- [ ] B-SET-34 ANTHROPIC_API_KEY -> AI email drafts and copy review via Claude; else keyword fallback | modes: n.a. | covered: tests/test_copy_review.py
+- [ ] B-SET-35 TWILIO_* (twilio_enabled / twilio_voice_enabled) -> SMS alerts and phone call-ins | modes: n.a. | NOT COVERED
+- [ ] B-SET-36 BUG_REPORTS_GITHUB_TOKEN / BUG_REPORTS_REPO -> mirror to GitHub | modes: n.a. | covered: tests/test_bug_reports.py
+- [ ] B-SET-37 NTFY_TOPIC / NTFY_SERVER -> push notifications | modes: n.a. | NOT COVERED
+- [ ] B-SET-38 SENTRY_DSN -> Sentry enabled | modes: n.a. | NOT COVERED
+- [ ] B-SET-39 ADMIN_SEED_PASSWORD / ALLOW_DESTRUCTIVE_SEED / APP_ENV=production | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-SET-40 JWT expiry (30 min access, 7 day refresh) honoured | modes: n.a. | covered: tests/test_auth_security.py::test_token_lifetimes
+- [ ] B-SET-41 CORS_ORIGINS parsing (JSON array or CSV) and error responses still carry CORS | modes: n.a. | NOT COVERED
+- [ ] B-SET-42 DATABASE_URL fix-up (postgres:// -> asyncpg), statement_cache_size=0 for pooler | modes: n.a. | NOT COVERED
+- [ ] B-SET-43 REDIS_URL / CELERY_* empty -> workers disabled without errors | modes: n.a. | NOT COVERED
+- [ ] B-SET-44 EMERGENCY_FALLBACK_CATEGORY still loads but is unused | modes: n.a. | NOT COVERED
+- [ ] B-SET-45 BACKEND_PUBLIC_URL / LIVE_SHOW_HOLD_MUSIC_URL used in Twilio TwiML | modes: n.a. | NOT COVERED
+
+## 4. Engine-vs-browser differences (each must be tested in the mode(s) listed)
+- [ ] B-MODE-1 Who advances: browser = backend by duration + precise timers; engine = engine's own clock, backend never advances by duration | modes: both | covered: tests/test_queue_advance.py, tests/test_playout_engine.py
+- [ ] B-MODE-2 Next (skip): browser changes queue + broadcasts fade_seconds; engine sends /skip with fade, real start reported back | modes: both | covered: tests/test_operator_actions.py, tests/test_playout_engine.py
+- [ ] B-MODE-3 Next protection for a timed item on air, in both modes | modes: both | covered: tests/test_rapid_next.py (browser); engine NOT COVERED
+- [ ] B-MODE-4 Fire-now: browser skip-to-entry under advance_lock; engine timed lane with 503 fallback | modes: both | covered: tests/test_operator_actions.py, tests/test_playout_engine.py
+- [ ] B-MODE-5 Mix-over: browser WS broadcast to listeners; engine overlay lane | modes: both | covered: tests/test_operator_actions.py (browser); engine NOT COVERED
+- [ ] B-MODE-6 Loop: browser re-queues at end; engine flush + re-ask | modes: both | covered: tests/test_operator_actions.py, tests/test_playout_engine.py
+- [ ] B-MODE-7 Insert / reorder / delete: engine pre-loaded track flushed when head changes | modes: engine | covered: tests/test_playout_engine.py (tick flush); insert NOT COVERED
+- [ ] B-MODE-8 Start: browser starts next; engine returns "engine will start" | modes: both | NOT COVERED (engine branch)
+- [ ] B-MODE-9 Hourly time check exactly on the hour: browser via preempt + _arm_timed_start; engine via timed lane handed 45 s ahead (radio.liq schedule_timed) | modes: both | covered: tests/test_timed_start_on_time.py (browser), tests/test_playout_engine.py (hand-over); real-clock NOT COVERED
+- [ ] B-MODE-10 Weather following time check in same group: browser same-group rule; engine timed group order (timed_group_at within 0.5 s) | modes: both | covered: tests/test_top_of_hour_block.py (browser); engine NOT COVERED
+- [ ] B-MODE-11 Soft ad slots / soft blocks: browser waits for song end + hard_by; engine pick_next step 1 + _enforce_hard_by | modes: both | covered: tests/test_next_follows_soft_slot.py, tests/test_playout_engine.py
+- [ ] B-MODE-12 Past-due hard item pick order differs: browser picks due timed items first; engine pick_next step 2 by position only | modes: both | NOT COVERED
+- [ ] B-MODE-13 Long-item pause/wait/cut policy implemented in browser advance; engine behaviour undefined | modes: both | NOT COVERED (engine)
+- [ ] B-MODE-14 Blackout end with silence on air: browser _check_advance; engine tick flush+skip | modes: both | NOT COVERED
+- [ ] B-MODE-15 Dead air: browser backend restarts queue; engine falls to emergency playlist and reports start without entry id -> alert | modes: both | covered: tests/test_one_player_per_station.py, tests/test_playout_engine.py
+- [ ] B-MODE-16 Restart: browser keeps current song, starts next; engine stations' entries untouched, engine re-hellos | modes: both | covered: tests/test_cold_start.py (browser); engine NOT COVERED
+- [ ] B-MODE-17 Play logging: browser logs on advance (source scheduler/manual); engine logs on started report (>=1 s, skipped -> manual) | modes: both | covered: tests/test_playout_engine.py
+- [ ] B-MODE-18 Now-playing stream_url null (browser) vs engine stream URL when PLAYOUT_STREAM_LIVE | modes: both | covered: tests/test_playout_engine.py
+- [ ] B-MODE-19 Live show: browser _check_station returns early; engine tick returns early - what plays on the engine during the show? | modes: both | NOT COVERED (engine)
+- [ ] B-MODE-20 Placeholders / do_not_play skipped before hand-over in both | modes: both | covered: tests/test_do_not_play_and_codec.py
+- [ ] B-MODE-21 Schedule redraw deleting a handed entry: engine still shows it on air | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-MODE-22 Multiple engine stations each with own control URL/state | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-MODE-23 radio.liq: timed lane mutes main lane, interrupted song does not resume; Next = clean cut / fade; main crossfade 3 s | modes: engine | NOT COVERED (no Liquidsoap test)
+- [ ] B-MODE-24 radio.liq: emergency dir playlist used when backend unreachable; reports lane=emergency | modes: engine | NOT COVERED
+- [ ] B-MODE-25 radio.liq: /timed dedupes by entry id (last 50); control endpoints require token | modes: engine | NOT COVERED
+- [ ] B-MODE-26 radio.liq: /next request retried on 204/timeout without dead air | modes: engine | NOT COVERED
+- [ ] B-MODE-27 Many stations x many listeners switch songs together (load) | modes: browser | NOT COVERED (loadtests/multi_station.py, manual)
+
+## 5. Roles and permissions
+- [ ] B-ROLE-1 Role matrix GET: assets/categories/asset-types/rules/reviews/live-shows = staff; users = admin; sponsors/alerts = admin+manager; auth/me = all | modes: n.a. | covered: tests/test_role_access.py
+- [ ] B-ROLE-2 Anonymous refused (401/403) on every protected GET in the matrix | modes: n.a. | covered: tests/test_role_access.py
+- [ ] B-ROLE-3 Role matrix for WRITES (POST/PUT/PATCH/DELETE) per router guard: viewer cannot change anything; dj only queue/controls/live shows/now-playing | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix (+ tests/test_access_mirror.py)
+- [ ] B-ROLE-4 require_admin-only writes: rules create/update/delete, users CRUD, alert delete, live-show delete, icecast, site-release, bug status/resend, activity | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix
+- [ ] B-ROLE-5 Sponsor cannot reach staff endpoints (library, queue, rules, reviews) | modes: n.a. | covered: tests/test_role_access.py
+- [ ] B-ROLE-6 Sponsor isolation: sponsor sees only own campaigns, drafts, comments, invoices, spots, play history | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-ROLE-7 require_sponsor_or_manager: dj/viewer refused on campaigns/billing/copy-review | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix, tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
+- [ ] B-ROLE-8 may_operate_station: admin always; others assigned stations only; station_ids=None -> all non-protected | modes: n.a. | covered: tests/test_station_permissions.py
+- [ ] B-ROLE-9 Protected station needs explicit assignment even for manager | modes: n.a. | covered: tests/test_station_permissions.py
+- [ ] B-ROLE-10 require_station_operator applies to all non-GET /stations/{id}/queue and /controls routes; GET left to route guards | modes: both | covered: tests/test_station_permissions.py
+- [ ] B-ROLE-11 station_write_guard on schedules, playlists, spot-schedules, live-shows (path and body ids incl. winner/other block ids) | modes: n.a. | covered: tests/test_station_write_permissions.py::test_spot_schedules_follow_station_permissions, test_live_shows_follow_station_permissions
+- [ ] B-ROLE-12 Program blocks: not-assigned station -> 403 | modes: n.a. | covered: tests/test_station_write_permissions.py::test_program_blocks_follow_station_permissions
+- [ ] B-ROLE-13 Station update/delete: manager not assigned -> 403; only admin toggles/deletes protected | modes: n.a. | covered: tests/test_station_permissions.py
+- [ ] B-ROLE-14 Admin cannot disable/demote/delete self | modes: n.a. | covered: tests/test_auth_security.py::test_admin_cannot_lock_themselves_out
+- [ ] B-ROLE-15 Inactive user token refused; access-vs-refresh token type enforced | modes: n.a. | covered: tests/test_auth.py
+- [ ] B-ROLE-16 Public (no auth) endpoints work anonymously and leak nothing private: stations list/get, now-playing, stream, live-audio, EPG, schedules list/blocks/entries GET, archives, rss, hosts, song request submit/count, listeners heartbeat, channels list, scheduler status, playout-status, rds.txt, site-release, call-in, crm register/login/raffles | modes: n.a. | covered: tests/test_public_endpoints.py::test_public_gets_work_anonymously_and_leak_nothing
+- [ ] B-ROLE-17 Unguarded writes to check for abuse: POST /auth/migrate, GET /api/v1/init, PUT/POST via live-shows twilio webhooks (signature?), /billing/webhook (Stripe signature) | modes: n.a. | covered: tests/test_auth_security.py::test_migrate_is_admin_only (BUG fixed), test_init_is_harmless_to_repeat, test_stripe_webhook_checks_the_signature; BUG Twilio unsigned (xfail)
+- [ ] B-ROLE-18 GET /schedules, /schedules/blocks, /schedules/playlist-entries are public - confirm intended | modes: n.a. | covered: tests/test_public_endpoints.py::test_public_get_list_is_what_we_reviewed (kept public: same data as the EPG, nothing secret)
+- [ ] B-ROLE-19 Playout endpoints: X-Playout-Token required; wrong station 404 | modes: engine | covered: tests/test_playout_engine.py
+- [ ] B-ROLE-20 CRM member auth (6-digit PIN token) separate from staff JWT; staff token refused on member routes and vice versa | modes: n.a. | covered: tests/test_crm.py::test_member_and_staff_logins_do_not_cross
+- [ ] B-ROLE-21 WebSockets: /ws/alerts and /ws/live/{show}/events|audio require staff auth; /ws/now-playing public | modes: n.a. | covered: tests/test_websocket_auth.py::test_alerts_socket_refuses_anonymous_and_non_managers (BUG fixed: /ws/alerts was open), test_live_show_socket_follows_station_permissions
+- [ ] B-ROLE-22 Refused action returns 403 with "not allowed" detail the frontend ViewOnlyNotice shows | modes: n.a. | covered: tests/test_write_role_matrix.py::test_refusal_says_not_allowed
+# Frontend test checklist (from frontend/src, 2026-11-17)
+
+Format: id, behaviour | sizes | engine/browser player | existing browser test.
+
+Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mjs (harness, fake tones), e2e/web-call-in.cjs, e2e/site-release/check.cjs, e2e/admin-layout-audit.mjs (layout/no-errors only, every admin page, desktop + iPhone 13 + iPhone SE).
+
+## Routes and roles (App.tsx + auth/access.ts)
+
+- [ ] F-ACCESS-1 `/` redirects to `/stations` | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-2 Anonymous visitor to any /admin/* route is sent to /admin/login | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-3 Anonymous visitor to any /sponsor/* route (except /sponsor/login) is sent to /sponsor/login | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-4 Signed-in user whose account lookup fails sees 'Could not reach the server' + Try again (not thrown to login); Try again refetches | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-5 admin can open every /admin/* route (all 38 admin routes render, no error box) | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
+- [ ] F-ACCESS-6 manager can open everything under /admin except /admin/users, /admin/site-updates, /admin/activity (redirected to /admin/dashboard) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-7 dj can open only dashboard, assets (not upload), reviews, schedules, rules, program-clock, live/*, studio; any other /admin path redirects to /admin/dashboard | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-8 viewer can open dashboard, assets, reviews, schedules, rules, program-clock only; /admin/live and /admin/studio redirect | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-9 sponsor opening any /admin/* path is redirected to /sponsor/dashboard; staff opening /sponsor/* redirected to /admin/dashboard | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-10 canChange: viewer on /admin/dashboard sees 'View only' and transport/queue writes refused; dj may operate dashboard | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-11 canChange: dj/viewer on /admin/assets, /admin/schedules, /admin/program-clock are view only; only admin may change /admin/rules | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-12 Any 403 from the API shows the app-wide 'not allowed' notice (ViewOnlyNotice, FORBIDDEN_EVENT) and the control room shows no connection-error toast | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-13 Station permissions: staff limited to named stations (User.station_ids) only see/operate those; protected station needs explicit assignment (control room actions refused otherwise) | sizes: both | both | covered: NOT COVERED
+- [ ] F-ACCESS-14 Unknown route under Layout renders nothing broken (no crash) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-15 Route error boundary: a page that throws shows the error box with Reload; moving to another route clears it | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-16 Lazy chunk missing after a new release (stale screen): page reloads onto the new release instead of showing an error | sizes: both | n.a. | covered: e2e/site-release/check.cjs
+
+## Shared shell: Navbar, Layout, global player, bug reporter, site updates
+
+- [ ] F-GLOBAL-1 Public navbar links: Stations, Program Guide, DJs, Archives navigate correctly | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-2 Signed-in navbar shows Dashboard link; sponsor sees Sponsor Portal link | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-3 Admin dropdown groups Content / Broadcast / Audience / Settings open and close; each of their ~27 links navigates and is hidden for roles that cannot open it | sizes: desktop | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-4 Alerts bell shows unresolved count; opens list; clicking an alert or 'View all' goes to /admin/alerts | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-5 Logout button clears tokens and returns to login | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-6 Phone: hamburger menu opens, every menu entry navigates and closes the menu, Logout in menu works | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-7 Navbar stays at top when page scrolls; no sideways page scroll on every admin page | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
+- [ ] F-GLOBAL-8 Admin pages fill the window width (no max-w wrapper) on desktop | sizes: desktop | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
+- [ ] F-GLOBAL-9 App-shell routes (control room) render full-height without page scrollbars | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-GLOBAL-10 Global AudioPlayer bar (playerStore): plays an asset, volume slider, Stop | sizes: both | browser | covered: NOT COVERED
+- [ ] F-GLOBAL-11 PageViewTracker records page views on route change (activity log shows them) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-12 JWT refresh: an expired access token is refreshed automatically by the Axios interceptor without logging the user out | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-13 Bug reporter: floating 🐞 button opens dialog; description + expected fields; screenshot checkbox; Send posts /bug-reports with breadcrumbs; Sending… state; success screen; Close/Cancel/× and backdrop close | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-14 Bug reporter opens from the control room footer 'Report a bug' link (REPORT_BUG_EVENT) | sizes: desktop | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-15 Site release auto mode: idle tab with no audio reloads onto the new version | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-16 Site release manual mode: no tab reloads on its own; tab reports waiting for admin push | sizes: both | n.a. | covered: e2e/site-release/check.cjs
+- [ ] F-GLOBAL-17 Site release push now: silent tab reloads at once | sizes: both | n.a. | covered: e2e/site-release/check.cjs
+- [ ] F-GLOBAL-18 Site release push without 'include playing tabs': listener keeps playing on old version | sizes: both | both | covered: e2e/site-release/check.cjs
+- [ ] F-GLOBAL-19 Site release push including playing tabs: listener reloads right after the next item change and plays on (Chrome) / shows 'Tap to keep listening' (Safari) and one tap restores sound | sizes: both | both | covered: e2e/site-release/check.cjs
+- [ ] F-GLOBAL-20 Scheduled push: no reload before its time, reload after | sizes: both | n.a. | covered: e2e/site-release/check.cjs
+- [ ] F-GLOBAL-21 Release picked up on navigation to another screen (UpdateOnNavigation) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-22 Release never reloads a tab while the mic is live or the person is typing | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-23 Release while control room is listening: control room comes back with sound on (useResumeAfterRelease) / ResumePrompt on Safari | sizes: both | both | covered: e2e/audio-engine.mjs (release hold only)
+- [ ] F-GLOBAL-24 Release with real Safari / iPhone (not simulated): tap-to-resume prompt and audio resumes | sizes: phone | both | covered: NOT COVERED
+
+## Admin login (/admin/login)
+
+- [ ] F-LOGIN-1 Valid username/email + password logs in and lands on /admin/dashboard (homeFor role) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LOGIN-2 Sponsor credentials on admin login land on /sponsor/dashboard | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LOGIN-3 Wrong password shows an error, no redirect; Processing… state while submitting | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LOGIN-4 Enter key submits; already signed-in user visiting login is handled | sizes: both | n.a. | covered: NOT COVERED
+
+## Control room: transport bar and header (/admin/dashboard)
+
+- [ ] F-CR-TRANSPORT-1 Station switcher dropdown (shown when >1 station) changes station; choice remembered in localStorage radio_last_station across reloads | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-2 Station switch: old station's now-playing socket closes, only the new station is heard/shown (no double audio) | sizes: both | both | covered: e2e/control-room.mjs + e2e/audio-engine.mjs
+- [ ] F-CR-TRANSPORT-3 Station switch cancels a pending insert marker and day filter | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-4 Single station: name shown instead of dropdown | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-5 PLAYING indicator when on air; '▶ Start' button when stopped; Start calls /queue start; 'Starting…' state; empty queue message 'The queue is empty. Add something…' | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-6 Remaining countdown counts down from server started_at/ends_at; turns red and pulses in the last 10 s | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-7 Intro countdown shows while the intro runs and disappears after | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-8 On air elapsed / total time display (hidden on phone) | sizes: desktop | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-9 Now-playing title + type and Next title + type boxes; Next shows the server's next_entry_id (skips items timed for later); 'nothing queued' when empty | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-10 Progress bar fills and turns red near the end | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-11 Clock shows station timezone time, ticking each second | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-12 'Can't reach the station' / 'Loading the queue…' instead of 'Stopped' when queue fails to load | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-13 Go next (hard cut) button calls /queue/skip?fade=hard; disabled when stopped or busy (shows …) | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-14 N key = Go next (hard); ignored with modifiers, while typing in an input, on key repeat, and inside the PFL deck | sizes: desktop | both | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-15 Fade button = skip?fade=fade (0.5 s); Soft fade = skip?fade=soft (3 s); audible fade of those lengths | sizes: both | both | covered: e2e/control-room.mjs (request only)
+- [ ] F-CR-TRANSPORT-16 Next pressed on a protected timed item (time/weather/sponsor) shows the 'always play to the end' toast and nothing changes | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-17 Next pressed right after an automatic change shows 'just started, keeps playing' toast (kept_incoming) | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-18 Next is heard at once in this browser before the server answers (playNextNow) and lands on the server's item | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-CR-TRANSPORT-19 Loop toggles on (button lit, aria-pressed) / off via /queue/loop; on-toast and off-toast; disabled when stopped | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-20 Loop on: the item really repeats at its end (server + engine), Next or play-now ends the loop | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-21 Listen (🔊) button switches sound on in this browser; remembered across reloads (kbr-cr-listen) | sizes: both | browser | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-22 Mute/Unmute button; mute remembered after reload; meters keep moving while muted | sizes: both | browser | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-23 Monitor volume slider (visible at 2xl widths) changes level | sizes: desktop | browser | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-24 Level meters (L/R) move without pressing Listen, at the real RMS level | sizes: desktop | browser | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-25 Level meters move when the station plays through the server stream (engine mode) too | sizes: desktop | engine | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-26 Only one control room tab makes sound: switching sound on in tab B silences tab A with message 'Sound moved to another control room tab' | sizes: desktop | browser | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-27 Full screen button enters/exits fullscreen (desktop only) | sizes: desktop | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-28 LIVE: <show> badge appears when a live show is on and links to host console | sizes: desktop | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-29 Playout badge: 'Browser player' / 'Server stream' / 'not answering' / 'out of step' from /playout-status | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-30 Engine mode: control room plays the stream_url through <audio> when listening, falls back to the browser player if the stream errors | sizes: both | engine | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-31 Back from a hidden tab (visibilitychange) the queue is re-fetched at once | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-32 A pushed track change (WS) refreshes queue and Played log at once, not at next poll | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-TRANSPORT-33 Toasts: ok auto-hide 2.5 s, warn/error 6 s, ✕ dismisses | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-34 Footer shows shortcuts, station + timezone, user email + role | sizes: desktop | n.a. | covered: NOT COVERED
+- [ ] F-CR-TRANSPORT-35 Time & weather preview button ('Preview time & weather') plays time then weather clips off air only; 'No weather announcement' toast when none; error toast on failure | sizes: both | n.a. | covered: NOT COVERED
+
+## Control room: Up next queue
+
+- [ ] F-CR-QUEUE-1 Queue rows show air time to the second, length, artist + title, type, last played | sizes: desktop | both | covered: e2e/control-room.mjs
+- [ ] F-CR-QUEUE-2 Phone row layout: time, title (2 lines), artist · type, length; 66 px rows | sizes: phone | both | covered: e2e/control-room.mjs
+- [ ] F-CR-QUEUE-3 Count label 'N items · total duration' and 'loaded of total' when partially loaded | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-QUEUE-4 Long queue: only first rows polled; scrolling to the end loads the rest; scrolling back to the top returns to first rows | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-QUEUE-5 Virtualised list: only rows near the screen drawn, scrollbar covers whole queue, correct rows mid-list and at end | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-QUEUE-6 Show day dropdown lists days in station tz; picking a day loads whole queue and filters; 'Nothing scheduled for that day'; back to All days | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-QUEUE-7 + Insert-here button arms insert marker ('Inserting here. Pick a song or button.'); Cancel and second click disarm | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-QUEUE-8 Esc cancels insert mode (and blurs an input) | sizes: desktop | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-QUEUE-9 Arming insert switches to the library pane/tab | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-QUEUE-10 Insert from library lands exactly before the marked row (/queue/insert after the row above) | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-QUEUE-11 Insert from an instant button (cart) while armed inserts at the marker | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-12 Insert when the marked row already started: plays next instead with warn toast | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-13 Insert marker disappears when that row starts playing or is removed | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-QUEUE-14 Desktop hover quick actions on a row: ▲ move up, ▼ move down, ✕ remove (call queue move-up/move-down/remove) | sizes: desktop | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-15 Phone: tap a row opens action bar (+ Insert before, ▲, ▼, Remove); tap again closes | sizes: phone | both | covered: e2e/control-room.mjs (insert only)
+- [ ] F-CR-QUEUE-16 Drag a row onto another row reorders it (/queue reorder DnD); warnings shown as toast; the playing row is not draggable | sizes: desktop | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-17 Optimistic placeholder row appears at once on next/end/insert; failure restores old queue and shows error toast | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-QUEUE-18 Playing row marked ▶, not selectable, no actions | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-QUEUE-19 Timed rows (preempt_at / ad_slot / block) highlighted; ⏰ exact time shown; SPONSOR badge on ad_slot; RESUMES m:ss badge on resume@ rows | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-20 Items due at the same moment grouped with 'BLOCK · N ITEMS' badge | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-21 Blackout silence rows show 'Scheduled silence: <name>' in red | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-22 Hourly time announcement row appears with ⏰ at hh:00:00 and the projected air time of the rows around it matches | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-QUEUE-23 Empty queue text 'The queue is empty. Add songs from the library, or press Start.' | sizes: both | n.a. | covered: NOT COVERED
+
+## Control room: library (Songs tab)
+
+- [ ] F-CR-LIBRARY-1 '/' key opens library and focuses search; typed characters not lost | sizes: desktop | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-LIBRARY-2 Search is server-side (/assets?search=) debounced 250 ms; stale results dimmed; '· searching…'; error text 'Could not load the library.' | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-LIBRARY-3 Clear search (✕) empties and refocuses | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-LIBRARY-4 Type tabs (all + each asset type) filter results | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-LIBRARY-5 Result count shown; 'Load more' adds 50 more | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-LIBRARY-6 Row 'Next' button queues right after current item (/queue next) | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-LIBRARY-7 Row 'End' (add to end) button (/queue end) | sizes: both | both | covered: NOT COVERED
+- [ ] F-CR-LIBRARY-8 Row Insert button shown while insert armed; insert banner with Cancel | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-LIBRARY-9 ☆/★ pins/unpins a library item as an instant button on the current cart page | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-LIBRARY-10 Row pre-listen (PFL) button opens the PFL deck for that item; pressing again stops | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-LIBRARY-11 Buttons disabled while that item is being sent (busy) and when no station | sizes: both | n.a. | covered: NOT COVERED
+
+## Control room: instant buttons / cart
+
+- [ ] F-CR-CART-1 Hot button in Play-now mode puts it on air immediately with one /queue/fire-now request | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-CART-2 Play-next mode: button waits for the current item | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-CART-3 Mix-over mode: plays on top, on-air item and queue unchanged (/queue/mix-over) | sizes: both | both | covered: e2e/control-room.mjs
+- [ ] F-CR-CART-4 Mix-over WS message is played on top by this browser's engine (kbr-mix-over) | sizes: both | browser | covered: e2e/control-room.mjs
+- [ ] F-CR-CART-5 Mix-over heard on the server stream (engine mode) | sizes: both | engine | covered: NOT COVERED
+- [ ] F-CR-CART-6 Fire mode choice remembered across reloads (kbr_ctl_fire_mode) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-7 Cart pages 1-10: each page separate; tabs show filled/empty titles | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-CART-8 Button sets: New set (prompt), Rename (prompt), Delete (confirm) work; switching sets restores buttons | sizes: both | n.a. | covered: e2e/control-room.mjs (new/switch only)
+- [ ] F-CR-CART-9 Sets and pages survive reload (per station localStorage) | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-CART-10 Edit mode: ✕ removes a button from the page; buttons cannot fire while editing | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-11 Jingles wall lists station IDs/sweepers automatically; empty hint when none | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-12 Sponsor spots wall lists spots | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-13 Empty page hint text | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-14 PFL toggle: buttons pre-listen instead of airing; green banner with Done; nothing reaches the station | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-CART-15 Headphones output picker (setSinkId) lists devices, choice remembered; 'find outputs' button | sizes: desktop | n.a. | covered: NOT COVERED
+- [ ] F-CR-CART-16 Desktop bottom strip layout (bar) vs phone Buttons tab grid | sizes: both | n.a. | covered: e2e/control-room.mjs
+
+## Control room: pre-listen (PFL) deck
+
+- [ ] F-CR-PFL-1 Deck opens with title, play/pause, elapsed and -remaining | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-PFL-2 Waveform drawn from the file (shimmer while loading, cached per asset) | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-PFL-3 Click/tap on the wave jumps there; drag moves playhead; hover shows time | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-PFL-4 Keys in deck: ←/→ 5 s, J/L 10 s, Space/K play-pause, Home start, End 10 s before end, 0-9 jump to tenths, Esc close | sizes: desktop | n.a. | covered: e2e/control-room.mjs (→, Space only)
+- [ ] F-CR-PFL-5 Back 10 s / Forward 10 s buttons | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-PFL-6 START / INTRO / MIX / END markers shown; jump buttons (Start, Intro end, Mix -5 s, End -5 s) | sizes: both | n.a. | covered: e2e/control-room.mjs (Mix only)
+- [ ] F-CR-PFL-7 Unplayable file (MP2 as .mp3): deck stays open with message, play disabled, close works | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-PFL-8 Network error: retry message, ▶ retries | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-PFL-9 Nothing sent to the station from the deck; N in deck never skips | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-PFL-10 Close (Esc / ✕) hides the deck | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-PFL-11 Compact deck on phone | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-CR-PFL-12 PFL audio goes to chosen headphones output, not the monitor | sizes: desktop | n.a. | covered: NOT COVERED
+
+## Control room: Go live, Played, Schedule tabs and layout
+
+- [ ] F-CR-SIDE-1 Desktop side tabs Songs / Go live / Played / Schedule switch the lower pane; choice remembered (kbr_ctl_side_tab); Go live tab turns red '● Live' during a show | sizes: desktop | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-SIDE-2 Phone bottom nav Queue / Buttons / Library / Go live / More; More shows Played + Schedule switch | sizes: phone | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-SIDE-3 Go live: type a show name + Go live now (Enter works) creates and starts a show | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-SIDE-4 Go live: scheduled shows listed with Start; Start disabled while another show is live | sizes: both | n.a. | covered: e2e/control-room.mjs (renders only)
+- [ ] F-CR-SIDE-5 Go live: End show asks 'Yes, end the show' / cancel; ends the show | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CR-SIDE-6 During a live show the control room hears the host instead of music; music returns after the show | sizes: both | browser | covered: NOT COVERED
+- [ ] F-CR-SIDE-7 Played log lists recently played items in station tz | sizes: both | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-SIDE-8 Schedule panel shows what is on now; datetime 'Check a time' previews another time; reset | sizes: both | n.a. | covered: e2e/control-room.mjs (renders only)
+- [ ] F-CR-SIDE-9 Drag bar between Up next and lower pane resizes; kept after reload; double-click resets; ArrowUp/Down keyboard | sizes: desktop | n.a. | covered: e2e/control-room.mjs (drag + reload only)
+- [ ] F-CR-SIDE-10 Desktop: fills window, no page scrollbars, header frozen while queue scrolls | sizes: desktop | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-SIDE-11 Phone (iPhone 13 and SE): fits screen, no sideways scroll, every button ≥ tap size, header frozen | sizes: phone | n.a. | covered: e2e/control-room.mjs
+- [ ] F-CR-SIDE-12 Tablet width (768-1023 px) uses phone layout without breaking | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-CR-SIDE-13 No script errors through a full session | sizes: both | n.a. | covered: e2e/control-room.mjs
+
+## Browser player engine (hooks/useAudioEngine.ts) and stream player (lib/liveStream.ts)
+
+- [ ] F-PLAYER-1 Song-to-song crossfade at analysed cross_start / cue_out; never silent; outgoing gone within limit | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-2 Player does not run ahead of the server at the crossfade point | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-3 Next during a crossfade / just before / just after crossfade began / right after automatic advance | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-4 Next with stale start time; next quick fade near the end | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-5 Same item twice in a row (warm and cold) | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-6 Next starts clean from cue_in, no seek on a fresh item (warm and cold) | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-7 Stored length longer than file: no hole | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-8 Hard-timed item (time announcement): song fades preempt_fade_ms before the due time; timed item starts on the second, no hole | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-9 Soft timed item does not fade the song; soft item fades only at its hard_by limit; older-server ad_slot not faded | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-10 Hourly time announcement heard at hh:00:00 (±1 s) end-to-end against a real backend + scheduler, in control room | sizes: both | browser | covered: NOT COVERED
+- [ ] F-PLAYER-11 Hourly time announcement heard at hh:00:00 on the PUBLIC Listen page (note: Listen passes nextPreemptAt=null to the engine, so it has no pre-fade and switches only when the WS announcement arrives) | sizes: both | browser | covered: NOT COVERED
+- [ ] F-PLAYER-12 Hourly time announcement on air at hh:00:00 on the server stream (engine mode) | sizes: both | engine | covered: NOT COVERED
+- [ ] F-PLAYER-13 Weather spot at :30 (or station interval) heard on time; station ID jingle hourly | sizes: both | both | covered: NOT COVERED
+- [ ] F-PLAYER-14 Cue in/out and replay gain applied | sizes: both | browser | covered: NOT COVERED
+- [ ] F-PLAYER-15 Stereo files reach both speakers; mono file reaches both | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-16 Station switch (and back, during crossfade, old crossfade time) leaves only the new station on air | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-17 Safari: Listen pressed mid-item brings up the item on air at its position at once | sizes: both | browser | covered: e2e/audio-engine.mjs (Safari simulated)
+- [ ] F-PLAYER-18 Listen from cold: one press heard at once | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-19 Stop then Listen joins the station where it is now (not resume from pause point) | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-20 Release hold: a tab with audio playing never reloads; silent control room does | sizes: both | browser | covered: e2e/audio-engine.mjs
+- [ ] F-PLAYER-21 Stream mode: MSE playback starts on first data, kept near live; jumps forward after stall | sizes: both | engine | covered: NOT COVERED
+- [ ] F-PLAYER-22 Stream mode: browsers without MSE for MP3 (Safari/iOS) use plain <audio> | sizes: phone | engine | covered: NOT COVERED
+- [ ] F-PLAYER-23 Stream error falls back to the browser player | sizes: both | engine | covered: NOT COVERED
+- [ ] F-PLAYER-24 WS now-playing reconnects automatically after drop; falls back to REST polling after repeated failures | sizes: both | both | covered: NOT COVERED
+- [ ] F-PLAYER-25 Tab back from background > few seconds: re-reads now-playing and reconnects | sizes: both | both | covered: NOT COVERED
+- [ ] F-PLAYER-26 Overdue item (shown past its end with no update) triggers re-read + reconnect (car / locked phone) | sizes: phone | both | covered: NOT COVERED
+- [ ] F-PLAYER-27 Next item preloaded on the idle deck; not downloaded in stream mode | sizes: both | both | covered: NOT COVERED
+- [ ] F-PLAYER-28 Network loss mid-song and recovery: player keeps going / rejoins at live position | sizes: phone | both | covered: NOT COVERED
+- [ ] F-PLAYER-29 Real Safari / iOS device run of all player scenarios (simulated only today) | sizes: phone | both | covered: NOT COVERED
+
+## Public Listen page (/listen/:stationId)
+
+- [ ] F-LISTEN-1 Station header: name, type · timezone, description, playout badge; 'Station not found' for bad id; Loading… | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-2 Listen Live button starts sound inside the click (browser player or stream) | sizes: both | both | covered: e2e/audio-engine.mjs (harness)
+- [ ] F-LISTEN-3 Stop button stops; Listen again joins live | sizes: both | both | covered: e2e/audio-engine.mjs (harness)
+- [ ] F-LISTEN-4 On Air / Offline / Connecting… status pill; stream playing counts as On Air | sizes: both | both | covered: NOT COVERED
+- [ ] F-LISTEN-5 Now Playing card: title, artist, album update on each change | sizes: both | both | covered: NOT COVERED
+- [ ] F-LISTEN-6 'Nothing playing right now' when stopped | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-7 Mute button and volume slider (percent) control both stream and browser player | sizes: both | both | covered: NOT COVERED
+- [ ] F-LISTEN-8 Lock screen / Media Session metadata (title, artist, station) shown and updated per item (CarPlay / Android Auto / iOS lock screen) | sizes: phone | both | covered: NOT COVERED
+- [ ] F-LISTEN-9 Media Session play/pause/stop actions: pause stops, play rejoins live (not resume from pause); seek actions disabled | sizes: phone | both | covered: NOT COVERED
+- [ ] F-LISTEN-10 Media Session playbackState follows Listen/Stop | sizes: phone | both | covered: NOT COVERED
+- [ ] F-LISTEN-11 Preconnect link to stream origin added before Listen | sizes: both | engine | covered: NOT COVERED
+- [ ] F-LISTEN-12 Listener heartbeat sent while listening (shows in /admin/listeners) | sizes: both | both | covered: NOT COVERED
+- [ ] F-LISTEN-13 Live show banner 'LIVE: <title>' with description; 'Call in from here' link when calls enabled; polled every 15 s | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-14 During a live show the host (and on-air caller) is heard instead of music; music resumes with a fresh now-playing after | sizes: both | both | covered: e2e/web-call-in.cjs (host/caller heard)
+- [ ] F-LISTEN-15 Song request: expand form; name + song required; artist + message optional; Submit posts /song-requests; success and error messages; Submitting… state | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-16 CRM: 6-digit PIN login (digits only, error on wrong length), register form (name required, phone, email), Logout | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-17 CRM: rate current song 1-5 stars, favorite toggle; profile counts refresh | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-18 CRM: active raffles listed; Enter Raffle → 'entered' state | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-19 Release while listening shows 'Tap to keep listening' on Safari and resumes | sizes: phone | both | covered: e2e/site-release/check.cjs
+- [ ] F-LISTEN-20 Phone layout: buttons ≥ 44 px, no sideways scroll | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-LISTEN-21 Station switch: going from one /listen/A to /listen/B stops A | sizes: both | both | covered: NOT COVERED
+
+## Web call-in page (/call/:stationId)
+
+- [ ] F-CALLIN-1 No live show / calls closed: says so (polls active show) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CALLIN-2 Name (required) + note; Call in asks for the microphone inside the click | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [ ] F-CALLIN-3 Mic permission denied shows an error | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CALLIN-4 Status text follows waiting → screening → approved → on_air (red pulse) | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [ ] F-CALLIN-5 Waiting caller hears the show (host), not on air | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [ ] F-CALLIN-6 On air: listeners hear host + caller; caller hears host not themselves | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [ ] F-CALLIN-7 Hang up ends the call; screener sees completed | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [ ] F-CALLIN-8 Rejected by screener shows rejected state | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CALLIN-9 Dropped connection reconnects and call is held | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-CALLIN-10 Mic level meter moves | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CALLIN-11 iPhone Safari call-in | sizes: phone | n.a. | covered: NOT COVERED
+
+## Public station list (/stations)
+
+- [ ] F-STLIST-1 Lists active stations with name/description; card links to /listen/:id | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STLIST-2 Empty / loading states | sizes: both | n.a. | covered: NOT COVERED
+
+## Public program guide (/guide)
+
+- [ ] F-GUIDE-1 Station dropdown and date picker load /schedules/epg/:station for that date | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GUIDE-2 Timeline shows blocks in station timezone; today default | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GUIDE-3 Phone layout readable, no sideways scroll | sizes: phone | n.a. | covered: NOT COVERED
+
+## Public DJs (/hosts)
+
+- [ ] F-HOSTS-1 Public host profile cards (photo, bio, title, social links) for users with Public Profile on | sizes: both | n.a. | covered: NOT COVERED
+
+## Public archives (/archives)
+
+- [ ] F-PARCH-1 Station filter; only published archives shown | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-PARCH-2 Play overlay on a card plays the archive audio | sizes: both | browser | covered: NOT COVERED
+- [ ] F-PARCH-3 Archives page after a stale release loads with no error box | sizes: both | n.a. | covered: e2e/site-release/check.cjs
+
+## Admin stations (/admin/stations)
+
+- [ ] F-STATIONS-1 Station list table with type, timezone, Active/Inactive | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
+- [ ] F-STATIONS-2 New station form: city search (/stations/geocode) results, pick, Create Station | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STATIONS-3 Delete station with confirm | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STATIONS-4 Protected checkbox (admin only) toggles station.protected; non-admin sees badge only | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STATIONS-5 Row expands: Location search + Save Location | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STATIONS-6 Automation config: Hourly Station ID, Hourly Time Announcement, Weather Spots + interval (5-120, disabled when off), Save | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STATIONS-7 'When the time check comes during a shiur or story': pause / wait / cut; saved and honoured on air | sizes: both | both | covered: NOT COVERED
+- [ ] F-STATIONS-8 Turning Hourly Time Announcement off removes it from the queue; on adds it at :00 | sizes: both | both | covered: NOT COVERED
+
+## Library (/admin/assets)
+
+- [ ] F-ASSETS-1 Column filters: title, artist, album search; category, type; duration min/max ('e.g. 3:00'); Clear filters | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETS-2 Page size select; pager prev/next/numbers | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETS-3 Per-row Play/Stop preview | sizes: both | browser | covered: NOT COVERED
+- [ ] F-ASSETS-4 Per-row download menu by format | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETS-5 Per-row View → /admin/assets/:id; Delete | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETS-6 Category badge dropdown changes category inline; Sponsor badge dropdown with search sets/clears sponsor | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETS-7 Row checkboxes + select all; 'Select all N filtered' / 'Clear, keep only this page' | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETS-8 Bulk: set category, download (format), auto-trim, create review queue (dialog with Close) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETS-9 Upload link only for managers; view-only for dj/viewer | sizes: both | n.a. | covered: NOT COVERED
+
+## Asset upload (/admin/assets/upload)
+
+- [ ] F-UPLOAD-1 Drag files onto drop zone or pick with file input; list shows each file | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-UPLOAD-2 Asset type, category, format, optional artist/album fields | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-UPLOAD-3 Remove one file, Clear All | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-UPLOAD-4 Upload All shows 'Uploading i of n…', results; link back to Assets | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-UPLOAD-5 Upload from iPhone Files/Photos | sizes: phone | n.a. | covered: NOT COVERED
+
+## Asset detail (/admin/assets/:id)
+
+- [ ] F-ASSETDETAIL-1 Metadata shown; release date and vote (0-100, saved on blur) update the asset | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETDETAIL-2 Waveform player: Play/Pause, Stop, speed buttons, seek slider | sizes: both | browser | covered: NOT COVERED
+- [ ] F-ASSETDETAIL-3 Preview controls: Play first N s, Play last N s, Save as default | sizes: both | browser | covered: NOT COVERED
+- [ ] F-ASSETDETAIL-4 Silence detection: Detect, threshold sliders, region list, Play region, Trim region (confirm), Auto-clip, Undo trim / Restore original, Save | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETDETAIL-5 Enhance panel: presets, Preview, Apply, AI Auto-Enhance, Undo, Save, link to full enhance page | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETDETAIL-6 Audience detection: Detect Questions, sliders, segment list, Play segment / with context, Deselect | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETDETAIL-7 Comment box posts a comment; history shows changes | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETDETAIL-8 Back to Assets link | sizes: both | n.a. | covered: NOT COVERED
+
+## Audio enhance (/admin/audio-enhance/:assetId)
+
+- [ ] F-ENHANCE-1 Preset buttons, Custom filters (checkboxes, sliders) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ENHANCE-2 Preview original / Preview enhanced | sizes: both | browser | covered: NOT COVERED
+- [ ] F-ENHANCE-3 Apply Enhancement, AI Auto-Enhance, Undo Enhancement, Save; back link | sizes: both | n.a. | covered: NOT COVERED
+
+## Review queues (/admin/reviews) and review flow (/admin/reviews/:id)
+
+- [ ] F-REVIEWS-1 Queue list; empty state links to Assets | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
+- [ ] F-REVIEWS-2 Flow: Approve / Reject / Flag / Skip with notes, advance to next | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-REVIEWS-3 Previous / Next navigation, item list jump | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-REVIEWS-4 Change category in flow; waveform, silence, enhance, audience, preview, comments, history panels | sizes: both | n.a. | covered: NOT COVERED
+
+## Users (/admin/users, admin only)
+
+- [ ] F-USERS-1 Create user: username/email, password, role (admin/manager/dj/viewer/sponsor), display name, phone, job title | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-USERS-2 Edit user (password blank keeps), Delete (confirm), Deactivate / Activate | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-USERS-3 Alert preferences: SMS/WhatsApp checkboxes, minimum severity | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-USERS-4 DJ/host profile: bio, photo URL, Public Profile, Twitter, Instagram, website (appears on /hosts) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-USERS-5 Stations this person may operate: all / named stations / protected station ticks; enforced in control room | sizes: both | both | covered: NOT COVERED
+- [ ] F-USERS-6 Last online / last action refresh every 5 s | sizes: both | n.a. | covered: NOT COVERED
+
+## Rules (/admin/rules)
+
+- [ ] F-RULES-1 Rule list; Edit; Delete (confirm); active toggle | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-RULES-2 New rule: type, asset type, station, numeric params, days of week buttons, date, active | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-RULES-3 Schedule preview toggle shows preview | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-RULES-4 Only admin can change; others view only | sizes: both | n.a. | covered: NOT COVERED
+
+## Schedules (/admin/schedules)
+
+- [ ] F-SCHED-1 Station filter; list | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
+- [ ] F-SCHED-2 Create / Edit (station, priority number, active) / Cancel / Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SCHED-3 Blocks button opens /admin/schedules/:id/blocks | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SCHED-4 dj/viewer view only | sizes: both | n.a. | covered: NOT COVERED
+
+## Schedule blocks (/admin/schedules/:id/blocks)
+
+- [ ] F-BLOCKS-1 Back to Schedules | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-BLOCKS-2 New/Edit block: name, recurrence type, day toggles, presets, start/end time, sunrise/sunset events + offsets, date range, playlist template, playback mode, one-time | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-BLOCKS-3 Delete block (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-BLOCKS-4 Add playlist entry from asset select; Remove entry; category badge | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-BLOCKS-5 Block change takes effect in the control room queue on time (schedule refresh) | sizes: both | both | covered: NOT COVERED
+
+## Blackouts (/admin/holidays)
+
+- [ ] F-HOLIDAYS-1 Filters: reason, status, station | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-HOLIDAYS-2 Add/Edit blackout: name, reason, start/end datetime, station chips, all stations, active | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-HOLIDAYS-3 Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-HOLIDAYS-4 Blackout window produces scheduled silence row in queue and silence on air | sizes: both | both | covered: NOT COVERED
+
+## Sponsors (/admin/sponsors)
+
+- [ ] F-SPONSORS-1 Add/Edit sponsor: name, audio path, insertion policy, numeric params; Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPONSORS-2 Link to sponsor portal login | sizes: both | n.a. | covered: NOT COVERED
+
+## Spot schedule (/admin/spot-schedule)
+
+- [ ] F-SPOTSCHED-1 New schedule: sponsor, station, spot search + Listen/Stop, Change spot, days, when (dayparts vs times), times add/remove, plays per daypart, date range, timing; Save schedule | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPOTSCHED-2 List: Listen, Turn on/off, Remove (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPOTSCHED-3 Station selector + 7-day look-ahead; timing defaults per daypart | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPOTSCHED-4 Planned spots appear as SPONSOR rows in the control room queue | sizes: both | both | covered: NOT COVERED
+
+## Record spots (/admin/spot-recordings)
+
+- [ ] F-SPOTREC-1 New spot: sponsor, name, script; create | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPOTREC-2 Edit script / Save / Cancel; Make audio; Upload a recording (file); ▶ Listen | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPOTREC-3 Approve / Reject / Delete | sizes: both | n.a. | covered: NOT COVERED
+
+## Program blocks (/admin/program-blocks)
+
+- [ ] F-PROGBLOCKS-1 New block: name, station, timing (hard/soft/soft-with-limit), day buttons, minute of every hour, every hour button, times add/remove/clear all | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-PROGBLOCKS-2 Items: library search add, category combo add, sponsors (places), Add the time, Add the weather; ↑/↓ move; remove | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-PROGBLOCKS-3 Save block / Save changes; Edit; Turn on/off; Delete | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-PROGBLOCKS-4 Next-24-hours preview | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-PROGBLOCKS-5 Block with time item replaces built-in hourly time and airs at its clock time | sizes: both | both | covered: NOT COVERED
+
+## Schedule check (/admin/schedule-check)
+
+- [ ] F-SCHEDCHECK-1 Station select; overlaps/gaps/off-air/unplaced spots listed | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
+- [ ] F-SCHEDCHECK-2 Settle a conflict: Keep "<block>" buttons | sizes: both | n.a. | covered: NOT COVERED
+
+## Sponsorship rules (/admin/sponsorship-rules)
+
+- [ ] F-SPRULES-1 Edit rules text; Save rules (disabled unless changed); Undo changes | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPRULES-2 Show/Hide history; Load into editor | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPRULES-3 Copy review panel: sponsor name + wording, Check my wording, Use this wording | sizes: both | n.a. | covered: NOT COVERED
+
+## Playlists (/admin/playlists)
+
+- [ ] F-PLAYLISTS-1 Station filter; Create playlist (name, station, pattern) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-PLAYLISTS-2 Delete template (confirm); Add slot (asset type + category); move slot up/down; delete slot; optimistic | sizes: both | n.a. | covered: e2e/control-room.mjs (optimistic move/remove)
+- [ ] F-PLAYLISTS-3 Playlist generation panel: settings checkbox/numbers, Save, Regenerate (disabled while dirty) | sizes: both | n.a. | covered: NOT COVERED
+
+## Categories (/admin/categories) and Types (/admin/asset-types)
+
+- [ ] F-CATS-1 Add (button and Enter), Rename (Enter saves, Esc cancels), Save/Cancel, Delete (confirm) — categories | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CATS-2 Same for asset types | sizes: both | n.a. | covered: NOT COVERED
+
+## Alerts (/admin/alerts)
+
+- [ ] F-ALERTS-1 Filters severity/type/status; pager | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ALERTS-2 Resolve, Reopen, Delete (confirm), Resolve all (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ALERTS-3 Bell count updates after resolving | sizes: both | n.a. | covered: NOT COVERED
+
+## Bug reports (/admin/bug-reports)
+
+- [ ] F-BUGS-1 List reports; Details/Hide details; Close sets status closed | sizes: both | n.a. | covered: NOT COVERED
+
+## Site updates (/admin/site-updates, admin)
+
+- [ ] F-SITEUPD-1 Mode Automatically / Only when I push | sizes: both | n.a. | covered: e2e/site-release/check.cjs (via API)
+- [ ] F-SITEUPD-2 Push latest release: now or at datetime; include playing tabs checkbox; Cancel push | sizes: both | n.a. | covered: e2e/site-release/check.cjs (via API)
+- [ ] F-SITEUPD-3 Open tabs list with version/playing/waiting | sizes: both | n.a. | covered: NOT COVERED
+
+## Activity (/admin/activity, admin)
+
+- [ ] F-ACTIVITY-1 Staff / Listeners tab, remembered | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACTIVITY-2 Staff: search, user/station/category filters, date range + quick ranges, checkboxes, expand item, pager, Try again | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACTIVITY-3 Listeners: search, station, min minutes, date range, view toggle, expand session | sizes: both | n.a. | covered: NOT COVERED
+
+## Analytics (/admin/analytics)
+
+- [ ] F-ANALYTICS-1 Station and days selects; daily plays, top assets, by category, by hour bars | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
+
+## Live listeners (/admin/listeners)
+
+- [ ] F-LISTENERS-1 Stat cards (active now, today sessions/minutes, peak) update live (push) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTENERS-2 Active stations list; history 7/30/90d; regions days buttons | sizes: both | n.a. | covered: NOT COVERED
+
+## Song requests (/admin/requests)
+
+- [ ] F-REQUESTS-1 Status tabs; Approve / Reject / Delete (confirm); analytics top requested toggle | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-REQUESTS-2 Phone card layout actions | sizes: phone | n.a. | covered: NOT COVERED
+
+## Admin archives (/admin/archives)
+
+- [ ] F-AARCH-1 Station filter; New Archive modal (title, station, audio URL, description, host, duration, cover, date); Edit; Cancel/× | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-AARCH-2 Publish/Unpublish toggle; Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
+
+## Live shows (/admin/live)
+
+- [ ] F-LIVE-1 Tabs (upcoming/live/ended…); New show modal (title, description, station, broadcast mode, start/end, calls enabled); Edit; Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LIVE-2 Start show; links to host console and screener | sizes: both | n.a. | covered: NOT COVERED
+
+## Host console (/admin/live/:id/host)
+
+- [ ] F-HOST-1 Start Broadcasting asks for mic; VU meter moves; Stop Broadcasting | sizes: both | n.a. | covered: e2e/web-call-in.cjs (audio path)
+- [ ] F-HOST-2 Countdown to hard stop, re-synced via WS; hard stop warning | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-HOST-3 Caller queue: put on air (one at a time), end call | sizes: both | n.a. | covered: e2e/web-call-in.cjs (via API)
+- [ ] F-HOST-4 End Show (confirm) → back to Live shows; listeners return to music | sizes: both | both | covered: NOT COVERED
+- [ ] F-HOST-5 Hard stop ends show at scheduled end and queue resumes | sizes: both | both | covered: NOT COVERED
+
+## Call screener (/admin/live/:id/screen)
+
+- [ ] F-SCREENER-1 Waiting / approved / on-air columns update in real time | sizes: both | n.a. | covered: e2e/web-call-in.cjs (lists caller)
+- [ ] F-SCREENER-2 Edit caller name (Enter saves, Esc cancels); Approve; Reject; Put on air; End call | sizes: both | n.a. | covered: NOT COVERED
+
+## Recording studio (/admin/studio)
+
+- [ ] F-STUDIO-1 Record / Pause / Resume / Stop / Cancel; title, type, category; Save to Library; Discard | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STUDIO-2 Weather readouts: station + date, create, custom template toggle, record per readout (Save & Link), regenerate, skip, queue, delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STUDIO-3 Audio mixer: pick bed + voice-over (search), offsets/volumes, voice-over preset, show waveforms, Mix & Save to Library | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STUDIO-4 Recording on iPhone Safari | sizes: phone | n.a. | covered: NOT COVERED
+
+## CRM (/admin/crm)
+
+- [ ] F-CRM-1 Tabs; members search, Deactivate (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CRM-2 Song rankings | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CRM-3 Create raffle (title, dates), Draw winner (confirm), view entries | sizes: both | n.a. | covered: NOT COVERED
+
+## Program clock (/admin/program-clock)
+
+- [ ] F-CLOCK-1 Station select, day buttons, hour list; click hour opens panel | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CLOCK-2 Config: ad minutes toggles; station config save | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CLOCK-3 New/Edit rule: name, type, asset type, genres, days, numbers, active; Save; Delete (confirm); Back | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CLOCK-4 dj/viewer view only | sizes: both | n.a. | covered: NOT COVERED
+
+## Sponsor login (/sponsor/login)
+
+- [ ] F-SPLOGIN-1 Sign in lands on /sponsor/dashboard; wrong password error; Signing in… state | sizes: both | n.a. | covered: NOT COVERED
+
+## Sponsor layout
+
+- [ ] F-SPLAYOUT-1 Nav Dashboard / Campaigns / Check Wording / Billing; Logout | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPLAYOUT-2 Phone layout no sideways scroll | sizes: phone | n.a. | covered: NOT COVERED
+
+## Sponsor dashboard
+
+- [ ] F-SPDASH-1 Stats, my spots, play history table with Prev/Next pager, upcoming schedule | sizes: both | n.a. | covered: NOT COVERED
+
+## Sponsor campaigns and detail
+
+- [ ] F-SPCAMP-1 New campaign form → Create Campaign; list | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPCAMP-2 Detail: Submit draft (script + notes) versioned; comment thread Send | sizes: both | n.a. | covered: NOT COVERED
+
+## Sponsor billing
+
+- [ ] F-SPBILL-1 Invoice table + summary; Pay now opens Stripe checkout; return with success/cancel query param message | sizes: both | n.a. | covered: NOT COVERED
+
+## Sponsor check wording
+
+- [ ] F-SPWORD-1 Wording check shows what must change and why; Use this wording | sizes: both | n.a. | covered: NOT COVERED
+
+## V1. Added by verifier round 1
+
+### A. Playout engine (infra/streaming/radio.liq, setup.sh, nginx, systemd, icecast.xml)
+
+- [ ] V1-1 Engine starts while the backend is down: /hello fails (logged), engine still starts and goes to the emergency lane; when the backend comes back the next /next works without a restart and the backend never got its hello (stale cued/timed state kept) | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:36-41
+- [ ] V1-2 /next carries `given=` (last 5 handed entry ids, newest first); after a /flush the pre-loaded id is removed from `given` unless it already aired, so the backend can hand it out again | modes: engine | covered: NOT COVERED (backend side only, tests/test_playout_engine.py) | src: infra/streaming/radio.liq:48-66, 229-236
+- [ ] V1-3 request.dynamic retry: backend 204/error -> engine retries every 2 s (retry_delay), a track that takes >30 s to resolve/download is abandoned (timeout=30) and the next is asked for; prefetch=1 means exactly one track pre-loaded | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:68
+- [ ] V1-4 Per-track level: `liq_amplify` (replay_gain_db from analysis) applied on the main lane and on mix-over; items with gain 0/no analysis play at unity | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:70, 162; backend/app/services/playout_engine.py:186-189, 225-227
+- [ ] V1-5 Cue points sent to the engine: `liq_cue_in`/`liq_cue_out` from analysis are honoured (no lead-in silence, ends at cue_out); a paused shiur (resume@) starts at max(cue_in, resume offset) on the engine | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:208-225
+- [ ] V1-6 Output processing: compressor (-14 dB, 3:1) and limiter (-1 dB) on the whole output; no clipping on loud masters, quiet items not pumped | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:182-183
+- [ ] V1-7 Icecast output is 320 kbps / 44.1 kHz stereo MP3 with station name from KBR_STATION_NAME, genre and url set; listeners see the right stream title | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:303-315
+- [ ] V1-8 Timed take-over arming window: the timed gate opens for only 1.5 s after the fade; a timed item whose file is not resolved by then (slow download, >45 s lead not enough) must still air (not wait for the next group or play late into a song) | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:128-147
+- [ ] V1-9 Timed group stays on air until every item of the group has played (timed_open while lane=timed and queue not empty), then music returns on the NEXT song, the interrupted song is not reported again | modes: engine | covered: NOT COVERED (only H-1..H-5 cover one item) | src: infra/streaming/radio.liq:114-118, 209-222
+- [ ] V1-10 Two timed groups less than 0.5 s apart are treated as one take-over (abs(at - timed_group_at) > 0.5); two groups 1 s apart both take over in order | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:150-155
+- [ ] V1-11 /skip while the timed lane is on air skips the timed item (engine has no protection of its own; the backend must refuse first) and the rest of the timed group still plays | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:171-180
+- [ ] V1-12 /skip body {"fade":0} is a cut (clamped to 0.02 s); missing body/fade uses KBR_SKIP_FADE_SECONDS; malformed JSON body does not crash the engine | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:221-226
+- [ ] V1-13 Start report dedupe: the engine reports a change only when `kbr_entry` differs from the last one; two consecutive plays of the same entry id never report the second, an emergency track after an emergency track ("" twice) is reported once | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:210-216
+- [ ] V1-14 Start report POST failure (backend down) is only logged; when the backend comes back the item on air is reconciled through `given` on the next /next (not before the current song ends) | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:189-200
+- [ ] V1-15 /status returns entry_id, title, main_remaining, timed_waiting; mix-over playing on top never changes entry_id | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:256-260
+- [ ] V1-16 Control endpoints refuse every call when KBR_PLAYOUT_TOKEN is empty (token != "" check), answer 403 JSON for a wrong token, and only accept POST (nginx limit_except) | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:218-233; infra/streaming/setup.sh:96-101
+- [ ] V1-17 Harbor control port bound to 127.0.0.1 only; telnet off; the control port is not reachable from outside (only through nginx /control/<station id>/) | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:29-31
+- [ ] V1-18 Emergency directory: files added while running are picked up (reload_mode=watch), played randomized; empty dir -> mksafe silence (no crash) and the backend alert still fires | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:160-161
+- [ ] V1-19 KBR_DEBUG_WAV set -> output also written to a WAV file (harness only), unset -> no file | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:262-266
+- [ ] V1-20 setup.sh: fresh Ubuntu 24.04 install brings up one kbr-engine@<id> per station, icecast2 and nginx; prints the backend settings; warns on another Ubuntu version; refuses non-root | modes: engine | covered: NOT COVERED | src: infra/streaming/setup.sh:22-30, 150-167
+- [ ] V1-21 setup.sh re-run keeps the token and source password it made the first time (backend keeps working), adds engines for new stations, disables and removes engines for stations no longer listed | modes: engine | covered: NOT COVERED | src: infra/streaming/setup.sh:50-53, 117-126
+- [ ] V1-22 setup.sh station selection: "all" uses GET /stations?limit=100 (more than 100 stations silently missed); comma list selects ids; no station found -> exits with message; names with | " \ are cleaned | modes: engine | covered: NOT COVERED | src: infra/streaming/setup.sh:31-43
+- [ ] V1-23 setup.sh TLS: certbot only when the domain's DNS A record is this machine; otherwise prints "HTTPS NOT set up yet"; re-run after DNS change gets the certificate | modes: engine | covered: NOT COVERED | src: infra/streaming/setup.sh:136-142
+- [ ] V1-24 Secrets on the stream server: /etc/kbr-engine/env and station env files are 640 root:liquidsoap; icecast admin/relay passwords random; nothing written to the repository | modes: engine | covered: NOT COVERED | src: infra/streaming/setup.sh:54-70, 86-91
+- [ ] V1-25 systemd unit: engine restarts 3 s after a crash (Restart=always), runs at Nice -10, requires icecast2; a crash mid-song resumes playing within a few seconds and sends /hello again | modes: engine | covered: NOT COVERED | src: infra/streaming/kbr-engine@.service
+- [ ] V1-26 nginx: /live-<uuid> proxied unbuffered with CORS * (browsers on kbrlive.com can play it), anything else 404; control proxy read timeout 10 s | modes: engine | covered: NOT COVERED | src: infra/streaming/nginx-stream.conf
+- [ ] V1-27 Icecast limits: 1000 listeners, 40 sources, burst-on-connect 128 KB so a new listener hears sound at once; listener 1001 refused cleanly | modes: engine | covered: NOT COVERED | src: infra/streaming/icecast.xml:5-11
+- [ ] V1-28 Station renamed or added after setup: its engine/stream does not exist until setup.sh is re-run; backend with PLAYOUT_ENGINE_STATION_ID listing a station with no engine -> watchdog/flush failures handled | modes: engine | covered: NOT COVERED | src: infra/streaming/setup.sh:80-111; backend/app/config.py:218-235
+
+### B. Backend link to the engine (services/playout_engine.py, config.py)
+
+- [ ] V1-29 Watchdog never fires when the engine has NOT contacted the backend since the backend started (last_contact == 0): engine down at deploy time -> no "not responding" alert ever | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:671-681
+- [ ] V1-30 Engine restart (hello) a few seconds before hh:00 after the time check was already handed over: timed_sent is reset, tick re-hands the item within its 45 s window and it still airs on the second | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:299-303, 584-620
+- [ ] V1-31 Backend restart inside the 45 s lead window: in-memory timed_sent is lost, the item is handed again with the same id, the engine ignores the duplicate (timed_seen) and it airs once | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:161-168; infra/streaming/radio.liq:240-251
+- [ ] V1-32 Engine reports a start for an entry that is neither in the queue nor in `handed` -> previous playing entry closed, nothing shown as on air, response known:false (listeners see Offline while the engine plays) | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:451-459
+- [ ] V1-33 Emergency alert re-arms: after a known entry is reported the on_emergency flag clears, so a second emergency spell later in the day raises a new alert | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:460-480
+- [ ] V1-34 Soft-group hard_by fade is sent only once the engine has the group's first item pre-loaded (cued == head); if the engine never re-asks the song is not faded at hard_by | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:540-582
+- [ ] V1-35 /next drops up to 5 consecutive entries without a playable URL (skipped) then returns 204; the 6th is not tried until the next ask | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:349-374
+- [ ] V1-36 Entries with a relative file_path and Supabase storage not configured have no audio URL: engine station skips them all (station plays emergency) - must alert | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:174-183
+- [ ] V1-37 PLAYOUT_ENGINE_ENABLED=true but PLAYOUT_ENGINE_URL or PLAYOUT_ENGINE_TOKEN empty -> every station stays browser-played (playout_engine_enabled false); /playout endpoints answer 404 | modes: both | covered: NOT COVERED | src: backend/app/config.py:222-233
+- [ ] V1-38 Switching a station between engine and browser (env change + redeploy) while it plays: no gap, no double playback, browser timers start for it; the engine left running for a station no longer listed gets 404 from /next and falls to emergency on its own stream | modes: both | covered: NOT COVERED | src: backend/app/config.py:231-233; backend/app/services/scheduler_engine.py:345-352
+- [ ] V1-39 public_stream_url: LIQUIDSOAP_ENABLED (legacy) wins over the engine and gives every station the one ICECAST_STREAM_URL; ICECAST_STREAM_URL empty -> no stream url even with PLAYOUT_STREAM_LIVE | modes: both | covered: NOT COVERED | src: backend/app/config.py:243-251
+- [ ] V1-40 Engine mode mix-over: /overlay payload carries the asset's replay gain; mix-over while a timed item is on air plays on top of it | modes: engine | covered: NOT COVERED | src: backend/app/services/playout_engine.py:156-168
+
+### C. Scheduler, queue and advance (scheduler_engine.py, api/v1/queue.py)
+
+- [ ] V1-41 CROSS-STATION: move-up, move-down, PUT reorder, reorder-dnd and DELETE /stations/{A}/queue/{entry} look the entry up by id only (no station filter): a DJ allowed on station A can move or delete an entry of protected station B by putting B's entry id under A's URL - must be refused | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:2088, 2118, 2147, 2269, 2324
+- [ ] V1-42 PUT /queue/reorder sets new_position without shifting others: duplicate positions; it also accepts a playing or played entry - verify the queue order and Next stay correct afterwards | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:2139-2152
+- [ ] V1-43 DELETE the entry that is ON AIR (status playing) or a timed item: browser station goes silent until dead-air recovery (30 s) or behaves sanely; engine keeps playing it | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:2316-2329
+- [ ] V1-44 DELETE /queue/{entry} runs a full synchronous replenish before answering (7-day fill): must still answer within the S-3 300 ms budget | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:2327-2328
+- [ ] V1-45 add/bulk-add/play-next with a non-existent asset id or an asset of another type (silence, placeholder) - no 500; placeholder added by operator still plays (OPERATOR_SOURCES) | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:1581-1653, 520-542
+- [ ] V1-46 mix-over client_request_id repeat (prefixed "mix:") returns duplicate:true and does not play twice | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:1716-1719, 1758
+- [ ] V1-47 mix-over writes a PlayLog with end = start + asset duration even though nothing on the queue moved; analytics/sponsor play counts include it | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:1748-1753
+- [ ] V1-48 Engine skip with nothing on air (no playing entry) still sends /skip; engine skip with a loop on stops the loop and flushes before skipping | modes: engine | covered: NOT COVERED | src: backend/app/api/v1/queue.py:1774-1796
+- [ ] V1-49 Loop survives a backend restart (kept in automation_config.loop_asset_id); loop on an item then station restart keeps repeating it | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:723-760
+- [ ] V1-50 Loop on with the engine: each repeat is a new entry id, so the engine's start-report dedupe does not hide the repeat (now-playing restarts at 0 each time) | modes: engine | covered: NOT COVERED | src: backend/app/api/v1/queue.py:751-790; infra/streaming/radio.liq:210-216
+- [ ] V1-51 Fire-now / play-next when the station is not playing at all (nothing on air): item starts (browser) and the queue continues after it | modes: browser | covered: NOT COVERED | src: backend/app/api/v1/queue.py:1656-1705
+- [ ] V1-52 Queue ran dry and the normal fill finds nothing: 20 random music items (else any non-filler type) queued as source=fallback; silence/spot/jingle/time/weather never used as filler | modes: browser | covered: NOT COVERED | src: backend/app/api/v1/queue.py:646-685
+- [ ] V1-53 Timed item whose asset equals the item on air (e.g. silence over silence, or the same jingle) is never preempted in; it waits and is picked by position later | modes: browser | covered: NOT COVERED | src: backend/app/api/v1/queue.py:1043-1045
+- [ ] V1-54 Item on air with no duration: server advances after 180 s (default) and the precise timer uses 180 s; cross_seconds never more than half the item | modes: browser | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:583-595; backend/app/api/v1/queue.py:1063-1066
+- [ ] V1-55 Now-playing payload when the next item (or the item on air) has no file_path (null): no crash (code calls .startswith on it), listeners keep the current item | modes: browser | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:741-746, 763-768
+- [ ] V1-56 Two backend processes during a deploy: the follower's precise/timed timers armed before it lost the lease do nothing; the new leader arms its own (no double advance at hh:00) | modes: browser | covered: partial (B-JOB-21 says NOT COVERED for leadership loss) | src: backend/app/services/scheduler_engine.py:538-541
+- [ ] V1-57 PATCH /now-playing/{station} writes a NowPlaying row that the scheduler deletes within one pass (leftover cleanup): manual now-playing is overwritten within 3 s - confirm intended or remove the endpoint | modes: both | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:820-828; backend/app/api/v1/now_playing.py:65-87
+- [ ] V1-58 Operator presses Stop (controls/stop) or the queue is left stopped on purpose: dead-air recovery restarts the station after silence_threshold_seconds anyway - confirm there is a way to keep a browser station off air (except blackout) | modes: browser | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:443-511
+- [ ] V1-59 controls/play|pause|stop|play-now|enqueue use the legacy HLS/Redis PlaylistEngine, a second player beside the queue: with REDIS_URL empty they must answer cleanly (no 500) and never put a second audio source on air | modes: both | covered: NOT COVERED | src: backend/app/api/v1/controls.py; backend/app/services/playback_service.py:13-60
+- [ ] V1-60 Weather readout auto-queue has no date check: a readout recorded on an earlier day and never queued is queued the next time queue_time passes (stale weather on air) | modes: both | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:272-320
+- [ ] V1-61 Weather readout auto-queued with position 0 and no preempt_at: where it lands relative to the playing item and timed items (plays next? before a due time check?) | modes: both | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:306-313
+- [ ] V1-62 Weather readout generation runs once per station per local day even if generation failed (marked checked), and generate_time with a bad format falls back to 06:00 | modes: both | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:243-268
+- [ ] V1-63 Station check failure alert repeats every 3 s pass while the error persists - confirm alert dedupe folds them (no alert/SMS storm) | modes: both | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:355-369
+- [ ] V1-64 Station set is_active=false while playing: scheduler stops advancing it, the item on air never ends in the DB, listeners' now-playing shows it forever | modes: both | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:333-336
+
+### D. Schedules, blocks and rotation (services/scheduling.py, queue_replenish_service.py)
+
+- [ ] V1-65 Block winner when blocks overlap: schedule priority, then block priority, then one-time > monthly > weekly > daily, then shorter, then newer | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:81-110
+- [ ] V1-66 Start-only blocks (until_next, "running playlist"): stay on until another start-only block starts; a timed block over it wins a tie; looks back up to 8 days | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:129-176
+- [ ] V1-67 A start-only block saved after its start time today (saved 6:40 for 6:52) does not take over until its next start (only starts after created_at count) | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:148-176
+- [ ] V1-68 Overnight block (start > end, e.g. 22:00-02:00) active on both sides of midnight; the after-midnight part belongs to which day's recurrence (weekly Friday block after midnight on Saturday) | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:231-237
+- [ ] V1-69 Recurrence types: weekly with day list / empty list = every day; monthly by day-of-month list; one-time with start_date only (that day) or a date range; one-time with no dates = always on (legacy) | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:178-194, 239-256
+- [ ] V1-70 Sun-relative block on a station without lat/lon uses Jerusalem coordinates (a New York station would get Jerusalem sunset) | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:196-210
+- [ ] V1-71 Block playback modes: sequential (continues after the last played item, wraps), shuffle (avoids the last half of the list), weighted (weight >= 1); disabled playlist entries never chosen | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:262-342
+- [ ] V1-72 Template rotation slot = total plays of the station modulo slot count, so time checks, weather and spots shift which slot comes next | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:394-418
+- [ ] V1-73 Template blocks still run the legacy automation insertions (hourly_station_id / hourly_time_announcement / weather) using UTC minute < 2: a station in a half-hour zone (e.g. India) or the generator path gets an extra or misplaced time clip | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:421-515
+- [ ] V1-74 Station-specific rules replace global rules entirely (a station with any own rule gets no global music/spots); global rules apply to stations with none | modes: both | covered: NOT COVERED | src: backend/app/services/queue_replenish_service.py:52-58, 205-225
+- [ ] V1-75 Rule fill avoids songs queued already and played in the last 2 h, then recycles in later passes; a small library (fewer songs than 7 days) fills without a loop or crash | modes: both | covered: NOT COVERED | src: backend/app/services/queue_replenish_service.py:180-195, 720-790
+- [ ] V1-76 Queue already >= 7 days (TARGET_QUEUE_SECONDS) skips the content fill but still schedules hourly announcements and ad slots | modes: both | covered: NOT COVERED | src: backend/app/services/queue_replenish_service.py:120-170
+- [ ] V1-77 Program block expansion throws -> the built-in hourly time/weather is scheduled instead (station keeps its time check) | modes: both | covered: NOT COVERED | src: backend/app/services/queue_replenish_service.py:139-147
+- [ ] V1-78 Station switched from old 7-day fill to block playlists: >2x generation hours of old automatic fill is replaced at once (block takes over on time) | modes: both | covered: partial (B-JOB-53) | src: backend/app/services/queue_replenish_service.py:76-92
+- [ ] V1-79 Legacy `_maybe_insert_hourly_jingle` / `_maybe_insert_weather_spot` are never called: the "Hourly Station ID" toggle only works through template blocks (scheduling._check_automation_insertions) - verify the station ID jingle airs hourly on a station without a template | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:338-510; backend/app/services/scheduling.py:436
+
+### E. Blackouts, Shabbos and stations
+
+- [ ] V1-80 MULTI-STATION: auto-generated Shabbos/Yom Tov windows are de-duplicated by name and start time (within 1 h) regardless of station: a second station in the same area (or same name window) gets NO windows and plays through Shabbos | modes: both | covered: NOT COVERED | src: backend/app/services/station_service.py:41-50
+- [ ] V1-81 MULTI-STATION: the daily holiday extension checks the furthest window and the next-7-days count across ALL stations, so a station with no windows is not extended while another is covered | modes: both | covered: NOT COVERED | src: backend/app/services/scheduler_engine.py:186-207
+- [ ] V1-82 Shabbos window = Friday sunset - 18 min to Saturday sunset + 72 min in the station's timezone; Yom Tov likewise from erev to the last day | modes: both | covered: NOT COVERED | src: backend/app/services/shabbos_service.py:56-66, 128-135
+- [ ] V1-83 Yom Tov days are always diaspora (2-day): a station in Israel (KBR Jerusalem) blacks out the second day too - confirm intended | modes: both | covered: NOT COVERED | src: backend/app/services/shabbos_service.py:6, 94-145
+- [ ] V1-84 Shabbos adjoining Yom Tov merged into one window with joined names ("Shabbos / Rosh Hashana") and no gap of music between them | modes: both | covered: NOT COVERED | src: backend/app/services/shabbos_service.py:149-200
+- [ ] V1-85 Creating a station with lat/lon generates 13 months of blackouts and the 5-minute silence asset; failure is logged, station still created | modes: both | covered: NOT COVERED | src: backend/app/services/station_service.py:119-145, 63-112
+- [ ] V1-86 Setting lat/lon on create or update re-derives the timezone from the coordinates, overriding a timezone the user chose; timezone change then moves hourly clips | modes: both | covered: NOT COVERED | src: backend/app/services/station_service.py:125-129, 179-184
+- [ ] V1-87 Duplicate station name on create -> 409 Conflict | modes: n.a. | covered: NOT COVERED | src: backend/app/services/station_service.py:120-122
+- [ ] V1-88 holidays preview/auto-generate: unknown station -> 404; station without lat/lon -> 400 with message | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/holidays.py:216-224, 279-287
+- [ ] V1-89 Manual blackout restricted to some stations (affected_stations.station_ids) silences only those; editing a blackout's end earlier while it is on ends silence at once | modes: both | covered: partial (B-JOB-40 NOT COVERED) | src: backend/app/services/scheduler_engine.py:377-396
+- [ ] V1-90 Station list default page is 50: the 51st station is missing from GET /stations, the control-room station switcher and setup.sh "all" | modes: n.a. | covered: NOT COVERED | src: backend/app/services/station_service.py:157-172
+- [ ] V1-91 Delete a library item that is on air, queued, in a block playlist, a spot schedule or a program block: DB cascade removes the playing queue entry (browser station goes silent until dead-air recovery), spot schedules vanish silently, program block items point at nothing | modes: both | covered: NOT COVERED | src: backend/app/services/asset_service.py:242-245; backend/app/models/queue_entry.py:29; backend/app/models/spot_schedule.py:23
+- [ ] V1-92 Upload of a non-audio file (PDF, image) or a very large file (500 MB shiur): refused or handled with a clear message, no half-made asset; no size limit exists in the endpoint | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:240-280
+- [ ] V1-93 Asset download/export: unsupported format -> 400; storage fetch failure -> 502; restore-original on an untrimmed asset -> 400; enhance with unknown preset or no filters -> 400; bulk auto-trim with no matching assets -> 400; bulk job status for an unknown job -> 404 | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:481, 512, 537, 721-727, 820-826, 936, 954, 1085
+
+### F. Roles and station permissions (station-scoped writes outside station_write_guard)
+
+- [ ] V1-94 Holidays create/update/delete/auto-generate have no station check: a manager not assigned to the protected FM station can black it out (or delete its Shabbos windows) | modes: both | covered: NOT COVERED | src: backend/app/api/v1/holidays.py:30, 131-200, 262-340
+- [ ] V1-95 PATCH/DELETE /now-playing/{station_id} (dj) have no station check: a DJ limited to station A can change/clear station B's now-playing | modes: both | covered: NOT COVERED | src: backend/app/api/v1/now_playing.py:65-100
+- [ ] V1-96 Weather readouts create/regenerate/queue/delete have no station check: a manager not assigned to a station can queue a readout onto it (incl. protected) | modes: both | covered: NOT COVERED | src: backend/app/api/v1/weather_readouts.py:67-254
+- [ ] V1-97 Song request approve (PATCH /song-requests/{id}) queues the song on the request's station with no station check (protected station) | modes: both | covered: NOT COVERED | src: backend/app/api/v1/song_requests.py:210-245
+- [ ] V1-98 Archives create/update/delete for any station by any manager (no station check) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/archives.py:20-110
+- [ ] V1-99 Weather spot and hourly time clip uploads change what EVERY station of that region airs, with no station check (a manager of one station replaces another station's time clips) | modes: both | covered: NOT COVERED | src: backend/app/api/v1/weather_spots.py:58-189
+- [ ] V1-100 /ws/alerts accepts any connection with no token: anonymous clients receive every alert (station names, error text) - must require staff | modes: n.a. | covered: NOT COVERED (B-ROLE-21 states the rule but not this gap) | src: backend/app/api/v1/websocket.py:101-116
+- [ ] V1-101 station_write_guard only reads JSON bodies: a multipart/form or form-encoded write naming station_id skips the station check | modes: n.a. | covered: NOT COVERED | src: backend/app/core/station_guard.py:114-124
+- [ ] V1-102 Restricted staff (station_ids set) can still READ every station's queue, play log, last-played and program blocks (GET left open) - confirm intended | modes: n.a. | covered: NOT COVERED | src: backend/app/core/dependencies.py:144-169; backend/app/api/v1/queue.py:1163-1580
+- [ ] V1-103 /auth/seed-reset: resets the FIRST admin's login to email "admin" with ADMIN_SEED_PASSWORD and re-activates it; 503 when ADMIN_SEED_PASSWORD unset; 404 when there is no admin | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/auth.py:104-123
+- [ ] V1-104 Login is limited to 10/minute and refresh to 30/minute per client address (not 200/min as B-AUTH-4 says); behind Railway's proxy get_remote_address may see one address for everyone, so 11 operators signing in within a minute lock each other out | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/auth.py:26-31, 57; backend/app/core/middleware.py:121-136
+- [ ] V1-105 Failed sign-in is written to the activity log ("Sign-in failed", with the known user's id when the email exists, case-insensitive) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/auth.py:35-48
+- [ ] V1-106 JWT_SECRET_KEY left at its default "change-me-in-production" in production: tokens (and web call-in HMAC tokens) are forgeable; nothing refuses to start - startup must refuse or alert | modes: n.a. | covered: NOT COVERED | src: backend/app/config.py:36; backend/app/services/call_in.py
+- [ ] V1-107 CRM listener login is a bare 6-digit PIN with no rate limit and PINs stored in plain text; two members with the same PIN log into the first match; the PIN is kept in localStorage (crm_pin) for auto-login | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/crm.py:195-210; frontend/src/api/crm.ts:108-120; frontend/src/hooks/useCrm.ts:37
+- [ ] V1-108 Managers cannot create a campaign at all (create always 403 "Managers must specify a sponsor_id"); a sponsor login with no linked sponsor record gets 403 on create and empty lists elsewhere | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/campaigns.py:80-95, 35-45
+- [ ] V1-109 Checkout of an already-paid invoice -> 400; another sponsor's invoice -> 404 (not 403); Stripe webhook with bad signature -> 400 | modes: n.a. | covered: NOT COVERED (B-BILLING-4/6 general) | src: backend/app/api/v1/billing.py:100-160
+
+### G. Startup, deploys, time zones, live shows, long items
+
+- [ ] V1-111 /health answers 503 "starting" until tables exist and 503 "unhealthy" when the DB is unreachable, so Railway keeps the old instance until the new one is ready | modes: n.a. | covered: NOT COVERED (test_health checks the 200 only) | src: backend/app/main.py:723-747
+- [ ] V1-112 Deploy overlap: the new instance runs its startup resume (close stale entries, start stations) while the OLD instance still holds the scheduler lease and is playing: must not start a second item, close the item on air, or double-log | modes: browser | covered: NOT COVERED | src: backend/app/main.py:509-610, 666-684
+- [ ] V1-113 Startup resume or scheduler start failing does not stop the API from serving (logged warning only) - confirm an alert is raised since stations would then never advance | modes: both | covered: NOT COVERED | src: backend/app/main.py:674-686
+- [ ] V1-114 Station timezone left at UTC or invalid: time announcements read New York time (HOME_TIMEZONE), not UTC | modes: both | covered: NOT COVERED | src: backend/app/services/weather_spot_service.py:54-66
+- [ ] V1-115 Daylight saving change days: autumn (1 AM twice) gets one time check per local hour label with correct audio, no duplicate/skipped hh:00; spring (no 2 AM) skips cleanly; blocks and blackouts follow local time | modes: both | covered: NOT COVERED (only spot planning DST in B-JOB-78) | src: backend/app/services/weather_spot_service.py:76-78; backend/app/services/queue_replenish_service.py:889-1020
+- [ ] V1-116 Station in a half-hour or 45-minute offset zone (Asia/Kolkata, Asia/Kathmandu): local hh:00 time check at the right UTC moment | modes: both | covered: NOT COVERED | src: backend/app/services/queue_replenish_service.py:889-1020
+- [ ] V1-117 Long-form detection: asset_type in shiur/story/lecture/program OR any item of 12+ minutes, so a 13-minute song is paused and resumed by the time check instead of cut | modes: both | covered: NOT COVERED | src: backend/app/services/long_items.py:19-40
+- [ ] V1-118 Resume after pause rewinds 3 s; an item with under 30 s left is not resumed; an unknown timed_during_long_items value falls back to pause | modes: browser | covered: NOT COVERED | src: backend/app/services/long_items.py:21-60
+- [ ] V1-119 Live show start pauses the item on air and re-queues it first to resume; time/weather that came due during the show and are more than 2 min late are dropped after the show (no stale time check) | modes: both | covered: NOT COVERED (B-JOB-37 asks only for the engine) | src: backend/app/services/live_show_service.py:108-160
+- [ ] V1-120 Generated time announcement text is the same for every station: "Radio Kohl Baramah, W M D I 107.9, the highest frequency" (Jerusalem and other stations announce the FM call sign) - confirm per-station brand | modes: both | covered: NOT COVERED | src: backend/app/services/weather_spot_service.py:93-103
+
+### H. Now-playing socket and listener player (websocket.py, useNowPlayingWS.ts, useAudioEngine.ts, liveStream.ts)
+
+- [ ] V1-121 Mass reconnect (every listener after a release or backend restart): join payload served from a 5 s per-station cache so the DB pool (15) is not exhausted; scheduler and control room stay responsive | modes: both | covered: NOT COVERED | src: backend/app/api/v1/websocket.py:262-298
+- [ ] V1-122 A slow listener socket that cannot take a message within 5 s is dropped (it reconnects) and does not delay the others | modes: both | covered: NOT COVERED | src: backend/app/api/v1/websocket.py:20-67
+- [ ] V1-123 Socket keepalive: server sends {"type":"ping"} after 30 s of silence and answers client text with pong; idle proxies (Railway, mobile carriers) do not cut the connection | modes: both | covered: NOT COVERED | src: backend/app/api/v1/websocket.py:236-248
+- [ ] V1-124 Initial socket message when nothing is playing is {"data": null}; on a read error the client gets {"type":"error"} and stays connected | modes: both | covered: NOT COVERED | src: backend/app/api/v1/websocket.py:139-226
+- [ ] V1-125 Reconnect backoff 1, 2, 4 ... 30 s; after the last attempt the page polls /now-playing every 3 s and stays on polling (mix-over and change_fade_seconds are lost) until the tab is hidden and shown again | modes: both | covered: NOT COVERED (F-PLAYER-24 only says falls back) | src: frontend/src/hooks/useNowPlayingWS.ts:80-104, 158-168
+- [ ] V1-126 Player drift correction: every 10 s, a player more than 5 s behind the server jumps forward (never within 15 s of a track change; a player ahead is not pulled back) | modes: browser | covered: NOT COVERED | src: frontend/src/hooks/useAudioEngine.ts:20-22, 803-829
+- [ ] V1-127 Listener volume and mute remembered across reloads (radio_volume, radio_muted) | modes: browser | covered: NOT COVERED | src: frontend/src/hooks/useAudioEngine.ts:6-8, 73-85, 831-855
+- [ ] V1-128 Crossfade check runs on a 100 ms timer, not animation frames, so a background tab / locked screen still crossfades on time | modes: browser | covered: NOT COVERED | src: frontend/src/hooks/useAudioEngine.ts:63-64, 889-922
+- [ ] V1-129 Hard timed item loaded on the idle deck 60 s ahead (instead of the next song); preempt fade only scheduled within 5 min of the due time | modes: browser | covered: partial (F-PLAYER-8 timing only) | src: frontend/src/hooks/useAudioEngine.ts:47-48, 700-800
+- [ ] V1-130 Mix-over in the browser is skipped when this tab is not listening (audio context not running) and plays once even when several components hold sockets for the station; a file that cannot be fetched (CORS) leaves the item on air untouched | modes: browser | covered: NOT COVERED | src: frontend/src/hooks/useAudioEngine.ts:924-952
+- [ ] V1-131 Stream mode: the server closing the stream (engine or Icecast restart) switches MSE to a plain <audio> element that reconnects; plain mode (Safari/iOS) has no keep-near-live, so delay can grow after stalls | modes: engine | covered: NOT COVERED | src: frontend/src/lib/liveStream.ts:30-105
+- [ ] V1-132 Long stream session (hours): played audio older than 20 s is removed from the buffer, memory stays flat | modes: engine | covered: NOT COVERED | src: frontend/src/lib/liveStream.ts:16, 76-80
+- [ ] V1-133 Listen page elapsed time ticks every second from started_at and stops at ends_at (an overdue item shows its full length, not beyond) | modes: both | covered: NOT COVERED | src: frontend/src/pages/public/Listen.tsx:158-172
+- [ ] V1-134 Song rating and favorite reset when the track changes | modes: n.a. | covered: NOT COVERED | src: frontend/src/pages/public/Listen.tsx:73-77
+
+### I. Release pickup timings (lib/appUpdate.ts)
+
+- [ ] V1-135 Reload-loop guard: a tab never reloads for a release more than once in 2 min (stale CDN copy) | modes: n.a. | covered: NOT COVERED | src: frontend/src/lib/appUpdate.ts:77-79
+- [ ] V1-136 A playing tab included in a push waits at most 5 min for an item change, then reloads anyway; the resume-after-reload state is honoured only within 90 s | modes: both | covered: NOT COVERED | src: frontend/src/lib/appUpdate.ts:73-81, 120-147
+- [ ] V1-137 Tab hidden for 10+ min and silent takes the release on return even if a player is switched on; idle tab waits 30 s of no activity; a tab whose audio just stopped waits 2 min | modes: both | covered: NOT COVERED | src: frontend/src/lib/appUpdate.ts:34-39, 430-445
+- [ ] V1-138 Scheduled push uses the server clock (offset measured), so a browser with a wrong clock still reloads at the pushed time; an unnamed push expires after 1 h | modes: n.a. | covered: NOT COVERED | src: frontend/src/lib/appUpdate.ts:66, 71-72
+- [ ] V1-139 Version check offline or mid-deploy is retried next minute without reloading or showing an error | modes: n.a. | covered: NOT COVERED | src: frontend/src/lib/appUpdate.ts:236-245
+
+### J. Admin screens and cross-cutting
+
+- [ ] V1-140 Review flow keyboard: A approve, R reject, F flag, S skip, Space play/pause; ignored while typing in an input or textarea (not ignored in a select) | modes: n.a. | covered: NOT COVERED | src: frontend/src/pages/admin/ReviewFlow.tsx:106-131
+- [ ] V1-141 Activity page remembers Staff/Listeners tab and view choice across reloads (activity-tab, activity-view) | modes: n.a. | covered: NOT COVERED | src: frontend/src/pages/admin/Activity.tsx
+- [ ] V1-142 PFL headphones output choice stored (kbr_pfl_output) and restored; a device no longer present falls back to the default output | modes: n.a. | covered: NOT COVERED | src: frontend/src/pages/admin/controlroom/pfl.ts
+- [ ] V1-143 Two operators on the same station insert at the same marker or press Next within the same second: both actions apply in a defined order, neither is lost, both screens converge within 1 s | modes: both | covered: NOT COVERED | src: backend/app/api/v1/queue.py:2017-2078, 1764-1800
+- [ ] V1-144 Same user signed in on two devices: logout on one does not break the other; refresh token rotation (if any) does not log the other out | modes: n.a. | covered: NOT COVERED | src: frontend/src/stores/authStore.ts; backend/app/services/auth_service.py
+- [ ] V1-145 Rate limits on public writes: song requests 10/min, copy review 12/min, bug reports and web call-in burst limits; listener heartbeat and CRM login have none | modes: n.a. | covered: NOT COVERED (song requests, copy review) | src: backend/app/api/v1/song_requests.py:37; backend/app/api/v1/copy_review.py:70
+- [ ] V1-146 /playout-status queries each engine one after another with a 3 s timeout (cached 8 s): with several engines down the public call (station list, Listen badge, control room) takes 3 s x engines - must stay within S-4 | modes: engine | covered: NOT COVERED | src: backend/app/api/v1/playout_status.py:25-63
+- [ ] V1-147 Playout badge in_sync is true when the engine's entry id OR its title matches the queue's playing item (a redrawn entry still counts as in step); engine status older than 8 s may be shown | modes: engine | covered: NOT COVERED | src: backend/app/api/v1/playout_status.py:36-52
+- [ ] V1-148 Live show sockets: only admin, manager or the show's own host may open events/audio (a DJ who is not the host gets 4001); no station-permission check, so a manager not assigned to the protected station can broadcast on it | modes: both | covered: NOT COVERED | src: backend/app/api/v1/live_shows_ws.py:245-322
+- [ ] V1-149 A second host audio socket for the same show (second tab/device) replaces the first; the first host's mic is no longer heard and it is told so | modes: both | covered: NOT COVERED | src: backend/app/api/v1/live_shows_ws.py:397-440
+- [ ] V1-150 Caller audio latency bounded: 0.12 s buffered before a caller is mixed in, more than 0.6 s queued drops the oldest audio (no growing delay on a bad connection) | modes: both | covered: NOT COVERED | src: backend/app/api/v1/live_shows_ws.py:100-140
+- [ ] V1-151 CRM raffles: entering a closed / not-yet-active raffle -> 400, entering twice -> 409; draw from a non-open raffle or one with no entries -> 400; register without name -> 400 | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/crm.py:186-190, 360-380, 650-668
+- [ ] V1-152 Spot recordings: an approved spot cannot be edited (409); placeholder audio cannot be approved (409); approve without audio (409); approving twice returns the same library item; upload empty (422), over 25 MB (413), unreadable (422) | modes: n.a. | covered: tests/test_spot_recordings.py (no checklist row) | src: backend/app/api/v1/spot_recordings.py:70-76, 175-195, 226-240
+- [ ] V1-153 Playlist regenerate while generation is switched off -> 409 "Playlist generation is switched off" | modes: both | covered: NOT COVERED | src: backend/app/api/v1/playlists.py:236-242
+- [ ] V1-154 Timeline preview with a bad at_time -> 400 "Use ISO 8601"; unknown station -> 404 | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/schedules.py:430-444
+
+### Areas checked
+
+Every endpoint decorator in backend/app/api/v1/*.py (317, extracted by script) was matched against
+the checklist by method and path: all have a row (four trailing-slash variants match the
+slash-less rows). The rows above are therefore branches, background behaviour, engine/infra and
+cross-cutting gaps, not missing endpoints.
+
+- api/v1 routers: all 48 files scanned for raise/HTTPException/status branches and guards. Nothing further missing beyond the rows above in: activity, ai_emails, alerts, analytics, asset_types, categories, channels, copy_review, icecast, listeners, mixer, rds, reviews, rules, scheduler, site_release, sponsor_portal, sponsors, spot_schedules, streams, users (self-protection rows already exist as B-USERS-6/8).
+- services: scheduler_engine, playout_engine, queue_replenish (main flow), scheduling, long_items, live_show_service (pause/resume), station_service, shabbos_service, weather_spot_service (zones), alert_service/spot_schedule/program_block constants checked against B-JOB rows. Constants for spot planning (7-day horizon, 2 min safety margin, slots 15/30/45) and program blocks (48 h) are already covered.
+- main.py: lifespan steps, /health, /api/v1/init, fallback middleware, migrations: covered except V1-111..113.
+- config.py: every setting matched; only gaps are V1-37, V1-39, V1-106 (S3_*, FFMPEG_PATH, LOG_LEVEL, FRONTEND_URL are low-risk and folded into existing B-SET rows).
+- infra/streaming: radio.liq, setup.sh, nginx-stream.conf, kbr-engine@.service, icecast.xml, kbr-engine.env.example: the checklist had almost nothing (only B-MODE-23..26); see section A.
+- frontend: App.tsx routes all have a section; localStorage/sessionStorage keys, keyboard handlers, useAudioEngine, useNowPlayingWS, liveStream, Listen, appUpdate scanned. Control-room panels (TransportBar, QueuePanel, LibraryPanel, HotButtons, PflDeck, SidePanels) are well covered by F-CR rows; nothing further missing there.
+- Not swept line by line (time): enhance_service, audio_convert_service, bpm/musicbrainz, mixer_service, reviews internals, CRM rankings, analytics SQL, activity_log internals, bug_report_service internals. Endpoint-level rows for these already exist.
+
+## V2. Added by verifier round 2
+
+### A. Audio processing: enhance, conversion on upload, BPM, MusicBrainz, mixer, trim, analysis
+
+- [ ] V2-1 Heavy audio work runs ffmpeg synchronously inside async request handlers (enhance, auto-enhance, enhance-preview, detect-audience, detect-silence, trim, restore-original, studio mix, download with format, upload conversion + BPM): while it runs (up to 300 s) the whole backend process is blocked, so other stations' scheduler ticks, queue reads and operator buttons stall. Test: run an enhance on a 60 min shiur and press Next on another station at the same time; Next must answer within S-3 and nothing on air may slip | modes: both | covered: NOT COVERED | src: backend/app/services/enhance_service.py:133,170,185; backend/app/services/mixer_service.py:98; backend/app/services/silence_service.py:22,51,92; backend/app/api/v1/assets.py:730,771,829,858,1016,1050; backend/app/services/asset_service.py:42,64
+- [ ] V2-2 Enhance filter values are range-checked before reaching ffmpeg (e.g. highpass 10-1000 Hz, lowpass 1000-22000, gains -20..20, compressor ratio 1-20, loudnorm I -70..-5); an out-of-range or unknown filter name must be refused with a clear 400 (today ValueError is not handled and becomes 500); a value like "80;rm" is never passed to ffmpeg | modes: n.a. | covered: NOT COVERED | src: backend/app/services/enhance_service.py:53-115
+- [ ] V2-3 Each enhance preset (broadcast_polish, noise_reduction, clarity_boost, warm_up, de_hiss, bbe_sonic_maximizer, voice_boost) produces playable MP3 192k with the new length, item repointed to a new file, enhance_history entry {from,to,preset}; a custom filter list stores its filters | modes: n.a. | covered: NOT COVERED | src: backend/app/services/enhance_service.py:14-50; backend/app/api/v1/assets.py:704-754
+- [ ] V2-4 AI auto-enhance rules: noise floor above -50 dB adds denoise (clamped -40..-10); high-pass 80 Hz (120 Hz when noisy); bass +2 when mean below -25 dB; treble +1/+2/+3 by noise/level; compressor when loudness range >12 or dynamic range >25; always loudnorm -16 LUFS; reasons list returned and shown | modes: n.a. | covered: NOT COVERED | src: backend/app/services/enhance_service.py:310-382; backend/app/api/v1/assets.py:757-801
+- [ ] V2-5 Enhance preview: default 15 s from start_seconds at 128k, returns audio/mpeg; nothing on the asset changes | modes: n.a. | covered: NOT COVERED | src: backend/app/services/enhance_service.py:151-175
+- [ ] V2-6 Repeated edits keep the FIRST original: trim then enhance then trim keeps original_file_path from the first edit; restore-original after an enhance only (no trim) returns to the pre-enhance file and re-measures length; restore clears trim_history and silence_regions but leaves enhance_history (stale history after restore) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:738-739,779-780,1060-1062,1072-1111
+- [ ] V2-7 Audience detection: two silencedetect passes (quiet -25 dB, silent -45 dB, min 1 s); a quiet region that is more than 80% truly silent is dropped; returns segments rounded to 0.01 s and a count | modes: n.a. | covered: NOT COVERED | src: backend/app/services/enhance_service.py:201-244
+- [ ] V2-8 Upload conversion normalises loudness: every converted upload gets loudnorm I=-16 TP=-1.5 LRA=11 at 256k stereo 44.1 kHz; an MP3 upload that really is MP3 is stored untouched (NOT normalised), so two uploads of the same song as WAV and MP3 differ in level | modes: both | covered: NOT COVERED | src: backend/app/services/audio_convert_service.py:88-101, 236-245
+- [ ] V2-9 Upload of a video or other container (.mp4, .mkv, .mov, .avi, .webm, .mpg, .wma, .opus, .aiff, .ape, .wv) keeps only the audio; when ffmpeg fails the ORIGINAL bytes are stored as-is with their own extension and the upload still reports success (an unplayable .mkv can reach the library); format "original" stores the file untouched | modes: both | covered: NOT COVERED | src: backend/app/services/audio_convert_service.py:22-26, 222-272
+- [ ] V2-10 Upload of a music item with no category: BPM detected from the first 60 s and the category set to relax (<90), med_fast (90-120) or lively (>=120), bpm saved in metadata; under 2 s of audio or no clear beat leaves the category empty; detection failure never fails the upload | modes: both | covered: NOT COVERED | src: backend/app/services/asset_service.py:61-72; backend/app/services/bpm_service.py:18-30, 33-104
+- [ ] V2-11 Upload of a music item with an artist looks up the first release date on MusicBrainz (score >= 80; "YYYY" or "YYYY-MM" filled to the 1st); MusicBrainz down or slow (10 s timeout) never fails the upload; lookups are spaced 1 s apart across the whole process | modes: n.a. | covered: NOT COVERED | src: backend/app/services/asset_service.py:89-99; backend/app/services/musicbrainz_service.py:20-88
+- [ ] V2-12 Release-date backfill walks every music item with an artist and no date, one MusicBrainz call a second inside the request (1,000 items = 17 min; request/proxy timeout must not lose the work already done) and returns {updated,total} | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:198-229
+- [ ] V2-13 Without Redis, transcode and clip endpoints call .delay() which returns None and then read result.id: the request fails with 500 instead of a clear "not available"; upload's metadata/album-art extraction is silently skipped (no album art ever saved) | modes: n.a. | covered: NOT COVERED | src: backend/app/workers/celery_app.py:4-15; backend/app/api/v1/assets.py:271,964-985
+- [ ] V2-14 Bulk analyse and bulk auto-trim job status lives in one process's memory: after a deploy/restart, or when the poll hits another worker, status returns 404 "Job not found" although the job ran or is running; the screen must say so instead of spinning | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:35, 404, 529-539
+- [ ] V2-15 Bulk auto-trim cuts only leading silence (region starting within 0.05 s of 0) and trailing silence (ending within 0.05 s of the end); items with nothing to cut are counted as skipped; per-item errors counted and the job continues; each trimmed item keeps its original for restore | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:280-361
+- [ ] V2-16 Trim uses stream copy into an MP3 container: trimming an item whose file is WAV/FLAC/M4A (kept as "original" format) fails with 500, and the length stored is trim_end - trim_start, not the measured length | modes: n.a. | covered: NOT COVERED | src: backend/app/services/silence_service.py:72-97
+- [ ] V2-17 audio-url for a non-browser format (e.g. .mp2): converted once to MP3, uploaded next to the original, the asset repointed and its length updated; conversion failure falls back to the original URL; without Supabase the URL is the /download proxy | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:600-646
+- [ ] V2-18 Download: "original" streams the stored bytes with a sanitised file name (only letters, digits, space, - and _; empty -> "download"); mp2/mp3/mp4/wav/flac/ogg/aac re-encoded (loudness normalised) with the right MIME type; never redirects to storage (CORS) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:905-961
+- [ ] V2-19 Studio mix: bed volume 0.2 and voice 1.0 by default, bed trimmed (when trim end > 0) and padded to target length, fades applied only when a fade-out start is given, result as long as the longer input, loudness normalised -16 LUFS, saved as a new item (type spot by default, category "studio", metadata source=mixer with both source ids); unknown asset id -> 404; ffmpeg failure -> clear error not a bare 500 | modes: n.a. | covered: NOT COVERED | src: backend/app/services/mixer_service.py:18-118; backend/app/api/v1/mixer.py:40-103
+- [ ] V2-20 Asset edit side effects: changing the type away from "spot" clears its sponsor; an empty release date clears it; vote null is ignored | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:869-886
+- [ ] V2-21 FFmpeg self-check (/assets/ffmpeg-check): tone -> MP2, MPEG-PS -> MP2, upload, download, compare, delete; PASS only when tones differ and both round trips match; no ffmpeg -> ffmpeg_error and early return; temporary files removed from storage | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:65-170
+- [ ] V2-22 Bulk create (files already in storage): defaults type music, review status approved; empty list -> created 0; missing title or file_path -> error (KeyError becomes 500) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/assets.py:1114-1148
+- [ ] V2-23 Audio analysis numbers: loudness measured at -18 LUFS target, replay gain = -18 - measured LUFS clamped to +/-12 dB; cue in = end of leading silence (-30 dB, 0.5 s) starting within 0.05 s; cue out = start of trailing silence ending within 0.5 s of the end; crossfade start = max(cue_in + 5, cue_out - 3); length that cannot be measured -> error, never a guessed 180 s; stored length corrected when off by more than 1 s | modes: both | covered: NOT COVERED (end-to-end effect only via F-PLAYER-1) | src: backend/app/services/audio_analysis_service.py:13-140
+- [ ] V2-126 Upload format choice: picking MP2, FLAC, OGG, WAV or "Keep Original" stores the item in that format although MP2 is known not to play in Safari or the stream server's MP3 decoder (the code comment says MP2 "becomes MP3 like everything else", but the form's choice wins); each stored format must play in the browser player (Chrome and Safari) and on the engine, or the choice must be limited | modes: both | covered: NOT COVERED | src: frontend/src/pages/admin/AssetUpload.tsx:9-18; backend/app/api/v1/assets.py:244-249
+
+### B. Review queues (api/v1/reviews.py, pages/admin/ReviewFlow.tsx)
+
+- [ ] V2-24 Approve/Reject/Flag/Skip in review changes only the review item: the library item's review_status is never set, and a REJECTED song stays in rotation and keeps airing. Decide and test the intended effect | modes: both | covered: NOT COVERED | src: backend/app/api/v1/reviews.py:113-175; backend/app/models/asset.py:46
+- [ ] V2-25 Two reviewers on the same item: the second save with a stale version -> 409 "Item was modified by another user"; the screen must tell the reviewer (today the mutation has no error handler, the press silently does nothing and does not advance) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/reviews.py:125-128; frontend/src/hooks/useReviews.ts:55-66; frontend/src/pages/admin/ReviewFlow.tsx:86-103
+- [ ] V2-26 Queue progress: each approve/reject/flag/skip recounts reviewed items; queue goes open -> in_progress -> completed when all are reviewed; batch update recounts too; items of another queue in a batch are ignored; batch update writes NO audit entry (per-item does, with user, comment and version) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/reviews.py:133-217
+- [ ] V2-27 /next claims the first pending item (in_review, assigned to the caller); an item claimed and then abandoned is never offered by /next again; empty queue returns null | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/reviews.py:92-110
+- [ ] V2-28 Asset history (newest first, with reviewer email), comments (empty comment accepted), queue activity (last 50 actions) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/reviews.py:222-310
+- [ ] V2-29 Creating a review queue with a malformed asset id -> 500 (uuid parse) instead of 400; total_items fixed at creation | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/reviews.py:24-49
+
+### C. CRM: ratings, rankings, taste profile, raffles
+
+- [ ] V2-30 Taste profile labels: <5 ratings "The Newcomer"; >50% of favourites lively "The Simcha Machine"; >50% relax "The Heartfelt Chazzan"; >40% shiurim "The Yeshiva Yungelight"; 3+ categories none over 50% "A True Harry"; >30 ratings in 2+ categories "The Mixtape Maven"; else "The Music Lover"; shown at listener login and in the admin member list | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/crm.py:74-181
+- [ ] V2-31 Rating: 1-5 only (0 or 6 -> 422); rating the same song again updates the one rating (no duplicate); unknown song -> 404; removing a rating that does not exist -> 404; my-ratings newest first with title and artist | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/crm.py:227-316; backend/app/schemas/crm.py:44-47
+- [ ] V2-32 Song rankings: ordered by average rating then number of ratings (one 5-star rating outranks a hundred 4.9 averages: check this is acceptable), average rounded to 2 places, favourite count; ratings from deactivated members still count | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/crm.py:493-532
+- [ ] V2-33 Admin member list shows each member's PIN in clear to managers; list search by name only (not phone/email); only active members listed; speed: 3 queries + a taste profile per member, page of 200 must still load within S-4 | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/crm.py:390-440
+- [ ] V2-34 Deactivated member: PIN refused at login and on rate/enter (401); their raffle entries stay and can still win a draw | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/crm.py:58-69, 479-490, 645-694
+- [ ] V2-35 Raffles: station_id is stored but ignored, so every active raffle shows on every station's Listen page; active = status open and starts_at <= now <= ends_at (UTC); a raffle past its end stays "open" in the admin list and can still be drawn; end before start is accepted; draw picks uniformly, sets status drawn and shows the winner's name; no re-draw | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/crm.py:319-387, 577-694; frontend/src/pages/public/Listen.tsx:665-690
+- [ ] V2-36 Raffle start/end typed in the admin's browser time zone (datetime-local -> ISO UTC); an admin in another zone than the station creates a raffle that opens at the wrong local hour; list shows times in the viewer's zone | modes: n.a. | covered: NOT COVERED | src: frontend/src/pages/admin/CrmDashboard.tsx:198-217
+
+### D. Analytics queries (api/v1/analytics.py)
+
+- [ ] V2-37 Analytics days and hours are UTC, not the station's local time: "plays by hour" shows 8 PM New York as hour 0/1, daily buckets cut at UTC midnight (7-8 PM local); a station in Israel or New York must see its own local hours/days (and across a DST change) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/analytics.py:30-37, 139-151
+- [ ] V2-38 Analytics totals: airtime = sum of each item's FULL length per play (a song skipped after 5 s counts its whole length); unique items; average plays per day = plays / days asked (not days with data); plays by source; days limited to 1-90 (91 -> 422); limit 1-100 on top items | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/analytics.py:162-211
+- [ ] V2-39 Analytics ignores station permissions: a manager limited to station A can read station B's figures and "all stations" totals (station_id optional) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/analytics.py:18-23
+- [ ] V2-40 Category breakdown groups empty category as "uncategorized", split by type; top items joined to the library so plays of deleted items vanish from top lists but still count in totals | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/analytics.py:96-128, 172-186
+
+### E. Activity log internals (services/activity_log.py, api/v1/activity.py)
+
+- [ ] V2-41 Not logged by design: listener heartbeats, token refresh, preferences, playout engine calls, Stripe webhook, Twilio callbacks, CRM member calls, web call-in, copy-review checks, blackout preview, weather preview, enhance preview, AI email draft; requests with no valid access token; responses with 401. Every other write by a signed-in user IS logged, including refused ones (403/404/422/500 rows with status code; "failed only" filter = status >= 400) | modes: n.a. | covered: NOT COVERED (partly tests/test_activity_log.py) | src: backend/app/services/activity_log.py:38-57, 744-778
+- [ ] V2-42 Next / Play now rows read "Song A -> Song B" (what went off and on air); a press that changed nothing shows the route's note ("kept the timed item on air: <title>"); queue adds list the added titles | modes: both | covered: NOT COVERED | src: backend/app/services/activity_log.py:200-209, 595-617, 811-826
+- [ ] V2-43 Field-level before/after for every changed column (max 15 objects per row, values cut at 300 chars, bookkeeping columns skipped); password/secret/token/api_key fields shown as "•••"/"(changed)", request bodies redacted the same way (up to 25 keys, 20 list items, depth 3); bodies over 64 KB or multipart uploads not stored | modes: n.a. | covered: partial (tests/test_activity_log.py) | src: backend/app/services/activity_log.py:172-178, 241-308, 474-490, 749-757
+- [ ] V2-44 Unnamed routes get a derived label: "Trim (library item)", "Changed schedule block", "Added playlist slot"; category from the first path segment, queue/controls under a station -> Control room | modes: n.a. | covered: NOT COVERED | src: backend/app/services/activity_log.py:363-394
+- [ ] V2-45 Log rows are written by an in-memory batch writer (up to 100 a batch, queue capped at 5,000): rows queued when the process restarts are lost; when the queue is full rows are dropped with a warning; a slow geo lookup delays the whole batch; a failed insert never fails the user's request | modes: n.a. | covered: NOT COVERED | src: backend/app/services/activity_log.py:497-540, 574-590
+- [ ] V2-46 Each signed-in write's IP is sent to the external geo lookup service (cached, 5,000 entries, then the cache is cleared); location shown as "City, Region, Country" without repeats or "Unknown" | modes: n.a. | covered: NOT COVERED | src: backend/app/services/activity_log.py:552-571
+- [ ] V2-47 Device column from user agent: iPhone/iPad/Android/Windows/Mac/Linux and Edge/Chrome/Firefox/Safari/Script; IP from X-Forwarded-For first hop, else X-Real-IP | modes: n.a. | covered: NOT COVERED | src: backend/app/services/activity_log.py:407-452
+- [ ] V2-48 Activity search covers label, detail, email, name, path, IP and location; categories comma list ("other" includes rows with none); start inclusive, end exclusive; times without zone read as UTC; live view polls every few seconds with a 30 s look-back and stops when the page is past page 1 or the range ends in the past; a sponsor's page views outside /sponsor are not recorded | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/activity.py:23-31, 76-120, 250-275; frontend/src/pages/admin/Activity.tsx:230-275
+
+### F. Bug reports (bug_report_service.py, api/v1/bug_reports.py, core/log_buffer.py)
+
+- [ ] V2-49 Two reports sent at the same moment get the same number (max+1, no unique key): both saved, the second GitHub copy collides on reports/<number>/ (409 retried twice then mirror_error) and pushes say the same "Bug N" | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/bug_reports.py:144; backend/app/models/bug_report.py:19; backend/app/services/bug_report_service.py:117-129
+- [ ] V2-50 Screenshot larger than 4 MB, or not JPEG/PNG/WebP, or bad base64 is silently dropped and the report is still saved (has_screenshot false); the reporter is not told | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/bug_reports.py:79-92
+- [ ] V2-51 Browser context over 1.5 M characters is cut (console/network/breadcrumbs/queries halved up to 6 times, then replaced by {"trimmed": true}); report still saved | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/bug_reports.py:95-107
+- [ ] V2-52 Every report carries the server's last 15 minutes of log lines (max 1,500) and requests (max 800) with request ids, so a failed click can be matched by X-Request-ID; these are from ALL users and are copied to the GitHub repo, including for anonymous reports: check that no password, token, phone number or email appears in them | modes: n.a. | covered: NOT COVERED | src: backend/app/core/log_buffer.py:21-96; backend/app/api/v1/bug_reports.py:146-158; backend/app/core/middleware.py:30-53
+- [ ] V2-53 GitHub copy: context.json, server-log.json and screenshot under reports/<00000>/, then an issue labelled bug-report whose body lists reporter, page, station, browser, player state, last 10 console errors, last 10 failed requests and the screenshot; GitHub failure saved as mirror_error (shown in the admin list), report stays "new" | modes: n.a. | covered: partial (tests/test_bug_reports.py) | src: backend/app/services/bug_report_service.py:60-188
+- [ ] V2-54 "Bug N received" push is sent at once after a report (title, first 160 chars, who, link to issue or admin page); with no GitHub it says "It is saved in Bug Reports" | modes: n.a. | covered: NOT COVERED | src: backend/app/services/bug_report_service.py:191-215
+- [ ] V2-55 GitHub follow-up: issue closed as completed -> report "fixed", closed otherwise -> "closed"; only reports from the last 45 days are checked; a "fix ready" push includes the latest PR link from comments; a failed push leaves the status so the next pass retries; one push per label, never repeated | modes: n.a. | covered: partial (tests/test_bug_reports.py) | src: backend/app/services/bug_report_service.py:261-316
+- [ ] V2-56 Bug report rate limit: 8 reports per 10 minutes per signed-in user, or per first X-Forwarded-For address for anonymous (a client can change that header to get round it); 429 with a friendly message | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/bug_reports.py:36-37, 68-76, 135-141
+
+### G. Sponsor portal, campaigns, billing, Stripe webhooks, emails, AI emails
+
+- [ ] V2-57 Campaign draft audio upload never stores the file: the route imports `supabase_storage` from supabase_storage_service, which does not exist; the ImportError is swallowed and audio_file_path is set to a path that was never uploaded (the sponsor sees success, the manager finds no file). Test: upload, then fetch the stored path | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/campaigns.py:294-306; backend/app/services/supabase_storage_service.py:10
+- [ ] V2-58 No admin screen exists for sponsor campaigns (review drafts, set status draft/in_review/approved/active/paused/completed), invoices (create) or AI sponsor emails: these work only through the API. Decide whether staff need screens; until then test via API | modes: n.a. | covered: NOT COVERED | src: frontend/src/api/campaigns.ts:69, 86; frontend/src/api/billing.ts; backend/app/api/v1/ai_emails.py
+- [ ] V2-59 Campaign status change: unknown status value -> 500 (enum ValueError) instead of 422; known status emails the sponsor "Campaign Update: <name>" with the new status; sponsor can still edit name/dates/budget of an approved or active campaign (no lock) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/campaigns.py:130-180
+- [ ] V2-60 Draft versions: each new draft gets max+1 (two drafts sent together can share a number); listed newest version first with the author's email | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/campaigns.py:222-262
+- [ ] V2-61 Comment by a manager/admin emails the sponsor (first part of the comment, commenter name); a sponsor's own comment emails nobody (staff are never told a sponsor wrote) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/campaigns.py:350-392
+- [ ] V2-62 Emails insert campaign names, commenter names and comment text into HTML without escaping: a comment containing "<a href=...>" or "<img>" is rendered in the sponsor's mail; AI "send" turns the body's new lines into <br> and sends raw HTML to any address the manager types (no check that it is a sponsor) | modes: n.a. | covered: NOT COVERED | src: backend/app/services/email_service.py:35-108; backend/app/api/v1/ai_emails.py:52-67
+- [ ] V2-63 Email sending: Resend off -> logged "Email skipped" and success false (AI send returns 200 with success false and a message); Resend error -> logged, request still succeeds; links in emails use FRONTEND_URL; sender RESEND_FROM_EMAIL | modes: n.a. | covered: NOT COVERED | src: backend/app/services/email_service.py:12-31; backend/app/api/v1/ai_emails.py:61-67
+- [ ] V2-64 Resend email send and the Claude call for AI email drafts are synchronous calls inside async routes: while they wait (seconds) the whole backend stalls (scheduler ticks, other stations' buttons). AI draft must answer within a few seconds and never stall on-air timing | modes: both | covered: NOT COVERED | src: backend/app/services/email_service.py:21-27; backend/app/services/ai_email_service.py:28-65
+- [ ] V2-65 AI email draft: without ANTHROPIC_API_KEY (or on any Claude error) a fixed template per purpose (welcome, renewal, follow_up, general; "custom" falls back to general) naming the sponsor; with the key, 2-3 paragraphs using sponsor, campaign, instructions and stats, no greeting or signature | modes: n.a. | covered: NOT COVERED | src: backend/app/services/ai_email_service.py:12-85
+- [ ] V2-66 Invoice creation: created straight away as "sent" (no draft), any amount accepted (0 or negative cents not refused), currency default USD, emails the sponsor "New Invoice: $X, due <date or upon receipt>"; nothing ever marks an invoice overdue, so "overdue" never appears and the summary's owed = sent only | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/billing.py:62-91, 184-224; backend/app/schemas/billing.py:8-14
+- [ ] V2-67 Stripe checkout return links use the FIRST entry of CORS_ORIGINS (+ /sponsor/billing?payment=success|cancelled): if that entry is localhost or the vercel alias the sponsor comes back to the wrong site; card only; product name = description or "Invoice <id8>" | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/billing.py:116-135
+- [ ] V2-68 Stripe webhook: only checkout.session.completed is acted on (marks paid, paid_at, payment intent, emails "Payment Confirmed"); the same event delivered twice re-marks it and emails twice; refunds, async payments and expired sessions are ignored; an invoice id in metadata that does not exist is ignored with 200; Stripe off -> 400 | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/billing.py:138-181
+- [ ] V2-69 Sponsor portal counts: "this month" starts at UTC midnight on the 1st (not the station's local month), every airing counts however it got on air (manual, queue fill, mix-over); a spot is the sponsor's when it carries their sponsor id, is used by one of their spot schedules, or is at their sponsor audio path; upcoming list shows only queue entries with a set time (up to 90) in the station's local time, a spot queued without a set time is not shown | modes: both | covered: partial (tests/test_spot_schedules.py) | src: backend/app/api/v1/sponsor_portal.py:39-57, 60-127, 172-208
+
+### H. Twilio phone call-ins, web call-ins, SMS/WhatsApp alerts, alert service
+
+- [ ] V2-70 Phone caller put on air is moved to Twilio conference "live-show-<id>", but nothing joins that conference to the stream or the host's browser (live_audio_mixer is a stub): listeners never hear a phone caller and the host cannot talk to them. Test the expectation with a real phone call, or mark phone call-ins as not working | modes: both | covered: NOT COVERED | src: backend/app/services/live_show_service.py:419-429; backend/app/services/live_audio_mixer.py:1-16; backend/app/services/twilio_voice_service.py:46-74
+- [ ] V2-71 Inbound phone call picks ANY live show with calls on (first found), not the one for the dialled number or station: with two stations live, phone callers land on an arbitrary show's screener | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/live_shows.py:353-360
+- [ ] V2-72 Phone caller hangs up while on hold: the hold TwiML sets a conference statusCallback (join/leave events, no CallStatus), so /twilio/status may never see "completed" and the caller stays "waiting" on the screener; a caller who hangs up while ON AIR is marked "abandoned" rather than "completed" and air_end is not set | modes: n.a. | covered: NOT COVERED | src: backend/app/services/twilio_voice_service.py:17-34; backend/app/api/v1/live_shows.py:393-418
+- [ ] V2-73 Phone call-in prompts and hold: "Thank you for calling in. Please hold..." then hold music (LIVE_SHOW_HOLD_MUSIC_URL, else Twilio's classical sample over plain http); no live show -> "Sorry, there is no live show accepting calls..." and hang up; ending the show hangs up every waiting/screening/approved/on-air phone call and marks them completed | modes: n.a. | covered: NOT COVERED | src: backend/app/services/twilio_voice_service.py:17-43, 95-120
+- [ ] V2-74 Web caller drops (reload, tunnel): 15 s to reconnect on the same call; after that a waiting/screening/approved call becomes "abandoned", an on-air call "completed" with air_end, and the screener gets caller_removed (hung_up); the call token is an HMAC of the call id with the server secret | modes: n.a. | covered: partial (e2e/web-call-in.cjs hang-up only) | src: backend/app/services/call_in.py:20-69
+- [ ] V2-75 Web call-in refused: no live show on the station -> 409 "There is no live show on this station right now."; show not taking calls -> 409; 5 calls per address per 10 minutes then 429; name 1-100 chars, note up to 300 | modes: n.a. | covered: partial (tests/test_web_call_in.py) | src: backend/app/api/v1/call_in.py:21-62
+- [ ] V2-76 Alert SMS/WhatsApp go to EVERY active user with a phone number whose preference allows the severity (default minimum "warning"), whatever their stations or role (a DJ limited to one station, or a sponsor login with a phone, gets every station's alerts) | modes: n.a. | covered: NOT COVERED | src: backend/app/services/alert_service.py:250-278
+- [ ] V2-77 A repeat of an open alert that escalates it (warning -> critical) only raises the stored severity: no SMS/WhatsApp and no live push is sent for the escalation, so a dead-air spell that becomes critical can stay silent | modes: both | covered: NOT COVERED | src: backend/app/services/alert_service.py:46-58
+- [ ] V2-78 SMS/WhatsApp and Twilio call control use the synchronous Twilio client inside async code: each message blocks the backend (scheduler tick included) for the length of the Twilio call; an alert that texts ten people delays every station's next tick. Measure with Twilio slow or down | modes: both | covered: NOT COVERED | src: backend/app/services/sms_service.py:12-53; backend/app/services/twilio_voice_service.py:54-91; backend/app/services/alert_service.py:73-77
+- [ ] V2-79 Alert list filter with an unknown severity or type (e.g. ?severity=urgent) -> 500 (enum ValueError) instead of 422; filter values are case-insensitive | modes: n.a. | covered: NOT COVERED | src: backend/app/services/alert_service.py:162-170
+- [ ] V2-80 Schedule-conflict alert when a block's times overlap another block in the same schedule (start-only "until next" blocks never conflict); title "Schedule conflict: A vs B" | modes: n.a. | covered: NOT COVERED | src: backend/app/services/alert_service.py:197-247
+
+### I. Archives, podcast RSS, RDS feed
+
+- [ ] V2-81 Admin Archives page lists through the PUBLIC list endpoint, which only returns published archives: unpublishing an archive ("Draft") makes it vanish from the admin list, so it can never be published again from the screen | modes: n.a. | covered: NOT COVERED (B-ARCHIVES-3 states the intended behaviour; the code does not do it) | src: backend/app/api/v1/archives.py:33-52; frontend/src/pages/admin/Archives.tsx:125-221
+- [ ] V2-82 GET /archives/{id} returns an UNPUBLISHED archive (title, audio URL) to anyone without signing in | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/archives.py:55-61
+- [ ] V2-83 Podcast RSS validity: feed validates in a podcast validator and Apple/Spotify accept it (enclosure has no length attribute, no channel <link>, no atom:self, language fixed "en", category fixed "Music"); pubDate from recorded_at else created_at in RFC 822; itunes:duration hh:mm:ss; at most 100 newest published items; titles/descriptions XML-escaped; a URL containing a double quote breaks the enclosure attribute; a non-UUID station id -> error not 404 | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/archives.py:113-153
+- [ ] V2-84 RDS line during a live show, a blackout/silence item or when nothing is "playing" shows the station name; in engine mode the line follows the entry the engine reported as started (not the one handed over and still preloaded); lines cut to the asked max (8-128, default 64) after making them RDS-safe; Cache-Control no-store | modes: both | covered: partial (tests/test_rds.py: line rules only) | src: backend/app/api/v1/rds.py:52-70
+
+### J. Telegram bot (bot/main.py)
+
+- [ ] V2-85 The bot answers ANY Telegram user who finds it: there is no allow-list of chat or user ids, and every message runs Claude Code with --dangerously-skip-permissions in the repo on the owner's PC (files, shell, git, deploy). Test: message the bot from an unknown account; it must refuse | modes: n.a. | covered: NOT COVERED | src: bot/main.py:83-110, 196-222, 315-331
+- [ ] V2-86 Bot text message: "typing" shown, one status message only when Claude starts using tools (first 300 chars of its text, or "Working on it..."), final answer split into chunks under 4,000 characters on line breaks; a single line longer than 4,000 is cut (text lost); Claude error -> stderr (first 2,000 chars) or "(no response from Claude)" | modes: n.a. | covered: NOT COVERED | src: bot/main.py:83-193
+- [ ] V2-87 Bot conversation continuity: each chat resumes its own Claude session; /reset starts a fresh one; sessions are kept only in memory (bot restart forgets them); two messages sent quickly in one chat run two Claude processes on the same session at once | modes: n.a. | covered: NOT COVERED | src: bot/main.py:73-77, 97-99, 129-131, 300-305
+- [ ] V2-88 Bot voice note: transcribed by Whisper (English) and shown 'Heard: "..." Send to Claude?' with Send / Cancel; Cancel -> 'Cancelled: "..."'; pressing a button after a bot restart -> "(expired)"; without OPENAI_API_KEY -> "Voice transcription not configured..." | modes: n.a. | covered: NOT COVERED | src: bot/main.py:52-67, 225-296
+- [ ] V2-89 Bot paths are hard-coded to the owner's Windows PC (REPO_DIR, CLAUDE_CLI); started anywhere else it fails at the first message, not at start; TELEGRAM_BOT_TOKEN missing -> fails at start | modes: n.a. | covered: NOT COVERED | src: bot/main.py:35-40
+
+### K. CI, load tests, Terraform
+
+- [ ] V2-90 CI runs on push to main and on PRs to main, skipping changes only to wiki/, docs/ or *.md; a newer push cancels an older PR run (not a main run); jobs: backend ruff, backend pytest on Postgres 16 + Redis 7, frontend tsc + eslint; each job times out at 20 min; a failing job blocks the merge (branch protection) | modes: n.a. | covered: NOT COVERED | src: .github/workflows/ci.yml:1-104
+- [ ] V2-91 CI gaps to decide on: no frontend build (vite build) and no browser tests (e2e/*.mjs, site-release check) run in CI; backend tests run with REDIS_URL set, so the no-Redis path production uses (Celery stub) is never exercised; requirements.txt (what Railway installs) is not checked against pyproject.toml | modes: n.a. | covered: NOT COVERED | src: .github/workflows/ci.yml:42-104
+- [ ] V2-92 Locust load test calls /api/v1/health (health lives at /health, so 404) and /now-playing/test-station (not a UUID, so 422): two thirds of the public load is errors, not real reads. The test must hit real station ids and /health | modes: n.a. | covered: NOT COVERED | src: backend/loadtests/locustfile.py:21-30
+- [ ] V2-93 multi_station.py exits non-zero when listeners miss a song change, see a different song, or REST calls fail; defaults 50 listeners and 5 pollers per station, 90 s, every active station when none given; reads admin credentials only from the environment | modes: browser | covered: NOT COVERED (manual, B-MODE-27) | src: backend/loadtests/multi_station.py:1-35, 117-230
+- [ ] V2-94 Terraform frontend: Vercel project from GitHub, root frontend/, VITE_API_URL and VITE_WS_URL default to the Railway hostname (not api.kbrlive.com); applying it with defaults points the site at the alias; SPA rewrite to index.html comes from frontend/vercel.json | modes: n.a. | covered: NOT COVERED | src: infra/terraform/main.tf:45-91; frontend/vercel.json
+
+### L. Shared frontend: sign-in renewal, error screens, diagnostics, recording studio, accessibility
+
+- [ ] V2-95 Sign-in renewal fails (refresh token expired after 7 days, user deactivated, or refresh rate-limited): both tokens are removed and the page goes to /sponsor/login on sponsor pages, else /admin/login; anything typed on the page is lost. Several requests failing with 401 at once each call /auth/refresh separately (no single shared refresh) | modes: n.a. | covered: NOT COVERED (F-GLOBAL-12 covers the success path only) | src: frontend/src/api/client.ts:44-66; backend/app/config.py:45-46
+- [ ] V2-96 Sessions cannot be ended from the server: logout only clears this browser; a changed password or a role change does not end other devices' sessions (refresh tokens stay valid 7 days); only deactivating the user stops them (checked on every request) | modes: n.a. | covered: NOT COVERED | src: backend/app/services/auth_service.py:30-64; backend/app/core/dependencies.py:60-80
+- [ ] V2-97 Error screen: an ordinary page crash shows "Something went wrong" with the error text and Reload Page; a missing code file after a release shows "The site was updated while this tab was open" and reloads by itself after 0.3 s | modes: n.a. | covered: partial (F-ACCESS-15, F-ACCESS-16) | src: frontend/src/components/ErrorBoundary.tsx:20-70
+- [ ] V2-98 Every API call carries an X-Request-ID; the browser keeps the last 400 console lines, 300 requests (axios and plain fetch), 300 breadcrumbs, uncaught errors and unhandled rejections, audio element and audio context state, and React Query states for the bug report; local storage keys that look like tokens/passwords (or hold a JWT) are never included | modes: n.a. | covered: NOT COVERED | src: frontend/src/lib/diagnostics.ts:1-294; frontend/src/api/client.ts:11-37
+- [ ] V2-99 Bug report screenshot is the visible window only (not the whole page), JPEG 0.75, scaled to at most 1600 px wide; elements marked to be ignored (the reporter itself) are left out; images from other sites may be blank; if capture fails the report is still sent without one | modes: n.a. | covered: NOT COVERED | src: frontend/src/components/BugReporter.tsx:25-45
+- [ ] V2-100 Recording studio keeps the whole take in browser memory as 32-bit samples and saves an uncompressed WAV (about 10 MB a minute, 600 MB for an hour, no upload size limit on /assets/upload); leaving the page or closing the tab while recording or before Save loses the take with no warning; the stored item stays WAV (not converted, not loudness-normalised, and cannot be trimmed: see V2-16) | modes: n.a. | covered: NOT COVERED | src: frontend/src/hooks/useStudioRecorder.ts:150-200; frontend/src/pages/admin/RecordingStudio.tsx:62-71, 179-183; backend/app/api/v1/assets.py:232-247
+- [ ] V2-101 Accessibility basics (no row exists): every icon-only button (✕, 🐞, play/stop, ⋮) has an accessible name; form fields have labels; modals (New Archive, Live show, Silence regions, Category/Sponsor pickers) can be closed with Esc, keep focus inside and return it; toasts and the "not allowed" notice are announced (role=alert/status); the control room's main actions work by keyboard alone; text contrast of status colours on the dark control room meets WCAG AA; page has lang="en" | modes: n.a. | covered: NOT COVERED | src: frontend/src/components/BugReporter.tsx (only dialog with role="dialog"); frontend/src/pages/admin/Archives.tsx; frontend/src/pages/admin/LiveShows.tsx; frontend/src/components/AssetCategoryBadge.tsx
+- [ ] V2-127 Public DJs page shows the part of the email before "@" as the name of a public host with no display name (staff email user names exposed) | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/users.py:19-41
+
+### M. Time zones, daylight saving, clocks, overnight and sun-relative times
+
+- [ ] V2-102 Overnight block (e.g. weekly Friday 22:00-02:00 or one-time block on a date): after midnight the weekday/date check uses the NEW day, so the 00:00-02:00 part does not air unless Saturday (or the next date) is also selected; same for monthly days | modes: both | covered: NOT COVERED | src: backend/app/services/scheduling.py:212-260
+- [ ] V2-103 Sun offset that crosses midnight (e.g. sunset + 90 min in June, or sunrise - 60 min near midnight in the far north) wraps to the wrong side of the day, turning a 2-hour block into a 22-hour one or making it never match; a place/date with no sunset (polar) raises instead of falling back | modes: both | covered: NOT COVERED | src: backend/app/services/sun_service.py:15-74; backend/app/services/scheduling.py:196-210
+- [ ] V2-104 Public program guide: default date is the SERVER's date (UTC) when none is given, while the page sends the viewer's own date; "on now" highlight uses the viewer's clock and zone against station-local block times (a listener in Israel sees the wrong block lit for a New York station); an overnight block is never lit after midnight | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/schedules.py:52-61; frontend/src/pages/public/ProgramGuide.tsx:36-51
+- [ ] V2-105 Program guide shows stored start/end times only: sunset/sunrise blocks show their placeholder times not today's real time, "until next" blocks show an end they do not have, overlapping blocks are both listed (priority ignored), and blackouts/Shabbos are not shown, so the guide disagrees with what airs | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/schedules.py:79-115
+- [ ] V2-106 Weather forecast days are grouped by the station's local date (today left out, next three days), high = max and low = min of the 3-hour values; at 11 PM local the "tomorrow" in the forecast is correct across a DST change | modes: both | covered: NOT COVERED | src: backend/app/services/weather_service.py:96-137
+- [ ] V2-107 Every screen that takes a date and time (live show start/end, raffle, spot date range, one-time block dates, holidays, activity date range, archive recorded date) states which time zone it means (station or viewer) and stores the moment the station expects; test with the browser set to a different zone from the station | modes: both | covered: NOT COVERED | src: frontend/src/pages/admin/CrmDashboard.tsx:198-217; frontend/src/pages/admin/LiveShows.tsx; frontend/src/pages/admin/Holidays.tsx; frontend/src/pages/admin/Activity.tsx
+- [ ] V2-108 Admin Archives edit fills the "recorded" date/time box with the UTC time (toISOString) in a local datetime field: opening and saving an archive without touching it moves its recorded time by the viewer's UTC offset (5 h in New York) each save | modes: n.a. | covered: NOT COVERED | src: frontend/src/pages/admin/Archives.tsx:83, 341
+- [ ] V2-109 Song request daily caps and "today's" counts start at UTC midnight, not the station's local midnight (a New York station's day resets at 7-8 PM) | modes: both | covered: NOT COVERED | src: backend/app/services/song_request_service.py:84-125
+- [ ] V2-121 Device clock wrong: the browser player computes "how far into the song" and when to fade for a timed item from the device's own clock against the server's start times (no offset measured): a phone or studio PC 20 s fast starts every song 20 s in and fires the hourly time check 20 s early; drift correction may then jump it. Test with the device clock set +/-30 s | modes: browser | covered: NOT COVERED | src: frontend/src/hooks/useAudioEngine.ts:258, 714, 780-784, 914
+- [ ] V2-122 Engine server and backend clocks must agree: the engine fires timed items by its own system clock (time()) at the "at" the backend sends; setup.sh does not check time sync, so a stream server whose clock drifts airs every time check early/late by the drift; check timesyncd/chrony is active and the offset is under 0.1 s | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:121-160, 192; infra/streaming/setup.sh:31-110
+- [ ] V2-128 City search for a station's location: Nominatim down or slow (5 s) returns an empty list, shown the same as "no city found"; the time zone is derived from the chosen city's coordinates (sea/border points give "UTC") | modes: n.a. | covered: NOT COVERED | src: backend/app/api/v1/stations.py:48-100; backend/app/services/timezone_service.py:6-10
+
+### N. Song requests, the "requested" category, weather readout template
+
+- [ ] V2-110 Fuzzy match: title 70% + artist 30% similarity after lower-casing and removing punctuation, match at 0.6 or more; a request with no artist against a song with an artist scores artist 0 (exact title alone = 0.7, still a match); the response shows the matched title/artist and confidence; under 0.6 the request is saved pending with no song | modes: n.a. | covered: NOT COVERED | src: backend/app/services/song_request_service.py:15-65
+- [ ] V2-111 Every public song request loads and compares the WHOLE music library in Python (no index): with thousands of songs each request takes seconds and holds a database session; must stay within S-4 at full library size | modes: n.a. | covered: NOT COVERED | src: backend/app/services/song_request_service.py:30-63
+- [ ] V2-112 Song requests can match songs marked do-not-play or placeholders (only type "music" is checked) and auto-approval queues them; requests are accepted and auto-queued for a station during Shabbos/blackout, during a live show, or for a station id that does not exist | modes: both | covered: NOT COVERED | src: backend/app/services/song_request_service.py:30-33; backend/app/api/v1/song_requests.py:36-92
+- [ ] V2-113 Auto-approved request goes right after the on-air item, or after the last request already waiting; positions of everything after it shift by one; response gives position, songs ahead and estimated wait; in engine mode the item the engine already pre-loaded still plays first (check the estimate) | modes: both | covered: NOT COVERED | src: backend/app/services/song_request_service.py:128-170; backend/app/api/v1/song_requests.py:66-80
+- [ ] V2-114 "Requested" category: a song with 3+ requests in 30 days has its category REPLACED by "requested" (old one saved) and gets it back when it drops under; while tagged it leaves every playlist/rotation built on its real category (a popular "lively" song stops airing in lively blocks); a category change made by staff during that time is overwritten on restore | modes: both | covered: NOT COVERED | src: backend/app/services/requested_category_service.py:19-71
+- [ ] V2-115 Weather readout template: {city}, {temp_f}, {description}, {wind_direction}, {wind_speed_mph}, {humidity}, {forecast_text}, {brand_name}, {day1_name}..{day3_desc} replaced; an unknown {placeholder} or a typo is left in the script as-is (read on air / shown to the reader) and the preview shows it | modes: n.a. | covered: NOT COVERED | src: backend/app/services/weather_readout_service.py:27-81
+
+### O. Icecast OTA source (services/icecast_service.py)
+
+- [ ] V2-116 "Start the FM feed" (/icecast/{id}/start) opens an Icecast source that carries ONLY live-show host audio: music from the queue is never pushed to it, and metadata updates are never called; when no host audio arrives nothing is sent (the "keepalive" sends nothing), so Icecast drops the source after its timeout and the client reconnects every 5 s. Decide what the FM feed should carry and test it | modes: both | covered: NOT COVERED | src: backend/app/services/icecast_service.py:70-131, 156-183; backend/app/api/v1/live_shows_ws.py:438
+- [ ] V2-117 Icecast source: mount defaults to /<station_id>; wrong password or Icecast down is logged and retried every 5 s forever until stopped; a full audio queue drops the oldest chunk; stop cancels and forgets the client; starting a live show starts it too | modes: both | covered: NOT COVERED | src: backend/app/services/icecast_service.py:45-68, 83-153; backend/app/services/live_show_service.py:215-222
+- [ ] V2-125 ICECAST_SOURCE_PASSWORD defaults to "hackme" and the Icecast admin metadata call reuses the source password as the admin password; with ICECAST_HOST set and the password left unset the backend streams with the default | modes: n.a. | covered: NOT COVERED | src: backend/app/config.py:119-124; backend/app/services/icecast_service.py:156-183
+
+### P. Listener statistics (api/v1/listeners.py)
+
+- [ ] V2-118 Listener geo lookup uses ip-api.com over plain HTTP (free tier: 45 lookups a minute): a burst of new listeners (start of a show) gets "Unknown" location past the limit, and each new session's heartbeat waits up to 3 s on the lookup; listener IPs are sent to that third party | modes: both | covered: NOT COVERED | src: backend/app/api/v1/listeners.py:72-92, 127-140
+- [ ] V2-119 Listener "today" (sessions, unique, minutes, peak) and daily history start at UTC midnight, not station-local midnight; peak = most sessions overlapping at once, never below the current count | modes: n.a. | covered: NOT COVERED (B-LISTENERS-8/9 do not state the day boundary) | src: backend/app/api/v1/listeners.py:271-322, 326-360
+- [ ] V2-120 Listener counts can be inflated: heartbeat is public and trusts X-Forwarded-For / X-Real-IP and the session key from the page, so a script can create any number of "listeners" from anywhere; sessions with no heartbeat for 90 s drop from the live count | modes: both | covered: NOT COVERED | src: backend/app/api/v1/listeners.py:25, 59-70, 94-148
+
+### Q. Backend platform: debug setting, middleware, database pool
+
+- [ ] V2-123 APP_DEBUG defaults to TRUE when unset: FastAPI runs in debug mode and SQLAlchemy echoes every SQL statement to the log (slows every request and fills the in-memory log that bug reports copy); production must set it false and a missing setting must not silently turn it on | modes: n.a. | covered: NOT COVERED | src: backend/app/config.py:11; backend/app/main.py:717; backend/app/db/engine.py:21
+- [ ] V2-124 Every response carries nosniff, X-Frame-Options DENY (the Listen page and API cannot be embedded in another site's iframe), Referrer-Policy, XSS header, and HSTS in production; responses over 500 bytes are gzip-compressed; requests that fail with 5xx or take over 3 s are written to the server log with their request id | modes: n.a. | covered: NOT COVERED | src: backend/app/core/middleware.py:16-53, 89-137
+- [ ] V2-129 Database connection health: a pooled connection idle 15 s is pinged before use and replaced if dead (no error shown after a quiet night or a Supabase pooler restart); connections recycled every 5 min; queries over 0.5 s are logged as SLOW QUERY with the first 200 chars of their parameters (which can include emails/phone numbers that then reach bug reports) | modes: n.a. | covered: NOT COVERED | src: backend/app/db/engine.py:10-70
+### Areas checked, nothing missing
+
+Checked line by line or against the existing rows; no further gaps beyond the rows above:
+
+- Endpoint coverage: every `@router` decorator path in backend/app/api/v1 (all 48 files) appears in the checklist (re-checked by script).
+- backend/app/api/v1: asset_types, categories, channels, copy_review, holidays (V1 rows), icecast routes, now_playing, nowplaying (dead), playlists, playout, playout_status, program_blocks, queue, rules, scheduler, schedules (except EPG, rows V2-102..105), site_release, sponsors, spot_recordings, spot_schedules, stations (except geocode V2-128), streams, users (except public hosts V2-127), weather_readouts, weather_spots, websocket (V1-100 covers /ws/alerts), live_shows CRUD and live_shows_ws.
+- backend/app/services: tail_analysis, upcoming_analysis, duration_backfill, last_played, long_items, playout_engine, liquidsoap_client, playback_service, media_service, schedule_service, schedule_refresh_service, schedule_lookahead_service, spot_schedule_service, spot_voice_service, program_block_service, playlist_generator_service, shabbos_service, station_service, weather_service (except forecast days V2-106), weather_spot_service, tts_service, copy_review_service (covered by tests/test_copy_review.py), audit_service, live_show_service (except phone bridge V2-70, Icecast V2-116).
+- backend/app/core: dependencies, security, exceptions, station_guard (V1 rows F cover the gaps), log_buffer (V2-52), middleware (V2-124).
+- backend/app/db: base, session (engine in V2-123, V2-129); backend/app/workers (V2-13); backend/app/streaming hls_generator and playlist_engine (V1-59).
+- infra/streaming: radio.liq, setup.sh, nginx-stream.conf, icecast.xml, kbr-engine@.service, env example: V1 section A is complete apart from clock sync (V2-122).
+- frontend/src: App.tsx routes, auth/access.ts, stores (authStore, playerStore), lib/appUpdate.ts, lib/liveStream.ts, lib/pcm.ts, hooks (useAudioEngine apart from device clock V2-121, useNowPlayingWS, useLiveShowWS, useHostAudio, useLiveAudio, useQueue, queueOptimistic, usePreferences and the CRUD hooks), control-room panels, Listen, CallIn, StationList, Hosts, public Archives, Navbar, Layout, SponsorLayout, ViewOnlyNotice, PageViewTracker, AssetCategoryBadge, AssetSponsorBadge, CopyReviewPanel, audio components (WaveformPlayer, SilenceDetectionPanel, AudienceDetectionPanel, EnhancePanel, PreviewControls, PlayoutBadge, ResumeAfterRelease), review components, and every admin and sponsor page apart from the rows above.
+- Keyboard shortcuts: control room (N, /, Esc, PFL keys, drag bar arrows), review flow, categories/types/screener rename keys are all in existing F-/V1- rows.

@@ -14,6 +14,13 @@ from app.schemas.asset_type import AssetTypeCreate, AssetTypeInDB, AssetTypeUpda
 router = APIRouter(prefix="/asset-types", tags=["asset-types"])
 
 
+async def _name_free(db: AsyncSession, name: str) -> None:
+    """Names are unique: answer 409, not a database error (500)."""
+    if (await db.execute(select(AssetTypeModel.id).where(AssetTypeModel.name == name))).first():
+        from app.core.exceptions import ConflictError
+        raise ConflictError("An asset type with that name already exists")
+
+
 @router.get("", response_model=list[AssetTypeInDB])
 async def list_asset_types(
     db: AsyncSession = Depends(get_db),
@@ -30,6 +37,7 @@ async def create_asset_type(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_manager),
 ):
+    await _name_free(db, data.name)
     record = AssetTypeModel(name=data.name)
     db.add(record)
     await db.commit()
@@ -51,6 +59,8 @@ async def update_asset_type(
         from app.core.exceptions import NotFoundError
         raise NotFoundError("Asset type not found")
 
+    if data.name is not None and data.name != record.name:
+        await _name_free(db, data.name)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(record, key, value)
 

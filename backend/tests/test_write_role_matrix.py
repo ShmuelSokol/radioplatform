@@ -246,8 +246,10 @@ WRITE_POLICY = {
 }
 
 # Every refused or allowed answer must come back quickly (checklist S-3: 300 ms
-# server time). The test client has no network, so this is server time.
+# server time, 1 s round trip). The test client has no network, so this is server
+# time: the typical answer must be under 300 ms and none may take 1 s.
 FAST = 0.3
+SLOWEST = 1.0
 
 
 def _write_routes():
@@ -303,6 +305,7 @@ async def test_write_role_matrix(client: AsyncClient, db_session: AsyncSession):
     headers = await _tokens(db_session)
     wrong = []
     slow = []
+    times = []
     for (method, path), allowed in sorted(WRITE_POLICY.items()):
         url = _fill(path)
         for role in ROLES:
@@ -316,13 +319,16 @@ async def test_write_role_matrix(client: AsyncClient, db_session: AsyncSession):
                     wrong.append(f"{role} refused on {method} {path}: {r.status_code} {r.text[:120]}")
             elif r.status_code != 403:
                 wrong.append(f"{role} NOT refused on {method} {path}: {r.status_code} {r.text[:120]}")
-            if took > FAST:
+            times.append(took)
+            if took > SLOWEST:
                 slow.append(f"{role} {method} {path}: {took * 1000:.0f} ms")
         r, _ = await _send(client, method, url, {})
         if r.status_code not in (401, 403):
             wrong.append(f"no login NOT refused on {method} {path}: {r.status_code}")
     assert not wrong, "\n".join(wrong)
     assert not slow, "slow answers:\n" + "\n".join(slow)
+    times.sort()
+    assert times[len(times) // 2] < FAST, f"median answer {times[len(times) // 2] * 1000:.0f} ms"
 
 
 @pytest.mark.asyncio

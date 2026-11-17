@@ -49,4 +49,9 @@ class LiveShow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     icecast_mount: Mapped[str | None] = mapped_column(String(255), nullable=True)
     calls_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    call_requests = relationship("CallInRequest", back_populates="live_show", lazy="selectin")
+    # Callers go with their show (the database cascades too); without this the ORM
+    # tried to blank their show id and deleting a show that had callers failed.
+    call_requests = relationship(
+        "CallInRequest", back_populates="live_show", lazy="selectin",
+        cascade="all, delete-orphan", passive_deletes=True,
+    )
