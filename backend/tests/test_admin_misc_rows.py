@@ -751,3 +751,27 @@ async def test_every_station_end_date_is_fast_with_80_stations(client, auth_head
     assert r.status_code == 200
     # not limit(): the 20 ms per station is simulated, so the S-6 1 s holds on any machine
     assert took < 1.0, f"{took:.2f} s for {len(calls)} station rebuilds inside the request"
+
+
+@pytest.mark.asyncio
+async def test_rds_shows_the_station_name_during_a_live_show(client, db_session, monkeypatch):
+    """V2-84: a live show stops the item on air, so the RDS line is the station's name."""
+    from app.models.live_show import LiveShow, LiveShowStatus
+    from app.services import live_show_service
+
+    st = Station(id=uuid.uuid4(), name="Kol B'ramah Live", timezone="UTC")
+    song = Asset(id=uuid.uuid4(), title="Song", artist="Singer", duration=200, file_path="https://c/s.mp3", asset_type="music")
+    db_session.add_all([st, song])
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=st.id, asset_id=song.id, position=1, status="playing",
+                              source="auto", started_at=datetime.now(UTC) - timedelta(seconds=30)))
+    now = datetime.now(UTC)
+    show = LiveShow(id=uuid.uuid4(), station_id=st.id, title="Motzei Shabbos", status=LiveShowStatus.SCHEDULED,
+                    scheduled_start=now, scheduled_end=now + timedelta(hours=1))
+    db_session.add(show)
+    await db_session.commit()
+    url = f"{API}/stations/{st.id}/rds.txt"
+    assert (await client.get(url)).text == "Singer - Song"
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    assert (await client.get(url)).text == "Kol B'ramah Live"

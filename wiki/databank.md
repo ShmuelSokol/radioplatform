@@ -17,3 +17,5 @@ Edit mode (managers): click or tap Artist, Title, Type, V or Intro on a song, Ca
 Mpeg / Prsnt filters and 123 (go to record): see [station-modes](station-modes.md). Not copied: BLK PRE SPOT, "blank" jingles of a set length.
 
 Test: `frontend/e2e/databank.mjs` against a running site with data (desktop and iPhone), `backend/tests/test_databank.py`.
+
+Find matches what is typed: `%` and `_` (file names like track_01) are escaped, not LIKE wildcards. The Log tab follows a station change: if today was shown it moves to the new station's today (time zones differ), an earlier day is kept when the new list has it, and the highlighted line is cleared.

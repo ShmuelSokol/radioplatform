@@ -118,8 +118,8 @@ export default function Hosts() {
         {!isLoading && !isError && hosts.length === 0 && (
           <div className="text-center py-20">
             <div className="text-6xl mb-4 opacity-20">🎙</div>
-            <p className="text-gray-500">No public host profiles yet.</p>
-            <p className="text-sm text-gray-600 mt-1">Check back soon!</p>
+            <p className="text-gray-300">No public host profiles yet.</p>
+            <p className="text-sm text-gray-400 mt-1">Check back soon!</p>
           </div>
         )}
 

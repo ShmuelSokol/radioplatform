@@ -291,6 +291,7 @@ radioplatform/
 | useLiveAudio.ts | Plays a station's live show (host mic relayed by the server) and tells the page to silence the music meanwhile |
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |
+| useEscape.ts | Esc closes an open dialog (New Archive, Live show, bug report) |
 
 ### API Clients (`frontend/src/api/`) — 14 modules
 auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
@@ -468,7 +469,7 @@ cd frontend && npx vercel --prod --yes
 cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/control-room.mjs
 
 # Every control room button, the Listen page, call-in and release-pickup timings, same fake backend (ONLY=<part> for one part; see wiki/audio-engine.md)
-cd frontend && for s in control-room-actions listen-page call-in release-timing; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+cd frontend && for s in control-room-actions listen-page call-in release-timing admin-misc; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
 
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
