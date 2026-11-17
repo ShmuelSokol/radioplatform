@@ -44,7 +44,7 @@ the engine owns the clock.
   first source of `add`, because `add` passes on only its first source's titles and the start
   report is made from them. With the outgoing song first, natural song changes were never
   reported (found on the rig 2026-11-15; Next was unaffected, which hid it).
-- **Three lanes**: timed, main (3 s crossfade), emergency (local files in
+- **Three lanes**: timed, main (songs overlap by the station's crossfade setting, 1 s by default; spoken items never overlap), emergency (local files in
   `/var/lib/kbr-engine/emergency`, then silence). If the backend is unreachable the engine
   plays what it has, then the emergency folder, and picks the queue up again by itself.
 - `scheduler_engine` calls `playout_engine.tick` (leader only) to hand timed items over 45 s

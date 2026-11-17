@@ -346,6 +346,10 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
         # How long this item overlaps the next at its end: the station's song
         # crossfade, 0 for anything spoken (queue.overlap_seconds)
         "kbr_overlap": f"{_overlap(entry):.2f}",
+        # How early the engine prepares the change. Never 0: with nothing held back
+        # the engine has no moment to make the change in; 0.2 s plays out in full
+        # when the overlap is 0.
+        "liq_cross_duration": f"{max(_overlap(entry), 0.2):.2f}",
         "title": asset.title or "",
         "artist": asset.artist or "",
     }

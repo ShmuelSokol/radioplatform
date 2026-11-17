@@ -99,15 +99,22 @@ end
 main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=120., next_request)
 # Per-track level from the library's audio analysis (backend sends liq_amplify)
 main = amplify(1., override="liq_amplify", main_requests)
-# Song-to-song: the outgoing song fades over 3s while the incoming one starts at full level.
+# Song-to-song: the outgoing song fades out under the incoming one, which starts at full
+# level. How long they overlap comes with each item from the backend (`kbr_overlap`, the
+# station's "Song crossfade" setting, 1 s by default; 0 = none). Anything spoken (a
+# sponsorship, a time check, a shiur) has overlap 0 and is never talked over: the next
+# item starts when it has ended (Shmuel 2026-11-17: sponsorships played in a row ran
+# into each other). `liq_cross_duration` tells `cross` how early to call transition().
 # After Next or a timed item the old song must not come back, so that change is a clean cut
 # (the music has already been faded out by then).
 hard_cut = ref(false)
 # When the music lane last changed song (`cross` calls transition() at that moment).
-# For up to 3 s after a change `cross` is still playing its transition, and a skip then
+# For the length of the overlap after a change `cross` is still playing its transition, and a skip then
 # only ends the transition: the song stays on air. skip_main() uses this to see whether
 # a skip really changed the song.
 main_changed_at = ref(0.)
+# Used when an item carries no overlap of its own (the emergency music)
+default_overlap = 1.
 def transition(ending, starting) =
   main_changed_at := time()
   if hard_cut() then
@@ -116,10 +123,16 @@ def transition(ending, starting) =
   else
     # The incoming song is listed first: `add` passes on the titles of its first source
     # only, and the start report to the backend is made from them.
-    add(normalize=false, [starting.source, fade.out(duration=3., ending.source)])
+    overlap = float_of_string(default=default_overlap, ending.metadata["kbr_overlap"])
+    if overlap < 0.05 then
+      # No overlap: the last moment of the ending item plays out, then the next starts
+      sequence([ending.source, starting.source])
+    else
+      add(normalize=false, [starting.source, fade.out(duration=overlap, ending.source)])
+    end
   end
 end
-main = cross(duration=3., transition, main)
+main = cross(duration=default_overlap, override_duration="liq_cross_duration", transition, main)
 
 # The music lane is muted while a timed item takes over, so nothing of it leaks through
 main_gain = ref(1.)
