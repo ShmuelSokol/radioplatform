@@ -341,6 +341,9 @@ async def test_timeline_preview(client: AsyncClient, db_session: AsyncSession):
     db_session.add(ScheduleBlock(id=uuid.uuid4(), schedule_id=sched.id, name="Morning",
                                  start_time=dtime(6, 0), end_time=dtime(9, 0)))
     await db_session.commit()
+    # one untimed request first: the first call through the app starts middleware and the DB
+    # connection cold (300+ ms on CI); the endpoint itself takes a few ms
+    await client.get("/api/v1/schedules/timeline-preview", params={"station_id": str(st.id)})
     r = await timed(client.get("/api/v1/schedules/timeline-preview",
                                params={"station_id": str(st.id), "at_time": "2030-01-07T07:00:00+00:00"}), READ)
     assert r.status_code == 200, r.text
