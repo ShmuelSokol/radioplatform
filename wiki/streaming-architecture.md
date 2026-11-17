@@ -243,3 +243,16 @@ Stop then Listen on the built-in player went on from where it was stopped: the c
 Timing on the server stream:
 - Every listener of a station plays the same Icecast mount, so they all hear the same audio. They differ only by their own delay: about 1 s with the MSE player (Chrome, Edge, Firefox, Android). On iPhone Safari, which has no `MediaSource` (only `ManagedMediaSource`, not used yet), it is a few seconds more.
 - Hard-timed items (time check, ID) are handed to the engine 45 s early with an absolute time. The engine starts the fade `skip_fade` before it, so the item starts on the second by the stream server's clock (Ubuntu's timesyncd keeps it on time).
+
+## iPhone Safari plays an HLS copy (2026-11-17)
+
+iPhone Safari has no Media Source Extensions for MP3, and its plain `<audio>` on the
+Icecast stream waited about 10 s before the first sound. Each engine also writes the same
+programme as HLS (`output.file.hls`, 1 s MP3 segments with Apple's packed-audio ID3
+timestamps) to `KBR_HLS_DIR` (`/var/lib/kbr-engine/hls/<station id>`); nginx serves it
+uncached at `/hls/<station id>/mp3.m3u8`. `lib/liveStream.ts` uses it when the browser has
+no MSE for MP3 but plays HLS natively (`canPlayType('application/vnd.apple.mpegurl')`),
+derived from the Icecast URL (`/live-<id>` -> `/hls/<id>/mp3.m3u8`), and falls back to the
+plain stream on an error or no sound within 8 s. In a local rig (hls.js in Chromium) the
+first sound came 0.2-0.6 s after load. Needs a `setup.sh` rerun on the server. Real iPhone
+and CarPlay not yet tested.

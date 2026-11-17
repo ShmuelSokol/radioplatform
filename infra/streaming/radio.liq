@@ -300,6 +300,24 @@ if debug_wav != "" then
   output.file(%wav, debug_wav, radio)
 end
 
+# ── HLS copy for iPhone Safari ───────────────────────────────────────────────
+# Safari has no Media Source Extensions for MP3, and its plain <audio> waited about
+# 10 s on the Icecast stream before the first sound. It plays HLS natively: 1 s MP3
+# segments (with the timestamps Apple's packed-audio format needs) start in about a
+# second. nginx serves them at /hls/<station id>/mp3.m3u8.
+hls_dir = environment.get("KBR_HLS_DIR")
+if hls_dir != "" then
+  output.file.hls(
+    playlist="live.m3u8",
+    segment_duration=1.0,
+    segments=10,
+    segments_overhead=5,
+    hls_dir,
+    [("mp3", %mp3(bitrate=320, samplerate=44100, stereo=true, internal_quality=0))],
+    radio
+  )
+end
+
 # ── Out to Icecast ───────────────────────────────────────────────────────────
 output.icecast(
   # Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting
