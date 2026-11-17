@@ -850,6 +850,21 @@ if (run('station')) {
   await sleep(400);
   check('F-DATABANK-30 Log follows the station', st.calls.filter((c) => c.path === '/databank/log').at(-1).query.station_id === 'st-2');
   check('F-DATABANK-30 title bar shows the station', (await page.locator('.qn-title').innerText()).includes('Second Feed'));
+  // Opening the control room from here lands on the station picked here
+  await page.getByRole('link', { name: 'Control room' }).click();
+  await page.waitForURL(/\/admin\/dashboard/);
+  const crPicker = page.getByRole('combobox', { name: 'Station' }).first();
+  await crPicker.waitFor();
+  await sleep(300);
+  check('F-DATABANK-64 the control room opens on the station picked in the Databank', await crPicker.inputValue() === 'st-2');
+  await page.goto(`${BASE}/admin/databank`);
+  await rows(page).first().waitFor();
+  await page.getByRole('combobox', { name: 'Station' }).selectOption('st-1');
+  await sleep(200);
+  await page.goto(`${BASE}/admin/dashboard`);
+  await crPicker.waitFor();
+  await sleep(300);
+  check('F-DATABANK-64 also when the control room is opened from the menu', await crPicker.inputValue() === 'st-1');
   await ctx.close();
   const gone = await open(browser, DESKTOP, { storage: { radio_last_station: 'deleted-station' } });
   await rows(gone.page).first().waitFor();

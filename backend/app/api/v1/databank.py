@@ -236,14 +236,19 @@ async def set_spot_end_date(
             raise HTTPException(status_code=403, detail="You are not assigned to this station")
         if body.end_date and s.start_date and body.end_date < s.start_date:
             raise HTTPException(status_code=422, detail="The end date is before the schedule starts")
+    if station_id is None and any(s.station_id is not None for s in schedules):
+        # No station chosen (station list still loading, none remembered): moving
+        # every station's schedules at once is not what the row on screen showed.
+        raise HTTPException(status_code=400, detail="Choose a station first, then change the end date.")
     for s in schedules:
         s.end_date = body.end_date
     await db.flush()
 
-    from app.api.v1.spot_schedules import _refresh_queues
+    from app.api.v1.spot_schedules import _refresh_queues, refresh_in_background
 
-    await _refresh_queues(db, {s.station_id for s in schedules})
+    later = await _refresh_queues(db, {s.station_id for s in schedules})
     await db.commit()
+    refresh_in_background(later)
     return {"updated": len(schedules), "end_date": body.end_date.isoformat() if body.end_date else None}
 
 

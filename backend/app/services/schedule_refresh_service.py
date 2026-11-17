@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.asset import ONE_MOMENT_CATEGORIES, Asset
+from app.models.playlist_entry import PlaylistEntry
 from app.models.playlist_template import PlaylistTemplate
 from app.models.queue_entry import QueueEntry
 from app.models.schedule import Schedule
@@ -28,7 +29,21 @@ _locks: dict[str, asyncio.Lock] = {}
 
 
 async def uses_block_playlists(db: AsyncSession, station_id) -> bool:
-    """True when an active schedule of the station has a block with an active playlist."""
+    """True when an active schedule of the station has a block with an active
+    playlist, or a block with its own songs ("+ Add song")."""
+    songs = await db.execute(
+        select(ScheduleBlock.id)
+        .join(Schedule, Schedule.id == ScheduleBlock.schedule_id)
+        .join(PlaylistEntry, PlaylistEntry.block_id == ScheduleBlock.id)
+        .where(
+            Schedule.station_id == station_id,
+            Schedule.is_active.is_(True),
+            PlaylistEntry.is_enabled.is_(True),
+        )
+        .limit(1)
+    )
+    if songs.first() is not None:
+        return True
     row = await db.execute(
         select(ScheduleBlock.id)
         .join(Schedule, Schedule.id == ScheduleBlock.schedule_id)
@@ -133,11 +148,16 @@ async def realign_before_block_change(db: AsyncSession, station: Station, now: d
     )
     if not schedules:
         return False
+    from app.services.playlist_generator_service import block_songs
+
     svc = SchedulingService(db)
+    with_songs = set(await block_songs(db, schedules))
 
     def playlist_block(at: datetime) -> str | None:
         ranked = svc.rank_matching_blocks(schedules, at, station)
         block = ranked[0][1] if ranked else None
+        if block is not None and str(block.id) in with_songs:
+            return str(block.id)
         if block is None or not block.playlist_template_id:
             return None
         template = block.playlist_template

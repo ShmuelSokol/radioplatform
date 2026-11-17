@@ -87,10 +87,11 @@ async def test_find_treats_percent_and_underscore_as_letters(client, auth_header
 
 
 @pytest.mark.asyncio
-async def test_end_date_without_a_station_moves_every_station(client, db_session):
-    """F-DATABANK-60: the API with no station_id moves the spot on every station, so it is
-    refused (403, nothing changed) unless the manager may operate every one of them. The page
-    itself always sends the chosen station (see e2e/databank-screen.mjs)."""
+async def test_end_date_without_a_station_is_refused_and_changes_nothing(client, db_session):
+    """F-DATABANK-60: with no station_id the API refuses (403 for a manager not on every
+    station, 400 "Choose a station first" otherwise) and nothing changes; with the station it
+    moves that station's schedule only. The page itself always sends the chosen station
+    (see e2e/databank-screen.mjs)."""
     ny, jm, sponsor = await _spot_world(db_session)
     spot = _asset("Spot", asset_type="spot")
     db_session.add(spot)
@@ -110,7 +111,10 @@ async def test_end_date_without_a_station_moves_every_station(client, db_session
     assert r.status_code == 200 and r.json()["updated"] == 1
     both = await _login(client, db_session, UserRole.MANAGER, [str(ny.id), str(jm.id)])
     r = await client.patch(f"/api/v1/databank/spots/{spot.id}/end-date", json={"end_date": new_end}, headers=both)
-    assert r.status_code == 200 and r.json()["updated"] == 2
+    assert r.status_code == 400 and r.json()["detail"].startswith("Choose a station first")
+    ends = sorted(str(s.end_date) for s in (await db_session.execute(
+        select(SpotSchedule).execution_options(populate_existing=True))).scalars())
+    assert ends == sorted([str(date.today()), new_end])  # only the NY one moved, by the call with the station
 
 
 @pytest.mark.asyncio
