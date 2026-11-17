@@ -14,10 +14,11 @@ import uuid
 
 import pytest
 
+from tests.timing import limit
 from app.models.asset import Asset
 
 SLOW = 0.6       # how long the fake outside call takes
-MAX_STALL = 0.2  # longest the event loop may be held (S-3: operator calls answer in 300 ms)
+MAX_STALL = limit(0.2)  # longest the event loop may be held (S-3: operator calls answer in 300 ms)
 
 
 async def _max_stall_while(coro) -> tuple[float, object]:

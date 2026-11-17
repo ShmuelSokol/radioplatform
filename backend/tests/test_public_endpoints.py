@@ -17,6 +17,7 @@ from tests.route_list import app_routes
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.timing import limit
 from app.core.security import hash_password
 from app.models.asset import Asset
 from app.models.call_in_request import CallInRequest, CallStatus
@@ -36,7 +37,7 @@ PRIVATE_KEYS = {"hashed_password", "password", "email", "phone", "pin", "station
                 "refresh_token", "caller_phone", "twilio_call_sid", "requester_message", "contact_email",
                 "last_ip", "ip_address"}
 LOGIN_DEPS = ("require_", "get_current_user", "get_crm_member")
-FAST = 0.3  # checklist S-4: reads under 300 ms server time
+FAST = limit(0.3)  # checklist S-4: reads under 300 ms server time
 
 
 def _public_gets():
@@ -139,6 +140,8 @@ def test_public_get_list_is_what_we_reviewed():
 async def test_public_gets_work_anonymously_and_leak_nothing(client: AsyncClient, db_session: AsyncSession):
     ids = await _seed(db_session)
     problems, slow = [], []
+    # The first request through a fresh app pays one-off start-up costs; time the rest
+    await client.get("/api/v1/archives")
     for path in _public_gets():
         url = _url(path, ids)
         params = {"station_id": str(ids["station_id"])} if path.endswith("timeline-preview") else None
