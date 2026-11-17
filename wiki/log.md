@@ -22,6 +22,7 @@ UPDATE 2026-11-17 playlist-generation.md, spot-schedules.md a block's own songs 
 UPDATE 2026-11-17 playlist-generation.md schedule, block and "+ Add song" saves answer at once; the queue rebuild runs in the background like playlist edits (they took 6-20 s live)
 UPDATE 2026-11-17 playlist-generation.md queue redraw swaps old songs for new in one transaction and keeps the next song (Jerusalem had 0 songs for ~60 s after a block edit)
 INGEST 2026-11-17 hourly-slots.md hour_fit.py: songs before a hard timed item are fitted to the time left by swapping queue positions (5-min song was cut after 61 s at 21:00 on Jerusalem); pick rules untouched, both players
+UPDATE 2026-11-17 hourly-slots.md hour_fit counts each song to its own hand-over point and prefers ending just after the hard item over just before (live: fitted twice in 10 s)
 INGEST 2026-11-17 hourly-slots.md a hard group due while an earlier short group plays now follows it (timed_groups.space_hard_groups); the engine is handed it at the first group's time so it stays in the same take-over
 INGEST 2026-11-15 streaming-architecture.md Liquidsoap wiring can't be switched on as-is: _advance_queue re-pushes the current track every 3s poll, two clocks (DB duration vs engine), telnet 1234 open with no auth. Plan: engine pulls next track + reports real starts.
 UPDATE 2026-11-15 hourly-slots.md Uploaded weather spots: PUT /weather-spots/{date} replaces the day's weather asset in place (Shprach voice); ElevenLabs is the fallback.
