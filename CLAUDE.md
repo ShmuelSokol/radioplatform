@@ -430,7 +430,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 
 ## Known Gotchas
 - **ALWAYS verify live site after deploy**: After deploying, test the live URLs (frontend + backend health + key API endpoints) to confirm the site works. Don't assume deploys succeed — check `curl https://api.kbrlive.com/health` and try loading key frontend pages.
-- **Railway deploys from GitHub**: Auto-deploy is enabled on `main` branch with root directory `/backend`. If deploys fail, check Railway dashboard → service → Deployments tab for build logs.
+- **Railway deploys from GitHub**: Auto-deploy is enabled on `main` branch with root directory `/backend`. A merge deploys the backend only when it changed `backend/` outside the tests, and builds the website only when it changed `frontend/` (see `wiki/deploys.md`). If deploys fail, check Railway dashboard → service → Deployments tab for build logs.
 - **nixpacks.toml**: Must use `["...", "ffmpeg"]` (with spread operator) to keep default Python packages. Using `["ffmpeg"]` alone removes Python and breaks the build.
 - **requirements.txt must stay in sync**: Railway installs from `requirements.txt`, not `pyproject.toml`. When adding dependencies to pyproject.toml, also add them to requirements.txt.
 - **DB migrations in main.py**: When adding columns to models, add corresponding `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` to `_add_missing_columns()` in `main.py`. Each migration runs in its own transaction so one failure doesn't block others.

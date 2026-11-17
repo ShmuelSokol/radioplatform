@@ -104,6 +104,7 @@ UPDATE 2026-11-17 hourly-slots.md soft-item look-ahead flip and wait-station sof
 INGEST 2026-11-16 multi-station-load.md now_playing announcements never go backwards (stale tick after the precise advance made listeners jump back); join cache ignores raced reads
 INGEST 2026-11-16 streaming-architecture.md startup migrations skip existing columns/indexes and use a 1 s lock timeout (an ADD COLUMN IF NOT EXISTS froze the backend 4 min during a deploy); analysis holds no transaction during range reads/FFmpeg; bulk jobs detached from the request (BackgroundTasks kept the request transaction open 2 h); scheduler session per pass
 INGEST 2026-11-16 streaming-architecture.md deploy cold start: bounded startup play-log scan, pool warmed before serving, last_seen_at once a minute; pg_timezone_names is the Supabase dashboard, not us
+INGEST 2026-11-17 deploys.md a merge now publishes only what it changed: website only for frontend/ changes (infra/vercel-ignore.sh, compares with the last published commit), backend only for backend/ changes outside tests (railway.toml watchPatterns). Before, 2 of 3 website builds and half the backend restarts were for nothing.
 INGEST 2026-11-16 streaming-architecture.md last played per item cached in memory (services/last_played.py); big-table indexes go in CONCURRENT_INDEXES (built concurrently after startup), not the migration list
 INGEST 2026-11-16 streaming-architecture.md timed items get an exact timer (hard at preempt_at, soft at hard_by); items with NULL duration (queue read, restart cut, background backfill); restart starts via start_from_queue
 UPDATE 2026-11-16 audio-engine.md item starts within 1 s play from the top without a seek (Safari repeated the opening)
@@ -228,3 +229,4 @@ INGEST 2026-11-17 audio-engine.md level meters set React state every frame: cont
 INGEST 2026-11-17 streaming-architecture.md engine commands share one kept httpx client (30 s keep-alive) instead of a TLS handshake per Next
 INGEST 2026-11-17 streaming-architecture.md engine items analysed before /next hands them over (liq_amplify was missing on late-analysed items); alimiter true-peak limiter replaces limit()
 INGEST 2026-11-17 program-blocks.md announcement left out when its programme has nothing to play; the hourly 'KBR schedule: Daf Yomi' clip is a separate block (data)
+INGEST 2026-11-17 streaming-architecture.md setup.sh rerun restarted Icecast + all engines at once (50 s off air, catch-up 7.6 s on 1 core); now script checked first, unchanged engines left running, changed ones one at a time
