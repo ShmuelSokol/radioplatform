@@ -403,7 +403,12 @@ async def twilio_status(request: Request, db: AsyncSession = Depends(get_db)):
         )
         call = result.scalar_one_or_none()
         if call and call.status not in (CallStatus.COMPLETED, CallStatus.REJECTED):
-            call.status = CallStatus.ABANDONED
+            if call.status == CallStatus.ON_AIR:
+                # Hung up while on air: the call happened, it just ended
+                call.status = CallStatus.COMPLETED
+                call.air_end = datetime.now(timezone.utc)
+            else:
+                call.status = CallStatus.ABANDONED
             await db.flush()
 
             # Broadcast removal

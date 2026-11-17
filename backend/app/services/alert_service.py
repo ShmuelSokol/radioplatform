@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.alert import Alert, AlertSeverity, AlertType
-from app.models.user import User
+from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,12 @@ async def create_alert(
     db.add(alert)
     await db.flush()
     await db.refresh(alert)
+    await _dispatch(db, alert, severity, title, message)
+    return alert
 
+
+async def _dispatch(db: AsyncSession, alert: Alert, severity, title: str, message: str) -> None:
+    """Text/WhatsApp the people who asked for this severity and push it to open screens."""
     # Dispatch SMS/WhatsApp to users who opted in
     try:
         await _notify_users(db, alert)
@@ -97,7 +102,6 @@ async def create_alert(
         logger.error("Alert WebSocket broadcast failed: %s", e)
 
     logger.info("Alert created: [%s] %s — %s", severity, title, message)
-    return alert
 
 
 async def resolve_alert(db: AsyncSession, alert_id: UUID | str, user_id: UUID | str) -> Alert:
@@ -264,6 +268,13 @@ async def _notify_users(db: AsyncSession, alert: Alert) -> None:
     body = f"[{alert.severity.value.upper()}] {alert.title}\n{alert.message}"
 
     for user in users:
+        # Sponsors never get station alerts; staff limited to some stations get only
+        # theirs (an alert with no station, e.g. a server restart, goes to everyone).
+        if user.role == UserRole.SPONSOR:
+            continue
+        if alert.station_id is not None and user.station_ids is not None \
+                and str(alert.station_id) not in user.station_ids:
+            continue
         prefs = user.alert_preferences or {}
         min_severity = prefs.get("min_severity", "warning")
         user_threshold = _SEVERITY_ORDER.get(min_severity, 1)
