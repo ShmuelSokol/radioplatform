@@ -212,3 +212,4 @@ INGEST 2026-11-17 streaming-architecture.md engine /hello retried every 5 s unti
 INGEST 2026-11-17 streaming-architecture.md engine take-over waits for the timed file to be ready (music plays on), timed queue download limit 90 s (V1-8)
 UPDATE 2026-11-17 audio-engine.md page pre-arm needs the time check as next_asset: scheduler re-sends now-playing 60 s before each hard timed item (_announce_timed); page logs window.__kbrTimedStart
 INGEST 2026-11-17 audio-engine.md items of one program block share preempt_at: the item after the time check has a past cut time; server and page now ignore it (no fade/pre-arm over the time check) and the item after a short item starts from the top up to 8 s late
+INGEST 2026-11-17 audio-engine.md play() to `playing` took 1.0 s live: page warms a hard item silently 3 s ahead; outgoing item waits for `playing`; __kbrLastStart/__kbrTimedWarm diagnostics; idle deck no longer plays silently after Listen
