@@ -51,11 +51,19 @@ function describe(s: PlayoutStatus): { label: string; dot: string; title: string
     title: 'Every listener hears the same stream from the server, at the same moment. Server and queue agree on what is on air.' };
 }
 
-export default function PlayoutBadge({ stationId, dark = false, className = '' }: { stationId: string | null | undefined; dark?: boolean; className?: string }) {
+/**
+ * `listener`: the public pages. Listeners never see the engine's health or its track
+ * titles ("out of step", "not answering"): a server-stream station shows a plain
+ * "Live stream", the browser player shows nothing. The control room keeps the detail.
+ */
+export default function PlayoutBadge({ stationId, dark = false, listener = false, className = '' }: { stationId: string | null | undefined; dark?: boolean; listener?: boolean; className?: string }) {
   const { data } = usePlayoutStatus();
   const s = playoutOf(data, stationId);
   if (!s) return null;
-  const d = describe(s);
+  if (listener && s.mode !== 'server') return null;
+  const d = listener
+    ? { label: 'Live stream', dot: 'bg-green-500', title: 'Everyone hears the same live stream.' }
+    : describe(s);
   return (
     <span title={d.title} data-testid="playout-badge" data-mode={s.mode}
       className={`inline-flex items-center gap-1.5 text-[11px] leading-none whitespace-nowrap ${dark ? 'text-gray-200' : 'text-gray-600'} ${className}`}>
