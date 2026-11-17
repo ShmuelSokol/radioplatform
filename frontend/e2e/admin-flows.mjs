@@ -311,7 +311,7 @@ function adminRoutes() {
     ['/admin/dashboard', ALL], ['/admin/stations', MGR], ['/admin/assets', ALL], ['/admin/assets/upload', MGR],
     [`/admin/assets/${FX.assets[0].id}`, ALL], ['/admin/reviews', ALL], [`/admin/reviews/${FX.review.id}`, ALL],
     ['/admin/users', ['admin']], ['/admin/rules', ALL], ['/admin/schedules', ALL],
-    [`/admin/schedules/${FX.schedule.id}/blocks`, ALL], ['/admin/holidays', MGR], ['/admin/sponsors', MGR],
+    [`/admin/schedules/${FX.schedule.id}/blocks`, ALL], ['/admin/holidays', MGR], ['/admin/sponsors', MGR], ['/admin/campaigns', ALL],
     ['/admin/spot-schedule', MGR], ['/admin/spot-recordings', MGR], ['/admin/program-blocks', MGR],
     ['/admin/schedule-check', MGR], ['/admin/sponsorship-rules', MGR], ['/admin/playlists', MGR],
     ['/admin/categories', MGR], ['/admin/asset-types', MGR], ['/admin/alerts', MGR], ['/admin/bug-reports', MGR],
@@ -327,8 +327,8 @@ const PUBLIC_ROUTES = ['/stations', '/guide', '/hosts', '/archives'];
 const VIEW_ONLY = {
   admin: [],
   manager: ['/admin/rules'],
-  dj: ['/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock'],
-  viewer: ['/admin/dashboard', '/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock'],
+  dj: ['/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns'],
+  viewer: ['/admin/dashboard', '/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns'],
 };
 const short = p => p.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, ':id');
 
@@ -1554,6 +1554,76 @@ section('sponsors', async () => {
       await waitPath(page, '/sponsor/login');
     }, page);
     await closePage(page);
+  }
+});
+
+// ── Sponsorship campaigns (admin screen) ────────────────────────────────────
+section('campaigns', async () => {
+  const name = `E2E Staff Campaign ${RUN}`;
+  const admin = await newPage('admin', 'desktop');
+  const form = admin.getByTestId('new-campaign-form');
+  const row = p => p.getByTestId('campaign-row').filter({ hasText: name }).first();
+  await step('F-CAMPAIGNS-1 admin: create a campaign for a sponsor (sponsor, name, dates, budget) saves fast', async () => {
+    await admin.goto(`${BASE}/admin/campaigns`);
+    await admin.getByRole('button', { name: 'New Campaign' }).click();
+    await form.getByRole('button', { name: 'Create Campaign' }).click();
+    assert(await field(form, 'Sponsor').evaluate(el => el.validationMessage), 'no message when no sponsor is chosen');
+    await field(form, 'Sponsor').selectOption(FX.sponsor.id);
+    await field(form, 'Campaign Name').fill(name);
+    await field(form, 'Description').fill('Made by the admin flows test');
+    await field(form, 'Start Date').fill('2027-04-01');
+    await field(form, 'End Date').fill('2027-04-14');
+    await field(form, 'Budget ($)').fill('250');
+    const { ms, resp } = await timedSave(admin, 'create campaign', (m, p) => m === 'POST' && p === '/campaigns',
+      () => form.getByRole('button', { name: 'Create Campaign' }).click());
+    const body = await resp.json();
+    assert(body.sponsor_id === FX.sponsor.id && body.budget_cents === 25000, `saved ${JSON.stringify(body).slice(0, 160)}`);
+    FX.campaign = body;
+    const t = await row(admin).innerText();
+    assert(t.includes(FX.sponsor.name) && t.includes('2027-04-01') && t.includes('$250.00') && t.includes('draft'), `row "${t.replace(/\s+/g, ' ')}"`);
+    return `saved in ${ms} ms`;
+  }, admin);
+  await step('F-CAMPAIGNS-1 admin: sponsor filter; open it, Save Status (approved), Submit Draft, Send comment', async () => {
+    await admin.getByLabel('Filter by sponsor').selectOption(FX.sponsor.id);
+    await row(admin).waitFor();
+    await admin.getByLabel('Filter by status').selectOption('completed');
+    await row(admin).waitFor({ state: 'detached' });
+    await admin.getByLabel('Filter by status').selectOption('');
+    await row(admin).click();
+    await waitPath(admin, `/admin/campaigns/${FX.campaign.id}`);
+    await admin.getByLabel('Campaign status').selectOption('approved');
+    await timedSave(admin, 'status', (m, p) => m === 'PATCH' && p.endsWith('/status'), () => admin.getByRole('button', { name: 'Save Status' }).click());
+    await admin.getByTestId('campaign-status').filter({ hasText: 'approved' }).waitFor();
+    await admin.getByRole('button', { name: 'New Draft' }).click();
+    await admin.getByPlaceholder('Write the sponsorship script here...').fill(`E2E staff script ${RUN}`);
+    await timedSave(admin, 'draft', (m, p) => m === 'POST' && p.endsWith('/drafts'), () => admin.getByRole('button', { name: 'Submit Draft' }).click());
+    await admin.getByText(`E2E staff script ${RUN}`).waitFor();
+    await admin.getByPlaceholder('Add a comment...').fill(`E2E staff comment ${RUN}`);
+    await timedSave(admin, 'comment', (m, p) => m === 'POST' && p.endsWith('/comments'), () => admin.getByRole('button', { name: 'Send' }).click());
+    await admin.getByText(`E2E staff comment ${RUN}`).waitFor();
+  }, admin);
+  await closePage(admin);
+
+  for (const view of ['desktop', 'iphone']) {
+    const dj = await newPage('dj', view);
+    await step(`F-CAMPAIGNS-1 dj ${view}: sees the campaign, its draft and comment, View only, no buttons that change anything`, async () => {
+      await dj.goto(`${BASE}/admin/campaigns`);
+      await row(dj).waitFor();
+      await dj.getByTestId('view-only').waitFor();
+      assert(!(await dj.getByRole('button', { name: 'New Campaign' }).count()), 'New Campaign offered to a dj');
+      await row(dj).click();
+      await waitPath(dj, `/admin/campaigns/${FX.campaign.id}`);
+      await dj.getByText(`E2E staff script ${RUN}`).waitFor();
+      await dj.getByText(`E2E staff comment ${RUN}`).waitFor();
+      await dj.getByTestId('campaign-status').filter({ hasText: 'approved' }).waitFor();
+      await dj.getByTestId('view-only').waitFor();
+      for (const b of ['Save Status', 'New Draft', 'Send']) {
+        assert(!(await dj.getByRole('button', { name: b }).count()), `${b} offered to a dj`);
+      }
+      const w = await dj.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+      assert(w[0] <= w[1] + 1, `page ${w[0]} px wide in a ${w[1]} px window`);
+    }, dj);
+    await closePage(dj);
   }
 });
 
@@ -3362,7 +3432,7 @@ section('sponsor', async () => {
       await page.waitForURL(/\/sponsor\/campaigns\/[0-9a-f-]{36}$/);
       for (const v of [1, 2]) {
         await page.getByRole('button', { name: 'New Draft' }).click();
-        await page.getByPlaceholder('Write your ad script here...').fill(`E2E script v${v}`);
+        await page.getByPlaceholder('Write the sponsorship script here...').fill(`E2E script v${v}`);
         await page.getByPlaceholder('Any notes for the team...').fill('note');
         await timedSave(page, 'draft', (m, p) => m === 'POST' && p.includes('/drafts'), () => page.getByRole('button', { name: 'Submit Draft' }).click());
         await page.getByText(`E2E script v${v}`).waitFor();
