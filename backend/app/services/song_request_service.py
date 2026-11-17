@@ -21,6 +21,32 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+_BY_SPLIT = re.compile(r"^(?P<title>.+)\s+by\s+(?P<artist>\S.*)$", re.IGNORECASE)
+
+
+def split_title_artist(song_title: str, song_artist: str | None) -> tuple[str, str | None]:
+    """Listeners often type "One Day by Matisyahu" into the title box and leave
+    the artist empty. Split that into title + artist so the artist part is not
+    scored as part of the title (which made such requests never match)."""
+    if song_artist and song_artist.strip():
+        return song_title, song_artist
+    m = _BY_SPLIT.match(song_title.strip())
+    if not m:
+        return song_title, song_artist
+    return m.group("title").strip(), m.group("artist").strip()
+
+
+def _score(norm_title: str, norm_artist: str, asset: Asset) -> float:
+    title_score = SequenceMatcher(None, norm_title, _normalize(asset.title)).ratio()
+    if norm_artist and asset.artist:
+        artist_score = SequenceMatcher(None, norm_artist, _normalize(asset.artist)).ratio()
+    elif not norm_artist and not asset.artist:
+        artist_score = 1.0  # both empty — don't penalize
+    else:
+        artist_score = 0.0
+    return title_score * 0.7 + artist_score * 0.3
+
+
 async def fuzzy_match_asset(
     db: AsyncSession,
     song_title: str,
@@ -39,28 +65,18 @@ async def fuzzy_match_asset(
     if not assets:
         return None, 0.0
 
-    norm_title = _normalize(song_title)
-    norm_artist = _normalize(song_artist) if song_artist else ""
+    # Score the request as typed and, if the title reads "X by Y", also as
+    # title X + artist Y; keep the better one ("Stand By Me" still works).
+    readings = {(song_title, song_artist), split_title_artist(song_title, song_artist)}
+    norm_readings = [
+        (_normalize(t), _normalize(a) if a else "") for t, a in readings
+    ]
 
     best_asset = None
     best_score = 0.0
 
     for asset in assets:
-        title_score = SequenceMatcher(
-            None, norm_title, _normalize(asset.title)
-        ).ratio()
-
-        if norm_artist and asset.artist:
-            artist_score = SequenceMatcher(
-                None, norm_artist, _normalize(asset.artist)
-            ).ratio()
-        elif not norm_artist and not asset.artist:
-            artist_score = 1.0  # both empty — don't penalize
-        else:
-            artist_score = 0.0
-
-        score = title_score * 0.7 + artist_score * 0.3
-
+        score = max(_score(nt, na, asset) for nt, na in norm_readings)
         if score > best_score:
             best_score = score
             best_asset = asset
