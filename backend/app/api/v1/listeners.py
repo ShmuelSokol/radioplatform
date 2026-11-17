@@ -5,13 +5,16 @@ import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_ip import client_ip
 from app.core.dependencies import require_manager
+from app.db.engine import async_session_factory
 from app.db.session import get_db
 from app.models.listener_session import ListenerSession
 from app.models.station import Station
@@ -57,16 +60,26 @@ def _live():
 
 
 def _get_client_ip(request: Request) -> str | None:
-    """Extract real client IP from proxy headers."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip
-    if request.client:
-        return request.client.host
-    return None
+    """The listener's address as Railway's proxy saw it (see app/core/client_ip.py)."""
+    return client_ip(request)
+
+
+# A new listener's heartbeat waits this long for the location, then answers and
+# fills the location in when the lookup finishes (ip-api.com can take 3 s).
+GEO_WAIT_SECONDS = 0.1
+_geo_tasks: set[asyncio.Task] = set()
+
+
+async def _fill_geo_later(session_id: uuid.UUID, lookup: asyncio.Future) -> None:
+    try:
+        geo = await lookup
+        async with async_session_factory() as db:
+            row = await db.get(ListenerSession, session_id)
+            if row is not None:
+                row.country, row.region, row.city = geo["country"], geo["region"], geo["city"]
+                await db.commit()
+    except Exception as exc:
+        logger.debug("Late GeoIP fill failed for %s: %s", session_id, exc)
 
 
 async def _resolve_geo(ip: str) -> dict:
@@ -126,16 +139,20 @@ async def heartbeat(
     else:
         # Create new session with geo lookup
         ip = _get_client_ip(request)
-        geo = await _resolve_geo(ip)
+        lookup = asyncio.ensure_future(_resolve_geo(ip))
+        try:
+            geo = await asyncio.wait_for(asyncio.shield(lookup), timeout=GEO_WAIT_SECONDS)
+        except asyncio.TimeoutError:
+            geo = None
         ua = request.headers.get("user-agent", "")[:500]
 
         session = ListenerSession(
             station_id=station_id,
             session_key=body.session_key,
             ip_address=ip,
-            country=geo["country"],
-            region=geo["region"],
-            city=geo["city"],
+            country=geo["country"] if geo else None,
+            region=geo["region"] if geo else None,
+            city=geo["city"] if geo else None,
             started_at=now,
             last_heartbeat=now,
             duration_seconds=0,
@@ -143,6 +160,10 @@ async def heartbeat(
         )
         db.add(session)
         await db.commit()
+        if geo is None:
+            task = asyncio.create_task(_fill_geo_later(session.id, lookup))
+            _geo_tasks.add(task)
+            task.add_done_callback(_geo_tasks.discard)
         await _notify_watchers()
         return {"status": "created"}
 
@@ -267,6 +288,14 @@ async def get_live_listeners(
     }
 
 
+def _local_midnight(now: datetime, tz_name: str | None) -> datetime:
+    try:
+        tz = ZoneInfo(tz_name or "UTC")
+    except Exception:
+        tz = timezone.utc
+    return now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
 @router.get("/today")
 async def get_today_stats(
     db: AsyncSession = Depends(get_db),
@@ -274,7 +303,16 @@ async def get_today_stats(
 ):
     """Today's listener stats: total sessions, unique listeners, total minutes."""
     now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # "Today" begins at each station's own local midnight, not at UTC midnight
+    # (8 pm the evening before in New York in summer)
+    day_starts = {
+        sid: _local_midnight(now, tz) for sid, tz in (await db.execute(select(Station.id, Station.timezone))).all()
+    }
+
+    def since_local_midnight(col):
+        if not day_starts:
+            return col >= now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return or_(*((ListenerSession.station_id == sid) & (col >= start) for sid, start in day_starts.items()))
 
     result = await db.execute(
         select(
@@ -282,7 +320,7 @@ async def get_today_stats(
             func.count(func.distinct(ListenerSession.ip_address)).label("unique_listeners"),
             func.coalesce(func.sum(ListenerSession.duration_seconds), 0).label("total_seconds"),
         )
-        .where(ListenerSession.started_at >= today_start)
+        .where(since_local_midnight(ListenerSession.started_at))
     )
     row = result.one()
 
@@ -298,7 +336,7 @@ async def get_today_stats(
     peak = active_count
     sessions_result = await db.execute(
         select(ListenerSession.started_at, ListenerSession.last_heartbeat)
-        .where(ListenerSession.last_heartbeat >= today_start)
+        .where(since_local_midnight(ListenerSession.last_heartbeat))
     )
     events: list[tuple[datetime, int]] = []
     for s in sessions_result.all():

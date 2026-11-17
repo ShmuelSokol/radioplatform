@@ -165,7 +165,8 @@ class SchedulingService:
             start = block.start_time
             if block.start_sun_event and station:
                 start = self._resolve_sun_time(
-                    block.start_sun_event, block.start_sun_offset or 0, station, day
+                    block.start_sun_event, block.start_sun_offset or 0, station, day,
+                    fallback=block.start_time,
                 )
             started = datetime.combine(day, start)
             if made is not None and started < made:
@@ -193,8 +194,14 @@ class SchedulingService:
             return True
         return True
 
-    def _resolve_sun_time(self, sun_event: SunEvent, offset_minutes: int, station, at_date) -> time:
-        """Resolve a sun-relative time to a concrete time value."""
+    def _resolve_sun_time(
+        self, sun_event: SunEvent, offset_minutes: int, station, at_date, fallback: time | None = None
+    ) -> time:
+        """Resolve a sun-relative time to a concrete time value.
+
+        Where the sun does not rise or set that day (polar summer or winter) astral
+        raises; the block's fixed clock time (`fallback`) is used instead, so one
+        block cannot break block resolution for the whole station."""
         from app.services.sun_service import get_sun_times, offset_sun_time
 
         lat = station.latitude if station else None
@@ -205,7 +212,14 @@ class SchedulingService:
             # Default to Jerusalem if no coords
             lat, lon = 31.7683, 35.2137
 
-        times = get_sun_times(lat, lon, tz, at_date)
+        try:
+            times = get_sun_times(lat, lon, tz, at_date)
+        except ValueError as exc:
+            if fallback is None:
+                raise
+            logger.warning("No %s at %s, %s on %s (%s): using the block's clock time %s",
+                           sun_event.value, lat, lon, at_date, exc, fallback)
+            return fallback
         base_time = times.get(sun_event.value, times["sunset"]).time()
         return offset_sun_time(base_time, offset_minutes or 0)
 
@@ -220,11 +234,13 @@ class SchedulingService:
 
         if block.start_sun_event and station:
             effective_start = self._resolve_sun_time(
-                block.start_sun_event, block.start_sun_offset or 0, station, current_date
+                block.start_sun_event, block.start_sun_offset or 0, station, current_date,
+                fallback=block.start_time,
             )
         if block.end_sun_event and station:
             effective_end = self._resolve_sun_time(
-                block.end_sun_event, block.end_sun_offset or 0, station, current_date
+                block.end_sun_event, block.end_sun_offset or 0, station, current_date,
+                fallback=block.end_time,
             )
 
         # Check time range (handle overnight blocks)

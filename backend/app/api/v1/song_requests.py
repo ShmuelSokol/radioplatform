@@ -27,8 +27,8 @@ from app.services.song_request_service import (
 )
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
-limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+from app.core.client_ip import rate_limit_key
+limiter = Limiter(key_func=rate_limit_key, storage_uri="memory://")
 
 router = APIRouter(prefix="/song-requests", tags=["song-requests"])
 

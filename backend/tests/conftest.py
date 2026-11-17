@@ -114,6 +114,9 @@ async def reset_rate_limiter():
         limiter.reset()
     except Exception:
         pass
+    from app.api.v1 import crm as _crm
+
+    _crm._pin_failures.clear()  # wrong CRM PINs are counted per address
     yield
     try:
         from app.api.v1.auth import limiter

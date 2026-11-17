@@ -62,9 +62,22 @@ def _after_cursor_execute(conn, cursor, statement, parameters, context, executem
         return
     elapsed = time.monotonic() - start
     if elapsed >= SLOW_QUERY_THRESHOLD:
+        # Parameter values are left out: they hold emails and phone numbers, and bug
+        # reports copy this log. Only how many there were is kept.
         logger.warning(
             "SLOW QUERY (%.3fs): %s | params=%s",
             elapsed,
             statement[:500],
-            str(parameters)[:200] if parameters else None,
+            _redacted_params(parameters, executemany),
         )
+
+
+def _redacted_params(parameters, executemany: bool) -> str | None:
+    if not parameters:
+        return None
+    if executemany and isinstance(parameters, (list, tuple)):
+        return f"<{len(parameters)} rows hidden>"
+    try:
+        return f"<{len(parameters)} hidden>"
+    except TypeError:
+        return "<hidden>"

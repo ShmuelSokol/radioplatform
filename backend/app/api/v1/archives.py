@@ -142,7 +142,7 @@ async def delete_archive(
 
 
 @router.get("/station/{station_id}/rss")
-async def podcast_rss(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def podcast_rss(station_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db)):
     """Public: RSS feed for a station's show archives (podcast format)."""
     # Get station info
     station_result = await db.execute(select(Station).where(Station.id == station_id))
@@ -180,7 +180,7 @@ async def podcast_rss(station_id: uuid.UUID, db: AsyncSession = Depends(get_db))
     <item>
       <title>{escape(a.title)}</title>
       <description>{escape(a.description or '')}</description>
-      <enclosure url="{attr(a.audio_url)}" type="audio/mpeg" />
+      <enclosure url="{attr(a.audio_url)}" length="0" type="audio/mpeg" />
       <pubDate>{pub_date}</pubDate>
       <guid isPermaLink="false">{a.id}</guid>
       {duration}
@@ -188,10 +188,22 @@ async def podcast_rss(station_id: uuid.UUID, db: AsyncSession = Depends(get_db))
       {f'<itunes:image href="{attr(a.cover_image_url)}" />' if a.cover_image_url else ''}
     </item>"""
 
+    # Directories (Apple, validators) need the channel's web page and the feed's own
+    # address. The file size is not stored, and RSS says length="0" when unknown.
+    from app.config import settings
+
+    site = f"{settings.FRONTEND_URL.rstrip('/')}/archives"
+    if settings.BACKEND_PUBLIC_URL:
+        self_url = f"{settings.BACKEND_PUBLIC_URL.rstrip('/')}{request.url.path}"
+    else:
+        self_url = str(request.url)
+
     rss = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>{escape(station.name)}</title>
+    <link>{escape(site)}</link>
+    <atom:link href="{attr(self_url)}" rel="self" type="application/rss+xml" />
     <description>{escape(station.description or f'{station.name} Show Archives')}</description>
     <language>en</language>
     <itunes:author>{escape(station.name)}</itunes:author>

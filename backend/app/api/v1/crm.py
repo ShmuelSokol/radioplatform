@@ -1,13 +1,15 @@
 import logging
 import random
+import time
 import uuid
+from collections import Counter, deque
 from datetime import datetime, timezone
-from collections import Counter
 
-from fastapi import APIRouter, Depends, Header, Query
-from sqlalchemy import select, func, Integer
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from sqlalchemy import Integer, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_ip import client_ip
 from app.core.dependencies import get_db, require_manager
 from app.core.exceptions import (
     BadRequestError,
@@ -55,18 +57,50 @@ async def _generate_pin(db: AsyncSession) -> str:
     raise ConflictError("Could not generate unique PIN — please try again")
 
 
+# A member signs in with a bare 6-digit PIN, so wrong PINs are limited per address
+# (the login and the X-CRM-PIN header share the count): after PIN_FAIL_MAX wrong
+# PINs in PIN_FAIL_WINDOW seconds that address gets 429 until the window passes.
+# Only failures count, so families or a school behind one address are not slowed.
+PIN_FAIL_MAX = 10
+PIN_FAIL_WINDOW = 600
+_pin_failures: dict[str, deque] = {}
+
+
+def _check_pin_attempts(request: Request) -> str:
+    key = client_ip(request) or "?"
+    q = _pin_failures.get(key)
+    if q:
+        cutoff = time.time() - PIN_FAIL_WINDOW
+        while q and q[0] < cutoff:
+            q.popleft()
+        if len(q) >= PIN_FAIL_MAX:
+            raise HTTPException(429, "Too many wrong PINs. Please wait a few minutes and try again.")
+    return key
+
+
+def _pin_failed(key: str) -> None:
+    _pin_failures.setdefault(key, deque()).append(time.time())
+
+
+async def _member_by_pin(request: Request, db: AsyncSession, pin: str) -> CrmMember:
+    key = _check_pin_attempts(request)
+    result = await db.execute(
+        select(CrmMember).where(CrmMember.pin == pin, CrmMember.is_active.is_(True))
+    )
+    member = result.scalar_one_or_none()
+    if not member:
+        _pin_failed(key)
+        raise UnauthorizedError("Invalid PIN or inactive member")
+    return member
+
+
 async def get_crm_member(
+    request: Request,
     x_crm_pin: str = Header(..., alias="X-CRM-PIN"),
     db: AsyncSession = Depends(get_db),
 ) -> CrmMember:
     """Dependency: authenticate a CRM member via PIN header."""
-    result = await db.execute(
-        select(CrmMember).where(CrmMember.pin == x_crm_pin, CrmMember.is_active.is_(True))
-    )
-    member = result.scalar_one_or_none()
-    if not member:
-        raise UnauthorizedError("Invalid PIN or inactive member")
-    return member
+    return await _member_by_pin(request, db, x_crm_pin)
 
 
 # ── Taste Profile ──────────────────────────────────────────────
@@ -195,14 +229,9 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(data: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Login with a 6-digit PIN."""
-    result = await db.execute(
-        select(CrmMember).where(CrmMember.pin == data.pin, CrmMember.is_active.is_(True))
-    )
-    member = result.scalar_one_or_none()
-    if not member:
-        raise UnauthorizedError("Invalid PIN or inactive member")
+    member = await _member_by_pin(request, db, data.pin)
 
     profile = await _compute_taste_profile(db, member.id)
 
@@ -321,14 +350,14 @@ async def my_ratings(
 
 
 @router.get("/raffles/active", response_model=list[RaffleResponse])
-async def active_raffles(db: AsyncSession = Depends(get_db)):
-    """List open raffles."""
+async def active_raffles(station_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db)):
+    """List open raffles. With station_id (the Listen page), only raffles for that
+    station and raffles for every station (no station set)."""
     now = datetime.now(timezone.utc)
-    result = await db.execute(
-        select(Raffle)
-        .where(Raffle.status == "open", Raffle.starts_at <= now, Raffle.ends_at >= now)
-        .order_by(Raffle.ends_at)
-    )
+    q = select(Raffle).where(Raffle.status == "open", Raffle.starts_at <= now, Raffle.ends_at >= now)
+    if station_id is not None:
+        q = q.where(or_(Raffle.station_id.is_(None), Raffle.station_id == station_id))
+    result = await db.execute(q.order_by(Raffle.ends_at))
     raffles = result.scalars().all()
 
     responses = []

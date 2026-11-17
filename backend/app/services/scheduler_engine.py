@@ -792,6 +792,10 @@ class SchedulerEngine:
                 # A paused shiur coming back starts where it stopped
                 "cue_in": max(na_analysis.get("cue_in_seconds", 0) or 0, resume_offset(next_entry)),
                 "replay_gain_db": na_analysis.get("replay_gain_db", 0),
+                # When it cuts in (a hard timed item's time, or a soft one's limit), so
+                # pages start it at that moment themselves instead of a second later
+                # when this message reaches them. None = it follows the item on air.
+                "cut_at": _cut_time(next_entry),
             }
 
             # Pre-queue next track in Liquidsoap for gapless transitions
@@ -885,6 +889,18 @@ class SchedulerEngine:
 
 def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _cut_time(entry) -> str | None:
+    """When a queued timed entry cuts into the item on air, or None if it waits for it."""
+    from app.models.queue_entry import is_soft_timed
+    if entry is None or entry.preempt_at is None:
+        return None
+    if is_soft_timed(entry):
+        if entry.hard_by is None:
+            return None
+        return max(_aware(entry.preempt_at), _aware(entry.hard_by)).isoformat()
+    return _aware(entry.preempt_at).isoformat()
 
 
 # Global scheduler instance
