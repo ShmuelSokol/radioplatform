@@ -13,6 +13,10 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+# Well-known default Icecast passwords: never stream with one
+DEFAULT_SOURCE_PASSWORDS = {"hackme"}
+
+
 class IcecastSourceClient:
     """
     Streams audio to an Icecast server as a source client.
@@ -50,6 +54,11 @@ class IcecastSourceClient:
 
         if not settings.icecast_enabled:
             logger.warning("Icecast not configured (ICECAST_HOST is empty)")
+            return
+
+        if not self.password or self.password in DEFAULT_SOURCE_PASSWORDS:
+            # The shipped default is public knowledge: anyone could take over the mount
+            logger.error("Icecast source not started: set ICECAST_SOURCE_PASSWORD (no default is used)")
             return
 
         self._running = True

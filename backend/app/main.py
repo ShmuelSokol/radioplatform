@@ -244,6 +244,8 @@ async def _add_missing_columns(engine):
         "CREATE INDEX IF NOT EXISTS ix_play_logs_station_start ON play_logs (station_id, start_utc)",
         # Last played per item (control room library): answered from the index alone
         "CREATE INDEX IF NOT EXISTS ix_play_logs_station_asset_start ON play_logs (station_id, asset_id, start_utc)",
+        # Two bug reports sent at once got the same number (max+1); the second now retries
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_bug_reports_number ON bug_reports (number)",
     ]
     await _run_migrations(engine, migrations)
 

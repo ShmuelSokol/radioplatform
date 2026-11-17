@@ -81,7 +81,10 @@ def slot_key_for(at_utc: datetime, zone: ZoneInfo) -> str:
 def clip_hour(asset: Asset) -> int | None:
     """The hour of the day a time announcement says (uploaded or generated clip)."""
     meta = asset.metadata_extra or {}
-    raw = meta.get("time_of_day") or (meta.get("slot_key") or "")[11:13]
+    # Midnight is 0: test for None, not falsy, or the midnight clip has no hour
+    raw = meta.get("time_of_day")
+    if raw is None or raw == "":
+        raw = (meta.get("slot_key") or "")[11:13]
     try:
         return int(raw)
     except (TypeError, ValueError):

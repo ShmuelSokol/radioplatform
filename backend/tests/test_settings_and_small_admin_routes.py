@@ -66,7 +66,7 @@ def test_no_redis_means_no_workers_and_no_errors():
     cleanly, no broker); set -> broker and results derived from it (/1 and /2)."""
     s = Settings(_env_file=None, REDIS_URL="redis://r:6379")
     assert (s.CELERY_BROKER_URL, s.CELERY_RESULT_BACKEND) == ("redis://r:6379/1", "redis://r:6379/2")
-    assert Settings(_env_file=None).CELERY_BROKER_URL == ""
+    assert Settings(_env_file=None, REDIS_URL="").CELERY_BROKER_URL == ""  # CI sets REDIS_URL
     code = (
         "from app.workers.celery_app import celery_app\n"
         "assert type(celery_app).__name__ == '_NoOpCelery'\n"

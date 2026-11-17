@@ -580,3 +580,51 @@ async def test_eighty_stations_in_one_pass(db_session):
     # At most 10 per station (the hour check included), plus a few shared ones per pass
     per_station = (len(queries) - 5) / 80
     assert per_station <= 10, f"{len(queries)} queries for 80 stations"
+
+
+async def _soft_behind_shiur(db, *, left, waited, **config):
+    now = datetime.now(UTC)
+    st = await _station(db, **config)
+    shiur = await _asset(db, "Yoma 79", kind="shiur", duration=49 * 60)
+    weather = await _asset(db, "Weather", kind="spot", duration=40)
+    db.add_all([
+        _entry(st, shiur, status="playing", started_at=now - timedelta(seconds=49 * 60 - left)),
+        _entry(st, weather, position=2, preempt_at=now - timedelta(seconds=waited), timing_mode="soft",
+               source="block"),
+    ])
+    await db.commit()
+    return st, now
+
+
+@pytest.mark.asyncio
+async def test_soft_item_that_should_have_paused_the_shiur_is_reported(db_session):
+    """F-SOFTPAUSE-17: the 7:30 weather still waiting 2 min later behind a shiur that had
+    19 min left at 7:30 is reported (it should have paused the shiur)."""
+    st, now = await _soft_behind_shiur(db_session, left=19 * 60, waited=120)
+    found = await AirWatch().check_station(db_session, st, now)
+    assert [f.title for f in found if f.kind == "late_timed"] == ["Weather is waiting behind Yoma 79"]
+
+
+@pytest.mark.asyncio
+async def test_soft_item_waiting_for_a_nearly_finished_shiur_is_fine(db_session):
+    """Under 5 min left at its time (4 min then, 2 min now): waiting is the rule, no alarm."""
+    st, now = await _soft_behind_shiur(db_session, left=2 * 60, waited=120)
+    assert [f for f in await AirWatch().check_station(db_session, st, now) if f.kind == "late_timed"] == []
+
+
+@pytest.mark.asyncio
+async def test_soft_item_waiting_on_a_wait_station_is_fine(db_session):
+    st, now = await _soft_behind_shiur(db_session, left=19 * 60, waited=120, timed_during_long_items="wait")
+    assert [f for f in await AirWatch().check_station(db_session, st, now) if f.kind == "late_timed"] == []
+
+
+@pytest.mark.asyncio
+async def test_soft_item_waiting_with_hs_off_is_fine(db_session):
+    st, now = await _soft_behind_shiur(db_session, left=19 * 60, waited=120, hard_start=False)
+    assert [f for f in await AirWatch().check_station(db_session, st, now) if f.kind == "late_timed"] == []
+
+
+@pytest.mark.asyncio
+async def test_soft_item_just_due_is_given_time(db_session):
+    st, now = await _soft_behind_shiur(db_session, left=19 * 60, waited=10)
+    assert [f for f in await AirWatch().check_station(db_session, st, now) if f.kind == "late_timed"] == []

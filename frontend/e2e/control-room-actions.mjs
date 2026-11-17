@@ -238,6 +238,63 @@ async function loop(browser) {
   await ctx.close();
 }
 
+// ── Panic arming (F-MODES-55) and its answers (F-MODES-14) ─────────────
+async function panic(browser, contextOpts, tag) {
+  const station = makeStation();
+  const { ctx, page, errors } = await openRoom(browser, contextOpts, station);
+  const btn = page.locator('[data-testid=panic]:visible').first();
+  // On a phone Panic sits under "More"
+  const showPanic = async () => { if (!(await btn.count())) await page.getByRole('button', { name: /More/ }).first().click(); await btn.waitFor({ timeout: 5000 }); };
+  await showPanic();
+  const panics = () => writes(station, /\/queue\/panic$/).length;
+  const was = station.playing().asset_id;
+  // Rapid taps right after the button appears: the first arms, the rest are one double-click
+  await btn.click(); await btn.click({ delay: 0 }); await btn.click({ delay: 0 });
+  await sleep(300);
+  check(`${tag}: three taps within 0.3 s send no Panic (F-MODES-55)`, panics() === 0 && station.playing().asset_id === was, `${panics()} sent`);
+  check(`${tag}: and the button still says Tap again`, (await btn.innerText()).includes('Tap again'), await btn.innerText());
+  // The 4 s window runs out: it disarms and the next tap only arms again
+  await sleep(4200);
+  check(`${tag}: after 4 s it disarms by itself`, (await btn.innerText()).includes('Panic'), await btn.innerText());
+  await btn.click();
+  await sleep(150);
+  check(`${tag}: a single tap after disarming sends nothing`, panics() === 0);
+  // A separate second tap cuts and says so (warn toast)
+  await sleep(500);
+  await btn.click();
+  await page.getByTestId('toast').waitFor({ timeout: 3000 }).catch(() => {});
+  check(`${tag}: second tap 0.5 s later sends one Panic`, panics() === 1, `${panics()} sent`);
+  check(`${tag}: Panic toast says it cut and started the next item`, (await toastText(page)).includes('Panic: cut what was on air'), await toastText(page));
+  check(`${tag}: the next item is on air`, station.playing() && station.playing().asset_id !== was);
+  await page.getByTestId('toast').getByRole('button', { name: 'Dismiss' }).click().catch(() => {});
+  // Engine not answering: red toast with the server's words (F-MODES-14)
+  station.panicReply = { message: 'The playout engine did not respond' };
+  await btn.click(); await sleep(500); await btn.click();
+  await page.getByTestId('toast').waitFor({ timeout: 3000 }).catch(() => {});
+  const t = await toastText(page);
+  const cls = await page.getByTestId('toast').getAttribute('class').catch(() => '');
+  check(`${tag}: engine silent -> toast "Panic: The playout engine did not respond" (F-MODES-14)`, t.includes('Panic: The playout engine did not respond'), t);
+  check(`${tag}: and that toast is red`, /red/.test(cls || ''), cls);
+  // Station switch disarms
+  station.panicReply = null;
+  const n = panics();
+  await btn.click();
+  const sel = page.locator('select[aria-label=Station]:visible').first();
+  if (!(await sel.count())) await page.getByRole('button', { name: /More/ }).first().click().catch(() => {});
+  if (await sel.count()) {
+    await sel.selectOption('st-2');
+    await sleep(400);
+    await sel.selectOption(station.SID);
+    await sleep(800);
+    await showPanic();
+    await btn.click();
+    await sleep(300);
+    check(`${tag}: switching station disarms (next tap only arms)`, panics() === n, `${panics() - n} sent`);
+  }
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Toasts: ok 2.5 s, warn 6 s, ✕ ─────────────
 async function toasts(browser) {
   const tag = 'toasts';
@@ -851,6 +908,7 @@ try {
   if (run('refused')) await nextRefused(browser);
   if (run('loop')) await loop(browser);
   if (run('toasts')) await toasts(browser);
+  if (run('panic')) { await panic(browser, DESKTOP, 'panic desktop'); await panic(browser, PHONE, 'panic iPhone'); }
   if (run('badges')) await badges(browser);
   if (run('tabs')) await oneSoundingTab(browser);
   if (run('rows')) await queueRows(browser);

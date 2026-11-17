@@ -118,10 +118,10 @@ export function useRemoveRating() {
 
 // ── Raffles (public) ──────────────────────────────────────────
 
-export function useActiveRaffles() {
+export function useActiveRaffles(stationId?: string) {
   return useQuery({
-    queryKey: ['crm', 'active-raffles'],
-    queryFn: getActiveRaffles,
+    queryKey: ['crm', 'active-raffles', stationId ?? null],
+    queryFn: () => getActiveRaffles(stationId),
   });
 }
 

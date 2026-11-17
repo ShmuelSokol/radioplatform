@@ -546,6 +546,7 @@ export default function Assets() {
                 <div>
                   <div className={`text-sm font-medium mb-3 ${trimStatus.status === 'completed' ? 'text-green-600' : 'text-red-600'}`}>
                     {trimStatus.status === 'completed' ? 'Complete!' : 'Failed'}
+                    {trimStatus.detail && <div className="font-normal text-gray-600 mt-1">{trimStatus.detail}</div>}
                   </div>
                   <div className="text-sm text-gray-700 space-y-1">
                     <div>Trimmed: <strong>{trimStatus.trimmed}</strong></div>

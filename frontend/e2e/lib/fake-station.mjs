@@ -173,6 +173,7 @@ export function makeStation(opts = {}) {
     get queue() { return queue; },
     set queue(q) { queue = q; },
     skipReply: null,          // extra fields for the skip answer: { protected: true } ...
+    panicReply: null,         // answer for /queue/panic instead of cutting, e.g. { message: 'The playout engine did not respond' }
     failNext: new Set(),      // paths that answer 500 once
     playout: opts.playout || { stations: {}, default: { mode: 'browser' } },
     weather: opts.weather ?? { time_url: '/__tone/tc.wav', weather_url: '/__tone/wx.wav' },
@@ -329,6 +330,16 @@ export function makeStation(opts = {}) {
       next.status = 'playing'; next.started_at = new Date().toISOString();
       announce();
       return { now_playing: next.asset_id };
+    }
+    if (path === `${q}/panic`) {
+      if (s.panicReply) return { ...s.panicReply, queue: s.view() };
+      const cur = playing();
+      if (cur) cur.status = 'skipped';
+      loopId = null;
+      const next = pending()[0];
+      if (next) { next.status = 'playing'; next.started_at = new Date().toISOString(); }
+      announce({ change_fade_seconds: 0 });
+      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view() };
     }
     if (path === `${q}/skip`) {
       if (s.skipReply) return { message: 'Kept', ...s.skipReply, queue: s.view() };
