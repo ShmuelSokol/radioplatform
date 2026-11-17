@@ -158,21 +158,18 @@ class SchedulingService:
             if made.tzinfo is None:
                 made = made.replace(tzinfo=timezone.utc)
             made = made.astimezone(local.tzinfo).replace(tzinfo=None) if local.tzinfo else made.replace(tzinfo=None)
-        for back in range(9):
+        # From tomorrow back 8 days: a start with a sun offset can fall on the
+        # neighbouring calendar day (sunset + 90 min after midnight).
+        for back in range(-1, 9):
             day = (local - timedelta(days=back)).date()
             if not self._recurs_on(block, day):
                 continue
-            start = block.start_time
-            if block.start_sun_event and station:
-                start = self._resolve_sun_time(
-                    block.start_sun_event, block.start_sun_offset or 0, station, day,
-                    fallback=block.start_time,
-                )
-            started = datetime.combine(day, start)
+            started = self._block_start(block, day, station)
+            if started > now:
+                continue
             if made is not None and started < made:
                 return None
-            if started <= now:
-                return started
+            return started
         return None
 
     @staticmethod
@@ -194,70 +191,100 @@ class SchedulingService:
             return True
         return True
 
-    def _resolve_sun_time(
-        self, sun_event: SunEvent, offset_minutes: int, station, at_date, fallback: time | None = None
-    ) -> time:
-        """Resolve a sun-relative time to a concrete time value.
+    # Stations in Israel without saved coordinates use Jerusalem's sun times.
+    ISRAEL_ZONES = ("Asia/Jerusalem", "Asia/Tel_Aviv")
+    JERUSALEM = (31.7683, 35.2137)
 
-        Where the sun does not rise or set that day (polar summer or winter) astral
-        raises; the block's fixed clock time (`fallback`) is used instead, so one
-        block cannot break block resolution for the whole station."""
-        from app.services.sun_service import get_sun_times, offset_sun_time
+    def _sun_moment(
+        self, sun_event: SunEvent, offset_minutes: int, station, day, fallback: time | None = None
+    ) -> datetime:
+        """When a sun-relative time falls for `day`, as a naive station-time datetime.
+
+        The offset is added to the full date and time, so "sunset + 90 min" after a
+        23:00 sunset is 00:30 the NEXT day (it used to wrap to 00:30 of the same day).
+
+        Falls back to the block's clock time (`fallback`) where the sun does not rise
+        or set that day (polar summer or winter), and where the station has no
+        coordinates and is not in Israel (it used to get Jerusalem's sunset, so a New
+        York station's sunset block started in the morning)."""
+        from app.services.sun_service import get_sun_times
 
         lat = station.latitude if station else None
         lon = station.longitude if station else None
-        tz = station.timezone if station else "UTC"
+        tz = (station.timezone if station else None) or "UTC"
 
         if lat is None or lon is None:
-            # Default to Jerusalem if no coords
-            lat, lon = 31.7683, 35.2137
+            if tz in self.ISRAEL_ZONES or fallback is None:
+                lat, lon = self.JERUSALEM
+            else:
+                logger.warning("Station %s has no latitude/longitude: %s block uses its clock time %s",
+                               getattr(station, "name", None), sun_event.value, fallback)
+                return datetime.combine(day, fallback)
 
         try:
-            times = get_sun_times(lat, lon, tz, at_date)
+            times = get_sun_times(lat, lon, tz, day)
         except ValueError as exc:
             if fallback is None:
                 raise
             logger.warning("No %s at %s, %s on %s (%s): using the block's clock time %s",
-                           sun_event.value, lat, lon, at_date, exc, fallback)
-            return fallback
-        base_time = times.get(sun_event.value, times["sunset"]).time()
-        return offset_sun_time(base_time, offset_minutes or 0)
+                           sun_event.value, lat, lon, day, exc, fallback)
+            return datetime.combine(day, fallback)
+        base = times.get(sun_event.value, times["sunset"]).replace(tzinfo=None)
+        noon = times["noon"].replace(tzinfo=None)
+        # Far north astral can give an evening time from the night before (dusk at
+        # 00:27 on the same date) or a morning time from the next night; keep the
+        # evening events after this day's noon and the morning events before it.
+        if sun_event in (SunEvent.SUNSET, SunEvent.DUSK) and base < noon:
+            base += timedelta(days=1)
+        elif sun_event in (SunEvent.SUNRISE, SunEvent.DAWN) and base > noon:
+            base -= timedelta(days=1)
+        return base + timedelta(minutes=offset_minutes or 0)
+
+    def _resolve_sun_time(
+        self, sun_event: SunEvent, offset_minutes: int, station, at_date, fallback: time | None = None
+    ) -> time:
+        """The clock time of a sun-relative time (see _sun_moment)."""
+        return self._sun_moment(sun_event, offset_minutes, station, at_date, fallback).time()
+
+    def _block_start(self, block: ScheduleBlock, day, station=None) -> datetime:
+        """When this block starts for the recurrence on `day` (naive station time)."""
+        if block.start_sun_event and station:
+            return self._sun_moment(block.start_sun_event, block.start_sun_offset or 0, station, day,
+                                    fallback=block.start_time)
+        return datetime.combine(day, block.start_time)
+
+    def _block_window(self, block: ScheduleBlock, day, station=None) -> tuple[datetime, datetime]:
+        """Start and end of this block for the recurrence on `day` (naive station time).
+
+        An end before the start is the next morning (22:00-02:00), so the part after
+        midnight belongs to the day the block started on, and a sun offset that crosses
+        midnight keeps the block its real length."""
+        start = self._block_start(block, day, station)
+        if block.end_sun_event and station:
+            end = self._sun_moment(block.end_sun_event, block.end_sun_offset or 0, station, day,
+                                   fallback=block.end_time)
+        else:
+            end = datetime.combine(day, block.end_time)
+        if end < start:
+            end += timedelta(days=1)
+        return start, end
 
     def _block_matches_time(self, block: ScheduleBlock, at_time: datetime, station=None) -> bool:
-        """Check if a schedule block is active at the given time."""
-        current_time = at_time.time()
-        current_date = at_time.date()
+        """Check if a schedule block is active at the given time (station local time).
 
-        # Resolve start/end times (may be sun-relative)
-        effective_start = block.start_time
-        effective_end = block.end_time
-
-        if block.start_sun_event and station:
-            effective_start = self._resolve_sun_time(
-                block.start_sun_event, block.start_sun_offset or 0, station, current_date,
-                fallback=block.start_time,
-            )
-        if block.end_sun_event and station:
-            effective_end = self._resolve_sun_time(
-                block.end_sun_event, block.end_sun_offset or 0, station, current_date,
-                fallback=block.end_time,
-            )
-
-        # Check time range (handle overnight blocks)
-        recurrence_day = current_date
-        if effective_start <= effective_end:
-            if not (effective_start <= current_time < effective_end):
-                return False
-        else:
-            if not (current_time >= effective_start or current_time < effective_end):
-                return False
-            if current_time < effective_end:
-                # After midnight of an overnight block (Friday 22:00-02:00 at 01:00 on
-                # Saturday): it is still the day the block started. Checking the new day
-                # stopped a Friday-only block at midnight.
-                recurrence_day = current_date - timedelta(days=1)
-
-        return self._recurs_on(block, recurrence_day)
+        Looks at the recurrences of yesterday (overnight blocks) and today, and for a
+        sun-relative block also tomorrow (sunrise - 60 min can fall before midnight)."""
+        now = at_time.replace(tzinfo=None)
+        today = now.date()
+        sun = bool(station and (block.start_sun_event or block.end_sun_event))
+        for back in ((-1, 0, 1) if sun else (0, 1)):
+            day = today - timedelta(days=back)
+            if not self._recurs_on(block, day):
+                continue
+            start, end = self._block_window(block, day, station)
+            if start <= now < end:
+                return True
+        return False
 
     async def get_next_asset_for_block(
         self, block: ScheduleBlock, station_id: UUID | str | None = None
