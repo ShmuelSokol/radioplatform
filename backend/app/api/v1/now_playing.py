@@ -18,7 +18,7 @@ router = APIRouter(prefix="/now-playing", tags=["now-playing"])
 
 @router.get("/{station_id}", response_model=Optional[NowPlaying])
 async def get_now_playing(
-    station_id: UUID | str,
+    station_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """Get current now-playing state for a station.
@@ -41,7 +41,7 @@ async def get_now_playing(
 
 @router.get("/{station_id}/active-block")
 async def get_active_block(
-    station_id: UUID | str,
+    station_id: UUID,
     at_time: Optional[datetime] = None,
     db: AsyncSession = Depends(get_db),
 ):

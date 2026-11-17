@@ -1,10 +1,11 @@
 """Show archive + podcast RSS feed API."""
 import uuid
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.dependencies import get_db, require_manager
-from app.core.exceptions import NotFoundError
+from app.core.dependencies import get_current_user, get_db, may_operate_station, require_manager
+from app.core.exceptions import ForbiddenError, NotFoundError, UnauthorizedError
 from app.models.show_archive import ShowArchive
 from app.models.station import Station
 from app.models.user import User
@@ -13,6 +14,36 @@ from app.schemas.show_archive import (
 )
 
 router = APIRouter(prefix="/archives", tags=["archives"])
+
+
+async def _sees_unpublished(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    db: AsyncSession = Depends(get_db),
+) -> bool:
+    """Listeners see published archives only; a manager (the Archives admin
+    screen) also sees drafts. A missing or bad login is simply a listener."""
+    if credentials is None:
+        return False
+    try:
+        user = await get_current_user(request, credentials, db)
+    except UnauthorizedError:
+        return False
+    return user.role.value in ("admin", "manager")
+
+
+async def _check_station(db: AsyncSession, user: User, station_id) -> uuid.UUID:
+    """The archive's station must exist and the login must be allowed on it."""
+    try:
+        key = uuid.UUID(str(station_id))
+    except ValueError:
+        raise NotFoundError("Station not found")
+    station = await db.get(Station, key)
+    if station is None:
+        raise NotFoundError("Station not found")
+    if not may_operate_station(user, station):
+        raise ForbiddenError("Your login is not set up to operate this station")
+    return key
 
 # --- Admin CRUD ---
 
@@ -23,7 +54,9 @@ async def create_archive(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    archive = ShowArchive(**body.model_dump())
+    values = body.model_dump()
+    values["station_id"] = await _check_station(db, _user, body.station_id)
+    archive = ShowArchive(**values)
     db.add(archive)
     await db.flush()
     await db.refresh(archive)
@@ -36,10 +69,14 @@ async def list_archives(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    everything: bool = Depends(_sees_unpublished),
 ):
-    """Public: list published archives. Admin sees all."""
-    q = select(ShowArchive).where(ShowArchive.is_published == True)
-    count_q = select(func.count(ShowArchive.id)).where(ShowArchive.is_published == True)
+    """Public: list published archives. Managers see drafts too."""
+    q = select(ShowArchive)
+    count_q = select(func.count(ShowArchive.id))
+    if not everything:
+        q = q.where(ShowArchive.is_published == True)
+        count_q = count_q.where(ShowArchive.is_published == True)
     if station_id:
         q = q.where(ShowArchive.station_id == station_id)
         count_q = count_q.where(ShowArchive.station_id == station_id)
@@ -52,10 +89,14 @@ async def list_archives(
 
 
 @router.get("/{archive_id}", response_model=ShowArchiveInDB)
-async def get_archive(archive_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_archive(
+    archive_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    everything: bool = Depends(_sees_unpublished),
+):
     result = await db.execute(select(ShowArchive).where(ShowArchive.id == archive_id))
     archive = result.scalar_one_or_none()
-    if not archive:
+    if not archive or (not archive.is_published and not everything):
         raise NotFoundError("Archive not found")
     return archive
 
@@ -71,7 +112,9 @@ async def update_archive(
     archive = result.scalar_one_or_none()
     if not archive:
         raise NotFoundError("Archive not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    await _check_station(db, _user, archive.station_id)
+    changes = body.model_dump(exclude_unset=True)
+    for k, v in changes.items():
         setattr(archive, k, v)
     await db.flush()
     await db.refresh(archive)
@@ -88,6 +131,7 @@ async def delete_archive(
     archive = result.scalar_one_or_none()
     if not archive:
         raise NotFoundError("Archive not found")
+    await _check_station(db, _user, archive.station_id)
     await db.delete(archive)
 
 
@@ -95,7 +139,7 @@ async def delete_archive(
 
 
 @router.get("/station/{station_id}/rss")
-async def podcast_rss(station_id: str, db: AsyncSession = Depends(get_db)):
+async def podcast_rss(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """Public: RSS feed for a station's show archives (podcast format)."""
     # Get station info
     station_result = await db.execute(select(Station).where(Station.id == station_id))

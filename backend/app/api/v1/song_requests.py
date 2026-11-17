@@ -267,7 +267,7 @@ async def delete_request(
 
 # Public: get pending requests count for a station (shown on listen page)
 @router.get("/station/{station_id}/count")
-async def get_request_count(station_id: str, db: AsyncSession = Depends(get_db)):
+async def get_request_count(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """Public: count pending song requests for a station."""
     result = await db.execute(
         select(func.count(SongRequest.id)).where(
