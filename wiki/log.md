@@ -224,3 +224,5 @@ UPDATE 2026-11-17 audio-engine.md warm-up retried every 250 ms and plays muted u
 INGEST 2026-11-17 streaming-architecture.md timed lane closed after its last item was fetched (length() leaves fetched items out): Daf Yomi missed at 18:00Z; prefetch=10, is_ready gate, follow-up take-over for a late file
 INGEST 2026-11-17 streaming-architecture.md range-only analysis never measured loudness (-18/0 made up); now sampled from 3 pieces, needs_analysis redoes them; limiter -2 dB
 INGEST 2026-11-17 streaming-architecture.md blackout starting now on an engine station: silence queued pending + engine flush/skip (song used to play into the blackout)
+INGEST 2026-11-17 audio-engine.md level meters set React state every frame: control room and Listen re-drew 60x a second; now 30 steps, only on change, off on Listen (`meter` arg)
+INGEST 2026-11-17 streaming-architecture.md engine commands share one kept httpx client (30 s keep-alive) instead of a TLS handshake per Next

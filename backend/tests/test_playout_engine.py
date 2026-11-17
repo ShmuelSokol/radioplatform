@@ -487,7 +487,7 @@ async def test_each_listed_station_has_its_own_engine(engine_station, monkeypatc
         async def __aexit__(self, *a):
             return False
 
-        async def post(self, url, json=None, headers=None):
+        async def post(self, url, json=None, headers=None, timeout=None):
             calls.append(url)
             return FakeResp()
 
@@ -496,6 +496,40 @@ async def test_each_listed_station_has_its_own_engine(engine_station, monkeypatc
     monkeypatch.setattr(playout_engine, "_command", _real_command)
     assert await playout_engine.engine_flush(other)
     assert calls == [f"https://stream.example.com/control/{other}/flush"]
+
+
+@pytest.mark.asyncio
+async def test_commands_reuse_one_connection_to_the_engine(monkeypatch):
+    """Each command used to open a new client: a TCP + TLS handshake to the engine server
+    before every Next. One client is kept and its connection reused."""
+    import httpx
+
+    made = []
+    real = httpx.AsyncClient
+
+    def handler(request):
+        return httpx.Response(200, json={"ok": True})
+
+    class Counting(real):
+        def __init__(self, **kw):
+            made.append(kw)
+            super().__init__(transport=httpx.MockTransport(handler))
+
+    await playout_engine.close_client()
+    monkeypatch.setattr(httpx, "AsyncClient", Counting)
+    monkeypatch.setattr(playout_engine, "_command", _real_command)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "https://stream.example.com/control")
+    station = uuid.uuid4()
+    assert await playout_engine.engine_flush(station)
+    assert await playout_engine.engine_skip(station, 0.5)
+    assert (await playout_engine.engine_status(station)) == {"ok": True}
+    assert len(made) == 1
+    assert made[0]["limits"].keepalive_expiry == 30.0
+    # A closed client (shutdown, or an error that closed it) is replaced, not reused
+    await playout_engine.close_client()
+    assert await playout_engine.engine_flush(station)
+    assert len(made) == 2
+    await playout_engine.close_client()
 
 
 @pytest.mark.asyncio

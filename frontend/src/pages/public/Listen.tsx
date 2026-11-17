@@ -331,6 +331,8 @@ export default function Listen() {
     useStream ? null : wsNextAsset?.audio_url ?? null,
     wsNowPlaying?.started_at ?? null,
     wsNowPlaying?.change_fade_seconds ?? null,
+    true, true,
+    false, // no level meters on this page
   );
 
   // Fetch active live show status (still uses polling — shows don't change often)

@@ -183,13 +183,47 @@ def token_ok(presented: str | None) -> bool:
 # ── Commands to the engine ───────────────────────────────────────────────────
 
 
+# One connection to the engine, kept open between commands. A new client per command
+# paid a TCP + TLS handshake to the engine server on every Next, Fade and timed
+# hand-over before the command itself could leave.
+_KEEPALIVE_SECONDS = 30.0  # below the engine's nginx keep-alive (75 s), so we close first
+_shared_client: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
+
+
+def _client() -> httpx.AsyncClient:
+    global _shared_client
+    loop = asyncio.get_running_loop()
+    held = _shared_client
+    if (
+        held is None
+        or held[0] is not loop
+        or type(held[1]) is not httpx.AsyncClient
+        or getattr(held[1], "is_closed", False)
+    ):
+        _shared_client = held = (loop, httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=8, keepalive_expiry=_KEEPALIVE_SECONDS),
+        ))
+    return held[1]
+
+
+async def close_client() -> None:
+    """Close the kept connection (backend shutdown)."""
+    global _shared_client
+    held, _shared_client = _shared_client, None
+    if held is not None and held[0] is asyncio.get_running_loop():
+        try:
+            await held[1].aclose()
+        except Exception:
+            pass
+
+
 async def _command(path: str, payload: dict | None = None, *, station_id) -> bool:
     url = settings.engine_control_url(station_id) + path
     try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
-            resp = await client.post(
-                url, json=payload or {}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN}
-            )
+        resp = await _client().post(
+            url, json=payload or {}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN},
+            timeout=4.0,
+        )
         if resp.status_code != 200:
             logger.warning("Playout engine %s -> HTTP %s", path, resp.status_code)
             return False
@@ -203,8 +237,9 @@ async def engine_status(station_id) -> dict | None:
     """What the engine says is on air (its /status), or None when it does not answer."""
     url = settings.engine_control_url(station_id) + "/status"
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.post(url, json={}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN})
+        resp = await _client().post(
+            url, json={}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN}, timeout=3.0,
+        )
         if resp.status_code != 200:
             return None
         data = resp.json()
