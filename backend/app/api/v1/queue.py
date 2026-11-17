@@ -1578,6 +1578,21 @@ async def get_last_played(
     return {"last_played": {asset_id: ts.isoformat() for asset_id, ts in rows.items()}}
 
 
+def _station_entry(station_id, entry_id):
+    """A queue entry of THIS station. Looking entries up by id alone let anyone allowed
+    on one station move or delete another station's entries (the protected FM feed
+    included) by sending their ids to their own station's URL."""
+    return select(QueueEntry).where(QueueEntry.id == entry_id, QueueEntry.station_id == station_id)
+
+
+async def _require_assets(db: AsyncSession, asset_ids) -> None:
+    """404 for an unknown asset, instead of a database error (500) on insert."""
+    wanted = set(asset_ids)
+    found = set((await db.execute(select(Asset.id).where(Asset.id.in_(wanted)))).scalars().all())
+    if wanted - found:
+        raise NotFoundError("Asset not found")
+
+
 @router.post("/add", status_code=201)
 async def add_to_queue(
     station_id: uuid.UUID,
@@ -1585,6 +1600,7 @@ async def add_to_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    await _require_assets(db, [body.asset_id])
     result = await db.execute(
         select(func.max(QueueEntry.position))
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
@@ -1607,6 +1623,7 @@ async def bulk_add_to_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    await _require_assets(db, body.asset_ids)
     result = await db.execute(
         select(func.max(QueueEntry.position))
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
@@ -1632,6 +1649,7 @@ async def play_next(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    await _require_assets(db, [body.asset_id])
     await db.execute(
         update(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
@@ -2085,7 +2103,7 @@ async def move_up(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Move a queue entry up (lower position number)."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    result = await db.execute(_station_entry(station_id, body.entry_id))
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2115,7 +2133,7 @@ async def move_down(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Move a queue entry down (higher position number)."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    result = await db.execute(_station_entry(station_id, body.entry_id))
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2143,7 +2161,7 @@ async def reorder_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    result = await db.execute(_station_entry(station_id, body.entry_id))
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
@@ -2266,7 +2284,7 @@ async def reorder_dnd(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Drag-and-drop reorder: move entry to new position with rule validation."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    result = await db.execute(_station_entry(station_id, body.entry_id))
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2320,7 +2338,7 @@ async def remove_from_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == entry_id))
+    result = await db.execute(_station_entry(station_id, entry_id))
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
