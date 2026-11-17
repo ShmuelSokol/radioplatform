@@ -192,6 +192,21 @@ slow phone still fetching it); its tail is cut instead. Scenarios
 `second-item-of-a-timed-group-from-the-top` and `...-slow-file` (harness `cut` field =
 Listen's `next_asset.cut_at`); test `test_next_item_of_the_group_on_air_has_no_cut_time`.
 
+**Start-up delay inside the element.** Live at 16:00Z 2026-11-17 the pre-arm called
+play() on time, but the element only began sounding 1.0 s later (its `playing` event),
+on two stations; the song had already faded at +0.4 s. A few seconds before a hard
+item's time (`PREARM_WARM_AHEAD_MS = 3000`) the page now plays the pre-loaded item on
+the idle deck silently until `playing`, then pauses it and seeks back to its cue-in, so
+the start-up is done before the due time (`window.__kbrTimedWarm`, console
+`[kbr] timed warm-up`). On any item change the item on air keeps playing until the new
+one fires `playing` (at most `OUT_WAITS_FOR_IN_MAX_MS = 1500`); each start's real
+latency is in `window.__kbrLastStart` (`[kbr] item sounding`). Also fixed: the silent
+unlock play on the decks after Listen left the idle deck playing the pre-loaded item
+silently when the pre-loader got there first. Rig: `coldStartMs` emulates a first
+play that sounds late; scenario `hard-time-check-slow-starting-file-on-time` (1.1 s
+late with 0.6 s silence without the warm-up). The emulation is a model of what was
+seen live, not the cause itself; check `playingAfterMs` live.
+
 ## Server clock, not the device clock (2026-11-17)
 Every position and due time (`started_at`, `preempt_at`, `ends_at`, a push's `at`) is server time, so the player compares them with `serverNow()` from `src/lib/serverClock.ts`, never `Date.now()`. The offset is measured from `server_time` in the release policy (`lib/appUpdate.ts`, on connect and every minute). Before, a PC 20 s fast joined every song 20 s in and faded the song for the hourly time check 20 s early. Used by useAudioEngine (live position, timed fades, crossfade, playNextNow), useNowPlayingWS (overdue check), Listen, Dashboard, `controlroom/timing.ts nextCut` and the transport clock. Checked by `e2e/listen-page.mjs` ONLY=clock (device clock 20 s fast and 30 s slow).
 

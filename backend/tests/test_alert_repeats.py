@@ -42,7 +42,7 @@ async def test_repeats_update_the_open_alert(db_session: AsyncSession):
     assert other_station.id != a.id and other_title.id != a.id
     assert a.context["repeats"] == 3 and a.context["last_message"] == "m3"
     assert a.severity == AlertSeverity.CRITICAL                     # a worse repeat raises it
-    assert notify.await_count == 3                                  # only the three new alerts notify
+    assert notify.await_count == 4                                  # three new alerts + the escalation to critical
     assert await _count(db_session) == 3
 
 
