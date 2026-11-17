@@ -396,6 +396,28 @@ def analyse_wav(path: Path, t0: float, start: float, end: float) -> list[tuple[f
     return out
 
 
+def tone_db(path: Path, t0: float, start: float, end: float, freq: float) -> float:
+    """Level (dBFS) of one frequency between start and end (Goertzel), whatever else plays."""
+    import math
+    with wave.open(str(path), "rb") as w:
+        rate, ch = w.getframerate(), w.getnchannels()
+        first = max(0, int((start - t0) * rate))
+        last = min(w.getnframes(), int((end - t0) * rate))
+        w.setpos(first)
+        frames = array("h", w.readframes(last - first))
+    left = frames[::ch]
+    if not left:
+        return -120.0
+    coeff = 2 * math.cos(2 * math.pi * freq / rate)
+    s1 = s2 = 0.0
+    for x in left:
+        s1, s2 = x + coeff * s1 - s2, s1
+    power = s1 * s1 + s2 * s2 - coeff * s1 * s2
+    amp = 2 * math.sqrt(max(power, 0.0)) / len(left)  # sine amplitude
+    rms = amp / math.sqrt(2)
+    return 20 * math.log10(rms / 32768) if rms > 0 else -120.0
+
+
 def longest_silence(windows, threshold_db: float = -45.0) -> tuple[float, float | None]:
     run, best, at, run_from = 0.0, 0.0, None, None
     for t, db, _ in windows:
@@ -1253,10 +1275,40 @@ async def sc_track_level(h: Harness) -> None:
     loud = _mean_db(h.heard(a + 8, a + 18))
     quiet = _mean_db(h.heard(b + 4, b + 10))
     diff = (loud - quiet) if loud is not None and quiet is not None else None
+    if diff is None or not 4.5 <= diff <= 7.5:
+        for label, t0 in (("unity", a), ("-6 dB", b)):
+            ws = h.heard(t0 - 1, t0 + 20)
+            log(f"    {label} item from its start: " + " ".join(
+                f"{t - t0:+.1f}:{db:.0f}dB/{f:.0f}Hz" for t, db, f in ws[::5]))
     h.check(name, diff is not None and 4.5 <= diff <= 7.5,
             f"-6 dB applied: unity {loud if loud is None else round(loud, 1)} dBFS, "
             f"-6 dB item {quiet if quiet is None else round(quiet, 1)} dBFS (difference "
             f"{diff if diff is None else round(diff, 1)} dB)")
+
+
+async def sc_level_song_muted(h: Harness) -> None:
+    """V1-4b: a song with a level of its own (liq_amplify) is still muted under a hard time
+    check: the mute and fade gains are not replaced by the track's level."""
+    name = "song_with_level_muted_under_time_check"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song3quiet", {}), ("song5", {}), ("song6", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    b = await h.wait_on_air("song3quiet", 60)
+    if b is None:
+        h.check(name, False, "song3quiet never went on air")
+        return
+    t1 = at(12)
+    await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + TONES["time"][1] + 3)
+    time.sleep(1.5)
+    song_hz = TONES["song3"][0]
+    before = tone_db(h.stack.wav, h.stack.wav_t0, t1.timestamp() - 6, t1.timestamp() - 2, song_hz)
+    under = tone_db(h.stack.wav, h.stack.wav_t0, t1.timestamp() + 1, t1.timestamp() + 5, song_hz)
+    clock = tone_db(h.stack.wav, h.stack.wav_t0, t1.timestamp() + 1, t1.timestamp() + 5, TONES["time"][0])
+    h.check(name, clock > -40, f"time check heard ({clock:.1f} dBFS)")
+    h.check(name, before > -45 and under < before - 30,
+            f"song at {before:.1f} dBFS before, {under:.1f} dBFS under the time check")
 
 
 SCENARIOS = {
@@ -1284,6 +1336,7 @@ SCENARIOS = {
     "cue_points": sc_cue_points,
     "icecast_output": sc_icecast_output,
     "track_level": sc_track_level,
+    "song_with_level_muted_under_time_check": sc_level_song_muted,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
