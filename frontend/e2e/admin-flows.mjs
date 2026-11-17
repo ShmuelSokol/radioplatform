@@ -279,6 +279,7 @@ async function setup() {
     form.append('artist', `E2E Artist ${i}`);
     FX.assets.push(await api('POST', '/assets/upload', { token: T, form }));
   }
+  FX.toneFile = makeTone(path.join(TMP, 'play.mp3'), 8, 523);
   FX.takeover = await api('POST', '/stations', { token: T, body: { name: `E2E Takeover ${RUN}`, timezone: 'UTC' } });
   FX.schedule = await api('POST', '/schedules', { token: T, body: { name: `E2E Base Schedule ${RUN}`, station_id: st.id } });
   const start = new Date(Date.now() + 3 * 3600e3), end = new Date(Date.now() + 4 * 3600e3);
@@ -1517,6 +1518,128 @@ section('sponsors', async () => {
     await step(`F-SPONSORS-2 ${view}: Client Portal link opens the sponsor login`, async () => {
       await page.getByRole('link', { name: 'Client Portal' }).click();
       await waitPath(page, '/sponsor/login');
+    }, page);
+    await closePage(page);
+  }
+});
+
+// Audio files: with local storage the backend hands out a relative /api/v1/assets/:id/download
+// URL (Supabase gives a full one in production), which the site resolves against itself.
+// Serve a real MP3 there so players can play.
+async function serveAudio(page) {
+  const mp3 = fs.readFileSync(FX.toneFile);
+  await page.route(/\/api\/v1\/assets\/[^/]+\/(download|stream)/, r => r.fulfill({ status: 200, contentType: 'audio/mpeg', body: mp3, headers: { 'accept-ranges': 'none' } }));
+}
+function stationClock(tz, plusMin) {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(Date.now() + plusMin * 60e3));
+}
+
+// ── Spot schedule ───────────────────────────────────────────────────────────
+section('spot-schedule', async () => {
+  const spot = FX.assets[2];
+  for (const view of ['desktop', 'iphone']) {
+    const page = await newPage('manager', view);
+    await serveAudio(page);
+    const form = page.locator('form');
+    const t1 = stationClock('America/New_York', 12), t2 = stationClock('America/New_York', 70);
+    await step(`F-SPOTSCHED-1 ${view}: Save with nothing chosen says what is missing`, async () => {
+      await page.goto(`${BASE}/admin/spot-schedule`);
+      await page.getByRole('button', { name: 'Schedule a spot' }).click();
+      await form.getByRole('button', { name: 'Save schedule' }).click();
+      await form.getByText('Choose a sponsor and a spot.').waitFor({ timeout: 2000 });
+    }, page);
+    await step(`F-SPOTSCHED-1 ${view}: sponsor, station, spot search + Listen/Stop, Change, exact times add/remove, timing, dates; Save fast`, async () => {
+      await field(form, 'Sponsor').selectOption(FX.sponsor.id);
+      await field(form, 'Station').selectOption(FX.station.id);
+      await form.getByPlaceholder("Type part of the spot's title").fill(spot.title.slice(0, 12));
+      const hit = form.locator('li', { hasText: spot.title });
+      await hit.waitFor();
+      await hit.getByRole('button', { name: 'Listen' }).click();
+      await hit.getByRole('button', { name: 'Stop' }).waitFor({ timeout: 3000 });
+      await hit.getByRole('button', { name: 'Stop' }).click();
+      await hit.getByRole('button', { name: spot.title }).click();
+      await form.getByRole('button', { name: 'Change' }).click();
+      await form.getByPlaceholder("Type part of the spot's title").fill(spot.title.slice(0, 12));
+      await form.locator('li', { hasText: spot.title }).getByRole('button', { name: spot.title }).click();
+      await form.getByRole('button', { name: 'Change' }).waitFor();
+      await form.getByRole('button', { name: 'At exact times' }).click();
+      for (const t of [t1, t2, '03:33']) {
+        await form.getByLabel('Time to add').fill(t);
+        await form.getByRole('button', { name: 'Add time' }).click();
+      }
+      await form.getByRole('button', { name: /^Remove 3:33/ }).click();
+      assert(!(await form.getByRole('button', { name: /^Remove 3:33/ }).count()), 'time not removed');
+      // every day is needed for "now + 12 min"; make sure all are on
+      for (const d of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) {
+        const b = form.getByRole('button', { name: d, exact: true });
+        if (!/bg-blue-600/.test(await b.getAttribute('class'))) await b.click();
+      }
+      await field(form, 'How the time is kept').selectOption('soft');
+      const { ms, resp } = await timedSave(page, 'save spot schedule', (m, p) => m === 'POST' && p.startsWith('/spot-schedules'), () => form.getByRole('button', { name: 'Save schedule' }).click());
+      const sent = resp.request().postDataJSON();
+      assert(sent.sponsor_id === FX.sponsor.id && sent.asset_id === spot.id && sent.station_id === FX.station.id && (sent.fixed_times || '').split(',').length === 2, `sent ${JSON.stringify(sent).slice(0, 250)}`);
+      FX.spotSchedule = (await resp.json()).id;
+      return `saved in ${ms} ms`;
+    }, page);
+    const li = page.locator('li', { hasText: FX.sponsor.name }).filter({ hasText: FX.station.name }).first();
+    await step(`F-SPOTSCHED-3 ${view}: 7-day look-ahead for the station shows the planned spot`, async () => {
+      await page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).last().selectOption(FX.station.id);
+      await page.getByText(FX.sponsor.name).filter({ hasNot: page.locator('option') }).nth(1).waitFor({ timeout: 5000 });
+      await waitText(page, "Times are in the station's time zone (America/New_York)");
+    }, page);
+    await step(`F-SPOTSCHED-4 ${view}: the planned spot is in the station's queue (SPONSOR row in the control room)`, async () => {
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        const q = await api('GET', `/stations/${FX.station.id}/queue?limit=200`, { token: USERS.admin.token });
+        const hit = q.entries.find(e => e.asset_id === spot.id || e.asset?.id === spot.id);
+        if (hit) return `queued for ${hit.preempt_at || hit.estimated_start} (${hit.source})`;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      throw new Error('spot not in the queue');
+    }, page);
+    await step(`F-SPOTSCHED-2 ${view}: Pause / Resume, Listen, Remove (confirm)`, async () => {
+      await timedSave(page, 'pause', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/spot-schedules/'), () => li.getByRole('button', { name: 'Pause' }).click());
+      await li.getByText('Paused').waitFor();
+      await timedSave(page, 'resume', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/spot-schedules/'), () => li.getByRole('button', { name: 'Resume' }).click());
+      await li.getByText('Paused').waitFor({ state: 'detached' });
+      await li.getByRole('button', { name: 'Listen' }).click();
+      await li.getByRole('button', { name: 'Stop' }).waitFor({ timeout: 3000 });
+      await li.getByRole('button', { name: 'Stop' }).click();
+      await timedSave(page, 'remove', (m, p) => m === 'DELETE' && p.startsWith('/spot-schedules/'), () => li.getByRole('button', { name: 'Remove' }).click());
+      await li.waitFor({ state: 'detached' });
+    }, page);
+    await closePage(page);
+  }
+  {
+    const page = await newPage('manager');
+    await step('F-SPOTSCHED-1 dayparts: no daypart chosen is refused; Morning + Evening with plays per daypart saves', async () => {
+      await page.goto(`${BASE}/admin/spot-schedule`);
+      await page.getByRole('button', { name: 'Schedule a spot' }).click();
+      const form = page.locator('form');
+      await field(form, 'Sponsor').selectOption(FX.sponsor.id);
+      await form.getByPlaceholder("Type part of the spot's title").fill(spot.title.slice(0, 12));
+      await form.locator('li', { hasText: spot.title }).getByRole('button', { name: spot.title }).click();
+      for (let i = 0; i < 6 && await form.locator('.grid button.bg-blue-600').count(); i++) await form.locator('.grid button.bg-blue-600').first().click();
+      await form.getByRole('button', { name: 'Save schedule' }).click();
+      await form.getByText(/Choose at least one (time of day|day)/).waitFor({ timeout: 2000 });
+      await form.getByRole('button', { name: /^Morning/ }).click();
+      await form.getByRole('button', { name: /^Evening/ }).click();
+      await field(form, 'Plays in each time of day').fill('3');
+      const { resp } = await timedSave(page, 'save daypart schedule', (m, p) => m === 'POST' && p.startsWith('/spot-schedules'), () => form.getByRole('button', { name: 'Save schedule' }).click());
+      const sent = resp.request().postDataJSON();
+      assert(sent.dayparts === 'morning,evening' && sent.plays_per_daypart === 3, `sent ${JSON.stringify(sent).slice(0, 200)}`);
+      await api('DELETE', `/spot-schedules/${(await resp.json()).id}`, { token: USERS.admin.token });
+    }, page);
+    await step('F-SPOTSCHED-3 timing defaults per daypart: changing "Spots on the hour play" saves', async () => {
+      await page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).last().selectOption(FX.station.id);
+      const sel = page.locator('label', { hasText: 'Spots on the hour play' }).locator('select');
+      const was = await sel.inputValue();
+      const to = was === 'hard' ? 'soft' : 'hard';
+      await timedSave(page, 'timing default', (m, p) => m !== 'GET' && p.includes('timing'), () => sel.selectOption(to));
+      await page.reload();
+      await page.locator('select', { has: page.locator(`option[value="${FX.station.id}"]`) }).last().selectOption(FX.station.id);
+      assert(await page.locator('label', { hasText: 'Spots on the hour play' }).locator('select').inputValue() === to, 'not kept');
+      await page.locator('label', { hasText: 'Spots on the hour play' }).locator('select').selectOption(was);
     }, page);
     await closePage(page);
   }
