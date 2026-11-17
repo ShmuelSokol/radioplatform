@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 import app.api.v1.queue as queue_module
 from app.models.asset import Asset
@@ -296,6 +296,35 @@ async def test_soft_item_turns_hard_ahead_so_it_starts_on_time(db_session):
     assert on_air.asset_id == talk.id  # not due yet: the shiur plays on
     row = next(e for e in await _pending(db_session, station.id) if e.asset_id == weather.id)
     assert row.timing_mode == "hard"
+
+
+@pytest.mark.asyncio
+async def test_turning_hard_ahead_is_saved(db_session):
+    """F-SOFTPAUSE-20: live on Jerusalem 2026-11-17 the weather read soft until it
+    started, because the 3 s poll rolls its session back after a check that changes
+    nothing on air. The flip must be committed so pages see it 90 s ahead."""
+    station, talk, (weather,), _ = await _setup(db_session, left=20 * 60, due_ago=-60)
+    station_id, weather_id = station.id, weather.id
+    await queue_module._check_advance(db_session, station_id)
+    await db_session.rollback()  # what the scheduler does after every tick
+    rows = [e for e in await _pending(db_session, station_id) if e.asset_id == weather_id]
+    assert rows and rows[0].timing_mode == "hard"
+
+
+@pytest.mark.asyncio
+async def test_wait_station_softening_is_saved(db_session):
+    """F-SOFTPAUSE-21: on a "wait" station a hard time check due during the shiur is
+    made soft. That too was lost to the poll's rollback, so pages kept it hard and
+    could fade the shiur themselves at the hour."""
+    station, talk, (clock,), _ = await _setup(db_session, left=20 * 60, policy="wait", due_ago=-30)
+    station_id, clock_id = station.id, clock.id
+    await db_session.execute(update(QueueEntry).where(QueueEntry.asset_id == clock_id)
+                             .values(timing_mode="hard", source="timed"))
+    await db_session.commit()
+    await queue_module._check_advance(db_session, station_id)
+    await db_session.rollback()
+    rows = [e for e in await _pending(db_session, station_id) if e.asset_id == clock_id]
+    assert rows and rows[0].timing_mode == "soft"
 
 
 @pytest.mark.asyncio

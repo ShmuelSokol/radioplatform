@@ -43,6 +43,7 @@ from app.models.station import Station
 logger = logging.getLogger(__name__)
 
 CHECK_EVERY_SECONDS = 5.0
+SOFT_STUCK_SECONDS = 30.0     # a soft item that should have paused a shiur, this long after its time
 LATE_SECONDS = 8.0            # a hard item this late is a fault (they normally start within 1 s)
 HOUR_WINDOW_SECONDS = 20.0    # an hourly time check must start within this of hh:00
 HOUR_CHECK_AFTER_SECONDS = 40.0
@@ -147,6 +148,35 @@ class AirWatch:
                     add("late_timed", f"{title} has not started",
                         f"Due {_local(due, station)}, now {(now - due).total_seconds():.0f} s late. "
                         f"On air instead: {behind}.", e.id)
+
+            # soft_stuck: a soft item that should have paused the shiur on air (more than
+            # 5 min of it left at the item's time, Shmuel 2026-11-17) is still waiting.
+            # Normally it was made hard ahead and the check above covers it; this catches
+            # the rule not being applied (hard items are skipped here).
+            from app.services import long_items
+            from app.services.station_modes import hard_start_on
+
+            if (
+                current is not None
+                and long_items.is_long_form(current.asset)
+                and long_items.policy(station) != "wait"
+                and hard_start_on(station)
+            ):
+                end = long_items.ends_at(current)
+                for e in rows:
+                    if (
+                        e.status != "pending" or e.preempt_at is None or e.id in hard_ids
+                        or end is None
+                    ):
+                        continue
+                    due = _aware(e.preempt_at)
+                    if current.preempt_at is not None and _aware(current.preempt_at) == due:
+                        continue  # part of the shiur's own block
+                    waited = (now - due).total_seconds()
+                    if waited > SOFT_STUCK_SECONDS and (end - due).total_seconds() > long_items.SOFT_PAUSE_MIN_LEFT_SECONDS:
+                        add("late_timed", f"{_title(e)} is waiting behind {_title(current)}",
+                            f"Due {_local(due, station)}, now {waited:.0f} s late; the shiur had more "
+                            "than 5 minutes left, so it should have paused for it.", e.id)
 
         # hour_missing: around each hh:00, did a time check start?
         local_now = now.astimezone(_tz(station))

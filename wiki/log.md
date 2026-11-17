@@ -88,6 +88,7 @@ INGEST 2026-11-15 streaming-architecture.md one player per station: _check_stati
 UPDATE 2026-11-16 release-pickup.md a release no longer reloads a listener in the gap between items: holdUpdates() while a player is on, plus a 2-minute grace after any audio
 UPDATE 2026-11-16 operator-actions.md GET queue returns next_entry_id (same rule as the Next pick); the control room's Next line uses it.
 UPDATE 2026-11-16 release-pickup.md useAudioEngine holds releases only while its audio context is running, so a control room with sound off still updates; browser check e2e/audio-engine.mjs release-hold
+UPDATE 2026-11-17 hourly-slots.md soft-item look-ahead flip and wait-station softening are now committed at once (poll rollback lost them; Jerusalem showed weather soft until it started)
 INGEST 2026-11-16 multi-station-load.md now_playing announcements never go backwards (stale tick after the precise advance made listeners jump back); join cache ignores raced reads
 INGEST 2026-11-16 streaming-architecture.md startup migrations skip existing columns/indexes and use a 1 s lock timeout (an ADD COLUMN IF NOT EXISTS froze the backend 4 min during a deploy); analysis holds no transaction during range reads/FFmpeg; bulk jobs detached from the request (BackgroundTasks kept the request transaction open 2 h); scheduler session per pass
 INGEST 2026-11-16 streaming-architecture.md deploy cold start: bounded startup play-log scan, pool warmed before serving, last_seen_at once a minute; pg_timezone_names is the Supabase dashboard, not us
@@ -171,6 +172,7 @@ INGEST 2026-11-17 streaming-architecture.md iPhone Safari plays the engine's HLS
 UPDATE 2026-11-17 hourly-slots.md engine stations apply pause/wait/cut (playout_engine._apply_long_item_rule); radio.liq: a new timed group skips an earlier timed item still on air (21:00 time check waited behind the 20:00 Daf Yomi until 21:09)
 INGEST 2026-11-17 hourly-slots.md soft items due during a shiur/story with >5 min left pause it (made hard); <=5 min wait; wait station and HS off unchanged; resume now first after the group
 UPDATE 2026-11-17 hourly-slots.md browser player turns such soft items hard 90 s ahead (live: made hard only when due, started 2.3 s late and cold)
+INGEST 2026-11-17 air-watch.md soft item still waiting 30 s behind a shiur that had >5 min left = late_timed finding
 INGEST 2026-11-17 streaming-architecture.md Main stall 02:57Z: same entry handed twice while its start report (slow 690-row renumber) was uncommitted; recent_started guard, one-statement renumber, read-only pick_next, overrun alert, on_track reports, self-filling emergency folder
 INGEST 2026-11-17 databank.md Databank page copies KBR Studio's database window; spot end date lives on SpotSchedule so the end-date edit moves every schedule of the spot; KBR weekdays are 0=Sunday
 INGEST 2026-11-17 station-modes.md HS = hard start switch (softens pending hard items each scheduler pass, restores from automation_config.hs_softened; engine items handed 45 s ahead can't be cancelled), Spots mode = sponsorships off via plan_for_station, Panic cuts even protected timed items, Errors pane; no KBR Studio manual exists online
