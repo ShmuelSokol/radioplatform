@@ -209,5 +209,6 @@ INGEST 2026-11-17 audio-engine.md page never crossfades a short item (hands over
 INGEST 2026-11-17 streaming-architecture.md engine take-over (go_on_air) no longer skips a timed item that just started or is ending: wait rule put the group at the shiur end and the time check was skipped (V1-10c)
 UPDATE 2026-11-17 engine-harness.md scenario list (backend_unreachable, control_endpoints added), full-run result, rotation carry-over false fail
 INGEST 2026-11-17 streaming-architecture.md engine /hello retried every 5 s until 200: a restart while the backend was down lost the time check handed over before (V1-1)
+INGEST 2026-11-17 streaming-architecture.md engine take-over waits for the timed file to be ready (music plays on), timed queue download limit 90 s (V1-8)
 UPDATE 2026-11-17 audio-engine.md page pre-arm needs the time check as next_asset: scheduler re-sends now-playing 60 s before each hard timed item (_announce_timed); page logs window.__kbrTimedStart
 INGEST 2026-11-17 audio-engine.md items of one program block share preempt_at: the item after the time check has a past cut time; server and page now ignore it (no fade/pre-arm over the time check) and the item after a short item starts from the top up to 8 s late
