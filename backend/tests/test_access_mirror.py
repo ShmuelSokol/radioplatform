@@ -65,6 +65,8 @@ SCREEN_WRITES = {
     "/admin/schedules": [("POST", "/schedules"), ("PATCH", "/schedules/{schedule_id}"), ("POST", "/schedules/blocks")],
     "/admin/holidays": [("POST", "/holidays"), ("PUT", "/holidays/{holiday_id}"), ("DELETE", "/holidays/{holiday_id}")],
     "/admin/sponsors": [("POST", "/sponsors"), ("PUT", "/sponsors/{sponsor_id}"), ("DELETE", "/sponsors/{sponsor_id}")],
+    "/admin/campaigns": [("POST", "/campaigns"), ("PATCH", "/campaigns/{campaign_id}/status"),
+                         ("POST", "/campaigns/{campaign_id}/drafts"), ("POST", "/campaigns/{campaign_id}/comments")],
     "/admin/spot-schedule": [("POST", "/spot-schedules"), ("PUT", "/spot-schedules/{schedule_id}")],
     "/admin/spot-recordings": [("POST", "/spot-recordings"), ("POST", "/spot-recordings/{recording_id}/approve")],
     "/admin/program-blocks": [("POST", "/program-blocks"), ("PUT", "/program-blocks/{block_id}")],

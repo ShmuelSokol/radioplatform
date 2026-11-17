@@ -156,7 +156,7 @@ radioplatform/
 | program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
 | databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, every type of a table, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
 | copy_review | copy_review.py | /sponsorship (rules + copy review) |
-| campaigns | campaigns.py | /campaigns |
+| campaigns | campaigns.py | /campaigns: sponsorship campaigns. Reads (list with `?sponsor_id=`, detail, drafts, comments) for every staff role and sponsors (own only); create/edit/drafts/comments for managers and sponsors (staff name the `sponsor_id`); status for managers |
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
@@ -234,6 +234,8 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsor/ad management
+- Campaigns.tsx — Sponsorship campaigns across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
+- CampaignDetail.tsx — One campaign for staff: drafts, comments, Save Status. Drafts and comments panels are shared with the sponsor portal (`components/campaigns/CampaignParts.tsx`)
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
 - SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead
 - SpotRecordings.tsx — Record Spots: write a script, make or upload audio, listen, approve into the library
@@ -284,7 +286,7 @@ radioplatform/
 | useNowPlayingWS.ts | Now-playing WebSocket (with polling fallback) |
 | usePlaylists.ts | Playlist template CRUD + asset type combos |
 | useSponsorPortal.ts | Sponsor play history, stats, upcoming schedule |
-| useCampaigns.ts | Campaign CRUD, drafts, comments |
+| useCampaigns.ts | Campaign CRUD (list takes an optional sponsor), status, drafts, comments |
 | useBilling.ts | Invoice list + billing summary |
 | useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
 | useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
@@ -312,6 +314,8 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
+- `/admin/campaigns` → AdminCampaigns (staff; managers/admins change, DJs/viewers view only)
+- `/admin/campaigns/:id` → AdminCampaignDetail (same roles)
 - `/admin/schedule-check` → ScheduleCheck (protected)
 - `/admin/spot-schedule` → SpotSchedules (protected)
 - `/admin/spot-recordings` → SpotRecordings (protected)

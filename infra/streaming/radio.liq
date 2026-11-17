@@ -154,7 +154,17 @@ def schedule_timed(~uri, ~at) =
         # or this group waits behind it. The 21:00 time check aired at 21:09 after the
         # 20:00 block's Daf Yomi (2026-11-16). The backend has already queued the
         # shiur to carry on afterwards when the station pauses long items.
-        timed_queue.skip()
+        # But not an item that has only just started, or one about to end by itself:
+        # with the station set to wait, the group is due exactly when the shiur ends,
+        # so the item on air at this moment is the group's own first item (the time
+        # check), and skipping it dropped the time check (harness, 2026-11-17).
+        elapsed = timed_queue.elapsed()
+        left = timed_queue.remaining()
+        if elapsed > 1.0 and (left < 0. or left > 1.0) then
+          timed_queue.skip()
+        else
+          log.important("timed: item on air just started or is ending; not cut (elapsed #{elapsed}, left #{left})")
+        end
         thread.run(delay=0.1, {master_gain := 1.})
       else
         master_gain := 1.
