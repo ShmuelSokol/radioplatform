@@ -6,7 +6,7 @@ Authenticated with the shared secret in the `X-Playout-Token` header, not a user
 
 import uuid
 
-from fastapi import APIRouter, Depends, Header, Response
+from fastapi import APIRouter, Body, Depends, Header, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,12 @@ from app.db.session import get_db
 from app.services import playout_engine
 
 router = APIRouter(prefix="/playout", tags=["playout"])
+
+
+class HelloReport(BaseModel):
+    # What the engine's radio.liq understands (see playout_engine.ENGINE_PROTO_GROUPS);
+    # an old engine sends nothing
+    proto: int | None = None
 
 
 class StartedReport(BaseModel):
@@ -36,9 +42,12 @@ def _require_engine(
 
 
 @router.post("/{station_id}/hello")
-async def hello(station_id: uuid.UUID = Depends(_require_engine)):
-    """The engine announces that it (re)started."""
-    await playout_engine.handle_hello(station_id)
+async def hello(
+    station_id: uuid.UUID = Depends(_require_engine),
+    body: HelloReport | None = Body(default=None),
+):
+    """The engine announces that it (re)started, and what it understands (`proto`)."""
+    await playout_engine.handle_hello(station_id, body.proto if body else None)
     return {"ok": True}
 
 
@@ -46,6 +55,7 @@ async def hello(station_id: uuid.UUID = Depends(_require_engine)):
 async def next_track(
     station_id: uuid.UUID = Depends(_require_engine),
     given: str | None = None,
+    proto: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """What should play next. 204 when the queue is empty (the engine retries).
@@ -55,7 +65,7 @@ async def next_track(
     a start report was lost.
     """
     ids = [g for g in (given or "").split(",") if g]
-    result = await playout_engine.handle_next(db, station_id, ids)
+    result = await playout_engine.handle_next(db, station_id, ids, proto=proto)
     if result is None:
         return Response(status_code=204)
     return result
