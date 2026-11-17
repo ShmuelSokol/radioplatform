@@ -812,9 +812,9 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-MODE-21 Schedule redraw deleting a handed entry: engine still shows it on air | modes: engine | covered: tests/test_playout_engine.py
 - [ ] B-MODE-22 Multiple engine stations each with own control URL/state | modes: engine | covered: tests/test_playout_engine.py
 - [ ] B-MODE-23 radio.liq: timed lane mutes main lane, interrupted song does not resume; Next = clean cut / fade; main crossfade 3 s | modes: engine | NOT COVERED (no Liquidsoap test)
-- [ ] B-MODE-24 radio.liq: emergency dir playlist used when backend unreachable; reports lane=emergency | modes: engine | NOT COVERED
-- [ ] B-MODE-25 radio.liq: /timed dedupes by entry id (last 50); control endpoints require token | modes: engine | NOT COVERED
-- [ ] B-MODE-26 radio.liq: /next request retried on 204/timeout without dead air | modes: engine | NOT COVERED
+- [x] B-MODE-24 radio.liq: emergency dir playlist used when backend unreachable; reports lane=emergency | modes: engine | covered: harness backend_unreachable (2026-11-17: emergency file during the outage, 0.0 s silence, back on the queue 2 s after the backend returned; the emergency start report cannot reach the backend while it is down)
+- [x] B-MODE-25 radio.liq: /timed dedupes by entry id (last 50); control endpoints require token | modes: engine | covered: harness control_endpoints (/skip /flush /timed /overlay /status: wrong or missing token 403; same id twice aired once)
+- [x] B-MODE-26 radio.liq: /next request retried on 204/timeout without dead air | modes: engine | covered: harness backend_unreachable (every /next answered 502 for about 90 s: retried every 2 s, no dead air) and empty_queue (204)
 - [ ] B-MODE-27 Many stations x many listeners switch songs together (load) | modes: browser | NOT COVERED (loadtests/multi_station.py, manual)
 
 ## 5. Roles and permissions
@@ -1379,7 +1379,7 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 
 ### A. Playout engine (infra/streaming/radio.liq, setup.sh, nginx, systemd, icecast.xml)
 
-- [ ] V1-1 Engine starts while the backend is down: /hello fails (logged), engine still starts and goes to the emergency lane; when the backend comes back the next /next works without a restart and the backend never got its hello (stale cued/timed state kept) | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:36-41
+- [x] V1-1 Engine starts while the backend is down: /hello fails (logged), engine still starts and goes to the emergency lane; when the backend comes back the next /next works without a restart and the backend never got its hello (stale cued/timed state kept) | modes: engine | covered: harness engine_starts_backend_down (FIXED 2026-11-17: the hello was sent once; while the backend never got it, a time check handed over before the restart never aired. radio.liq now retries the hello every 5 s until it answers 200; the time check aired +1.3 s) | src: infra/streaming/radio.liq:36-41
 - [ ] V1-2 /next carries `given=` (last 5 handed entry ids, newest first); after a /flush the pre-loaded id is removed from `given` unless it already aired, so the backend can hand it out again | modes: engine | covered: NOT COVERED (backend side only, tests/test_playout_engine.py) | src: infra/streaming/radio.liq:48-66, 229-236
 - [ ] V1-3 request.dynamic retry: backend 204/error -> engine retries every 2 s (retry_delay), a track that takes >120 s to resolve/download is abandoned (timeout=120, PR 142) and the next is asked for; prefetch=1 means exactly one track pre-loaded | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:68
 - [ ] V1-4 Per-track level: `liq_amplify` (replay_gain_db from analysis) applied on the main lane and on mix-over; items with gain 0/no analysis play at unity | modes: engine | covered: NOT COVERED | src: infra/streaming/radio.liq:70, 162; backend/app/services/playout_engine.py:186-189, 225-227

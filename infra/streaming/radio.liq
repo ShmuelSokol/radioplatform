@@ -39,13 +39,33 @@ auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")
 engine_proto = 2
 
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
-# track is requested, so the two cannot cross.
-try
-  ignore(http.post(headers=auth_headers, timeout=8., data='{"proto":#{engine_proto}}',
-
-                   "#{backend_url}/playout/#{station_id}/hello"))
-catch err do
-  log.important("hello: backend unreachable: #{err}")
+# track is requested, so the two cannot cross. If the backend cannot be reached (or
+# answers with an error), keep trying every 5 s: until it hears this it still believes we
+# hold the timed items it handed the engine before the restart, never hands them over
+# again, and the time check is lost (harness engine_starts_backend_down, 2026-11-17). A
+# late hello is safe: the backend forgets what it handed us, but every /next sends `given`
+# again and /timed ignores an id it already holds.
+hello_done = ref(false)
+def send_hello() =
+  try
+    resp = http.post(headers=auth_headers, timeout=8., data='{"proto":#{engine_proto}}',
+                     "#{backend_url}/playout/#{station_id}/hello")
+    if resp.status_code == 200 then
+      hello_done := true
+      log.important("hello: backend answered")
+    else
+      log.important("hello: backend answered #{resp.status_code}; trying again in 5 s")
+    end
+  catch err do
+    log.important("hello: backend unreachable: #{err}; trying again in 5 s")
+  end
+end
+send_hello()
+if not hello_done() then
+  thread.run.recurrent(delay=5., fun () -> begin
+    send_hello()
+    if hello_done() then (-1.) else 5. end
+  end)
 end
 
 # ── Main lane: ask the backend for the next track ────────────────────────────

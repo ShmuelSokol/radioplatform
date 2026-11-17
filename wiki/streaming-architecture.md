@@ -308,3 +308,13 @@ just ended and the time check had just started, so the time check was skipped an
 aired (harness `block_shiur_spans_hour_wait`). Now it skips only an item that has played
 more than 1 s and has more than 1 s left (`timed_queue.elapsed()` / `.remaining()`). Needs
 `setup.sh` rerun on the droplet. Checklist V1-10c.
+
+## The engine's hello is retried until the backend answers (2026-11-17)
+
+`radio.liq` sent `/hello` once at start-up. An engine that restarted while the backend was
+unreachable (a droplet reboot during a Railway deploy) left the backend believing the
+engine still held the timed items handed over before; `timed_sent` kept them out of every
+hand-over and `/next`, so the time check never aired (harness `engine_starts_backend_down`).
+Now the hello is retried every 5 s until it answers 200. A late hello is safe: `/next`
+sends `given` each time and `/timed` ignores an id it already holds. Needs `setup.sh`
+rerun. Checklist V1-1.
