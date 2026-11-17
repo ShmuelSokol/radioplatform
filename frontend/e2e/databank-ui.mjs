@@ -656,6 +656,8 @@ if (run('spots')) {
   check('F-DATABANK-18 the red clears', await page.locator('[data-row="s2"][data-expired]').count() === 0, `${Date.now() - t0} ms`);
   await page.locator('[data-row="s1"] [data-testid="spot-end"]').click();
   await page.getByTestId('db-edit-input').fill('');
+  // clearing asks first (F-DATABANK-56, checked in e2e/databank-screen.mjs): say yes
+  page.once('dialog', (dlg) => dlg.accept());
   await page.getByTestId('db-edit-input').press('Enter');
   await page.getByRole('status').filter({ hasText: 'Bagel King Breakfast now has no end date.' }).waitFor({ timeout: 3000 }).catch(() => {});
   check('F-DATABANK-40 clearing the end date: "<spot> now has no end date." and "no end"',

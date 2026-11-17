@@ -47,6 +47,11 @@ async def _station(db: AsyncSession, station_id) -> Station:
     return station
 
 
+def like_escape(text: str) -> str:
+    """Find text as typed: % and _ are letters, not LIKE wildcards ("100%" finds "100%" only)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 # KBR Studio's "Mpeg" filter: MPEG audio files
 MPEG_EXTS = ("mp3", "mp2", "mpg", "mpeg")
 
@@ -95,10 +100,10 @@ async def list_items(
         conditions.append(Asset.file_path != "")
         conditions.append(or_(Asset.category.is_(None), func.lower(Asset.category) != "do_not_play"))
     if search:
-        pat = f"%{search.strip()}%"
+        pat = f"%{like_escape(search.strip())}%"
         conditions.append(or_(
-            Asset.title.ilike(pat), Asset.artist.ilike(pat),
-            Asset.category.ilike(pat), Asset.file_path.ilike(pat),
+            Asset.title.ilike(pat, escape="\\"), Asset.artist.ilike(pat, escape="\\"),
+            Asset.category.ilike(pat, escape="\\"), Asset.file_path.ilike(pat, escape="\\"),
         ))
 
     total = (await db.execute(select(func.count(Asset.id)).where(*conditions))).scalar() or 0

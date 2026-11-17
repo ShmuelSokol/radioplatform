@@ -121,7 +121,7 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
         {!isLoading && !isError && lines.length === 0 && <p className="p-2 text-gray-600">Nothing aired on {dayLabel(day)}.</p>}
         {lines.map((l, i) => (
           <button type="button" key={`${l.entry.id}-${l.what}`} onClick={() => setSel(i)}
-            className={`w-full text-left flex gap-3 px-1.5 ${compact ? 'min-h-[36px] items-center' : ''} ${sel === i ? 'bg-[#000080] text-white' : 'text-black hover:bg-[#eef]'}`}>
+            className={`w-full text-left flex gap-3 px-1.5 ${compact ? 'min-h-[44px] items-center' : ''} ${sel === i ? 'bg-[#000080] text-white' : 'text-black hover:bg-[#eef]'}`}>
             <span className="shrink-0 tabular-nums">{clockMs(l.at, data?.timezone ?? stationTz)}</span>
             <span className="min-w-0 flex-1 truncate">
               {nameOf(l.entry)}{' '}
