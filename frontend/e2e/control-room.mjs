@@ -659,6 +659,32 @@ async function pflDeck(browser, contextOpts, tag) {
   await ctx.close();
 }
 
+// A file the browser cannot play (old MP2 audio saved as .mp3) keeps the deck open with a clear reason.
+async function pflUnplayable(browser, contextOpts, tag) {
+  const { page, ctx, errors } = await open(browser, contextOpts);
+  // MPEG-1 Layer II frame headers (FF FD) with nothing a browser can decode
+  const bad = Buffer.alloc(64 * 1024);
+  for (let i = 0; i < bad.length; i += 418) { bad[i] = 0xff; bad[i + 1] = 0xfd; bad[i + 2] = 0x94; bad[i + 3] = 0x44; }
+  await page.route('**/bad.mp3', (route) => route.fulfill({ status: 200, contentType: 'audio/mpeg', body: bad }));
+  await page.route(/\/assets\/[^/]+\/audio-url$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: `${new URL(page.url()).origin}/bad.mp3` }) }));
+  await page.route(/\/api\/v1\/assets\/[^/?]+$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    id: 'a1', title: 'Hiney Ma Tov', artist: 'Old file', duration: 240, intro_seconds: null, asset_type: 'music', category: null, metadata_extra: {} }) }));
+  if (contextOpts.isMobile) await page.getByRole('button', { name: /Library/ }).first().click();
+  await page.getByTestId('library-pfl').first().click();
+  const msg = page.getByTestId('pfl-error');
+  await msg.waitFor({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(1000);
+  check(`${tag}: the deck stays open`, await page.getByTestId('pfl-deck').count() === 1);
+  check(`${tag}: it says the file can't play`, /Can't play this file/.test((await msg.textContent().catch(() => '')) || ''));
+  check(`${tag}: play is greyed out`, await page.getByTestId('pfl-playpause').isDisabled());
+  await shot(page, tag.replace(/ /g, '-'));
+  await page.getByRole('button', { name: 'Close pre-listen' }).click();
+  await page.waitForTimeout(200);
+  check(`${tag}: close still works`, await page.getByTestId('pfl-deck').count() === 0);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // Playlist steps change on screen at once, while the save is still on its way.
 async function playlistsInstant(browser) {
   const tag = 'playlists';
@@ -723,6 +749,8 @@ await metersWithoutListening(browser);
 await playlistsInstant(browser);
 await pflDeck(browser, { viewport: { width: 1440, height: 900 } }, 'pfl deck desktop');
 await pflDeck(browser, { ...devices['iPhone 13'] }, 'pfl deck iPhone');
+await pflUnplayable(browser, { viewport: { width: 1440, height: 900 } }, 'pfl unplayable desktop');
+await pflUnplayable(browser, { ...devices['iPhone 13'] }, 'pfl unplayable iPhone');
 if (process.env.ONLY === 'station-switch') { await browser.close(); process.exit(failures ? 1 : 0); }
 await desktop(browser, 1440, 900);
 await desktop(browser, 2560, 1440);

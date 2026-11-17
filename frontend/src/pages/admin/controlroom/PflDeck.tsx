@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getAsset } from '../../../api/assets';
-import type { Pfl } from './pfl';
+import { UNPLAYABLE_MESSAGE, type Pfl } from './pfl';
 
 /**
  * The pre-listen (PFL) deck: shows the item heard in this browser only, with a
@@ -264,6 +264,13 @@ export function PflDeck({ pfl, compact = false }: { pfl: Pfl; compact?: boolean 
 
   if (!id) return null;
   const playing = !pfl.paused && pfl.playingId === id;
+  const failed = pfl.error;
+  const unplayable = failed === UNPLAYABLE_MESSAGE;
+  // After a failed load, ▶ loads the file again
+  const onPlay = () => {
+    if (failed) { if (!unplayable) { pfl.stop(); void pfl.toggle(id); } return; }
+    void pfl.playPause();
+  };
   const title = asset?.title ?? 'Loading…';
   const artist = asset?.artist;
   const hoverTime = hoverX !== null && width ? (hoverX / width) * duration : null;
@@ -279,13 +286,13 @@ export function PflDeck({ pfl, compact = false }: { pfl: Pfl; compact?: boolean 
       className="shrink-0 bg-black border-t-2 border-[#2bff4a] text-[#d0d0d0] px-2 py-1.5 select-none">
       <div className={`flex items-center gap-2 ${compact ? 'flex-wrap' : ''}`}>
         <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-bold bg-[#2bff4a] text-black rounded-sm" title="Pre-listen: only you hear it, not on air">PFL</span>
-        <button type="button" onClick={() => void pfl.playPause()} data-testid="pfl-playpause"
-          aria-label={playing ? 'Pause pre-listen' : 'Play pre-listen'}
-          className="qn-btn shrink-0 w-11 h-11 text-lg leading-none">{playing ? '❚❚' : '▶'}</button>
-        <button type="button" onClick={() => jump(-10)} aria-label="Back 10 seconds" title="Back 10 s (J)"
-          className="qn-btn shrink-0 h-11 px-2 text-xs">−10</button>
-        <button type="button" onClick={() => jump(10)} aria-label="Forward 10 seconds" title="Forward 10 s (L)"
-          className="qn-btn shrink-0 h-11 px-2 text-xs">+10</button>
+        <button type="button" onClick={onPlay} data-testid="pfl-playpause" disabled={unplayable}
+          aria-label={playing ? 'Pause pre-listen' : failed ? 'Try loading again' : 'Play pre-listen'}
+          className="qn-btn shrink-0 w-11 h-11 text-lg leading-none disabled:opacity-40">{playing ? '❚❚' : '▶'}</button>
+        <button type="button" onClick={() => jump(-10)} disabled={!!failed} aria-label="Back 10 seconds" title="Back 10 s (J)"
+          className="qn-btn shrink-0 h-11 px-2 text-xs disabled:opacity-40">−10</button>
+        <button type="button" onClick={() => jump(10)} disabled={!!failed} aria-label="Forward 10 seconds" title="Forward 10 s (L)"
+          className="qn-btn shrink-0 h-11 px-2 text-xs disabled:opacity-40">+10</button>
         <div className={`min-w-0 leading-tight ${compact ? 'flex-1' : 'w-56 xl:w-72 shrink-0'}`}>
           <div className="text-[#ffff40] font-bold text-sm truncate" title={title}>{title}</div>
           <div className="text-[11px] truncate opacity-80">{artist || 'Only you hear this, not on air'}</div>
@@ -294,18 +301,34 @@ export function PflDeck({ pfl, compact = false }: { pfl: Pfl; compact?: boolean 
           <div className="qn-digits text-xl" data-testid="pfl-elapsed">{fmt(shown)}</div>
           <div className="qn-digits text-xs !text-[#ffa64d]" data-testid="pfl-remaining">-{fmt(remaining)}</div>
         </div>
-        {!compact && (
+        {!compact && failed && (
+          <div role="alert" data-testid="pfl-error"
+            className="flex-1 min-w-0 flex items-center gap-2 h-11 px-2 rounded-sm border border-[#ff4040] bg-[#3a0000] text-[#ffb0b0] text-xs leading-snug">
+            <span aria-hidden className="text-[#ff4040] text-base shrink-0">⚠</span>
+            <span className="min-w-0">{failed}</span>
+          </div>
+        )}
+        {!compact && !failed && (
           <Scrub {...{ wrapRef, canvasRef, onDown, onMove, onUp, onKey, duration, shown, hoverX, hoverTime, dragAt, markers, setHoverX }} />
         )}
         <button type="button" onClick={pfl.stop} aria-label="Close pre-listen" title="Stop and close (Esc)"
           className="qn-btn shrink-0 w-9 h-11 text-sm">✕</button>
       </div>
-      {compact && (
+      {compact && failed && (
+        <div className="mt-1.5 flex">
+          <div role="alert" data-testid="pfl-error"
+            className="flex-1 min-w-0 flex items-center gap-2 min-h-[44px] py-1 px-2 rounded-sm border border-[#ff4040] bg-[#3a0000] text-[#ffb0b0] text-xs leading-snug">
+            <span aria-hidden className="text-[#ff4040] text-base shrink-0">⚠</span>
+            <span className="min-w-0">{failed}</span>
+          </div>
+        </div>
+      )}
+      {compact && !failed && (
         <div className="mt-1.5 flex">
           <Scrub {...{ wrapRef, canvasRef, onDown, onMove, onUp, onKey, duration, shown, hoverX, hoverTime, dragAt, markers, setHoverX }} />
         </div>
       )}
-      {jumps.length > 0 && (
+      {jumps.length > 0 && !failed && (
         <div className="mt-1 flex items-center gap-1 overflow-x-auto text-[11px]" data-testid="pfl-jumps">
           <span className="opacity-60 shrink-0">Jump to</span>
           {jumps.map(j => (
