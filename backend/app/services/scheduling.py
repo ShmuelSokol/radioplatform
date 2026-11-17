@@ -24,6 +24,22 @@ from app.models.schedule_block import RecurrenceType, ScheduleBlock, SunEvent
 logger = logging.getLogger(__name__)
 
 
+def block_in_date_range(block, day) -> bool:
+    """Is `day` (a station-local date) inside the block's start_date..end_date?
+
+    Either end may be empty (open-ended). The one place the date range of a
+    schedule block is checked: the resolver (and so playout, the guide, the
+    look-ahead and the queue refresh) goes through SchedulingService._recurs_on.
+    """
+    start = getattr(block, "start_date", None)
+    end = getattr(block, "end_date", None)
+    if start is not None and day < start:
+        return False
+    if end is not None and day > end:
+        return False
+    return True
+
+
 class SchedulingService:
     """Service for schedule resolution and now-playing state management."""
 
@@ -159,8 +175,8 @@ class SchedulingService:
         """
         now = local.replace(tzinfo=None)
         if (
-            block.recurrence_type == RecurrenceType.ONE_TIME
-            and block.start_date and block.end_date
+            block.end_date
+            and (block.recurrence_type != RecurrenceType.ONE_TIME or block.start_date)
             and now >= datetime.combine(block.end_date + timedelta(days=1), time(0))
         ):
             return None  # the date range is over
@@ -217,7 +233,13 @@ class SchedulingService:
 
     @staticmethod
     def _recurs_on(block: ScheduleBlock, day) -> bool:
-        """Does this block's recurrence include the given date?"""
+        """Does this block's recurrence include the given date (station-local)?
+
+        A daily, weekly or monthly block with a start_date and/or end_date only
+        recurs on dates inside that range (either may be empty = open-ended).
+        """
+        if block.recurrence_type != RecurrenceType.ONE_TIME and not block_in_date_range(block, day):
+            return False
         if block.recurrence_type == RecurrenceType.WEEKLY:
             if block.recurrence_pattern:
                 return day.strftime("%A").lower() in [d.lower() for d in block.recurrence_pattern]
