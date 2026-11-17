@@ -108,6 +108,25 @@ def not_placeholder():
     )
 
 
+# Songs requested 3+ times in 30 days carry this tag (services/requested_category_service.py).
+# A string, not true: Postgres' ->> gives 'true' for a JSON true but SQLite gives 1.
+REQUESTED_CATEGORY = "requested"
+REQUESTED_TAG = "requested"
+REQUESTED_TAG_VALUE = "yes"
+
+
+def in_category(category):
+    """SQL condition for rotation picks: the asset is in `category`. The "requested"
+    category also takes every song tagged as requested, which keeps its own category
+    (and its place in that rotation) as well."""
+    from sqlalchemy import or_
+
+    condition = Asset.category == category
+    if category == REQUESTED_CATEGORY:
+        condition = or_(condition, Asset.metadata_extra[REQUESTED_TAG].astext == REQUESTED_TAG_VALUE)
+    return condition
+
+
 def fit_for_random_pick():
     """SQL condition: an asset that may be drawn at random (not do-not-play, not a
     test item, not a one-moment clip, not a placeholder). Category case does not matter."""

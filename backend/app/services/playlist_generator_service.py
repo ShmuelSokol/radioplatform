@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.asset import Asset, fit_for_random_pick, not_placeholder, stored_analysis
+from app.models.asset import Asset, fit_for_random_pick, in_category, not_placeholder, stored_analysis
 from app.models.schedule import Schedule
 from app.models.station import Station
 from app.services.scheduling import SchedulingService
@@ -156,7 +156,7 @@ class _Library:
                 Asset.asset_type == asset_type
             )
             if category:
-                stmt = stmt.where(Asset.category == category, not_placeholder())
+                stmt = stmt.where(in_category(category), not_placeholder())
             else:
                 stmt = stmt.where(fit_for_random_pick())
             rows = []
