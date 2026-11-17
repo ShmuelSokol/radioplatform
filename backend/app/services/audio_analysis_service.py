@@ -10,6 +10,12 @@ from app.services.silence_service import detect_silence, get_audio_duration
 
 logger = logging.getLogger(__name__)
 
+def replay_gain_for(loudness_lufs: float) -> float:
+    """dB that brings an item to -18 LUFS. Turning down goes to -20 dB (a story mastered
+    at -3 LUFS needs -15); turning up stops at +12 dB (more lifts the noise floor)."""
+    return round(max(-20.0, min(12.0, -18.0 - loudness_lufs)), 2)
+
+
 def measure_loudness(data: bytes) -> tuple[float | None, float | None]:
     """(integrated LUFS, true peak dBFS) of some audio, from FFmpeg loudnorm's
     measuring pass. (None, None) when it cannot be measured."""
@@ -71,7 +77,7 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
     cross_start = max(cue_in + 5.0, cue_out - 3.0)
 
     # replay_gain_db: -18.0 - measured_lufs, clamped to ±12 dB
-    replay_gain_db = max(-12.0, min(12.0, -18.0 - loudness_lufs))
+    replay_gain_db = replay_gain_for(loudness_lufs)
 
     return {
         "loudness_lufs": round(loudness_lufs, 2),
@@ -104,15 +110,19 @@ async def analyze_audio(db, asset_id: str, full: bool = False):
     # queued behind it then blocks every other query (froze a deploy once).
     await db.commit()
 
+    analysis = None
     if not full:
-        from app.services.tail_analysis import analyze_by_range, public_audio_url
+        from app.services.tail_analysis import LoudnessNotSampledError, analyze_by_range, public_audio_url
 
         url = public_audio_url(file_path or "")
         if not url:
             raise ValueError(f"No public URL for asset {asset_id}")
         previous = stored_extra.get("audio_analysis") if isinstance(stored_extra, dict) else None
-        analysis = await analyze_by_range(url, previous if isinstance(previous, dict) else None)
-    else:
+        try:
+            analysis = await analyze_by_range(url, previous if isinstance(previous, dict) else None)
+        except LoudnessNotSampledError as e:
+            logger.warning("Asset %s: %s; measuring the whole file", asset_id, e)
+    if analysis is None:
         # Download audio
         if file_path.startswith("http://") or file_path.startswith("https://"):
             import httpx

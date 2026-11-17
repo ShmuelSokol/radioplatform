@@ -35,6 +35,15 @@ class RangeNotSupportedError(Exception):
     pass
 
 
+class LoudnessNotSampledError(Exception):
+    """The sampled pieces gave no believable loudness: measure the whole file instead."""
+
+
+# No real recording is this loud integrated; a reading above it is a bad decode of the
+# pieces (the Carlebach story "Yisrael Betach" read -3.1 LUFS and aired at -10.6)
+LOUDEST_BELIEVABLE_LUFS = -5.0
+
+
 def public_audio_url(file_path: str) -> str | None:
     if file_path.startswith(("http://", "https://")):
         return file_path
@@ -148,6 +157,12 @@ def combine_loudness(measures: list[tuple[float, float]]) -> tuple[float, float]
     return lufs, max(tp for _, tp in loud)
 
 
+def replay_gain_for(loudness: float) -> float:
+    from app.services.audio_analysis_service import replay_gain_for as rule
+
+    return rule(loudness)
+
+
 async def _sampled_loudness(client: httpx.AsyncClient, url: str, audio_start: int,
                             total: int, bitrate: int, length: float) -> tuple[float, float] | None:
     from app.services.audio_analysis_service import measure_loudness
@@ -197,6 +212,8 @@ async def analyze_by_range(url: str, previous: dict | None = None,
         sampled = None
         if not has_real_loudness(previous):
             sampled = await _sampled_loudness(client, url, audio_start, total, bitrate, length)
+            if sampled is None or sampled[0] > LOUDEST_BELIEVABLE_LUFS:
+                raise LoudnessNotSampledError(f"sampled loudness {sampled} for {url}")
     finally:
         if own:
             await client.aclose()
@@ -211,7 +228,7 @@ async def analyze_by_range(url: str, previous: dict | None = None,
         loudness_fields = {
             "loudness_lufs": round(loudness, 2),
             "true_peak_dbfs": round(peak, 2),
-            "replay_gain_db": round(max(-12.0, min(12.0, -18.0 - loudness)), 2),
+            "replay_gain_db": replay_gain_for(loudness),
         }
     else:
         loudness_fields = {
