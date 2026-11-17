@@ -66,6 +66,8 @@ TONES = {
     "weather": (2000, 8, "spot", "weather_spot"),
     "shiur": (300, 150, "shiur", "block_only"),
     "story": (350, 150, "story", None),
+    # longer than the 5 minutes a soft item needs to pause a shiur (Shmuel, 2026-11-17)
+    "longshiur": (395, 420, "shiur", None),
 }
 EMERGENCY_FREQ = 5000
 
@@ -637,6 +639,70 @@ async def _expect_hour(h: Harness, name: str, policy: str, t1: datetime, talk_st
         h.check(name, not resumed, f"cut: the {talk} does not come back ({len(resumed)} resumes)")
 
 
+async def _start_talk(h: Harness, name: str, talk: str) -> float | None:
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([(talk, {}), ("song5", {}), ("song6", {})])
+    if await h.on_air():  # end the song on air so the talk starts now
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    start = await h.wait_on_air(talk, 60)
+    if start is None:
+        h.check(name, False, f"the {talk} never went on air")
+    return start
+
+
+async def sc_soft_pauses_long_shiur(h: Harness) -> None:
+    """Shmuel, 2026-11-17: Jerusalem's 7:30 weather aired at 7:49 behind a shiur. A soft
+    item due while the shiur has more than 5 minutes left pauses it; it then carries on."""
+    name = "soft_pauses_long_shiur"
+    await h.set_config(timed_during_long_items="pause")
+    start = await _start_talk(h, name, "longshiur")
+    if start is None:
+        return
+    t1 = at(40)  # 420 - ~45 s in: about 6 minutes left
+    await h.queue([("weather", {"preempt_at": t1, "timing_mode": "soft", "source": "block"})])
+    due = t1.timestamp()
+    await asyncio.sleep(max(0, due - time.time()) + 30)
+    times = await h.started_times("weather", due - 5)
+    started = times[0][0] if times else None
+    late = None if started is None else started - due
+    h.check(name, late is not None and -1.0 <= late <= 2.0,
+            f"weather due {_fmt(due)}, started {_fmt(started)} ({'never' if late is None else f'{late:+.1f} s'})")
+    talk_starts = await h.started_times("longshiur", start - 1)
+    resumed = [t for t, src in talk_starts if src.startswith("resume@")]
+    h.check(name, bool(resumed), f"the shiur carries on after the weather (starts: {[(_fmt(t), s) for t, s in talk_starts]})")
+    if resumed:
+        heard = h.heard(due - 3, resumed[0] + 6)
+        h.print_timeline(heard, due)
+        names = [n for _, n in timeline(heard)]
+        h.check(name, names[:1] == ["longshiur"] and "weather" in names and names[-1] == "longshiur",
+                f"heard shiur -> weather -> shiur: {names}")
+        gap, gap_at = longest_silence(heard)
+        h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s" + (f" at {_fmt(gap_at)}" if gap_at else ""))
+
+
+async def sc_soft_waits_for_short_shiur(h: Harness) -> None:
+    """Under 5 minutes left (the 150 s shiur), the soft item waits for the shiur's end."""
+    name = "soft_waits_for_short_shiur"
+    await h.set_config(timed_during_long_items="pause")
+    start = await _start_talk(h, name, "shiur")
+    if start is None:
+        return
+    t1 = at(15)
+    await h.queue([("weather", {"preempt_at": t1, "timing_mode": "soft", "source": "block"})])
+    talk_end = start + TONES["shiur"][1]
+    await asyncio.sleep(max(0, talk_end - time.time()) + 20)
+    times = await h.started_times("weather", t1.timestamp() - 5)
+    started = times[0][0] if times else None
+    h.check(name, started is not None and talk_end - 5 <= started <= talk_end + 4,
+            f"shiur ends {_fmt(talk_end)}, weather started {_fmt(started)}")
+    talk_starts = await h.started_times("shiur", start - 1)
+    h.check(name, len(talk_starts) == 1, f"the shiur was not paused ({len(talk_starts)} starts)")
+    if started:
+        gap, _ = longest_silence(h.heard(started - 6, started + 6))
+        h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+
+
 async def sc_song_spans_hour(h: Harness) -> None:
     name = "song_spans_hour"
     await wait_music(h)
@@ -761,6 +827,8 @@ SCENARIOS = {
     "queued_shiur_spans_hour_cut": lambda h: sc_music_lane_shiur_spans_hour(h, "cut"),
     "song_spans_hour": sc_song_spans_hour,
     "soft_timed_waits_for_song": sc_soft_waits_for_song,
+    "soft_pauses_long_shiur": sc_soft_pauses_long_shiur,
+    "soft_waits_for_short_shiur": sc_soft_waits_for_short_shiur,
     "rapid_next": sc_rapid_next,
     "empty_queue": sc_empty_queue,
     "slow_started": sc_slow_started,

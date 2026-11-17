@@ -50,13 +50,13 @@ async def move_caller_to_conference(call_sid: str | None, conference_name: str) 
         logger.debug("Twilio voice not enabled — move caller skipped")
         return False
 
-    try:
+    def _redirect() -> None:
+        # All of it in a worker thread: the first import of twilio's TwiML module alone
+        # held the event loop 0.28 s (tests/test_event_loop_not_blocked.py)
         from twilio.rest import Client
-        from twilio.twiml.voice_response import VoiceResponse, Dial
+        from twilio.twiml.voice_response import Dial, VoiceResponse
 
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-
-        # Build TwiML for live conference
         response = VoiceResponse()
         dial = Dial()
         dial.conference(
@@ -65,9 +65,10 @@ async def move_caller_to_conference(call_sid: str | None, conference_name: str) 
             end_conference_on_exit=False,
         )
         response.append(dial)
+        client.calls(call_sid).update(twiml=str(response))
 
-        # Redirect the call
-        await asyncio.to_thread(client.calls(call_sid).update, twiml=str(response))
+    try:
+        await asyncio.to_thread(_redirect)
         logger.info("Caller %s moved to conference %s", call_sid, conference_name)
         return True
     except Exception as e:
