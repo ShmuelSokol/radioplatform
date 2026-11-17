@@ -288,12 +288,46 @@ async def test_twilio_hold_music_is_twiml(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="BUG: Twilio webhooks do not check X-Twilio-Signature: anyone can add fake "
-                   "callers to the live show's queue or mark real callers as hung up")
-async def test_unsigned_twilio_webhook_is_refused(client: AsyncClient, db_session: AsyncSession):
-    from app.models.call_in_request import CallInRequest
+async def test_unsigned_twilio_webhook_is_refused(client: AsyncClient, db_session: AsyncSession, monkeypatch):
+    """B-LIVESHOWS-21 (fixed): with TWILIO_AUTH_TOKEN set, a webhook without a valid
+    X-Twilio-Signature gets 403 and changes nothing; a correctly signed one works."""
+    from twilio.request_validator import RequestValidator
 
+    from app.api.v1.live_shows import twilio_signature
+    from app.config import settings
+    from app.models.call_in_request import CallInRequest, CallStatus
+
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "tw-secret")
+    monkeypatch.setattr(settings, "BACKEND_PUBLIC_URL", "https://api.example.test")
     await _live_show(db_session)
-    r = await client.post("/api/v1/live-shows/twilio/inbound", data={"From": "+15550000002", "CallSid": "CAx"})
-    assert r.status_code == 403
+    form = {"From": "+15550000002", "CallSid": "CAx", "To": "+15550009999"}
+    wrong_key = twilio_signature("other", "http://test/api/v1/live-shows/twilio/inbound", form.items())
+    for headers in ({}, {"X-Twilio-Signature": "bm9wZQ=="}, {"X-Twilio-Signature": wrong_key}):
+        r = await client.post("/api/v1/live-shows/twilio/inbound", data=form, headers=headers)
+        assert r.status_code == 403, r.text
     assert (await db_session.execute(select(CallInRequest))).scalars().all() == []
+
+    # Our signature is Twilio's own algorithm
+    public = "https://api.example.test/api/v1/live-shows/twilio/inbound"
+    assert twilio_signature("tw-secret", public, form.items()) == \
+        RequestValidator("tw-secret").compute_signature(public, form)
+
+    # Signed for the public URL Twilio was given (the app sees another host behind the proxy)
+    r = await client.post("/api/v1/live-shows/twilio/inbound", data=form,
+                          headers={"X-Twilio-Signature": twilio_signature("tw-secret", public, form.items())})
+    assert r.status_code == 200 and "<Response" in r.text
+    call = (await db_session.execute(select(CallInRequest))).scalar_one()
+    assert call.status == CallStatus.WAITING
+
+    # The status callback is checked too
+    status_form = {"CallSid": "CAx", "CallStatus": "completed"}
+    r = await client.post("/api/v1/live-shows/twilio/status", data=status_form)
+    assert r.status_code == 403
+    await db_session.refresh(call)
+    assert call.status == CallStatus.WAITING
+    status_url = "https://api.example.test/api/v1/live-shows/twilio/status"
+    r = await client.post("/api/v1/live-shows/twilio/status", data=status_form,
+                          headers={"X-Twilio-Signature": twilio_signature("tw-secret", status_url, status_form.items())})
+    assert r.status_code == 200
+    await db_session.refresh(call)
+    assert call.status == CallStatus.ABANDONED
