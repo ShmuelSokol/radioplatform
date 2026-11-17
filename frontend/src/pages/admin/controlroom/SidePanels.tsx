@@ -195,13 +195,13 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
               </div>
               <button type="button" onClick={() => startShow(show.id)} disabled={busy || live.length > 0}
                 title={live.length > 0 ? 'End the current live show first' : 'Start this show now'}
-                className="h-10 px-3 shrink-0 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-bold disabled:opacity-40">
+                className="cr-tap h-10 px-3 shrink-0 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-bold disabled:opacity-40">
                 Start
               </button>
             </div>
           ))}
         </div>
-        <Link to="/admin/live" className="block mt-3 px-1 text-sm text-cyan-300 hover:underline">Schedule or edit live shows</Link>
+        <Link to="/admin/live" className="cr-tap flex items-center mt-3 px-1 text-sm text-cyan-300 hover:underline">Schedule or edit live shows</Link>
       </div>
     </section>
   );

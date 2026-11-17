@@ -112,6 +112,9 @@ class Settings(BaseSettings):
 
     # FFmpeg
     FFMPEG_PATH: str = "ffmpeg"
+    # Largest library upload (POST /assets/upload), in MB. The whole file is held in
+    # memory while it is converted; a bigger file is refused with 413 before reading.
+    MAX_UPLOAD_MB: int = 600
 
     # ElevenLabs TTS (optional — set API key to empty to disable)
     ELEVENLABS_API_KEY: str = ""

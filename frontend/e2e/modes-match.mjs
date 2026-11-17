@@ -181,8 +181,13 @@ async function viewerAndSideways(browser) {
     }
     await btn(page, 'mode-hs').click();
     check('phone sideways: HS press works', await waitToast(page, /HS is off/));
-    const errBtn = page.getByRole('button', { name: 'Errors', exact: true });
-    if (await errBtn.count()) await errBtn.first().click(); else await page.getByRole('tab', { name: 'Errors' }).first().click();
+    // Sideways the left column has Go live / Played / Schedule / Errors buttons (.cr-side)
+    const more = page.locator('.cr-side button:visible', { hasText: 'More' });
+    if (await more.count() && !(await page.locator('button:visible', { hasText: /^Errors$/ }).count())) await more.first().click();
+    const errBtn = page.locator('button:visible', { hasText: /^Errors$/ });
+    await errBtn.first().waitFor({ timeout: 3000 }).catch(() => {});
+    if (await errBtn.count()) await errBtn.first().click();
+    else await page.getByRole('tab', { name: 'Errors' }).first().click();
     await page.getByTestId('errors-panel').first().waitFor({ timeout: 4000 }).catch(() => {});
     check('phone sideways: Errors reachable', await page.locator('[data-testid=errors-panel]:visible').count() === 1);
     check('phone sideways: no sideways scroll', await noSideScroll(page));

@@ -117,10 +117,29 @@ Meter scale: each side is the RMS level of the on-air bus in dBFS over about 46 
 
 ## Phone held sideways
 
-`(orientation: landscape) and (max-height: 500px) and (max-width: 1023.98px)`: the
-transport bar becomes a left column (about 42%) and the queue with its tabs fills the
-right one at full height; the page scrolls so the site menu sits just above the control
-room, and the page starts scrolled to it. Before (Shmuel, 2026-11-16), menu, transport
-and tabs filled the ~300 px and no queue row showed. CSS in `controlroom/classic.css`,
-query `PHONE_LANDSCAPE` in `Dashboard.tsx` (keep both in step). Checked by
-`e2e/control-room.mjs` `phoneLandscape` at 750x342 and 932x300.
+When: `PHONE_LANDSCAPE` in `controlroom/shared.ts`, `(orientation: landscape) and
+(max-height: 500px) and (max-width: 1023.98px)`, decided by `usePhoneLandscape()`. It
+ignores the query while a text field is in use on a phone whose screen is upright
+(Android shrinks the window for the keyboard, so an upright phone looks wide). The page
+sets `html.cr-land` and `classic.css` follows that class, so there is no second copy of
+the query in CSS. No `:has()` is needed for the layout: `Layout.tsx` gives the shell
+`cr-shell`.
+
+Layout (Shmuel, 2026-11-16 and 11-17: "unusable sideways"):
+- Left column (42 %, 260-400 px) is `TransportBar` with `landscape`: one LCD row
+  (status with elapsed / length, Remaining, Clock), on air and next, then a 4-column
+  grid of 44 px buttons: Go next (2 cells), Fade, Soft fade / Loop, HS, Spots, Panic.
+  Under that: the pre-listen deck when open (`PflDeck column`), then Listen, LIVE and
+  the station. HS / Spots / Panic are not repeated under More. The column scrolls on
+  its own; Go next and Panic are at the top.
+- Right column: the queue (rows 50 px, one line of title, `ROW_LANDSCAPE`; the queue
+  keeps the same top row when the phone turns) or the open pane, with 44 px tabs.
+- Every control in the right column is at least 44 x 44 px (CSS under `html.cr-land`).
+  The library search and type buttons share one row; while typing, the tabs hide so the
+  keyboard leaves room for results.
+- The page scrolls so the site menu sits just above the control room and starts
+  scrolled to it. Safe areas: left and bottom on the transport, right on the queue.
+
+Checked by `e2e/control-room-landscape.mjs` (iPhone SE / 14 / Pro Max with and without
+Safari's bars, Pixel 7, Galaxy S21; tap sizes in every pane; every control; turning the
+phone keeps state and sound; keyboard) and `e2e/control-room.mjs` `phoneLandscape`.

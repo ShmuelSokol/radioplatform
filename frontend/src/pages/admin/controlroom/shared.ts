@@ -61,6 +61,11 @@ export const TYPE_STYLE: Record<string, { text: string; chip: string; button: st
 const FALLBACK_STYLE = { text: 'text-gray-400', chip: 'bg-white/10 text-gray-300', button: 'bg-white/5 border-white/20 text-gray-100 hover:bg-white/10' };
 export const typeStyle = (t: string | null | undefined) => (t && TYPE_STYLE[t]) || FALLBACK_STYLE;
 
+/** Phone held sideways: wider than tall, at most 500 px tall, under the desktop width.
+ * The page decides (usePhoneLandscape) and sets html.cr-land; classic.css follows that
+ * class, so there is one query only. */
+export const PHONE_LANDSCAPE = '(orientation: landscape) and (max-height: 500px) and (max-width: 1023.98px)';
+
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -75,6 +80,43 @@ export function useMediaQuery(query: string): boolean {
     return () => mq.removeEventListener('change', onChange);
   }, [query]);
   return matches;
+}
+
+const isTypingField = (el: Element | null): boolean => {
+  if (!el) return false;
+  if (el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable) return true;
+  return el.tagName === 'INPUT' && !/^(button|checkbox|radio|range|submit|reset|file|color|image)$/i.test((el as HTMLInputElement).type);
+};
+const screenUpright = (): boolean => {
+  try { return !!window.screen?.orientation?.type?.startsWith('portrait'); } catch { return false; }
+};
+
+/**
+ * True when the control room should use its sideways layout (PHONE_LANDSCAPE).
+ * Android shrinks the window when the on-screen keyboard opens, so a phone held upright
+ * can look wider than tall while typing; with the screen upright and a text field in
+ * use, the layout stays as it is. (iPhone does not resize the window for the keyboard.)
+ */
+export function usePhoneLandscape(): boolean {
+  const wide = useMediaQuery(PHONE_LANDSCAPE);
+  const [typingUpright, setTypingUpright] = useState(false);
+  useEffect(() => {
+    const check = () => setTypingUpright(isTypingField(document.activeElement) && screenUpright());
+    const later = () => setTimeout(check, 0);
+    check();
+    document.addEventListener('focusin', check);
+    document.addEventListener('focusout', later);
+    window.addEventListener('resize', check);
+    const so = window.screen?.orientation;
+    so?.addEventListener?.('change', check);
+    return () => {
+      document.removeEventListener('focusin', check);
+      document.removeEventListener('focusout', later);
+      window.removeEventListener('resize', check);
+      so?.removeEventListener?.('change', check);
+    };
+  }, []);
+  return wide && !typingUpright;
 }
 
 export function useDebounced<T>(value: T, ms: number): T {

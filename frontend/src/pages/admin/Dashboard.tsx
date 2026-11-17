@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
@@ -31,7 +31,7 @@ import { ErrorsPanel, LivePanel, LogPanel, SchedulePanel } from './controlroom/S
 import ModeButtons from './controlroom/ModeButtons';
 import { panicRequest, setStationModes, type StationModes } from '../../api/queue';
 import { isManager } from '../../auth/access';
-import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
+import { dayKey, isValidTz, useHotButtons, useMediaQuery, usePhoneLandscape, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
 import { serverNow } from '../../lib/serverClock';
@@ -60,8 +60,6 @@ const MOBILE_TABS: Array<{ id: Pane; label: string; icon: string }> = [
 // Fade lengths the server uses for each Next button (queue.py SKIP_FADE_SECONDS)
 const SKIP_FADE_SECONDS: Record<SkipFade, number> = { hard: 0, fade: 0.5, soft: 3 };
 
-// Keep in step with the media query in controlroom/classic.css
-const PHONE_LANDSCAPE = '(orientation: landscape) and (max-height: 500px) and (max-width: 1023.98px)';
 // Share of the height Up next gets above the lower pane (the old fixed 3:2)
 const SPLIT_DEFAULT = 0.6;
 const SPLIT_MIN = 0.15;
@@ -75,7 +73,12 @@ export default function Dashboard() {
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   // Phone held sideways: the page scrolls so the control room fills the screen with the
   // site menu just above it (classic.css "phone landscape"); start scrolled to it.
-  const phoneLandscape = useMediaQuery(PHONE_LANDSCAPE);
+  const phoneLandscape = usePhoneLandscape();
+  // classic.css lays the page out sideways under html.cr-land (set before paint)
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle('cr-land', phoneLandscape);
+    return () => document.documentElement.classList.remove('cr-land');
+  }, [phoneLandscape]);
   useEffect(() => {
     if (!phoneLandscape) return;
     const el = document.querySelector('[data-testid="control-room"]');
@@ -844,7 +847,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      <TransportBar {...transport} />
+      <TransportBar {...transport} landscape={phoneLandscape}
+        modeButtons={phoneLandscape ? <ModeButtons p={modeProps} stacked={false} grid /> : undefined}
+        pflDeck={phoneLandscape ? <PflDeck pfl={pfl} column /> : undefined} />
 
       {isDesktop ? (
         /* ═══ Desktop, laid out like the old program: log over songs, buttons on the right, cart along the bottom ═══ */
@@ -898,25 +903,26 @@ export default function Dashboard() {
         /* ═══ Phone / tablet: one pane + bottom tabs (beside the transport in landscape, see classic.css) ═══ */
         <div className="cr-side flex-1 min-h-0 flex flex-col">
           <div className="flex-1 min-h-0 flex flex-col">
-            {(pane === 'log' || pane === 'schedule' || pane === 'errors') && (
+            {/* Sideways, HS, Spots and Panic sit under Go next in the left column */}
+            {!phoneLandscape && (pane === 'log' || pane === 'schedule' || pane === 'errors') && (
               <ModeButtons p={modeProps} stacked={false} />
             )}
             {(pane === 'log' || pane === 'schedule' || pane === 'errors') && (
               <div className="shrink-0 flex gap-1 p-1 bg-[#c0c0c0]">
                 {(['log', 'schedule', 'errors'] as Pane[]).map(t => (
                   <button key={t} type="button" onClick={() => setPane(t)} aria-pressed={pane === t}
-                    className="qn-btn flex-1 h-9 text-sm">
+                    className="qn-btn cr-tap flex-1 h-9 text-sm">
                     {t === 'log' ? 'Played' : t === 'schedule' ? 'Schedule' : 'Errors'}
                   </button>
                 ))}
-                <Link to="/admin/databank?tab=log" className="qn-btn flex-1 h-9 text-sm flex items-center justify-center" data-testid="cr-databank">Databank</Link>
+                <Link to="/admin/databank?tab=log" className="qn-btn cr-tap flex-1 h-9 text-sm flex items-center justify-center" data-testid="cr-databank">Databank</Link>
               </div>
             )}
             <div className="flex-1 min-h-0">
               {pane === 'queue' ? queuePanel : pane === 'buttons' ? hotButtons(true) : sidePanel(pane)}
             </div>
           </div>
-          <PflDeck pfl={pfl} compact />
+          {!phoneLandscape && <PflDeck pfl={pfl} compact />}
           <nav className="cr-tabs shrink-0 flex gap-1 px-1 pt-1 bg-[#c0c0c0] border-t-2 border-white pb-[max(0.25rem,env(safe-area-inset-bottom))]" aria-label="Control room sections">
             {MOBILE_TABS.map(t => {
               const active = pane === t.id || (t.id === 'log' && (pane === 'schedule' || pane === 'errors'));
