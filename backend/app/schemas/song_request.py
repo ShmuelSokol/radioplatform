@@ -1,14 +1,34 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Limits match the song_requests columns (models/song_request.py); longer text used
+# to reach the database and fail there (500). The message column is TEXT: 1000 is ours.
+REQUESTER_NAME_MAX = 255
+SONG_TITLE_MAX = 500
+SONG_ARTIST_MAX = 255
+REQUESTER_MESSAGE_MAX = 1000
 
 
 class SongRequestCreate(BaseModel):
     station_id: str
-    requester_name: str
-    song_title: str
-    song_artist: str | None = None
-    requester_message: str | None = None
+    requester_name: str = Field(min_length=1, max_length=REQUESTER_NAME_MAX)
+    song_title: str = Field(min_length=1, max_length=SONG_TITLE_MAX)
+    song_artist: str | None = Field(default=None, max_length=SONG_ARTIST_MAX)
+    requester_message: str | None = Field(default=None, max_length=REQUESTER_MESSAGE_MAX)
+
+    @field_validator("requester_name", "song_title", "song_artist", "requester_message", mode="before")
+    @classmethod
+    def _strip(cls, value):
+        # Blank name or title -> 422 (min_length); blank artist or message -> not given
+        if isinstance(value, str):
+            value = value.strip()
+        return value
+
+    @field_validator("song_artist", "requester_message")
+    @classmethod
+    def _blank_is_none(cls, value):
+        return value or None
 
 
 class SongRequestUpdate(BaseModel):

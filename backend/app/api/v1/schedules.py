@@ -59,18 +59,18 @@ async def get_epg(
     from datetime import date as date_type
 
     if date:
-        target_date = date_type.fromisoformat(date)
+        try:
+            target_date = date_type.fromisoformat(date)
+        except ValueError:
+            # A bad ?date= is the caller's mistake, not a server error
+            raise HTTPException(422, "date must be YYYY-MM-DD")
     else:
         # The station's own date (block times are station-local), not the server's
         from zoneinfo import ZoneInfo
 
         from app.models.station import Station
-        tz_name = None
-        try:
-            st = (await db.execute(select(Station).where(Station.id == UUID(station_id)))).scalar_one_or_none()
-            tz_name = st.timezone if st else None
-        except (ValueError, AttributeError):
-            pass
+        st = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+        tz_name = st.timezone if st else None
         try:
             target_date = datetime.now(ZoneInfo(tz_name or "UTC")).date()
         except Exception:

@@ -1296,6 +1296,9 @@ async def _check_advance_locked(
         return next_entry
 
     await db.commit()
+    # The item on air ended and nothing followed it (a blackout with no silence
+    # queued, or a refill that found nothing): tell open pages
+    await _broadcast_nothing_playing(station_id)
     return None
 
 
@@ -2070,6 +2073,8 @@ async def _skip_current_locked(
     if not refilled:
         await _replenish_queue(db, station_id)
     await db.commit()
+    if current is not None:
+        await _broadcast_nothing_playing(station_id)
     return {"message": "Queue empty", "now_playing": None, "queue": await _queue_after_action(db, station_id)}
 
 
@@ -2133,6 +2138,13 @@ async def _queue_after_action(db: AsyncSession, station_id) -> dict | None:
     except Exception as exc:
         logger.warning("Queue snapshot after action failed: %s", exc)
         return None
+
+
+async def _broadcast_nothing_playing(station_id) -> None:
+    """Nothing is on air any more: open listener pages must stop showing the old item."""
+    from app.api.v1.websocket import broadcast_nothing_playing
+
+    await broadcast_nothing_playing(station_id)
 
 
 async def _broadcast_now_playing_entry(
@@ -2623,6 +2635,7 @@ async def _remove_on_air_locked(db: AsyncSession, station_id, entry: QueueEntry)
         if not refilled:
             await _replenish_queue(db, station_id)
         await db.commit()
+        await _broadcast_nothing_playing(station_id)
         return
     mark_started(next_entry, datetime.now(timezone.utc))
     await _drop_timed_twins(db, next_entry)
