@@ -37,6 +37,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
   const levelRef = useRef(1);
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
+  const liveRef = useRef(false); // the server said a host is on air
 
   const ensureCtx = useCallback(() => {
     if (!ctxRef.current) {
@@ -71,7 +72,9 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
     let attempts = 0;
 
     const play = (buf: ArrayBuffer) => {
-      if (!enabledRef.current) return;
+      // Only while a show is on air: a frame still in flight after the host left
+      // must not play over the music that comes back
+      if (!enabledRef.current || !liveRef.current) return;
       const ctx = ensureCtx();
       if (ctx.state !== 'running') { ctx.resume().catch(() => {}); return; }
       const pcm = new Int16Array(buf);
@@ -99,6 +102,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
             const msg = JSON.parse(e.data);
             if (msg.type === 'live_state') {
               if (msg.sample_rate) rateRef.current = msg.sample_rate;
+              liveRef.current = !!msg.live;
               setOnAir(!!msg.live);
               setKnown(true);
               nextTimeRef.current = 0;
@@ -110,6 +114,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
       };
       ws.onclose = () => {
         if (closed) return;
+        liveRef.current = false;
         setOnAir(false);
         retry = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 15000));
       };

@@ -173,8 +173,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-BUGREPORTS-8 ↳ admin only; copies to GitHub again | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 
 ### call_in.py (prefix `/call-in`)
-- [ ] B-CALLIN-1 `POST /call-in/{station_id}` [PUBLIC] Join the queue of the station's live show. Returns the call and the token its | modes: n.a. | covered: tests/test_web_call_in.py
-- [ ] B-CALLIN-2 ↳ no live show -> 409; show not taking calls -> 409; burst -> 429 | modes: n.a. | covered: tests/test_web_call_in.py
+- [x] B-CALLIN-1 `POST /call-in/{station_id}` [PUBLIC] Join the queue of the station's live show. Returns the call and the token its | modes: n.a. | covered: tests/test_web_call_in.py
+- [x] B-CALLIN-2 ↳ no live show -> 409; show not taking calls -> 409; burst -> 429 | modes: n.a. | covered: tests/test_web_call_in.py
 
 ### campaigns.py (prefix `/campaigns`)
 - [ ] B-CAMPAIGNS-1 `GET /campaigns` [require_sponsor_or_manager] list campaigns | modes: n.a. | covered: tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
@@ -264,37 +264,37 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-LISTENERS-11 `GET /listeners/regions` [require_manager] Listener breakdown by country/region over a period. | modes: both | covered: tests/test_admin_crud.py::test_analytics_listeners_and_activity_reads
 
 ### live_shows.py (prefix `/live-shows`) — router guard: station_write_guard(show_id)
-- [ ] B-LIVESHOWS-1 `POST /live-shows` [require_dj_or_manager] Create a new live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-2 `GET /live-shows` [require_staff] List live shows with optional filters. | modes: both | covered: tests/test_role_access.py
-- [ ] B-LIVESHOWS-3 `GET /live-shows/{show_id}` [require_dj_or_manager] Get a live show by ID. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-4 `PATCH /live-shows/{show_id}` [require_dj_or_manager] Update a live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-5 `DELETE /live-shows/{show_id}` [require_admin] Delete a live show (admin only). | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-6 `POST /live-shows/{show_id}/start` [require_dj_or_manager] Start a live show (go live). | modes: both | covered (indirect, calls handler): tests/test_live_show_lifecycle.py, tests/test_live_show_on_air.py
-- [ ] B-LIVESHOWS-7 ↳ start pauses automation (live_show_id set), queue resumes after end | modes: both | covered: tests/test_live_show_on_air.py
-- [ ] B-LIVESHOWS-8 ↳ station not operable by user -> 403 (station_write_guard) | modes: n.a. | covered: tests/test_station_write_permissions.py::test_live_shows_follow_station_permissions
-- [ ] B-LIVESHOWS-9 `POST /live-shows/{show_id}/end` [require_dj_or_manager] End a live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-10 ↳ end clears live_show_id and resumes automation; archive created? | modes: both | covered: tests/test_live_show_on_air.py
-- [ ] B-LIVESHOWS-11 `GET /live-shows/{show_id}/time-remaining` [require_dj_or_manager] Get seconds until hard stop. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-12 `GET /live-shows/{show_id}/calls` [require_dj_or_manager] List all callers for a show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-13 `POST /live-shows/{show_id}/calls/{call_id}/approve` [require_dj_or_manager] Approve a caller. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-14 `POST /live-shows/{show_id}/calls/{call_id}/reject` [require_dj_or_manager] Reject a caller. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-15 `POST /live-shows/{show_id}/calls/{call_id}/on-air` [require_dj_or_manager] Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted). | modes: both | covered: tests/test_web_call_in.py
-- [ ] B-LIVESHOWS-16 ↳ only one caller on air at a time -> 409 | modes: n.a. | covered: tests/test_web_call_in.py
-- [ ] B-LIVESHOWS-17 `POST /live-shows/{show_id}/calls/{call_id}/end-call` [require_dj_or_manager] End an active call. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
-- [ ] B-LIVESHOWS-18 `PATCH /live-shows/{show_id}/calls/{call_id}` [require_dj_or_manager] Update caller name/notes. | modes: both | covered: tests/test_web_call_in.py
-- [ ] B-LIVESHOWS-19 `GET /live-shows/station/{station_id}/active` [PUBLIC] Public endpoint: get the active live show for a station (if any). | modes: both | covered: tests/test_public_endpoints.py::test_active_live_show_is_public_without_callers
-- [ ] B-LIVESHOWS-20 `POST /live-shows/twilio/inbound` [PUBLIC] Twilio inbound call webhook — find active show, create CallInRequest, return hold TwiML. | modes: both | covered: tests/test_auth_security.py::test_twilio_inbound_with_no_live_show_answers_politely, test_twilio_inbound_queues_the_caller_and_status_ends_it
-- [ ] B-LIVESHOWS-21 ↳ Twilio signature/no active show -> polite TwiML; creates CallInRequest | modes: n.a. | covered: BUG unsigned Twilio webhooks accepted (tests/test_auth_security.py::test_unsigned_twilio_webhook_is_refused xfail)
-- [ ] B-LIVESHOWS-22 `POST /live-shows/twilio/status` [PUBLIC] Twilio call status callback — update call status when caller hangs up. | modes: both | covered: tests/test_auth_security.py::test_twilio_inbound_queues_the_caller_and_status_ends_it
-- [ ] B-LIVESHOWS-23 `GET /live-shows/twilio/hold-music` [PUBLIC] Return TwiML with hold music URL for Twilio conference waitUrl. | modes: both | covered: tests/test_auth_security.py::test_twilio_hold_music_is_twiml
+- [x] B-LIVESHOWS-1 `POST /live-shows` [require_dj_or_manager] Create a new live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-2 `GET /live-shows` [require_staff] List live shows with optional filters. | modes: both | covered: tests/test_role_access.py
+- [x] B-LIVESHOWS-3 `GET /live-shows/{show_id}` [require_dj_or_manager] Get a live show by ID. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-4 `PATCH /live-shows/{show_id}` [require_dj_or_manager] Update a live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-5 `DELETE /live-shows/{show_id}` [require_admin] Delete a live show (admin only). | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-6 `POST /live-shows/{show_id}/start` [require_dj_or_manager] Start a live show (go live). | modes: both | covered (indirect, calls handler): tests/test_live_show_lifecycle.py, tests/test_live_show_on_air.py
+- [x] B-LIVESHOWS-7 ↳ start pauses automation (live_show_id set), queue resumes after end | modes: both | covered: tests/test_live_show_on_air.py
+- [x] B-LIVESHOWS-8 ↳ station not operable by user -> 403 (station_write_guard) | modes: n.a. | covered: tests/test_station_write_permissions.py::test_live_shows_follow_station_permissions
+- [x] B-LIVESHOWS-9 `POST /live-shows/{show_id}/end` [require_dj_or_manager] End a live show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-10 ↳ end clears live_show_id and resumes automation; archive created? | modes: both | covered: tests/test_live_show_on_air.py
+- [x] B-LIVESHOWS-11 `GET /live-shows/{show_id}/time-remaining` [require_dj_or_manager] Get seconds until hard stop. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-12 `GET /live-shows/{show_id}/calls` [require_dj_or_manager] List all callers for a show. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-13 `POST /live-shows/{show_id}/calls/{call_id}/approve` [require_dj_or_manager] Approve a caller. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-14 `POST /live-shows/{show_id}/calls/{call_id}/reject` [require_dj_or_manager] Reject a caller. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-15 `POST /live-shows/{show_id}/calls/{call_id}/on-air` [require_dj_or_manager] Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted). | modes: both | covered: tests/test_web_call_in.py
+- [x] B-LIVESHOWS-16 ↳ only one caller on air at a time -> 409 | modes: n.a. | covered: tests/test_web_call_in.py
+- [x] B-LIVESHOWS-17 `POST /live-shows/{show_id}/calls/{call_id}/end-call` [require_dj_or_manager] End an active call. | modes: both | covered: tests/test_admin_crud.py::test_live_show_round_trip
+- [x] B-LIVESHOWS-18 `PATCH /live-shows/{show_id}/calls/{call_id}` [require_dj_or_manager] Update caller name/notes. | modes: both | covered: tests/test_web_call_in.py
+- [x] B-LIVESHOWS-19 `GET /live-shows/station/{station_id}/active` [PUBLIC] Public endpoint: get the active live show for a station (if any). | modes: both | covered: tests/test_public_endpoints.py::test_active_live_show_is_public_without_callers
+- [x] B-LIVESHOWS-20 `POST /live-shows/twilio/inbound` [PUBLIC] Twilio inbound call webhook — find active show, create CallInRequest, return hold TwiML. | modes: both | covered: tests/test_auth_security.py::test_twilio_inbound_with_no_live_show_answers_politely, test_twilio_inbound_queues_the_caller_and_status_ends_it
+- [x] B-LIVESHOWS-21 ↳ Twilio signature/no active show -> polite TwiML; creates CallInRequest | modes: n.a. | covered: tests/test_auth_security.py::test_unsigned_twilio_webhook_is_refused (fixed: with TWILIO_AUTH_TOKEN set, /twilio/inbound and /twilio/status refuse a missing or wrong X-Twilio-Signature with 403; no live show -> polite TwiML and a queued caller covered by test_twilio_inbound_with_no_live_show_answers_politely / test_twilio_inbound_queues_the_caller_and_status_ends_it)
+- [x] B-LIVESHOWS-22 `POST /live-shows/twilio/status` [PUBLIC] Twilio call status callback — update call status when caller hangs up. | modes: both | covered: tests/test_auth_security.py::test_twilio_inbound_queues_the_caller_and_status_ends_it
+- [x] B-LIVESHOWS-23 `GET /live-shows/twilio/hold-music` [PUBLIC] Return TwiML with hold music URL for Twilio conference waitUrl. | modes: both | covered: tests/test_auth_security.py::test_twilio_hold_music_is_twiml
 
 ### live_shows_ws.py
-- [ ] B-LIVESHOWSW-1 `WEBSOCKET /ws/live/station/{station_id}/listen` [PUBLIC] Public: a listener page hears the station's live show here while one is on air. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWSW-2 `WEBSOCKET /ws/live/{show_id}/events` [PUBLIC] Real-time show state + caller updates WebSocket. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWSW-3 `WEBSOCKET /ws/live/{show_id}/audio` [PUBLIC] Binary audio WebSocket — receives MP3 chunks from host browser, forwards to Icecast. | modes: both | NOT COVERED
-- [ ] B-LIVESHOWSW-4 ↳ host MP3 chunks relayed to station listeners only; dead listener dropped | modes: both | covered: tests/test_live_show_on_air.py
-- [ ] B-LIVESHOWSW-5 `WEBSOCKET /ws/live/call/{call_id}` [PUBLIC] A web caller (public page): first message {"type":"auth","token":...} with the | modes: both | NOT COVERED
-- [ ] B-LIVESHOWSW-6 ↳ first message must be auth token; wrong token closes | modes: n.a. | covered: tests/test_web_call_in.py
+- [x] B-LIVESHOWSW-1 `WEBSOCKET /ws/live/station/{station_id}/listen` [PUBLIC] Public: a listener page hears the station's live show here while one is on air. | modes: both | covered: tests/test_live_shows_websockets.py::test_host_audio_reaches_the_station_listeners
+- [x] B-LIVESHOWSW-2 `WEBSOCKET /ws/live/{show_id}/events` [PUBLIC] Real-time show state + caller updates WebSocket. | modes: both | covered: tests/test_live_shows_websockets.py::test_show_events_socket_sends_state_and_caller_updates
+- [x] B-LIVESHOWSW-3 `WEBSOCKET /ws/live/{show_id}/audio` [PUBLIC] Binary audio WebSocket — receives MP3 chunks from host browser, forwards to Icecast. | modes: both | covered: tests/test_live_shows_websockets.py::test_host_audio_reaches_the_station_listeners, ::test_host_audio_socket_refuses_strangers
+- [x] B-LIVESHOWSW-4 ↳ host MP3 chunks relayed to station listeners only; dead listener dropped | modes: both | covered: tests/test_live_show_on_air.py
+- [x] B-LIVESHOWSW-5 `WEBSOCKET /ws/live/call/{call_id}` [PUBLIC] A web caller (public page): first message {"type":"auth","token":...} with the | modes: both | covered: tests/test_live_shows_websockets.py::test_web_caller_waits_hearing_the_host_then_goes_on_air, ::test_rejected_web_caller_is_told_and_closed
+- [x] B-LIVESHOWSW-6 ↳ first message must be auth token; wrong token closes | modes: n.a. | covered: tests/test_web_call_in.py
 
 ### mixer.py (prefix `/studio`)
 - [ ] B-MIXER-1 `POST /studio/mix` [require_manager] Mix two assets (backtrack + overlay) and save as a new asset. | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
@@ -1022,7 +1022,7 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [x] F-CR-SIDE-3 Go live: type a show name + Go live now (Enter works) creates and starts a show | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::side "Go live (Enter) creates and starts the show, opens the host console"
 - [x] F-CR-SIDE-4 Go live: scheduled shows listed with Start; Start disabled while another show is live | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::side "scheduled show Start disabled while a show is live" + "a scheduled show's Start starts it"
 - [x] F-CR-SIDE-5 Go live: End show asks 'Yes, end the show' / cancel; ends the show | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::side "End show asks first; Keep going cancels" + "\"Yes, end the show\" ends it"
-- [x] F-CR-SIDE-6 During a live show the control room hears the host instead of music; music returns after the show | sizes: both | browser | covered: e2e/control-room-actions.mjs::live "during the show the host is heard here" + "during the show the music is silent" + "after the show the music is heard again"
+- [x] F-CR-SIDE-6 During a live show the control room hears the host instead of music; music returns after the show | sizes: both | browser | covered: e2e/control-room-actions.mjs::live "during the show the host is heard here" + "during the show the music is silent" + "after the show the music is heard again" + e2e/control-room-actions.mjs::live (desktop + iPhone) "the music stops when the host goes on air", "the host is heard in the control room", "the music returns after the show" (fixed: a host frame arriving after the show ended was still played over the music)
 - [x] F-CR-SIDE-7 Played log lists recently played items in station tz | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [x] F-CR-SIDE-8 Schedule panel shows what is on now; datetime 'Check a time' previews another time; reset | sizes: both | n.a. | covered: e2e/control-room-actions.mjs::side "Check a time previews another time" + "Now resets to the present"
 - [x] F-CR-SIDE-9 Drag bar between Up next and lower pane resizes; kept after reload; double-click resets; ArrowUp/Down keyboard | sizes: desktop | n.a. | covered: e2e/control-room-actions.mjs::side "splitter ArrowDown/ArrowUp move by 5, double-click resets"; drag + reload: e2e/control-room.mjs
@@ -1128,16 +1128,16 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 
 ## Web call-in page (/call/:stationId)
 
-- [ ] F-CALLIN-1 No live show / calls closed: says so (polls active show) | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "no live show -> says so" + "calls closed -> says so" + "the show appears within one 15 s poll"
-- [ ] F-CALLIN-2 Name (required) + note; Call in asks for the microphone inside the click | sizes: both | n.a. | covered: e2e/web-call-in.cjs
-- [ ] F-CALLIN-3 Mic permission denied shows an error | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "microphone refused -> error, no call made"
-- [ ] F-CALLIN-4 Status text follows waiting → screening → approved → on_air (red pulse) | sizes: both | n.a. | covered: e2e/web-call-in.cjs
-- [ ] F-CALLIN-5 Waiting caller hears the show (host), not on air | sizes: both | n.a. | covered: e2e/web-call-in.cjs
-- [ ] F-CALLIN-6 On air: listeners hear host + caller; caller hears host not themselves | sizes: both | n.a. | covered: e2e/web-call-in.cjs
-- [ ] F-CALLIN-7 Hang up ends the call; screener sees completed | sizes: both | n.a. | covered: e2e/web-call-in.cjs
-- [ ] F-CALLIN-8 Rejected by screener shows rejected state | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "rejected by the screener -> says so, mic released"
-- [ ] F-CALLIN-9 Dropped connection reconnects and call is held | sizes: phone | n.a. | covered: e2e/call-in.mjs::call-in "dropped connection reconnects within 1.5 s and authenticates again" + "the call is held"
-- [ ] F-CALLIN-10 Mic level meter moves | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "mic level meter moves"
+- [x] F-CALLIN-1 No live show / calls closed: says so (polls active show) | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "no live show -> says so" + "calls closed -> says so" + "the show appears within one 15 s poll"
+- [x] F-CALLIN-2 Name (required) + note; Call in asks for the microphone inside the click | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "Call in disabled until a name is typed" + "call sent with name and topic, socket authenticated" + e2e/web-call-in.cjs
+- [x] F-CALLIN-3 Mic permission denied shows an error | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "microphone refused -> error, no call made"
+- [x] F-CALLIN-4 Status text follows waiting → screening → approved → on_air (red pulse) | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [x] F-CALLIN-5 Waiting caller hears the show (host), not on air | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [x] F-CALLIN-6 On air: listeners hear host + caller; caller hears host not themselves | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [x] F-CALLIN-7 Hang up ends the call; screener sees completed | sizes: both | n.a. | covered: e2e/web-call-in.cjs
+- [x] F-CALLIN-8 Rejected by screener shows rejected state | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "rejected by the screener -> says so, mic released"
+- [x] F-CALLIN-9 Dropped connection reconnects and call is held | sizes: phone | n.a. | covered: e2e/call-in.mjs::call-in "dropped connection reconnects within 1.5 s and authenticates again" + "the call is held"
+- [x] F-CALLIN-10 Mic level meter moves | sizes: both | n.a. | covered: e2e/call-in.mjs::call-in "mic level meter moves"
 - [ ] F-CALLIN-11 iPhone Safari call-in | sizes: phone | n.a. | covered: partial, real WebKit (WebKitGTK mock microphone, 450 px): frontend/e2e/webkit/listener-webkit.py::call-in (page loads, name field, Call in gets the mic, call socket authenticated, status line, mic meter moves, on air, Hang up, no sideways scroll); real iPhone still not covered
 - [x] F-CALLIN-12 During a call the call UI (status, mic meter, Hang up) stays even if the 15 s poll says calls are off or no show; the mic is never left open with no Hang up button | sizes: both | n.a. | covered: frontend/e2e/call-in.mjs::call-in "F-CALLIN-12: calls turned off mid-call -> status, mic meter and Hang up stay" + "the poll says no show while on air -> still on air with Hang up" (fixed: the call state wins over the show poll while a call is active) | src: frontend/src/pages/public/CallIn.tsx
 - [x] F-CALLIN-13 Call refused by the server shows its message: no live show (409), calls closed (409), too many calls (429 "Too many calls in a few minutes"), no network ("Could not reach the show"); the mic is released | sizes: both | n.a. | covered: frontend/e2e/call-in.mjs::call-in "F-CALLIN-13: ..." (4 cases) | src: CallIn.tsx; backend/app/api/v1/call_in.py
@@ -1373,31 +1373,31 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 
 ## Song requests (/admin/requests)
 
-- [ ] F-REQUESTS-1 Status tabs; Approve / Reject / Delete (confirm); analytics top requested toggle | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REQUESTS-1 desktop: Approve, Reject, Delete (confirm) save fast; status tabs filter
-- [ ] F-REQUESTS-2 Phone card layout actions | sizes: phone | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REQUESTS-2 iphone: Approve, Reject, Delete (confirm) save fast; status tabs filter
+- [x] F-REQUESTS-1 Status tabs; Approve / Reject / Delete (confirm); analytics top requested toggle | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REQUESTS-1 desktop: Approve, Reject, Delete (confirm) save fast; status tabs filter
+- [x] F-REQUESTS-2 Phone card layout actions | sizes: phone | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REQUESTS-2 iphone: Approve, Reject, Delete (confirm) save fast; status tabs filter
 
 ## Admin archives (/admin/archives)
 
-- [ ] F-AARCH-1 Station filter; New Archive modal (title, station, audio URL, description, host, duration, cover, date); Edit; Cancel/× | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-AARCH-1 desktop: New Archive: Create off until title/audio/station; × and Cancel close; create; Edit saves (+1 more)
-- [ ] F-AARCH-2 Publish/Unpublish toggle; Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-AARCH-2 desktop: Draft / Published toggle saves; station filter; Delete (confirm) (+1 more)
+- [x] F-AARCH-1 Station filter; New Archive modal (title, station, audio URL, description, host, duration, cover, date); Edit; Cancel/× | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-AARCH-1 desktop: New Archive: Create off until title/audio/station; × and Cancel close; create; Edit saves (+1 more)
+- [x] F-AARCH-2 Publish/Unpublish toggle; Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-AARCH-2 desktop: Draft / Published toggle saves; station filter; Delete (confirm) (+1 more)
 
 ## Live shows (/admin/live)
 
-- [ ] F-LIVE-1 Tabs (upcoming/live/ended…); New show modal (title, description, station, broadcast mode, start/end, calls enabled); Edit; Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LIVE-1 desktop: New show: Create off until title+station; create; tabs; Edit saves; Delete (confirm) (+1 more)
-- [ ] F-LIVE-2 Start show; links to host console and screener | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LIVE-2 Go Live saves fast; Host Console and Screener links open
+- [x] F-LIVE-1 Tabs (upcoming/live/ended…); New show modal (title, description, station, broadcast mode, start/end, calls enabled); Edit; Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LIVE-1 desktop: New show: Create off until title+station; create; tabs; Edit saves; Delete (confirm) (+1 more)
+- [x] F-LIVE-2 Start show; links to host console and screener | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LIVE-2 Go Live saves fast; Host Console and Screener links open
 
 ## Host console (/admin/live/:id/host)
 
-- [ ] F-HOST-1 Start Broadcasting asks for mic; VU meter moves; Stop Broadcasting | sizes: both | n.a. | covered: e2e/web-call-in.cjs (audio path)
-- [ ] F-HOST-2 Countdown to hard stop, re-synced via WS; hard stop warning | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-HOST-2 countdown to the hard stop shows about 2 hours and ticks down
-- [ ] F-HOST-3 Caller queue: put on air (one at a time), end call | sizes: both | n.a. | covered: e2e/web-call-in.cjs (via API)
-- [ ] F-HOST-4 End Show (confirm) → back to Live shows; listeners return to music | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-HOST-4 End Show (confirm) goes back to Live shows and the station plays music again
-- [ ] F-HOST-5 Hard stop ends show at scheduled end and queue resumes | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-HOST-5 hard stop ends the show at its end time (host console shows SHOW ENDED) and the queue plays on
+- [x] F-HOST-1 Start Broadcasting asks for mic; VU meter moves; Stop Broadcasting | sizes: both | n.a. | covered: e2e/web-call-in.cjs::"listeners hear the host" + "host VU meter moves" + "Stop Broadcasting: listeners are told the host is off air"
+- [x] F-HOST-2 Countdown to hard stop, re-synced via WS; hard stop warning | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-HOST-2 countdown to the hard stop shows about 2 hours and ticks down
+- [x] F-HOST-3 Caller queue: put on air (one at a time), end call | sizes: both | n.a. | covered: e2e/web-call-in.cjs::"host console: Moshe in Caller On Air" (Put On Air clicked on the console); one at a time: tests/test_web_call_in.py (409)
+- [x] F-HOST-4 End Show (confirm) → back to Live shows; listeners return to music | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-HOST-4 End Show (confirm) goes back to Live shows and the station plays music again
+- [x] F-HOST-5 Hard stop ends show at scheduled end and queue resumes | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-HOST-5 hard stop ends the show at its end time (host console shows SHOW ENDED) and the queue plays on
 
 ## Call screener (/admin/live/:id/screen)
 
-- [ ] F-SCREENER-1 Waiting / approved / on-air columns update in real time | sizes: both | n.a. | covered: e2e/web-call-in.cjs (lists caller)
-- [ ] F-SCREENER-2 Edit caller name (Enter saves, Esc cancels); Approve; Reject; Put on air; End call | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SCREENER-2 edit caller name (Esc cancels, Enter saves), Approve, Put On Air, End Call; Reject
+- [x] F-SCREENER-1 Waiting / approved / on-air columns update in real time | sizes: both | n.a. | covered: e2e/web-call-in.cjs::"Call Screener lists Moshe in Waiting without a reload" + "screener: Moshe moves to Approved"
+- [x] F-SCREENER-2 Edit caller name (Enter saves, Esc cancels); Approve; Reject; Put on air; End call | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SCREENER-2 edit caller name (Esc cancels, Enter saves), Approve, Put On Air, End Call; Reject
 
 ## Recording studio (/admin/studio)
 
@@ -1743,17 +1743,17 @@ cross-cutting gaps, not missing endpoints.
 
 ### H. Twilio phone call-ins, web call-ins, SMS/WhatsApp alerts, alert service
 
-- [ ] V2-70 Phone caller put on air is moved to Twilio conference "live-show-<id>", but nothing joins that conference to the stream or the host's browser (live_audio_mixer is a stub): listeners never hear a phone caller and the host cannot talk to them. Test the expectation with a real phone call, or mark phone call-ins as not working | modes: both | covered: NOT COVERED | src: backend/app/services/live_show_service.py:419-429; backend/app/services/live_audio_mixer.py:1-16; backend/app/services/twilio_voice_service.py:46-74
+- [x] V2-70 Phone caller put on air is moved to Twilio conference "live-show-<id>", but nothing joins that conference to the stream or the host's browser (live_audio_mixer is a stub): listeners never hear a phone caller and the host cannot talk to them. Test the expectation with a real phone call, or mark phone call-ins as not working | modes: both | covered: BUG xfail tests/test_live_shows_websockets.py::test_phone_caller_on_air_is_heard (phone call-ins not bridged; web call-ins chosen) | src: backend/app/services/live_show_service.py:419-429; backend/app/services/live_audio_mixer.py:1-16; backend/app/services/twilio_voice_service.py:46-74
 - [x] V2-71 Inbound phone call picks ANY live show with calls on (first found), not the one for the dialled number or station: with two stations live, phone callers land on an arbitrary show's screener | modes: n.a. | covered: FIXED 2026-11-17 (the number dialled, To, picks the station whose broadcast_config.call_in_number it is; a shared number keeps any live show), tests/test_alerts_calls_twilio.py::test_phone_call_reaches_the_dialled_station | src: backend/app/api/v1/live_shows.py:353-360
-- [ ] V2-72 Phone caller hangs up while on hold: the hold TwiML sets a conference statusCallback (join/leave events, no CallStatus), so /twilio/status may never see "completed" and the caller stays "waiting" on the screener; a caller who hangs up while ON AIR is marked "abandoned" rather than "completed" and air_end is not set | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_phone_call_prompts_and_hang_ups (FIXED: on-air hang-up completes the call) | src: backend/app/services/twilio_voice_service.py:17-34; backend/app/api/v1/live_shows.py:393-418
-- [ ] V2-73 Phone call-in prompts and hold: "Thank you for calling in. Please hold..." then hold music (LIVE_SHOW_HOLD_MUSIC_URL, else Twilio's classical sample over plain http); no live show -> "Sorry, there is no live show accepting calls..." and hang up; ending the show hangs up every waiting/screening/approved/on-air phone call and marks them completed | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_phone_call_prompts_and_hang_ups | src: backend/app/services/twilio_voice_service.py:17-43, 95-120
-- [ ] V2-74 Web caller drops (reload, tunnel): 15 s to reconnect on the same call; after that a waiting/screening/approved call becomes "abandoned", an on-air call "completed" with air_end, and the screener gets caller_removed (hung_up); the call token is an HMAC of the call id with the server secret | modes: n.a. | covered: partial (e2e/web-call-in.cjs hang-up only) | src: backend/app/services/call_in.py:20-69
-- [ ] V2-75 Web call-in refused: no live show on the station -> 409 "There is no live show on this station right now."; show not taking calls -> 409; 5 calls per address per 10 minutes then 429; name 1-100 chars, note up to 300 | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_web_call_in_refusals + tests/test_web_call_in.py | src: backend/app/api/v1/call_in.py:21-62
-- [ ] V2-76 Alert SMS/WhatsApp go to EVERY active user with a phone number whose preference allows the severity (default minimum "warning"), whatever their stations or role (a DJ limited to one station, or a sponsor login with a phone, gets every station's alerts) | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_alert_texts_go_to_the_right_people (FIXED: no texts to sponsors or staff of other stations) | src: backend/app/services/alert_service.py:250-278
-- [ ] V2-77 A repeat of an open alert that escalates it (warning -> critical) only raises the stored severity: no SMS/WhatsApp and no live push is sent for the escalation, so a dead-air spell that becomes critical can stay silent | modes: both | covered: BUG escalation sends no text (tests/test_alerts_calls_twilio.py::test_escalation_notifies_again) | src: backend/app/services/alert_service.py:46-58
-- [ ] V2-78 SMS/WhatsApp and Twilio call control use the synchronous Twilio client inside async code: each message blocks the backend (scheduler tick included) for the length of the Twilio call; an alert that texts ten people delays every station's next tick. Measure with Twilio slow or down | modes: both | covered: tests/test_event_loop_not_blocked.py::test_sms_and_whatsapp_do_not_block, ::test_twilio_call_control_does_not_block (FIXED: to_thread) | src: backend/app/services/sms_service.py:12-53; backend/app/services/twilio_voice_service.py:54-91; backend/app/services/alert_service.py:73-77
-- [ ] V2-79 Alert list filter with an unknown severity or type (e.g. ?severity=urgent) -> 500 (enum ValueError) instead of 422; filter values are case-insensitive | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_alert_filter_values | src: backend/app/services/alert_service.py:162-170
-- [ ] V2-80 Schedule-conflict alert when a block's times overlap another block in the same schedule (start-only "until next" blocks never conflict); title "Schedule conflict: A vs B" | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_schedule_conflict_alert | src: backend/app/services/alert_service.py:197-247
+- [x] V2-72 Phone caller hangs up while on hold: the hold TwiML sets a conference statusCallback (join/leave events, no CallStatus), so /twilio/status may never see "completed" and the caller stays "waiting" on the screener; a caller who hangs up while ON AIR is marked "abandoned" rather than "completed" and air_end is not set | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_phone_call_prompts_and_hang_ups (FIXED: on-air hang-up completes the call) | src: backend/app/services/twilio_voice_service.py:17-34; backend/app/api/v1/live_shows.py:393-418
+- [x] V2-73 Phone call-in prompts and hold: "Thank you for calling in. Please hold..." then hold music (LIVE_SHOW_HOLD_MUSIC_URL, else Twilio's classical sample over plain http); no live show -> "Sorry, there is no live show accepting calls..." and hang up; ending the show hangs up every waiting/screening/approved/on-air phone call and marks them completed | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_phone_call_prompts_and_hang_ups | src: backend/app/services/twilio_voice_service.py:17-43, 95-120
+- [x] V2-74 Web caller drops (reload, tunnel): 15 s to reconnect on the same call; after that a waiting/screening/approved call becomes "abandoned", an on-air call "completed" with air_end, and the screener gets caller_removed (hung_up); the call token is an HMAC of the call id with the server secret | modes: n.a. | covered: tests/test_live_shows_websockets.py::test_web_caller_drop_reconnect_and_abandon, ::test_call_token_is_an_hmac_of_the_call_id_and_grace_is_15_seconds | src: backend/app/services/call_in.py:20-69
+- [x] V2-75 Web call-in refused: no live show on the station -> 409 "There is no live show on this station right now."; show not taking calls -> 409; 5 calls per address per 10 minutes then 429; name 1-100 chars, note up to 300 | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_web_call_in_refusals + tests/test_web_call_in.py | src: backend/app/api/v1/call_in.py:21-62
+- [x] V2-76 Alert SMS/WhatsApp go to EVERY active user with a phone number whose preference allows the severity (default minimum "warning"), whatever their stations or role (a DJ limited to one station, or a sponsor login with a phone, gets every station's alerts) | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_alert_texts_go_to_the_right_people (FIXED: no texts to sponsors or staff of other stations) | src: backend/app/services/alert_service.py:250-278
+- [x] V2-77 A repeat of an open alert that escalates it (warning -> critical) only raises the stored severity: no SMS/WhatsApp and no live push is sent for the escalation, so a dead-air spell that becomes critical can stay silent | modes: both | covered: BUG xfail tests/test_alerts_calls_twilio.py::test_escalation_notifies_again (left for Shmuel: tests/test_alert_repeats.py asserts the opposite) | src: backend/app/services/alert_service.py:46-58
+- [x] V2-78 SMS/WhatsApp and Twilio call control use the synchronous Twilio client inside async code: each message blocks the backend (scheduler tick included) for the length of the Twilio call; an alert that texts ten people delays every station's next tick. Measure with Twilio slow or down | modes: both | covered: tests/test_event_loop_not_blocked.py::test_sms_and_whatsapp_do_not_block, ::test_twilio_call_control_does_not_block (FIXED: to_thread) | src: backend/app/services/sms_service.py:12-53; backend/app/services/twilio_voice_service.py:54-91; backend/app/services/alert_service.py:73-77
+- [x] V2-79 Alert list filter with an unknown severity or type (e.g. ?severity=urgent) -> 500 (enum ValueError) instead of 422; filter values are case-insensitive | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_alert_filter_values | src: backend/app/services/alert_service.py:162-170
+- [x] V2-80 Schedule-conflict alert when a block's times overlap another block in the same schedule (start-only "until next" blocks never conflict); title "Schedule conflict: A vs B" | modes: n.a. | covered: tests/test_alerts_calls_twilio.py::test_schedule_conflict_alert | src: backend/app/services/alert_service.py:197-247
 
 ### I. Archives, podcast RSS, RDS feed
 

@@ -23,6 +23,14 @@ LIVE show with calls on; none live there = the no-show message. A number no stat
 (the shared `TWILIO_VOICE_NUMBER`) keeps the old rule: the most recently started live show
 with calls on. Test: `tests/test_alerts_calls_twilio.py::test_phone_call_reaches_the_dialled_station`.
 
+Signed webhooks (2026-11-17): when `TWILIO_AUTH_TOKEN` is set, `/twilio/inbound` and `/twilio/status`
+need a valid `X-Twilio-Signature` (403 otherwise). The URL checked is the one the app sees, the same
+with https (Railway's proxy), and `BACKEND_PUBLIC_URL` + path, so `BACKEND_PUBLIC_URL` must be the
+address the Twilio number's webhook is set to. Without the token nothing is checked (local use).
+Test: `tests/test_auth_security.py::test_unsigned_twilio_webhook_is_refused`.
+Phone callers on air are still not heard by anyone (V2-70, strict xfail
+`tests/test_live_shows_websockets.py::test_phone_caller_on_air_is_heard`).
+
 ## Web call-ins (2026-11-16, Shmuel chose these over phone lines for now)
 A listener calls from `/call/<station id>` (linked from the Listen page's live banner when the show takes calls). No Twilio.
 1. **Join** (`POST /call-in/{station_id}`, public, 5 per address per 10 min): creates a normal `CallInRequest` (`caller_phone` "Web caller", name, topic in `notes`) for the station's LIVE show with `calls_enabled`, and sends the screener a `caller_queued` event carrying the whole call. It returns a token, an HMAC of the call id with the JWT secret (`services/call_in.py`), so nothing new is stored.
@@ -30,4 +38,5 @@ A listener calls from `/call/<station id>` (linked from the Listen page's live b
 3. **Mixing** (`StationLiveRelay.audio`): the host's frames are the clock. Each one is mixed with the same number of samples from every caller on air (each caller has a small buffer: 0.12 s before mixing in, 0.6 s at most). Listeners get host plus callers, so listener pages and the protocol are unchanged. The host gets the callers only, back down the host's own audio socket (`useHostAudio` plays them). Each caller gets everyone but themselves. Waiting and approved callers are never mixed in. If the host stops sending, nobody hears the callers.
 4. **Screener**: approve, on air, end call and reject also call `live_relay.caller_status`, which mixes the caller in or out and updates their page. Ending the show ends every web call. A caller whose socket drops has 15 s to reconnect; after that the call is marked abandoned, or completed if they were on air.
 - Echo: callers and the host should use headphones. Both use the browser's echo cancellation, but a speaker next to the mic feeds the show back in.
-- Check: `frontend/e2e/web-call-in.cjs` (two Chromium browsers with fake mics at different tones, plus a listener socket; 13 checks) and `tests/test_web_call_in.py`.
+- Check: `frontend/e2e/web-call-in.cjs` (two Chromium browsers with fake mics at different tones, plus a listener socket; screener and host console buttons; `API_URL`/`BASE_URL` point it at a local backend) and `tests/test_web_call_in.py`. The sockets themselves, end to end through the app: `tests/test_live_shows_websockets.py` (a small in-loop ASGI client, so the sockets share the test database session; the WS routes live under `/api/v1/ws/...`).
+- Listener pages (and the control room) play host frames only between `live_state` live true and live false: a frame still in flight after the show ended used to play over the returning music. Check: `e2e/control-room-actions.mjs` part `live`.
