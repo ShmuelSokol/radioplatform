@@ -226,7 +226,20 @@ async def update_request(
         raise NotFoundError("Song request not found")
 
     if body.asset_id is not None:
-        req.asset_id = body.asset_id
+        # Matched by hand ("Match to a song"): the song must exist in the library
+        try:
+            matched = await db.get(Asset, uuid.UUID(str(body.asset_id)))
+        except ValueError:
+            matched = None
+        if matched is None:
+            raise NotFoundError("Song not found in the library")
+        req.asset_id = matched.id
+        # Approved earlier without a match: it goes to the queue now
+        if not body.status and req.status in (RequestStatus.APPROVED, RequestStatus.APPROVED.value):
+            req.status = RequestStatus.QUEUED
+            req.reviewed_by = user.id
+            req.reviewed_at = datetime.now(timezone.utc)
+            await add_to_queue(db, str(req.asset_id), str(req.station_id))
     if body.status:
         req.status = body.status
         req.reviewed_by = user.id

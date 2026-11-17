@@ -21,6 +21,21 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+_SPLITS = re.compile(r"\s+(?:by|-|–|—|/)\s+", re.IGNORECASE)
+
+
+def _guesses(song_title: str, song_artist: str | None) -> list[tuple[str, str]]:
+    title = song_title or ""
+    artist = song_artist or ""
+    out = [(_normalize(title), _normalize(artist))]
+    if not artist.strip():
+        parts = _SPLITS.split(title, maxsplit=1)
+        if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+            left, right = _normalize(parts[0]), _normalize(parts[1])
+            out += [(left, right), (right, left)]
+    return out
+
+
 async def fuzzy_match_asset(
     db: AsyncSession,
     song_title: str,
@@ -39,27 +54,33 @@ async def fuzzy_match_asset(
     if not assets:
         return None, 0.0
 
-    norm_title = _normalize(song_title)
-    norm_artist = _normalize(song_artist) if song_artist else ""
+    # What the listener might mean: their title and artist as typed, and, when the
+    # artist box is empty, the title split at " by " or " - " (both ways round): a
+    # request "One day by matisyahu" with no artist scored 0.35 against "One Day".
+    guesses = _guesses(song_title, song_artist)
+    whole = _normalize(f"{song_title} {song_artist or ''}")
 
     best_asset = None
     best_score = 0.0
 
     for asset in assets:
-        title_score = SequenceMatcher(
-            None, norm_title, _normalize(asset.title)
-        ).ratio()
-
-        if norm_artist and asset.artist:
-            artist_score = SequenceMatcher(
-                None, norm_artist, _normalize(asset.artist)
-            ).ratio()
-        elif not norm_artist and not asset.artist:
-            artist_score = 1.0  # both empty — don't penalize
-        else:
-            artist_score = 0.0
-
-        score = title_score * 0.7 + artist_score * 0.3
+        asset_title = _normalize(asset.title)
+        asset_artist = _normalize(asset.artist) if asset.artist else ""
+        score = 0.0
+        for norm_title, norm_artist in guesses:
+            title_score = SequenceMatcher(None, norm_title, asset_title).ratio()
+            if norm_artist and asset_artist:
+                artist_score = SequenceMatcher(None, norm_artist, asset_artist).ratio()
+            elif not norm_artist and not asset_artist:
+                artist_score = 1.0  # both empty — don't penalize
+            else:
+                artist_score = 0.0
+            score = max(score, title_score * 0.7 + artist_score * 0.3)
+        # Everything typed against "title artist" (and "artist title"), for requests
+        # that put both in one box in any order
+        if asset_artist:
+            for both in (f"{asset_title} {asset_artist}", f"{asset_artist} {asset_title}"):
+                score = max(score, SequenceMatcher(None, whole, both).ratio())
 
         if score > best_score:
             best_score = score
