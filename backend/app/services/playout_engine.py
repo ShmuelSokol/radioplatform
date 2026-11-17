@@ -14,6 +14,7 @@ There is one clock: the engine's. Nothing here advances playback by track durati
 State that is only needed between engine calls lives in memory (single backend process).
 """
 
+import asyncio
 import hmac
 import logging
 import time
@@ -22,12 +23,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.config import settings
 from app.models.asset import Asset, stored_analysis
+from app.models.engine_handoff import EngineHandoff
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset, soft_timed
 
@@ -35,11 +37,20 @@ logger = logging.getLogger(__name__)
 
 # Hand a hard-timed item to the engine this long before it airs, so it is downloaded and ready
 TIMED_LEAD_SECONDS = 45.0
+# A hard item whose hand-over window was missed (backend restart, slow pass) still goes to
+# the timed lane, and airs at once, while it is at most this late. Later than that it no
+# longer cuts the item on air: it plays next in the music lane (pick_next step 1).
+MISSED_HAND_OVER_SECONDS = 300.0
 # Plays shorter than this are not logged (e.g. a song cut off as a timed item starts)
 MIN_LOGGED_PLAY_SECONDS = 1.0
 # Raise an alert if the engine has not contacted us for this long
 ENGINE_SILENT_ALERT_SECONDS = 120.0
 ALERT_REPEAT_SECONDS = 1800.0
+# Engine protocol (radio.liq sends `proto` with /hello and /next). From this version it
+# takes a timed group in parallel (seq/of, reassembled in order) and /timed_drop. An
+# older engine queues timed items in arrival order and has no /timed_drop, so it gets
+# the serial hand-over and the plain flush + skip at blackout end.
+ENGINE_PROTO_GROUPS = 2
 
 
 @dataclass
@@ -70,6 +81,14 @@ class EngineState:
     # Entries the engine reported on air, newest last. Never handed out again, even
     # while their start report is still being written (it is not committed yet)
     recent_started: list[str] = field(default_factory=list)
+    # Hard-timed entries already reported as never accepted by the engine
+    timed_alerted: set[str] = field(default_factory=set)
+    # Monotonic time of the first tick, the watchdog's reference until the engine calls
+    watch_since: float = 0.0
+    # Monotonic time old EngineHandoff rows were last pruned
+    last_handoff_prune: float = 0.0
+    # Protocol version the engine last reported (0 = an engine that reports none)
+    engine_proto: int = 0
 
 
 HANDED_KEEP = 30
@@ -97,6 +116,45 @@ def _note_handed(state: "EngineState", entry) -> None:
     state.handed[str(entry.id)] = str(entry.asset_id)
     while len(state.handed) > HANDED_KEEP:
         state.handed.pop(next(iter(state.handed)))
+
+
+# EngineHandoff rows are kept this long (a start report comes within one item's length)
+HANDOFF_KEEP_HOURS = 6
+HANDOFF_PRUNE_SECONDS = 3600.0
+
+
+async def _record_handed(db: AsyncSession, station_id, handed: list[tuple[str, str]]) -> None:
+    """Write (entry id, asset id) pairs to EngineHandoff, so a start report for an entry
+    deleted meanwhile still finds its asset after a backend restart. Never fails the
+    caller: the in-memory `handed` map still covers the no-restart case."""
+    if not handed:
+        return
+    try:
+        now = datetime.now(UTC)
+        for entry_id, asset_id in handed:
+            await db.merge(EngineHandoff(
+                entry_id=uuid.UUID(entry_id), station_id=station_id,
+                asset_id=uuid.UUID(asset_id), handed_at=now,
+            ))
+        await db.commit()
+    except Exception as e:
+        logger.warning("Could not record the engine hand-over: %s", e)
+        await db.rollback()
+
+
+async def _handed_asset(db: AsyncSession, state: "EngineState", station_id, entry_id: str) -> str | None:
+    """Asset of an entry handed to the engine: from memory, else from EngineHandoff."""
+    if entry_id in state.handed:
+        return state.handed[entry_id]
+    try:
+        row = await db.get(EngineHandoff, uuid.UUID(entry_id))
+    except Exception as e:
+        logger.warning("Could not read the engine hand-over record: %s", e)
+        await db.rollback()
+        return None
+    if row is None or str(row.station_id) != str(station_id):
+        return None
+    return str(row.asset_id)
 
 
 _states: dict[str, EngineState] = {}
@@ -169,13 +227,26 @@ async def engine_flush(station_id) -> bool:
     return await _command("/flush", station_id=station_id)
 
 
-async def engine_timed(station_id, uri: str, at_epoch: float, entry_id: str = "") -> bool:
+async def engine_timed(
+    station_id, uri: str, at_epoch: float, entry_id: str = "", *, seq: int = 0, of: int = 1
+) -> bool:
     """Load an item now and put it on air at `at_epoch` (music fades under it).
 
     The engine ignores an `entry_id` it already holds, so handing the same item over twice
     (after a backend restart, when our own record of it is gone) does not air it twice.
+    `seq` / `of`: its place in a group handed over in parallel (same time); the engine
+    waits for the whole group and queues it in `seq` order.
     """
-    return await _command("/timed", {"uri": uri, "at": at_epoch, "id": entry_id}, station_id=station_id)
+    payload = {"uri": uri, "at": at_epoch, "id": entry_id}
+    if of > 1:
+        payload.update(seq=seq, of=of)
+    return await _command("/timed", payload, station_id=station_id)
+
+
+async def engine_timed_drop(station_id, entry_ids: list[str]) -> bool:
+    """Drop these entries from the engine's timed lane: any of them that is still waiting
+    there is skipped the moment it would start (silence left over after a blackout)."""
+    return await _command("/timed_drop", {"ids": list(entry_ids)}, station_id=station_id)
 
 
 async def engine_overlay(station_id, asset) -> bool:
@@ -272,14 +343,16 @@ async def pick_next(
                 return e
         return None
 
-    # 1. Clock-based ad slots whose time has arrived play after the current song
+    # 1. Timed items whose time has arrived play first: soft ones (ad slots, blocks that
+    # wait for the song) and hard ones the timed lane never got (their hand-over window
+    # was missed). Same rule as the browser path (_pick_next_pending): by position, an
+    # hourly time check created hours ahead aired only after every song queued before it.
     ads = await db.execute(
         select(QueueEntry)
         .options(joinedload(QueueEntry.asset))
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            soft_timed(),
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now,
             may_air,
@@ -315,10 +388,16 @@ def _touch(state: EngineState) -> None:
     state.last_contact = time.monotonic()
 
 
-async def handle_hello(station_id) -> None:
+def _note_proto(state: EngineState, proto: int | None) -> None:
+    state.engine_proto = proto if isinstance(proto, int) and proto > 0 else 0
+
+
+async def handle_hello(station_id, proto: int | None = None) -> None:
     """The engine (re)started: it holds nothing of ours any more."""
     reset_state(station_id)
-    _touch(get_state(station_id))
+    state = get_state(station_id)
+    _note_proto(state, proto)
+    _touch(state)
     logger.info("Playout engine connected for station %s", station_id)
 
 
@@ -352,12 +431,23 @@ async def _reconcile_given(db: AsyncSession, station_id, given: list[str]) -> se
     return {str(i) for i in ids}
 
 
-async def handle_next(db: AsyncSession, station_id, given: list[str] | None = None) -> dict | None:
+async def handle_next(
+    db: AsyncSession, station_id, given: list[str] | None = None, proto: int | None = None
+) -> dict | None:
     """The engine wants its next track: {"uri", "entry_id"}, or None if the queue is empty."""
     state = get_state(station_id)
     _touch(state)
+    # Sent with every ask, so a backend restart learns it again within one item
+    if proto is not None:
+        _note_proto(state, proto)
     already_given = await _reconcile_given(db, station_id, given or [])
     state.given = set(already_given)
+
+    # During a live show the engine gets nothing from the queue: music would play on the
+    # stream under the host, and the item the show paused (its resume entry, queued
+    # first) would be used up. The engine retries by itself once the show is over.
+    if await _live_show_on(db, station_id):
+        return None
 
     # The engine only asks when it holds nothing pre-loaded, so an entry we already handed
     # out is on its way to air (its "started" report may not have reached us yet).
@@ -374,6 +464,7 @@ async def handle_next(db: AsyncSession, station_id, given: list[str] | None = No
     except Exception as e:
         logger.warning("Loop repeat could not be queued: %s", e)
 
+    unplayable = 0
     for _ in range(5):
         entry = await pick_next(db, station_id, exclude)
         if entry is None:
@@ -387,18 +478,42 @@ async def handle_next(db: AsyncSession, station_id, given: list[str] | None = No
             except Exception as e:
                 logger.warning("Replenish on empty queue failed: %s", e)
             if entry is None:
-                return None
+                break
         uri = build_uri(entry, "main")
         if uri:
-            state.cued_entry_id = str(entry.id)
+            entry_id, asset_id = str(entry.id), str(entry.asset_id)
+            state.cued_entry_id = entry_id
             _note_handed(state, entry)
-            logger.info("Engine next -> %s", entry.id)
-            return {"uri": uri, "entry_id": str(entry.id)}
+            await _record_handed(db, station_id, [(entry_id, asset_id)])
+            logger.info("Engine next -> %s", entry_id)
+            return {"uri": uri, "entry_id": entry_id}
         # No playable file for this entry: drop it and try the following one
         logger.error("Queue entry %s has no playable audio URL; skipping it", entry.id)
         entry.status = "skipped"
+        unplayable += 1
         await db.commit()
+    if unplayable:
+        # Every entry tried had no file the engine can fetch (relative paths with storage
+        # not configured): the stream sits on its emergency files, so say so
+        await _alert(
+            db,
+            station_id,
+            state,
+            title="Playout engine has nothing it can play",
+            message=(
+                f"{unplayable} queue item(s) had no audio URL the engine can fetch and were "
+                "skipped; the engine is left without a track. Check the storage settings "
+                "(SUPABASE_URL) and the items' files."
+            ),
+        )
     return None
+
+
+async def _live_show_on(db: AsyncSession, station_id) -> bool:
+    from app.models.station import Station
+
+    station = await db.get(Station, station_id)
+    return bool(station is not None and (station.automation_config or {}).get("live_show_id"))
 
 
 async def handle_started(
@@ -427,6 +542,12 @@ async def handle_started(
                 .where(QueueEntry.id == entry_uuid, QueueEntry.station_id == station_id)
             )
             entry = res.unique().scalar_one_or_none()
+    # Handed to the engine, then deleted here (a schedule redraw replaced the unplayed
+    # songs): found before anything is changed, as the lookup may need a rollback
+    handed_asset = (
+        await _handed_asset(db, state, station_id, str(entry_id))
+        if entry is None and entry_id else None
+    )
 
     # Close whatever the database still shows as playing
     res = await db.execute(
@@ -453,12 +574,12 @@ async def handle_started(
             )
         prev.status = "skipped" if skipped else "played"
 
-    if entry is None and entry_id and str(entry_id) in state.handed:
-        # Handed to the engine, then deleted here (a schedule redraw replaced the
-        # unplayed songs): it is on air all the same. Without this, Main showed
-        # nothing playing (listeners saw "Offline") while the engine played on.
+    if entry is None and handed_asset:
+        # Handed to the engine, then deleted here: it is on air all the same. Without
+        # this, Main showed nothing playing (listeners saw "Offline") while the engine
+        # played on. EngineHandoff keeps this working across a backend restart.
         try:
-            asset_uuid = uuid.UUID(state.handed[str(entry_id)])
+            asset_uuid = uuid.UUID(handed_asset)
         except ValueError:
             asset_uuid = None
         if asset_uuid is not None and await db.get(Asset, asset_uuid) is not None:
@@ -477,8 +598,9 @@ async def handle_started(
             # An entry we no longer have (removed from the queue after the engine loaded it)
             logger.warning("Engine started unknown queue entry %s", entry_id)
             return {"ok": True, "known": False}
-        # No entry id at all: the engine is on its emergency playlist
-        if not state.on_emergency:
+        # No entry id at all: the engine is on its emergency playlist. During a live
+        # show that is expected (/next hands it nothing then), so no alert.
+        if not state.on_emergency and not await _live_show_on(db, station_id):
             state.on_emergency = True
             await _alert(
                 db,
@@ -543,7 +665,9 @@ async def _alert(
     db, station_id, state: EngineState, title: str, message: str, force: bool = False
 ) -> None:
     mono = time.monotonic()
-    if not force and mono - state.last_alert < ALERT_REPEAT_SECONDS:
+    # last_alert 0 = never alerted. Compared as a time, it held back every alert for the
+    # first 30 minutes after the host booted (time.monotonic() starts near 0 there).
+    if not force and state.last_alert and mono - state.last_alert < ALERT_REPEAT_SECONDS:
         return
     state.last_alert = mono
     try:
@@ -742,6 +866,13 @@ async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, n
         "Station %s: %s pauses at %.0f s for the timed group at %s; it resumes after",
         station_id, current.asset_id, resume_at, at,
     )
+    # The engine has already pre-loaded the next song for the music lane. Drop it so it
+    # asks again and gets the resume. Done here unconditionally: the automatic swap only
+    # runs while we remember what it pre-loaded, and a backend restart a minute before
+    # the hour forgot that, so a song aired and the shiur came back 6 minutes late
+    # (Jerusalem, 2026-11-17 14:00Z).
+    if await engine_flush(station_id):
+        state.last_auto_flush = time.monotonic()
 
 
 # The engine downloads a whole file before it can play it. Its pre-loaded track is kept,
@@ -794,9 +925,12 @@ async def _flush_if_head_changed(db: AsyncSession, station_id, state: EngineStat
 OVERRUN_ALERT_SECONDS = 30.0
 
 
-async def _check_overrun(db: AsyncSession, station_id, state: EngineState, now) -> None:
+async def _check_overrun(db: AsyncSession, station_id, state: EngineState, now) -> datetime | None:
     """Main stalled at the end of a song for two minutes with no alert (2026-11-17 02:57Z):
-    the engine never reported the next start. Say so within a minute."""
+    the engine never reported the next start. Say so within a minute.
+
+    Returns when the item on air ends (None when nothing is on air or its length is
+    unknown), for the "not responding" watchdog."""
     res = await db.execute(
         select(QueueEntry)
         .options(joinedload(QueueEntry.asset))
@@ -806,9 +940,9 @@ async def _check_overrun(db: AsyncSession, station_id, state: EngineState, now) 
     current = res.unique().scalars().first()
     end = _airs_until(current) if current is not None else None
     if end is None or (now - end).total_seconds() < OVERRUN_ALERT_SECONDS:
-        return
+        return end
     if state.overrun_alerted == str(current.id):
-        return
+        return end
     state.overrun_alerted = str(current.id)
     title = (current.asset.title if current.asset else None) or "The item on air"
     await _alert(
@@ -823,6 +957,114 @@ async def _check_overrun(db: AsyncSession, station_id, state: EngineState, now) 
             "engine may be stuck: press Next, and check the engine's log."
         ),
     )
+    return end
+
+
+async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now, horizon) -> None:
+    """Hand hard-timed items due by `horizon` to the engine's timed lane.
+
+    Also items whose 45 s window was missed (backend restart, slow pass) while they are
+    at most MISSED_HAND_OVER_SECONDS late: the engine airs a past `at` at once. Each
+    group (same time) goes over at once, its items in parallel, so a slow or hung engine
+    costs the scheduler pass one command timeout per group instead of one per item; the
+    engine puts a group back in order by `seq`. Groups go one after another.
+    """
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            hard_timed(),
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at > now - timedelta(seconds=MISSED_HAND_OVER_SECONDS),
+            QueueEntry.preempt_at <= horizon,
+        )
+        # Handed over in play order: the engine plays a group (same time) in that order
+        .order_by(QueueEntry.preempt_at, QueueEntry.position)
+    )
+    # Never hand over what the engine already holds in its music lane, or it airs twice
+    held = set(state.given) | set(state.recent_started)
+    if state.cued_entry_id:
+        held.add(state.cued_entry_id)
+    blacked_out: bool | None = None
+    groups: dict[datetime, list[tuple[QueueEntry, str]]] = {}
+    for entry in res.unique().scalars().all():
+        key = str(entry.id)
+        if key in state.timed_sent or key in held:
+            continue
+        at = entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=UTC)
+        if at <= now and (entry.asset is None or entry.asset.asset_type != "silence"):
+            # A missed item does not go on air during Shabbos / Yom Tov
+            if blacked_out is None:
+                from app.api.v1.queue import _is_blacked_out
+
+                blacked_out = await _is_blacked_out(db, station_id)
+            if blacked_out:
+                continue
+        uri = build_uri(entry, "timed")
+        if not uri:
+            continue
+        groups.setdefault(at, []).append((entry, uri))
+
+    handed: list[tuple[str, str]] = []
+    parallel = state.engine_proto >= ENGINE_PROTO_GROUPS
+    for at, items in groups.items():
+        if parallel:
+            oks = await asyncio.gather(*(
+                engine_timed(station_id, uri, at.timestamp(), str(entry.id), seq=i, of=len(items))
+                for i, (entry, uri) in enumerate(items)
+            ))
+        else:
+            # An older engine plays a group in the order it receives it: one at a time
+            oks = [
+                await engine_timed(station_id, uri, at.timestamp(), str(entry.id))
+                for entry, uri in items
+            ]
+        for (entry, _), ok in zip(items, oks):
+            key = str(entry.id)
+            if ok:
+                state.timed_sent.add(key)
+                _note_handed(state, entry)
+                handed.append((key, str(entry.asset_id)))
+                logger.info("Handed timed entry %s to the engine for %s", key, at.isoformat())
+            elif at <= now and key not in state.timed_alerted:
+                # Its time has come and the engine has not taken it: it will not air on time
+                state.timed_alerted.add(key)
+                title = (entry.asset.title if entry.asset else None) or "A timed item"
+                await _alert(
+                    db,
+                    station_id,
+                    state,
+                    force=True,
+                    title="Timed item did not reach the playout engine",
+                    message=(
+                        f"\"{title}\" was due at {at:%H:%M:%S} UTC, but the engine did not "
+                        "accept it. It is retried for a few minutes; check that the engine "
+                        "is running."
+                    ),
+                )
+    if len(state.timed_alerted) > 200:
+        state.timed_alerted.clear()
+    await _record_handed(db, station_id, handed)
+
+
+async def _prune_handoffs(db: AsyncSession, station_id, state: EngineState) -> None:
+    mono = time.monotonic()
+    if state.last_handoff_prune and mono - state.last_handoff_prune < HANDOFF_PRUNE_SECONDS:
+        return
+    state.last_handoff_prune = mono
+    try:
+        await db.execute(
+            delete(EngineHandoff).where(
+                EngineHandoff.station_id == station_id,
+                EngineHandoff.handed_at < datetime.now(UTC) - timedelta(hours=HANDOFF_KEEP_HOURS),
+            )
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning("Could not prune engine hand-over records: %s", e)
+        await db.rollback()
 
 
 async def tick(db: AsyncSession, station) -> None:
@@ -831,8 +1073,12 @@ async def tick(db: AsyncSession, station) -> None:
     state = get_state(station_id)
     now = datetime.now(UTC)
 
-    # During a live show the automation queue is left alone
+    # During a live show the automation queue is left alone. The engine's pre-loaded next
+    # track would air during the show and be used up: drop it once (/next hands it
+    # nothing while the show is on, so nothing is cued again)
     if (station.automation_config or {}).get("live_show_id"):
+        if state.cued_entry_id:
+            await engine_flush(station_id)
         return
 
     # 1. Hand hard-timed items (hourly ID, time, weather) to the engine ahead of time
@@ -846,35 +1092,7 @@ async def tick(db: AsyncSession, station) -> None:
         # handing the time check to the engine.
         await db.rollback()
         await db.refresh(station)
-    res = await db.execute(
-        select(QueueEntry)
-        .options(joinedload(QueueEntry.asset))
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            hard_timed(),
-            QueueEntry.preempt_at.isnot(None),
-            QueueEntry.preempt_at > now,
-            QueueEntry.preempt_at <= horizon,
-        )
-        # Handed over in play order: the engine plays a group (same time) in the order received
-        .order_by(QueueEntry.preempt_at, QueueEntry.position)
-    )
-    for entry in res.unique().scalars().all():
-        key = str(entry.id)
-        if key in state.timed_sent:
-            continue
-        # Silence entries mark Shabbos/Yom Tov blackouts; they are not "spots over music"
-        uri = build_uri(entry, "timed")
-        if not uri:
-            continue
-        at = entry.preempt_at
-        if at.tzinfo is None:
-            at = at.replace(tzinfo=UTC)
-        if await engine_timed(station_id, uri, at.timestamp(), key):
-            state.timed_sent.add(key)
-            _note_handed(state, entry)
-            logger.info("Handed timed entry %s to the engine for %s", key, at.isoformat())
+    await _hand_over_timed(db, station_id, state, now, horizon)
 
     # Forget timed entries that no longer exist as pending (played, removed)
     if state.timed_sent:
@@ -899,6 +1117,27 @@ async def tick(db: AsyncSession, station) -> None:
             )
             current = res.unique().scalars().first()
             if current and current.asset and current.asset.asset_type == "silence":
+                # Silence already in the engine's timed lane (a blackout's silence is
+                # hard-timed at its start, so all of it went there at once) is dropped
+                # there too: /flush clears only the music lane, and /skip would just
+                # start the next silence
+                res = await db.execute(
+                    select(QueueEntry.id).where(
+                        QueueEntry.station_id == station_id,
+                        QueueEntry.asset_id == current.asset_id,
+                        QueueEntry.status == "pending",
+                    )
+                )
+                in_lane = [str(i) for i in res.scalars().all() if str(i) in state.timed_sent]
+                if state.engine_proto < ENGINE_PROTO_GROUPS:
+                    in_lane = []  # an older engine has no /timed_drop: flush + skip only
+                if in_lane:
+                    await db.execute(
+                        update(QueueEntry)
+                        .where(QueueEntry.id.in_([uuid.UUID(i) for i in in_lane]))
+                        .values(status="played")
+                        .execution_options(synchronize_session=False)
+                    )
                 await db.execute(
                     update(QueueEntry)
                     .where(
@@ -910,6 +1149,9 @@ async def tick(db: AsyncSession, station) -> None:
                     .values(status="played")
                 )
                 await db.commit()
+                if in_lane:
+                    await engine_timed_drop(station_id, in_lane)
+                    state.timed_sent.difference_update(in_lane)
                 await engine_flush(station_id)
                 await engine_skip(station_id)
                 logger.info(
@@ -917,6 +1159,8 @@ async def tick(db: AsyncSession, station) -> None:
                 )
     except Exception as e:
         logger.warning("Blackout check in playout tick failed: %s", e)
+
+    await _prune_handoffs(db, station_id, state)
 
     # 3. The queue changed after the engine pre-loaded its next track: make it ask again
     if state.cued_entry_id:
@@ -926,8 +1170,17 @@ async def tick(db: AsyncSession, station) -> None:
     await _enforce_hard_by(db, station_id, state, now)
 
     # 5. Watchdog: the item on air runs well past its end and nothing new was reported
-    await _check_overrun(db, station_id, state, now)
-    if state.last_contact and time.monotonic() - state.last_contact > ENGINE_SILENT_ALERT_SECONDS:
+    on_air_until = await _check_overrun(db, station_id, state, now)
+    # The engine calls only between items (/next for the one after, /started), so it is
+    # quiet for as long as the item on air lasts: a song or shiur over two minutes is not
+    # a dead engine. Until it first calls, silence counts from the first tick, so an
+    # engine that is down when the backend starts is reported too.
+    mono = time.monotonic()
+    if not state.watch_since:
+        state.watch_since = mono
+    heard = state.last_contact or state.watch_since
+    expected_quiet = on_air_until is not None and on_air_until > now
+    if not expected_quiet and mono - heard > ENGINE_SILENT_ALERT_SECONDS:
         await _alert(
             db,
             station_id,
