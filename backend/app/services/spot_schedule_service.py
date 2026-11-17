@@ -483,18 +483,20 @@ async def reconcile_spot_slots(
 ) -> dict | None:
     """Make the station's pending ad_slot queue entries match the spot schedules.
 
-    Returns None when the station has no spot schedules at all — the caller
-    then keeps the legacy single-spot behaviour. Otherwise returns counts.
+    Returns None when the station has no spot schedules at all (and Spots mode is
+    on) — the caller then keeps the legacy single-spot behaviour. Otherwise returns counts.
     Does not commit.
     """
-    schedules = await load_station_schedules(db, station_id)
-    if not schedules:
-        return None
+    from app.services.station_modes import spots_on
 
     station = (
         await db.execute(select(Station).where(Station.id == station_id))
     ).scalar_one_or_none()
     if station is None:
+        return None
+    # Spots mode off: carry on with an empty plan even with no schedules, so the
+    # placeholder ad slots of the legacy path are removed and none are added.
+    if spots_on(station) and not await load_station_schedules(db, station_id):
         return None
 
     now = now or datetime.now(UTC)

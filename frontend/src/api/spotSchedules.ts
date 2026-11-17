@@ -66,6 +66,8 @@ export interface SpotPlanPreview {
   planned: PlannedSpot[];
   unplaced: UnplacedSpot[];
   off_air?: OffAirWindow[];
+  /** Spots mode is off in the control room: nothing is planned until it is switched on */
+  spots_off?: boolean;
 }
 
 export const listSpotSchedules = async (): Promise<SpotSchedule[]> =>

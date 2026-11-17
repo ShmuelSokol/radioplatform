@@ -89,6 +89,8 @@ class Stack:
         self.wav_t0: float | None = None
         # seconds the engine's POST .../started waits before it reaches the backend
         self.slow_started = 0.0
+        # true = the backend cannot be reached from the engine (every call answers 502)
+        self.backend_down = False
 
     # audio files
     def make_audio(self) -> None:
@@ -159,6 +161,14 @@ class Stack:
         class BackendProxy(SimpleHTTPRequestHandler):
             def _forward(self, method: str):
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method != "GET" else None
+                if stack.backend_down:
+                    data = b"backend down (harness)"
+                    self.send_response(502)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if method == "POST" and self.path.rstrip("/").endswith("/started") and stack.slow_started:
                     time.sleep(stack.slow_started)
                 headers = {k: v for k, v in self.headers.items()
@@ -267,15 +277,32 @@ class Stack:
             "KBR_ICECAST_MOUNT": "/harness",
             "KBR_DEBUG_WAV": str(self.wav),
         })
-        out = open(self.dir / "engine.log", "w")
+        out = open(self.dir / "engine.log", "a")
         cmd = ["liquidsoap", str(RADIO_LIQ)]
         if os.geteuid() == 0:  # Liquidsoap refuses to run as root
             cmd = ["runuser", "-u", "nobody", "--"] + cmd
         p = subprocess.Popen(cmd, env=env, stdout=out,
                              stderr=subprocess.STDOUT, start_new_session=True)
         self.procs.append(p)
+        self.engine = p
         wait_for(lambda: self.wav.exists() and self.wav.stat().st_size > 0, 60, "engine output")
         self.wav_t0 = time.time()
+
+    def restart_engine(self) -> None:
+        """Kill the engine and start it again (a crash, a server reboot, setup.sh)."""
+        p = getattr(self, "engine", None)
+        if p is not None:
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+                p.wait(timeout=10)
+            except Exception:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+            self.procs.remove(p)
+        self.wav.unlink(missing_ok=True)
+        self.start_engine()
 
     def stop(self) -> None:
         for p in reversed(self.procs):
@@ -880,6 +907,118 @@ async def sc_two_groups(h: Harness, apart: float) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
 
 
+
+def _control(path: str, body: dict | None = None, token: str = TOKEN) -> int:
+    """POST straight to the engine's control port (what nginx forwards to)."""
+    req = urllib.request.Request(f"http://127.0.0.1:{CONTROL_PORT}{path}", method="POST",
+                                 data=json.dumps(body or {}).encode(),
+                                 headers={"X-Playout-Token": token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+async def sc_backend_unreachable(h: Harness) -> None:
+    """B-MODE-24 / B-MODE-26 / V1-3: the backend cannot be reached. When the song on air
+    ends the engine plays its emergency files (no silence) and keeps asking every 2 s;
+    once the backend is back it returns to the station's queue by itself."""
+    name = "backend_unreachable"
+    await wait_music(h)
+    cur = await h.on_air()
+    song_end = cur.started_at.timestamp() + (cur.asset.duration or 40)
+    h.stack.backend_down = True
+    try:
+        # the next song was pre-loaded before the outage: let it and the one on air run out
+        await asyncio.sleep(max(0, song_end - time.time()) + 40 + 12)
+        down_heard = h.heard(song_end - 3, time.time() - 1)
+    finally:
+        h.stack.backend_down = False
+    back_at = time.time()
+    await asyncio.sleep(30)
+    heard = h.heard(song_end - 3, time.time() - 1)
+    h.print_timeline(heard, back_at)
+    names = [n for _, n in timeline(down_heard)]
+    h.check(name, "EMERGENCY" in names, f"emergency files played while the backend was down: {sorted(set(names))}")
+    gap, gap_at = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s (outage and return)")
+    tail = [n for _, n in timeline(h.heard(time.time() - 6, time.time() - 1))]
+    h.check(name, bool(tail) and tail[-1].startswith("song"),
+            f"back on the station's music within 30 s of the backend returning: {tail}")
+    st = await h.on_air()
+    h.check(name, st is not None and st.started_at is not None and st.started_at.timestamp() >= back_at - 1,
+            f"the site shows what started after the return ({st.asset.title if st else None})")
+
+
+async def sc_control_endpoints(h: Harness) -> None:
+    """B-MODE-25: control endpoints refuse a wrong or missing token; /timed with the same
+    entry id twice airs it once (an id is remembered, the last 50)."""
+    name = "control_endpoints"
+    await wait_music(h)
+    for path in ("/skip", "/flush", "/timed", "/overlay", "/status"):
+        code = _control(path, {}, token="wrong")
+        h.check(name, code == 403, f"{path} with a wrong token -> {code}")
+    h.check(name, _control("/status", {}, token="") == 403, "no token -> 403")
+    entry = str(uuid.uuid4())
+    uri = (f'annotate:kbr_entry="{entry}",kbr_lane="timed",title="dup":'
+           f"http://127.0.0.1:{AUDIO_PORT}/time.mp3")
+    due = time.time() + 12
+    codes = [_control("/timed", {"uri": uri, "at": due, "id": entry}) for _ in range(2)]
+    h.check(name, codes == [200, 200], f"/timed twice answered {codes}")
+    await asyncio.sleep(12 + 6 + 10)
+    heard = h.heard(due - 3, due + 20)
+    h.print_timeline(heard, due)
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    h.check(name, runs.count("time") == 1, f"the item handed twice aired once: {runs}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+
+
+async def sc_engine_starts_backend_down(h: Harness) -> None:
+    """V1-1 / B-MODE-16: the engine (re)starts while the backend cannot be reached. Its
+    /hello fails, it still starts and plays its emergency files (no silence); when the
+    backend is back the next /next works without another restart."""
+    name = "engine_starts_backend_down"
+    await wait_music(h)
+    # A time check the backend hands over before the restart: the restarted engine no
+    # longer holds it, so the backend must hand it over again once it hears from it
+    due = at(42)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(6)
+    h.stack.backend_down = True
+    try:
+        h.stack.restart_engine()
+        started = h.stack.wav_t0
+        await asyncio.sleep(20)
+        down = h.heard(started + 2, time.time() - 1)
+    finally:
+        h.stack.backend_down = False
+    back_at = time.time()
+    await asyncio.sleep(30)
+    heard = h.heard(started + 2, time.time() - 1)
+    h.print_timeline(heard, back_at)
+    names = sorted({n for _, n in timeline(down)})
+    h.check(name, "EMERGENCY" in names, f"emergency files while the backend is down after the restart: {names}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s from 2 s after the start")
+    tail = [n for _, n in timeline(h.heard(time.time() - 6, time.time() - 1))]
+    h.check(name, bool(tail) and tail[-1].startswith("song"),
+            f"station music within 30 s of the backend returning, without a restart: {tail}")
+    st = await h.on_air()
+    h.check(name, st is not None and st.started_at is not None and st.started_at.timestamp() >= back_at - 1,
+            f"the site shows the item that started after the return ({st.asset.title if st else None})")
+    playing = [e for e in await h.rows() if e.status == "playing"]
+    h.check(name, len(playing) == 1, f"one item on air ({len(playing)})")
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + 10)
+    starts = await h.started_times("time", due.timestamp() - 5)
+    late = starts[0][0] - due.timestamp() if starts else None
+    h.check(name, late is not None and abs(late) <= 2.0,
+            f"time check handed over before the restart still aired on time: due {_fmt(due.timestamp())}, "
+            f"{'never' if late is None else f'{late:+.1f} s'}")
+
+
 SCENARIOS = {
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
@@ -897,7 +1036,12 @@ SCENARIOS = {
     "three_item_timed_group": sc_three_item_group,
     "two_groups_0.3s_apart": lambda h: sc_two_groups(h, 0.3),
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
+    "backend_unreachable": sc_backend_unreachable,
+    "control_endpoints": sc_control_endpoints,
+    # restarts the engine: keep it last
+    "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
+
 
 
 def _fmt(t: float | None) -> str:

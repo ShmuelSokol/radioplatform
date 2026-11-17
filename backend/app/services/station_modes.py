@@ -61,7 +61,10 @@ async def soften_hard_items(db: AsyncSession, station: Station) -> int:
             QueueEntry.station_id == station.id,
             QueueEntry.status == "pending",
             QueueEntry.preempt_at.isnot(None),
-            or_(hard_timed(), QueueEntry.hard_by.isnot(None)),
+            # hard_timed() misses old entries with no timing and no source (SQL NULL
+            # != 'ad_slot' is not true), yet they start on the second: soften them too
+            or_(hard_timed(), QueueEntry.hard_by.isnot(None),
+                and_(QueueEntry.timing_mode.is_(None), QueueEntry.source.is_(None))),
             # Shabbos / Yom Tov silence must start on time
             or_(QueueEntry.asset_id.is_(None), QueueEntry.asset_id.notin_(silence_ids)),
             # Resumed shiurim and live-show entries are not "timed songs"

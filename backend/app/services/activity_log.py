@@ -67,6 +67,8 @@ LABELS: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/stations/{station_id}/queue/play-next"): ("Set to play next", "control"),
     ("POST", "/stations/{station_id}/queue/loop"): ("Set loop", "control"),
     ("POST", "/stations/{station_id}/queue/mix-over"): ("Mixed over", "control"),
+    ("POST", "/stations/{station_id}/queue/modes"): ("Switched HS / Spots mode", "control"),
+    ("POST", "/stations/{station_id}/queue/panic"): ("Pressed Panic", "control"),
     ("POST", "/stations/{station_id}/queue/move-up"): ("Moved up in the queue", "control"),
     ("POST", "/stations/{station_id}/queue/move-down"): ("Moved down in the queue", "control"),
     ("PUT", "/stations/{station_id}/queue/reorder"): ("Reordered the queue", "control"),

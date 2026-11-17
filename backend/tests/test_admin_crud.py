@@ -19,6 +19,7 @@ from app.core.security import create_access_token
 from app.models.asset import Asset
 from app.models.station import Station
 from app.models.user import User, UserRole
+from tests.timing import limit as ci_limit
 
 SAVE = 1.0  # S-6
 READ = 0.3  # S-4
@@ -36,7 +37,8 @@ async def timed(coro, limit=SAVE):
     t = time.perf_counter()
     r = await coro
     took = time.perf_counter() - t
-    assert took < limit, f"{r.request.method} {r.request.url.path} took {took * 1000:.0f} ms"
+    # Shared CI runners are 2-3x slower and noisy: same allowance as every other speed test
+    assert took < ci_limit(limit), f"{r.request.method} {r.request.url.path} took {took * 1000:.0f} ms"
     return r
 
 

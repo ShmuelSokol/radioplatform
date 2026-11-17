@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.asset import Asset, fit_for_random_pick
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
-from app.models.song_request import SongRequest, RequestStatus
 
 
 def _normalize(text: str) -> str:
@@ -177,8 +176,8 @@ async def check_auto_approve(
     """Check if a matched asset can be auto-approved.
 
     Reads auto_approve_requests (bool) and max_requests_per_day (int)
-    from asset.metadata_extra. Counts today's plays + pending queue entries
-    + approved/queued song requests.
+    from asset.metadata_extra. Counts today's plays + pending/playing queue entries
+    (a queued request is one of those).
     """
     extra = asset.metadata_extra or {}
     if not extra.get("auto_approve_requests", False):
@@ -207,20 +206,10 @@ async def check_auto_approve(
     )
     queue_count = queue_count_result.scalar() or 0
 
-    # Count approved/queued song requests today
-    req_count_result = await db.execute(
-        select(func.count(SongRequest.id)).where(
-            SongRequest.station_id == station_id,
-            SongRequest.asset_id == asset.id,
-            SongRequest.status.in_(
-                [RequestStatus.APPROVED, RequestStatus.QUEUED]
-            ),
-            SongRequest.created_at >= today_start,
-        )
-    )
-    req_count = req_count_result.scalar() or 0
-
-    total = play_count + queue_count + req_count
+    # A request that was queued is already counted above, as its queue entry (and once
+    # played, in the play log): counting the request row as well counted it twice, so a
+    # song allowed 2 a day took only 1 request (B-SONGREQUES-3).
+    total = play_count + queue_count
     return total < max_per_day
 
 

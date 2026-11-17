@@ -178,7 +178,13 @@ async def _queue_follows_schedule(db: AsyncSession, schedule_id, *, had_playlist
     try:
         station_id = await station_of_schedule(db, schedule_id)
         if station_id is not None:
-            await refresh_station(db, station_id, had_playlists=had_playlists)
+            from app.api.v1 import playlists as _pl
+
+            if _pl.REFRESH_INLINE:
+                await refresh_station(db, station_id, had_playlists=had_playlists)
+            else:
+                # answer the save at once; the queue rebuild follows in the background
+                _pl._schedule_refresh(station_id, had_playlists)
     except Exception:
         import logging
 
@@ -706,7 +712,12 @@ async def delete_schedule(
     await db.delete(schedule)
     await db.commit()
     try:
-        await refresh_station(db, station_id, had_playlists=had)
+        from app.api.v1 import playlists as _pl
+
+        if _pl.REFRESH_INLINE:
+            await refresh_station(db, station_id, had_playlists=had)
+        else:
+            _pl._schedule_refresh(station_id, had)
     except Exception:
         import logging
 
