@@ -70,6 +70,33 @@ def _clean_relay():
     clear()
 
 
+# No socket test may hang CI (PR 172's run hit the 20-minute job limit here): every
+# receive gives up after RECEIVE_TIMEOUT, and a whole test that runs past
+# TEST_HARD_LIMIT stops the run with every thread's traceback.
+RECEIVE_TIMEOUT = 10.0
+TEST_HARD_LIMIT = 90.0
+
+
+@pytest.fixture(autouse=True)
+def _never_hang(monkeypatch):
+    import faulthandler
+
+    import anyio
+    from starlette.testclient import WebSocketTestSession
+
+    def receive(self):
+        async def get():
+            with anyio.fail_after(RECEIVE_TIMEOUT):
+                return await self._send_rx.receive()
+
+        return self.portal.call(get)
+
+    monkeypatch.setattr(WebSocketTestSession, "receive", receive)
+    faulthandler.dump_traceback_later(TEST_HARD_LIMIT, exit=True)
+    yield
+    faulthandler.cancel_dump_traceback_later()
+
+
 @contextmanager
 def ws_client():
     app = FastAPI()

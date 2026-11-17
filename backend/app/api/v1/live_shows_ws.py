@@ -392,9 +392,11 @@ async def websocket_live_events(websocket: WebSocket, show_id: str):
                     await websocket.send_json({"type": "ping"})
 
     except WebSocketDisconnect:
-        live_show_manager.disconnect(show_id, websocket)
+        pass
     except Exception as e:
         logger.error("Live show WS error for show %s: %s", show_id, e)
+    finally:
+        # Also when the handler is cancelled (server shutdown, a client gone mid-send)
         live_show_manager.disconnect(show_id, websocket)
 
 
@@ -452,7 +454,9 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         if live_relay.hosts.get(station_id) is websocket:
             live_relay.hosts.pop(station_id, None)
         if live_relay.on_air.get(station_id) == show_id:
-            await live_relay.set_on_air(station_id, None)
+            # Shielded: a handler cancelled as the host leaves must still tell the
+            # listener pages the show is off air, or their music stays silenced
+            await asyncio.shield(live_relay.set_on_air(station_id, None))
 
 
 @router.websocket("/ws/live/call/{call_id}")
@@ -517,7 +521,8 @@ async def websocket_web_caller(websocket: WebSocket, call_id: str):
     finally:
         if live_relay.callers.get(call_id) is line:
             live_relay.callers.pop(call_id, None)
-            await caller_left(call_id, line.show_id)
+            # Shielded: the grace timer must start even if this handler is cancelled
+            await asyncio.shield(caller_left(call_id, line.show_id))
 
 
 # --- Broadcast helpers ---
