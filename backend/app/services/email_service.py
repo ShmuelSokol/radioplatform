@@ -2,7 +2,9 @@
 Transactional email service using Resend.
 All sends are no-ops when RESEND_API_KEY is not configured.
 """
+import asyncio
 import logging
+from html import escape
 
 from app.config import settings
 
@@ -19,7 +21,7 @@ async def send_email(to: str, subject: str, html_body: str) -> bool:
     resend.api_key = settings.RESEND_API_KEY
 
     try:
-        resend.Emails.send({
+        await asyncio.to_thread(resend.Emails.send, {
             "from": settings.RESEND_FROM_EMAIL,
             "to": [to],
             "subject": subject,
@@ -36,6 +38,9 @@ async def send_campaign_status_update(
     sponsor_email: str, campaign_name: str, new_status: str
 ) -> bool:
     subject = f"Campaign Update: {campaign_name}"
+    # Names and text typed by users go into HTML escaped: a comment holding a link or
+    # an image must reach the sponsor as plain text, never as markup.
+    campaign_name, new_status = escape(campaign_name), escape(new_status)
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #4f46e5;">Campaign Status Update</h2>
@@ -54,6 +59,8 @@ async def send_new_comment_notification(
     sponsor_email: str, campaign_name: str, commenter_name: str, comment_preview: str
 ) -> bool:
     subject = f"New Comment on {campaign_name}"
+    campaign_name, commenter_name = escape(campaign_name), escape(commenter_name)
+    comment_preview = escape(comment_preview)
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #4f46e5;">New Comment</h2>
@@ -74,7 +81,7 @@ async def send_invoice_created(
     sponsor_email: str, invoice_amount_cents: int, due_date: str | None
 ) -> bool:
     amount = f"${invoice_amount_cents / 100:.2f}"
-    due = due_date or "upon receipt"
+    due = escape(due_date or "upon receipt")
     subject = f"New Invoice: {amount}"
     html = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">

@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models.ad_campaign import CampaignStatus
+
 
 # --- Campaign ---
 
@@ -27,7 +29,7 @@ class CampaignUpdate(BaseModel):
 
 
 class CampaignStatusUpdate(BaseModel):
-    status: str  # one of CampaignStatus values
+    status: CampaignStatus  # an unknown value is refused with 422
 
 
 class CampaignInDB(BaseModel):

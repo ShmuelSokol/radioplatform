@@ -1,18 +1,33 @@
 """Show archive + podcast RSS feed API."""
 import uuid
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.dependencies import get_db, require_manager
-from app.core.exceptions import NotFoundError
+from app.core.dependencies import get_current_user, get_db, require_manager
+from app.core.exceptions import ForbiddenError, NotFoundError, UnauthorizedError
 from app.models.show_archive import ShowArchive
 from app.models.station import Station
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.show_archive import (
     ShowArchiveCreate, ShowArchiveUpdate, ShowArchiveInDB, ShowArchiveListResponse,
 )
 
 router = APIRouter(prefix="/archives", tags=["archives"])
+
+_optional_bearer = HTTPBearer(auto_error=False)
+
+
+async def _is_manager(request: Request, credentials, db: AsyncSession) -> bool:
+    """True when the caller is signed in as admin or manager. Anonymous or other roles: False."""
+    if credentials is None:
+        return False
+    try:
+        user = await get_current_user(request, credentials, db)
+    except UnauthorizedError:
+        return False
+    return user.role in (UserRole.ADMIN, UserRole.MANAGER)
+
 
 # --- Admin CRUD ---
 
@@ -32,14 +47,26 @@ async def create_archive(
 
 @router.get("", response_model=ShowArchiveListResponse)
 async def list_archives(
+    request: Request,
     station_id: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    include_unpublished: bool = Query(False),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
     db: AsyncSession = Depends(get_db),
 ):
-    """Public: list published archives. Admin sees all."""
-    q = select(ShowArchive).where(ShowArchive.is_published == True)
-    count_q = select(func.count(ShowArchive.id)).where(ShowArchive.is_published == True)
+    """Public: list published archives. With include_unpublished=true a manager
+    also sees drafts (the admin Archives screen), so a draft can be published again."""
+    if include_unpublished:
+        if credentials is None:
+            raise UnauthorizedError()
+        if not await _is_manager(request, credentials, db):
+            raise ForbiddenError("Manager access required")
+        q = select(ShowArchive)
+        count_q = select(func.count(ShowArchive.id))
+    else:
+        q = select(ShowArchive).where(ShowArchive.is_published == True)
+        count_q = select(func.count(ShowArchive.id)).where(ShowArchive.is_published == True)
     if station_id:
         q = q.where(ShowArchive.station_id == station_id)
         count_q = count_q.where(ShowArchive.station_id == station_id)
@@ -52,10 +79,18 @@ async def list_archives(
 
 
 @router.get("/{archive_id}", response_model=ShowArchiveInDB)
-async def get_archive(archive_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_archive(
+    archive_id: uuid.UUID,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+    db: AsyncSession = Depends(get_db),
+):
+    """Public for published archives; a draft is shown only to managers."""
     result = await db.execute(select(ShowArchive).where(ShowArchive.id == archive_id))
     archive = result.scalar_one_or_none()
     if not archive:
+        raise NotFoundError("Archive not found")
+    if not archive.is_published and not await _is_manager(request, credentials, db):
         raise NotFoundError("Archive not found")
     return archive
 

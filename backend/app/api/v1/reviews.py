@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_manager, require_staff
 from app.db.session import get_db
+from app.models.asset import Asset
 from app.models.user import User
 from app.models.review_queue import ReviewQueue, ReviewItem
 from app.schemas.review import (
@@ -19,6 +20,19 @@ from app.schemas.review import (
 )
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
+
+# A review decision is the library item's review status: a rejected item leaves every
+# automatic pick (see not_placeholder), an approved one is back in. Flag and skip
+# leave the item's status as it was.
+DECIDING = ("approved", "rejected")
+
+
+async def _set_asset_review_status(db: AsyncSession, asset_id, status: str | None) -> None:
+    if status not in DECIDING:
+        return
+    asset = await db.get(Asset, asset_id)
+    if asset is not None:
+        asset.review_status = status
 
 
 @router.post("/queues", response_model=ReviewQueueResponse, status_code=201)
@@ -133,6 +147,7 @@ async def update_item(
 
     if body.status:
         item.status = body.status
+        await _set_asset_review_status(db, item.asset_id, body.status)
     if body.notes is not None:
         item.notes = body.notes
     item.version += 1
@@ -193,6 +208,7 @@ async def batch_update(
         if item:
             item.status = body.status
             item.version += 1
+            await _set_asset_review_status(db, item.asset_id, body.status)
             updated += 1
 
     # Update queue progress
