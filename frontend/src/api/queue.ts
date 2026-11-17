@@ -90,6 +90,19 @@ export const setLoop = async (stationId: string, on: boolean) => {
   return res.data as { loop: boolean; asset_id: string | null; queue?: { entries?: unknown[] } };
 };
 
+/** KBR Studio's HS (hard start) and Spots mode switches; leave one out to keep it. */
+export interface StationModes { hard_start: boolean; spots: boolean }
+export const setStationModes = async (stationId: string, modes: Partial<StationModes>) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/modes`, modes);
+  return res.data as { modes: StationModes; queue?: { entries?: unknown[] } };
+};
+
+/** Panic: cut whatever is on air now (even a time check) and play the next item. */
+export const panicRequest = async (stationId: string) => {
+  const res = await apiClient.post(`/stations/${stationId}/queue/panic`);
+  return res.data as { message: string; queue?: { entries?: unknown[] } };
+};
+
 /** Play an asset on top of the item on air; the queue does not move. */
 export const mixOverRequest = async (stationId: string, assetId: string, clientRequestId: string) => {
   const res = await apiClient.post(`/stations/${stationId}/queue/mix-over`, {

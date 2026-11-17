@@ -21,6 +21,7 @@ const ROUTE_ROLES: [prefix: string, roles: Role[]][] = [
   ['/admin/dashboard', STAFF],
   ['/admin/assets/upload', MANAGERS],
   ['/admin/assets', STAFF],
+  ['/admin/databank', STAFF],
   ['/admin/reviews', STAFF],
   ['/admin/schedules', STAFF],
   ['/admin/rules', STAFF],
@@ -51,6 +52,7 @@ export function canAccess(role: Role | undefined | null, path: string): boolean 
 const WRITE_ROLES: [prefix: string, roles: Role[]][] = [
   ['/admin/dashboard', ON_AIR],
   ['/admin/assets', MANAGERS],
+  ['/admin/databank', MANAGERS],
   ['/admin/schedules', MANAGERS],
   ['/admin/rules', ADMIN],
   ['/admin/program-clock', MANAGERS],
