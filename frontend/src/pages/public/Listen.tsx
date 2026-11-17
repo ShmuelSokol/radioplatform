@@ -283,13 +283,25 @@ export default function Listen() {
   // A live show on air: the host is heard instead of the music. The now-playing
   // message held when the show began is stale afterwards (the station's queue was
   // paused), so the music waits for a fresh one.
-  const live = useLiveAudio(stationId ?? null, userStarted);
+  // The live socket opens only once Listen is pressed and closes on Stop: a visitor
+  // who never presses Listen downloads no show audio (F-LISTEN-44)
+  const live = useLiveAudio(stationId ?? null, userStarted, { onlyWhenEnabled: true });
+  // A show the 15 s poll says is live: right after Listen the music waits (at most
+  // 3 s) for the live socket to say so, so it does not play before the host is heard
+  const [liveWaitOver, setLiveWaitOver] = useState(false);
+  useEffect(() => {
+    setLiveWaitOver(false);
+    if (!userStarted) return;
+    const t = setTimeout(() => setLiveWaitOver(true), 3000);
+    return () => clearTimeout(t);
+  }, [userStarted]);
+  const waitingForLive = userStarted && !live.known && !!activeShow?.active && !liveWaitOver;
   const staleNowPlaying = useRef<typeof wsNowPlaying | undefined>(undefined);
   if (live.onAir && staleNowPlaying.current === undefined) staleNowPlaying.current = wsNowPlaying;
   if (!live.onAir && staleNowPlaying.current !== undefined && staleNowPlaying.current !== wsNowPlaying) {
     staleNowPlaying.current = undefined;
   }
-  const musicAllowed = !live.onAir && staleNowPlaying.current === undefined;
+  const musicAllowed = !live.onAir && staleNowPlaying.current === undefined && !waitingForLive;
 
   // Audio engine with crossfade support (fallback when HLS is not available)
   const {
@@ -444,7 +456,7 @@ export default function Listen() {
           <div className="min-w-0">
             <h1 className="text-3xl font-bold break-words">{station.name}</h1>
             <p className="text-gray-500">{station.type} &middot; {station.timezone}</p>
-            <PlayoutBadge stationId={stationId} className="mt-1" />
+            <PlayoutBadge stationId={stationId} listener className="mt-1" />
             {station.description && <p className="text-gray-400 mt-1">{station.description}</p>}
           </div>
         </div>

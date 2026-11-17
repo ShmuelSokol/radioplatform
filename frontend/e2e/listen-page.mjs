@@ -5,7 +5,7 @@
  * profile, network loss and coming back to the tab, the server-stream mode (with a
  * small MP3 stream server on STREAM_PORT), the hourly time check heard on time, and
  * short items and hard timed items handed over on the second (ONLY=handover).
- * Parts: basics forms crm requests nothing shell network polling switch player elapsed
+ * Parts: basics forms crm requests nothing shell live network polling switch player elapsed
  * clock timecheck stream streamretry resume handover. crm..shell, streamretry and resume
  * are the verifier's F-LISTEN-23..54 (listener profile, raffles, song request texts,
  * nothing on air as the server says it, stream retry, release resume on the stream,
@@ -76,8 +76,9 @@ async function basics(browser, contextOpts, tag) {
   await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
   check(`${tag}: header shows type and timezone`, await page.getByText('internet · America/New_York').count() === 1);
   check(`${tag}: header shows the description`, await page.getByText('Music all day').count() === 1);
-  await page.getByTestId('playout-badge').waitFor({ timeout: 5000 }).catch(() => {});
-  check(`${tag}: playout badge says Browser player`, /Browser player/.test(await page.getByTestId('playout-badge').textContent().catch(() => '')));
+  await page.getByText('On Air', { exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
+  await sleep(500);
+  check(`${tag}: no playout badge for a browser-player station (listeners see no engine wording)`, await page.getByTestId('playout-badge').count() === 0);
   await page.getByText('On Air', { exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
   check(`${tag}: status pill says On Air while the station plays`, await page.getByText('On Air', { exact: true }).count() === 1);
   const cur = station.byId[station.playing().asset_id];
@@ -805,7 +806,7 @@ async function streamMode(browser, stream) {
   await page.getByText('On Air', { exact: true }).waitFor();
   await sleep(300);
   check(`${tag}: preconnect to the stream server before Listen`, await page.locator(`link[rel=preconnect][href="${stream.origin}"]`).count() === 1);
-  check(`${tag}: badge says Server stream`, /Server stream/.test(await page.getByTestId('playout-badge').textContent()));
+  check(`${tag}: badge says Live stream (listener wording)`, (await page.getByTestId('playout-badge').textContent()).trim() === 'Live stream');
   const el = () => page.evaluate(() => {
     const a = document.querySelector('audio');
     const b = a.buffered;
@@ -1374,11 +1375,12 @@ async function pageShell(browser) {
     check(`${tag}: and says so within 4 s (F-LISTEN-47)`, Date.now() - t0 < 4000, `${Date.now() - t0} ms`);
     await ctx.close();
   }
-  // F-LISTEN-48: playout badge variants for an engine station
-  for (const [st, label, tip] of [
-    [{ mode: 'server', engine: true, engine_ok: true, in_sync: true }, 'Server stream', /same stream from the server/],
-    [{ mode: 'server', engine: true, engine_ok: false, in_sync: false }, 'Server stream: not answering', /did not answer/],
-    [{ mode: 'server', engine: true, engine_ok: true, in_sync: false, engine_title: 'Nigun Simcha 7' }, 'Server stream: out of step', /"Nigun Simcha 7"/],
+  // F-LISTEN-48: listeners never see engine wording: every server-stream state shows a
+  // plain "Live stream" (the control room keeps the detail: control-room-actions.mjs badges)
+  for (const [st, what] of [
+    [{ mode: 'server', engine: true, engine_ok: true, in_sync: true }, 'engine fine'],
+    [{ mode: 'server', engine: true, engine_ok: false, in_sync: false }, 'engine not answering'],
+    [{ mode: 'server', engine: true, engine_ok: true, in_sync: false, engine_title: 'Nigun Simcha 7' }, 'engine out of step'],
   ]) {
     const station = makeStation({ shows: [] });
     station.playout = { stations: { [station.SID]: st }, default: { mode: 'browser' } };
@@ -1388,7 +1390,8 @@ async function pageShell(browser) {
     await badge.waitFor({ timeout: 5000 }).catch(() => {});
     const text = (await badge.textContent().catch(() => '')).trim();
     const title = await badge.getAttribute('title').catch(() => '');
-    check(`${tag}: playout badge "${label}" with its tooltip (F-LISTEN-48)`, text === label && tip.test(title || ''), `${text} | ${title}`);
+    check(`${tag}: ${what}: the public badge says only "Live stream", no engine wording or track title (F-LISTEN-48)`,
+      text === 'Live stream' && !/engine|server|step|answer|Nigun/i.test(title || ''), `${text} | ${title}`);
     await ctx.close();
   }
   // F-LISTEN-51: lock screen before any now-playing arrives, and no Media Session at all
@@ -1483,6 +1486,59 @@ async function pageShell(browser) {
   });
 }
 
+// F-LISTEN-44: the live-show socket opens only after Listen and closes on Stop; a show
+// already live when Listen is pressed is heard at once, with no music before it
+async function liveSocket(browser) {
+  const tag = 'listen live socket';
+  for (const showLive of [false, true]) {
+    const station = makeStation({ shows: showLive ? [{ id: 'ls9', station_id: 'st-1', title: 'Motzei Shabbos Live', status: 'live' }] : [] });
+    const { ctx } = await listenContext(browser, DESK, station);
+    await ctx.addInitScript(() => {
+      window.__liveFrames = 0;
+      const AC = window.AudioContext;
+      const cbs = AC.prototype.createBufferSource;
+      AC.prototype.createBufferSource = function (...a) { window.__liveFrames++; return cbs.apply(this, a); };
+    });
+    const live = [];
+    // Registered after the context's catch-all, so it answers the listen socket
+    await ctx.routeWebSocket(/\/ws\/live\/station\/[^/]+\/listen/, (ws) => {
+      const e = { open: true, at: Date.now(), timer: null };
+      live.push(e);
+      ws.onClose(() => { e.open = false; clearInterval(e.timer); });
+      ws.send(JSON.stringify({ type: 'live_state', live: showLive, sample_rate: 24000 }));
+      if (showLive) {
+        const frame = Buffer.alloc(4800); // 0.1 s of 16-bit mono at 24 kHz
+        for (let i = 0; i < 2400; i++) frame.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 300 * i / 24000)), i * 2);
+        e.timer = setInterval(() => { if (e.open) ws.send(frame); }, 100);
+      }
+    });
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText(showLive ? 'LIVE: Motzei Shabbos Live' : 'On Air', { exact: !showLive }).waitFor({ timeout: 5000 });
+    await sleep(2000);
+    const name = showLive ? 'show on air' : 'no show';
+    check(`${tag} (${name}): no live-audio socket before Listen is pressed (F-LISTEN-44)`, live.length === 0, `${live.length} opened`);
+    const t0 = Date.now();
+    await listenBtn(page).click();
+    const heard = await timeUntil(page, `() => window.__liveFrames > 0`, showLive ? 3000 : 1);
+    check(`${tag} (${name}): Listen opens the live-audio socket at once (F-LISTEN-44)`, live.some((e) => e.open) && live[0].at - t0 < 1500, live.length ? `${live[0].at - t0} ms` : 'never');
+    if (showLive) {
+      check(`${tag}: a show already live is heard within 1 s of Listen (F-LISTEN-14, F-LISTEN-44)`, heard >= 0 && heard <= 1000, `${heard} ms`);
+      const samples = await watchDecks(page, 2500, 100);
+      const music = samples.filter((s) => s.decks.some((d) => d.playing && d.gain > 0.05)).length;
+      check(`${tag}: no music over the live show after Listen`, music === 0, `${music} samples with music`);
+    } else {
+      const music = await timeUntil(page, `() => window.__audible().length === 1`, 3000);
+      check(`${tag}: no show: the music plays as usual`, music >= 0, `${music} ms`);
+    }
+    await stopBtn(page).click();
+    await sleep(500);
+    check(`${tag} (${name}): Stop closes the live-audio socket (F-LISTEN-44)`, live.every((e) => !e.open), `${live.filter((e) => e.open).length} open`);
+    check(`${tag} (${name}): no script errors`, errors.length === 0, errors.join(' | '));
+    live.forEach((e) => clearInterval(e.timer));
+    await ctx.close();
+  }
+}
+
 const browser = await chromium.launch();
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 try {
@@ -1495,6 +1551,7 @@ try {
   if (run('requests')) await songRequests(browser);
   if (run('nothing')) await nothingOnAir(browser);
   if (run('shell')) await pageShell(browser);
+  if (run('live')) await liveSocket(browser);
   if (run('network')) await network(browser);
   if (run('polling')) await pollingFallback(browser);
   if (run('switch')) await stationSwitch(browser);
