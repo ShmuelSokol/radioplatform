@@ -68,13 +68,16 @@ async def list_archives(
     station_id: uuid.UUID | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    drafts: bool = Query(False, description="Include unpublished archives (admins and managers only)"),
     db: AsyncSession = Depends(get_db),
     everything: bool = Depends(_sees_unpublished),
 ):
-    """Public: list published archives. Managers see drafts too."""
+    """Public: list published archives. With drafts=true an admin or manager also gets the
+    unpublished ones (the admin page asks for them; the public page never shows drafts,
+    even to a signed-in manager)."""
     q = select(ShowArchive)
     count_q = select(func.count(ShowArchive.id))
-    if not everything:
+    if not (drafts and everything):
         q = q.where(ShowArchive.is_published == True)
         count_q = count_q.where(ShowArchive.is_published == True)
     if station_id:

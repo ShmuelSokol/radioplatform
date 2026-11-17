@@ -1,10 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listUsers, createUser, updateUser, deleteUser, listPublicHosts } from '../api/users';
+import { listAllUsers, createUser, updateUser, deleteUser, listPublicHosts } from '../api/users';
 
 export function useUsers() {
   return useQuery({
     queryKey: ['users'],
-    queryFn: () => listUsers(),
+    queryFn: () => listAllUsers(),
     refetchInterval: 10000, // Poll every 10s for live online status
   });
 }

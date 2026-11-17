@@ -187,7 +187,8 @@ async def list_alerts(
     total = (await db.execute(count_query)).scalar() or 0
 
     result = await db.execute(
-        query.order_by(Alert.created_at.desc()).offset(skip).limit(limit)
+        # id breaks ties so pages stay stable when alerts share a time (one transaction)
+        query.order_by(Alert.created_at.desc(), Alert.id.desc()).offset(skip).limit(limit)
     )
     alerts = list(result.scalars().all())
 

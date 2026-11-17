@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useStations, useUpdateStation } from '../../hooks/useStations';
 import { useStationRules, useCreateRule, useUpdateRule, useDeleteRule } from '../../hooks/useRules';
 import type { ScheduleRule, Station } from '../../types';
+import { useAuth } from '../../hooks/useAuth';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -79,6 +80,10 @@ function ruleToForm(r: ScheduleRule): RuleFormData {
 }
 
 export default function ProgramClock() {
+  const { user } = useAuth();
+  // The rules API lets only admins change rules (as on the Rules screen); others were offered
+  // New Rule / Update / Delete that the server always refused
+  const canEditRules = user?.role === 'admin';
   const { data: stationData } = useStations();
   const stations = stationData?.stations ?? [];
   const [stationId, setStationId] = useState<string | null>(null);
@@ -310,14 +315,14 @@ export default function ProgramClock() {
               >
                 ⚙ Automation
               </button>
-              <button
+              {canEditRules && <button
                 onClick={() => { setPanelMode('create'); setSelectedRuleId(null); setForm(emptyForm(undefined, selectedDay)); }}
                 className={`px-3 py-1 text-xs rounded font-medium transition ${
                   panelMode === 'create' ? 'bg-cyan-700 text-white' : 'bg-[#1a1a3e] text-gray-400 hover:text-white'
                 }`}
               >
                 + New Rule
-              </button>
+              </button>}
             </div>
 
             {/* Automation Config Panel */}
@@ -566,15 +571,18 @@ export default function ProgramClock() {
                 )}
 
                 {/* Action buttons */}
+                {!canEditRules && (
+                  <p className="text-xs text-gray-400">Only an admin can change rules.</p>
+                )}
                 <div className="flex gap-2 pt-2">
-                  <button
+                  {canEditRules && <button
                     onClick={handleSaveRule}
                     disabled={saving || !form.name}
                     className="flex-1 bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 text-white text-sm font-medium py-2 rounded transition"
                   >
                     {saving ? 'Saving...' : panelMode === 'edit' ? 'Update Rule' : 'Create Rule'}
-                  </button>
-                  {panelMode === 'edit' && (
+                  </button>}
+                  {canEditRules && panelMode === 'edit' && (
                     <button
                       onClick={handleDeleteRule}
                       disabled={saving}

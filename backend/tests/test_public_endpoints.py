@@ -189,7 +189,7 @@ async def test_archives_public_sees_published_only_manager_sees_all(
     titles = [a["title"] for a in public.json()["archives"]]
     assert titles == ["Published"]
     assert (await client.get(f"/api/v1/archives/{ids['hidden_archive_id']}")).status_code == 404
-    admin = await client.get("/api/v1/archives", headers=auth_headers)
+    admin = await client.get("/api/v1/archives?drafts=true", headers=auth_headers)
     assert sorted(a["title"] for a in admin.json()["archives"]) == ["Hidden draft", "Published"]
     rss = await client.get(f"/api/v1/archives/station/{ids['station_id']}/rss")
     assert rss.status_code == 200 and "<rss" in rss.text and "Published" in rss.text

@@ -20,6 +20,13 @@ const Schedules: React.FC = () => {
   const canEdit = isManager(user?.role);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
+  // A failed save used to show nothing at all (console only).
+  const [saveError, setSaveError] = useState('');
+  const saveErrorText = (error: any) => {
+    if (error?.response?.status === 403) return 'Your login may not change schedules.';
+    const d = error?.response?.data?.detail;
+    return typeof d === 'string' ? d : 'Could not save the schedule. Check the fields and try again.';
+  };
 
   const { data: stations } = useStations();
   const { data: schedules, isLoading } = useSchedules(selectedStationId || undefined);
@@ -40,6 +47,7 @@ const Schedules: React.FC = () => {
     try {
       await createSchedule.mutateAsync(formData);
       setShowCreateForm(false);
+      setSaveError('');
       setFormData({
         station_id: '',
         name: '',
@@ -49,6 +57,7 @@ const Schedules: React.FC = () => {
       });
     } catch (error) {
       console.error('Failed to create schedule:', error);
+      setSaveError(saveErrorText(error));
     }
   };
 
@@ -66,6 +75,8 @@ const Schedules: React.FC = () => {
         },
       });
       setEditingSchedule(null);
+      setShowCreateForm(false); // was left open as an empty "Create Schedule" form
+      setSaveError('');
       setFormData({
         station_id: '',
         name: '',
@@ -75,6 +86,7 @@ const Schedules: React.FC = () => {
       });
     } catch (error) {
       console.error('Failed to update schedule:', error);
+      setSaveError(saveErrorText(error));
     }
   };
 
@@ -203,6 +215,7 @@ const Schedules: React.FC = () => {
                 rows={3}
               />
             </div>
+            {saveError && <p role="alert" className="text-sm text-red-600 mb-3">{saveError}</p>}
             <div className="flex gap-2">
               <button
                 type="submit"

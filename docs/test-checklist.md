@@ -18,13 +18,13 @@ the limits in section S. A row passes only when it does the right thing **and** 
 - [ ] S-2 Go next / Fade / Soft fade / Play now: next item audible in the control room within 0.5 s (browser) or 1.5 s (engine, incl. stream delay) | both | covered: partial (e2e/audio-engine.mjs browser only)
 - [ ] S-3 Every operator API call (skip, fire-now, insert, loop, mix-over, move, remove, reorder) answers in under 300 ms server time, 1 s round trip from the US East Coast | both | covered: tests/test_speed_operator_actions.py::test_operator_calls_answer_within_300_ms (server time, test DB); live: backend/loadtests/operator_speed.py
 - [ ] S-4 Queue, now-playing and library search reads: under 300 ms server time; library search results on screen under 500 ms | n.a. | covered: NOT COVERED
-- [ ] S-5 Every admin page: first content under 1.5 s, interactive under 2.5 s on a warm load (desktop and iPhone) | n.a. | covered: NOT COVERED
-- [ ] S-6 Saves (schedule, block, playlist, station settings, program block, spot schedule): confirmed under 1 s; on-air effect on time | both | covered: NOT COVERED
+- [ ] S-5 Every admin page: first content under 1.5 s, interactive under 2.5 s on a warm load (desktop and iPhone) | n.a. | covered: frontend/e2e/admin-flows.mjs::S-5 desktop /admin/dashboard loads fast (+93 more)
+- [ ] S-6 Saves (schedule, block, playlist, station settings, program block, spot schedule): confirmed under 1 s; on-air effect on time | both | covered: frontend/e2e/admin-flows.mjs::every save step (timedSave, 1 s limit: stations, users, schedules, blocks, playlists, program blocks, spot schedules, rules ...); BUG spot schedule for all stations re-plans every station inside the save (F-SPOTSCHED-1 dayparts: 1.9-6.5 s with 80+ stations)
 - [ ] S-7 Listen (control room or public): sound within 1.5 s of the press; stream mode stays about 1 s behind live | both | covered: partial
 - [ ] S-8 Now-playing on every open screen updates within 1 s of a real change on air | both | covered: e2e/listen-page.mjs::basics "now playing updates within 1 s of a change on air (S-8)" + e2e/control-room-actions.mjs::transport "a change on air shows in the header within 1 s (S-8)"
 - [ ] S-9 Hard timed item (time check, hard block, hard spot) heard within 1 s of its time | both | covered: harness (engine), pw10 scripts (browser, not in repo)
 - [ ] S-11 iPhone Safari, server-stream station: Listen (control room and public Listen page) to sound within 2 s; never silent for 10 s or more (Shmuel, 2026-11-16 9:54 PM: about 10 s, then over 2 minutes of nothing) | engine | covered: NOT COVERED
-- [ ] S-10 Upload: progress shown at once; item playable in the library within 10 s of upload end for a 5 MB file | n.a. | covered: NOT COVERED
+- [ ] S-10 Upload: progress shown at once; item playable in the library within 10 s of upload end for a 5 MB file | n.a. | covered: frontend/e2e/admin-flows.mjs::F-UPLOAD-2/4 + S-10 desktop: type, category, format, artist, album; Upload All shows progress at once; 5 MB... (+1 more)
 
 ## H. On-air timing on a real engine (infra/streaming/harness/run_harness.py)
 
@@ -848,56 +848,56 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 
 ## Routes and roles (App.tsx + auth/access.ts)
 
-- [ ] F-ACCESS-1 `/` redirects to `/stations` | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-2 Anonymous visitor to any /admin/* route is sent to /admin/login | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-3 Anonymous visitor to any /sponsor/* route (except /sponsor/login) is sent to /sponsor/login | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-4 Signed-in user whose account lookup fails sees 'Could not reach the server' + Try again (not thrown to login); Try again refetches | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-1 `/` redirects to `/stations` | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-1 / redirects to /stations
+- [ ] F-ACCESS-2 Anonymous visitor to any /admin/* route is sent to /admin/login | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-2 anonymous /admin/* goes to /admin/login
+- [ ] F-ACCESS-3 Anonymous visitor to any /sponsor/* route (except /sponsor/login) is sent to /sponsor/login | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-3 anonymous /sponsor/* goes to /sponsor/login
+- [ ] F-ACCESS-4 Signed-in user whose account lookup fails sees 'Could not reach the server' + Try again (not thrown to login); Try again refetches | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-4 account lookup failure shows Try again (not login); Try again recovers
 - [ ] F-ACCESS-5 admin can open every /admin/* route (all 38 admin routes render, no error box) | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
-- [ ] F-ACCESS-6 manager can open everything under /admin except /admin/users, /admin/site-updates, /admin/activity (redirected to /admin/dashboard) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-7 dj can open only dashboard, assets (not upload), reviews, schedules, rules, program-clock, live/*, studio; any other /admin path redirects to /admin/dashboard | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-8 viewer can open dashboard, assets, reviews, schedules, rules, program-clock only; /admin/live and /admin/studio redirect | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-9 sponsor opening any /admin/* path is redirected to /sponsor/dashboard; staff opening /sponsor/* redirected to /admin/dashboard | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-10 canChange: viewer on /admin/dashboard sees 'View only' and transport/queue writes refused; dj may operate dashboard | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-11 canChange: dj/viewer on /admin/assets, /admin/schedules, /admin/program-clock are view only; only admin may change /admin/rules | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-12 Any 403 from the API shows the app-wide 'not allowed' notice (ViewOnlyNotice, FORBIDDEN_EVENT) and the control room shows no connection-error toast | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-6 manager can open everything under /admin except /admin/users, /admin/site-updates, /admin/activity (redirected to /admin/dashboard) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-6 manager: opens exactly the allowed screens
+- [ ] F-ACCESS-7 dj can open only dashboard, assets (not upload), reviews, schedules, rules, program-clock, live/*, studio; any other /admin path redirects to /admin/dashboard | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-7 dj: opens exactly the allowed screens
+- [ ] F-ACCESS-8 viewer can open dashboard, assets, reviews, schedules, rules, program-clock only; /admin/live and /admin/studio redirect | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-8 viewer: opens exactly the allowed screens (+1 more)
+- [ ] F-ACCESS-9 sponsor opening any /admin/* path is redirected to /sponsor/dashboard; staff opening /sponsor/* redirected to /admin/dashboard | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-9 admin on /sponsor/* goes to /admin/dashboard (+5 more)
+- [ ] F-ACCESS-10 canChange: viewer on /admin/dashboard sees 'View only' and transport/queue writes refused; dj may operate dashboard | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-10 viewer: "View only" marker exactly where the role cannot change
+- [ ] F-ACCESS-11 canChange: dj/viewer on /admin/assets, /admin/schedules, /admin/program-clock are view only; only admin may change /admin/rules | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-11 admin: "View only" marker exactly where the role cannot change (+2 more)
+- [ ] F-ACCESS-12 Any 403 from the API shows the app-wide 'not allowed' notice (ViewOnlyNotice, FORBIDDEN_EVENT) and the control room shows no connection-error toast | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-12 a 403 on a write shows "not allowed" notice (+1 more)
 - [ ] F-ACCESS-13 Station permissions: staff limited to named stations (User.station_ids) only see/operate those; protected station needs explicit assignment (control room actions refused otherwise) | sizes: both | both | covered: NOT COVERED
-- [ ] F-ACCESS-14 Unknown route under Layout renders nothing broken (no crash) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACCESS-15 Route error boundary: a page that throws shows the error box with Reload; moving to another route clears it | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACCESS-14 Unknown route under Layout renders nothing broken (no crash) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-14 unknown route: no crash, nav still there, says "Page not found"
+- [ ] F-ACCESS-15 Route error boundary: a page that throws shows the error box with Reload; moving to another route clears it | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-15 / V2-97 a page that throws shows "Something went wrong" with the error and Reload Page; another... (+1 more)
 - [ ] F-ACCESS-16 Lazy chunk missing after a new release (stale screen): page reloads onto the new release instead of showing an error | sizes: both | n.a. | covered: e2e/site-release/check.cjs
 
 ## Shared shell: Navbar, Layout, global player, bug reporter, site updates
 
-- [ ] F-GLOBAL-1 Public navbar links: Stations, Program Guide, DJs, Archives navigate correctly | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-2 Signed-in navbar shows Dashboard link; sponsor sees Sponsor Portal link | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-3 Admin dropdown groups Content / Broadcast / Audience / Settings open and close; each of their ~27 links navigates and is hidden for roles that cannot open it | sizes: desktop | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-4 Alerts bell shows unresolved count; opens list; clicking an alert or 'View all' goes to /admin/alerts | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-5 Logout button clears tokens and returns to login | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-6 Phone: hamburger menu opens, every menu entry navigates and closes the menu, Logout in menu works | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-1 Public navbar links: Stations, Program Guide, DJs, Archives navigate correctly | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-1 desktop: public nav links Stations / Program Guide / DJs / Archives navigate (+1 more)
+- [ ] F-GLOBAL-2 Signed-in navbar shows Dashboard link; sponsor sees Sponsor Portal link | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-2 staff nav shows Dashboard link (no Sponsor Portal) (+1 more)
+- [ ] F-GLOBAL-3 Admin dropdown groups Content / Broadcast / Audience / Settings open and close; each of their ~27 links navigates and is hidden for roles that cannot open it | sizes: desktop | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-3 admin: nav dropdowns open/close, each shown link navigates, forbidden ones hidden (+3 more)
+- [ ] F-GLOBAL-4 Alerts bell shows unresolved count; opens list; clicking an alert or 'View all' goes to /admin/alerts | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-4 bell shows unresolved count, opens list, alert click and View All go to /admin/alerts (+1 more)
+- [ ] F-GLOBAL-5 Logout button clears tokens and returns to login | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-5 Logout clears tokens and returns to login (+2 more)
+- [ ] F-GLOBAL-6 Phone: hamburger menu opens, every menu entry navigates and closes the menu, Logout in menu works | sizes: phone | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-6 phone: hamburger opens, each entry navigates and closes the menu, Logout works
 - [ ] F-GLOBAL-7 Navbar stays at top when page scrolls; no sideways page scroll on every admin page | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
 - [ ] F-GLOBAL-8 Admin pages fill the window width (no max-w wrapper) on desktop | sizes: desktop | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
 - [ ] F-GLOBAL-9 App-shell routes (control room) render full-height without page scrollbars | sizes: both | n.a. | covered: e2e/control-room.mjs
 - [ ] F-GLOBAL-10 Global AudioPlayer bar (playerStore): plays an asset, volume slider, Stop | sizes: both | browser | covered: NOT COVERED
-- [ ] F-GLOBAL-11 PageViewTracker records page views on route change (activity log shows them) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-12 JWT refresh: an expired access token is refreshed automatically by the Axios interceptor without logging the user out | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-13 Bug reporter: floating 🐞 button opens dialog; description + expected fields; screenshot checkbox; Send posts /bug-reports with breadcrumbs; Sending… state; success screen; Close/Cancel/× and backdrop close | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-14 Bug reporter opens from the control room footer 'Report a bug' link (REPORT_BUG_EVENT) | sizes: desktop | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-15 Site release auto mode: idle tab with no audio reloads onto the new version | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-11 PageViewTracker records page views on route change (activity log shows them) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-11 page views are recorded (activity log shows "Opened Schedules" for the DJ)
+- [ ] F-GLOBAL-12 JWT refresh: an expired access token is refreshed automatically by the Axios interceptor without logging the user out | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-12 a bad/expired access token is refreshed without logging out
+- [ ] F-GLOBAL-13 Bug reporter: floating 🐞 button opens dialog; description + expected fields; screenshot checkbox; Send posts /bug-reports with breadcrumbs; Sending… state; success screen; Close/Cancel/× and backdrop close | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-13 desktop: bug reporter opens, Cancel / × / backdrop close, Send posts with breadcrumbs, success ... (+1 more)
+- [ ] F-GLOBAL-14 Bug reporter opens from the control room footer 'Report a bug' link (REPORT_BUG_EVENT) | sizes: desktop | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-14 control room footer "Report a bug" opens the bug reporter
+- [ ] F-GLOBAL-15 Site release auto mode: idle tab with no audio reloads onto the new version | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-15 auto mode: an idle tab with no audio reloads onto the new release (+1 more)
 - [ ] F-GLOBAL-16 Site release manual mode: no tab reloads on its own; tab reports waiting for admin push | sizes: both | n.a. | covered: e2e/site-release/check.cjs
 - [ ] F-GLOBAL-17 Site release push now: silent tab reloads at once | sizes: both | n.a. | covered: e2e/site-release/check.cjs
 - [ ] F-GLOBAL-18 Site release push without 'include playing tabs': listener keeps playing on old version | sizes: both | both | covered: e2e/site-release/check.cjs
 - [ ] F-GLOBAL-19 Site release push including playing tabs: listener reloads right after the next item change and plays on (Chrome) / shows 'Tap to keep listening' (Safari) and one tap restores sound | sizes: both | both | covered: e2e/site-release/check.cjs
 - [ ] F-GLOBAL-20 Scheduled push: no reload before its time, reload after | sizes: both | n.a. | covered: e2e/site-release/check.cjs
-- [ ] F-GLOBAL-21 Release picked up on navigation to another screen (UpdateOnNavigation) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GLOBAL-22 Release never reloads a tab while the mic is live or the person is typing | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-GLOBAL-21 Release picked up on navigation to another screen (UpdateOnNavigation) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-21 a waiting release is picked up when the person moves to another screen (+1 more)
+- [ ] F-GLOBAL-22 Release never reloads a tab while the mic is live or the person is typing | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GLOBAL-22 a tab never reloads while the person is typing (field focused) (+1 more)
 - [ ] F-GLOBAL-23 Release while control room is listening: control room comes back with sound on (useResumeAfterRelease) / ResumePrompt on Safari | sizes: both | both | covered: e2e/audio-engine.mjs (release hold only)
 - [ ] F-GLOBAL-24 Release with real Safari / iPhone (not simulated): tap-to-resume prompt and audio resumes | sizes: phone | both | covered: NOT COVERED
 
 ## Admin login (/admin/login)
 
-- [ ] F-LOGIN-1 Valid username/email + password logs in and lands on /admin/dashboard (homeFor role) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LOGIN-2 Sponsor credentials on admin login land on /sponsor/dashboard | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LOGIN-3 Wrong password shows an error, no redirect; Processing… state while submitting | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LOGIN-4 Enter key submits; already signed-in user visiting login is handled | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LOGIN-1 Valid username/email + password logs in and lands on /admin/dashboard (homeFor role) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LOGIN-1 desktop: manager signs in and lands on /admin/dashboard fast (+1 more)
+- [ ] F-LOGIN-2 Sponsor credentials on admin login land on /sponsor/dashboard | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LOGIN-2 sponsor credentials on the admin login land on /sponsor/dashboard
+- [ ] F-LOGIN-3 Wrong password shows an error, no redirect; Processing… state while submitting | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LOGIN-3 desktop: wrong password shows an error, stays on login, Processing… while waiting (+3 more)
+- [ ] F-LOGIN-4 Enter key submits; already signed-in user visiting login is handled | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LOGIN-4 desktop: signed-in user opening /admin/login is not stuck (can go to the dashboard) (+2 more)
 
 ## Control room: transport bar and header (/admin/dashboard)
 
@@ -1099,187 +1099,187 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 
 ## Public station list (/stations)
 
-- [ ] F-STLIST-1 Lists active stations with name/description; card links to /listen/:id | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STLIST-2 Empty / loading states | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-STLIST-1 Lists active stations with name/description; card links to /listen/:id | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STLIST-1 desktop: active stations listed; a card opens /listen/:id (+1 more)
+- [ ] F-STLIST-2 Empty / loading states | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STLIST-2 desktop: loading then list (no error), empty state text exists for no stations (+1 more)
 
 ## Public program guide (/guide)
 
-- [ ] F-GUIDE-1 Station dropdown and date picker load /schedules/epg/:station for that date | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GUIDE-2 Timeline shows blocks in station timezone; today default | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-GUIDE-3 Phone layout readable, no sideways scroll | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-GUIDE-1 Station dropdown and date picker load /schedules/epg/:station for that date | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GUIDE-1/2 + V2-104 desktop: station + date load the EPG; "today" and "Now" follow the station's clock (Je... (+1 more)
+- [ ] F-GUIDE-2 Timeline shows blocks in station timezone; today default | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GUIDE-1/2 + V2-104 desktop: station + date load the EPG; "today" and "Now" follow the station's clock (Je... (+1 more)
+- [ ] F-GUIDE-3 Phone layout readable, no sideways scroll | sizes: phone | n.a. | covered: frontend/e2e/admin-flows.mjs::F-GUIDE-3 desktop: no sideways scroll (+1 more)
 
 ## Public DJs (/hosts)
 
-- [ ] F-HOSTS-1 Public host profile cards (photo, bio, title, social links) for users with Public Profile on | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-HOSTS-1 Public host profile cards (photo, bio, title, social links) for users with Public Profile on | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-HOSTS-1 + V2-127 desktop: public host card with bio; a host without a display name does not show their lo... (+1 more)
 
 ## Public archives (/archives)
 
-- [ ] F-PARCH-1 Station filter; only published archives shown | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-PARCH-2 Play overlay on a card plays the archive audio | sizes: both | browser | covered: NOT COVERED
+- [ ] F-PARCH-1 Station filter; only published archives shown | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-PARCH-1/2 desktop: only published archives; station filter; play overlay plays the audio (+1 more)
+- [ ] F-PARCH-2 Play overlay on a card plays the archive audio | sizes: both | browser | covered: frontend/e2e/admin-flows.mjs::F-PARCH-1/2 desktop: only published archives; station filter; play overlay plays the audio (+1 more)
 - [ ] F-PARCH-3 Archives page after a stale release loads with no error box | sizes: both | n.a. | covered: e2e/site-release/check.cjs
 
 ## Admin stations (/admin/stations)
 
 - [ ] F-STATIONS-1 Station list table with type, timezone, Active/Inactive | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
-- [ ] F-STATIONS-2 New station form: city search (/stations/geocode) results, pick, Create Station | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STATIONS-3 Delete station with confirm | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STATIONS-4 Protected checkbox (admin only) toggles station.protected; non-admin sees badge only | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STATIONS-5 Row expands: Location search + Save Location | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STATIONS-6 Automation config: Hourly Station ID, Hourly Time Announcement, Weather Spots + interval (5-120, disabled when off), Save | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STATIONS-7 'When the time check comes during a shiur or story': pause / wait / cut; saved and honoured on air | sizes: both | both | covered: NOT COVERED
-- [ ] F-STATIONS-8 Turning Hourly Time Announcement off removes it from the queue; on adds it at :00 | sizes: both | both | covered: NOT COVERED
+- [ ] F-STATIONS-2 New station form: city search (/stations/geocode) results, pick, Create Station | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STATIONS-2 desktop: Create Station without a city says to pick one (validation) (+3 more)
+- [ ] F-STATIONS-3 Delete station with confirm | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STATIONS-3 desktop: Delete (confirm) removes the station (+1 more)
+- [ ] F-STATIONS-4 Protected checkbox (admin only) toggles station.protected; non-admin sees badge only | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STATIONS-4 desktop: admin ticks Protected, saved; untick (+2 more)
+- [ ] F-STATIONS-5 Row expands: Location search + Save Location | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STATIONS-5 desktop: expand row, search location, Save Location updates coordinates and timezone (+1 more)
+- [ ] F-STATIONS-6 Automation config: Hourly Station ID, Hourly Time Announcement, Weather Spots + interval (5-120, disabled when off), Save | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STATIONS-6/7 desktop: automation config (hourly ID, time, weather + interval, long items) saves fast and ... (+1 more)
+- [ ] F-STATIONS-7 'When the time check comes during a shiur or story': pause / wait / cut; saved and honoured on air | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-STATIONS-6/7 desktop: automation config (hourly ID, time, weather + interval, long items) saves fast and ... (+1 more)
+- [ ] F-STATIONS-8 Turning Hourly Time Announcement off removes it from the queue; on adds it at :00 | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-STATIONS-8 desktop: turning Hourly Time Announcement off is saved (queue effect needs storage, see backen... (+1 more)
 
 ## Library (/admin/assets)
 
-- [ ] F-ASSETS-1 Column filters: title, artist, album search; category, type; duration min/max ('e.g. 3:00'); Clear filters | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETS-2 Page size select; pager prev/next/numbers | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETS-3 Per-row Play/Stop preview | sizes: both | browser | covered: NOT COVERED
-- [ ] F-ASSETS-4 Per-row download menu by format | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETS-5 Per-row View → /admin/assets/:id; Delete | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETS-6 Category badge dropdown changes category inline; Sponsor badge dropdown with search sets/clears sponsor | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETS-7 Row checkboxes + select all; 'Select all N filtered' / 'Clear, keep only this page' | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETS-8 Bulk: set category, download (format), auto-trim, create review queue (dialog with Close) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETS-9 Upload link only for managers; view-only for dj/viewer | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETS-1 Column filters: title, artist, album search; category, type; duration min/max ('e.g. 3:00'); Clear filters | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-1 column filters: title, artist, type, duration min/max; Clear filters
+- [ ] F-ASSETS-2 Page size select; pager prev/next/numbers | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-2 Rows select asks for that many; pager
+- [ ] F-ASSETS-3 Per-row Play/Stop preview | sizes: both | browser | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-3 row Play plays the real file, Stop stops it
+- [ ] F-ASSETS-4 Per-row download menu by format | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-4 row Download menu: a format downloads the file
+- [ ] F-ASSETS-5 Per-row View → /admin/assets/:id; Delete | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-5 View opens the item page; Del removes an item
+- [ ] F-ASSETS-6 Category badge dropdown changes category inline; Sponsor badge dropdown with search sets/clears sponsor | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-6 category badge sets and clears a category; sponsor badge search sets and clears a sponsor
+- [ ] F-ASSETS-7 Row checkboxes + select all; 'Select all N filtered' / 'Clear, keep only this page' | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-7 row checkboxes, select all on the page, "Select all N", "Clear, keep only this page"
+- [ ] F-ASSETS-8 Bulk: set category, download (format), auto-trim, create review queue (dialog with Close) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-8 bulk: Set Category, Download, Auto-Clip Silence (dialog, Close), Create Review Queue
+- [ ] F-ASSETS-9 Upload link only for managers; view-only for dj/viewer | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETS-9 desktop: a DJ gets no Upload link and no Del; a manager does (+2 more)
 
 ## Asset upload (/admin/assets/upload)
 
-- [ ] F-UPLOAD-1 Drag files onto drop zone or pick with file input; list shows each file | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-UPLOAD-2 Asset type, category, format, optional artist/album fields | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-UPLOAD-3 Remove one file, Clear All | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-UPLOAD-4 Upload All shows 'Uploading i of n…', results; link back to Assets | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-UPLOAD-1 Drag files onto drop zone or pick with file input; list shows each file | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-UPLOAD-1/3 desktop: pick files (list shows each), drop a file, Remove one, Clear All (+1 more)
+- [ ] F-UPLOAD-2 Asset type, category, format, optional artist/album fields | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-UPLOAD-2/4 + S-10 desktop: type, category, format, artist, album; Upload All shows progress at once; 5 MB... (+1 more)
+- [ ] F-UPLOAD-3 Remove one file, Clear All | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-UPLOAD-1/3 desktop: pick files (list shows each), drop a file, Remove one, Clear All (+1 more)
+- [ ] F-UPLOAD-4 Upload All shows 'Uploading i of n…', results; link back to Assets | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-UPLOAD-2/4 + S-10 desktop: type, category, format, artist, album; Upload All shows progress at once; 5 MB... (+1 more)
 - [ ] F-UPLOAD-5 Upload from iPhone Files/Photos | sizes: phone | n.a. | covered: NOT COVERED
 
 ## Asset detail (/admin/assets/:id)
 
-- [ ] F-ASSETDETAIL-1 Metadata shown; release date and vote (0-100, saved on blur) update the asset | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETDETAIL-2 Waveform player: Play/Pause, Stop, speed buttons, seek slider | sizes: both | browser | covered: NOT COVERED
-- [ ] F-ASSETDETAIL-3 Preview controls: Play first N s, Play last N s, Save as default | sizes: both | browser | covered: NOT COVERED
-- [ ] F-ASSETDETAIL-4 Silence detection: Detect, threshold sliders, region list, Play region, Trim region (confirm), Auto-clip, Undo trim / Restore original, Save | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETDETAIL-5 Enhance panel: presets, Preview, Apply, AI Auto-Enhance, Undo, Save, link to full enhance page | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETDETAIL-6 Audience detection: Detect Questions, sliders, segment list, Play segment / with context, Deselect | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETDETAIL-7 Comment box posts a comment; history shows changes | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ASSETDETAIL-8 Back to Assets link | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ASSETDETAIL-1 Metadata shown; release date and vote (0-100, saved on blur) update the asset | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETDETAIL-1 desktop: metadata shown; vote saves on blur; release date saves (+1 more)
+- [ ] F-ASSETDETAIL-2 Waveform player: Play/Pause, Stop, speed buttons, seek slider | sizes: both | browser | covered: frontend/e2e/admin-flows.mjs::F-ASSETDETAIL-2/3 desktop: waveform loads; Play/Pause, Stop, speed, seek; Play first/last N s; Save as default (+1 more)
+- [ ] F-ASSETDETAIL-3 Preview controls: Play first N s, Play last N s, Save as default | sizes: both | browser | covered: frontend/e2e/admin-flows.mjs::F-ASSETDETAIL-2/3 desktop: waveform loads; Play/Pause, Stop, speed, seek; Play first/last N s; Save as default (+1 more)
+- [ ] F-ASSETDETAIL-4 Silence detection: Detect, threshold sliders, region list, Play region, Trim region (confirm), Auto-clip, Undo trim / Restore original, Save | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETDETAIL-4 silence: Detect finds regions; Play / Deselect; Trim Out (confirm) then Undo Trim; Auto-Cli...
+- [ ] F-ASSETDETAIL-5 Enhance panel: presets, Preview, Apply, AI Auto-Enhance, Undo, Save, link to full enhance page | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETDETAIL-5 enhance panel: preset, Preview, Apply, Undo Enhancement; full editor link
+- [ ] F-ASSETDETAIL-6 Audience detection: Detect Questions, sliders, segment list, Play segment / with context, Deselect | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETDETAIL-6 audience detection: Detect Questions runs and lists segments (or says none)
+- [ ] F-ASSETDETAIL-7 Comment box posts a comment; history shows changes | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETDETAIL-7 desktop: a comment posts and shows in the history (+1 more)
+- [ ] F-ASSETDETAIL-8 Back to Assets link | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ASSETDETAIL-8 desktop: Back to Assets (+1 more)
 
 ## Audio enhance (/admin/audio-enhance/:assetId)
 
-- [ ] F-ENHANCE-1 Preset buttons, Custom filters (checkboxes, sliders) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ENHANCE-2 Preview original / Preview enhanced | sizes: both | browser | covered: NOT COVERED
-- [ ] F-ENHANCE-3 Apply Enhancement, AI Auto-Enhance, Undo Enhancement, Save; back link | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ENHANCE-1 Preset buttons, Custom filters (checkboxes, sliders) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ENHANCE-1 presets and Custom Filters: toggles show their sliders
+- [ ] F-ENHANCE-2 Preview original / Preview enhanced | sizes: both | browser | covered: frontend/e2e/admin-flows.mjs::F-ENHANCE-2 Play Original / preview enhanced
+- [ ] F-ENHANCE-3 Apply Enhancement, AI Auto-Enhance, Undo Enhancement, Save; back link | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ENHANCE-3 Apply Enhancement, Undo Enhancement, AI Auto-Enhance, Save; back link
 
 ## Review queues (/admin/reviews) and review flow (/admin/reviews/:id)
 
 - [ ] F-REVIEWS-1 Queue list; empty state links to Assets | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
-- [ ] F-REVIEWS-2 Flow: Approve / Reject / Flag / Skip with notes, advance to next | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-REVIEWS-3 Previous / Next navigation, item list jump | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-REVIEWS-4 Change category in flow; waveform, silence, enhance, audience, preview, comments, history panels | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-REVIEWS-2 Flow: Approve / Reject / Flag / Skip with notes, advance to next | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REVIEWS-2 desktop: Approve / Reject / Flag / Skip buttons with notes save and advance (+1 more)
+- [ ] F-REVIEWS-3 Previous / Next navigation, item list jump | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REVIEWS-3 desktop: Next / Previous and the item list move between items (+1 more)
+- [ ] F-REVIEWS-4 Change category in flow; waveform, silence, enhance, audience, preview, comments, history panels | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REVIEWS-4 desktop: change the tempo/category in the flow; waveform, silence, enhance, comments panels pre... (+1 more)
 
 ## Users (/admin/users, admin only)
 
-- [ ] F-USERS-1 Create user: username/email, password, role (admin/manager/dj/viewer/sponsor), display name, phone, job title | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-USERS-2 Edit user (password blank keeps), Delete (confirm), Deactivate / Activate | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-USERS-3 Alert preferences: SMS/WhatsApp checkboxes, minimum severity | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-USERS-4 DJ/host profile: bio, photo URL, Public Profile, Twitter, Instagram, website (appears on /hosts) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-USERS-5 Stations this person may operate: all / named stations / protected station ticks; enforced in control room | sizes: both | both | covered: NOT COVERED
-- [ ] F-USERS-6 Last online / last action refresh every 5 s | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-USERS-1 Create user: username/email, password, role (admin/manager/dj/viewer/sponsor), display name, phone, job title | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-USERS-1 desktop: create needs a password (validation) (+5 more)
+- [ ] F-USERS-2 Edit user (password blank keeps), Delete (confirm), Deactivate / Activate | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-USERS-2 desktop: Edit with password left blank keeps the password; changes saved (+5 more)
+- [ ] F-USERS-3 Alert preferences: SMS/WhatsApp checkboxes, minimum severity | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-USERS-1/3/4/5 desktop: create DJ with name, phone, title, alerts, public profile, one station; saves fast (+1 more)
+- [ ] F-USERS-4 DJ/host profile: bio, photo URL, Public Profile, Twitter, Instagram, website (appears on /hosts) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-USERS-1/3/4/5 desktop: create DJ with name, phone, title, alerts, public profile, one station; saves fast (+3 more)
+- [ ] F-USERS-5 Stations this person may operate: all / named stations / protected station ticks; enforced in control room | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-USERS-1/3/4/5 desktop: create DJ with name, phone, title, alerts, public profile, one station; saves fast (+3 more)
+- [ ] F-USERS-6 Last online / last action refresh every 5 s | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-USERS-6 user list refreshes on its own (last online / last action)
 
 ## Rules (/admin/rules)
 
-- [ ] F-RULES-1 Rule list; Edit; Delete (confirm); active toggle | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-RULES-2 New rule: type, asset type, station, numeric params, days of week buttons, date, active | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-RULES-3 Schedule preview toggle shows preview | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-RULES-4 Only admin can change; others view only | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-RULES-1 Rule list; Edit; Delete (confirm); active toggle | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-1 desktop: Edit saves; Off/On toggles active; Del (confirm) removes (+1 more)
+- [ ] F-RULES-2 New rule: type, asset type, station, numeric params, days of week buttons, date, active | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-2 desktop: new rule needs a name (validation) (+3 more)
+- [ ] F-RULES-3 Schedule preview toggle shows preview | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-3 desktop: Preview Schedule shows generated slots; Hide Preview (+1 more)
+- [ ] F-RULES-4 Only admin can change; others view only | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-4 manager: rules are view only (no New Rule, no Edit/Del) (+2 more)
 
 ## Schedules (/admin/schedules)
 
 - [ ] F-SCHED-1 Station filter; list | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
-- [ ] F-SCHED-2 Create / Edit (station, priority number, active) / Cancel / Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SCHED-3 Blocks button opens /admin/schedules/:id/blocks | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SCHED-4 dj/viewer view only | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SCHED-2 Create / Edit (station, priority number, active) / Cancel / Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SCHED-2 desktop: create needs a station (validation), then Create saves fast (+7 more)
+- [ ] F-SCHED-3 Blocks button opens /admin/schedules/:id/blocks | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SCHED-3 / F-BLOCKS-1 desktop: Blocks opens the block page; back link returns (+1 more)
+- [ ] F-SCHED-4 dj/viewer view only | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SCHED-4 dj: schedules view only (no New/Edit/Delete), Blocks still opens (+1 more)
 
 ## Schedule blocks (/admin/schedules/:id/blocks)
 
-- [ ] F-BLOCKS-1 Back to Schedules | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-BLOCKS-2 New/Edit block: name, recurrence type, day toggles, presets, start/end time, sunrise/sunset events + offsets, date range, playlist template, playback mode, one-time | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-BLOCKS-3 Delete block (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-BLOCKS-4 Add playlist entry from asset select; Remove entry; category badge | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-BLOCKS-5 Block change takes effect in the control room queue on time (schedule refresh) | sizes: both | both | covered: NOT COVERED
+- [ ] F-BLOCKS-1 Back to Schedules | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SCHED-3 / F-BLOCKS-1 desktop: Blocks opens the block page; back link returns (+1 more)
+- [ ] F-BLOCKS-2 New/Edit block: name, recurrence type, day toggles, presets, start/end time, sunrise/sunset events + offsets, date range, playlist template, playback mode, one-time | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-BLOCKS-2 desktop: weekly block with no day picked says so (validation) (+7 more)
+- [ ] F-BLOCKS-3 Delete block (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-BLOCKS-3 desktop: Delete block (confirm) (+1 more)
+- [ ] F-BLOCKS-4 Add playlist entry from asset select; Remove entry; category badge | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-BLOCKS-4 desktop: + Add song from the library list, category badge, Remove (+1 more)
+- [ ] F-BLOCKS-5 Block change takes effect in the control room queue on time (schedule refresh) | sizes: both | both | covered: BUG songs added to a block ("+ Add song") never reach the queue: SchedulingService.get_next_asset_for_block has no (frontend/e2e/admin-flows.mjs::F-BLOCKS-5 all-day block with one song: the queue plays only that song after the)
 
 ## Blackouts (/admin/holidays)
 
-- [ ] F-HOLIDAYS-1 Filters: reason, status, station | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-HOLIDAYS-2 Add/Edit blackout: name, reason, start/end datetime, station chips, all stations, active | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-HOLIDAYS-3 Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-HOLIDAYS-4 Blackout window produces scheduled silence row in queue and silence on air | sizes: both | both | covered: NOT COVERED
+- [ ] F-HOLIDAYS-1 Filters: reason, status, station | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-HOLIDAYS-1 desktop: filters by reason, status and station (+1 more)
+- [ ] F-HOLIDAYS-2 Add/Edit blackout: name, reason, start/end datetime, station chips, all stations, active | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-HOLIDAYS-2 desktop: end before start is refused with a message (+5 more)
+- [ ] F-HOLIDAYS-3 Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-HOLIDAYS-3 desktop: Delete (confirm) (+1 more)
+- [ ] F-HOLIDAYS-4 Blackout window produces scheduled silence row in queue and silence on air | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-HOLIDAYS-4 blackout starting now: the station queue gets silence at once
 
 ## Sponsors (/admin/sponsors)
 
-- [ ] F-SPONSORS-1 Add/Edit sponsor: name, audio path, insertion policy, numeric params; Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPONSORS-2 Link to sponsor portal login | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPONSORS-1 Add/Edit sponsor: name, audio path, insertion policy, numeric params; Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPONSORS-1 desktop: name and audio path are required (validation) (+5 more)
+- [ ] F-SPONSORS-2 Link to sponsor portal login | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPONSORS-2 desktop: Client Portal link opens the sponsor login (+1 more)
 
 ## Spot schedule (/admin/spot-schedule)
 
-- [ ] F-SPOTSCHED-1 New schedule: sponsor, station, spot search + Listen/Stop, Change spot, days, when (dayparts vs times), times add/remove, plays per daypart, date range, timing; Save schedule | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPOTSCHED-2 List: Listen, Turn on/off, Remove (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPOTSCHED-3 Station selector + 7-day look-ahead; timing defaults per daypart | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPOTSCHED-4 Planned spots appear as SPONSOR rows in the control room queue | sizes: both | both | covered: NOT COVERED
+- [ ] F-SPOTSCHED-1 New schedule: sponsor, station, spot search + Listen/Stop, Change spot, days, when (dayparts vs times), times add/remove, plays per daypart, date range, timing; Save schedule | sizes: both | n.a. | covered: BUG S-6: saving a spot schedule for all stations re-plans every active station's queue inside the request, one aft (frontend/e2e/admin-flows.mjs::F-SPOTSCHED-1 dayparts: no daypart chosen is refused; Morning + Evening with pla)
+- [ ] F-SPOTSCHED-2 List: Listen, Turn on/off, Remove (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPOTSCHED-2 desktop: Pause / Resume, Listen, Remove (confirm) (+1 more)
+- [ ] F-SPOTSCHED-3 Station selector + 7-day look-ahead; timing defaults per daypart | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPOTSCHED-3 desktop: 7-day look-ahead for the station shows the planned spot (+2 more)
+- [ ] F-SPOTSCHED-4 Planned spots appear as SPONSOR rows in the control room queue | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-SPOTSCHED-4 desktop: the planned spot is in the station's queue (SPONSOR row in the control room) (+1 more)
 
 ## Record spots (/admin/spot-recordings)
 
-- [ ] F-SPOTREC-1 New spot: sponsor, name, script; create | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPOTREC-2 Edit script / Save / Cancel; Make audio; Upload a recording (file); ▶ Listen | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPOTREC-3 Approve / Reject / Delete | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPOTREC-1 New spot: sponsor, name, script; create | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPOTREC-1 desktop: Save is off until sponsor, name and script are filled; create checks the wording (+1 more)
+- [ ] F-SPOTREC-2 Edit script / Save / Cancel; Make audio; Upload a recording (file); ▶ Listen | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPOTREC-2 desktop: Make the audio gives placeholder tones (no Approve); ▶ Listen plays (+5 more)
+- [ ] F-SPOTREC-3 Approve / Reject / Delete | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPOTREC-2/3 desktop: Upload a recording, then Approve for air puts it in the library (+3 more)
 
 ## Program blocks (/admin/program-blocks)
 
-- [ ] F-PROGBLOCKS-1 New block: name, station, timing (hard/soft/soft-with-limit), day buttons, minute of every hour, every hour button, times add/remove/clear all | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-PROGBLOCKS-2 Items: library search add, category combo add, sponsors (places), Add the time, Add the weather; ↑/↓ move; remove | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-PROGBLOCKS-3 Save block / Save changes; Edit; Turn on/off; Delete | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-PROGBLOCKS-4 Next-24-hours preview | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-PROGBLOCKS-5 Block with time item replaces built-in hourly time and airs at its clock time | sizes: both | both | covered: NOT COVERED
+- [ ] F-PROGBLOCKS-1 New block: name, station, timing (hard/soft/soft-with-limit), day buttons, minute of every hour, every hour button, times add/remove/clear all | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-PROGBLOCKS-1 desktop: Save with no name / no items says what is missing (+3 more)
+- [ ] F-PROGBLOCKS-2 Items: library search add, category combo add, sponsors (places), Add the time, Add the weather; ↑/↓ move; remove | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-PROGBLOCKS-2 desktop: items: library search, type that takes turns, sponsor places, time, weather; ↑/↓; r... (+1 more)
+- [ ] F-PROGBLOCKS-3 Save block / Save changes; Edit; Turn on/off; Delete | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-PROGBLOCKS-3 desktop: Save block saves fast; card shows times, every day, timing (+3 more)
+- [ ] F-PROGBLOCKS-4 Next-24-hours preview | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-PROGBLOCKS-4 desktop: next-24-hours preview lists the block at its time (+1 more)
+- [ ] F-PROGBLOCKS-5 Block with time item replaces built-in hourly time and airs at its clock time | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-PROGBLOCKS-5 the block is queued on the station at its clock time (source block)
 
 ## Schedule check (/admin/schedule-check)
 
 - [ ] F-SCHEDCHECK-1 Station select; overlaps/gaps/off-air/unplaced spots listed | sizes: both | n.a. | covered: e2e/admin-layout-audit.mjs (layout only)
-- [ ] F-SCHEDCHECK-2 Settle a conflict: Keep "<block>" buttons | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SCHEDCHECK-2 Settle a conflict: Keep "<block>" buttons | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SCHEDCHECK-2 settle a conflict: choosing one block makes it win and the item leaves "Needs a look"
 
 ## Sponsorship rules (/admin/sponsorship-rules)
 
-- [ ] F-SPRULES-1 Edit rules text; Save rules (disabled unless changed); Undo changes | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPRULES-2 Show/Hide history; Load into editor | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPRULES-3 Copy review panel: sponsor name + wording, Check my wording, Use this wording | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPRULES-1 Edit rules text; Save rules (disabled unless changed); Undo changes | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPRULES-1 desktop: Save is off until changed; Undo changes restores; Save rules saves a new version fast (+1 more)
+- [ ] F-SPRULES-2 Show/Hide history; Load into editor | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPRULES-2 desktop: Show earlier versions, Load into editor, Hide (+1 more)
+- [ ] F-SPRULES-3 Copy review panel: sponsor name + wording, Check my wording, Use this wording | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPRULES-3 desktop: copy review panel: business name + wording, Check my wording, result shown (+1 more)
 
 ## Playlists (/admin/playlists)
 
-- [ ] F-PLAYLISTS-1 Station filter; Create playlist (name, station, pattern) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-PLAYLISTS-1 Station filter; Create playlist (name, station, pattern) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-PLAYLISTS-1 desktop: create (name, station, pattern) saves fast; station filter (+1 more)
 - [ ] F-PLAYLISTS-2 Delete template (confirm); Add slot (asset type + category); move slot up/down; delete slot; optimistic | sizes: both | n.a. | covered: e2e/control-room.mjs (optimistic move/remove)
-- [ ] F-PLAYLISTS-3 Playlist generation panel: settings checkbox/numbers, Save, Regenerate (disabled while dirty) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-PLAYLISTS-3 Playlist generation panel: settings checkbox/numbers, Save, Regenerate (disabled while dirty) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-PLAYLISTS-3 generation panel: settings change enables Save and disables Regenerate; Save keeps them
 
 ## Categories (/admin/categories) and Types (/admin/asset-types)
 
-- [ ] F-CATS-1 Add (button and Enter), Rename (Enter saves, Esc cancels), Save/Cancel, Delete (confirm) — categories | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CATS-2 Same for asset types | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CATS-1 Add (button and Enter), Rename (Enter saves, Esc cancels), Save/Cancel, Delete (confirm) — categories | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CATS-1 desktop: Add is off while empty; Add by button and by Enter save fast (+5 more)
+- [ ] F-CATS-2 Same for asset types | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CATS-2 desktop: Add is off while empty; Add by button and by Enter save fast (+5 more)
 
 ## Alerts (/admin/alerts)
 
-- [ ] F-ALERTS-1 Filters severity/type/status; pager | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ALERTS-2 Resolve, Reopen, Delete (confirm), Resolve all (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ALERTS-3 Bell count updates after resolving | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ALERTS-1 Filters severity/type/status; pager | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ALERTS-1 desktop: severity / type / status filters narrow the list; pager Older / Newer
+- [ ] F-ALERTS-2 Resolve, Reopen, Delete (confirm), Resolve all (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ALERTS-2 desktop: Resolve, Reopen, Delete (confirm) each save fast (+2 more)
+- [ ] F-ALERTS-3 Bell count updates after resolving | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ALERTS-2/3 Resolve all (confirm) resolves every open alert and the bell count goes away
 
 ## Bug reports (/admin/bug-reports)
 
-- [ ] F-BUGS-1 List reports; Details/Hide details; Close sets status closed | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-BUGS-1 List reports; Details/Hide details; Close sets status closed | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-BUGS-1 desktop: list shows the report; Details / Hide details; Close sets it closed (+1 more)
 
 ## Site updates (/admin/site-updates, admin)
 
 - [ ] F-SITEUPD-1 Mode Automatically / Only when I push | sizes: both | n.a. | covered: e2e/site-release/check.cjs (via API)
 - [ ] F-SITEUPD-2 Push latest release: now or at datetime; include playing tabs checkbox; Cancel push | sizes: both | n.a. | covered: e2e/site-release/check.cjs (via API)
-- [ ] F-SITEUPD-3 Open tabs list with version/playing/waiting | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SITEUPD-3 Open tabs list with version/playing/waiting | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SITEUPD-3 desktop: open tabs list shows another open tab (a listener on /stations) with version and playing (+1 more)
 
 ## Activity (/admin/activity, admin)
 
-- [ ] F-ACTIVITY-1 Staff / Listeners tab, remembered | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACTIVITY-2 Staff: search, user/station/category filters, date range + quick ranges, checkboxes, expand item, pager, Try again | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-ACTIVITY-3 Listeners: search, station, min minutes, date range, view toggle, expand session | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-ACTIVITY-1 Staff / Listeners tab, remembered | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACTIVITY-1 / V1-141 desktop: tab and view are remembered after a reload (+1 more)
+- [ ] F-ACTIVITY-2 Staff: search, user/station/category filters, date range + quick ranges, checkboxes, expand item, pager, Try again | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACTIVITY-2 desktop: search finds the manager's change; expand shows the detail; quick ranges set the dates (+1 more)
+- [ ] F-ACTIVITY-3 Listeners: search, station, min minutes, date range, view toggle, expand session | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACTIVITY-3 desktop: Listeners: search, station, minimum minutes, dates (+1 more)
 
 ## Analytics (/admin/analytics)
 
@@ -1287,82 +1287,82 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 
 ## Live listeners (/admin/listeners)
 
-- [ ] F-LISTENERS-1 Stat cards (active now, today sessions/minutes, peak) update live (push) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LISTENERS-2 Active stations list; history 7/30/90d; regions days buttons | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LISTENERS-1 Stat cards (active now, today sessions/minutes, peak) update live (push) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LISTENERS-1/2 desktop: a listener joining shows in Active Now and Active Stations within seconds (push, n... (+1 more)
+- [ ] F-LISTENERS-2 Active stations list; history 7/30/90d; regions days buttons | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LISTENERS-1/2 desktop: a listener joining shows in Active Now and Active Stations within seconds (push, n... (+1 more)
 
 ## Song requests (/admin/requests)
 
-- [ ] F-REQUESTS-1 Status tabs; Approve / Reject / Delete (confirm); analytics top requested toggle | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-REQUESTS-2 Phone card layout actions | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-REQUESTS-1 Status tabs; Approve / Reject / Delete (confirm); analytics top requested toggle | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REQUESTS-1 desktop: Approve, Reject, Delete (confirm) save fast; status tabs filter
+- [ ] F-REQUESTS-2 Phone card layout actions | sizes: phone | n.a. | covered: frontend/e2e/admin-flows.mjs::F-REQUESTS-2 iphone: Approve, Reject, Delete (confirm) save fast; status tabs filter
 
 ## Admin archives (/admin/archives)
 
-- [ ] F-AARCH-1 Station filter; New Archive modal (title, station, audio URL, description, host, duration, cover, date); Edit; Cancel/× | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-AARCH-2 Publish/Unpublish toggle; Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-AARCH-1 Station filter; New Archive modal (title, station, audio URL, description, host, duration, cover, date); Edit; Cancel/× | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-AARCH-1 desktop: New Archive: Create off until title/audio/station; × and Cancel close; create; Edit saves (+1 more)
+- [ ] F-AARCH-2 Publish/Unpublish toggle; Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-AARCH-2 desktop: Draft / Published toggle saves; station filter; Delete (confirm) (+1 more)
 
 ## Live shows (/admin/live)
 
-- [ ] F-LIVE-1 Tabs (upcoming/live/ended…); New show modal (title, description, station, broadcast mode, start/end, calls enabled); Edit; Delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-LIVE-2 Start show; links to host console and screener | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-LIVE-1 Tabs (upcoming/live/ended…); New show modal (title, description, station, broadcast mode, start/end, calls enabled); Edit; Delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LIVE-1 desktop: New show: Create off until title+station; create; tabs; Edit saves; Delete (confirm) (+1 more)
+- [ ] F-LIVE-2 Start show; links to host console and screener | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-LIVE-2 Go Live saves fast; Host Console and Screener links open
 
 ## Host console (/admin/live/:id/host)
 
 - [ ] F-HOST-1 Start Broadcasting asks for mic; VU meter moves; Stop Broadcasting | sizes: both | n.a. | covered: e2e/web-call-in.cjs (audio path)
-- [ ] F-HOST-2 Countdown to hard stop, re-synced via WS; hard stop warning | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-HOST-2 Countdown to hard stop, re-synced via WS; hard stop warning | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-HOST-2 countdown to the hard stop shows about 2 hours and ticks down
 - [ ] F-HOST-3 Caller queue: put on air (one at a time), end call | sizes: both | n.a. | covered: e2e/web-call-in.cjs (via API)
-- [ ] F-HOST-4 End Show (confirm) → back to Live shows; listeners return to music | sizes: both | both | covered: NOT COVERED
-- [ ] F-HOST-5 Hard stop ends show at scheduled end and queue resumes | sizes: both | both | covered: NOT COVERED
+- [ ] F-HOST-4 End Show (confirm) → back to Live shows; listeners return to music | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-HOST-4 End Show (confirm) goes back to Live shows and the station plays music again
+- [ ] F-HOST-5 Hard stop ends show at scheduled end and queue resumes | sizes: both | both | covered: frontend/e2e/admin-flows.mjs::F-HOST-5 hard stop ends the show at its end time (host console shows SHOW ENDED) and the queue plays on
 
 ## Call screener (/admin/live/:id/screen)
 
 - [ ] F-SCREENER-1 Waiting / approved / on-air columns update in real time | sizes: both | n.a. | covered: e2e/web-call-in.cjs (lists caller)
-- [ ] F-SCREENER-2 Edit caller name (Enter saves, Esc cancels); Approve; Reject; Put on air; End call | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SCREENER-2 Edit caller name (Enter saves, Esc cancels); Approve; Reject; Put on air; End call | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SCREENER-2 edit caller name (Esc cancels, Enter saves), Approve, Put On Air, End Call; Reject
 
 ## Recording studio (/admin/studio)
 
-- [ ] F-STUDIO-1 Record / Pause / Resume / Stop / Cancel; title, type, category; Save to Library; Discard | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STUDIO-2 Weather readouts: station + date, create, custom template toggle, record per readout (Save & Link), regenerate, skip, queue, delete (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STUDIO-3 Audio mixer: pick bed + voice-over (search), offsets/volumes, voice-over preset, show waveforms, Mix & Save to Library | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-STUDIO-4 Recording on iPhone Safari | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-STUDIO-1 Record / Pause / Resume / Stop / Cancel; title, type, category; Save to Library; Discard | sizes: both | n.a. | covered: BUG a DJ may open the recording studio and record, but Save is refused (POST /assets/upload is manager-only: 403 " (frontend/e2e/admin-flows.mjs::F-STUDIO-1 dj: a DJ (who may open the studio) can save a recording to the librar)
+- [ ] F-STUDIO-2 Weather readouts: station + date, create, custom template toggle, record per readout (Save & Link), regenerate, skip, queue, delete (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STUDIO-2 weather readouts: station + date, Generate Readout, Template Config toggle
+- [ ] F-STUDIO-3 Audio mixer: pick bed + voice-over (search), offsets/volumes, voice-over preset, show waveforms, Mix & Save to Library | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STUDIO-3 audio mixer: pick bed and voice-over by search, Mix & Save to Library
+- [ ] F-STUDIO-4 Recording on iPhone Safari | sizes: phone | n.a. | covered: frontend/e2e/admin-flows.mjs::F-STUDIO-1/4 iphone: Record / Pause / Resume / Stop; Discard; record again and Save to Library (title, type...
 
 ## CRM (/admin/crm)
 
-- [ ] F-CRM-1 Tabs; members search, Deactivate (confirm) | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CRM-2 Song rankings | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CRM-3 Create raffle (title, dates), Draw winner (confirm), view entries | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CRM-1 Tabs; members search, Deactivate (confirm) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CRM-1 desktop: members tab: search finds the member; Deactivate (confirm) (+1 more)
+- [ ] F-CRM-2 Song rankings | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CRM-2 desktop: song rankings tab loads (+1 more)
+- [ ] F-CRM-3 Create raffle (title, dates), Draw winner (confirm), view entries | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CRM-3 desktop: create a raffle (title, dates), Entries, Draw Winner (confirm) (+1 more)
 
 ## Program clock (/admin/program-clock)
 
-- [ ] F-CLOCK-1 Station select, day buttons, hour list; click hour opens panel | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CLOCK-2 Config: ad minutes toggles; station config save | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CLOCK-3 New/Edit rule: name, type, asset type, genres, days, numbers, active; Save; Delete (confirm); Back | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-CLOCK-4 dj/viewer view only | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-CLOCK-1 Station select, day buttons, hour list; click hour opens panel | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CLOCK-1 desktop: station select, day buttons, 24 hours listed; clicking an hour opens the panel (+1 more)
+- [ ] F-CLOCK-2 Config: ad minutes toggles; station config save | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CLOCK-2 ⚙ Automation: an ad minute toggles and is saved to the station
+- [ ] F-CLOCK-3 New/Edit rule: name, type, asset type, genres, days, numbers, active; Save; Delete (confirm); Back | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CLOCK-3 desktop: New Rule (name, type, asset type, hours, days, priority) creates; Edit updates; Delete (... (+1 more)
+- [ ] F-CLOCK-4 dj/viewer view only | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-CLOCK-4 manager: no New Rule (rules are admin-only); the clock still shows (+2 more)
 
 ## Sponsor login (/sponsor/login)
 
-- [ ] F-SPLOGIN-1 Sign in lands on /sponsor/dashboard; wrong password error; Signing in… state | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPLOGIN-1 Sign in lands on /sponsor/dashboard; wrong password error; Signing in… state | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPLOGIN-1 desktop: sponsor wrong password error, Signing in… state, then sign in to /sponsor/dashboard (+3 more)
 
 ## Sponsor layout
 
-- [ ] F-SPLAYOUT-1 Nav Dashboard / Campaigns / Check Wording / Billing; Logout | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPLAYOUT-2 Phone layout no sideways scroll | sizes: phone | n.a. | covered: NOT COVERED
+- [ ] F-SPLAYOUT-1 Nav Dashboard / Campaigns / Check Wording / Billing; Logout | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPLAYOUT-1 desktop: nav Dashboard / Campaigns / Check Wording / Billing; all reachable (+1 more)
+- [ ] F-SPLAYOUT-2 Phone layout no sideways scroll | sizes: phone | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPLAYOUT-1 iphone: nav Dashboard / Campaigns / Check Wording / Billing; F-SPLAYOUT-2 no sideways scroll
 
 ## Sponsor dashboard
 
-- [ ] F-SPDASH-1 Stats, my spots, play history table with Prev/Next pager, upcoming schedule | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPDASH-1 Stats, my spots, play history table with Prev/Next pager, upcoming schedule | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPDASH-1 desktop: stats, my spots (the linked spot), play history, upcoming (+1 more)
 
 ## Sponsor campaigns and detail
 
-- [ ] F-SPCAMP-1 New campaign form → Create Campaign; list | sizes: both | n.a. | covered: NOT COVERED
-- [ ] F-SPCAMP-2 Detail: Submit draft (script + notes) versioned; comment thread Send | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPCAMP-1 New campaign form → Create Campaign; list | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPCAMP-1/2 desktop: New Campaign → Create Campaign; detail: Submit Draft (versioned), comment Send (+1 more)
+- [ ] F-SPCAMP-2 Detail: Submit draft (script + notes) versioned; comment thread Send | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPCAMP-1/2 desktop: New Campaign → Create Campaign; detail: Submit Draft (versioned), comment Send (+1 more)
 
 ## Sponsor billing
 
-- [ ] F-SPBILL-1 Invoice table + summary; Pay now opens Stripe checkout; return with success/cancel query param message | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPBILL-1 Invoice table + summary; Pay now opens Stripe checkout; return with success/cancel query param message | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPBILL-1 desktop: invoice listed with summary; Pay Now asks for a checkout; ?payment=success / cancelled ... (+1 more)
 
 ## Sponsor check wording
 
-- [ ] F-SPWORD-1 Wording check shows what must change and why; Use this wording | sizes: both | n.a. | covered: NOT COVERED
+- [ ] F-SPWORD-1 Wording check shows what must change and why; Use this wording | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-SPWORD-1 desktop: wording check shows what must change and why; Use this wording (+1 more)
 
 ## V1. Added by verifier round 1
 

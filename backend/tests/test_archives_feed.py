@@ -46,7 +46,7 @@ async def test_admin_list_keeps_drafts_public_list_does_not(client, auth_headers
     assert [a["title"] for a in public["archives"]] == ["Published"] and public["total"] == 1
 
     t0 = time.perf_counter()
-    r = await client.get(f"{API}/archives", headers=auth_headers)
+    r = await client.get(f"{API}/archives?drafts=true", headers=auth_headers)
     assert time.perf_counter() - t0 < 0.5
     admin = r.json()
     assert {a["title"] for a in admin["archives"]} == {"Published", "Draft"} and admin["total"] == 2
@@ -55,15 +55,17 @@ async def test_admin_list_keeps_drafts_public_list_does_not(client, auth_headers
     r = await client.patch(f"{API}/archives/{draft.id}", json={"is_published": True}, headers=auth_headers)
     assert r.status_code == 200 and r.json()["is_published"] is True
     await client.patch(f"{API}/archives/{pub.id}", json={"is_published": False}, headers=auth_headers)
-    admin = (await client.get(f"{API}/archives", headers=auth_headers)).json()
+    admin = (await client.get(f"{API}/archives?drafts=true", headers=auth_headers)).json()
     assert admin["total"] == 2
+    # the public page never shows drafts, even to a signed-in manager
+    assert (await client.get(f"{API}/archives", headers=auth_headers)).json()["total"] == 1
     assert [a["title"] for a in (await client.get(f"{API}/archives")).json()["archives"]] == ["Draft"]
 
     # Station filter applies to the admin list too
     other = await _station(db_session, "Other")
     await _archive(db_session, other, "Elsewhere", published=False)
     admin = (await client.get(
-        f"{API}/archives", params={"station_id": str(st.id)}, headers=auth_headers
+        f"{API}/archives", params={"station_id": str(st.id), "drafts": "true"}, headers=auth_headers
     )).json()
     assert admin["total"] == 2
 

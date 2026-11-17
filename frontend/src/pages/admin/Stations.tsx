@@ -23,6 +23,7 @@ export default function Stations() {
   const [createSelected, setCreateSelected] = useState<GeoResult | null>(null);
   const createDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const createWrapperRef = useRef<HTMLDivElement>(null);
+  const [createError, setCreateError] = useState('');
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -51,13 +52,16 @@ export default function Stations() {
 
   const handleCreateSelect = (result: GeoResult) => {
     setCreateSelected(result);
+    setCreateError('');
     setCreateQuery(result.display_name);
     setCreateShowDropdown(false);
   };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createSelected) return;
+    // Without this the button silently did nothing when no city was picked.
+    if (!createSelected) { setCreateError('Pick the city from the list under Location.'); return; }
+    setCreateError('');
     await createMutation.mutateAsync({
       name,
       latitude: createSelected.latitude,
@@ -121,6 +125,7 @@ export default function Stations() {
                 </div>
               )}
             </div>
+            {createError && <p role="alert" className="text-sm text-red-600 mt-1">{createError}</p>}
             {createSelected && (
               <p className="text-xs text-green-600 mt-1">
                 {createSelected.display_name} — Timezone: {createSelected.timezone}
