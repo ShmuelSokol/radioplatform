@@ -65,6 +65,9 @@ class SchedulerEngine:
         # Leadership: only the process holding the lease advances queues.
         self._instance_id = uuid.uuid4().hex
         self._leader_until: Optional[datetime] = None
+        # A pass is running (stop() lets it finish rather than cancel it mid-query)
+        self._in_pass = False
+        self._pass_done = asyncio.Event()
     
     async def start(self):
         """Start the scheduler engine."""
@@ -80,7 +83,16 @@ class SchedulerEngine:
         """Stop the scheduler engine."""
         self.running = False
         if self._task:
-            self._task.cancel()
+            # Let the pass in progress finish (the loop ends after it) before cancelling.
+            # Cancelled in the middle of a database call, a pass could leave its
+            # connection with a write transaction open, and the next schema change or
+            # test teardown then waited on "database is locked".
+            if self._in_pass:
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._pass_done.wait()), timeout=self.STOP_GRACE_SECONDS)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+            self._task.cancel()  # now asleep between passes (or a pass that hung)
             try:
                 await self._task
             except asyncio.CancelledError:
@@ -93,6 +105,7 @@ class SchedulerEngine:
         logger.info("Scheduler engine stopped")
     
     LEASE_SECONDS = 15
+    STOP_GRACE_SECONDS = 5.0
 
     @property
     def is_leader(self) -> bool:
@@ -153,6 +166,8 @@ class SchedulerEngine:
     async def _run_loop(self):
         """Main scheduler loop."""
         while self.running:
+            self._in_pass = True
+            self._pass_done.clear()
             try:
                 # A session of its own per pass, closed (and its transaction ended)
                 # as soon as the pass is done. It used to come from an `async for`
@@ -170,6 +185,9 @@ class SchedulerEngine:
                     await _safe_rollback(db)  # end the read transaction now
             except Exception as e:
                 logger.error(f"Scheduler error: {e}", exc_info=True)
+            finally:
+                self._in_pass = False
+                self._pass_done.set()
 
             await asyncio.sleep(self.check_interval)
     

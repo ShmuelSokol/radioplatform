@@ -25,7 +25,7 @@ import type { QueueRow } from './controlroom/QueuePanel';
 import { nextCut } from './controlroom/timing';
 import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
-import { usePfl } from './controlroom/pfl';
+import { usePfl, WEATHER_PFL_ID, type PflClip } from './controlroom/pfl';
 import { PflDeck } from './controlroom/PflDeck';
 import { ErrorsPanel, LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import ModeButtons from './controlroom/ModeButtons';
@@ -659,33 +659,26 @@ export default function Dashboard() {
   // Pre-listen (PFL): one off-air player shared by the cart and the library
   const pfl = usePfl();
 
-  // Off-air time + weather preview
-  const [weatherState, setWeatherState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  // Off-air time + weather preview: played in the pre-listen deck (time, then
+  // weather, as one item with play/pause, seek and stop), never on air
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const playClips = pfl.playClips;
   const previewWeather = useCallback(async () => {
-    if (weatherState !== 'idle') return;
-    setWeatherState('loading');
+    if (weatherLoading) return;
+    setWeatherLoading(true);
     try {
       const data = await weatherPreviewMut.mutateAsync();
-      const urls = [data.time_url, data.weather_url].filter(Boolean) as string[];
-      if (urls.length === 0) {
-        setToast({ text: 'No weather announcement is available right now.', type: 'warn' });
-        setWeatherState('idle');
-        return;
-      }
-      setWeatherState('playing');
-      for (const url of urls) {
-        await new Promise<void>((resolve) => {
-          const a = new Audio(url);
-          a.onended = () => resolve();
-          a.onerror = () => resolve();
-          a.play().catch(() => resolve());
-        });
-      }
+      const clips: PflClip[] = [];
+      if (data.time_url) clips.push({ url: data.time_url, label: 'Time' });
+      if (data.weather_url) clips.push({ url: data.weather_url, label: 'Weather' });
+      if (clips.length === 0) setToast({ text: 'No weather announcement is available right now.', type: 'warn' });
+      else void playClips(WEATHER_PFL_ID, 'Time & weather', clips);
     } catch {
       setToast({ text: 'Could not load the weather preview.', type: 'error' });
+    } finally {
+      setWeatherLoading(false);
     }
-    setWeatherState('idle');
-  }, [weatherState, weatherPreviewMut]);
+  }, [weatherLoading, weatherPreviewMut, playClips]);
 
   // ── Keyboard shortcuts (desktop) ───────────────────────────
   const keyActions = useRef({ handleNext, cancelInsert, isPlaying });
@@ -786,7 +779,7 @@ export default function Dashboard() {
       onCancelInsert={cancelInsert}
       disabled={noStation}
       onPreviewWeather={previewWeather}
-      weatherState={weatherState}
+      weatherLoading={weatherLoading}
       pfl={pfl}
       wide={wide}
       bar={bar}
