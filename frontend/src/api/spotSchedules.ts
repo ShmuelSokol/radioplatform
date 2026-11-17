@@ -25,9 +25,11 @@ export interface SpotSchedule {
   timing_mode: TimingMode | null; // null = the station's default for that slot
   created_at: string;
   updated_at: string;
+  /** After a save: plays that do not fit in the coming days */
+  warnings?: string[];
 }
 
-export type SpotScheduleInput = Omit<SpotSchedule, 'id' | 'created_at' | 'updated_at'>;
+export type SpotScheduleInput = Omit<SpotSchedule, 'id' | 'created_at' | 'updated_at' | 'warnings'>;
 
 export interface PlannedSpot {
   scheduled_at: string;
@@ -36,6 +38,7 @@ export interface PlannedSpot {
   timing_mode: TimingMode;
   fixed: boolean;
   block: string | null; // the program block whose sponsor place this is
+  moved_from?: Daypart | null; // its own time of day was full, so it rolled to this block
   schedule_id: string;
   sponsor_id: string;
   sponsor_name: string;

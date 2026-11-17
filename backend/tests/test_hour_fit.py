@@ -38,10 +38,14 @@ def _asset(title: str, seconds: float | None, *, kind: str = "music", artist: st
 async def _station(db: AsyncSession, config: dict | None = None) -> Station:
     station = Station(
         id=uuid.uuid4(), name=f"KBR Jerusalem {uuid.uuid4().hex[:6]}", timezone="Asia/Jerusalem", is_active=True,
-        automation_config=config or {},
+        # these queues were measured with a 3 s song crossfade
+        automation_config={"crossfade_seconds": 3, **(config or {})},
     )
     db.add(station)
     await db.flush()
+    from app.api.v1.queue import note_station_crossfade
+
+    note_station_crossfade(station)
     return station
 
 

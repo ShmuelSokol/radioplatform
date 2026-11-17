@@ -7,7 +7,8 @@ export type BlockItem =
   | { kind: 'category'; asset_type: string; category?: string; label?: string }
   | { kind: 'time'; label?: string }
   | { kind: 'weather'; label?: string }
-  | { kind: 'sponsors'; count: number; label?: string };
+  // max_seconds: the most sponsorship time one airing holds (then count may be left out)
+  | { kind: 'sponsors'; count?: number | null; max_seconds?: number | null; label?: string };
 
 export interface ProgramBlock {
   id: string;

@@ -299,7 +299,11 @@ async def test_block_rotation_starts_with_the_longest_rested(db_session: AsyncSe
                            start_utc=datetime.now(UTC) - timedelta(minutes=10)))
     await db_session.commit()
     psa1_id, psa2_id, station_id = psa1.id, psa2.id, station.id
-    await reconcile_block_entries(db_session, station_id)
+    # Mid-hour on purpose: in the last two minutes of an hour the coming airing is too
+    # close to queue but still takes its turn, so the first queued one would be "PSA one"
+    # (this failed in CI at 22:59:24).
+    midhour = datetime.now(UTC).replace(minute=20, second=0, microsecond=0)
+    await reconcile_block_entries(db_session, station_id, now=midhour)
     await db_session.commit()
     rows = (await db_session.execute(
         select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.source == "block")
