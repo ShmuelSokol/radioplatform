@@ -179,6 +179,8 @@ def has_real_loudness(analysis) -> bool:
     18:00Z, items from -13.5 to -19.3 LUFS)."""
     if not isinstance(analysis, dict) or not analysis:
         return False
+    if analysis.get("loudness_method") == "sampled" and (analysis.get("loudness_lufs") or 0) > -5.0:
+        return False  # a bad reading from the sampled pieces (see tail_analysis)
     if analysis.get("method") == "range" and not analysis.get("loudness_method"):
         return not (analysis.get("loudness_lufs", -18.0) == -18.0 and analysis.get("replay_gain_db", 0.0) == 0.0)
     return "loudness_lufs" in analysis or "replay_gain_db" in analysis

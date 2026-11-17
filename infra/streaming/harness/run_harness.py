@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -116,6 +117,15 @@ class Stack:
             subprocess.run(
                 ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
                  "anullsrc=r=44100:cl=stereo", "-t", "60", "-b:a", "128k", str(silent)],
+                check=True,
+            )
+        # A master hotter than anything in the library: full-scale noise and square wave
+        loud = self.audio / "loud.mp3"
+        if not loud.exists():
+            subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                 "aevalsrc=0.6*sgn(sin(2*PI*900*t))+0.4*(random(0)*2-1):s=44100:d=40",
+                 "-ac", "2", "-b:a", "128k", str(loud)],
                 check=True,
             )
         name, f0, f1, secs = CHIRP
@@ -521,6 +531,15 @@ class Harness:
                          metadata_extra={"audio_analysis": {
                              "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": 40.0,
                              "cross_start_seconds": 37.0, "replay_gain_db": -6.0}}))
+            # Full-scale file with +6 dB of level on top: the output limiter must hold it
+            aid = uuid.uuid4()
+            self.assets["loud"] = aid
+            db.add(Asset(id=aid, title="loud master", artist="Harness", duration=40.0,
+                         file_path=f"http://127.0.0.1:{AUDIO_PORT}/loud.mp3", asset_type="music",
+                         review_status="approved",
+                         metadata_extra={"audio_analysis": {
+                             "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": 40.0,
+                             "cross_start_seconds": 37.0, "replay_gain_db": 6.0}}))
             aid = uuid.uuid4()
             self.assets["silence"] = aid
             db.add(Asset(id=aid, title="Silence", artist="Harness", duration=60.0,
@@ -1309,6 +1328,57 @@ async def sc_track_level(h: Harness) -> None:
             f"{diff if diff is None else round(diff, 1)} dB)")
 
 
+def wav_peak_db(path: Path, t0: float, start: float, end: float) -> float:
+    """Highest sample (dBFS) between start and end."""
+    import math
+    with wave.open(str(path), "rb") as w:
+        rate = w.getframerate()
+        first = max(0, int((start - t0) * rate))
+        last = min(w.getnframes(), int((end - t0) * rate))
+        w.setpos(first)
+        frames = array("h", w.readframes(last - first))
+    peak = max((abs(x) for x in frames), default=0)
+    return 20 * math.log10(peak / 32768) if peak else -120.0
+
+
+async def sc_output_limiter(h: Harness) -> None:
+    """V1-7: nothing leaves the engine above -3 dBFS (sample peak), so the MP3 stream's
+    true peaks stay under -2 dBFS, even for a full-scale master given +6 dB (Jerusalem
+    2026-11-17: true peaks of -0.6 dBFS with limit(threshold=-2)). The stream keeps its
+    titles through the FFmpeg limiter."""
+    name = "output_limiter"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("loud", {}), ("song5", {}), ("song6", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    a = await h.wait_on_air("loud", 60)
+    if a is None:
+        h.check(name, False, "the loud item never went on air")
+        return
+    await asyncio.sleep(5)
+    # What a listener receives while it plays: its true peak after MP3 encoding
+    sample = h.stack.dir / "loud-sample.mp3"
+
+    def grab() -> bytes:
+        with urllib.request.urlopen(f"http://127.0.0.1:{ICECAST_PORT}/harness", timeout=15) as r:
+            return r.read(450_000)
+
+    data = await asyncio.to_thread(grab)
+    sample.write_bytes(data[180_000:])  # past the burst of older audio sent on connect
+    meter = subprocess.run(["ffmpeg", "-nostats", "-i", str(sample), "-af", "ebur128=peak=true",
+                            "-f", "null", "-"], capture_output=True, text=True)
+    m = re.findall(r"Peak:\s+(-?[\d.]+|-inf) dBFS", meter.stderr)
+    true_peak = float(m[-1]) if m else None
+    await asyncio.sleep(6)
+    peak = wav_peak_db(h.stack.wav, h.stack.wav_t0, a + 4, a + 15)
+    level = _mean_db(h.heard(a + 4, a + 15))
+    h.check(name, peak <= -2.9, f"sample peak {peak:.2f} dBFS (limit -3)")
+    h.check(name, true_peak is not None and true_peak <= -2.0, f"stream true peak {true_peak} dBFS")
+    h.check(name, level is not None and level > -12, f"still loud, not crushed: {level} dBFS")
+    title = str(_icecast_source().get("title") or "")
+    h.check(name, "loud master" in title, f"stream title after the limiter: {title!r}")
+
+
 async def sc_level_song_muted(h: Harness) -> None:
     """V1-4b: a song with a level of its own (liq_amplify) is still muted under a hard time
     check: the mute and fade gains are not replaced by the track's level."""
@@ -1365,6 +1435,10 @@ async def sc_lane_levels(h: Harness) -> None:
     h.check(name, bool(started), f"timed item started ({[_fmt(x[0]) for x in started]})")
     timed = tone_db(w, t0, t1.timestamp() + 2, t1.timestamp() + 7, TONES["song3"][0])
     h.check(name, -32.5 <= timed <= -28.5, f"timed item at {timed:.1f} dBFS (expected about -30.5)")
+    # The 40 s timed item would still be on air for the next scenario, whose own timed
+    # item would then be moved to follow it (the site leaves a timed item alone on Next)
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+    await asyncio.sleep(2)
 
 async def sc_engine_crash_restart(h: Harness) -> None:
     """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
@@ -1571,6 +1645,7 @@ SCENARIOS = {
     # the shiur's file arrives only after the announcement has ended: music fills in
     "block_with_very_slow_shiur": lambda h: sc_block_with_slow_shiur(h, 45.0),
     "blackout_ended_early": sc_blackout_ended_early,
+    "output_limiter": sc_output_limiter,
     "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,

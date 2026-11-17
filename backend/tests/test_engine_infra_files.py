@@ -59,7 +59,10 @@ def test_levels_and_output_processing():
     for call in re.findall(r"amplify\(([^\n]*)\)", liq):
         assert 'override="liq_amplify"' in call or "override=null()" in call, call
     assert "compress(threshold=-14., ratio=3." in liq
-    assert "limit(threshold=-2., radio)" in liq
+    # Look-ahead brickwall at -3 dBFS (limit() is a compressor: true peaks got through)
+    assert "ffmpeg.filter.alimiter(graph, limit=0.708" in liq and "level=false" in liq
+    assert "radio = mksafe(true_peak_limit(radio))" in liq
+    assert "limit(threshold=" not in liq
     assert "%mp3(bitrate=320, samplerate=44100, stereo=true" in liq
     assert 'environment.get(default="Kol B\'ramah", "KBR_STATION_NAME")' in liq
 
