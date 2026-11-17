@@ -32,7 +32,7 @@ If grep returns nothing relevant, you're in genuinely new territory — proceed 
 Start by reading `wiki/README.md` if the topic might already be covered. If creating a new page, also update `wiki/README.md` index.
 
 ## What is this?
-Multi-channel radio streaming platform with playlist automation, ad insertion, weather/time announcements (ElevenLabs TTS), silence trimming, timezone-aware scheduling (Sabbath/holiday blackouts, sunset/sunrise rules), and admin + public listener UIs. Includes a Telegram bot for remote development via Claude.
+Multi-channel radio streaming platform with playlist automation, ad insertion, weather/time announcements (ElevenLabs TTS), silence trimming, timezone-aware scheduling (Sabbath/holiday blackouts, sunset/sunrise rules), and admin + public listener UIs.
 
 ## Live URLs
 - **Frontend**: https://kbrlive.com (alias: https://studio-kolbramah-radio.vercel.app)
@@ -47,7 +47,6 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, w
 - **TTS**: ElevenLabs API for weather/time announcements
 - **Weather**: OpenWeatherMap API (current + 3-day forecast)
 - **Storage**: Supabase Storage for audio files (bucket: `audio`)
-- **Bot**: Telegram bot with Claude API + OpenAI Whisper for voice transcription
 - **Workers**: Celery + Redis (not yet deployed — needed for media processing)
 - **Media**: FFmpeg for transcoding, clipping, HLS generation
 - **Streaming**: in-browser player today; a single playout engine (Liquidsoap 2.2 + Icecast on its own server) is built and switched off until the server exists. See `wiki/streaming-architecture.md`
@@ -81,11 +80,6 @@ radioplatform/
 │       ├── hooks/                # 22 custom hooks
 │       ├── stores/               # Zustand: authStore, playerStore
 │       └── types/                # TypeScript interfaces
-├── bot/
-│   ├── main.py                   # Telegram bot — Claude Code over Telegram
-│   ├── pyproject.toml            # Bot dependencies
-│   ├── .env                      # Bot secrets (not committed)
-│   └── .env.example              # Template
 ├── docs/                         # API reference documentation
 ├── docker/                       # Dockerfiles, nginx.conf
 ├── infra/streaming/              # Playout engine server: radio.liq, setup.sh, Icecast, nginx, systemd
@@ -338,20 +332,6 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/sponsor/billing` → SponsorBilling (sponsor-protected)
 - `/sponsor/wording` → CheckWording (sponsor-protected)
 
-## Telegram Bot (`bot/`)
-Claude Code accessible over Telegram for remote development.
-
-**Capabilities**: Read/write/edit files, run bash, git, deploy to Vercel, voice notes (Whisper transcription)
-
-**Tools**: read_file, write_file, edit_file, run_bash, list_files
-
-**Config** (in `bot/.env`):
-- `TELEGRAM_BOT_TOKEN` — from @BotFather
-- `ANTHROPIC_API_KEY` — Claude API key
-- `OPENAI_API_KEY` — for Whisper voice transcription (optional)
-
-**Run locally**: `cd bot && uv run python main.py`
-
 ## CRITICAL: Read Before You Write
 > **NEVER guess function names, class names, import paths, or field names.**
 > Before writing ANY code that imports from or references existing modules, you MUST first READ the actual source file to confirm the exact names. This applies to:
@@ -493,8 +473,6 @@ cd backend && uv run python ../infra/streaming/harness/run_harness.py
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com
 
-# Run Telegram bot locally
-cd bot && uv run python main.py
 
 # Node.js path (not in system PATH)
 export PATH="/c/Users/shmue/.node/node-v20.19.2-win-x64:$PATH"

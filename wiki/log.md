@@ -150,3 +150,4 @@ UPDATE 2026-11-17 playlist-generation.md do_not_play joins not_placeholder (neve
 INGEST 2026-11-17 engine-harness.md real radio.liq + Icecast + backend + Postgres run locally with tone items; reproduces the 9 PM bug (shiur in the engine's timed lane holds back the next time check) and missing engine pause/resume
 INGEST 2026-11-17 air-watch.md on-air self-check every 5 s (late/missing hard items, no time check at hh:00, dead air, overrun, engine drift, skipped timed items) with alerts and ntfy; GET /air-watch
 INGEST 2026-11-17 (docs/test-checklist.md) full feature checklist, one row per testable behaviour, with speed limits (section S); verifier rounds add rows until none missing
+INGEST 2026-11-17 (no page) Telegram bot (bot/) removed at Shmuel's request: unused since February and it ran Claude Code with full permissions for anyone who messaged it
