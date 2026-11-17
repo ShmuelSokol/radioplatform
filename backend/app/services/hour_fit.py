@@ -47,6 +47,10 @@ CROSSFADE = 3.0
 # on the early start and, a second or two earlier still, lets one more song start.
 # Song changes drift by a few seconds, so a fit that ends early counts as worse.
 EARLY_COST = 10.0
+# Song changes come a few seconds sooner than planned (live 2026-11-17 23:00Z: the song
+# planned to end 1 s past the hour ended 1.9 s before it, and a new song was handed out
+# and cut after 2.4 s). So "ends after the hard item" needs this much to spare.
+SAFE_PAST = 5.0
 # A song starting this soon is already announced to listeners' pages: not moved
 FROZEN = 30.0
 # Seconds between looks per station (the scheduler passes every second or two)
@@ -85,8 +89,8 @@ def _cut(total: float, room: float) -> float | None:
     None when they end early enough that one more song would start and be cut."""
     if total < room - EARLY_START:
         return None
-    if total < room:
-        return EARLY_COST + (room - total)
+    if total < room + SAFE_PAST:
+        return EARLY_COST + (room + SAFE_PAST - total)
     return total - room
 
 
