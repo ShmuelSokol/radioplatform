@@ -12,6 +12,7 @@ import app.api.v1.queue as queue_module
 from app.models.asset import Asset
 from app.models.queue_entry import QueueEntry
 from tests.test_queue_advance import _station_with_two_tracks
+from tests.timing import limit
 
 
 @pytest.fixture(autouse=True)
@@ -138,7 +139,7 @@ async def test_next_answers_before_the_queue_top_up(client, auth_headers, db_ses
     took = _time.monotonic() - began
     assert res.status_code == 200
     assert res.json()["now_playing"] == str(pending.asset_id)
-    assert took < 0.8
+    assert took < limit(0.8)
     assert order[0] == "announced"
     await asyncio.wait_for(asyncio.gather(*queue_module._background), timeout=5)
     assert order[-1] == "top-up done"

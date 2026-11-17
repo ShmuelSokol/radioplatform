@@ -1,4 +1,5 @@
 import type { QueueRow } from './QueuePanel';
+import { serverNow } from '../../../lib/serverClock';
 
 /** When a queued timed item cuts the song on air, or null if it waits for the song to end. */
 export function cutAt(e: QueueRow): string | null {
@@ -11,7 +12,7 @@ export function cutAt(e: QueueRow): string | null {
 }
 
 /** The next queued item that cuts the song on air, and when. */
-export function nextCut(rows: QueueRow[], now = Date.now()): { preempt_at: string; asset_id: string } | null {
+export function nextCut(rows: QueueRow[], now = serverNow()): { preempt_at: string; asset_id: string } | null {
   let best: { preempt_at: string; asset_id: string; t: number } | null = null;
   for (const e of rows) {
     if (e.status !== 'pending') continue;

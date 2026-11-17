@@ -21,7 +21,10 @@ export default function SponsorLogin() {
       authLogin(tokens.access_token, tokens.refresh_token);
       navigate('/sponsor/dashboard');
     } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || 'Login failed';
+      // The sign-in limit answers 429 with no 'detail'; do not show the raw 'status code 429'.
+      const msg = err?.response?.status === 429
+        ? 'Too many sign-in attempts. Wait a minute and try again.'
+        : err?.response?.data?.detail || err?.message || 'Login failed';
       setError(typeof msg === 'string' ? msg : 'Invalid email or password');
     } finally {
       setLoading(false);
@@ -38,8 +41,9 @@ export default function SponsorLogin() {
             <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label htmlFor="sponsor-login-email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
             <input
+            id="sponsor-login-email"
               type="text"
               autoCapitalize="none"
               autoCorrect="off"
@@ -50,8 +54,9 @@ export default function SponsorLogin() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <label htmlFor="sponsor-login-password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
             <input
+            id="sponsor-login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

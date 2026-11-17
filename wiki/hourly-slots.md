@@ -112,3 +112,17 @@ the time check played twice. Two causes:
   `_drop_timed_twins` marks any pending copy (same item, same time) "skipped".
 The control room marks timed items due at the same moment with a cyan bar and a
 "BLOCK · N ITEMS" tag on the first. Test: `backend/tests/test_top_of_hour_block.py`.
+
+
+## Blackouts and the station's own clock (2026-11-17)
+
+- Hourly time and weather are not queued inside a blackout (Shabbos, Yom Tov):
+  `_schedule_hourly_announcements` skips hours covered by `load_blackouts`. During a
+  blackout the browser-player advance starts only silence (`_pick_next_pending(...,
+  silence_only=True)`, and a due timed item that is not silence does not preempt). Before,
+  a time check queued on Friday came due on Shabbos morning and cut the silence. The
+  engine path (`playout_engine.tick`/`pick_next`) has not been checked for the same.
+- Hour marks come from the station's own clock (`local_hour_marks`): a half-hour zone
+  (India) heard its time check at local :30, and the default hard/soft timing used the UTC
+  minute. On the autumn DST day 1 AM gets two checks, in spring 2 AM none.
+- Tests: `backend/tests/test_scheduler_jobs.py`, `backend/tests/test_restart_holidays_timezones.py`.

@@ -11,14 +11,17 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import require_manager
+from app.core.dependencies import may_operate_station, require_manager
 from app.db.session import get_db
 from app.models.asset import Asset
+from app.models.station import Station
 from app.models.user import User
 from app.services.weather_spot_service import (
     find_own_time_clip,
     find_weather_spot_asset,
+    DEFAULT_WEATHER_REGION,
     normalize_region,
+    station_weather_region,
     store_uploaded_time_clip,
     store_uploaded_weather_spot,
 )
@@ -86,6 +89,7 @@ async def upload_weather_spot(
     Replaces whatever spot that date already has, including one already queued.
     Any audio format FFmpeg reads is accepted; it is stored as loudness-normalized MP3.
     """
+    await _check_region_stations(db, _user, _region(region), default_is_fallback=False)
     data = await _read_upload(file, source)
     try:
         asset, replaced = await store_uploaded_weather_spot(
@@ -94,6 +98,25 @@ async def upload_weather_spot(
     except ValueError as e:
         raise HTTPException(422, str(e))
     return _to_response(spot_date, asset, replaced)
+
+
+async def _check_region_stations(db: AsyncSession, user: User, region: str, default_is_fallback: bool) -> None:
+    """An upload changes what every station of that region airs, so the login must
+    be allowed on all of them (V1-99). Hourly time clips of the default region are
+    also the fallback for stations of other regions, so those count too."""
+    from sqlalchemy import select
+
+    if user.role.value == "admin":
+        return
+    stations = (await db.execute(select(Station).where(Station.is_active == True))).scalars().all()  # noqa: E712
+    affected = [
+        st for st in stations
+        if station_weather_region(st.automation_config) == region
+        or (default_is_fallback and region == DEFAULT_WEATHER_REGION)
+    ]
+    refused = sorted(st.name for st in affected if not may_operate_station(user, st))
+    if refused:
+        raise HTTPException(403, f"Your login is not set up to operate {', '.join(refused)}")
 
 
 def _region(region: str | None) -> str:
@@ -179,6 +202,7 @@ async def upload_time_clip(
     if not 0 <= hour <= 23:
         raise HTTPException(422, "hour must be 0-23")
     region = _region(region)
+    await _check_region_stations(db, _user, region, default_is_fallback=True)
     data = await _read_upload(file, source)
     try:
         asset, replaced = await store_uploaded_time_clip(

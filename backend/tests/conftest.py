@@ -69,6 +69,36 @@ def _register_sqlite_compilers():
 _register_sqlite_compilers()
 
 
+def _accept_string_uuids_on_sqlite():
+    """Production (asyncpg) accepts a UUID column value given as a string; SQLite's
+    emulated UUID type crashed on it ('str' object has no attribute 'hex'). Many
+    schemas type ids as `UUID | str`, so without this the tests failed where the
+    site works. Convert a valid string to a UUID first, as the database would."""
+    from sqlalchemy.sql import sqltypes
+
+    original = sqltypes.Uuid.bind_processor
+
+    def bind_processor(self, dialect):
+        process = original(self, dialect)
+        if process is None or dialect.name != "sqlite":
+            return process
+
+        def convert(value):
+            if isinstance(value, str):
+                try:
+                    value = uuid.UUID(value)
+                except ValueError:
+                    pass
+            return process(value)
+
+        return convert
+
+    sqltypes.Uuid.bind_processor = bind_processor
+
+
+_accept_string_uuids_on_sqlite()
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     loop = asyncio.new_event_loop()

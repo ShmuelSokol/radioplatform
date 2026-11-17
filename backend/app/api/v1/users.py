@@ -30,7 +30,8 @@ async def list_public_hosts(db: AsyncSession = Depends(get_db)):
         "hosts": [
             {
                 "id": str(h.id),
-                "display_name": h.display_name or h.email.split("@")[0],
+                # Never the e-mail's user name: it is a staff login, not a public name
+                "display_name": h.display_name or "KBR host",
                 "title": h.title,
                 "bio": h.bio if hasattr(h, 'bio') else None,
                 "photo_url": h.photo_url if hasattr(h, 'photo_url') else None,
@@ -55,6 +56,14 @@ async def list_users(
     return UserListResponse(users=users, total=total)
 
 
+async def _email_free(db: AsyncSession, email: str) -> None:
+    """One login per email: answer 409, not a database error (500)."""
+    taken = (await db.execute(select(User.id).where(func.lower(User.email) == email.lower()))).first()
+    if taken:
+        from app.core.exceptions import ConflictError
+        raise ConflictError("A login with that email already exists")
+
+
 @router.post("", response_model=UserOut, status_code=201)
 async def create_user(
     body: UserCreate,
@@ -63,6 +72,7 @@ async def create_user(
     _admin: User = Depends(require_admin),
 ):
     role = UserRole(body.role) if body.role in [r.value for r in UserRole] else UserRole.VIEWER
+    await _email_free(db, body.email)
     user = User(
         id=uuid.uuid4(),
         email=body.email,
@@ -100,6 +110,10 @@ async def update_user(
         raise NotFoundError("User not found")
     # An admin must not be able to lock themselves out: with one admin account
     # that would leave nobody able to sign in and undo it.
+    if body.role is not None and body.role not in [r.value for r in UserRole]:
+        raise BadRequestError(f"Unknown role {body.role!r}")
+    if body.email is not None and body.email.lower() != (user.email or "").lower():
+        await _email_free(db, body.email)
     if user.id == _admin.id:
         if body.is_active is False:
             raise BadRequestError("You cannot disable your own account")

@@ -244,6 +244,9 @@ Timing on the server stream:
 - Every listener of a station plays the same Icecast mount, so they all hear the same audio. They differ only by their own delay: about 1 s with the MSE player (Chrome, Edge, Firefox, Android). On iPhone Safari, which has no `MediaSource` (only `ManagedMediaSource`, not used yet), it is a few seconds more.
 - Hard-timed items (time check, ID) are handed to the engine 45 s early with an absolute time. The engine starts the fade `skip_fade` before it, so the item starts on the second by the stream server's clock (Ubuntu's timesyncd keeps it on time).
 
+## Known engine gaps (tests, 2026-11-17)
+
+`backend/tests/test_engine_backend.py` holds strict xfail tests, each with a reproduction, for engine behaviour that is wrong today: a hard timed item whose 45 s hand-over was missed (restart, slow pass, created late) never reaches the timed lane and `pick_next` orders it by position; no alert when /timed never succeeds; the watchdog never fires before the first engine contact, never in the first 30 min after host boot (monotonic < 1800), and fires falsely during any item over 2 min (the engine only calls between tracks); blackout silence handed to the timed lane outlives the blackout; live shows do not stop the engine (`/next` keeps serving music, `end_show` marks an entry playing locally); `timed_during_long_items` pause/wait are ignored on the engine; engine commands run serially inside the shared scheduler pass (4 s timeout each). When one is fixed, its test starts passing and strict xfail fails: remove the marker. Static checks of the stream-server files: `tests/test_engine_infra_files.py`.
 ## The same song handed out twice (2026-11-17 02:49Z, Main)
 
 The engine asks for its next track the moment a track starts. Its start report for Shema

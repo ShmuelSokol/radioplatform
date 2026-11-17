@@ -136,3 +136,26 @@ Both decks (and mix-over jingles) go into one GainNode bus fixed at 2 channels (
 
 ## Station switch (2026-11-16)
 `useNowPlayingWS` bumps a generation on every station change; the old socket, its close handler, poll and reconnect timer check it and stop. Before, the old socket's close handler reconnected to the old station a second after a switch, so the control room got both stations' now-playing and played both. Checked by `e2e/control-room.mjs` (station switch) and `e2e/audio-engine.mjs switch-station*`.
+
+## One hand-over rule (2026-11-17)
+
+`handover_seconds(entry)` in `api/v1/queue.py` is the only rule for when the item on air
+hands over: the scheduler's timer (`_advance_queue`), the now-playing `cross_start` and
+`switch_time` all use it. Short items (under 20 s) and timed items (preempt_at, ad_slot,
+block) hand over 0.3 s before their end even when their analysis has a crossfade point;
+songs use their analysed `cross_start_seconds` (default 3 s before the end). The page
+(`useAudioEngine`) also hands a short file over at its end, and when the server moves on
+while a short item that started late on the page is still talking, it lets it finish
+(`letFinish`, up to 8 s) unless the operator pressed Next. Before, a 5 s time check was
+cut about 1.8 s early and the resumed story was heard over it (All Day Stories, 10 PM
+2026-11-16). Tests: `backend/tests/test_handover_rule.py`, e2e `audio-engine.mjs`
+scenarios `time-check-not-talked-over` and `time-check-hands-over-at-its-end`.
+
+## Server clock, not the device clock (2026-11-17)
+Every position and due time (`started_at`, `preempt_at`, `ends_at`, a push's `at`) is server time, so the player compares them with `serverNow()` from `src/lib/serverClock.ts`, never `Date.now()`. The offset is measured from `server_time` in the release policy (`lib/appUpdate.ts`, on connect and every minute). Before, a PC 20 s fast joined every song 20 s in and faded the song for the hourly time check 20 s early. Used by useAudioEngine (live position, timed fades, crossfade, playNextNow), useNowPlayingWS (overdue check), Listen, Dashboard, `controlroom/timing.ts nextCut` and the transport clock. Checked by `e2e/listen-page.mjs` ONLY=clock (device clock 20 s fast and 30 s slow).
+
+## Known: cue-in runs ahead of the server (2026-11-17)
+The server counts an item from the top of the file (hand-over at `started_at + cross_start`; a resumed shiur moves `started_at` back). The player starts a fresh item at `cue_in` but a listener joining later at `max(cue_in, elapsed)`, so with a cue-in of N s the two are N s apart and the crossfade waits up to N - 1 s past the cross point (MAX_LEAD bound). Harmless for the usual sub-second leading silence. `e2e/audio-engine.mjs cue-gain` marks it XFAIL; fix would be server-side (start the clock at cue-in, e.g. `started_at = now - cue_in` in `mark_started`).
+
+## Browser checks
+`e2e/lib/fake-station.mjs` is a fake backend for page.route (queue, actions, live shows, CRM, now-playing socket, site socket, ranged tone files, `skewClock`) with an audio probe (`window.__decks()`, `__audible()`, `__outLevel()`, Media Session handlers). Suites on the built site (`npx vite preview --port 4311 --strictPort`): `control-room-actions.mjs` (every control room button, desktop + iPhone, S-1/S-2 timings), `listen-page.mjs` (Listen page, lock screen, network loss, socket back-off/polling, stream mode with `lib/stream-server.mjs`, time check on the second), `call-in.mjs`, `release-timing.mjs` (release pickup limits under a fake clock). Each takes `ONLY=<part>`.

@@ -22,7 +22,7 @@ export interface ShowArchiveListResponse {
   total: number;
 }
 
-export const getArchives = (params?: { station_id?: string; skip?: number; limit?: number }) =>
+export const getArchives = (params?: { station_id?: string; skip?: number; limit?: number; drafts?: boolean }) =>
   apiClient.get<ShowArchiveListResponse>('/archives', { params }).then(r => r.data);
 
 export const getArchive = (id: string) =>

@@ -90,11 +90,13 @@ NEVER_AUTO_CATEGORIES = ("do_not_play",)
 
 
 def not_placeholder():
-    """SQL condition: the asset is neither a placeholder nor marked do-not-play, so an
-    automatic pick may use it (operators can still queue it themselves)."""
+    """SQL condition: the asset is neither a placeholder, nor marked do-not-play, nor
+    rejected in a review queue, so an automatic pick may use it (operators can still
+    queue it themselves)."""
     from sqlalchemy import and_, func, or_
 
     return and_(
+        or_(Asset.review_status.is_(None), Asset.review_status != "rejected"),
         or_(
             Asset.title.is_(None),
             func.lower(func.trim(Asset.title)).notin_(NEVER_AUTO_TITLES),

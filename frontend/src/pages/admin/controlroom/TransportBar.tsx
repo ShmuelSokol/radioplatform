@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import PlayoutBadge from '../../../components/audio/PlayoutBadge';
 import { Link } from 'react-router-dom';
 import { assetLabel, fmtDur } from './shared';
+import { serverNow } from '../../../lib/serverClock';
 import './classic.css';
 import type { CtlAsset } from './shared';
 
@@ -46,9 +47,10 @@ interface Props {
 }
 
 function Clock({ tz }: { tz?: string }) {
-  const [now, setNow] = useState(() => new Date());
+  // The station's time, on the server's clock (a wrong device clock showed the wrong time)
+  const [now, setNow] = useState(() => new Date(serverNow()));
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
+    const t = setInterval(() => setNow(new Date(serverNow())), 1000);
     return () => clearInterval(t);
   }, []);
   const opts: Intl.DateTimeFormatOptions = { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' };

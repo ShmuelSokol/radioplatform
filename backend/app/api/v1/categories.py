@@ -14,6 +14,13 @@ from app.schemas.category import CategoryCreate, CategoryInDB, CategoryUpdate
 router = APIRouter(prefix="/categories", tags=["categories"])
 
 
+async def _name_free(db: AsyncSession, name: str) -> None:
+    """Names are unique: answer 409, not a database error (500)."""
+    if (await db.execute(select(Category.id).where(Category.name == name))).first():
+        from app.core.exceptions import ConflictError
+        raise ConflictError("A category with that name already exists")
+
+
 @router.get("", response_model=list[CategoryInDB])
 async def list_categories(
     db: AsyncSession = Depends(get_db),
@@ -30,6 +37,7 @@ async def create_category(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_manager),
 ):
+    await _name_free(db, data.name)
     record = Category(name=data.name)
     db.add(record)
     await db.commit()
@@ -51,6 +59,8 @@ async def update_category(
         from app.core.exceptions import NotFoundError
         raise NotFoundError("Category not found")
 
+    if data.name is not None and data.name != record.name:
+        await _name_free(db, data.name)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(record, key, value)
 

@@ -2,13 +2,13 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvoiceCreate(BaseModel):
     sponsor_id: UUID | str
     campaign_id: UUID | str | None = None
-    amount_cents: int
+    amount_cents: int = Field(gt=0)  # a zero or negative invoice cannot be paid by card
     currency: str = "USD"
     due_date: date | None = None
     description: str | None = None

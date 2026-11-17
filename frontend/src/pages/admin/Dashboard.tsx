@@ -34,6 +34,7 @@ import { isManager } from '../../auth/access';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
+import { serverNow } from '../../lib/serverClock';
 
 type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule' | 'errors';
 type SideTab = 'library' | 'live' | 'log' | 'schedule' | 'errors';
@@ -59,6 +60,8 @@ const MOBILE_TABS: Array<{ id: Pane; label: string; icon: string }> = [
 // Fade lengths the server uses for each Next button (queue.py SKIP_FADE_SECONDS)
 const SKIP_FADE_SECONDS: Record<SkipFade, number> = { hard: 0, fade: 0.5, soft: 3 };
 
+// Keep in step with the media query in controlroom/classic.css
+const PHONE_LANDSCAPE = '(orientation: landscape) and (max-height: 500px) and (max-width: 1023.98px)';
 // Share of the height Up next gets above the lower pane (the old fixed 3:2)
 const SPLIT_DEFAULT = 0.6;
 const SPLIT_MIN = 0.15;
@@ -70,6 +73,15 @@ export default function Dashboard() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
+  // Phone held sideways: the page scrolls so the control room fills the screen with the
+  // site menu just above it (classic.css "phone landscape"); start scrolled to it.
+  const phoneLandscape = useMediaQuery(PHONE_LANDSCAPE);
+  useEffect(() => {
+    if (!phoneLandscape) return;
+    const el = document.querySelector('[data-testid="control-room"]');
+    const t = window.setTimeout(() => el?.scrollIntoView({ block: 'start' }), 50);
+    return () => window.clearTimeout(t);
+  }, [phoneLandscape]);
   const { data: stationsData } = useStations();
   const stations = useMemo(() => stationsData?.stations ?? [], [stationsData]);
 
@@ -181,7 +193,7 @@ export default function Dashboard() {
   useEffect(() => {
     const tick = () => {
       if (serverStartedAt && serverDuration > 0) {
-        const el = Math.min(Math.max(0, (Date.now() - new Date(serverStartedAt).getTime()) / 1000), serverDuration);
+        const el = Math.min(Math.max(0, (serverNow() - new Date(serverStartedAt).getTime()) / 1000), serverDuration);
         setRealElapsed(el);
       } else {
         setRealElapsed(0);
@@ -317,7 +329,10 @@ export default function Dashboard() {
         if (holdsSound.current) {
           holdsSound.current = false;
           setListenHere(false); // the other tab now remembers listening
-          setStatusMessage('Sound moved to another control room tab. Press the speaker here to hear it in this tab.');
+          const moved = 'Sound moved to another control room tab. Press the speaker here to hear it in this tab.';
+          setStatusMessage(moved);
+          // The status line only shows while nothing is on air: say it where it is seen
+          setToast({ text: moved, type: 'warn' });
         }
       } else if (e.data?.type === 'released') {
         soundElsewhere.current = false;
@@ -480,7 +495,7 @@ export default function Dashboard() {
     const { nextAsset: upNext, nextEntryId: upNextId, serverStartedAt: onAirSince, onAirTimed: timedOnAir } = nextNow.current;
     // Right after an automatic change the server keeps the incoming item (it is still
     // fading in), so nothing is played ahead then.
-    const justChanged = onAirSince ? Date.now() - new Date(onAirSince).getTime() < 4500 : true;
+    const justChanged = onAirSince ? serverNow() - new Date(onAirSince).getTime() < 4500 : true;
     if (upNext && upNextId && !justChanged && !timedOnAir) {
       playNextNow(
         { id: upNext.id, title: upNext.title, artist: upNext.artist ?? null, asset_type: upNext.asset_type,
@@ -799,7 +814,7 @@ export default function Dashboard() {
     : <SchedulePanel stationId={stationId} />;
 
   return (
-    <div className="qn h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
+    <div className="qn cr-root h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
       {resume.asking && <ResumePrompt onTap={resume.tap} />}
       <audio ref={dashStreamAudioRef} className="hidden" />
 
@@ -866,8 +881,8 @@ export default function Dashboard() {
           <div className="h-[150px] xl:h-[170px] shrink-0">{hotButtons(false, true)}</div>
         </>
       ) : (
-        /* ═══ Phone / tablet: one pane + bottom tabs ═══ */
-        <>
+        /* ═══ Phone / tablet: one pane + bottom tabs (beside the transport in landscape, see classic.css) ═══ */
+        <div className="cr-side flex-1 min-h-0 flex flex-col">
           <div className="flex-1 min-h-0 flex flex-col">
             {(pane === 'log' || pane === 'schedule' || pane === 'errors') && (
               <ModeButtons p={modeProps} stacked={false} />
@@ -888,7 +903,7 @@ export default function Dashboard() {
             </div>
           </div>
           <PflDeck pfl={pfl} compact />
-          <nav className="shrink-0 flex gap-1 px-1 pt-1 bg-[#c0c0c0] border-t-2 border-white pb-[max(0.25rem,env(safe-area-inset-bottom))]" aria-label="Control room sections">
+          <nav className="cr-tabs shrink-0 flex gap-1 px-1 pt-1 bg-[#c0c0c0] border-t-2 border-white pb-[max(0.25rem,env(safe-area-inset-bottom))]" aria-label="Control room sections">
             {MOBILE_TABS.map(t => {
               const active = pane === t.id || (t.id === 'log' && (pane === 'schedule' || pane === 'errors'));
               return (
@@ -902,7 +917,7 @@ export default function Dashboard() {
               );
             })}
           </nav>
-        </>
+        </div>
       )}
 
       {isDesktop && (
