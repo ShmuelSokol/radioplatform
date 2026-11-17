@@ -621,6 +621,29 @@ SHORT_ITEM_SECONDS = 20.0
 SHORT_ITEM_HANDOVER_SECONDS = 0.3
 
 
+def handover_seconds(entry) -> float:
+    """How long before its end the item on air hands over to the next one. The one rule
+    for the scheduler's timer, the now-playing message (cross_start) and the queue's
+    look-ahead, so the server and the listeners' pages change at the same moment."""
+    asset = entry.asset if entry is not None else None
+    duration = (asset.duration if asset else None) or DEFAULT_DURATION
+    cross_seconds = 3.0
+    extra = getattr(asset, "metadata_extra", None) if asset else None
+    analysis = stored_analysis(extra) if extra else {}
+    cross_start = analysis.get("cross_start_seconds")
+    if duration < SHORT_ITEM_SECONDS or (
+        getattr(entry, "preempt_at", None) is not None or getattr(entry, "source", None) in ("ad_slot", "block")
+    ):
+        # A time check, weather or sponsorship is not crossfaded: handing over at
+        # half its length cut a 5 s time check after 2.5 s and the shiur it had
+        # paused started over it (Main, 15:00 ET 2026-11-16; All Day Stories,
+        # 22:00 ET: 1.8 s of the time check under the story).
+        cross_seconds = SHORT_ITEM_HANDOVER_SECONDS
+    elif isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
+        cross_seconds = duration - cross_start
+    return min(cross_seconds, max(0.0, duration / 2))
+
+
 def switch_time(entry) -> datetime | None:
     """When the item on air hands over to the next one: where listeners start
     their crossfade (cross_start, default 3 s before the end). The scheduler
@@ -629,21 +652,7 @@ def switch_time(entry) -> datetime | None:
         return None
     asset = entry.asset
     duration = (asset.duration if asset else None) or DEFAULT_DURATION
-    cross_seconds = 3.0
-    extra = getattr(asset, "metadata_extra", None) if asset else None
-    analysis = stored_analysis(extra) if extra else {}
-    cross_start = analysis.get("cross_start_seconds")
-    if isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
-        cross_seconds = duration - cross_start
-    elif duration < SHORT_ITEM_SECONDS or (
-        getattr(entry, "preempt_at", None) is not None or getattr(entry, "source", None) in ("ad_slot", "block")
-    ):
-        # A time check, weather or sponsorship is not crossfaded: handing over at
-        # half its length cut a 5 s time check after 2.5 s and the shiur it had
-        # paused started over it (Main, 15:00 ET 2026-11-16).
-        cross_seconds = SHORT_ITEM_HANDOVER_SECONDS
-    cross_seconds = min(cross_seconds, max(0.0, duration / 2))
-    return _aware(entry.started_at) + timedelta(seconds=duration - cross_seconds)
+    return _aware(entry.started_at) + timedelta(seconds=duration - handover_seconds(entry))
 
 
 async def predict_next_entry(db: AsyncSession, station_id, playing_entry) -> QueueEntry | None:

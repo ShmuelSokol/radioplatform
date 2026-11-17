@@ -587,15 +587,10 @@ class SchedulerEngine:
                 # Schedule precise timer for this track
                 asset = entry.asset
                 duration = (asset.duration if asset else None) or 180.0
-                # Advance where clients start their crossfade: at cross_start
-                # (same default as the now-playing payload: 3s before the end)
-                cross_seconds = 3.0
-                if asset and asset.metadata_extra:
-                    analysis = stored_analysis(asset.metadata_extra)
-                    cross_start = analysis.get("cross_start_seconds")
-                    if isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
-                        cross_seconds = duration - cross_start
-                cross_seconds = min(cross_seconds, max(0.0, duration / 2))
+                # Advance where clients start their crossfade: the queue's one
+                # hand-over rule (short and timed items play to their end)
+                from app.api.v1.queue import handover_seconds
+                cross_seconds = handover_seconds(entry)
 
                 # Calculate remaining time from started_at
                 elapsed = (datetime.now(timezone.utc) - _aware(entry.started_at)).total_seconds()
@@ -714,7 +709,10 @@ class SchedulerEngine:
 
         cue_in = analysis.get("cue_in_seconds", 0)
         cue_out = analysis.get("cue_out_seconds", asset.duration or 180.0)
-        cross_start = analysis.get("cross_start_seconds", (asset.duration or 180.0) - 3.0)
+        # Where pages hand over: the same rule the queue advances by, so a short or
+        # timed item is not crossfaded 3 s before its end on the page
+        from app.api.v1.queue import handover_seconds
+        cross_start = (asset.duration or 180.0) - handover_seconds(entry)
         replay_gain_db = analysis.get("replay_gain_db", 0)
 
         # What follows this item: the queue's own pick at the hand-over, so a soft

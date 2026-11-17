@@ -34,9 +34,18 @@ const COLD_LOAD_MAX_WAIT_MS = 4000;
  *  3 s before the end of the file actually loaded. A stored length or analysis can be
  *  longer than the file (the old analysis gave every item 180 s); then the song ran out
  *  and the listener heard silence until the server caught up. */
+// Items this short (time checks, station IDs) are not crossfaded: they play to their
+// end, like the server's hand-over rule (SHORT_ITEM_SECONDS in api/v1/queue.py)
+const SHORT_ITEM_SECONDS = 20;
+const SHORT_ITEM_HANDOVER_SECONDS = 0.3;
+// A short item still playing when the server moves on is let finish, up to this long
+const LET_FINISH_MAX_SECONDS = 8;
 function handOverPoint(crossStart: number, fileDuration: number): number {
-  const fileEnd = isFinite(fileDuration) && fileDuration > CROSSFADE_DURATION
-    ? fileDuration - CROSSFADE_DURATION : 0;
+  const short = isFinite(fileDuration) && fileDuration > 0 && fileDuration < SHORT_ITEM_SECONDS;
+  const fileEnd = short
+    ? Math.max(0.1, fileDuration - SHORT_ITEM_HANDOVER_SECONDS)
+    : isFinite(fileDuration) && fileDuration > CROSSFADE_DURATION
+      ? fileDuration - CROSSFADE_DURATION : 0;
   if (crossStart > 0 && fileEnd > 0) return Math.min(crossStart, fileEnd);
   return crossStart > 0 ? crossStart : fileEnd;
 }
@@ -604,6 +613,16 @@ export function useAudioEngine(
     const operatorFade = asked != null && isFinite(asked) ? Math.min(10, Math.max(0.03, asked)) : null;
     const fadeOut = operatorFade ?? (naturalEnd ? CROSSFADE_DURATION : SKIP_FADE_OUT);
     const fadeIn = SKIP_FADE_IN;
+    // A short spoken item (time check, weather) that started late on this page is
+    // still talking when the server moves on: let it finish, never talk over it.
+    // All Day Stories, 10 PM 2026-11-16: the paused story came back 1.8 s into the
+    // time check. An operator's Next still cuts at once.
+    const letFinish = operatorFade == null && !replay && !outDeck.audio.paused && !outDeck.audio.ended
+      && deckAssetRef.current[outLabel] != null
+      && isFinite(outDur) && outDur > 0 && outDur < SHORT_ITEM_SECONDS
+      && outDur - outTime > 0.05 && outDur - outTime < LET_FINISH_MAX_SECONDS
+      // behind the server's hand-over point: it started late here
+      && outTime < outEnd - 0.5;
 
     let wentLive = false;
     const goLive = () => {
@@ -652,11 +671,24 @@ export function useAudioEngine(
       }, fadeOut * 1000 + 50);
     };
 
+    // Bring the new item on air, after the short item on air has finished if it should
+    const goLiveAfterOut = () => {
+      if (!letFinish) { goLive(); return; }
+      const left = outDeck.audio.paused || outDeck.audio.ended ? 0 : outDur - outDeck.audio.currentTime;
+      if (left <= 0.05) { goLive(); return; }
+      const onEnded = () => goLive();
+      outDeck.audio.addEventListener('ended', onEnded, { once: true });
+      setTimeout(() => {
+        outDeck.audio.removeEventListener('ended', onEnded);
+        goLive();
+      }, Math.min(LET_FINISH_MAX_SECONDS, left) * 1000 + 100);
+    };
+
     const run = async () => {
       try {
         // Already pre-loaded and ready: go live now, without a round trip for its URL
         if (assetId && deckAssetRef.current[inLabel] === assetId && inDeck.audio.readyState >= 2) {
-          goLive();
+          goLiveAfterOut();
           return;
         }
         let url: string;
@@ -671,7 +703,7 @@ export function useAudioEngine(
 
         const preloaded = deckAssetRef.current[inLabel] === assetId;
         if (preloaded && inDeck.audio.readyState >= 2) {
-          goLive();
+          goLiveAfterOut();
           return;
         }
 
@@ -684,11 +716,11 @@ export function useAudioEngine(
           inDeck.audio.src = url;
           inDeck.audio.load();
         }
-        const onReady = () => goLive();
+        const onReady = () => goLiveAfterOut();
         inDeck.audio.addEventListener('canplay', onReady, { once: true });
         setTimeout(() => {
           inDeck.audio.removeEventListener('canplay', onReady);
-          goLive();
+          goLiveAfterOut();
         }, COLD_LOAD_MAX_WAIT_MS);
       } catch {
         // Load failure

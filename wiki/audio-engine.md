@@ -136,3 +136,17 @@ Both decks (and mix-over jingles) go into one GainNode bus fixed at 2 channels (
 
 ## Station switch (2026-11-16)
 `useNowPlayingWS` bumps a generation on every station change; the old socket, its close handler, poll and reconnect timer check it and stop. Before, the old socket's close handler reconnected to the old station a second after a switch, so the control room got both stations' now-playing and played both. Checked by `e2e/control-room.mjs` (station switch) and `e2e/audio-engine.mjs switch-station*`.
+
+## One hand-over rule (2026-11-17)
+
+`handover_seconds(entry)` in `api/v1/queue.py` is the only rule for when the item on air
+hands over: the scheduler's timer (`_advance_queue`), the now-playing `cross_start` and
+`switch_time` all use it. Short items (under 20 s) and timed items (preempt_at, ad_slot,
+block) hand over 0.3 s before their end even when their analysis has a crossfade point;
+songs use their analysed `cross_start_seconds` (default 3 s before the end). The page
+(`useAudioEngine`) also hands a short file over at its end, and when the server moves on
+while a short item that started late on the page is still talking, it lets it finish
+(`letFinish`, up to 8 s) unless the operator pressed Next. Before, a 5 s time check was
+cut about 1.8 s early and the resumed story was heard over it (All Day Stories, 10 PM
+2026-11-16). Tests: `backend/tests/test_handover_rule.py`, e2e `audio-engine.mjs`
+scenarios `time-check-not-talked-over` and `time-check-hands-over-at-its-end`.

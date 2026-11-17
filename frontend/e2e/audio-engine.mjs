@@ -22,7 +22,7 @@ const check = (name, ok, detail = '') => {
 };
 
 // Test tones: asset id -> [frequency, seconds]
-const TONES = { a: [440, 20], b: [660, 12], c: [880, 12], d: [550, 40] };
+const TONES = { a: [440, 20], b: [660, 12], c: [880, 12], d: [550, 40], t: [1000, 5] };
 function wav(freq, seconds) {
   const rate = 8000, n = rate * seconds, buf = Buffer.alloc(44 + n * 2);
   buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
@@ -37,6 +37,8 @@ const A = { id: 'a', dur: 20, cross: 17 };
 const B = { id: 'b', dur: 12, cross: 9 };
 const C = { id: 'c', dur: 12, cross: 9 };
 const D = { id: 'd', dur: 40, cross: 37 };
+// A 5 s time check: short items hand over at their end (0.3 s before), not by crossfade
+const T = { id: 't', dur: 5, cross: 4.7 };
 const now = () => new Date().toISOString();
 
 // Each scenario starts with song "a" on air, then calls change() and is watched for `watch` seconds.
@@ -206,6 +208,20 @@ const SCENARIOS = {
     },
     end: { src: 'b', minT: 0, maxT: 7 },
   },
+  // All Day Stories, 10 PM 2026-11-16: the server moved on to the paused story 3.3 s into
+  // a 5 s time check and the story was heard over the last 1.8 s of it. The page lets a
+  // short item finish; the story follows it with no gap.
+  'time-check-not-talked-over': {
+    start: { ...T, nextId: 'd' }, wait: 3.3, watch: 6,
+    change: (set) => set({ ...D, nextId: 'a', startedAt: now() }),
+    overlapOf: ['t', 'd'], end: { src: 'd', minT: 3, maxT: 5.5 },
+  },
+  // The same with the server's own hand-over 0.3 s before the end: no overlap either
+  'time-check-hands-over-at-its-end': {
+    start: { ...T, nextId: 'd' }, wait: 4.7, watch: 5,
+    change: (set) => set({ ...D, nextId: 'a', startedAt: now() }),
+    overlapOf: ['t', 'd'], end: { src: 'd', minT: 3.5, maxT: 5.5 },
+  },
   // Switching while the station's own crossfade is under way
   'switch-station-during-crossfade': {
     start: { ...A, nextId: 'b' }, wait: 17.5, watch: 4,
@@ -252,6 +268,7 @@ async function run(name, sc) {
   const nextNow = (id, fade) => page.evaluate(([i, f]) => window.__nextNow(i, f), [id, fade]);
   sc.change(set, startA, nextNow);
   let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, firstSilent = null, last = [];
+  let overlap = 0;
   const target = sc.end?.src;
   while (Date.now() - t0 < sc.watch * 1000) {
     last = await page.evaluate(() => window.__snap());
@@ -259,6 +276,7 @@ async function run(name, sc) {
     silentFor = audible.length ? 0 : silentFor + 0.2;
     if (firstSilent === null && !audible.length) firstSilent = (Date.now() - t0) / 1000;
     longestSilence = Math.max(longestSilence, silentFor);
+    if (sc.overlapOf && sc.overlapOf.every((id) => audible.some((d) => d.src === id && d.gain > 0.2))) overlap += 0.2;
     if (firstNew === null && audible.some((d) => d.src === target && d.t < 4)) firstNew = (Date.now() - t0) / 1000;
     if (outGone === null && !audible.some((d) => d.src === sc.start.id)) outGone = (Date.now() - t0) / 1000;
     await sleep(200);
@@ -281,6 +299,10 @@ async function run(name, sc) {
   if (sc.audibleWithin) {
     check(`${name}: new song audible within ${sc.audibleWithin} s`, firstNew !== null && firstNew <= sc.audibleWithin,
       firstNew === null ? 'never' : `${firstNew.toFixed(2)} s`);
+  }
+  if (sc.overlapOf) {
+    check(`${name}: "${sc.overlapOf[1]}" is not heard over "${sc.overlapOf[0]}"`, overlap <= 0.4,
+      `heard together for about ${overlap.toFixed(1)} s`);
   }
   if (sc.noSeekOn) {
     const seeks = (await page.evaluate(() => window.__seeks)).filter((x) => x.src === sc.noSeekOn);

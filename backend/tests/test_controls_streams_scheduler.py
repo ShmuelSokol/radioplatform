@@ -224,9 +224,6 @@ async def test_live_audio_storage_paths_and_liquidsoap_branch(client, db_session
     assert body["stream_url"] == "https://stream.example.com/live"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: public GET /stations/{id}/now-playing reads the old Redis player; with REDIS_URL "
-    "empty (production) it is a 500 instead of the queue's item on air"))
 @pytest.mark.asyncio
 async def test_stream_now_playing_works_without_redis(client, db_session):
     """B-STREAMS-3"""

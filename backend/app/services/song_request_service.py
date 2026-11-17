@@ -21,19 +21,30 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-_SPLITS = re.compile(r"\s+(?:by|-|–|—|/)\s+", re.IGNORECASE)
+_BY_SPLIT = re.compile(r"^(?P<title>.+)\s+by\s+(?P<artist>\S.*)$", re.IGNORECASE)
 
 
-def _guesses(song_title: str, song_artist: str | None) -> list[tuple[str, str]]:
-    title = song_title or ""
-    artist = song_artist or ""
-    out = [(_normalize(title), _normalize(artist))]
-    if not artist.strip():
-        parts = _SPLITS.split(title, maxsplit=1)
-        if len(parts) == 2 and parts[0].strip() and parts[1].strip():
-            left, right = _normalize(parts[0]), _normalize(parts[1])
-            out += [(left, right), (right, left)]
-    return out
+def split_title_artist(song_title: str, song_artist: str | None) -> tuple[str, str | None]:
+    """Listeners often type "One Day by Matisyahu" into the title box and leave
+    the artist empty. Split that into title + artist so the artist part is not
+    scored as part of the title (which made such requests never match)."""
+    if song_artist and song_artist.strip():
+        return song_title, song_artist
+    m = _BY_SPLIT.match(song_title.strip())
+    if not m:
+        return song_title, song_artist
+    return m.group("title").strip(), m.group("artist").strip()
+
+
+def _score(norm_title: str, norm_artist: str, asset: Asset) -> float:
+    title_score = SequenceMatcher(None, norm_title, _normalize(asset.title)).ratio()
+    if norm_artist and asset.artist:
+        artist_score = SequenceMatcher(None, norm_artist, _normalize(asset.artist)).ratio()
+    elif not norm_artist and not asset.artist:
+        artist_score = 1.0  # both empty — don't penalize
+    else:
+        artist_score = 0.0
+    return title_score * 0.7 + artist_score * 0.3
 
 
 async def fuzzy_match_asset(
@@ -54,34 +65,18 @@ async def fuzzy_match_asset(
     if not assets:
         return None, 0.0
 
-    # What the listener might mean: their title and artist as typed, and, when the
-    # artist box is empty, the title split at " by " or " - " (both ways round): a
-    # request "One day by matisyahu" with no artist scored 0.35 against "One Day".
-    guesses = _guesses(song_title, song_artist)
-    whole = _normalize(f"{song_title} {song_artist or ''}")
+    # Score the request as typed and, if the title reads "X by Y", also as
+    # title X + artist Y; keep the better one ("Stand By Me" still works).
+    readings = {(song_title, song_artist), split_title_artist(song_title, song_artist)}
+    norm_readings = [
+        (_normalize(t), _normalize(a) if a else "") for t, a in readings
+    ]
 
     best_asset = None
     best_score = 0.0
 
     for asset in assets:
-        asset_title = _normalize(asset.title)
-        asset_artist = _normalize(asset.artist) if asset.artist else ""
-        score = 0.0
-        for norm_title, norm_artist in guesses:
-            title_score = SequenceMatcher(None, norm_title, asset_title).ratio()
-            if norm_artist and asset_artist:
-                artist_score = SequenceMatcher(None, norm_artist, asset_artist).ratio()
-            elif not norm_artist and not asset_artist:
-                artist_score = 1.0  # both empty — don't penalize
-            else:
-                artist_score = 0.0
-            score = max(score, title_score * 0.7 + artist_score * 0.3)
-        # Everything typed against "title artist" (and "artist title"), for requests
-        # that put both in one box in any order
-        if asset_artist:
-            for both in (f"{asset_title} {asset_artist}", f"{asset_artist} {asset_title}"):
-                score = max(score, SequenceMatcher(None, whole, both).ratio())
-
+        score = max(_score(nt, na, asset) for nt, na in norm_readings)
         if score > best_score:
             best_score = score
             best_asset = asset
@@ -160,10 +155,6 @@ async def add_to_queue(
     Returns the new entry's position.
     """
     from sqlalchemy import update
-
-    # Callers pass ids as strings; the columns are UUIDs.
-    station_id = uuid.UUID(str(station_id))
-    asset_id = uuid.UUID(str(asset_id))
 
     # Find the highest position among request-sourced pending entries
     result = await db.execute(
