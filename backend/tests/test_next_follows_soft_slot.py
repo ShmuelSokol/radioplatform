@@ -66,3 +66,42 @@ async def test_prediction_matches_what_the_queue_plays(db_session):
     predicted = await _next_named(db_session, station, playing)
     started = await queue_module._check_advance(db_session, station.id, 3.0)
     assert str(started.asset_id) == predicted == str(spot.id)
+
+
+async def _next_payload(db, station, playing):
+    await db.refresh(playing, ["asset"])
+    payload = await SchedulerEngine().queue_entry_payload(db, station.id, playing)
+    return payload["next_asset"]
+
+
+@pytest.mark.asyncio
+async def test_next_hard_item_carries_its_cut_time(db_session):
+    # Pages start a hard item at its time themselves (they were 1.1-1.8 s late
+    # waiting for this message at 13:00Z 2026-11-17)
+    station, playing, _ = await _station_with_two_tracks(db_session, elapsed_seconds=10)
+    clip = Asset(id=uuid.uuid4(), title="Time", duration=5.0,
+                 file_path="https://cdn.example.com/t.mp3", asset_type="time")
+    db_session.add(clip)
+    await db_session.flush()
+    due = datetime.now(UTC) + timedelta(seconds=60)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=clip.id, position=3,
+                              status="pending", source="block", preempt_at=due))
+    await db_session.commit()
+    nxt = await _next_payload(db_session, station, playing)
+    assert nxt["id"] == str(clip.id)
+    assert nxt["cut_at"] is not None
+    assert abs(datetime.fromisoformat(nxt["cut_at"]) - due).total_seconds() < 0.01
+
+
+@pytest.mark.asyncio
+async def test_next_soft_slot_has_no_cut_time(db_session):
+    station, playing, _, spot = await _with_soft_spot(db_session, elapsed=10, due_in=60)
+    nxt = await _next_payload(db_session, station, playing)
+    assert nxt["id"] == str(spot.id) and nxt["cut_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_next_plain_song_has_no_cut_time(db_session):
+    station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=10)
+    nxt = await _next_payload(db_session, station, playing)
+    assert nxt["id"] == str(pending.asset_id) and nxt["cut_at"] is None

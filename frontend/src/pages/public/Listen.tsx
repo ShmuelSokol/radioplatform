@@ -201,7 +201,10 @@ export default function Listen() {
     userStarted && !useStream && musicAllowed ? audioAsset : null,
     elapsed,
     userStarted && isWsPlaying && !useStream && musicAllowed,
-    null, null, 2000,
+    // A hard timed item next (time check): pre-loaded and started here at its time
+    useStream ? null : wsNextAsset?.cut_at ?? null,
+    useStream ? null : (wsNextAsset?.cut_at ? wsNextAsset.id : null),
+    2000,
     // Crossfade params from WS
     wsAsset?.cue_in ?? 0,
     wsAsset?.cue_out ?? 0,
