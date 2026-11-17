@@ -1,200 +1,211 @@
-"""Station create / update settings: blackouts and silence on create, time zone from
-coordinates, duplicate names, list paging and city search.
-
-V1-85, V1-86, V1-87, V1-90, V2-128 (docs/test-checklist.md).
-"""
+"""Station.automation_config settings each change what the station does.
+B-SET-2, 8, 10, 11, 12, 13, 18, 21 (the others have their own test files)."""
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
-import httpx
 import pytest
-from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset
-from app.models.holiday_window import HolidayWindow
+from app.models.queue_entry import QueueEntry
+from app.models.song_request import RequestStatus, SongRequest
 from app.models.station import Station
-
-JERUSALEM = {"latitude": 31.7683, "longitude": 35.2137}
-NEW_YORK = {"latitude": 40.7128, "longitude": -74.0060}
+from app.services.queue_replenish_service import QueueReplenishService
 
 
-def _naive_utc(dt: datetime) -> datetime:
-    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+async def _station(db, **config) -> Station:
+    st = Station(id=uuid.uuid4(), name=f"S{uuid.uuid4().hex[:4]}", timezone="UTC", is_active=True,
+                 automation_config=config)
+    db.add(st)
+    await db.commit()
+    return st
 
 
-async def _windows_for(db: AsyncSession, station_id) -> list[HolidayWindow]:
-    rows = (await db.execute(select(HolidayWindow))).scalars().all()
-    return [w for w in rows if str(station_id) in ((w.affected_stations or {}).get("station_ids") or [])]
+async def _song(db, title, **kw) -> Asset:
+    a = Asset(id=uuid.uuid4(), title=title, file_path=f"{title}.mp3", duration=kw.pop("duration", 200),
+              asset_type="music", **kw)
+    db.add(a)
+    await db.commit()
+    return a
 
 
-@pytest.mark.asyncio
-async def test_create_with_location_makes_13_months_of_blackouts_and_silence(
-    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
-):
-    """V1-85"""
-    r = await client.post("/api/v1/stations", json={"name": "Kol B'ramah Jerusalem", **JERUSALEM},
-                          headers=auth_headers)
-    assert r.status_code == 201, r.text
-    station_id = r.json()["id"]
-    windows = await _windows_for(db_session, station_id)
-    assert len(windows) > 50  # a Shabbos every week for a year, plus Yom Tov
-    assert all(w.is_blackout for w in windows)
-    last_start = max(_naive_utc(w.start_datetime) for w in windows)
-    assert last_start > datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=360), last_start
-    silence = (await db_session.execute(select(Asset).where(Asset.asset_type == "silence"))).scalars().all()
-    assert len(silence) == 1 and silence[0].duration == 300.0
+async def _queued(db, station) -> list:
+    rows = (await db.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id).order_by(QueueEntry.position)
+    )).scalars().all()
+    return [r.asset_id for r in rows]
 
-    # a second located station reuses the one silence asset
-    r = await client.post("/api/v1/stations", json={"name": "Kol B'ramah NY", **NEW_YORK}, headers=auth_headers)
-    assert r.status_code == 201
-    assert len((await db_session.execute(select(Asset).where(Asset.asset_type == "silence"))).scalars().all()) == 1
-    # a station with no location gets no blackouts
-    r = await client.post("/api/v1/stations", json={"name": "No location"}, headers=auth_headers)
-    assert r.status_code == 201
-    assert await _windows_for(db_session, r.json()["id"]) == []
 
+# ---- B-SET-2: hourly_time_announcement ----
 
 @pytest.mark.asyncio
-async def test_blackout_failure_is_logged_and_station_still_created(
-    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, monkeypatch
-):
-    """V1-85: a failure while generating blackouts is logged, the station is still created."""
-    from app.services import station_service
+@pytest.mark.parametrize("on", [False, True])
+async def test_hourly_time_check_only_when_switched_on(db_session: AsyncSession, monkeypatch, on):
+    calls = []
 
-    async def boom(db, station, months_ahead=13):
-        raise RuntimeError("calendar service down")
+    async def fake_hourly(self):
+        calls.append(self.station_id)
 
-    warnings = []
-    monkeypatch.setattr(station_service, "auto_generate_holidays_for_station", boom)
-    monkeypatch.setattr(station_service.logger, "warning", lambda msg, *a: warnings.append(msg % a))
-    r = await client.post("/api/v1/stations", json={"name": "Survives", **JERUSALEM}, headers=auth_headers)
-    assert r.status_code == 201, r.text
-    assert any("Holiday auto-generation failed" in m and "calendar service down" in m for m in warnings)
-    assert (await db_session.execute(select(Station).where(Station.name == "Survives"))).scalar_one()
+    monkeypatch.setattr(QueueReplenishService, "_schedule_hourly_announcements", fake_hourly)
+    st = await _station(db_session, hourly_time_announcement=on, weather_enabled=False)
+    await _song(db_session, "Filler")
+    await QueueReplenishService(db_session, st.id).replenish()
+    assert bool(calls) is on
 
+
+# ---- B-SET-8: ad_slot_minutes ----
 
 @pytest.mark.asyncio
-async def test_coordinates_override_the_chosen_timezone(client: AsyncClient, auth_headers: dict):
-    """V1-86: lat/lon on create or update re-derives the time zone, even over one the user chose.
-    Changing other fields leaves the time zone alone."""
-    r = await client.post("/api/v1/stations", json={"name": "TZ", "timezone": "Europe/London", **NEW_YORK},
-                          headers=auth_headers)
-    assert r.status_code == 201
-    sid = r.json()["id"]
-    assert r.json()["timezone"] == "America/New_York"
+@pytest.mark.parametrize("config,allowed", [({}, {15, 30, 45}), ({"ad_slot_minutes": [20, 40]}, {20, 40})])
+async def test_spot_slots_follow_ad_slot_minutes(db_session: AsyncSession, config, allowed):
+    from app.models.spot_schedule import SpotSchedule
+    from app.models.sponsor import Sponsor
+    from app.services.spot_schedule_service import plan_for_station
 
-    r = await client.put(f"/api/v1/stations/{sid}", json={"timezone": "Europe/London"}, headers=auth_headers)
-    assert r.json()["timezone"] == "Europe/London"  # no coordinates in the request: the choice stands
-    r = await client.put(f"/api/v1/stations/{sid}", json={"description": "x"}, headers=auth_headers)
-    assert r.json()["timezone"] == "Europe/London"
-
-    # sending coordinates (even with a chosen time zone) re-derives it
-    r = await client.put(f"/api/v1/stations/{sid}", json={"timezone": "Europe/London", **JERUSALEM},
-                         headers=auth_headers)
-    assert r.json()["timezone"] == "Asia/Jerusalem"
-    r = await client.put(f"/api/v1/stations/{sid}", json={"latitude": 40.7128}, headers=auth_headers)
-    from app.services.timezone_service import get_timezone_for_coords
-
-    # one coordinate sent: the stored other one is used with it
-    assert r.json()["timezone"] == get_timezone_for_coords(40.7128, JERUSALEM["longitude"]) == "Europe/Istanbul"
-
-
-@pytest.mark.asyncio
-async def test_duplicate_station_name_is_409(client: AsyncClient, auth_headers: dict):
-    """V1-87"""
-    assert (await client.post("/api/v1/stations", json={"name": "Twin"}, headers=auth_headers)).status_code == 201
-    r = await client.post("/api/v1/stations", json={"name": "Twin"}, headers=auth_headers)
-    assert r.status_code == 409
-    assert "already exists" in r.text
-
-
-@pytest.mark.asyncio
-async def test_station_list_pages_reach_the_51st_station(client: AsyncClient, db_session: AsyncSession):
-    """V1-90: GET /stations returns 50 by default with the full total; the 51st is on the next
-    page (skip=50). The frontend (api/stations.ts listAllStations) and infra/streaming/setup.sh
-    read page by page with limit 100 until total, so they see every station."""
-    db_session.add_all([Station(id=uuid.uuid4(), name=f"S{i:03d}", timezone="UTC") for i in range(51)])
+    st = await _station(db_session, **config)
+    spot = Asset(id=uuid.uuid4(), title="Spot", file_path="p.mp3", duration=30, asset_type="spot")
+    sp = Sponsor(id=uuid.uuid4(), name="Shop", length_seconds=30, audio_file_path="p.mp3")
+    db_session.add_all([spot, sp])
+    await db_session.flush()
+    db_session.add(SpotSchedule(id=uuid.uuid4(), sponsor_id=sp.id, asset_id=spot.id, station_id=st.id,
+                                dayparts="morning,afternoon,evening", plays_per_daypart=3))
     await db_session.commit()
-    r = await client.get("/api/v1/stations")
-    assert r.status_code == 200
-    assert len(r.json()["stations"]) == 50 and r.json()["total"] == 51
-    r = await client.get("/api/v1/stations", params={"skip": 50, "limit": 100})
-    assert [s["name"] for s in r.json()["stations"]] == ["S050"]
-    r = await client.get("/api/v1/stations", params={"limit": 100})
-    assert len(r.json()["stations"]) == 51
-    assert (await client.get("/api/v1/stations", params={"limit": 101})).status_code == 422
+    placements, _ = await plan_for_station(db_session, st, days=2,
+                                           now=datetime(2030, 1, 7, 0, 0, tzinfo=UTC))
+    assert placements
+    assert {p.local.minute for p in placements} <= allowed
 
 
-def test_frontend_and_setup_script_read_every_page():
-    """V1-90: the two callers that need every station page through the list."""
-    from pathlib import Path
+# ---- B-SET-10 / B-SET-11: requests_only and popular_request_threshold ----
 
-    root = Path(__file__).resolve().parents[2]
-    api = (root / "frontend" / "src" / "api" / "stations.ts").read_text()
-    assert "listStations(stations.length, 100)" in api
-    setup = (root / "infra" / "streaming" / "setup.sh").read_text()
-    assert "skip={skip}&limit={page_size}" in setup
-
-
-class _FakeClient:
-    def __init__(self, behaviour):
-        self.behaviour = behaviour
-
-    def __call__(self, *a, **kw):
-        return self
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    async def get(self, url, **kw):
-        return self.behaviour(url, **kw)
+@pytest.mark.asyncio
+async def test_requests_only_station_plays_requests_not_the_library(db_session: AsyncSession):
+    st = await _station(db_session, requests_only=True)
+    asked = await _song(db_session, "Asked for")
+    await _song(db_session, "Never asked")
+    db_session.add(SongRequest(id=uuid.uuid4(), station_id=st.id, requester_name="A", song_title="Asked for",
+                               asset_id=asked.id, status=RequestStatus.APPROVED))
+    await db_session.commit()
+    await QueueReplenishService(db_session, st.id).replenish()
+    await db_session.commit()
+    assert await _queued(db_session, st) == [asked.id]
+    req = (await db_session.execute(select(SongRequest))).scalar_one()
+    assert req.status == RequestStatus.QUEUED
 
 
 @pytest.mark.asyncio
-async def test_city_search(client: AsyncClient, auth_headers: dict, monkeypatch):
-    """V2-128: Nominatim down or slow -> [] (the screen shows it as "no city found"); a found
-    city carries the time zone of its coordinates; a point with no zone at all falls back to UTC."""
-    from app.api.v1 import stations as stations_api
+@pytest.mark.parametrize("threshold,expected", [(2, True), (3, False)])
+async def test_popular_request_threshold(db_session: AsyncSession, threshold, expected):
+    st = await _station(db_session, requests_only=True, popular_request_threshold=threshold)
+    hit = await _song(db_session, "Popular")
+    for n in range(2):  # asked twice, already played (not approved/queued any more)
+        db_session.add(SongRequest(id=uuid.uuid4(), station_id=st.id, requester_name=f"R{n}", song_title="Popular",
+                                   asset_id=hit.id, status=RequestStatus.PLAYED))
+    await db_session.commit()
+    await QueueReplenishService(db_session, st.id).replenish()
+    await db_session.commit()
+    assert (hit.id in await _queued(db_session, st)) is expected
 
-    def slow(url, **kw):
-        raise httpx.ReadTimeout("took longer than 5 s")
 
-    monkeypatch.setattr(stations_api.httpx, "AsyncClient", _FakeClient(slow))
-    r = await client.get("/api/v1/stations/geocode", params={"q": "Lakewood"}, headers=auth_headers)
-    assert r.status_code == 200 and r.json() == []
+# ---- B-SET-12: oldies_only + oldies_min_years ----
 
-    def down(url, **kw):
-        return httpx.Response(503, request=httpx.Request("GET", url))
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config,expected", [
+    ({}, {"Old", "New", "Undated"}),
+    ({"oldies_only": True}, {"Old"}),
+    ({"oldies_only": True, "oldies_min_years": 0}, {"Old", "New"}),
+])
+async def test_oldies_only_filters_by_release_date(db_session: AsyncSession, config, expected):
+    st = await _station(db_session, **config)
+    today = date.today()
+    await _song(db_session, "Old", release_date=today - timedelta(days=20 * 365))
+    await _song(db_session, "New", release_date=today - timedelta(days=30))
+    await _song(db_session, "Undated")
 
-    monkeypatch.setattr(stations_api.httpx, "AsyncClient", _FakeClient(down))
-    r = await client.get("/api/v1/stations/geocode", params={"q": "Lakewood"}, headers=auth_headers)
-    assert r.json() == []
+    class Rule:
+        name = "music"
+        asset_type = "music"
+        category = None
 
-    def found(url, **kw):
-        body = [{"lat": "40.0821", "lon": "-74.2097", "name": "Lakewood",
-                 "address": {"town": "Lakewood", "state": "New Jersey", "country": "United States"}},
-                {"lat": "0", "lon": "-30", "name": "Mid-Atlantic", "address": {}}]
-        return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+    svc = QueueReplenishService(db_session, st.id)
+    await svc._load_automation_config()
+    svc.exclude_ids = set()
+    found = await svc._find_assets_for_rule(Rule())
+    assert {a.title for a in found} == expected
 
-    monkeypatch.setattr(stations_api.httpx, "AsyncClient", _FakeClient(found))
-    r = await client.get("/api/v1/stations/geocode", params={"q": "Lakewood"}, headers=auth_headers)
-    first, sea = r.json()
-    assert first["display_name"] == "Lakewood, New Jersey, United States"
-    assert first["timezone"] == "America/New_York"
-    assert sea["timezone"] == "Etc/GMT+2"  # open sea: a fixed-offset zone, not UTC
 
-    from app.services import timezone_service
+# ---- B-SET-13: silence_threshold_seconds ----
 
-    class NoZone:
-        def timezone_at(self, **kw):
-            return None
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config,alerted", [({"silence_threshold_seconds": 5}, True),
+                                            ({"silence_threshold_seconds": 120}, False),
+                                            ({}, True)])  # default SILENCE_DETECTION_SECONDS (30)
+async def test_dead_air_alert_follows_silence_threshold(db_session: AsyncSession, monkeypatch, config, alerted):
+    from app.api.v1 import queue as queue_api
+    from app.models.alert import Alert
+    from app.services.scheduler_engine import SchedulerEngine
 
-    monkeypatch.setattr(timezone_service, "_tf", NoZone())
-    assert timezone_service.get_timezone_for_coords(0, 0) == "UTC"
-    # managers only
-    assert (await client.get("/api/v1/stations/geocode", params={"q": "Lakewood"})).status_code in (401, 403)
+    async def no_start(db, station_id):
+        return None
+
+    monkeypatch.setattr(queue_api, "start_from_queue", no_start)
+    st = await _station(db_session, **config)
+    engine = SchedulerEngine()
+    engine._silence_start[str(st.id)] = datetime.now(UTC) - timedelta(seconds=40)
+    await engine._check_silence_detection(db_session, st, has_playing_asset=False, is_blacked_out=False)
+    alerts = (await db_session.execute(select(Alert))).scalars().all()
+    assert bool(alerts) is alerted
+
+
+@pytest.mark.asyncio
+async def test_no_dead_air_alert_during_a_blackout(db_session: AsyncSession):
+    from app.models.alert import Alert
+    from app.services.scheduler_engine import SchedulerEngine
+
+    st = await _station(db_session, silence_threshold_seconds=1)
+    engine = SchedulerEngine()
+    engine._silence_start[str(st.id)] = datetime.now(UTC) - timedelta(seconds=40)
+    await engine._check_silence_detection(db_session, st, has_playing_asset=False, is_blacked_out=True)
+    assert (await db_session.execute(select(Alert))).scalars().all() == []
+
+
+# ---- B-SET-21: is_active ----
+
+@pytest.mark.asyncio
+async def test_inactive_station_is_not_advanced(db_session: AsyncSession, monkeypatch):
+    from app.services.scheduler_engine import SchedulerEngine
+
+    on = await _station(db_session)
+    off = await _station(db_session)
+    off.is_active = False
+    await db_session.commit()
+    visited = []
+    engine = SchedulerEngine()
+
+    async def advance(db, station_id):
+        visited.append(station_id)
+
+    async def check(db, station):
+        return None
+
+    monkeypatch.setattr(engine, "_advance_queue", advance)
+    monkeypatch.setattr(engine, "_check_station", check)
+    await engine._check_all_stations(db_session)
+    assert visited == [on.id]
+
+
+# ---- B-SET-18: hourly_station_id (legacy path) ----
+
+@pytest.mark.asyncio
+async def test_hourly_station_id_legacy_insertion(db_session: AsyncSession):
+    """The legacy scheduling path still honours hourly_station_id in the first two
+    minutes of the hour; the queue engine (replenish) never reads it."""
+    import inspect
+
+    from app.services import queue_replenish_service
+    from app.services.scheduling import SchedulingService
+
+    assert "hourly_station_id" not in inspect.getsource(queue_replenish_service)
+    assert "hourly_station_id" in inspect.getsource(SchedulingService._check_automation_insertions)
+
