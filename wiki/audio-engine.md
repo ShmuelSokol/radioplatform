@@ -178,6 +178,20 @@ confirmed 1.5 s late or never: back to the song once the item ends, 4 s or more 
 The fake station sends `cut_at` like the server. `backend/tests/test_next_asset_cut_at.py`
 covers the soft limit, a hard ad slot and the polling answer.
 
+**Second item of a program block.** Every item of a block occurrence shares one
+`preempt_at` (see `program-blocks.md`), so with the time check on air the Daf Yomi
+announcement after it still carried hh:00 as its cut time. The page took that as "cut
+in now": the preempt fade faded the time check, the pre-arm could start the
+announcement over it, and the announcement was joined seconds in (Main, 15:00Z
+2026-11-17, heard from "the Miami daf"). Now a cut time at or before the start of the
+item on air (+1 s) is that item's own group: the server sends `cut_at: null`
+(`_cut_time(next, on_air)`) and the page ignores such a cut itself
+(`GROUP_CUT_SLACK_MS`). And whatever follows a short item this page played to its end
+starts from the top if it comes in up to 8 s late (`AFTER_SHORT_FROM_TOP_SECONDS`, a
+slow phone still fetching it); its tail is cut instead. Scenarios
+`second-item-of-a-timed-group-from-the-top` and `...-slow-file` (harness `cut` field =
+Listen's `next_asset.cut_at`); test `test_next_item_of_the_group_on_air_has_no_cut_time`.
+
 ## Server clock, not the device clock (2026-11-17)
 Every position and due time (`started_at`, `preempt_at`, `ends_at`, a push's `at`) is server time, so the player compares them with `serverNow()` from `src/lib/serverClock.ts`, never `Date.now()`. The offset is measured from `server_time` in the release policy (`lib/appUpdate.ts`, on connect and every minute). Before, a PC 20 s fast joined every song 20 s in and faded the song for the hourly time check 20 s early. Used by useAudioEngine (live position, timed fades, crossfade, playNextNow), useNowPlayingWS (overdue check), Listen, Dashboard, `controlroom/timing.ts nextCut` and the transport clock. Checked by `e2e/listen-page.mjs` ONLY=clock (device clock 20 s fast and 30 s slow).
 
