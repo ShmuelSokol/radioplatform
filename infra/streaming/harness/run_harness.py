@@ -285,7 +285,23 @@ class Stack:
             start_new_session=True,
         )
         self.procs.append(p)
+        self.backend = p
         wait_for(lambda: http_ok(f"http://127.0.0.1:{BACKEND_PORT}/health"), 90, "backend /health")
+
+    def restart_backend(self) -> None:
+        """Stop the backend and start it again (a deploy): everything it kept in memory is lost."""
+        p = getattr(self, "backend", None)
+        if p is not None:
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+                p.wait(timeout=15)
+            except Exception:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+            self.procs.remove(p)
+        self.start_backend()
 
     def start_icecast(self) -> None:
         conf = self.dir / "icecast.xml"
@@ -1156,7 +1172,9 @@ async def sc_engine_starts_backend_down(h: Harness) -> None:
     await wait_music(h)
     # A time check the backend hands over before the restart: the restarted engine no
     # longer holds it, so the backend must hand it over again once it hears from it
-    due = at(42)
+    # 60 s ahead: the engine's restart takes 5 to 15 s and the backend stays unreachable
+    # for 20 s after it, which must still leave the backend 15 s to hand the item over again
+    due = at(60)
     await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
     await asyncio.sleep(6)
     h.stack.backend_down = True
@@ -1563,6 +1581,144 @@ async def sc_next_twice(h: Harness) -> None:
                 f"{'no change in 8 s' if second is None else f'{second:.1f} s'}")
 
 
+async def sc_next_skips_one(h: Harness) -> None:
+    """PR 224: every Next moves on by exactly one item: single, twice 0.5 s apart, within
+    2 s of a natural song change, and with nothing queued. The item after the skipped one
+    airs, never the one after that."""
+    name = "next_skips_one"
+    await wait_music(h)
+    await h.clear_pending()
+    order = ["song2", "song3", "song4", "song5", "song6", "story", "shiur"]
+    ids = await h.queue([(n, {}) for n in order])
+    await asyncio.sleep(3)
+    t_start = time.time()
+
+    async def press_expect(expect: str, why: str) -> None:
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t = await h.wait_on_air(expect, 6)
+        cur = await h.on_air()
+        h.check(name, t is not None,
+                f"{why}: {expect} on air (site shows {cur.asset.title if cur else None})")
+
+    await press_expect("song2", "Next")
+    await asyncio.sleep(1.0)
+    await press_expect("song3", "Next 1 s later")
+    await asyncio.sleep(5)
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    await asyncio.sleep(0.5)
+    await press_expect("song5", "two Nexts 0.5 s apart move on two items")
+    await asyncio.sleep(4)
+    cur = await h.on_air()
+    h.check(name, cur is not None and cur.asset_id == h.assets["song5"],
+            f"and no further: still {cur.asset.title if cur else None} 4 s later")
+    t6 = await h.wait_on_air("song6", 60)
+    h.check(name, t6 is not None, "song5 ended by itself and song6 followed")
+    await asyncio.sleep(max(0, (t6 or time.time()) + 1.5 - time.time()))
+    await press_expect("story", "Next 1.5 s after a natural song change")
+    await asyncio.sleep(4)
+    cur = await h.on_air()
+    h.check(name, cur is not None and cur.asset_id == h.assets["story"],
+            f"and no further: still {cur.asset.title if cur else None} 4 s later")
+    last = next((e.status for e in await h.rows() if e.id == ids[-1]), None)
+    h.check(name, last == "pending", f"the item after it was not touched (shiur {last})")
+    # nothing queued: Next still changes the item, once, with no silence
+    await h.clear_pending()
+    await asyncio.sleep(3)
+    before = await h.on_air()
+    took = await _next_changes_song(h)
+    h.check(name, took is not None and took <= 3.0,
+            f"Next with nothing queued: {'no change' if took is None else f'{took:.1f} s'}")
+    after = await h.on_air()
+    await asyncio.sleep(6)
+    later = await h.on_air()
+    h.check(name, after is not None and later is not None and after.id == later.id and after.id != before.id,
+            "and it moved on once only")
+    heard = h.heard(t_start, time.time() - 1)
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence in the whole run {gap:.1f} s")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, "no emergency files")
+
+
+async def sc_next_right_after_change(h: Harness) -> None:
+    """A Next pressed a moment after an item started (0.1 to 1 s after a natural song change,
+    and 0.1 / 0.3 s after another Next) still brings the next item. Found 2026-11-17: a
+    Next 0.2 s after a song start, while its crossfade ran, changed nothing."""
+    name = "next_right_after_change"
+    for delay in (0.1, 0.3, 0.6, 1.0):
+        await wait_music(h)
+        await h.clear_pending()
+        await h.queue([("song2", {}), ("song3", {}), ("song4", {})])
+        # 16 s: an automatic flush is held back 15 s after the last one, and until it
+        # happens the engine still holds a song from before the queue was replaced
+        await asyncio.sleep(16)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        if await h.wait_on_air("song2", 8) is None:
+            h.check(name, False, f"[{delay}] song2 never went on air")
+            continue
+        t3 = await h.wait_on_air("song3", 60)   # natural change, 3 s crossfade
+        if t3 is None:
+            h.check(name, False, f"[{delay}] song3 did not follow by itself")
+            continue
+        await asyncio.sleep(max(0, t3 + delay - time.time()))
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t4 = await h.wait_on_air("song4", 8)
+        h.check(name, t4 is not None,
+                f"Next {delay} s after a natural song change: "
+                f"{'no change in 8 s' if t4 is None else f'song4 after {t4 - t3 - delay:.1f} s'}")
+    for delay in (0.1, 0.3):
+        await wait_music(h)
+        await h.clear_pending()
+        await h.queue([("song2", {}), ("song3", {}), ("song4", {})])
+        await asyncio.sleep(5)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        await asyncio.sleep(delay)
+        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+        t = await h.wait_on_air("song3", 8)
+        h.check(name, t is not None,
+                f"two Nexts {delay} s apart: {'song3 never on air' if t is None else 'song3 on air'}")
+        await asyncio.sleep(4)
+        cur = await h.on_air()
+        h.check(name, cur is not None and cur.asset_id == h.assets["song3"],
+                f"and no further ({cur.asset.title if cur else None})")
+
+
+async def sc_site_matches_stream(h: Harness) -> None:
+    """F-HANDOVER-14: on a stream-server station the site's "now playing" follows what the
+    engine really plays. At natural song changes (3 s crossfade) and at a hard time check
+    (no crossfade) the time the site shows an item starting is within 3 s of the moment it
+    is the loudest thing on the stream, and never after it by more than 1 s."""
+    name = "site_matches_stream"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song2", {}), ("song3", {}), ("song4", {}), ("song5", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    t0 = await h.wait_on_air("song2", 60)  # the engine may first play the song it held
+    if t0 is None:
+        h.check(name, False, "song2 never went on air")
+        return
+    due = datetime.fromtimestamp(t0 + 95, UTC)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + 14)
+    heard = h.heard(t0 + 3, time.time() - 1)
+    h.print_timeline(heard, due.timestamp())
+    tl = timeline(heard)
+    worst = 0.0
+    for item in ("song3", "song4", "time"):
+        site = await h.started_times(item, t0 + 5)  # not the song that was on air before
+        aud = next((t for t, n in tl if n == tone_name(TONES[item][0])), None)
+        if not site or aud is None:
+            h.check(name, False, f"{item}: site {'no start' if not site else 'ok'}, stream {'not heard' if aud is None else 'ok'}")
+            continue
+        diff = aud - site[0][0]
+        worst = max(worst, abs(diff))
+        limit = 1.5 if item == "time" else 3.0
+        h.check(name, -1.0 <= diff <= limit,
+                f"{item}: heard as the loudest item {diff:+.1f} s after the site showed it start (limit {limit} s)")
+    playing = [e for e in await h.rows() if e.status == "playing"]
+    h.check(name, len(playing) == 1, f"one item on air on the site ({len(playing)})")
+
+
 async def sc_engine_crash_restart(h: Harness) -> None:
     """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
     the backend up. It says hello, plays station music (not emergency files) within a few
@@ -1598,6 +1754,59 @@ async def sc_engine_crash_restart(h: Harness) -> None:
             f"{'never' if late is None else f'{late:+.1f} s'}")
     gap, _ = longest_silence(h.heard(started + 6, time.time() - 1))
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s after the restart")
+
+
+async def _restart_near_hour(h: Harness, name: str, what: str, lead: float, allowed: float) -> None:
+    await wait_music(h)
+    due = at(60)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, due.timestamp() - time.time() - lead))
+    t_kill = time.time()
+    if what == "engine":
+        await asyncio.to_thread(h.stack.restart_engine)
+        t_from = h.stack.wav_t0
+    else:
+        await asyncio.to_thread(h.stack.restart_backend)
+        t_from = t_kill - 20
+    up = time.time()
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + TONES["time"][1] + 14)
+    heard = h.heard(max(t_from, due.timestamp() - 20), time.time() - 1)
+    h.print_timeline(heard, due.timestamp())
+    clock = tone_name(TONES["time"][0])
+    tl = timeline(heard)
+    names = [n for _, n in tl]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    first = next((t for t, n in tl if n == clock), None)
+    late = None if first is None else first - due.timestamp()
+    h.check(name, late is not None and -1.0 <= late <= allowed,
+            f"{what} restarted {due.timestamp() - t_kill:.0f} s before the time check and was back "
+            f"{due.timestamp() - up:+.1f} s before it: time check "
+            f"{'never' if late is None else f'{late:+.1f} s'} (allowed {allowed:.0f} s)")
+    h.check(name, runs.count(clock) == 1, f"time check heard once: {runs}")
+    h.check(name, "EMERGENCY" not in runs[runs.index(clock):] if clock in runs else False,
+            f"station items after it, no emergency files: {runs}")
+    gap, _ = longest_silence(h.heard(max(t_from + 6, due.timestamp() - 5), time.time() - 1))
+    h.check(name, gap <= 1.5, f"longest silence {gap:.1f} s")
+    playing = [e for e in await h.rows() if e.status == "playing"]
+    h.check(name, len(playing) == 1, f"one item on air on the site ({len(playing)})")
+
+
+async def sc_engine_restart_15s_before_hour(h: Harness) -> None:
+    """V1-30: the engine restarts 15 s before a hard time check that was already handed over.
+    The backend hands it over again and it airs once, on its second."""
+    await _restart_near_hour(h, "engine_restart_15s_before_hour", "engine", 15, 2.0)
+
+
+async def sc_engine_restart_across_hour(h: Harness) -> None:
+    """V1-30: the engine is down across the second of a hard time check. It airs once as soon
+    as the engine is back (late, but not dropped and not twice)."""
+    await _restart_near_hour(h, "engine_restart_across_hour", "engine", 3, 20.0)
+
+
+async def sc_backend_restart_before_hour(h: Harness) -> None:
+    """V1-31: the backend restarts (a deploy) after it handed the time check over. It hands it
+    over again with the same id; the engine airs it once, on its second."""
+    await _restart_near_hour(h, "backend_restart_before_hour", "backend", 30, 2.0)
 
 
 async def sc_duplicate_timed_id(h: Harness) -> None:
@@ -1770,8 +1979,14 @@ SCENARIOS = {
     "blackout_ended_early": sc_blackout_ended_early,
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
+    "engine_restart_15s_before_hour": sc_engine_restart_15s_before_hour,
+    "engine_restart_across_hour": sc_engine_restart_across_hour,
+    "backend_restart_before_hour": sc_backend_restart_before_hour,
     "next_after_idle": sc_next_after_idle,
+    "next_right_after_change": sc_next_right_after_change,
+    "site_matches_stream": sc_site_matches_stream,
     "next_twice": sc_next_twice,
+    "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
