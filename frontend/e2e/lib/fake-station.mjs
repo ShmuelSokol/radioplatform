@@ -224,7 +224,9 @@ export function makeStation(opts = {}) {
       station_id: SID, asset_id: a.id, started_at: cur.started_at,
       ends_at: new Date(new Date(cur.started_at).getTime() + a.duration * 1000).toISOString(),
       asset: { title: a.title, artist: a.artist, album: a.album, audio_url: `/__tone/${a.id}.wav`, cue_in: 0, cue_out: a.duration, cross_start: a.duration - 3, replay_gain_db: 0, intro_seconds: a.intro_seconds ?? null },
-      next_asset: na ? { id: na.id, title: na.title, artist: na.artist, audio_url: `/__tone/${na.id}.wav`, cue_in: 0, replay_gain_db: 0 } : null,
+      next_asset: na ? { id: na.id, title: na.title, artist: na.artist, audio_url: `/__tone/${na.id}.wav`, cue_in: 0, replay_gain_db: 0,
+        // when a hard timed item cuts in (the server's cut_at)
+        cut_at: nxt.preempt_at && nxt.hard_timed !== false ? nxt.preempt_at : null } : null,
       ...extra,
     };
   };

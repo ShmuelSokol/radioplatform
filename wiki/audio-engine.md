@@ -161,7 +161,13 @@ starts on the page at its due time by itself (pre-arm, via `localNext` with a 0.
 of the item on air); the server's message confirms it a moment later. Pages were
 1.1-1.8 s late waiting for that message. Listen gets the due time from
 `next_asset.cut_at` in the now-playing message (control room: from the queue,
-`nextCut`). Scenarios `story-resumes-after-time-check`,
+`nextCut`). Live at 14:00Z the pre-arm still did not fire: the message pages hold is
+the one sent when the item on air started, and a time check queued later (or during a
+30 min story) was not in it, so nothing was pre-loaded. The scheduler now sends the
+now-playing message again once a hard timed item is under a minute away
+(`SchedulerEngine._announce_timed`, `TIMED_ANNOUNCE_AHEAD_SECONDS = 60`, once per due
+time). The page records each decision in `window.__kbrTimedStart` and a console line
+`[kbr] timed start` (started here / not loaded / sound off). Scenarios `story-resumes-after-time-check`,
 `story-resumes-after-late-time-check`, `hard-time-check-starts-on-time-before-the-message`.
 
 ## Server clock, not the device clock (2026-11-17)

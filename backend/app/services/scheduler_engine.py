@@ -54,6 +54,8 @@ class SchedulerEngine:
         self._advance_timers: dict[str, asyncio.TimerHandle] = {}
         # station -> (due time, timer) for the next timed item (hard start or hard_by)
         self._timed_timers: dict[str, tuple[datetime, asyncio.TimerHandle]] = {}
+        # station -> due time of the timed item pages were last told about (_announce_timed)
+        self._timed_announced: dict[str, datetime] = {}
         # Leadership: only the process holding the lease advances queues.
         self._instance_id = uuid.uuid4().hex
         self._leader_until: Optional[datetime] = None
@@ -628,6 +630,8 @@ class SchedulerEngine:
 
     # How far ahead the 3 s poll arms an exact timer for a timed item
     TIMED_LOOKAHEAD_SECONDS = 10.0
+    # How far ahead pages are told again what is next, so they pre-load a timed item
+    TIMED_ANNOUNCE_AHEAD_SECONDS = 60.0
 
     def _cancel_timed_timers(self):
         for _, timer in self._timed_timers.values():
@@ -646,13 +650,14 @@ class SchedulerEngine:
         from app.models.queue_entry import QueueEntry, is_soft_timed
         now = datetime.now(timezone.utc)
         horizon = now + timedelta(seconds=self.TIMED_LOOKAHEAD_SECONDS)
+        announce_horizon = now + timedelta(seconds=self.TIMED_ANNOUNCE_AHEAD_SECONDS)
         rows = (await db.execute(
             select(QueueEntry)
             .where(
                 QueueEntry.station_id == station_id,
                 QueueEntry.status == "pending",
                 QueueEntry.preempt_at.isnot(None),
-                QueueEntry.preempt_at <= horizon,
+                QueueEntry.preempt_at <= announce_horizon,
             )
             .order_by(QueueEntry.preempt_at, QueueEntry.position)
             .limit(20)
@@ -664,9 +669,13 @@ class SchedulerEngine:
                 if entry.hard_by is None:
                     continue  # waits for the song to end: the song-end timer covers it
                 at = max(at, _aware(entry.hard_by))
-            if at <= horizon and (due is None or at < due):
+            if at <= announce_horizon and (due is None or at < due):
                 due = at
         key = str(station_id)
+        if due is not None and due > now:
+            await self._announce_timed(db, station_id, key, due)
+        if due is not None and due > horizon:
+            return  # announced; the exact timer is armed in a later poll
         armed = self._timed_timers.get(key)
         if due is None or due <= now:
             return  # nothing soon, or already due: this tick's advance handles it
@@ -681,6 +690,26 @@ class SchedulerEngine:
             delay, lambda: loop.create_task(self._timed_fire(station_id, due))
         )
         self._timed_timers[key] = (due, handle)
+
+    async def _announce_timed(self, db: AsyncSession, station_id, key: str, due: datetime):
+        """Send the now-playing message again once a hard timed item is less than a minute
+        away, so pages learn it is next (with its cut_at), pre-load it and start it at its
+        time themselves. The message sent when the item on air started can be older than
+        the time check's queue entry (a 30 min story): pages then fetched the time check
+        when it was announced and started it 1.1-1.8 s late (13:00Z, 14:00Z 2026-11-17)."""
+        if self._timed_announced.get(key) == due:
+            return
+        self._timed_announced[key] = due
+        from sqlalchemy.orm import joinedload
+
+        from app.models.queue_entry import QueueEntry
+        playing = (await db.execute(
+            select(QueueEntry).options(joinedload(QueueEntry.asset)).where(
+                QueueEntry.station_id == station_id, QueueEntry.status == "playing",
+            ).limit(1)
+        )).unique().scalar_one_or_none()
+        if playing is not None and playing.started_at is not None:
+            await self._broadcast_queue_entry(db, station_id, playing)
 
     async def _timed_fire(self, station_id, due):
         current = self._timed_timers.get(str(station_id))
