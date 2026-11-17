@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import PlayoutBadge from '../../components/audio/PlayoutBadge';
 import { useStations } from '../../hooks/useStations';
 
 export default function StationList() {
@@ -36,6 +37,7 @@ export default function StationList() {
                     {station.name}
                   </h2>
                   <p className="text-sm text-gray-500">{station.type} &middot; {station.timezone}</p>
+                  <PlayoutBadge stationId={station.id} className="mt-1" />
                   {station.description && (
                     <p className="text-sm text-gray-400 mt-1 line-clamp-2">{station.description}</p>
                   )}
