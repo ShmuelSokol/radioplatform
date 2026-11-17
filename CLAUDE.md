@@ -153,7 +153,7 @@ radioplatform/
 | spot_schedules | spot_schedules.py | /spot-schedules |
 | spot_recordings | spot_recordings.py | /spot-recordings |
 | program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
-| databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
+| databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, every type of a table, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
 | copy_review | copy_review.py | /sponsorship (rules + copy review) |
 | campaigns | campaigns.py | /campaigns |
 | billing | billing.py | /billing |

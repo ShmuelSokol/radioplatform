@@ -4,6 +4,7 @@ This runs continuously and updates now-playing state when blocks change or asset
 """
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -19,6 +20,9 @@ from app.models.station import Station
 from app.models.queue_entry import resume_offset
 
 logger = logging.getLogger(__name__)
+
+# Longest wait between tries of a daily weather readout that could not be made
+READOUT_RETRY_MAX_SECONDS = 30 * 60
 
 
 async def _safe_rollback(db: AsyncSession) -> None:
@@ -50,10 +54,14 @@ class SchedulerEngine:
         self._last_holiday_check: Optional[datetime] = None
         # Weather readout daily generation check: station_id → date string
         self._last_readout_check: dict[str, str] = {}
+        # Failed readouts: station_id -> (date string, failures so far, monotonic time of next try)
+        self._readout_retry: dict[str, tuple[str, int, float]] = {}
         # Precise advance timers: station_id → TimerHandle
         self._advance_timers: dict[str, asyncio.TimerHandle] = {}
         # station -> (due time, timer) for the next timed item (hard start or hard_by)
         self._timed_timers: dict[str, tuple[datetime, asyncio.TimerHandle]] = {}
+        # station -> due time of the timed item pages were last told about (_announce_timed)
+        self._timed_announced: dict[str, datetime] = {}
         # Leadership: only the process holding the lease advances queues.
         self._instance_id = uuid.uuid4().hex
         self._leader_until: Optional[datetime] = None
@@ -262,16 +270,37 @@ class SchedulerEngine:
                 if local_now.hour < gen_hour or (local_now.hour == gen_hour and local_now.minute < gen_min):
                     continue
 
+                # A failed attempt waits out its back-off before the next one (same day only)
+                retry = self._readout_retry.get(station_key)
+                if retry and retry[0] == today_str and time.monotonic() < retry[2]:
+                    continue
+
+                made = False
                 try:
+                    from app.models.weather_readout import WeatherReadout
                     from app.services.weather_readout_service import generate_readout_for_station
                     readout = await generate_readout_for_station(db, station, local_now.date())
                     if readout:
                         await db.commit()
                         logger.info("Auto-generated weather readout for station %s", station.name)
+                        made = True
+                    else:
+                        # None is either "already there" (done) or "could not be made" (retry)
+                        made = (await db.execute(select(WeatherReadout.id).where(
+                            WeatherReadout.station_id == station.id,
+                            WeatherReadout.readout_date == local_now.date(),
+                        ).limit(1))).scalar_one_or_none() is not None
                 except Exception as e:
                     logger.warning("Weather readout generation failed for station %s: %s", station.name, e)
 
-                self._last_readout_check[station_key] = today_str
+                if made:
+                    self._last_readout_check[station_key] = today_str
+                    self._readout_retry.pop(station_key, None)
+                else:
+                    # Try again later today: the next pass first, then 1, 2, 4 ... up to 30 minutes
+                    failures = retry[1] + 1 if retry and retry[0] == today_str else 1
+                    wait = 0 if failures == 1 else min(READOUT_RETRY_MAX_SECONDS, 60 * 2 ** (failures - 2))
+                    self._readout_retry[station_key] = (today_str, failures, time.monotonic() + wait)
 
         except Exception as e:
             logger.error("Weather readout generation check failed: %s", e, exc_info=True)
@@ -310,6 +339,9 @@ class SchedulerEngine:
                 except Exception:
                     local_now = datetime.now(timezone.utc)
 
+                # Only on its own day: tomorrow's readout, recorded tonight, waits for tomorrow
+                if readout.readout_date != local_now.date():
+                    continue
                 local_time = local_now.time()
                 if local_time >= readout.queue_time:
                     entry = QueueEntry(
@@ -628,6 +660,8 @@ class SchedulerEngine:
 
     # How far ahead the 3 s poll arms an exact timer for a timed item
     TIMED_LOOKAHEAD_SECONDS = 10.0
+    # How far ahead pages are told again what is next, so they pre-load a timed item
+    TIMED_ANNOUNCE_AHEAD_SECONDS = 60.0
 
     def _cancel_timed_timers(self):
         for _, timer in self._timed_timers.values():
@@ -646,13 +680,14 @@ class SchedulerEngine:
         from app.models.queue_entry import QueueEntry, is_soft_timed
         now = datetime.now(timezone.utc)
         horizon = now + timedelta(seconds=self.TIMED_LOOKAHEAD_SECONDS)
+        announce_horizon = now + timedelta(seconds=self.TIMED_ANNOUNCE_AHEAD_SECONDS)
         rows = (await db.execute(
             select(QueueEntry)
             .where(
                 QueueEntry.station_id == station_id,
                 QueueEntry.status == "pending",
                 QueueEntry.preempt_at.isnot(None),
-                QueueEntry.preempt_at <= horizon,
+                QueueEntry.preempt_at <= announce_horizon,
             )
             .order_by(QueueEntry.preempt_at, QueueEntry.position)
             .limit(20)
@@ -664,9 +699,13 @@ class SchedulerEngine:
                 if entry.hard_by is None:
                     continue  # waits for the song to end: the song-end timer covers it
                 at = max(at, _aware(entry.hard_by))
-            if at <= horizon and (due is None or at < due):
+            if at <= announce_horizon and (due is None or at < due):
                 due = at
         key = str(station_id)
+        if due is not None and due > now:
+            await self._announce_timed(db, station_id, key, due)
+        if due is not None and due > horizon:
+            return  # announced; the exact timer is armed in a later poll
         armed = self._timed_timers.get(key)
         if due is None or due <= now:
             return  # nothing soon, or already due: this tick's advance handles it
@@ -681,6 +720,26 @@ class SchedulerEngine:
             delay, lambda: loop.create_task(self._timed_fire(station_id, due))
         )
         self._timed_timers[key] = (due, handle)
+
+    async def _announce_timed(self, db: AsyncSession, station_id, key: str, due: datetime):
+        """Send the now-playing message again once a hard timed item is less than a minute
+        away, so pages learn it is next (with its cut_at), pre-load it and start it at its
+        time themselves. The message sent when the item on air started can be older than
+        the time check's queue entry (a 30 min story): pages then fetched the time check
+        when it was announced and started it 1.1-1.8 s late (13:00Z, 14:00Z 2026-11-17)."""
+        if self._timed_announced.get(key) == due:
+            return
+        self._timed_announced[key] = due
+        from sqlalchemy.orm import joinedload
+
+        from app.models.queue_entry import QueueEntry
+        playing = (await db.execute(
+            select(QueueEntry).options(joinedload(QueueEntry.asset)).where(
+                QueueEntry.station_id == station_id, QueueEntry.status == "playing",
+            ).limit(1)
+        )).unique().scalar_one_or_none()
+        if playing is not None and playing.started_at is not None:
+            await self._broadcast_queue_entry(db, station_id, playing)
 
     async def _timed_fire(self, station_id, due):
         current = self._timed_timers.get(str(station_id))
