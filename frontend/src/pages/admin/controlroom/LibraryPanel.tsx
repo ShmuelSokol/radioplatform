@@ -64,8 +64,8 @@ function LibraryPanel(p: Props) {
         </div>
       )}
 
-      <div className="shrink-0 p-1.5 bg-[#c0c0c0] text-black font-normal border-b border-[#808080] flex flex-col lg:flex-row lg:items-center gap-1.5">
-        <div className="relative lg:w-72 xl:w-96 shrink-0">
+      <div className="cr-lib-head shrink-0 p-1.5 bg-[#c0c0c0] text-black font-normal border-b border-[#808080] flex flex-col lg:flex-row lg:items-center gap-1.5">
+        <div className="cr-lib-search relative lg:w-72 xl:w-96 shrink-0">
           <input
             ref={p.searchRef}
             type="search"
@@ -83,7 +83,7 @@ function LibraryPanel(p: Props) {
           {search && (
             <button type="button" onClick={() => { setSearch(''); p.searchRef.current?.focus(); }}
               aria-label="Clear search"
-              className="absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 text-gray-600 hover:text-black">✕</button>
+              className="cr-tap absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 text-gray-600 hover:text-black">✕</button>
           )}
         </div>
         <div className="flex gap-1 overflow-x-auto min-w-0 pb-0.5" role="tablist" aria-label="Type">
@@ -138,7 +138,7 @@ function LibraryPanel(p: Props) {
                 title={pinned ? 'Remove from instant buttons' : 'Add to instant buttons'}
                 aria-label={pinned ? 'Remove from instant buttons' : 'Add to instant buttons'}
                 aria-pressed={pinned}
-                className={`w-9 h-9 lg:w-6 lg:h-6 shrink-0 text-lg lg:text-sm ${pinned ? 'text-[var(--qn-yellow)]' : 'text-gray-600 hover:text-gray-300'}`}>
+                className={`cr-tap w-9 h-9 lg:w-6 lg:h-6 shrink-0 text-lg lg:text-sm ${pinned ? 'text-[var(--qn-yellow)]' : 'text-gray-600 hover:text-gray-300'}`}>
                 {pinned ? '★' : '☆'}
               </button>
               {inserting ? (
