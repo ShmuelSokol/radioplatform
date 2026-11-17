@@ -44,3 +44,12 @@ Selection is the cheap win; **recall is the real ceiling**. A smarter selection 
 bolted on top inherits the character-level candidate list and still cannot see
 `B'tzeis Yisroel` for a semantic query. Fix recall first (trigram / embeddings), then
 improve selection, then collapse the duplicate rows.
+
+## Auto-approve limit (2026-11-17)
+
+A matched song is queued without review when its asset has `auto_approve_requests` and
+it has aired today (PlayLog, written when an item ends) plus is lined up (pending/playing
+queue entries) fewer than `max_requests_per_day` times (default 3). Approved requests are
+not counted separately: each one already has its queue entry and later its play, and
+counting both let only 2 of 3 through. Past the limit the request is saved pending, with
+its matched song, for staff (`tests/test_song_request_auto_approve.py`).
