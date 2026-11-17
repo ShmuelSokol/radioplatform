@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AssetResponse(BaseModel):
@@ -44,6 +44,14 @@ class AssetUpdate(BaseModel):
     release_date: str | None = None
     vote: int | None = Field(None, ge=0, le=100)
     sponsor_id: uuid.UUID | str | None = None
+
+    @field_validator("title")
+    @classmethod
+    def _title_not_empty(cls, v: str | None) -> str:
+        # Sent on purpose (None or blank) would empty a required column: refuse it
+        if v is None or not v.strip():
+            raise ValueError("The title cannot be empty")
+        return v.strip()
 
 
 class TranscodeRequest(BaseModel):
