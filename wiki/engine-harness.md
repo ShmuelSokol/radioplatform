@@ -20,7 +20,7 @@ back on the queue by itself), control_endpoints (wrong/missing token 403, /timed
 time check file arrives after its time), queue_change_drops_preloaded, engine_starts_backend_down
 (restarts the engine, so it runs last), resume_position and cue_points (a shiur whose pitch
 rises with time, so the pitch heard gives the position played), icecast_output (format, name,
-stream title; ffprobe of what a listener receives), track_level (replay_gain_db applied exactly once), song_with_level_muted_under_time_check (a song with its own level is still muted under a time check).
+stream title; ffprobe of what a listener receives), track_level (replay_gain_db applied exactly once), song_with_level_muted_under_time_check (a song with its own level is still muted under a time check), timed_and_mix_over_levels (the level applies once on the timed lane and on mix-over).
 A full run takes about 25 minutes. Exit code 0 when all
 pass. Liquidsoap and Icecast refuse to run as root; the harness runs them as `nobody`.
 Ports 8100, 8181, 8190, 8191, 8010: one run at a time per machine.
