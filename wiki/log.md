@@ -151,3 +151,4 @@ INGEST 2026-11-17 engine-harness.md real radio.liq + Icecast + backend + Postgre
 INGEST 2026-11-17 air-watch.md on-air self-check every 5 s (late/missing hard items, no time check at hh:00, dead air, overrun, engine drift, skipped timed items) with alerts and ntfy; GET /air-watch
 INGEST 2026-11-17 (docs/test-checklist.md) full feature checklist, one row per testable behaviour, with speed limits (section S); verifier rounds add rows until none missing
 INGEST 2026-11-17 (no page) Telegram bot (bot/) removed at Shmuel's request: unused since February and it ran Claude Code with full permissions for anyone who messaged it
+INGEST 2026-11-17 streaming-architecture.md engine gaps recorded as strict xfail tests (tests/test_engine_backend.py): missed 45 s hand-over, watchdog holes, blackout silence in timed lane, live show on engine, long-item policies, serial engine commands; restart queue-empty alert was never committed (fixed in main.py)

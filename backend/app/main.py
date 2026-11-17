@@ -639,6 +639,9 @@ async def _resume_playback_on_startup():
                                 message=f"Station '{station.name}' has no pending entries after queue replenish on startup",
                                 station_id=station.id,
                             )
+                            # create_alert only flushes: without this the alert was lost
+                            # whenever nothing else committed after it (last station)
+                            await db.commit()
                         except Exception:
                             pass
                 except Exception as e:
