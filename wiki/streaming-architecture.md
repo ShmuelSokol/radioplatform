@@ -330,3 +330,6 @@ and the timed queue's default 20 s download limit then dropped it, so it never a
 (harness `slow_timed_file`). Now `go_on_air` waits until `timed_queue.is_ready()` (polled
 every 0.25 s, for up to 45 s) while the music plays on, then takes over; the timed queue
 allows 90 s per download. Needs `setup.sh` rerun. Checklist V1-8.
+
+## Only one amplify reads the track's level (2026-11-17)
+Liquidsoap's `amplify` reads the `liq_amplify` metadata by default (`override="liq_amplify"`). radio.liq has three amplify operators in a row on the music lane (per-track level, the mute gain used at a take-over, the master gain used for Next fades), so a song's `replay_gain_db` was applied three times: a -6 dB song played 18 dB down and a +4 dB song 12 dB up into the limiter. Every library item with an analysis has a non-zero level, so this hit almost every song on an engine station. The mute and fade amplifiers now pass `override=null()`; only the per-track amplify (main lane, timed lane, mix-over) reads it. Harness: `track_level` (exactly 6 dB) and `song_with_level_muted_under_time_check`; `test_levels_and_output_processing` refuses any other amplify without `override=null()`.

@@ -70,6 +70,14 @@ TONES = {
     "longshiur": (395, 420, "shiur", None),
 }
 EMERGENCY_FREQ = 5000
+# A shiur whose pitch rises steadily (300 Hz at 0 s to 600 Hz at 150 s): the pitch heard
+# tells the position played, so a resume can be checked to the second
+CHIRP = ("chirp", 300.0, 600.0, 150)
+
+
+def chirp_position(freq: float) -> float:
+    _, f0, f1, secs = CHIRP
+    return (freq - f0) / ((f1 - f0) / secs)
 
 
 def log(msg: str) -> None:
@@ -102,6 +110,16 @@ class Stack:
         emerg = self.dir / "emergency"
         emerg.mkdir(exist_ok=True)
         self._tone(emerg / "emergency.mp3", EMERGENCY_FREQ, 20)
+        name, f0, f1, secs = CHIRP
+        path = self.audio / f"{name}.mp3"
+        if not path.exists():
+            k = (f1 - f0) / secs
+            subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                 f"aevalsrc=0.5*sin(2*PI*({f0}*t+{k / 2}*t*t)):s=44100:d={secs}",
+                 "-ac", "2", "-b:a", "128k", str(path)],
+                check=True,
+            )
 
     @staticmethod
     def _tone(path: Path, freq: int, secs: int) -> None:
@@ -378,6 +396,28 @@ def analyse_wav(path: Path, t0: float, start: float, end: float) -> list[tuple[f
     return out
 
 
+def tone_db(path: Path, t0: float, start: float, end: float, freq: float) -> float:
+    """Level (dBFS) of one frequency between start and end (Goertzel), whatever else plays."""
+    import math
+    with wave.open(str(path), "rb") as w:
+        rate, ch = w.getframerate(), w.getnchannels()
+        first = max(0, int((start - t0) * rate))
+        last = min(w.getnframes(), int((end - t0) * rate))
+        w.setpos(first)
+        frames = array("h", w.readframes(last - first))
+    left = frames[::ch]
+    if not left:
+        return -120.0
+    coeff = 2 * math.cos(2 * math.pi * freq / rate)
+    s1 = s2 = 0.0
+    for x in left:
+        s1, s2 = x + coeff * s1 - s2, s1
+    power = s1 * s1 + s2 * s2 - coeff * s1 * s2
+    amp = 2 * math.sqrt(max(power, 0.0)) / len(left)  # sine amplitude
+    rms = amp / math.sqrt(2)
+    return 20 * math.log10(rms / 32768) if rms > 0 else -120.0
+
+
 def longest_silence(windows, threshold_db: float = -45.0) -> tuple[float, float | None]:
     run, best, at, run_from = 0.0, 0.0, None, None
     for t, db, _ in windows:
@@ -446,6 +486,33 @@ class Harness:
                              metadata_extra={"audio_analysis": {
                                  "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": float(secs),
                                  "cross_start_seconds": max(0.0, secs - 3.0)}}))
+            cname, _, _, csecs = CHIRP
+            aid = uuid.uuid4()
+            self.assets[cname] = aid
+            db.add(Asset(id=aid, title="chirp shiur", artist="Harness", duration=float(csecs),
+                         file_path=f"http://127.0.0.1:{AUDIO_PORT}/{cname}.mp3", asset_type="shiur",
+                         review_status="approved",
+                         metadata_extra={"audio_analysis": {
+                             "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": float(csecs),
+                             "cross_start_seconds": csecs - 3.0}}))
+            # The same file with analysed cue points (lead-in and tail cut), as music
+            aid = uuid.uuid4()
+            self.assets["chirpcue"] = aid
+            db.add(Asset(id=aid, title="chirp cued", artist="Harness", duration=float(csecs),
+                         file_path=f"http://127.0.0.1:{AUDIO_PORT}/{cname}.mp3", asset_type="music",
+                         review_status="approved",
+                         metadata_extra={"audio_analysis": {
+                             "version": 99, "cue_in_seconds": 10.0, "cue_out_seconds": 40.0,
+                             "cross_start_seconds": 37.0}}))
+            # song3's file with an analysed level of -6 dB (a loud master turned down)
+            aid = uuid.uuid4()
+            self.assets["song3quiet"] = aid
+            db.add(Asset(id=aid, title="song3 at -6 dB", artist="Harness", duration=40.0,
+                         file_path=f"http://127.0.0.1:{AUDIO_PORT}/song3.mp3", asset_type="music",
+                         review_status="approved",
+                         metadata_extra={"audio_analysis": {
+                             "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": 40.0,
+                             "cross_start_seconds": 37.0, "replay_gain_db": -6.0}}))
             await db.commit()
 
     def api(self, method: str, path: str, body=None) -> tuple[int, dict]:
@@ -1079,6 +1146,171 @@ async def sc_queue_change_drops_preloaded(h: Harness) -> None:
     h.check(name, bool(tl) and tl[-1] == new_head, f"and is what is heard: {tl}")
 
 
+def _mean_freq(windows) -> float | None:
+    loud = [f for _, db, f in windows if db > -30]
+    return sum(loud) / len(loud) if loud else None
+
+
+async def sc_resume_position(h: Harness) -> None:
+    """V1-5: a shiur paused for the hour's time check resumes where it stopped (3 s
+    rewound), not from the top and not further on. The shiur's pitch rises with time, so
+    the pitch heard after the resume gives the position actually played."""
+    name = "resume_position"
+    await h.set_config(timed_during_long_items="pause")
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("chirp", {}), ("song5", {}), ("song6", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    start = await h.wait_on_air("chirp", 60)
+    if start is None:
+        h.check(name, False, "the shiur never went on air")
+        return
+    first = _mean_freq(h.heard(start + 1.0, start + 2.0))
+    h.check(name, first is not None and abs(chirp_position(first) - 1.5) <= 3.0,
+            f"the shiur starts at its beginning (heard position {chirp_position(first) if first else None:.1f} s at 1.5 s)")
+    t1 = at(40)
+    await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
+                   ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8 + 10)
+    # A resumed entry's started_at is back-dated by its offset (the progress bar shows the
+    # position): the real start is started_at + offset
+    starts = [(t + float(src.split("@", 1)[1]), src) for t, src in await h.started_times("chirp", start + 1)
+              if src.startswith("resume@")]
+    h.check(name, bool(starts) and starts[0][0] >= t1.timestamp(),
+            f"the shiur resumed after the time check ({[(_fmt(t), s) for t, s in starts]})")
+    if not starts:
+        return
+    resumed_at, source = starts[0]
+    offset = float(source.split("@", 1)[1])
+    stopped = t1.timestamp() - start
+    h.check(name, abs(offset - (stopped - 3.0)) <= 2.0,
+            f"resume offset {offset:.0f} s for a shiur stopped at {stopped:.1f} s (3 s rewound)")
+    heard = _mean_freq(h.heard(resumed_at + 1.5, resumed_at + 2.5))
+    pos = chirp_position(heard) if heard else None
+    h.check(name, pos is not None and abs(pos - (offset + 2.0)) <= 3.0,
+            f"the engine played from the offset: heard position {pos if pos is None else round(pos, 1)} s, "
+            f"expected about {offset + 2.0:.0f} s")
+
+
+async def sc_cue_points(h: Harness) -> None:
+    """V1-5: the engine honours the analysed cue points: an item with cue_in 10 s and
+    cue_out 40 s starts 10 s into its file and ends at 40 s (the next song follows then)."""
+    name = "cue_points"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("chirpcue", {}), ("song5", {}), ("song6", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    start = await h.wait_on_air("chirpcue", 60)
+    if start is None:
+        h.check(name, False, "the item never went on air")
+        return
+    f = _mean_freq(h.heard(start + 1.0, start + 2.0))
+    pos = chirp_position(f) if f else None
+    h.check(name, pos is not None and abs(pos - 11.5) <= 3.0,
+            f"starts at cue_in: heard position {pos if pos is None else round(pos, 1)} s 1.5 s in (expected 11.5)")
+    nxt = await h.wait_on_air("song5", 60)
+    length = (nxt - start) if nxt else None
+    h.check(name, length is not None and 25.0 <= length <= 33.0,
+            f"ends at cue_out: next item {length if length is None else round(length, 1)} s after the start "
+            "(30 s between the cue points, crossfade 3 s)")
+
+
+def _icecast_source() -> dict:
+    with urllib.request.urlopen(f"http://127.0.0.1:{ICECAST_PORT}/status-json.xsl", timeout=4) as r:
+        src = json.loads(r.read().decode("utf-8", "replace")).get("icestats", {}).get("source", {})
+    if isinstance(src, list):
+        src = next((x for x in src if str(x.get("listenurl", "")).endswith("/harness")), src[0] if src else {})
+    return src or {}
+
+
+async def sc_icecast_output(h: Harness) -> None:
+    """V1-7: the stream is 320 kbps / 44.1 kHz stereo MP3 with the station's name, genre and
+    url, and listeners see the title of the item on air."""
+    name = "icecast_output"
+    await wait_music(h)
+    await asyncio.sleep(3)
+    src = _icecast_source()
+    h.check(name, str(src.get("server_type", "")) == "audio/mpeg", f"MP3 stream ({src.get('server_type')})")
+    br = src.get("bitrate") or src.get("audio_bitrate") or src.get("ice-bitrate")
+    h.check(name, str(br).startswith("320"), f"320 kbps ({br})")
+    # What a listener actually receives: a few seconds of the stream through ffprobe
+    sample = h.stack.dir / "stream-sample.mp3"
+    with urllib.request.urlopen(f"http://127.0.0.1:{ICECAST_PORT}/harness", timeout=10) as r:
+        sample.write_bytes(r.read(200_000))
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+                            "stream=codec_name,sample_rate,channels,bit_rate", "-of", "json", str(sample)],
+                           capture_output=True, text=True)
+    st = (json.loads(probe.stdout or "{}").get("streams") or [{}])[0]
+    h.check(name, st.get("codec_name") == "mp3" and st.get("sample_rate") == "44100"
+            and st.get("channels") == 2 and str(st.get("bit_rate", "")).startswith("320"),
+            f"listeners get MP3 44.1 kHz stereo 320 kbps: {st}")
+    h.check(name, src.get("server_name") == "Kol B'ramah" and src.get("genre") == "Jewish Radio"
+            and src.get("server_url") == "https://kbrlive.com",
+            f"name/genre/url: {src.get('server_name')!r} / {src.get('genre')!r} / {src.get('server_url')!r}")
+    cur = await h.on_air()
+    title = str(src.get("title") or "")
+    h.check(name, bool(cur) and (cur.asset.title or "") in title,
+            f"stream title shows the item on air: {title!r} (site: {cur.asset.title if cur else None})")
+
+
+def _mean_db(windows) -> float | None:
+    vals = [db for _, db, _ in windows if db > -60]
+    return sum(vals) / len(vals) if vals else None
+
+
+async def sc_track_level(h: Harness) -> None:
+    """V1-4: the per-track level from the analysis (replay_gain_db, sent as liq_amplify) is
+    applied: the same file with -6 dB plays 6 dB quieter; an item without one at unity."""
+    name = "track_level"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song3", {}), ("song3quiet", {}), ("song5", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    a = await h.wait_on_air("song3", 60)
+    b = await h.wait_on_air("song3quiet", 60)
+    if a is None or b is None:
+        h.check(name, False, f"items never went on air ({a}, {b})")
+        return
+    await asyncio.sleep(12)
+    loud = _mean_db(h.heard(a + 8, a + 18))
+    quiet = _mean_db(h.heard(b + 4, b + 10))
+    diff = (loud - quiet) if loud is not None and quiet is not None else None
+    if diff is None or not 4.5 <= diff <= 7.5:
+        for label, t0 in (("unity", a), ("-6 dB", b)):
+            ws = h.heard(t0 - 1, t0 + 20)
+            log(f"    {label} item from its start: " + " ".join(
+                f"{t - t0:+.1f}:{db:.0f}dB/{f:.0f}Hz" for t, db, f in ws[::5]))
+    h.check(name, diff is not None and 4.5 <= diff <= 7.5,
+            f"-6 dB applied: unity {loud if loud is None else round(loud, 1)} dBFS, "
+            f"-6 dB item {quiet if quiet is None else round(quiet, 1)} dBFS (difference "
+            f"{diff if diff is None else round(diff, 1)} dB)")
+
+
+async def sc_level_song_muted(h: Harness) -> None:
+    """V1-4b: a song with a level of its own (liq_amplify) is still muted under a hard time
+    check: the mute and fade gains are not replaced by the track's level."""
+    name = "song_with_level_muted_under_time_check"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song3quiet", {}), ("song5", {}), ("song6", {})])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+    b = await h.wait_on_air("song3quiet", 60)
+    if b is None:
+        h.check(name, False, "song3quiet never went on air")
+        return
+    t1 = at(12)
+    await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + TONES["time"][1] + 3)
+    time.sleep(1.5)
+    song_hz = TONES["song3"][0]
+    before = tone_db(h.stack.wav, h.stack.wav_t0, t1.timestamp() - 6, t1.timestamp() - 2, song_hz)
+    under = tone_db(h.stack.wav, h.stack.wav_t0, t1.timestamp() + 1, t1.timestamp() + 5, song_hz)
+    clock = tone_db(h.stack.wav, h.stack.wav_t0, t1.timestamp() + 1, t1.timestamp() + 5, TONES["time"][0])
+    h.check(name, clock > -40, f"time check heard ({clock:.1f} dBFS)")
+    h.check(name, before > -45 and under < before - 30,
+            f"song at {before:.1f} dBFS before, {under:.1f} dBFS under the time check")
+
+
 SCENARIOS = {
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
@@ -1100,6 +1332,11 @@ SCENARIOS = {
     "control_endpoints": sc_control_endpoints,
     "slow_timed_file": sc_slow_timed_file,
     "queue_change_drops_preloaded": sc_queue_change_drops_preloaded,
+    "resume_position": sc_resume_position,
+    "cue_points": sc_cue_points,
+    "icecast_output": sc_icecast_output,
+    "track_level": sc_track_level,
+    "song_with_level_muted_under_time_check": sc_level_song_muted,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }

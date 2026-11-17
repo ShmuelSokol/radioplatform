@@ -1221,3 +1221,21 @@ async def test_mix_over_while_a_timed_item_is_on_air(client, db_session, auth_he
     assert r.status_code == 200
     assert engine.paths() == ["/overlay"]
     assert (await _fresh(db_session, clock.id)).status == "playing"
+
+
+@pytest.mark.asyncio
+async def test_emergency_alert_clears_itself_on_a_known_start(client, db_session, eng):
+    """The open emergency alert is resolved once the engine plays the station's queue again
+    (Jerusalem kept one open after the droplet reruns, 2026-11-17)."""
+    from sqlalchemy import select
+
+    from app.models.alert import Alert
+
+    station, entries, _, _ = eng
+    await _on_air(client, station, "", lane="emergency")
+    open_ = (await db_session.execute(select(Alert).where(Alert.is_resolved == False))).scalars().all()  # noqa: E712
+    assert [a.title for a in open_] == ["Playout engine is on its emergency playlist"]
+    await _on_air(client, station, entries[0].id)
+    row = (await db_session.execute(select(Alert).execution_options(populate_existing=True))).scalar_one()
+    assert row.is_resolved is True
+    assert "queue" in row.context["cleared_by_itself"]

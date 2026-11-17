@@ -117,7 +117,10 @@ main = cross(duration=3., transition, main)
 
 # The music lane is muted while a timed item takes over, so nothing of it leaks through
 main_gain = ref(1.)
-main = amplify({main_gain()}, main)
+# override=null(): amplify reads the track's liq_amplify by default, so each amplify
+# below applied the track's level again: a -6 dB song played 18 dB down and a +4 dB one
+# 12 dB up (harness track_level, 2026-11-17). Only the per-track amplify reads it.
+main = amplify(override=null(), {main_gain()}, main)
 # Set when a timed item interrupted a song: that song does not resume afterwards
 main_interrupted = ref(false)
 
@@ -153,7 +156,9 @@ on_air_lane = ref("")
 def timed_open() =
   timed_armed() or (on_air_lane() == "timed" and timed_queue.length() > 0)
 end
-timed = switch(id="timed_gate", track_sensitive=true, [(timed_open, timed_queue)])
+# Per-track level for timed items too (time checks, sponsors), as on the music lane
+timed = switch(id="timed_gate", track_sensitive=true,
+               [(timed_open, amplify(1., override="liq_amplify", timed_queue))])
 
 # Start time of the last group scheduled to take over
 timed_group_at = ref(-1.)
@@ -222,7 +227,7 @@ emergency = playlist(id="emergency", mode="randomize", reload_mode="watch", emer
 emergency = mksafe(emergency)
 
 radio = fallback(id="radio", track_sensitive=false, [timed, main, emergency])
-radio = amplify({master_gain()}, radio)
+radio = amplify(override=null(), {master_gain()}, radio)
 # What is on air from the lanes above. Start reports and /status read this, so an item
 # mixed over the top (below) never counts as a change of track.
 program = radio

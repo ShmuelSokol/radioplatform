@@ -52,6 +52,12 @@ def test_levels_and_output_processing():
     liq = _liq()
     assert 'amplify(1., override="liq_amplify", main_requests)' in liq
     assert 'amplify(1., override="liq_amplify", overlay_queue)' in liq
+    assert 'amplify(1., override="liq_amplify", timed_queue)' in liq
+    # Every other amplify must not read liq_amplify (its default): the track's level then
+    # replaced the mute and fade gains for the whole track (harness track_level)
+    import re
+    for call in re.findall(r"amplify\(([^\n]*)\)", liq):
+        assert 'override="liq_amplify"' in call or "override=null()" in call, call
     assert "compress(threshold=-14., ratio=3." in liq
     assert "limit(threshold=-1., radio)" in liq
     assert "%mp3(bitrate=320, samplerate=44100, stereo=true" in liq
