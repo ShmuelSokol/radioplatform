@@ -61,6 +61,7 @@ The OpenWeatherMap key (free plan, 60 calls/min) was blocked on 2026-11-15. Caus
 - `get_or_create_weather_spot_assets` pauses all generation for 15 min after a failure; uploaded clips are still returned.
 - Tests reset both through the autouse fixture in `tests/conftest.py`.
 - No `OPENWEATHERMAP_API_KEY` (2026-11-17): `get_current_weather` raises `WeatherNotConfiguredError` without a request, weather is not even attempted by `get_or_create_weather_spot_assets` (a failed attempt used to pause the time announcements too), and the weather readout pages answer 503 with the reason. Tests that fetch weather must set the key.
+- Daily weather readout (`SchedulerEngine._maybe_generate_weather_readouts`): the day counts as done only once a readout for that date exists. A failed attempt (weather down) is retried the same day: next pass, then 1, 2, 4 ... minutes, at most 30 (`READOUT_RETRY_MAX_SECONDS`, in memory per process). Auto-queue (`_maybe_queue_weather_readouts`) queues a readout only on its own `readout_date` in the station's zone, so tomorrow's readout recorded tonight waits. Tests: `backend/tests/test_weather_without_key_and_readouts.py`.
 
 ## Weather per region (2026-11-16)
 
@@ -128,4 +129,24 @@ The control room marks timed items due at the same moment with a cyan bar and a
 - Hour marks come from the station's own clock (`local_hour_marks`): a half-hour zone
   (India) heard its time check at local :30, and the default hard/soft timing used the UTC
   minute. On the autumn DST day 1 AM gets two checks, in spring 2 AM none.
+- Moving a station (new latitude/longitude in `PUT /stations/{id}`): `update_station` drops
+  the Shabbos/Yom Tov windows generated for the old place (`drop_generated_holidays_for_location`:
+  covering this station only, name and start matching what the generator makes for the old
+  place) and generates the new place's at once. Hand-made windows, windows shared with
+  other stations and a window in progress are kept. There is no "generated" flag on
+  `HolidayWindow`; the match against the generator is how they are told apart.
+  Test: `backend/tests/test_holiday_generation_endpoints.py::test_moving_a_station_moves_its_shabbos`.
 - Tests: `backend/tests/test_scheduler_jobs.py`, `backend/tests/test_restart_holidays_timezones.py`.
+
+
+## Rotation and interval rules in the rule-based fill (2026-11-17)
+
+Stations without playlist generation fill 7 days from `ScheduleRule`s. After the daypart
+fill, `_spread_rule_items` weaves rule items between the fill's songs and renumbers the
+fill's positions: rotation (`songs_between=N`) puts one item after every N filled songs,
+interval (`interval_minutes=N`) one each time N minutes of estimated air time pass. Both
+only where the rule's `hour_start`/`hour_end` (a range like 22-2 wraps) and
+`days_of_week` (0=Mon) cover the estimated station-local air time. Before, rotation items
+went after the whole week, back to back, and interval rules were never applied. Legacy
+global sponsors still go at the end of the fill (unchanged). Test:
+`backend/tests/test_rule_fill_and_station_delete.py`.
