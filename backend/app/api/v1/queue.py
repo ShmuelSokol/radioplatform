@@ -304,20 +304,31 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
             ).values(position=QueueEntry.position + num_silence)
         )
 
+    # On a station the playout engine plays, the silence is queued and the engine is told
+    # to move on (below): it reports the silence's start itself. Marking it playing here
+    # left the song on air until it ended while the site showed silence (harness
+    # blackout_ended_early: a blackout that starts now aired 10 s and more of music).
+    engine = settings.engine_drives(station_id)
+    start_now = is_active_now and not engine
     for i in range(num_silence):
         entry = QueueEntry(
             id=uuid.uuid4(),
             station_id=station_id,
             asset_id=silence.id,
             position=insert_at + i + 1,
-            status="playing" if (i == 0 and is_active_now) else "pending",
-            started_at=now if (i == 0 and is_active_now) else None,
+            status="playing" if (i == 0 and start_now) else "pending",
+            started_at=now if (i == 0 and start_now) else None,
             preempt_at=blackout_start if not is_active_now else None,
             source="auto",
         )
         db.add(entry)
 
     await db.commit()
+    if engine and is_active_now:
+        from app.services import playout_engine
+
+        await playout_engine.engine_flush(station_id)
+        await playout_engine.engine_skip(station_id)
     logger.info(
         "Filled blackout queue for station %s: %d silence entries (%.0f min), %s, ends at %s",
         station_id, num_silence, total_seconds / 60,

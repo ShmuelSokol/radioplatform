@@ -7,8 +7,12 @@ file, so this reads, with HTTP range requests:
   the file size gives the length;
 - the last TAIL_SECONDS, where ffmpeg finds the quiet tail;
 - the first HEAD_SECONDS only when no start cue is stored yet.
-Loudness and the start cue from an earlier analysis are kept as they are.
-About 0.5 MB per song at 192 kbps instead of 5 to 10 MB. MP3 only; anything else raises.
+Loudness and the start cue from an earlier analysis are kept as they are. When no
+earlier analysis measured loudness, it is measured from LOUDNESS_SAMPLES pieces of
+LOUDNESS_SECONDS spread through the file (before this, such items kept a made-up
+-18 LUFS and played unadjusted, from -13.5 to -19.3 LUFS on Jerusalem).
+About 0.5 MB per song at 192 kbps (1.5 MB when loudness is sampled) instead of
+5 to 10 MB. MP3 only; anything else raises.
 """
 import asyncio
 import io
@@ -16,13 +20,15 @@ import logging
 
 import httpx
 
-from app.models.asset import ANALYSIS_VERSION
+from app.models.asset import ANALYSIS_VERSION, has_real_loudness
 
 logger = logging.getLogger(__name__)
 
 TAIL_SECONDS = 20.0
 HEAD_SECONDS = 8.0
 PROBE_BYTES = 64 * 1024
+LOUDNESS_SAMPLES = (0.2, 0.5, 0.8)
+LOUDNESS_SECONDS = 15.0
 
 
 class RangeNotSupportedError(Exception):
@@ -130,6 +136,32 @@ def _head_cue_in(head_audio: bytes) -> float:
     return 0.0
 
 
+def combine_loudness(measures: list[tuple[float, float]]) -> tuple[float, float] | None:
+    """One loudness from several pieces: the power average of their LUFS (quiet
+    pieces under -60 LUFS left out, like loudnorm's own gate) and the highest true peak."""
+    import math
+
+    loud = [(lufs, tp) for lufs, tp in measures if lufs is not None and lufs > -60.0]
+    if not loud:
+        return None
+    lufs = 10 * math.log10(sum(10 ** (lu / 10) for lu, _ in loud) / len(loud))
+    return lufs, max(tp for _, tp in loud)
+
+
+async def _sampled_loudness(client: httpx.AsyncClient, url: str, audio_start: int,
+                            total: int, bitrate: int, length: float) -> tuple[float, float] | None:
+    from app.services.audio_analysis_service import measure_loudness
+
+    piece = int(min(LOUDNESS_SECONDS, length) * bitrate / 8)
+    measures = []
+    for frac in LOUDNESS_SAMPLES:
+        start = audio_start + int((total - audio_start - piece) * frac)
+        start = max(audio_start, start)
+        data, _ = await fetch_range(client, url, start, min(total - 1, start + piece - 1))
+        measures.append(await asyncio.to_thread(measure_loudness, data))
+    return combine_loudness(measures)
+
+
 async def analyze_by_range(url: str, previous: dict | None = None,
                            client: httpx.AsyncClient | None = None) -> dict:
     """Version-2 analysis from a few ranges of the file. `previous` is the stored
@@ -161,6 +193,10 @@ async def analyze_by_range(url: str, previous: dict | None = None,
             head_end = min(total - 1, audio_start + int(HEAD_SECONDS * bitrate / 8))
             head_audio, _ = await fetch_range(client, url, audio_start, head_end)
             cue_in = await asyncio.to_thread(_head_cue_in, head_audio)
+
+        sampled = None
+        if not has_real_loudness(previous):
+            sampled = await _sampled_loudness(client, url, audio_start, total, bitrate, length)
     finally:
         if own:
             await client.aclose()
@@ -168,15 +204,30 @@ async def analyze_by_range(url: str, previous: dict | None = None,
     cue_in = float(cue_in)
     cue_out = max(cue_out, min(length, cue_in + 5.0))
     cross_start = min(cue_out, max(cue_in + 5.0, cue_out - 3.0))
-    loudness = previous.get("loudness_lufs", -18.0)
+    extra = {}
+    if sampled:
+        loudness, peak = sampled
+        extra = {"loudness_method": "sampled"}
+        loudness_fields = {
+            "loudness_lufs": round(loudness, 2),
+            "true_peak_dbfs": round(peak, 2),
+            "replay_gain_db": round(max(-12.0, min(12.0, -18.0 - loudness)), 2),
+        }
+    else:
+        loudness_fields = {
+            "loudness_lufs": previous.get("loudness_lufs", -18.0),
+            "true_peak_dbfs": previous.get("true_peak_dbfs", -1.5),
+            "replay_gain_db": previous.get("replay_gain_db", 0.0),
+        }
+        if previous.get("loudness_method"):
+            extra = {"loudness_method": previous["loudness_method"]}
     return {
-        "loudness_lufs": loudness,
-        "true_peak_dbfs": previous.get("true_peak_dbfs", -1.5),
+        **loudness_fields,
         "cue_in_seconds": round(cue_in, 3),
         "cue_out_seconds": round(cue_out, 3),
         "cross_start_seconds": round(cross_start, 3),
-        "replay_gain_db": previous.get("replay_gain_db", 0.0),
         "duration": round(length, 3),
         "version": ANALYSIS_VERSION,
         "method": "range",
+        **extra,
     }

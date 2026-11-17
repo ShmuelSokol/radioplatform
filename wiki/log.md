@@ -220,3 +220,6 @@ INGEST 2026-11-17 audio-engine.md items of one program block share preempt_at: t
 INGEST 2026-11-17 audio-engine.md play() to `playing` took 1.0 s live: page warms a hard item silently 3 s ahead; outgoing item waits for `playing`; __kbrLastStart/__kbrTimedWarm diagnostics; idle deck no longer plays silently after Listen
 INGEST 2026-11-17 streaming-architecture.md Liquidsoap amplify reads liq_amplify by default: three amplifies applied each song's level 3x; mute/master amplify now override=null()
 UPDATE 2026-11-17 audio-engine.md warm-up retried every 250 ms and plays muted until audio really flows (17:00Z: a 1 ms warm-up did not help); pre-fade stops at 12% until the item sounds; deck event log window.__kbrDeckEvents; Next-during-warm-up known bug
+INGEST 2026-11-17 streaming-architecture.md timed lane closed after its last item was fetched (length() leaves fetched items out): Daf Yomi missed at 18:00Z; prefetch=10, is_ready gate, follow-up take-over for a late file
+INGEST 2026-11-17 streaming-architecture.md range-only analysis never measured loudness (-18/0 made up); now sampled from 3 pieces, needs_analysis redoes them; limiter -2 dB
+INGEST 2026-11-17 streaming-architecture.md blackout starting now on an engine station: silence queued pending + engine flush/skip (song used to play into the blackout)
