@@ -337,9 +337,14 @@ async def generate(
         ranked = svc.rank_matching_blocks(schedules, at, station)
         block = ranked[0][1] if ranked else None
         own = songs_by_block.get(str(block.id)) if block is not None else None
+        named = block.playlist_template if block is not None and block.playlist_template_id else None
+        if own and named is not None and named.is_active and named.slots:
+            # A block that names a working playlist keeps playing it: its own songs
+            # only take over a block with no playlist, so a block already on air
+            # with stray songs listed does not suddenly change what it plays.
+            own = None
         if own:
-            # The block's own songs, in the block's playback mode. They win over a
-            # playlist the block also names: they are the more specific choice.
+            # The block's own songs, in the block's playback mode.
             if library.last_used is None:
                 await library._load_last_used()
             key = str(block.id)

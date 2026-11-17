@@ -402,13 +402,10 @@ class SchedulerEngine:
         result = await db.execute(stmt)
         windows = result.scalars().all()
 
+        from app.services.station_service import window_covers_station
+
         for window in windows:
-            # Check if this window affects this station
-            if window.affected_stations is None:
-                # Null = affects all stations
-                return True
-            station_ids = window.affected_stations.get("station_ids", [])
-            if str(station.id) in [str(sid) for sid in station_ids]:
+            if window_covers_station(window, station.id):
                 return True
 
         return False

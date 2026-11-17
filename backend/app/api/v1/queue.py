@@ -55,11 +55,10 @@ async def _is_blacked_out(db: AsyncSession, station_id) -> bool:
     )
     result = await db.execute(stmt)
     windows = result.scalars().all()
+    from app.services.station_service import window_covers_station
+
     for window in windows:
-        if window.affected_stations is None:
-            return True
-        station_ids = window.affected_stations.get("station_ids", [])
-        if str(station_id) in [str(sid) for sid in station_ids]:
+        if window_covers_station(window, station_id):
             return True
     return False
 

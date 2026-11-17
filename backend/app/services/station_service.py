@@ -19,7 +19,9 @@ def window_covers_station(window: HolidayWindow, station_id) -> bool:
     affected = window.affected_stations
     if affected is None:
         return True
-    ids = affected.get("station_ids", []) if isinstance(affected, dict) else []
+    ids = affected.get("station_ids") if isinstance(affected, dict) else None
+    if ids is None:
+        return True
     return str(station_id) in [str(i) for i in ids]
 
 
