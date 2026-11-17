@@ -13,12 +13,14 @@ from sqlalchemy import select
 import app.api.v1.queue as queue_module
 from app.models.alert import Alert
 from app.models.asset import Asset
+from app.models.hs_softened import HsSoftened
 from app.models.queue_entry import QueueEntry
 from app.models.sponsor import Sponsor
 from app.models.spot_schedule import SpotSchedule
 from app.models.station import Station
 from app.services.spot_schedule_service import plan_for_station, reconcile_spot_slots
 from app.services.station_modes import soften_hard_items
+from tests.conftest import TestSessionLocal
 
 
 @pytest.fixture(autouse=True)
@@ -166,3 +168,78 @@ async def test_viewer_cannot_switch_modes_or_panic(client, db_session):
     for path in ("modes", "panic"):
         r = await client.post(f"/api/v1/stations/{station.id}/queue/{path}", json={})
         assert r.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_hs_on_restores_every_softened_item_however_many(client, auth_headers, db_session):
+    """No cap that drops saved timings: 2,500 timed items all come back hard."""
+    station = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem")
+    check = Asset(id=uuid.uuid4(), title="Time", duration=8.0, file_path="t", asset_type="jingle")
+    db_session.add_all([station, check])
+    await db_session.flush()
+    at = datetime.now(UTC) + timedelta(hours=1)
+    ids = [uuid.uuid4() for _ in range(2500)]
+    db_session.add_all([
+        QueueEntry(id=i, station_id=station.id, asset_id=check.id, position=n + 1, status="pending",
+                   source="block", preempt_at=at + timedelta(minutes=n), timing_mode="hard")
+        for n, i in enumerate(ids)
+    ])
+    await db_session.commit()
+    url = f"/api/v1/stations/{station.id}/queue/modes"
+    assert (await client.post(url, json={"hard_start": False}, headers=auth_headers)).status_code == 200
+    # The scheduler pass runs again and again while HS is off: still one saved timing each
+    st = await db_session.get(Station, station.id)
+    await soften_hard_items(db_session, st)
+    await db_session.commit()
+    assert (await client.post(url, json={"hard_start": True}, headers=auth_headers)).status_code == 200
+    modes = (await db_session.execute(
+        select(QueueEntry.timing_mode).where(QueueEntry.station_id == station.id)
+        .execution_options(populate_existing=True))).scalars().all()
+    assert len(modes) == 2500 and set(modes) == {"hard"}
+    assert (await db_session.execute(select(HsSoftened))).scalars().all() == []
+    assert "hs_softened" not in ((await db_session.get(Station, station.id)).automation_config or {})
+
+
+@pytest.mark.asyncio
+async def test_hs_pass_never_rewrites_station_settings(db_session):
+    """The scheduler's HS pass must not undo a setting saved meanwhile (loop, live show, HS itself)."""
+    station = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem",
+                      automation_config={"hard_start": False})
+    check = Asset(id=uuid.uuid4(), title="Time", duration=8.0, file_path="t", asset_type="jingle")
+    db_session.add_all([station, check])
+    await db_session.flush()
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=check.id, position=1,
+                              status="pending", source="block", timing_mode="hard",
+                              preempt_at=datetime.now(UTC) + timedelta(hours=1)))
+    await db_session.commit()
+    stale = await db_session.get(Station, station.id)
+    assert stale.automation_config == {"hard_start": False}
+
+    # Meanwhile another request sets a loop and switches HS on
+    async with TestSessionLocal() as other:
+        st = await other.get(Station, station.id)
+        st.automation_config = {"hard_start": True, "loop_asset_id": str(check.id)}
+        await other.commit()
+
+    assert await soften_hard_items(db_session, stale) == 1  # read before the change
+    await db_session.commit()
+    async with TestSessionLocal() as fresh:
+        cfg = (await fresh.get(Station, station.id)).automation_config
+    assert cfg == {"hard_start": True, "loop_asset_id": str(check.id)}
+
+
+@pytest.mark.asyncio
+async def test_hs_on_restores_timings_saved_by_the_first_version(client, auth_headers, db_session):
+    at = datetime.now(UTC) + timedelta(hours=1)
+    station = Station(id=uuid.uuid4(), name="Main", timezone="UTC")
+    check = Asset(id=uuid.uuid4(), title="Time", duration=8.0, file_path="t", asset_type="jingle")
+    db_session.add_all([station, check])
+    await db_session.flush()
+    e = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=check.id, position=1, status="pending",
+                   source="block", timing_mode="soft", preempt_at=at)
+    db_session.add(e)
+    station.automation_config = {"hard_start": False, "hs_softened": {str(e.id): ["hard", None]}}
+    await db_session.commit()
+    r = await client.post(f"/api/v1/stations/{station.id}/queue/modes", json={"hard_start": True}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert (await _row(db_session, e.id)).timing_mode == "hard"

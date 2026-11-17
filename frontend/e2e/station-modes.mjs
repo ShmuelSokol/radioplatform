@@ -66,6 +66,7 @@ const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gestur
   await page.getByTestId('panic').click();
   check((await page.getByTestId('panic').innerText()).includes('Tap again'), 'desktop: first Panic tap asks for a second');
   check(await onAirId() === was, 'desktop: one tap cuts nothing');
+  await page.waitForTimeout(500);  // a second tap under 0.4 s is a double-click and does not count
   await page.getByTestId('panic').click();
   await page.getByText(/Panic: cut what was on air/).waitFor({ timeout: 8000 });
   const after = await sample(6000);
