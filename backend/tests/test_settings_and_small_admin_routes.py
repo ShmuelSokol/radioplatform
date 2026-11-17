@@ -144,7 +144,8 @@ async def test_icecast_status_and_start_follow_icecast_host(client, auth_headers
     db_session.add(st)
     await db_session.commit()
     monkeypatch.setattr(settings, "ICECAST_HOST", "")
-    status = (await client.get("/api/v1/icecast/status", headers=auth_headers)).json()
+    monkeypatch.setattr(icecast_service, "_icecast_clients", {})       # other tests leave sources behind
+    status =(await client.get("/api/v1/icecast/status", headers=auth_headers)).json()
     assert status["enabled"] is False and status["host"] is None and status["active_streams"] == []
 
     started = []
