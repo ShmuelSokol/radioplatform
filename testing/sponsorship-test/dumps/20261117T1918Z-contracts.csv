@@ -1,0 +1,21 @@
+name,station_id,start_date,end_date,days_of_week,dayparts,plays_per_daypart,fixed_times,timing_mode,is_active,updated_at
+TEST contract 01 - Authentic Kosher Chinese,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-17,2026-11-17,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",2,,,True,2026-11-17T19:16:06.007411+00:00
+TEST contract 02 - Glatt Bite,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-17,2026-11-18,"0,1,2,3,4,5,6","morning,evening",1,,,True,2026-11-17T19:16:06.763764+00:00
+TEST contract 03 - Bun Burger Kitchen,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-17,2026-11-18,"0,1,2,3,4,5,6",afternoon,3,,,True,2026-11-17T19:16:07.370897+00:00
+TEST contract 04 - Estreia,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-19,2026-11-21,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",1,,,True,2026-11-17T19:16:08.095562+00:00
+TEST contract 05 - Kepshuto,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-20,2026-11-23,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",1,,,True,2026-11-17T19:16:08.785802+00:00
+TEST contract 06 - Taquito,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-17,2026-11-30,"0,1,2,3",morning,2,,,True,2026-11-17T19:16:09.462077+00:00
+TEST contract 07 - Pita Hut,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-17,2026-11-30,6,"afternoon,evening",1,,,True,2026-11-17T19:16:10.150649+00:00
+TEST contract 08 - Southside Smokehouse,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-17,2026-11-24,"0,1,2,3,4,5,6",overnight,2,,,True,2026-11-17T19:16:10.939406+00:00
+TEST contract 09 - Cafotteria Modern Eatery,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-17,2026-11-19,"0,1,2,3,4,5,6",morning,1,"08:15,17:45",,True,2026-11-17T19:16:11.702218+00:00
+TEST contract 10 - Pizzaleh,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-17,2026-11-18,"0,1,2,3,4,5,6",morning,1,14:00,hard,True,2026-11-17T19:16:12.958944+00:00
+TEST contract 11 - Pizza Plus,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-17,,"0,1,2,3,4,5,6",morning,1,,,True,2026-11-17T19:16:13.724156+00:00
+TEST contract 12 - Goldstar Caterers,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-17,2026-11-24,"0,1,2,3,4,5,6",evening,4,,,True,2026-11-17T19:16:14.466542+00:00
+TEST contract 13 - Gourmet Glatt North,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-17,2026-11-20,"0,1,2,3,4,5,6",afternoon,2,,,True,2026-11-17T19:16:15.452159+00:00
+TEST contract 14 - Evergreen Kosher Market,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-17,2026-11-19,"0,1,2,3,4,5,6","morning,afternoon",1,,,True,2026-11-17T19:16:16.281124+00:00
+TEST contract 15 - Gelbstein's Bakery and Cafe,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-17,2026-11-26,"1,2,3",evening,1,,,True,2026-11-17T19:16:17.099519+00:00
+TEST contract 16 - Bagel Nosh,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-17,2026-11-19,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",6,,,True,2026-11-17T19:16:17.743501+00:00
+TEST contract 17 - Lakewood Gingerbread House,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-18,2026-11-18,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",1,,,True,2026-11-17T19:16:18.604736+00:00
+TEST contract 18 - Judaica Square North,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-22,2026-11-25,"0,1,2,3,4,5,6","morning,afternoon",1,,,True,2026-11-17T19:16:19.284166+00:00
+TEST contract 19 - Israel Bookshop Publications,d0740efe-3f25-4067-96f8-d8bc84c64dc3,2026-11-17,2026-11-21,"0,1,2,3,4,5,6","morning,overnight",2,,,True,2026-11-17T19:16:20.011716+00:00
+TEST contract 20 - Ice Cream House Lakewood,13c2697e-b9f8-42e8-b97a-4e1afa3b5a0e,2026-11-17,2026-11-20,"0,1,2,3,4,5,6","afternoon,evening",1,,hard,True,2026-11-17T19:16:20.852591+00:00
