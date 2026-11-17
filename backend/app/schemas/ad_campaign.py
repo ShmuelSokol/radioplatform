@@ -12,6 +12,8 @@ from app.models.ad_campaign import CampaignStatus
 
 class CampaignCreate(BaseModel):
     name: str
+    # Staff choose the sponsor; a sponsor's own login always uses its own record
+    sponsor_id: UUID | None = None
     description: str | None = None
     start_date: date | None = None
     end_date: date | None = None
