@@ -49,87 +49,119 @@ router = APIRouter(
 
 
 # ==================== Public EPG ====================
+def _hhmm(local: datetime) -> str:
+    return local.strftime("%H:%M")
+
+
 @router.get("/epg/{station_id}")
 async def get_epg(
     station_id: UUID,
-    date: str | None = Query(None),  # YYYY-MM-DD, defaults to today
+    date: str | None = Query(None),  # YYYY-MM-DD, defaults to the station's today
     db: AsyncSession = Depends(get_db),
 ):
-    """Public EPG: returns all schedule blocks for a station on a given day, sorted by start_time."""
-    from datetime import date as date_type
+    """Public EPG: what airs on a station on one day of its own calendar, in order.
 
+    Built with the resolver the station plays by (SchedulingService.rank_matching_blocks),
+    so the guide agrees with what airs (V2-105): a sunset/sunrise block shows that
+    day's real time, overlapping blocks show only the winner for the time it wins,
+    a start-only ("until next") block ends where the next one starts, and Shabbos /
+    Yom Tov blackouts show as off air. Times are station-local HH:MM; a run that goes
+    on past midnight ends "00:00".
+    """
+    from datetime import date as date_type
+    from datetime import timedelta
+
+    from app.models.station import Station
+    from app.services.scheduling import SchedulingService
+    from app.services.spot_schedule_service import load_blackouts, station_tz
+
+    station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+    # The station's own clock (block times are station-local), not the server's
+    zone = station_tz(station.timezone if station else None)
     if date:
         try:
             target_date = date_type.fromisoformat(date)
         except ValueError:
-            # A bad ?date= is the caller's mistake, not a server error
-            raise HTTPException(422, "date must be YYYY-MM-DD")
+            raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
     else:
-        # The station's own date (block times are station-local), not the server's
-        from zoneinfo import ZoneInfo
+        target_date = datetime.now(zone).date()
 
-        from app.models.station import Station
-        st = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
-        tz_name = st.timezone if st else None
-        try:
-            target_date = datetime.now(ZoneInfo(tz_name or "UTC")).date()
-        except Exception:
-            target_date = datetime.now(ZoneInfo("UTC")).date()
-    day_name = target_date.strftime("%A").lower()  # "monday", etc.
-
-    # Get active schedules for station
-    result = await db.execute(
-        select(ScheduleModel).where(
-            ScheduleModel.station_id == station_id,
-            ScheduleModel.is_active == True,
+    schedules = (
+        await db.execute(
+            select(ScheduleModel)
+            .where(ScheduleModel.station_id == station_id, ScheduleModel.is_active == True)  # noqa: E712
+            .options(selectinload(ScheduleModel.blocks))
         )
-    )
-    schedules = result.scalars().all()
-    schedule_ids = [s.id for s in schedules]
-    if not schedule_ids:
+    ).scalars().all()
+    if not schedules:
         return {"station_id": station_id, "date": target_date.isoformat(), "blocks": []}
 
-    # Get blocks for these schedules
-    result = await db.execute(
-        select(ScheduleBlockModel).where(ScheduleBlockModel.schedule_id.in_(schedule_ids))
-    )
-    blocks = result.scalars().all()
+    svc = SchedulingService(db)
+    day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=zone)
+    day_end = datetime.combine(target_date + timedelta(days=1), datetime.min.time(), tzinfo=zone)
+    start_utc, end_utc = day_start.astimezone(timezone.utc), day_end.astimezone(timezone.utc)
+    blackouts = await load_blackouts(db, station_id, start_utc, end_utc)
 
-    # Filter to blocks active on target_date
-    epg_blocks = []
-    for block in blocks:
-        matches = False
-        rec = block.recurrence_type.value if hasattr(block.recurrence_type, 'value') else str(block.recurrence_type)
+    # Every moment the winner can change: midnight, each block's real start and end
+    # that day (sun times resolved), and the edges of off-air windows.
+    edges = {start_utc}
+    for schedule in schedules:
+        for block in schedule.blocks:
+            for clock, event, offset in (
+                (block.start_time, block.start_sun_event, block.start_sun_offset),
+                (block.end_time, block.end_sun_event, block.end_sun_offset),
+            ):
+                if clock is None:
+                    continue
+                if event and station:
+                    clock = svc._resolve_sun_time(event, offset or 0, station, target_date, fallback=clock)
+                at = datetime.combine(target_date, clock, tzinfo=zone).astimezone(timezone.utc)
+                if start_utc < at < end_utc:
+                    edges.add(at)
+    for b in blackouts:
+        for at in (b.start, b.end):
+            if start_utc < at < end_utc:
+                edges.add(at)
+    edges = sorted(edges)
 
-        if rec == "daily":
-            matches = True
-        elif rec == "weekly":
-            pattern = block.recurrence_pattern or []
-            matches = day_name in [p.lower() for p in pattern]
-        elif rec == "monthly":
-            pattern = block.recurrence_pattern or []
-            matches = target_date.day in pattern
-        elif rec == "one_time":
-            if block.start_date and block.end_date:
-                matches = block.start_date <= target_date <= block.end_date
-            elif block.start_date:
-                matches = target_date == block.start_date
-
-        if matches:
-            # Find parent schedule name
-            schedule = next((s for s in schedules if s.id == block.schedule_id), None)
-            epg_blocks.append({
+    names = {s.id: s.name for s in schedules}
+    runs: list[dict] = []
+    for i, at in enumerate(edges):
+        until = edges[i + 1] if i + 1 < len(edges) else end_utc
+        off = next((b for b in blackouts if b.covers(at)), None)
+        if off is not None:
+            key, item = f"off:{off.name}", {
+                "id": f"off-air-{at.isoformat()}",
+                "name": off.name or "Off air",
+                "description": "Off the air",
+                "playback_mode": "off_air",
+                "schedule_name": None,
+                "off_air": True,
+            }
+        else:
+            ranked = svc.rank_matching_blocks(schedules, at, station)
+            if not ranked:
+                continue
+            schedule, block = ranked[0]
+            key, item = str(block.id), {
                 "id": str(block.id),
                 "name": block.name,
                 "description": block.description,
-                "start_time": block.start_time.strftime("%H:%M") if block.start_time else None,
-                "end_time": block.end_time.strftime("%H:%M") if block.end_time else None,
-                "playback_mode": block.playback_mode.value if hasattr(block.playback_mode, 'value') else str(block.playback_mode),
-                "schedule_name": schedule.name if schedule else None,
-            })
+                "playback_mode": block.playback_mode.value if hasattr(block.playback_mode, "value") else str(block.playback_mode),
+                "schedule_name": names.get(schedule.id),
+                "off_air": False,
+            }
+        if runs and runs[-1]["_key"] == key and runs[-1]["_until"] == at:
+            runs[-1]["_until"] = until
+            continue
+        runs.append({**item, "_key": key, "_from": at, "_until": until})
 
-    # Sort by start_time
-    epg_blocks.sort(key=lambda b: b["start_time"] or "00:00")
+    epg_blocks = []
+    for run in runs:
+        item = {k: v for k, v in run.items() if not k.startswith("_")}
+        item["start_time"] = _hhmm(run["_from"].astimezone(zone))
+        item["end_time"] = _hhmm(run["_until"].astimezone(zone))
+        epg_blocks.append(item)
 
     return {
         "station_id": station_id,
@@ -152,6 +184,24 @@ async def _queue_follows_schedule(db: AsyncSession, schedule_id, *, had_playlist
 
         logging.getLogger(__name__).exception("Queue refresh after schedule change failed")
         await db.rollback()
+
+
+async def _block_has_songs(db: AsyncSession, block_id) -> bool:
+    row = await db.execute(
+        select(PlaylistEntryModel.id)
+        .where(PlaylistEntryModel.block_id == block_id, PlaylistEntryModel.is_enabled.is_(True))
+        .limit(1)
+    )
+    return row.first() is not None
+
+
+async def _queue_follows_block(db: AsyncSession, block_id, *, had_playlists: bool = False) -> None:
+    """A song added to, changed on or removed from a block reaches the queue on time."""
+    schedule_id = (
+        await db.execute(select(ScheduleBlockModel.schedule_id).where(ScheduleBlockModel.id == block_id))
+    ).scalar_one_or_none()
+    if schedule_id is not None:
+        await _queue_follows_schedule(db, schedule_id, had_playlists=had_playlists)
 
 
 # ==================== Schedules ====================
@@ -270,7 +320,7 @@ async def update_schedule_block(
     if not block:
         raise HTTPException(status_code=404, detail="Schedule block not found")
 
-    had_playlist = block.playlist_template_id is not None
+    had_playlist = block.playlist_template_id is not None or await _block_has_songs(db, block.id)
     for key, value in data.model_dump(exclude_unset=True).items():
         if key == "playlist_template_id" and isinstance(value, str):
             value = UUID(value)
@@ -305,7 +355,8 @@ async def delete_schedule_block(
     if not block:
         raise HTTPException(status_code=404, detail="Schedule block not found")
 
-    schedule_id, had_playlist = block.schedule_id, block.playlist_template_id is not None
+    schedule_id = block.schedule_id
+    had_playlist = block.playlist_template_id is not None or await _block_has_songs(db, block.id)
     await db.delete(block)
     await db.commit()
     await _queue_follows_schedule(db, schedule_id, had_playlists=had_playlist)
@@ -328,6 +379,7 @@ async def set_prerecorded_show(
     if not block:
         raise NotFoundError("Block not found")
 
+    had_songs = await _block_has_songs(db, block_id)
     # Clear existing entries
     existing = (await db.execute(
         select(PlaylistEntryModel).where(PlaylistEntryModel.block_id == block_id)
@@ -343,7 +395,8 @@ async def set_prerecorded_show(
         is_enabled=True,
     )
     db.add(entry)
-    await db.flush()
+    await db.commit()
+    await _queue_follows_block(db, block_id, had_playlists=had_songs)
 
     return {"status": "ok", "block_id": str(block_id), "asset_id": body["asset_id"]}
 
@@ -357,8 +410,10 @@ async def create_playlist_entry(
 ):
     """Add an asset to a schedule block's playlist."""
     entry = PlaylistEntryModel(**data.model_dump())
+    block_id = entry.block_id
     db.add(entry)
     await db.commit()
+    await _queue_follows_block(db, block_id)
     await db.refresh(entry)
     return entry
 
@@ -406,10 +461,13 @@ async def update_playlist_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Playlist entry not found")
 
+    block_id = entry.block_id
+    had_songs = await _block_has_songs(db, block_id)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(entry, key, value)
 
     await db.commit()
+    await _queue_follows_block(db, block_id, had_playlists=had_songs)
     await db.refresh(entry)
     return entry
 
@@ -427,8 +485,11 @@ async def delete_playlist_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Playlist entry not found")
 
+    block_id = entry.block_id
+    had_songs = await _block_has_songs(db, block_id)
     await db.delete(entry)
     await db.commit()
+    await _queue_follows_block(db, block_id, had_playlists=had_songs)
 
 
 # ==================== Timeline Preview ====================

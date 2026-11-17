@@ -110,6 +110,11 @@ function EditCell({ value, type = 'text', onSave, onCancel, list }: {
 
 /* ── Page ────────────────────────────────────────────────── */
 
+/** The control room opens on the station last picked here (same key it remembers its own pick in). */
+function rememberStation(id: string) {
+  try { localStorage.setItem('radio_last_station', id); } catch { /* private mode */ }
+}
+
 export default function Databank() {
   const qc = useQueryClient();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -550,7 +555,7 @@ export default function Databank() {
           </>
         )}
         {stations.length > 1 && (
-          <select value={stationId} onChange={e => { setStationId(e.target.value); setSel(null); }} aria-label="Station"
+          <select value={stationId} onChange={e => { setStationId(e.target.value); setSel(null); rememberStation(e.target.value); }} aria-label="Station"
             className="qn-field h-11 lg:h-8 px-2 text-sm lg:ml-auto max-w-[14rem]">
             {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>

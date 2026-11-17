@@ -195,17 +195,16 @@ async def test_inactive_station_is_not_advanced(db_session: AsyncSession, monkey
     assert visited == [on.id]
 
 
-# ---- B-SET-18: hourly_station_id (legacy path) ----
+# ---- B-SET-18: hourly_station_id ----
 
-@pytest.mark.asyncio
-async def test_hourly_station_id_legacy_insertion(db_session: AsyncSession):
-    """The legacy scheduling path still honours hourly_station_id in the first two
-    minutes of the hour; the queue engine (replenish) never reads it."""
+def test_hourly_station_id_is_read_by_the_hourly_pass():
+    """The "Hourly Station ID" switch is honoured by the queue's hourly pass (the old
+    template-only path on the UTC clock, which nothing called, is gone). Behaviour is
+    tested in tests/test_replenish_guide_forecast.py (V1-79)."""
     import inspect
 
     from app.services import queue_replenish_service
     from app.services.scheduling import SchedulingService
 
-    assert "hourly_station_id" not in inspect.getsource(queue_replenish_service)
-    assert "hourly_station_id" in inspect.getsource(SchedulingService._check_automation_insertions)
-
+    assert "hourly_station_id" in inspect.getsource(queue_replenish_service)
+    assert not hasattr(SchedulingService, "_check_automation_insertions")
