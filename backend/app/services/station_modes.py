@@ -18,10 +18,11 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset
+from app.models.hs_softened import HsSoftened
 from app.models.queue_entry import QueueEntry, hard_timed
 from app.models.station import Station
 
@@ -29,8 +30,8 @@ logger = logging.getLogger(__name__)
 
 HS_KEY = "hard_start"
 SPOTS_KEY = "spots_on"
-# entry id -> [timing_mode, hard_by iso] as it was before HS off softened it
-SOFTENED_KEY = "hs_softened"
+# Where the first version kept softened timings (now the hs_softened table)
+LEGACY_SOFTENED_KEY = "hs_softened"
 
 
 def hard_start_on(station: Station | None) -> bool:
@@ -48,8 +49,9 @@ def modes(station: Station | None) -> dict:
 async def soften_hard_items(db: AsyncSession, station: Station) -> int:
     """HS off: make every pending hard timed item wait for the song on air.
 
-    Called on each scheduler pass (new items keep arriving). Remembers what it
-    changed so HS on can put it back. Does not commit.
+    Called on each scheduler pass (new items keep arriving). Remembers each item's
+    timing in its own HsSoftened row so HS on can put it back. Never writes the
+    station's settings, so it cannot undo a switch flipped meanwhile. Does not commit.
     """
     if hard_start_on(station):
         return 0
@@ -68,29 +70,40 @@ async def soften_hard_items(db: AsyncSession, station: Station) -> int:
     )).scalars().all()
     if not rows:
         return 0
-    config = dict(station.automation_config or {})
-    saved = dict(config.get(SOFTENED_KEY) or {})
+    known = set((await db.execute(
+        select(HsSoftened.entry_id).where(HsSoftened.entry_id.in_([e.id for e in rows]))
+    )).scalars().all())
+    known = {str(k) for k in known}
     for e in rows:
-        key = str(e.id)
-        if key not in saved:
-            saved[key] = [e.timing_mode, e.hard_by.isoformat() if e.hard_by else None]
+        if str(e.id) not in known:
+            db.add(HsSoftened(entry_id=e.id, station_id=station.id,
+                              timing_mode=e.timing_mode, hard_by=e.hard_by))
         e.timing_mode = "soft"
         e.hard_by = None
-    # Items that aired or were redrawn leave old keys behind: keep the newest
-    if len(saved) > 2000:
-        saved = dict(list(saved.items())[-2000:])
-    config[SOFTENED_KEY] = saved
-    station.automation_config = config
     await db.flush()
     logger.info("Station %s: HS off, %d timed item(s) now wait for the song", station.id, len(rows))
     return len(rows)
 
 
+def _restore(e: QueueEntry, mode: str | None, hard_by: datetime | None) -> None:
+    # The old rule (mode None) treats anything but an ad slot as hard: say so plainly
+    e.timing_mode = mode if mode in ("hard", "soft") else ("soft" if e.source == "ad_slot" else "hard")
+    if hard_by is not None and hard_by.tzinfo is None:
+        hard_by = hard_by.replace(tzinfo=UTC)
+    e.hard_by = hard_by
+
+
 async def restore_hard_items(db: AsyncSession, station: Station) -> int:
     """HS on again: put back the timing of every item HS off softened. Does not commit."""
-    config = dict(station.automation_config or {})
-    saved = dict(config.pop(SOFTENED_KEY, None) or {})
-    station.automation_config = config
+    saved = {str(r.entry_id): (r.timing_mode, r.hard_by) for r in (await db.execute(
+        select(HsSoftened).where(HsSoftened.station_id == station.id)
+    )).scalars().all()}
+    # Saved by the first version, inside the station's settings
+    if LEGACY_SOFTENED_KEY in (station.automation_config or {}):
+        config = dict(station.automation_config)
+        for k, (mode, hard_by) in (config.pop(LEGACY_SOFTENED_KEY) or {}).items():
+            saved.setdefault(k, (mode, datetime.fromisoformat(hard_by) if hard_by else None))
+        station.automation_config = config
     if not saved:
         return 0
     rows = (await db.execute(
@@ -101,18 +114,17 @@ async def restore_hard_items(db: AsyncSession, station: Station) -> int:
         )
     )).scalars().all()
     for e in rows:
-        mode, hard_by = saved.get(str(e.id)) or [None, None]
-        # The old rule (mode None) treats anything but an ad slot as hard: say so plainly
-        e.timing_mode = mode if mode in ("hard", "soft") else ("soft" if e.source == "ad_slot" else "hard")
-        e.hard_by = datetime.fromisoformat(hard_by) if hard_by else None
-        if e.hard_by is not None and e.hard_by.tzinfo is None:
-            e.hard_by = e.hard_by.replace(tzinfo=UTC)
+        _restore(e, *saved[str(e.id)])
+    await db.execute(delete(HsSoftened).where(HsSoftened.station_id == station.id))
     await db.flush()
     return len(rows)
 
 
 async def set_modes(db: AsyncSession, station: Station, hard_start: bool | None, spots: bool | None) -> dict:
-    """Change one or both switches and bring the queue in line. Does not commit."""
+    """Change one or both switches and bring the queue in line. Does not commit.
+    Call under the station's advance_lock: the settings are read fresh here so a
+    change saved elsewhere a moment ago is kept."""
+    await db.refresh(station, ["automation_config"])
     config = dict(station.automation_config or {})
     if hard_start is not None:
         config[HS_KEY] = bool(hard_start)

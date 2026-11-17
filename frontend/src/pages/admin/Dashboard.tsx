@@ -563,9 +563,10 @@ export default function Dashboard() {
       setModesBusy(false);
     }
   }, [qc, refreshQueue]);
-  const doPanic = useCallback(async () => {
+  const doPanic = useCallback(async (armedOn: string) => {
     const sid = latest.current.stationId;
-    if (!sid) return;
+    // Armed on another station than the one now shown: cut nothing
+    if (!sid || sid !== armedOn) return;
     setModesBusy(true);
     try {
       const res = await panicRequest(sid);
@@ -582,6 +583,7 @@ export default function Dashboard() {
     }
   }, [qc, refreshQueue]);
   const modeProps = {
+    stationId: stationId ?? null,
     hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId,
     canChange: !!user && user.role !== 'viewer',
     onHardStart: () => changeModes({ hard_start: !modes.hard_start }),
@@ -856,8 +858,11 @@ export default function Dashboard() {
               />
               <div className="min-h-0" style={{ flex: `${1 - splitShown} 1 0` }}>{sidePanel(sideTab)}</div>
             </div>
-            <aside className="w-28 xl:w-32 shrink-0 bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white" aria-label="Controls">
+            <aside className="w-28 xl:w-32 shrink-0 min-h-0 overflow-y-auto bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white [&>*]:shrink-0" aria-label="Controls">
               <TransportButtons p={transport} stacked />
+              <div className="h-2" />
+              {/* HS, Spots mode and Panic right under the transport, so Panic is on screen even on a short window */}
+              <ModeButtons p={modeProps} stacked />
               <div className="h-2" />
               <div className="flex flex-col gap-1" role="tablist" aria-label="Lower pane">
                 {SIDE_TABS.map(t => (
@@ -867,8 +872,6 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
-              <div className="h-2" />
-              <ModeButtons p={modeProps} stacked />
               <div className="h-2" />
               <Link to="/admin/databank" className="qn-btn h-8 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
                 data-testid="cr-databank">DB</Link>

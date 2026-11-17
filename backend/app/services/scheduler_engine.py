@@ -349,10 +349,16 @@ class SchedulerEngine:
                 continue
             station_name = station.name
             try:
-                # HS off: timed items that arrived since the last pass wait for the song too
-                from app.services.station_modes import soften_hard_items
-                if await soften_hard_items(db, station):
-                    await db.commit()
+                # HS off: timed items that arrived since the last pass wait for the song too.
+                # Under the station's lock, with HS read fresh, so a switch flipped a
+                # moment ago is never undone (wiki/station-modes.md)
+                from app.api.v1.queue import advance_lock
+                from app.services.station_modes import hard_start_on, soften_hard_items
+                if not hard_start_on(station):
+                    async with advance_lock(station_id):
+                        await db.refresh(station, ["automation_config"])
+                        if await soften_hard_items(db, station):
+                            await db.commit()
                     station = await db.get(Station, station_id)
                 if settings.engine_drives(station.id):
                     # The playout engine owns the clock for this station: it asks for the
