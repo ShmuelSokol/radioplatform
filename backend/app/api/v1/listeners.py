@@ -7,8 +7,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 from sqlalchemy import Date, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,8 +33,30 @@ def _aware(dt: datetime) -> datetime:
 
 
 class HeartbeatRequest(BaseModel):
-    station_id: str
-    session_key: str
+    # A malformed station id is the caller's mistake: 422, not a 500 from uuid.UUID()
+    station_id: uuid.UUID
+    # The column is String(100); a retired session gets "~<8 chars>" appended (_retire)
+    session_key: str = Field(min_length=1, max_length=80)
+
+
+def _retire(session: ListenerSession) -> None:
+    """Free the session key of a session that ended (Stop), so the next Listen with
+    the same key starts a new session instead of reopening this one. Reopening it
+    counted the stopped gap as listening time (duration = now - started_at) and made
+    the session overlap the gap in the peak count."""
+    session.session_key = f"{session.session_key}~{str(session.id).replace('-', '')[:8]}"
+
+
+def _for_key(station_id: uuid.UUID, session_key: str):
+    """The sessions with this key, newest first. Two first heartbeats arriving at
+    the same moment can each create a row (no unique constraint on old databases);
+    the newest is used and the rest are left alone, instead of every later heartbeat
+    failing with MultipleResultsFound."""
+    return (
+        select(ListenerSession)
+        .where(ListenerSession.station_id == station_id, ListenerSession.session_key == session_key)
+        .order_by(ListenerSession.started_at.desc(), ListenerSession.last_heartbeat.desc())
+    )
 
 
 # ── Live push: admin pages hear "listeners changed" the moment someone joins or
@@ -111,16 +133,16 @@ async def heartbeat(
 ):
     """Public endpoint — called by the Listen page every 30s to track active listeners."""
     now = datetime.now(timezone.utc)
-    station_id = uuid.UUID(body.station_id)
+    station_id = body.station_id
 
-    # Find existing session
-    result = await db.execute(
-        select(ListenerSession).where(
-            ListenerSession.station_id == station_id,
-            ListenerSession.session_key == body.session_key,
-        )
-    )
-    session = result.scalar_one_or_none()
+    sessions = (await db.execute(_for_key(station_id, body.session_key))).scalars().all()
+    session = sessions[0] if sessions else None
+    if session is not None and session.ended_at is not None:
+        # Stop, then Listen again on the same page (same key): a new session
+        for old in sessions:
+            _retire(old)
+        await db.flush()
+        session = None
 
     if session:
         # Update existing session
@@ -137,6 +159,8 @@ async def heartbeat(
             await _notify_watchers()
         return {"status": "ok", "duration": elapsed}
     else:
+        if await db.get(Station, station_id) is None:
+            raise HTTPException(404, "Station not found")
         # Create new session with geo lookup
         ip = _get_client_ip(request)
         lookup = asyncio.ensure_future(_resolve_geo(ip))
@@ -170,17 +194,13 @@ async def heartbeat(
 
 async def _end_session(db: AsyncSession, station_id: uuid.UUID, session_key: str) -> None:
     now = datetime.now(timezone.utc)
-    result = await db.execute(
-        select(ListenerSession).where(
-            ListenerSession.station_id == station_id,
-            ListenerSession.session_key == session_key,
-        )
-    )
-    session = result.scalar_one_or_none()
-    if session and session.ended_at is None:
+    sessions = (await db.execute(_for_key(station_id, session_key))).scalars().all()
+    open_ones = [s for s in sessions if s.ended_at is None]
+    for session in open_ones:
         session.last_heartbeat = now
         session.duration_seconds = (now - _aware(session.started_at)).total_seconds()
         session.ended_at = now
+    if open_ones:
         await db.commit()
         await _notify_watchers()
 
@@ -191,7 +211,7 @@ async def disconnect(
     db: AsyncSession = Depends(get_db),
 ):
     """Called when a listener stops — finalizes the session and drops it from the live count."""
-    await _end_session(db, uuid.UUID(body.station_id), body.session_key)
+    await _end_session(db, body.station_id, body.session_key)
     return {"status": "ok"}
 
 
@@ -204,7 +224,7 @@ async def leave(request: Request, db: AsyncSession = Depends(get_db)):
     """
     try:
         body = HeartbeatRequest(**json.loads(await request.body()))
-        station_id = uuid.UUID(body.station_id)
+        station_id = body.station_id
     except Exception:
         return {"status": "ignored"}
     await _end_session(db, station_id, body.session_key)

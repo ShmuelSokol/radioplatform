@@ -155,7 +155,8 @@ async def test_adding_a_song_to_an_all_day_block_takes_over_the_queue(
     db_session.expire_all()
     titles = await _pending_titles(db_session, station_id)
     assert len(titles) >= 3
-    assert set(titles) == {"The one song"}, titles[:5]
+    # The next song stays while the rest are redrawn (it may be about to start)
+    assert set(titles[1:]) == {"The one song"}, titles[:5]
 
     r = await client.delete(f"/api/v1/schedules/playlist-entries/{entry_id}", headers=auth_headers)
     assert r.status_code == 204, r.text

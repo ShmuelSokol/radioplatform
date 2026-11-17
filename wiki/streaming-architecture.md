@@ -58,6 +58,9 @@ the engine owns the clock.
 The queue is the only player (the engine plays it when it drives a station). Only
 `_check_advance` / the precise timer (or `playout_engine.tick`) advance playback; they keep
 no `now_playing` row, the WebSocket payload is built from the playing queue entry.
+When an item ends, is skipped (Next/Panic) or removed with nothing to follow it (a blackout with no
+silence queued, a refill that found nothing), `websocket.broadcast_nothing_playing` sends one
+`{"type":"now_playing","data":null}` so open pages drop the old item. A live show taking the air sends none.
 `SchedulerEngine._check_station` plays nothing: it handles live-show hard stops, blackout
 silence and dead air. Dead air (no `playing` entry past `SILENCE_DETECTION_SECONDS`) raises
 one alert per spell and recovers through `queue.start_from_queue` (under `advance_lock`, starts

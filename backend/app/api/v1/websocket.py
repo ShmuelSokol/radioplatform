@@ -415,6 +415,27 @@ async def broadcast_now_playing_update(station_id: str, now_playing_data: dict):
     await manager.broadcast_to_station(station_id, message)
 
 
+async def broadcast_nothing_playing(station_id) -> None:
+    """Tell listeners the station has nothing on air any more (the last item ended
+    or was skipped or removed and nothing followed it, e.g. during a blackout with no
+    silence queued). Without it open pages kept showing the old item "On Air" until
+    their overdue re-read. Sends {"type": "now_playing", "data": null}."""
+    station_id = str(station_id)
+    _np_generation[station_id] = _np_generation.get(station_id, 0) + 1
+    _join_cache.pop(station_id, None)
+    message = {"type": "now_playing", "data": None}
+    key = json.dumps(message)
+    now = time.monotonic()
+    last = _last_now_playing.get(station_id)
+    if last and last[0] == key and now - last[1] < UNCHANGED_RESEND_SECONDS:
+        return
+    _last_now_playing[station_id] = (key, now)
+    try:
+        await manager.broadcast_to_station(station_id, message)
+    except Exception as e:
+        logger.warning("Nothing-playing broadcast failed for station %s: %s", station_id, e)
+
+
 # station_id -> (last message sent, when)
 _last_now_playing: Dict[str, tuple[str, float]] = {}
 # station_id -> start time of the latest item announced (never goes backwards)

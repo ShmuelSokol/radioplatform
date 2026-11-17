@@ -113,15 +113,18 @@ async def test_refresh_requested_category(client, auth_headers, db_session):
     r = await client.post("/api/v1/assets/refresh-requested-category", headers=auth_headers)
     assert r.status_code == 200 and r.json() == {"tagged": 1}
     p = await _fresh(db_session, popular.id)
-    assert p.category == "requested" and p.metadata_extra["original_category"] == "lively"
-    assert (await _fresh(db_session, quiet.id)).category == "relax"
+    # V2-114: the song keeps its own category and is tagged as requested
+    assert p.category == "lively" and p.metadata_extra["requested"] == "yes"
+    q = await _fresh(db_session, quiet.id)
+    assert q.category == "relax" and "requested" not in (q.metadata_extra or {})
 
     for q in reqs[:3]:
         await db_session.delete(q)
     await db_session.commit()
     r = await client.post("/api/v1/assets/refresh-requested-category", headers=auth_headers)
     assert r.json() == {"tagged": 0}
-    assert (await _fresh(db_session, popular.id)).category == "lively"  # restored
+    p = await _fresh(db_session, popular.id)
+    assert p.category == "lively" and "requested" not in p.metadata_extra  # tag removed
 
 
 # --- B-ASSETS-3 ---

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
 
-from app.models.asset import ONE_MOMENT_CATEGORIES, Asset, fit_for_random_pick, not_placeholder
+from app.models.asset import ONE_MOMENT_CATEGORIES, Asset, fit_for_random_pick, in_category, not_placeholder
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
@@ -83,6 +83,7 @@ class QueueReplenishService:
 
         from app.services.playlist_generator_service import settings_for
         from app.services.schedule_refresh_service import (
+            KEEP_NEXT,
             automatic_songs,
             drop_dated_clips,
             realign_before_block_change,
@@ -97,6 +98,9 @@ class QueueReplenishService:
         # ahead, whether or not "Generate from sequences" was switched on. A week of
         # ordinary fill left from before is replaced, or the blocks would wait for it.
         generation = settings_for(self.automation_config)
+        # Songs thrown away to be drawn again stay on the air (uncommitted) until the
+        # new ones are written, so the queue never runs out of songs in between
+        redrawing = False
         by_schedule = not generation.enabled and await uses_block_playlists(self.db, self.station_id)
         if by_schedule:
             generation = dataclasses.replace(generation, enabled=True)
@@ -107,13 +111,15 @@ class QueueReplenishService:
                 .where(*automatic_songs(self.station_id))
             )
             if float(queued_auto.scalar() or 0) > 2 * generation.hours * 3600:
-                await remove_automatic_songs(self.db, self.station_id)
+                await remove_automatic_songs(self.db, self.station_id, keep_next=KEEP_NEXT)
+                redrawing = True
                 logger.info("Station %s now fills from its schedule blocks: old fill replaced", self.station_id)
         if by_schedule or (generation.enabled and await uses_block_playlists(self.db, self.station_id)):
             # Shortly before a block's playlist takes over, draw the songs again from
             # the real time on air so the block starts on time, not early
             station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
-            await realign_before_block_change(self.db, station, datetime.now(timezone.utc))
+            if await realign_before_block_change(self.db, station, datetime.now(timezone.utc)):
+                redrawing = True
         await self.db.flush()
 
         result = await self.db.execute(
@@ -172,21 +178,17 @@ class QueueReplenishService:
 
             station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
             await soften_hard_items(self.db, station)
-        await self.db.commit()
+        if not redrawing:
+            await self.db.commit()
 
         # Playlist generation: fill a few hours ahead from the schedule blocks'
         # playlist sequences instead of the rule-based 7-day fill.
         if generation.enabled:
-            if await self._fill_from_playlists(generation, total_seconds):
-                return
-            # Nothing could be generated (no block with a sequence): keep the
-            # station on the air with the ordinary fill, but only as far ahead
-            # as generation looks, so sequences take over once they exist.
-            shortfall = generation.hours * 3600 - total_seconds
-            if shortfall > 0:
-                self.queued_ids = set()
-                self.exclude_ids = set()
-                await self._fill_content(shortfall, asset_type="music", category=None)
+            try:
+                await self._generate_or_fill(generation, total_seconds)
+            finally:
+                if redrawing:
+                    await self.db.commit()
             return
 
         if total_seconds >= TARGET_QUEUE_SECONDS:
@@ -254,6 +256,18 @@ class QueueReplenishService:
 
         await self.db.commit()
         logger.info("Queue replenishment complete")
+
+    async def _generate_or_fill(self, generation, total_seconds: float) -> None:
+        if await self._fill_from_playlists(generation, total_seconds):
+            return
+        # Nothing could be generated (no block with a sequence): keep the
+        # station on the air with the ordinary fill, but only as far ahead
+        # as generation looks, so sequences take over once they exist.
+        shortfall = generation.hours * 3600 - total_seconds
+        if shortfall > 0:
+            self.queued_ids = set()
+            self.exclude_ids = set()
+            await self._fill_content(shortfall, asset_type="music", category=None)
 
     async def _realign_weather_region(self, region: str) -> int:
         """Point queued weather spots at the station's own region.
@@ -663,7 +677,7 @@ class QueueReplenishService:
     async def _find_assets_for_rule(self, rule: ScheduleRule) -> Sequence[Asset]:
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
         if rule.category:
-            query = query.where(Asset.category == rule.category, not_placeholder())
+            query = query.where(in_category(rule.category), not_placeholder())
         else:
             query = query.where(fit_for_random_pick())
         if self.exclude_ids:
@@ -829,7 +843,7 @@ class QueueReplenishService:
 
             query = select(Asset).where(Asset.asset_type == asset_type)
             if category:
-                query = query.where(Asset.category == category, not_placeholder())
+                query = query.where(in_category(category), not_placeholder())
             else:
                 query = query.where(fit_for_random_pick())
             # Only exclude on first pass; allow repeats on subsequent passes

@@ -49,7 +49,7 @@ Operators come from KBR Studio 1.82 (the desktop program the station runs today)
 
 Queue rows show projected air time to the second (`clockTimeSec`), because that is what the old running log shows.
 
-HS, Spots mode, Panic and Errors: see [station-modes](station-modes.md). Still missing: blocks that expand into their items in the log. Its database window is the Databank page ([databank](databank.md)), opened from the DB button.
+HS, Spots mode, Panic and Errors: see [station-modes](station-modes.md). Still missing: blocks that expand into their items in the log. Its database window is the Databank page ([databank](databank.md)), opened from the DB button (right column, straight under Panic, so it stays on screen on a 1280x720 window).
 
 ## PFL (pre-listen) is one shared off-air player
 
