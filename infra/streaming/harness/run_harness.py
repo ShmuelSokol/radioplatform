@@ -1134,6 +1134,11 @@ async def sc_engine_starts_backend_down(h: Harness) -> None:
             f"the site shows the item that started after the return ({st.asset.title if st else None})")
     playing = [e for e in await h.rows() if e.status == "playing"]
     h.check(name, len(playing) == 1, f"one item on air ({len(playing)})")
+    # The backend keeps one connection to the engine open (PR 212); the restart killed
+    # it. The first command after it must still arrive: Next changes the song
+    took = await _next_changes_song(h)
+    h.check(name, took is not None and took <= 4.0,
+            f"Next right after the restart: {'no change' if took is None else f'{took:.1f} s'}")
     await asyncio.sleep(max(0, due.timestamp() - time.time()) + 10)
     starts = await h.started_times("time", due.timestamp() - 5)
     late = starts[0][0] - due.timestamp() if starts else None
@@ -1440,6 +1445,52 @@ async def sc_lane_levels(h: Harness) -> None:
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
     await asyncio.sleep(2)
 
+async def _next_changes_song(h: Harness, limit: float = 8.0) -> float | None:
+    """Press Next on the site; seconds until another item is on air (None = never)."""
+    before = await h.on_air()
+    t0 = time.time()
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    while time.time() - t0 < limit:
+        cur = await h.on_air()
+        if cur is not None and (before is None or cur.id != before.id):
+            return time.time() - t0
+        await asyncio.sleep(0.1)
+    return None
+
+
+async def sc_next_after_idle(h: Harness) -> None:
+    """PR 212: the backend's kept connection to the engine expires after 30 s without
+    use. A Next after 35 s with no operator command still changes the song at once."""
+    name = "next_after_idle"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("story", {}), ("song5", {}), ("song6", {})])
+    took = await _next_changes_song(h)
+    h.check(name, took is not None, "story on air")
+    await asyncio.sleep(35)
+    took = await _next_changes_song(h)
+    h.check(name, took is not None and took <= 3.0,
+            f"Next after 35 s idle: {'no change' if took is None else f'{took:.1f} s'}")
+
+
+async def sc_next_twice(h: Harness) -> None:
+    """A second Next shortly after the first also changes the item (an operator stepping
+    through items). Found 2026-11-17: 0.3 s after a Next the second one answered
+    "Skipped" and nothing changed."""
+    name = "next_twice"
+    for gap in (5.0, 3.5, 2.0, 0.5):
+        await wait_music(h)
+        await h.clear_pending()
+        await h.queue([("song2", {}), ("song3", {}), ("song4", {}), ("song5", {})])
+        await asyncio.sleep(3)
+        first = await _next_changes_song(h)
+        await asyncio.sleep(gap)
+        second = await _next_changes_song(h)
+        h.check(name, first is not None and second is not None and second <= 3.0,
+                f"second Next {gap} s after the first changed the item: "
+                f"{'no change in 8 s' if second is None else f'{second:.1f} s'}")
+
+
 async def sc_engine_crash_restart(h: Harness) -> None:
     """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
     the backend up. It says hello, plays station music (not emergency files) within a few
@@ -1646,6 +1697,8 @@ SCENARIOS = {
     "block_with_very_slow_shiur": lambda h: sc_block_with_slow_shiur(h, 45.0),
     "blackout_ended_early": sc_blackout_ended_early,
     "output_limiter": sc_output_limiter,
+    "next_after_idle": sc_next_after_idle,
+    "next_twice": sc_next_twice,
     "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
