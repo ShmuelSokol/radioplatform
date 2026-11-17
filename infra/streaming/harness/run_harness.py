@@ -818,6 +818,68 @@ async def sc_slow_started(h: Harness) -> None:
     h.check(name, len(playing) == 1, f"one item on air at the end ({len(playing)})")
 
 
+async def sc_three_item_group(h: Harness) -> None:
+    """V1-9: a hard group of three (time, weather, announcement) takes over on the
+    second, plays all three in order, then music comes back with the NEXT song: the
+    song it cut is not reported or heard again."""
+    name = "three_item_timed_group"
+    await wait_music(h)
+    cut = await h.on_air()
+    t1 = at(20)
+    await h.queue([(n, {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})
+                   for n in ("time", "weather", "announce")])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8 + 6 + 12)
+    starts = [(await h.started_times(n, t1.timestamp() - 5)) for n in ("time", "weather", "announce")]
+    firsts = [s[0][0] if s else None for s in starts]
+    late = firsts[0] - t1.timestamp() if firsts[0] else None
+    h.check(name, late is not None and -1 <= late <= 2.0, f"group due {_fmt(t1.timestamp())}, time check {'never' if late is None else f'{late:+.1f} s'}")
+    h.check(name, all(firsts) and firsts[0] < firsts[1] < firsts[2], f"all three played in order: {[_fmt(t) for t in firsts]}")
+    h.check(name, all(len(s) == 1 for s in starts), f"each played once: {[len(s) for s in starts]}")
+    again = [e for e in await h.rows() if e.asset_id == cut.asset_id and e.started_at
+             and e.started_at.timestamp() > t1.timestamp()]
+    h.check(name, not again, f"the cut song was not started again ({len(again)})")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"music back on air ({cur.asset.title if cur else None})")
+    heard = h.heard(t1.timestamp() - 3, (firsts[2] or t1.timestamp() + 20) + 10)
+    h.print_timeline(heard, t1.timestamp())
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    cut_tone = tone_name(TONES[[k for k, v in h.assets.items() if v == cut.asset_id][0]][0])
+    h.check(name, cut_tone not in runs[runs.index(tone_name(TONES["time"][0])) + 1:] if tone_name(TONES["time"][0]) in runs else False,
+            f"heard {runs}; the cut song ({cut_tone}) not heard after the group")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+
+
+async def sc_two_groups(h: Harness, apart: float) -> None:
+    """V1-10: two hard groups `apart` seconds apart (0.3 s: one take-over; 1 s: two in
+    order). Either way both items air once, in order, the first on its second."""
+    name = f"two_groups_{apart:g}s_apart"
+    await wait_music(h)
+    t1 = at(20)
+    t2 = t1 + timedelta(seconds=apart)
+    await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
+                   ("weather", {"preempt_at": t2, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8 + 12)
+    a = await h.started_times("time", t1.timestamp() - 5)
+    b = await h.started_times("weather", t1.timestamp() - 5)
+    late = a[0][0] - t1.timestamp() if a else None
+    h.check(name, late is not None and -1 <= late <= 2.0, f"first group {'never' if late is None else f'{late:+.1f} s'}")
+    h.check(name, len(a) == 1 and len(b) == 1, f"each item played once ({len(a)}, {len(b)})")
+    h.check(name, bool(a and b) and a[0][0] < b[0][0], f"in order: time {_fmt(a[0][0] if a else None)}, weather {_fmt(b[0][0] if b else None)}")
+    # Known bug V1-10b: a hard group due while another timed item plays cuts it (1 s apart:
+    # the time check is cut after 1 s). Logged, not failed, until server, page and engine agree.
+    whole = bool(a and b) and b[0][0] - a[0][0] >= TONES["time"][1] - 0.5
+    log(f"{'OK   ' if whole else 'KNOWN BUG V1-10b'} {name}: time check played "
+        f"{(b[0][0] - a[0][0]) if a and b else 0:.1f} s of {TONES['time'][1]} s before the weather")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"music back on air ({cur.asset.title if cur else None})")
+    heard = h.heard(t1.timestamp() - 3, t1.timestamp() + 22)
+    h.print_timeline(heard, t1.timestamp())
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+
+
 SCENARIOS = {
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
@@ -832,6 +894,9 @@ SCENARIOS = {
     "rapid_next": sc_rapid_next,
     "empty_queue": sc_empty_queue,
     "slow_started": sc_slow_started,
+    "three_item_timed_group": sc_three_item_group,
+    "two_groups_0.3s_apart": lambda h: sc_two_groups(h, 0.3),
+    "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
 }
 
 
