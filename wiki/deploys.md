@@ -27,6 +27,14 @@ drops a queued build in favour of a newer push, the newer push still sees the
 older push's website change and builds. Vercel's checkout is shallow (about 10
 commits): when the last published commit is not in it, the script builds.
 
+`vercel.json` at the repository root is read by every Vercel project that builds
+from the root, and its `ignoreCommand` replaces the project's own "Ignored Build
+Step" setting. The two unused projects (`studio-kolbramah-api`, `frontend`) are
+skipped by their production address (`VERCEL_PROJECT_PRODUCTION_URL`); the first
+merge with the script built the website into `studio-kolbramah-api` once before
+that guard was right. Disconnecting those two projects from Git in Vercel would
+remove the need for the guard.
+
 Branch previews stay off (the script skips anything that is not production), as
 they were in the Vercel project's settings before; `vercel.json` now overrides
 that setting.
