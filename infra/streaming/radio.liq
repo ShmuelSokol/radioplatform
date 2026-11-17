@@ -488,6 +488,17 @@ if debug_wav != "" then
   output.file(%wav, debug_wav, radio)
 end
 
+# ── One MP3 encode for both outputs ──────────────────────────────────────────
+# Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting
+# (compression_level 0 is LAME's quality 0). Encoded once and copied to Icecast and to
+# the HLS segments: two separate encoders cost 14.9% of a core against 8.7% for one
+# (measured 2026-11-17), and the server has a single core.
+encoded = ffmpeg.encode.audio(
+  %ffmpeg(%audio(codec="libmp3lame", b="320k", compression_level=0, ar=44100, channels=2)),
+  radio
+)
+mp3_copy = %ffmpeg(format="mp3", %audio.copy)
+
 # ── HLS copy for iPhone Safari ───────────────────────────────────────────────
 # Safari has no Media Source Extensions for MP3, and its plain <audio> waited about
 # 10 s on the Icecast stream before the first sound. It plays HLS natively: 1 s MP3
@@ -496,20 +507,23 @@ end
 hls_dir = environment.get("KBR_HLS_DIR")
 if hls_dir != "" then
   output.file.hls(
+    fallible=true,
     playlist="live.m3u8",
     segment_duration=1.0,
     segments=10,
     segments_overhead=5,
     hls_dir,
-    [("mp3", %mp3(bitrate=320, samplerate=44100, stereo=true, internal_quality=0))],
-    radio
+    [("mp3", mp3_copy)],
+    encoded
   )
 end
 
 # ── Out to Icecast ───────────────────────────────────────────────────────────
 output.icecast(
-  # Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting
-  %mp3(bitrate=320, samplerate=44100, stereo=true, internal_quality=0),
+  mp3_copy,
+  fallible=true,
+  # A copied stream does not say its bitrate to Icecast by itself
+  headers=[("ice-bitrate", "320"), ("ice-audio-info", "ice-samplerate=44100;ice-bitrate=320;ice-channels=2")],
   host=icecast_host,
   port=icecast_port,
   password=icecast_pass,
@@ -517,5 +531,5 @@ output.icecast(
   name=environment.get(default="Kol B'ramah", "KBR_STATION_NAME"),
   genre="Jewish Radio",
   url="https://kbrlive.com",
-  radio
+  encoded
 )

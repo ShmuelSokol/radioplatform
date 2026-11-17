@@ -63,7 +63,12 @@ def test_levels_and_output_processing():
     assert "ffmpeg.filter.alimiter(graph, limit=0.708" in liq and "level=false" in liq
     assert "radio = mksafe(true_peak_limit(radio))" in liq
     assert "limit(threshold=" not in liq
-    assert "%mp3(bitrate=320, samplerate=44100, stereo=true" in liq
+    # 320 kbps, 44.1 kHz stereo, best encoder setting; encoded once and copied to both
+    # outputs (two encoders cost 14.9% of a core against 8.7% for one, 2026-11-17)
+    assert 'codec="libmp3lame", b="320k", compression_level=0, ar=44100, channels=2' in liq
+    assert liq.count("ffmpeg.encode.audio(") == 1 and "%mp3(" not in liq
+    assert liq.count("mp3_copy") == 3 and 'mp3_copy = %ffmpeg(format="mp3", %audio.copy)' in liq
+    assert '("ice-bitrate", "320")' in liq
     assert 'environment.get(default="Kol B\'ramah", "KBR_STATION_NAME")' in liq
 
 

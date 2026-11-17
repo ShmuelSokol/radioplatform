@@ -159,7 +159,7 @@ stops advancing an engine station itself.
 Each engine uses about 150 MB and 6-7% of one CPU core in steady play (measured 2026-11-16,
 three engines in the local rig), so a 1 GB server holds about four or five stations. The
 stream is MP3 320 kbps, 44.1 kHz stereo, encoder quality 0 (best; Shmuel asked for top
-quality); quality 2 saves only about 2% CPU. At 320 kbps a listener uses about 144 MB an
+quality), encoded once and copied to Icecast and HLS (see "One MP3 encode" below). At 320 kbps a listener uses about 144 MB an
 hour, so a 1 TB monthly transfer allowance covers about 7,000 listener-hours. In the rig, Next on one station moved only
 that station. The backend always sends a JSON body; a bare empty POST through nginx once
 got a 502 from harbor.
@@ -350,3 +350,6 @@ The droplet has one core. Every Liquidsoap start checks the whole script at full
 
 ## One kept connection to the engine (2026-11-17)
 `playout_engine._command` and `engine_status` used to open a new `httpx.AsyncClient` per call: a TCP + TLS handshake to the engine server before every Next, Fade, flush and timed hand-over. They now share one client (`_client()`, one per event loop) with a 30 s keep-alive, below nginx's 75 s so our side closes first and a command never lands on a connection the server has just closed. `close_client()` runs at shutdown. Not measured on production yet (the engine is off for Main); expect the saving of one handshake per command.
+
+## One MP3 encode for Icecast and HLS (2026-11-17)
+Each engine used to run two `%mp3` encoders at quality 0, one for Icecast and one for the iPhone HLS copy. Measured here on the same input: processing alone about 1% of a core, each quality-0 encode about 5%; the whole output chain 14.9% with two encoders against 8.7% with one. `radio.liq` now encodes once with `ffmpeg.encode.audio` (libmp3lame, 320k, `compression_level=0`, which is LAME quality 0) and both outputs take `%ffmpeg(format="mp3", %audio.copy)`. Same quality setting, so nothing to hear. Things that differ with a copied stream: both outputs are `fallible=true`; Icecast is not told the bitrate, so `headers` sends `ice-bitrate` and `ice-audio-info`; HLS segments still start with Apple's timestamp ID3 tag and now begin on a whole MP3 frame (the old ones cut mid-frame). The harness `icecast_output` scenario checks all of this, including the HLS segments. On the droplet (2026-11-17 21:20Z, before this change) one engine used 20% of the one core and 207 MB; three engines need 2 vCPU / 2 GB at least.
