@@ -127,23 +127,33 @@ async def test_second_station_in_the_same_town_gets_its_own_shabbos(client, auth
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: moving a station (new latitude/longitude) keeps the blackouts made for its old "
-    "location; the new town's Shabbos is only added when the daily extension next runs, and "
-    "the old windows are never removed, so the station goes silent at the old town's times"))
 async def test_moving_a_station_moves_its_shabbos(client, auth_headers, db_session):
-    """B-HOLIDAYS-7: windows follow the station's location after it is changed."""
+    """B-HOLIDAYS-7: windows follow the station's location after it is changed. FIXED: the old
+    town's windows stayed and the new town's came only with the next daily extension."""
     st = await _station(db_session)
     await client.post("/api/v1/holidays/auto-generate", json={"station_id": str(st.id), "months_ahead": 1},
                       headers=auth_headers)
     old = {w.id for w in (await db_session.execute(select(HolidayWindow))).scalars().all()}
     assert old
+    # A hand-made window and one shared with another station stay where they are
+    first = (await db_session.execute(select(HolidayWindow))).scalars().first()
+    other = await _station(db_session, "Toms River", (39.9537, -74.1979, "America/New_York"))
+    keep = [HolidayWindow(id=uuid.uuid4(), name="Station event", start_datetime=first.start_datetime + timedelta(days=9),
+                          end_datetime=first.end_datetime + timedelta(days=9), is_blackout=True,
+                          affected_stations={"station_ids": [str(st.id)]}, reason="Manual"),
+            HolidayWindow(id=uuid.uuid4(), name=first.name, start_datetime=first.start_datetime,
+                          end_datetime=first.end_datetime, is_blackout=True,
+                          affected_stations={"station_ids": [str(st.id), str(other.id)]}, reason="Shabbos")]
+    db_session.add_all(keep)
+    await db_session.commit()
+    keep_ids = {w.id for w in keep}
     r = await client.put(f"/api/v1/stations/{st.id}", json={"latitude": 31.778, "longitude": 35.235},
                          headers=auth_headers)
     assert r.status_code == 200 and r.json()["timezone"] == "Asia/Jerusalem"
     rows = (await db_session.execute(select(HolidayWindow).execution_options(populate_existing=True))).scalars().all()
     left = [w.name for w in rows if w.id in old and str(st.id) in (w.affected_stations or {}).get("station_ids", [])]
     assert left == []
+    assert keep_ids <= {w.id for w in rows}
     assert any(w.id not in old for w in rows)                       # the new town's windows are there
 
 
