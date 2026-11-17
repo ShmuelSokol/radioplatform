@@ -34,9 +34,9 @@ def test_engine_says_hello_before_asking_for_tracks():
 
 
 def test_main_lane_request_settings():
-    """V1-2/V1-3: one track pre-loaded, retry every 2 s, 30 s to resolve; `given` holds 5 ids."""
+    """V1-2/V1-3: one track pre-loaded, retry every 2 s, 120 s to resolve (raised from 30 s in PR 142: whole files download first); `given` holds 5 ids."""
     liq = _liq()
-    assert re.search(r"request\.dynamic\(id=\"main\", prefetch=1, retry_delay=2\., timeout=30\.", liq)
+    assert re.search(r"request\.dynamic\(id=\"main\", prefetch=1, retry_delay=2\., timeout=120\.", liq)
     assert "given := list.prefix(5, data.entry_id :: given())" in liq
     assert "?given=#{handed}" in liq
 
