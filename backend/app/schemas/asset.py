@@ -97,6 +97,7 @@ class BulkAutoTrimStatusResponse(BaseModel):
     trimmed: int
     skipped: int
     errors: int
+    detail: str | None = None  # why it failed (e.g. the server restarted mid-job)
 
 
 class EnhanceFilter(BaseModel):

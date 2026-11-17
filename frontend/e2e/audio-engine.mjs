@@ -129,7 +129,7 @@ const SCENARIOS = {
   'hard-timed-item-fades-the-song': {
     start: { ...A, nextId: 'b' }, wait: 4, watch: 5,
     change: (set, startA) => set({ ...A, nextId: 'b', startedAt: startA, queue: [timed({ hard_timed: true })] }),
-    fadesBy: 3,
+    fadesBy: 3, firstHeard: { src: 'c', from: 2.8, to: 3.5 },
   },
   // A soft item with a limit: the song fades at the limit, not at the item's time
   'soft-item-fades-only-at-its-limit': {
@@ -138,7 +138,7 @@ const SCENARIOS = {
       ...A, nextId: 'b', startedAt: startA,
       queue: [timed({ hard_timed: false, preempt_at: inSeconds(1), hard_by: inSeconds(5) })],
     }),
-    fadesBy: 5, notBefore: 2.5,
+    fadesBy: 5, notBefore: 2.5, firstHeard: { src: 'c', from: 4.8, to: 5.5 },
   },
   // A hard block due in 3 s, announced 0.25 s after its time, with slow URL lookups
   // (a cold load): the block item must already be loaded, so there is no hole
@@ -229,6 +229,42 @@ const SCENARIOS = {
     change: (set) => set({ ...D, nextId: 'a', startedAt: now() }),
     overlapOf: ['t', 'd'], end: { src: 'd', minT: 3.5, maxT: 5.5 },
   },
+  // All Day Stories, 03:00Z 2026-11-17: the story on air is paused for the 5 s time check
+  // (pre-loaded as the next item), the server hands back to the story 4.8 s later with
+  // its start time moved back to where it stopped. No overlap, no gap.
+  'story-resumes-after-time-check': {
+    start: { ...D, nextId: 't' }, wait: 3, watch: 9, ranges: true,
+    change: (set) => {
+      // the server sends the paused story as next with its resume point as cue-in
+      set({ ...T, nextId: 'd', nextCueIn: 3, startedAt: now() });
+      setTimeout(() => set({ ...D, nextId: 'a', startedAt: secondsAgo(3 + 4.8) }), 4800);
+    },
+    overlapOf: ['t', 'd'], end: { src: 'd', minT: 9, maxT: 13 },
+  },
+  // The same with the time check not pre-loaded and slow to arrive (1.2 s late here)
+  'story-resumes-after-late-time-check': {
+    start: { ...D, nextId: 'a' }, wait: 3, watch: 9, urlDelay: 1200, ranges: true,
+    change: (set) => {
+      // the server sends the paused story as next with its resume point as cue-in
+      set({ ...T, nextId: 'd', nextCueIn: 3, startedAt: now() });
+      setTimeout(() => set({ ...D, nextId: 'a', startedAt: secondsAgo(3 + 4.8) }), 4800);
+    },
+    overlapOf: ['t', 'd'], end: { src: 'd', minT: 9, maxT: 13 },
+  },
+  // The page starts a pre-loaded hard time check at its time itself: the server's
+  // message arrives 1.5 s late (pages were 1.1-1.8 s late, 13:00Z 2026-11-17)
+  'hard-time-check-starts-on-time-before-the-message': {
+    start: { ...D, nextId: 't' }, wait: 1, watch: 11, ranges: true,
+    change: (set, startA) => {
+      const due = inSeconds(3);
+      set({ ...D, nextId: 't', startedAt: startA, queue: [timed({ asset_id: 't', preempt_at: due })] });
+      setTimeout(() => set({ ...T, nextId: 'd', nextCueIn: 4, startedAt: due }), 4500);
+      // the server resumes the story at the clip's end (+8 s) from 4 s, started_at moved back
+      setTimeout(() => set({ ...D, nextId: 'a', startedAt: secondsAgo(1.2 + 4) }), 3000 + 5000 + 1200);
+    },
+    firstHeard: { src: 't', from: 2.8, to: 3.4 },
+    overlapOf: ['t', 'd'], end: { src: 'd', minT: 6, maxT: 8.5 },
+  },
   // Switching while the station's own crossfade is under way
   'switch-station-during-crossfade': {
     start: { ...A, nextId: 'b' }, wait: 17.5, watch: 4,
@@ -255,6 +291,8 @@ async function run(name, sc) {
   let urlDelay = 30;
   await page.route('**/__tone/*.wav', (r) => {
     const id = r.request().url().split('/').pop().replace('.wav', '');
+    // sc.ranges: byte ranges like the real file store, so positions can be checked
+    if (sc.ranges) return serveRange(r, wav(...TONES[id]));
     return r.fulfill({ contentType: 'audio/wav', body: wav(...TONES[id]) });
   });
   await page.route('**/assets/*/audio-url', async (r) => {
@@ -275,25 +313,33 @@ async function run(name, sc) {
   const nextNow = (id, fade) => page.evaluate(([i, f]) => window.__nextNow(i, f), [id, fade]);
   sc.change(set, startA, nextNow);
   let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, firstSilent = null, last = [];
-  let overlap = 0;
+  let overlap = 0, firstHeard = null;
   const target = sc.end?.src;
   while (Date.now() - t0 < sc.watch * 1000) {
     last = await page.evaluate(() => window.__snap());
+    if (process.env.TIMELINE) console.log(((Date.now() - t0) / 1000).toFixed(1), last.map((d) => `${d.src}${d.playing ? '' : '-'}@${d.t}/${d.gain}`).join(' '));
     const audible = last.filter((d) => d.playing && d.gain > 0.05);
     silentFor = audible.length ? 0 : silentFor + 0.2;
     if (firstSilent === null && !audible.length) firstSilent = (Date.now() - t0) / 1000;
     longestSilence = Math.max(longestSilence, silentFor);
     if (sc.overlapOf && sc.overlapOf.every((id) => audible.some((d) => d.src === id && d.gain > 0.2))) overlap += 0.2;
     if (firstNew === null && audible.some((d) => d.src === target && d.t < 4)) firstNew = (Date.now() - t0) / 1000;
+    if (sc.firstHeard && firstHeard === null && audible.some((d) => d.src === sc.firstHeard.src && d.gain > 0.5)) firstHeard = (Date.now() - t0) / 1000;
     if (outGone === null && !audible.some((d) => d.src === sc.start.id)) outGone = (Date.now() - t0) / 1000;
     await sleep(200);
   }
   if (sc.fadesBy) {
-    check(`${name}: song faded out by ${sc.fadesBy} s`, firstSilent !== null && firstSilent <= sc.fadesBy + 0.5,
-      firstSilent === null ? 'never' : `${firstSilent.toFixed(2)} s`);
+    // the song is gone (silence, or the timed item the page started itself at its time)
+    check(`${name}: song faded out by ${sc.fadesBy} s`, outGone !== null && outGone <= sc.fadesBy + 0.5,
+      outGone === null ? 'never' : `${outGone.toFixed(2)} s`);
     if (sc.notBefore) {
-      check(`${name}: not before ${sc.notBefore} s`, firstSilent === null || firstSilent >= sc.notBefore,
-        firstSilent === null ? 'never' : `${firstSilent.toFixed(2)} s`);
+      check(`${name}: not before ${sc.notBefore} s`, outGone === null || outGone >= sc.notBefore,
+        outGone === null ? 'never' : `${outGone.toFixed(2)} s`);
+    }
+    if (sc.firstHeard) {
+      const { src, from, to } = sc.firstHeard;
+      check(`${name}: "${src}" heard from ${from} to ${to} s`, firstHeard !== null && firstHeard >= from && firstHeard <= to,
+        firstHeard === null ? 'never' : `${firstHeard.toFixed(2)} s`);
     }
     await page.close();
     return;
@@ -306,6 +352,11 @@ async function run(name, sc) {
   if (sc.audibleWithin) {
     check(`${name}: new song audible within ${sc.audibleWithin} s`, firstNew !== null && firstNew <= sc.audibleWithin,
       firstNew === null ? 'never' : `${firstNew.toFixed(2)} s`);
+  }
+  if (sc.firstHeard) {
+    const { src, from, to } = sc.firstHeard;
+    check(`${name}: "${src}" heard from ${from} to ${to} s`, firstHeard !== null && firstHeard >= from && firstHeard <= to,
+      firstHeard === null ? 'never' : `${firstHeard.toFixed(2)} s`);
   }
   if (sc.overlapOf) {
     check(`${name}: "${sc.overlapOf[1]}" is not heard over "${sc.overlapOf[0]}"`, overlap <= 0.4,

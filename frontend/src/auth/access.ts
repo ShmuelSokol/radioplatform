@@ -56,6 +56,7 @@ const WRITE_ROLES: [prefix: string, roles: Role[]][] = [
   ['/admin/schedules', MANAGERS],
   ['/admin/rules', ADMIN],
   ['/admin/program-clock', MANAGERS],
+  ['/admin/bug-reports', ADMIN],
 ];
 
 export function canChange(role: Role | undefined | null, path: string): boolean {

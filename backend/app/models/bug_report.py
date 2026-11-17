@@ -16,7 +16,7 @@ BUG_STATUSES = ("new", "mirrored", "fix_ready", "needs_owner", "fixed", "closed"
 class BugReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "bug_reports"
 
-    number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    number: Mapped[int] = mapped_column(Integer, nullable=False, index=True, unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="new")
 
     reporter_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

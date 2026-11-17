@@ -21,7 +21,7 @@ Tab "Listeners" lists each listening session (station, start, length, place, dev
   "(changed)"). The JSON body is kept with secret keys masked.
 - Station: the `{station_id}` path param, else `station_id` in the body, else the
   changed rows. Next / Play now show "Song A → Song B" from queue status changes.
-- Rows also carry status code (403 shows as "Refused"), IP (X-Forwarded-For),
+- Rows also carry status code (403 shows as "Refused"), IP (rightmost non-internal X-Forwarded-For hop, `app/core/client_ip.py`),
   device ("iPhone · Safari"), place (ip-api lookup, cached per IP) and the
   request id the browser sent (matches bug reports).
 - Writing never slows a request: rows go to an in-memory queue and one background

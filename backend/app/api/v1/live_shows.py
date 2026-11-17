@@ -343,6 +343,27 @@ async def get_active_show_for_station(
 
 # --- Twilio webhooks (no auth — validated by Twilio signature) ---
 
+def _phone_key(number) -> str:
+    """A phone number as its numerals only, to compare +1 (555) 000-0002 with +15550000002."""
+    return "".join(ch for ch in str(number or "") if ch in "0123456789")
+
+
+async def _station_for_number(db: AsyncSession, number) -> uuid.UUID | None:
+    """The station whose own call-in number was dialled, or None (shared number)."""
+    from app.models.station import Station
+
+    wanted = _phone_key(number)
+    if not wanted:
+        return None
+    rows = (await db.execute(
+        select(Station.id, Station.broadcast_config).where(Station.broadcast_config.isnot(None))
+    )).all()
+    for station_id, config in rows:
+        if isinstance(config, dict) and _phone_key(config.get("call_in_number")) == wanted:
+            return station_id
+    return None
+
+
 @router.post("/twilio/inbound")
 async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     """Twilio inbound call webhook — find active show, create CallInRequest, return hold TwiML."""
@@ -350,13 +371,16 @@ async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     caller_phone = form.get("From", "unknown")
     call_sid = form.get("CallSid", "")
 
-    # Find an active live show with calls enabled
-    result = await db.execute(
-        select(LiveShow).where(
-            LiveShow.status == LiveShowStatus.LIVE,
-            LiveShow.calls_enabled == True,
-        ).limit(1)
+    # Find an active live show with calls enabled: the dialled station's when the number
+    # called (To) is a station's own call-in number (broadcast_config.call_in_number)
+    query = select(LiveShow).where(
+        LiveShow.status == LiveShowStatus.LIVE,
+        LiveShow.calls_enabled == True,  # noqa: E712
     )
+    dialled = await _station_for_number(db, form.get("To", ""))
+    if dialled is not None:
+        query = query.where(LiveShow.station_id == dialled)
+    result = await db.execute(query.order_by(LiveShow.actual_start.desc().nullslast()).limit(1))
     show = result.scalar_one_or_none()
 
     if not show:

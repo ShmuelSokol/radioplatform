@@ -177,7 +177,6 @@ async def test_phone_call_prompts_and_hang_ups(client, db_session):
     assert calls["CA2"].status == CallStatus.COMPLETED and calls["CA2"].air_end is not None
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: an inbound phone call joins the first live show found, not the dialled station's")
 @pytest.mark.asyncio
 async def test_phone_call_reaches_the_dialled_station(client, db_session):
     from app.config import settings

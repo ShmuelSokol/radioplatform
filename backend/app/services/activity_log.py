@@ -416,13 +416,9 @@ def describe_device(ua: str | None) -> str | None:
 
 
 def client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:50]
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip[:50]
-    return request.client.host if request.client else None
+    from app.core.client_ip import client_ip as _client_ip
+
+    return _client_ip(request)
 
 
 _SECRET_KEY = re.compile(r"password|secret|token|api_key|authorization", re.I)

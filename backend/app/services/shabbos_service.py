@@ -3,7 +3,8 @@ Shabbos & Yom Tov blackout window generation service.
 
 Generates HolidayWindow dicts for:
 - Every Shabbos (Friday sunset −18 min → Saturday sunset +72 min)
-- All Yom Tov days (diaspora, 2-day) with proper Hebrew→Gregorian conversion
+- All Yom Tov days with proper Hebrew→Gregorian conversion: the 2-day diaspora
+  calendar, or the 1-day Israel calendar for a station whose time zone is in Israel
 """
 import logging
 from datetime import date, datetime, timedelta
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Yom Tov dates in the Hebrew calendar (month, day) pairs.
 # Each entry: (name, list of (hebrew_month, hebrew_day) for erev through last day).
-# Diaspora 2-day Yom Tov assumed.
+# Diaspora 2-day Yom Tov (Israel stations use YOM_TOV_DEFINITIONS_ISRAEL below).
 YOM_TOV_DEFINITIONS = [
     ("Rosh Hashanah", [(7, 1), (7, 2)]),          # Tishrei 1-2
     ("Yom Kippur", [(7, 10)]),                      # Tishrei 10
@@ -26,6 +27,19 @@ YOM_TOV_DEFINITIONS = [
     ("Pesach (Last Days)", [(1, 21), (1, 22)]),     # Nissan 21-22
     ("Shavuot", [(3, 6), (3, 7)]),                  # Sivan 6-7
 ]
+
+# In Israel every Yom Tov but Rosh Hashanah is one day (no second day of galuyot).
+YOM_TOV_DEFINITIONS_ISRAEL = [
+    (name, days if name == "Rosh Hashanah" else days[:1])
+    for name, days in YOM_TOV_DEFINITIONS
+]
+
+ISRAEL_TIMEZONES = {"Asia/Jerusalem", "Asia/Tel_Aviv", "Israel"}
+
+
+def is_israel_timezone(tz: str | None) -> bool:
+    """A station keeps the Israel calendar when its time zone is Israel's."""
+    return (tz or "") in ISRAEL_TIMEZONES
 
 
 def _sunset_for(lat: float, lon: float, tz: str, d: date) -> datetime:
@@ -101,15 +115,19 @@ def generate_yom_tov_windows(
 ) -> list[dict]:
     """Generate blackout windows for all Yom Tov in the date range.
 
+    A time zone in Israel gets the 1-day Israel calendar, anywhere else the
+    2-day diaspora one.
+
     For each Yom Tov block:
       start = erev (day before first day) sunset − 18 min
       end   = last day sunset + 72 min
     """
     windows = []
     hebrew_years = _get_hebrew_years_for_range(start_date, end_date)
+    definitions = YOM_TOV_DEFINITIONS_ISRAEL if is_israel_timezone(tz) else YOM_TOV_DEFINITIONS
 
     for hebrew_year in hebrew_years:
-        for name, day_list in YOM_TOV_DEFINITIONS:
+        for name, day_list in definitions:
             try:
                 # Convert all days to Gregorian
                 greg_days = []

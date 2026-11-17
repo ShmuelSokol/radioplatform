@@ -30,6 +30,8 @@ export interface NowPlayingData {
     audio_url?: string;
     cue_in?: number;
     replay_gain_db?: number;
+    /** When it cuts into the item on air (hard timed item); null = it follows it */
+    cut_at?: string | null;
   };
 }
 

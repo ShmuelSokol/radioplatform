@@ -150,9 +150,6 @@ async def test_sunset_block_uses_the_station_location(db_session):
     assert await _on(db_session, station, 2026, 11, 17, 16, 40) is None
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: a sun-relative block where the sun never sets (polar summer) raises from astral "
-    "and breaks block resolution for the whole station instead of falling back"))
 @pytest.mark.asyncio
 async def test_polar_summer_does_not_break_block_resolution(db_session):
     """V2-103"""

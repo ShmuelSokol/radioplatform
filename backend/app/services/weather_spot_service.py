@@ -81,7 +81,10 @@ def slot_key_for(at_utc: datetime, zone: ZoneInfo) -> str:
 def clip_hour(asset: Asset) -> int | None:
     """The hour of the day a time announcement says (uploaded or generated clip)."""
     meta = asset.metadata_extra or {}
-    raw = meta.get("time_of_day") or (meta.get("slot_key") or "")[11:13]
+    # Midnight is 0: test for None, not falsy, or the midnight clip has no hour
+    raw = meta.get("time_of_day")
+    if raw is None or raw == "":
+        raw = (meta.get("slot_key") or "")[11:13]
     try:
         return int(raw)
     except (TypeError, ValueError):
@@ -438,7 +441,9 @@ async def get_or_create_weather_spot_assets(
         existing_time = uploaded_time
 
     existing_weather = await find_weather_spot_asset(db, weather_key, region)
-    generate_weather = region == DEFAULT_WEATHER_REGION
+    # No weather key: no weather to generate. Trying anyway failed every time, and each
+    # failure paused the time announcements' generation too.
+    generate_weather = region == DEFAULT_WEATHER_REGION and settings.weather_enabled
 
     if existing_time and (existing_weather or not generate_weather):
         return existing_time, existing_weather
