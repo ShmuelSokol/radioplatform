@@ -270,15 +270,18 @@ async function stationListChecks(browser) {
 }
 
 // ── Program guide ──
-const NIGHT = { id: 'g-night', name: 'Night learning', description: 'Gemara b\'iyun', start_time: '22:00', end_time: '02:00', playback_mode: 'sequential', schedule_name: 'Daily' };
+// A daily 22:00-02:00 block as the EPG lists it: runs are cut at midnight, so the day
+// shows its early part (00:00-02:00) first and its evening part (22:00-00:00) last
+const NIGHT = { id: 'g-night', name: 'Night learning', description: 'Gemara b\'iyun', playback_mode: 'sequential', schedule_name: 'Daily' };
 const GUIDE_DAY = [
+  { ...NIGHT, start_time: '00:00', end_time: '02:00' },
   { id: 'g-morning', name: 'Morning shiurim', description: 'Daf yomi', start_time: '06:00', end_time: '09:00', playback_mode: 'sequential', schedule_name: 'Weekday' },
   { id: 'g-mid', name: 'Mid-morning music', description: null, start_time: '09:00', end_time: '12:00', playback_mode: 'shuffle', schedule_name: 'Weekday' },
-  NIGHT,
+  { ...NIGHT, start_time: '22:00', end_time: '00:00' },
 ];
 const nowBlocks = (page) => page.evaluate(() => [...document.querySelectorAll('span')]
   .filter((s) => s.textContent.trim() === 'Now')
-  .map((s) => { const card = s.closest('.rounded-lg'); return `${card?.querySelector('h3')?.textContent.trim()}${card?.textContent.includes('Started last night') ? ' (last night)' : ''}`; }));
+  .map((s) => { const card = s.closest('.rounded-lg'); return `${card?.querySelector('h3')?.textContent.trim()} ${card?.querySelector('span.font-mono')?.textContent.replace(/\s+/g, ' ').trim()}`; }));
 const dateLabel = (page) => page.locator('span.uppercase.tracking-wider').first().innerText();
 const dateValue = (page) => page.getByLabel('Date').inputValue();
 
@@ -294,7 +297,7 @@ async function guideChecks(browser) {
     await sleep(800);
     const now = await nowBlocks(page);
     check(`${tag}-4: overnight block (22:00-02:00) is "Now" in its early-morning part on today's view`,
-      (await dateValue(page)) === '2026-11-17' && now.length === 1 && now[0].startsWith('Night learning'), JSON.stringify(now));
+      (await dateValue(page)) === '2026-11-17' && now.join() === 'Night learning 12:00 AM - 2:00 AM', JSON.stringify(now));
     await ctx.close();
   }
   // F-GUIDE-5: the Now marker moves on an open page (08:58 -> 09:01), and past midnight "today" moves on
@@ -308,7 +311,7 @@ async function guideChecks(browser) {
     await sleep(800);
     const after = await nowBlocks(page);
     check(`${tag}-5: "Now" moves from one block to the next on an open page, no reload`,
-      before.join() === 'Morning shiurim' && after.join() === 'Mid-morning music', `${before} -> ${after}`);
+      before.join() === 'Morning shiurim 6:00 AM - 9:00 AM' && after.join() === 'Mid-morning music 9:00 AM - 12:00 PM', `${before} -> ${after}`);
     await ctx.close();
   }
   {
@@ -321,7 +324,7 @@ async function guideChecks(browser) {
     await sleep(1000);
     const d1 = await dateValue(page), n1 = await nowBlocks(page), l1 = await dateLabel(page);
     check(`${tag}-5: at midnight in the station's zone the open page moves to the new day, "Today", and last night's block stays "Now"`,
-      d0 === '2026-11-17' && n0.join() === 'Night learning' && d1 === '2026-11-18' && /today/i.test(l1) && n1.join() === 'Night learning (last night)',
+      d0 === '2026-11-17' && n0.join() === 'Night learning 10:00 PM - 12:00 AM' && d1 === '2026-11-18' && /today/i.test(l1) && n1.join() === 'Night learning 12:00 AM - 2:00 AM',
       `${d0} ${n0} -> ${d1} ${l1} ${n1}`);
     await ctx.close();
   }

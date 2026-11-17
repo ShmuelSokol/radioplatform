@@ -142,6 +142,48 @@ def probe_codec(file_data: bytes, input_ext: str = ".bin") -> str | None:
                 pass
 
 
+class UnreadableAudioError(ValueError):
+    """The upload holds no audio FFmpeg can read (a PDF, an image, a broken file),
+    or FFmpeg could not convert it. Nothing is stored; the caller answers 415."""
+
+
+def _has_audio_stream(file_data: bytes, ext: str) -> bool | None:
+    """True when ffprobe finds an audio stream, False when it finds none (or cannot
+    read the file at all), None when ffprobe is missing so nothing can be told."""
+    if not ext.startswith("."):
+        ext = "." + ext
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+            f.write(file_data)
+            tmp_path = f.name
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams",
+             "-select_streams", "a", tmp_path],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            return False
+        return bool(json.loads(result.stdout or b"{}").get("streams"))
+    except FileNotFoundError:
+        return None
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return False
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _ffmpeg_available() -> bool:
+    import shutil
+
+    return bool(shutil.which(settings.FFMPEG_PATH) or os.path.isfile(settings.FFMPEG_PATH))
+
+
 def _codec_matches(file_data: bytes, ext: str, target_format: str) -> bool:
     """True when the file really carries the target's codec. When ffprobe cannot
     tell, the extension is trusted as before (no needless re-encode)."""
@@ -225,8 +267,13 @@ def convert_audio(
 
     Returns:
         A tuple of (file_bytes, duration_seconds, file_extension).
-        If conversion fails, the original bytes are returned.
         Duration may be None if extraction fails.
+
+    Raises:
+        UnreadableAudioError: the file holds no readable audio, or FFmpeg failed to
+        convert it. (Before 2026-11-17 the original bytes were stored with their own
+        extension and the upload reported success: a PDF became a "song".) Only when
+        ffprobe/FFmpeg are not installed at all are the original bytes kept as before.
     """
     ext = _get_extension(original_filename)
 
@@ -236,6 +283,12 @@ def convert_audio(
         "convert_audio START: file='%s', ext='%s', target='%s', size=%d, hash_4k=%s",
         original_filename, ext, target_format, len(file_data), input_hash,
     )
+
+    if _has_audio_stream(file_data, ext or ".bin") is False:
+        logger.warning("Refusing '%s': no audio stream FFmpeg can read", original_filename)
+        raise UnreadableAudioError(
+            f"'{original_filename}' could not be read as audio. Upload an audio file (MP3, WAV, FLAC, M4A...)."
+        )
 
     # "original" means no conversion
     if target_format == "original":
@@ -272,7 +325,14 @@ def convert_audio(
         duration = _extract_duration(converted, fmt_config["ext"])
         return converted, duration, fmt_config["ext"]
 
-    # Conversion failed — fall back to original file
+    if _ffmpeg_available():
+        # FFmpeg ran and failed: storing the original would put a file of another
+        # format (or a broken one) on air under a success message.
+        raise UnreadableAudioError(
+            f"'{original_filename}' could not be converted to {target_format.upper()}. Try another copy of the file."
+        )
+
+    # No FFmpeg on this machine at all: keep the original file as before
     logger.warning("Conversion failed for '%s' — storing original file as-is", original_filename)
     duration = _extract_duration(file_data, ext)
     return file_data, duration, ext or ".bin"

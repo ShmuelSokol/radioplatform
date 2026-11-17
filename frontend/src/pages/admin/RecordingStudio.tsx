@@ -78,7 +78,7 @@ function ReadoutRecorder({
       const asset = await uploadAsset(
         savedFile,
         `Weather Readout - ${readout.readout_date}`,
-        'wav',
+        'mp3',
         undefined,
         undefined,
         'spot',
@@ -191,7 +191,7 @@ function GeneralRecorder() {
     if (!savedFile || !title.trim()) return;
     setSaving(true);
     try {
-      await uploadAsset(savedFile, title.trim(), 'wav', undefined, undefined, assetType, category || undefined);
+      await uploadAsset(savedFile, title.trim(), 'mp3', undefined, undefined, assetType, category || undefined);
       setSuccess(`Saved "${title}" to library`);
       setPreviewUrl(null);
       setSavedFile(null);

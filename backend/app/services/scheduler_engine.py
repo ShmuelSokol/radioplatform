@@ -434,13 +434,10 @@ class SchedulerEngine:
         result = await db.execute(stmt)
         windows = result.scalars().all()
 
+        from app.services.station_service import window_covers_station
+
         for window in windows:
-            # Check if this window affects this station
-            if window.affected_stations is None:
-                # Null = affects all stations
-                return True
-            station_ids = window.affected_stations.get("station_ids", [])
-            if str(station.id) in [str(sid) for sid in station_ids]:
+            if window_covers_station(window, station.id):
                 return True
 
         return False
@@ -824,7 +821,7 @@ class SchedulerEngine:
                 # When it cuts in (a hard timed item's time, or a soft one's limit), so
                 # pages start it at that moment themselves instead of a second later
                 # when this message reaches them. None = it follows the item on air.
-                "cut_at": _cut_time(next_entry),
+                "cut_at": _cut_time(next_entry, entry),
             }
 
             # Pre-queue next track in Liquidsoap for gapless transitions
@@ -920,16 +917,27 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _cut_time(entry) -> str | None:
-    """When a queued timed entry cuts into the item on air, or None if it waits for it."""
+def _cut_time(entry, on_air=None) -> str | None:
+    """When a queued timed entry cuts into the item on air, or None if it waits for it.
+
+    Every item of a program block shares one preempt_at, so the item after the time
+    check still carries hh:00 once the time check is on air. A cut time at or before
+    the start of the item on air is that group's own: the entry follows it (Main,
+    15:00Z 2026-11-17: pages faded the time check and joined the Daf Yomi
+    announcement late)."""
     from app.models.queue_entry import is_soft_timed
     if entry is None or entry.preempt_at is None:
         return None
     if is_soft_timed(entry):
         if entry.hard_by is None:
             return None
-        return max(_aware(entry.preempt_at), _aware(entry.hard_by)).isoformat()
-    return _aware(entry.preempt_at).isoformat()
+        cut = max(_aware(entry.preempt_at), _aware(entry.hard_by))
+    else:
+        cut = _aware(entry.preempt_at)
+    started = getattr(on_air, "started_at", None)
+    if started is not None and cut <= _aware(started) + timedelta(seconds=1):
+        return None
+    return cut.isoformat()
 
 
 # Global scheduler instance

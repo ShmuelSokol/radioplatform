@@ -67,7 +67,8 @@ ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
 # "carlebach": Shmuel, 2026-11-16: his songs are kept in the library but off the air for now.
 # "block_only": recordings that air only where a program block names them (the day's
 # Daf Yomi shiur, the schedule announcement), never as filler.
-NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing", "carlebach", "block_only")
+# "kids": Shmuel, 2026-11-17: kids' songs (Uncle Moishy, Country Yossi...) stay out of general music draws.
+NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing", "carlebach", "block_only", "kids")
 
 
 # Placeholder items that must never be drawn by any automatic pick, even by a

@@ -10,6 +10,8 @@ A `SpotSchedule` row = "air this sponsor's asset N times in each chosen daypart,
 
 `reconcile_spot_slots()` makes the station's pending `source="ad_slot"` queue entries match the plan for the next 7 days (adds missing, deletes stale). It runs from `QueueReplenishService._schedule_ad_slots()` and right after any schedule create/update/delete.
 
+**Saves stay under 1 s (S-6).** `api/v1/spot_schedules._refresh_queues` refreshes up to `INLINE_MAX_STATIONS` (3) stations inside the request; more (a schedule for every station, 80+ stations took 2-6 s) are returned and handed to `refresh_in_background` after the commit (own session per station, 4 at a time). Deleting an every-station schedule commits it switched off, and the background job deletes the row once the stations have dropped its slots. Each refresh re-softens rebuilt block items when HS is off. The Databank end-date PATCH uses the same path, and with no `station_id` it is 400 unless every schedule of the spot is station-less. Tests: `tests/test_spot_save_speed_and_end_dates.py` (set `spot_schedules.session_factory` to the test session maker to run the background part).
+
 ## Things you would not guess from the code
 
 - **Legacy fallback is keyed on "no schedule rows at all".** A station with zero spot schedules can play the single asset titled `automation_config.ad_slot_asset_title` (default "KOL BRAMAH TEST SPONSOR") in every :15/:30/:45 slot, but only if it sets `ad_slot_legacy_spot = true`. As soon as one schedule row exists (even inactive), only scheduled spots air.
@@ -40,3 +42,5 @@ The planner reads `HolidayWindow` rows with `is_blackout` for the station (`load
 A `SpotSchedule` with `fixed_times` ("07:00,13:30", station time) airs at those clock times on its days instead of being spread over dayparts. Exact times are planned first; spread plays skip a slot an exact time already holds, and two schedules asking for the same minute leave the later one unplaced.
 
 Every placement carries `timing_mode`, written to `QueueEntry.timing_mode` next to `preempt_at` (the playout engine and web player read it; see `wiki/operator-actions.md`): `hard` = the item on air fades and the spot starts on the second, `soft` = the item on air finishes first. The schedule's own `timing_mode` wins; otherwise the station default applies: `automation_config.spot_timing = {"on_the_hour": "hard", "other": "soft"}` (edit via `GET/PUT /spot-schedules/timing-defaults`, on the Spot Schedule page). Changing either re-stamps entries already queued, in place.
+
+Deleting a library item that a spot schedule or a program block uses is refused with 409 naming them (`asset_service.delete_asset`, 2026-11-17); before, the schedule vanished by CASCADE and the block item pointed at nothing. Queued entries and block playlist lines still go with the item.

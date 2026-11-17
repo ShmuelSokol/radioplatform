@@ -8,7 +8,7 @@ import Spinner from '../../components/Spinner';
 
 const IMPORT_FORMATS = [
   { value: 'mp3', label: 'MP3 (default)' },
-  { value: 'mp2', label: 'MP2' },
+  { value: 'mp2', label: 'MP2 (saved as MP3: Safari cannot play MP2)' },
   { value: 'mp4', label: 'MP4 (AAC)' },
   { value: 'wav', label: 'WAV' },
   { value: 'flac', label: 'FLAC' },

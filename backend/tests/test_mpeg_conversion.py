@@ -50,7 +50,8 @@ def _make_valid_mp3_frame() -> bytes:
     """Build a minimal valid MPEG-1 Layer 3 frame (mono, 128kbps, 44100)."""
     # MPEG1, Layer III, 128kbps, 44100Hz, mono → frame size = 417 bytes
     header = bytes([0xFF, 0xFB, 0x90, 0x00])
-    return header + b"\x00" * 413
+    # A few frames: ffprobe needs more than one to call it audio (unreadable files are refused)
+    return (header + b"\x00" * 413) * 8
 
 
 class TestMpegConversion:
@@ -133,8 +134,7 @@ async def test_upload_mpeg_converts_to_mp3(client: AsyncClient, auth_headers: di
 
     with patch("app.services.asset_service.convert_audio", side_effect=mock_convert_audio):
         with patch("app.services.asset_service.upload_file", new_callable=AsyncMock, return_value="assets/test.mp3"):
-            with patch("app.api.v1.assets.task_extract_metadata") as mock_task:
-                mock_task.delay = lambda *a, **k: None
+            with patch("app.api.v1.assets._save_album_art", new_callable=AsyncMock):
                 response = await client.post(
                     "/api/v1/assets/upload",
                     files={"file": ("recording.MPEG", io.BytesIO(fake_mpeg), "video/mpeg")},
@@ -153,17 +153,19 @@ async def test_upload_mpeg_converts_to_mp3(client: AsyncClient, auth_headers: di
 
 @pytest.mark.asyncio
 async def test_upload_mpeg_conversion_failure_returns_error(client: AsyncClient, auth_headers: dict):
-    """If MPEG conversion fails, the upload should still succeed but store original."""
+    """If MPEG conversion fails, the upload is refused with 415 and nothing is stored
+    (it used to store the original and report success)."""
+    from app.services.audio_convert_service import UnreadableAudioError
+
     fake_mpeg = _make_minimal_mp2_in_mpeg_ps()
 
     def mock_convert_audio_fail(file_data, original_filename, target_format="mp3"):
-        """Simulate failed conversion — returns original data."""
-        return file_data, None, ".mpeg"
+        raise UnreadableAudioError(f"'{original_filename}' could not be converted to MP3. Try another copy of the file.")
 
+    upload = AsyncMock(return_value="assets/test.mpeg")
     with patch("app.services.asset_service.convert_audio", side_effect=mock_convert_audio_fail):
-        with patch("app.services.asset_service.upload_file", new_callable=AsyncMock, return_value="assets/test.mpeg"):
-            with patch("app.api.v1.assets.task_extract_metadata") as mock_task:
-                mock_task.delay = lambda *a, **k: None
+        with patch("app.services.asset_service.upload_file", upload):
+            with patch("app.api.v1.assets._save_album_art", new_callable=AsyncMock):
                 response = await client.post(
                     "/api/v1/assets/upload",
                     files={"file": ("recording.mpeg", io.BytesIO(fake_mpeg), "video/mpeg")},
@@ -171,8 +173,6 @@ async def test_upload_mpeg_conversion_failure_returns_error(client: AsyncClient,
                     headers=auth_headers,
                 )
 
-    # Upload still succeeds (stores original)
-    assert response.status_code == 201
-    data = response.json()
-    # File stored with original extension since conversion failed
-    assert data["file_path"].endswith(".mpeg")
+    assert response.status_code == 415
+    assert "could not be converted" in response.json()["detail"]
+    upload.assert_not_called()

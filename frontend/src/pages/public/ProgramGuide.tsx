@@ -6,14 +6,14 @@ import type { StationListResponse, Station } from '../../types';
 
 interface EpgBlock {
   id: string;
-  /** Set on the part of last night's overnight block that is still on after midnight */
-  fromYesterday?: boolean;
   name: string;
   description: string | null;
   start_time: string | null;
   end_time: string | null;
   playback_mode: string;
   schedule_name: string | null;
+  /** Shabbos / Yom Tov: the station is off the air */
+  off_air?: boolean;
 }
 
 interface EpgResponse {
@@ -27,6 +27,7 @@ const playbackModeColors: Record<string, string> = {
   shuffle: 'bg-purple-600/20 text-purple-300 border-purple-500/30',
   weighted: 'bg-amber-600/20 text-amber-300 border-amber-500/30',
   rotation: 'bg-green-600/20 text-green-300 border-green-500/30',
+  off_air: 'bg-gray-700/30 text-gray-400 border-gray-500/30',
 };
 
 function formatTime12h(time24: string): string {
@@ -77,10 +78,9 @@ function isCurrentBlock(block: EpgBlock, selectedDate: string, now: { date: stri
   const t = blockMins(block);
   if (!t) return false;
   const { startMins, endMins } = t;
-  if (block.fromYesterday) return selectedDate === now.date && now.mins < endMins;
   if (endMins <= startMins) {
-    // Overnight (e.g. 22:00-02:00): the evening part on its own date, the early part
-    // on the next date (today's view lists it again first, as "Started last night")
+    // Ends at or after midnight (the EPG cuts runs at midnight, so usually 22:00-00:00;
+    // the part after midnight is its own 00:00-02:00 run in the next day's guide)
     if (selectedDate === now.date) return now.mins >= startMins;
     return addDays(selectedDate, 1) === now.date && now.mins < endMins;
   }
@@ -133,27 +133,8 @@ export default function ProgramGuide() {
     enabled: !!selectedStation,
   });
 
-  // On today's view, last night's overnight blocks that are still on (past midnight,
-  // before their end) come first, read from yesterday's guide
   const isToday = selectedDate === now.date;
-  const yesterday = addDays(selectedDate, -1);
-  const { data: prevData } = useQuery<EpgResponse>({
-    queryKey: ['epg', selectedStation, yesterday],
-    queryFn: async () => {
-      const res = await apiClient.get<EpgResponse>(`/schedules/epg/${selectedStation}`, {
-        params: { date: yesterday },
-      });
-      return res.data;
-    },
-    enabled: !!selectedStation && isToday,
-  });
-  const carried: EpgBlock[] = isToday
-    ? (prevData?.blocks ?? []).filter((b) => {
-        const t = blockMins(b);
-        return !!t && t.endMins <= t.startMins && now.mins < t.endMins;
-      }).map((b) => ({ ...b, fromYesterday: true }))
-    : [];
-  const blocks = [...carried, ...(epgData?.blocks ?? [])];
+  const blocks = epgData?.blocks ?? [];
   // Built at noon UTC and shown in UTC, so viewers west of UTC do not see the day before
   const dateLabel = isToday ? 'Today' : new Date(selectedDate + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
 
@@ -238,7 +219,7 @@ export default function ProgramGuide() {
 
                 return (
                   <div
-                    key={(block.fromYesterday ? 'prev-' : '') + block.id}
+                    key={`${block.id}-${block.start_time}`}
                     data-testid="guide-block"
                     className={`relative flex gap-4 group ${
                       isCurrent ? '' : ''
@@ -280,7 +261,7 @@ export default function ProgramGuide() {
 
                         {/* Playback mode badge */}
                         <span className={`text-[10px] uppercase font-medium px-2 py-0.5 rounded-full border ${modeClass}`}>
-                          {block.playback_mode}
+                          {block.off_air ? 'off air' : block.playback_mode}
                         </span>
                       </div>
 
@@ -292,10 +273,6 @@ export default function ProgramGuide() {
                       {/* Description */}
                       {block.description && (
                         <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{block.description}</p>
-                      )}
-
-                      {block.fromYesterday && (
-                        <p className="text-[11px] text-gray-500 mt-1">Started last night</p>
                       )}
 
                       {/* Schedule name */}
