@@ -286,7 +286,7 @@ async def test_switch_to_block_playlists_replaces_a_long_old_fill(
     entries = await _pending(db_session, st.id)
     old_left = [a for _, a in entries if a.category == "Old"]
     if replaced:
-        assert old_left == []
+        assert len(old_left) <= 1  # the next song stays (it may be about to start)
         assert any(a.category == "New" for _, a in entries)
     else:
         assert len(old_left) == old_songs

@@ -88,22 +88,35 @@ async def drop_dated_clips(db: AsyncSession, station_id) -> int:
     return result.rowcount or 0
 
 
-async def remove_automatic_songs(db: AsyncSession, station_id) -> int:
+async def remove_automatic_songs(db: AsyncSession, station_id, *, keep_next: int = 0) -> int:
     """Throw away the unplayed automatic songs so they are drawn again.
 
     Each block's place in its playlist goes back by the songs removed that were
     drawn for it, so the redrawn queue carries on from the same step.
+
+    keep_next leaves the first few in place. Callers that redraw inside one long
+    transaction use it: the player may move on to the next song meanwhile, and a
+    row deleted but not yet committed would hold it until the redraw is done.
     """
     from app.services.playlist_generator_service import CONFIG_KEY
 
+    which = automatic_songs(station_id)
+    if keep_next:
+        head = (
+            await db.execute(
+                select(QueueEntry.id).where(*which).order_by(QueueEntry.position).limit(keep_next)
+            )
+        ).scalars().all()
+        if head:
+            which = (*which, QueueEntry.id.notin_(head))
     counts = await db.execute(
         select(QueueEntry.block_id, func.count())
-        .where(*automatic_songs(station_id), QueueEntry.block_id.isnot(None))
+        .where(*which, QueueEntry.block_id.isnot(None))
         .group_by(QueueEntry.block_id)
     )
     back = {block_id: n for block_id, n in counts.all()}
     result = await db.execute(
-        delete(QueueEntry).where(*automatic_songs(station_id)).execution_options(synchronize_session=False)
+        delete(QueueEntry).where(*which).execution_options(synchronize_session=False)
     )
     if back:
         station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one()
@@ -178,7 +191,7 @@ async def realign_before_block_change(db: AsyncSession, station: Station, now: d
     if change is None or _realigned.get(str(station.id)) == change:
         return False
     _realigned[str(station.id)] = change
-    removed = await remove_automatic_songs(db, station.id)
+    removed = await remove_automatic_songs(db, station.id, keep_next=KEEP_NEXT)
     logger.info("Station %s: redrew %d automatic songs before the playlist changes (%s)", station.id, removed, change)
     return True
 
@@ -196,19 +209,42 @@ async def refresh_station(db: AsyncSession, station_id, *, had_playlists: bool =
 
 
 async def _refresh(db: AsyncSession, station_id) -> int:
+    removed = await replace_automatic_songs(db, station_id)
+    logger.info("Schedule change: replaced %d automatic songs on station %s", removed, station_id)
+    return removed
+
+
+# The next automatic song stays while the rest are redrawn (see remove_automatic_songs)
+KEEP_NEXT = 1
+
+
+async def replace_automatic_songs(db: AsyncSession, station_id) -> int:
+    """Draw the unplayed automatic songs again, swapping old for new in ONE transaction.
+
+    The redraw can take a minute on the live database. Deleting first and
+    committing left the queue with no songs until the new ones were written
+    (Jerusalem had none from 16:21:34 to 16:22:31 on 2026-11-17), so a song ending
+    then would have jumped to a timed item early or gone silent. Now the refill's
+    own commits are held back: the player keeps seeing the old songs until the new
+    ones are committed together with their removal. If the refill fails, nothing
+    changes. Returns songs removed (0 when the refill failed).
+    """
     from app.services.queue_replenish_service import QueueReplenishService
 
-    removed = await remove_automatic_songs(db, station_id)
-    await db.commit()
-    # The change was just made in this session; read blocks and playlists afresh
-    db.expire_all()
+    await db.commit()  # the caller's own change is saved whatever happens below
+    db.commit = db.flush  # replenish commits in batches; hold them until the swap
     try:
+        removed = await remove_automatic_songs(db, station_id, keep_next=KEEP_NEXT)
+        # The change was just made in this session; read blocks and playlists afresh
+        db.expire_all()
         await QueueReplenishService(db, station_id).replenish()
-        await db.commit()
     except Exception:
         logger.exception("Queue refill after a schedule change failed for station %s", station_id)
+        del db.commit
         await db.rollback()
-    logger.info("Schedule change: replaced %d automatic songs on station %s", removed, station_id)
+        return 0
+    del db.commit
+    await db.commit()
     return removed
 
 

@@ -144,12 +144,15 @@ async def test_queue_is_drawn_again_shortly_before_the_block(db_session: AsyncSe
     station_id, block_id = station.id, str(block.id)
     category = {s.id: s.category for s in songs}
     await db_session.commit()
-    old_ids = {e.id for e in await _auto(db_session, station_id)}
+    old = await _auto(db_session, station_id)
+    old_ids = {e.id for e in old}
 
     await QueueReplenishService(db_session, station_id).replenish()
     await db_session.commit()
     auto = await _auto(db_session, station_id)
-    assert not old_ids & {e.id for e in auto}
+    # all redrawn but the next song, which stays in case it is about to start
+    assert old_ids & {e.id for e in auto} == {old[0].id}
+    assert auto[0].id == old[0].id
     # 7:00, 7:03:45, 7:07:30 (before 7:10), then 7:11:15: the block from step one
     first = next(i for i, e in enumerate(auto) if e.block_id)
     assert first == 3
