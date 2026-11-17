@@ -307,9 +307,9 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-NOWPLAYING-4 `PATCH /now-playing/{station_id}` [require_dj_or_manager] update now playing | modes: both | covered: tests/test_now_playing_broadcast.py
 - [ ] B-NOWPLAYING-5 `DELETE /now-playing/{station_id}` [require_dj_or_manager] Clear now-playing state for a station. | modes: both | covered: tests/test_now_playing_broadcast.py
 
-### nowplaying.py (prefix `/ws`) — NOT MOUNTED (dead code)
-- [ ] B-NOWPLAYING-6 `WEBSOCKET /ws/nowplaying/{station_id}` [PUBLIC] nowplaying websocket | modes: both | covered: tests/test_controls_streams_scheduler.py::test_old_nowplaying_socket_is_not_mounted
-- [ ] B-NOWPLAYING-7 ↳ DEAD CODE: nowplaying.py router is not mounted in api/v1/__init__.py - confirm/remove | modes: n.a. | covered: tests/test_controls_streams_scheduler.py::test_old_nowplaying_socket_is_not_mounted (confirmed not mounted)
+### nowplaying.py (prefix `/ws`): REMOVED in PR 218 (it was never mounted)
+- [x] B-NOWPLAYING-6 `WEBSOCKET /ws/nowplaying/{station_id}` is gone (file removed in PR 218): connecting is refused | modes: both | covered: tests/test_controls_streams_scheduler.py::test_old_nowplaying_socket_is_not_mounted
+- [x] B-NOWPLAYING-7 ↳ DEAD CODE removed: app/api/v1/nowplaying.py deleted in PR 218 (live now-playing is /ws via websocket.py) | modes: n.a. | covered: tests/test_controls_streams_scheduler.py::test_old_nowplaying_socket_is_not_mounted (confirmed not mounted)
 
 ### playlists.py (prefix `/playlists`) — router guard: station_write_guard(template/slot)
 - [x] B-PLAYLISTS-1 `GET /playlists` [require_manager] list templates | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
