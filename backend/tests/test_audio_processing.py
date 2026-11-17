@@ -281,7 +281,6 @@ async def test_musicbrainz_lookup_rules(monkeypatch):
 
 # --- V2-16 ---
 
-@pytest.mark.xfail(strict=True, reason="BUG: trim uses stream copy into an MP3 container, so a WAV/FLAC item cannot be trimmed (500)")
 @pytest.mark.asyncio
 async def test_trim_a_wav_item(client, auth_headers, db_session, local_storage):
     a = await _stored_asset(db_session, _audio("wav", 4), ext="wav")
@@ -385,7 +384,6 @@ def test_audience_detection():
 
 # --- V2-14 ---
 
-@pytest.mark.xfail(strict=True, reason="BUG: bulk analyse/auto-trim job status lives in one process's memory; after a restart the poll gets 404 'Job not found'")
 @pytest.mark.asyncio
 async def test_bulk_job_status_survives_a_restart(client, auth_headers, monkeypatch):
     from app.api.v1 import assets as assets_api
@@ -419,7 +417,6 @@ async def test_studio_mix(client, auth_headers, db_session, local_storage):
     assert r.status_code == 404
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: a studio mix that ffmpeg cannot make answers a bare 500, not a clear error")
 @pytest.mark.asyncio
 async def test_studio_mix_failure_is_explained(client, auth_headers, db_session, local_storage):
     bed = await _stored_asset(db_session, b"not audio", title="Bed")

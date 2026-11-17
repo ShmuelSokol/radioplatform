@@ -1,6 +1,9 @@
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from typing import Any
+
+
+_PUBLIC_JWT_SECRETS = {"", "change-me-in-production"}
 
 
 class Settings(BaseSettings):
@@ -35,6 +38,15 @@ class Settings(BaseSettings):
 
     # JWT
     JWT_SECRET_KEY: str = "change-me-in-production"
+
+    @model_validator(mode="after")
+    def refuse_public_jwt_secret(self) -> "Settings":
+        # The default is in this public repository: with it anyone can sign their own
+        # admin token (and web call-in tokens). Production refuses to start; Railway
+        # keeps the running instance until a new one passes its health check.
+        if self.APP_ENV == "production" and self.JWT_SECRET_KEY in _PUBLIC_JWT_SECRETS:
+            raise ValueError("JWT_SECRET_KEY is the public default; set a long random secret in production")
+        return self
 
     # Password given to accounts created by the seed endpoints. No default on
     # purpose: the repository is public, so a password written here is public.

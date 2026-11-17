@@ -22,8 +22,11 @@ Same pattern as his supplier-item-database project (`wiki/bug-autofix.md` there)
   also written to the Railway log. Per process: a restart empties the buffer.
 
 ## Where it goes
-1. `POST /api/v1/bug-reports` (no login needed; 8 per 10 min per user/IP) saves the row
-   in `bug_reports` (screenshot as bytes). Staff read them at `/admin/bug-reports`
+1. `POST /api/v1/bug-reports` (no login needed; 8 per 10 min per user, or per address
+   from `app/core/client_ip.py`) saves the row in `bug_reports` (screenshot as bytes).
+   `number` has a unique key; a report sent at the same moment as another retries with
+   the next number. The answer says `screenshot_saved: false` when a screenshot was
+   sent but not kept (over 4 MB, not JPEG/PNG/WebP, bad base64) and the dialog says so. Staff read them at `/admin/bug-reports`
    (Settings → Bug Reports); admins can close one.
 2. If `BUG_REPORTS_GITHUB_TOKEN` is set on Railway, the report is copied to the
    PRIVATE repo `BUG_REPORTS_REPO` (default `ShmuelSokol/kbr-bug-reports`):

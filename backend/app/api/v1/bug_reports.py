@@ -17,10 +17,12 @@ from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
 from app.core import log_buffer
+from app.core.client_ip import client_ip
 from app.core.dependencies import require_admin, require_staff
 from app.core.exceptions import NotFoundError
 from app.core.security import decode_token
@@ -132,8 +134,7 @@ async def create_bug_report(
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(_optional_user),
 ):
-    ip = request.client.host if request.client else "?"
-    key = f"user:{user.id}" if user else f"ip:{request.headers.get('x-forwarded-for', ip).split(',')[0].strip()}"
+    key = f"user:{user.id}" if user else f"ip:{client_ip(request) or '?'}"
     if _rate_limited(key):
         return Response(
             content=json.dumps({"detail": "Too many reports in a few minutes. Please wait a little and try again."}),
@@ -141,11 +142,9 @@ async def create_bug_report(
         )
 
     shot, mime = _decode_screenshot(body.screenshot)
-    number = ((await db.execute(select(func.max(BugReport.number)))).scalar() or 0) + 1
     rid = getattr(request.state, "request_id", None)
     log_buffer_snapshot = log_buffer.snapshot()
     report = BugReport(
-        number=number,
         status="new",
         reporter_id=user.id if user else None,
         reporter_name=(user.display_name or user.email) if user else None,
@@ -159,8 +158,19 @@ async def create_bug_report(
         screenshot=shot,
         screenshot_mime=mime,
     )
-    db.add(report)
-    await db.commit()
+    # Numbers are max+1 under a unique key: a report sent at the same moment as
+    # another takes the next number instead of sharing it
+    for attempt in range(5):
+        report.number = ((await db.execute(select(func.max(BugReport.number)))).scalar() or 0) + 1
+        db.add(report)
+        try:
+            await db.commit()
+            break
+        except IntegrityError:
+            await db.rollback()
+            if attempt == 4:
+                raise
+    number = report.number
     import logging
     logging.getLogger(__name__).info(
         "Bug report %s from %s on %s: %s", number, report.reporter_name or "anonymous", body.page_url, body.description[:120]
@@ -169,7 +179,11 @@ async def create_bug_report(
         task = asyncio.get_running_loop().create_task(bug_report_service.report_received(report.id))
         _background.add(task)
         task.add_done_callback(_background.discard)
-    return {"id": str(report.id), "number": number, "mirrored": bug_report_service.github_enabled()}
+    return {
+        "id": str(report.id), "number": number, "mirrored": bug_report_service.github_enabled(),
+        # False when a screenshot was sent but not kept (too big, wrong type, unreadable)
+        "screenshot_saved": bool(shot) if body.screenshot else None,
+    }
 
 
 @router.get("")

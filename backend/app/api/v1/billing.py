@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -27,6 +27,20 @@ async def _get_sponsor_for_user(db: AsyncSession, user: User) -> Sponsor | None:
     return result.scalar_one_or_none()
 
 
+async def _mark_overdue(db: AsyncSession) -> None:
+    """A sent invoice whose due date has passed becomes overdue. Done when invoices
+    are read (list, summary), so the status is right whenever anyone looks."""
+    today = datetime.now(timezone.utc).date()
+    result = await db.execute(
+        update(Invoice)
+        .where(Invoice.status == InvoiceStatus.SENT, Invoice.due_date.isnot(None), Invoice.due_date < today)
+        .values(status=InvoiceStatus.OVERDUE)
+        .execution_options(synchronize_session="fetch")
+    )
+    if result.rowcount:
+        await db.commit()
+
+
 @router.get("/invoices", response_model=list[InvoiceInDB])
 async def list_invoices(
     skip: int = 0,
@@ -36,6 +50,7 @@ async def list_invoices(
 ):
     from app.models.ad_campaign import AdCampaign
 
+    await _mark_overdue(db)
     stmt = (
         select(Invoice, Sponsor.name.label("sponsor_name"), AdCampaign.name.label("campaign_name"))
         .outerjoin(Sponsor, Invoice.sponsor_id == Sponsor.id)

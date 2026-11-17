@@ -327,7 +327,6 @@ async def test_invoice_creation_and_summary(client, sponsor_login, auth_headers,
     assert len(mine) == 2 and all(i["sponsor_name"] == "Acme" for i in mine)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: nothing ever marks an invoice overdue; a sent invoice past its due date stays 'sent'")
 @pytest.mark.asyncio
 async def test_invoice_past_due_becomes_overdue(client, sponsor_login, auth_headers):
     _, sponsor, _ = sponsor_login

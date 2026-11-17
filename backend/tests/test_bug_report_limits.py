@@ -18,7 +18,6 @@ def _reset():
     bug_api._recent.clear()
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: report numbers are max+1 with no unique key; two reports at once share a number")
 def test_report_numbers_are_unique():
     col = BugReport.__table__.c.number
     unique = col.unique or any(
@@ -41,7 +40,6 @@ async def test_oversized_or_wrong_screenshot_is_dropped_report_kept(client, auth
     assert len(reports) == 3 and not any(x["has_screenshot"] for x in reports)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: a dropped screenshot is not reported back; the reporter thinks it was sent")
 @pytest.mark.asyncio
 async def test_reporter_is_told_when_the_screenshot_was_dropped(client):
     gif = "data:image/gif;base64," + base64.b64encode(b"GIF89a").decode()
@@ -90,7 +88,6 @@ async def test_rate_limit_keys(client, auth_headers):
     assert r.status_code == 429 and "Too many reports" in r.json()["detail"]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: anonymous bug-report limit trusts the client's X-Forwarded-For; changing it gets round the limit")
 @pytest.mark.asyncio
 async def test_rate_limit_cannot_be_dodged_with_forwarded_for(client):
     codes = [(await client.post("/api/v1/bug-reports", json={"description": "x"},
