@@ -51,6 +51,11 @@ ALERT_REPEAT_SECONDS = 1800.0
 # older engine queues timed items in arrival order and has no /timed_drop, so it gets
 # the serial hand-over and the plain flush + skip at blackout end.
 ENGINE_PROTO_GROUPS = 2
+# From this version the engine stays quiet for the last seconds before a hard timed item
+# when it has no song (its hold lane); an older engine would play emergency music there.
+ENGINE_PROTO_HOLD = 3
+# A song that would start this close before a hard timed item is not handed out
+HOLD_BEFORE_HARD_SECONDS = 5.0
 
 
 @dataclass
@@ -585,6 +590,11 @@ async def handle_next(
     if await _live_show_on(db, station_id):
         return None
 
+    if state.engine_proto >= ENGINE_PROTO_HOLD and await _hold_before_hard_item(
+        db, station_id, state.cued_entry_id or (given[0] if given else None)
+    ):
+        return None
+
     # The engine only asks when it holds nothing pre-loaded, so an entry we already handed
     # out is on its way to air (its "started" report may not have reached us yet).
     exclude = set(state.timed_sent) | already_given | set(state.recent_started)
@@ -644,6 +654,77 @@ async def handle_next(
             ),
         )
     return None
+
+
+async def _hold_before_hard_item(
+    db: AsyncSession, station_id, cued: str | None = None, now: datetime | None = None
+) -> bool:
+    """True when the item on air ends within a few seconds before a hard timed item.
+
+    A song handed out then starts and is cut after a second or two (Jerusalem 23:00Z
+    2026-11-17: a 266 s song aired for 2.4 s before the time check). The engine is given
+    nothing instead: the item on air plays to its end, the engine stays quiet for what
+    is left (its hold lane) and the timed item starts on its second. The engine asks
+    again every 2 s, so the next song is handed out as soon as the timed item is due.
+
+    `cued`: the entry the engine was handed last. The engine asks the moment that entry
+    starts, usually before its start report has arrived, so while it is still pending
+    it counts as the item on air, starting where the one before it hands over.
+    """
+    now = now or datetime.now(UTC)
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current = res.unique().scalars().first()
+    end = _airs_until(current) if current is not None else None
+    from app.api.v1.queue import handover_seconds
+
+    # Where the next song would start: the crossfade point of the item on air
+    change = max(now, end - timedelta(seconds=handover_seconds(current))) if end is not None else now
+    held = None
+    if cued and (current is None or str(current.id) != str(cued)):
+        try:
+            held = (
+                await db.execute(
+                    select(QueueEntry)
+                    .options(joinedload(QueueEntry.asset))
+                    .where(QueueEntry.id == uuid.UUID(str(cued)), QueueEntry.status == "pending")
+                )
+            ).unique().scalar_one_or_none()
+        except ValueError:
+            held = None
+    if held is not None and held.asset is not None:
+        cue_out = stored_analysis(held.asset.metadata_extra).get("cue_out_seconds")
+        length = cue_out if isinstance(cue_out, (int, float)) and cue_out > 0 else held.asset.duration
+        if not length:
+            return False
+        change = change + timedelta(seconds=max(0.0, float(length) - handover_seconds(held)))
+    elif end is None:
+        return False
+    due = (
+        await db.execute(
+            select(QueueEntry.preempt_at)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                hard_timed(),
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > now,
+                QueueEntry.preempt_at <= now + timedelta(minutes=30),
+            )
+            .order_by(QueueEntry.preempt_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if due is None:
+        return False
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=UTC)
+    room = (due - change).total_seconds()
+    return 0 <= room < HOLD_BEFORE_HARD_SECONDS
 
 
 async def _live_show_on(db: AsyncSession, station_id) -> bool:

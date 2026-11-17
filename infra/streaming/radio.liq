@@ -34,9 +34,10 @@ settings.harbor.bind_addrs := ["127.0.0.1"]
 auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")]
 
 # What this engine understands, sent with /hello and every /next. 2 = timed groups handed
-# over in parallel (seq/of) and /timed_drop. The backend keeps to the old serial hand-over
+# over in parallel (seq/of) and /timed_drop. 3 = the hold lane (quiet before a hard item
+# when no song is handed out). The backend keeps to the old serial hand-over
 # for an engine that sends nothing.
-engine_proto = 2
+engine_proto = 3
 
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
 # track is requested, so the two cannot cross. If the backend cannot be reached (or
@@ -260,7 +261,20 @@ end
 emergency = playlist(id="emergency", mode="randomize", reload_mode="watch", emergency_dir)
 emergency = mksafe(emergency)
 
-radio = fallback(id="radio", track_sensitive=false, [timed, main, emergency])
+# ── Hold lane: a moment of quiet just before a hard timed item ───────────────
+# When a song ends a few seconds before a hard item (the hourly time check), the backend
+# hands out no new song: it would be chopped after two seconds (Jerusalem 23:00Z
+# 2026-11-17). With nothing in the music lane the emergency music would start instead,
+# so for those few seconds the stream is quiet until the timed item takes over. Open only
+# while a timed item is loaded and due within 8 s; never longer, so a timed item that
+# does not arrive still ends in emergency music, not dead air.
+def hold_open() =
+  left = timed_group_at() - time()
+  timed_pending() > 0 and left < 8. and left > -2.
+end
+hold = switch(id="hold_gate", track_sensitive=false, [(hold_open, blank(id="hold"))])
+
+radio = fallback(id="radio", track_sensitive=false, [timed, main, hold, emergency])
 radio = amplify(override=null(), {master_gain()}, radio)
 # What is on air from the lanes above. Start reports and /status read this, so an item
 # mixed over the top (below) never counts as a change of track.
@@ -358,7 +372,8 @@ timed_dropped = ref([])
 
 def send_started(m) =
   entry = m["kbr_entry"]
-  lane = if entry == "" then "emergency" else m["kbr_lane"] end
+  # No entry: an emergency file, or the quiet held just before a hard timed item
+  lane = if entry != "" then m["kbr_lane"] elsif hold_open() then "hold" else "emergency" end
   was = on_air_lane()
   on_air_lane := lane
   if lane == "timed" and timed_pending() > 0 then timed_pending := timed_pending() - 1 end
@@ -379,6 +394,9 @@ def send_started(m) =
     hard_cut := true
     main.skip()
     thread.run(delay=0.15, {main_gain := 1.})
+  elsif lane == "hold" then
+    # Not reported: nothing from the queue is on air and it is not the emergency music
+    log.important("hold: quiet until the timed item due in #{timed_group_at() - time()} s")
   else
     if lane == "main" and main_interrupted() then
       # The music lane came back on a new track, not the interrupted song (after a long
