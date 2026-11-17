@@ -10,8 +10,9 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import bindparam, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
@@ -229,16 +230,16 @@ class QueueReplenishService:
         # Step 2: Fill main content FIRST so interval/rotation entries interleave
         # Use time-aware fill so morning/afternoon/evening rules are respected
         # across the full 7-day queue window, not just the current hour's rule.
+        fill_start_pos = self.max_pos + 1
         await self._fill_content_time_aware(shortfall, rules)
+
+        # Step 3: Rotation ("every N songs") and interval ("every N minutes") rules
+        # are woven into the fill just made, not appended after it
+        await self._spread_rule_items(rules, fill_start_pos, total_seconds)
 
         # Only insert global sponsors for stations using global rules
         if not station_specific:
             await self._insert_sponsors(shortfall)
-
-        # Step 3: Apply rotation rules (spread within fill range)
-        for rule in rules:
-            if rule.rule_type == "rotation":
-                await self._apply_rotation_rule(rule, shortfall)
 
         await self.db.commit()
         logger.info("Queue replenishment complete")
@@ -527,53 +528,111 @@ class QueueReplenishService:
         )
         return float(result.scalar() or 0)
 
-    async def _apply_rotation_rule(self, rule: ScheduleRule, shortfall: float) -> None:
-        if not rule.songs_between or rule.songs_between <= 0:
-            return
-        avg_song_duration = 180
-        estimated_songs = shortfall / avg_song_duration
-        insertions_needed = int(estimated_songs / rule.songs_between)
-        if insertions_needed <= 0:
-            return
-        logger.info("Rotation rule '%s': inserting %d x %s", rule.name, insertions_needed, rule.asset_type)
-        assets = await self._find_assets_for_rule(rule)
-        if not assets:
-            return
-        for i in range(insertions_needed):
-            asset = assets[i % len(assets)]
-            insert_pos = self.max_pos + (i + 1) * rule.songs_between
-            await self._enqueue_asset(asset, insert_pos)
+    @staticmethod
+    def _rule_covers(rule: ScheduleRule, local: datetime) -> bool:
+        """Whether a rule's hours and days include this station-local moment."""
+        days = (rule.days_of_week or "0,1,2,3,4,5,6").split(",")
+        if str(local.weekday()) not in days:
+            return False
+        start = rule.hour_start or 0
+        end = 24 if rule.hour_end is None else rule.hour_end
+        if start <= end:
+            return start <= local.hour < end
+        return local.hour >= start or local.hour < end  # range past midnight (22-2)
 
-    async def _apply_interval_rule(
-        self, rule: ScheduleRule, shortfall: float,
-        fill_start: int | None = None, fill_end: int | None = None,
+    async def _spread_rule_items(
+        self, rules: list[ScheduleRule], fill_start_pos: int, queued_seconds: float,
     ) -> None:
-        if not rule.interval_minutes or rule.interval_minutes <= 0:
-            return
-        interval_seconds = rule.interval_minutes * 60
-        insertions_needed = int(shortfall / interval_seconds)
-        if insertions_needed <= 0:
-            return
-        logger.info("Interval rule '%s': inserting %d x %s (every %d min)",
-                    rule.name, insertions_needed, rule.asset_type, rule.interval_minutes)
-        assets = await self._find_assets_for_rule(rule)
-        if not assets:
+        """Weave rotation and interval rule items through the fill.
+
+        Rotation (songs_between=N): one item after every N filled songs.
+        Interval (interval_minutes=N): one item each time N minutes of air time pass.
+        Both only while the rule's hours and days cover the estimated air time
+        (station local). The fill's entries (positions from fill_start_pos) are
+        renumbered so the items sit between them.
+        """
+        spread = [
+            r for r in rules
+            if (r.rule_type == "rotation" and (r.songs_between or 0) > 0)
+            or (r.rule_type == "interval" and (r.interval_minutes or 0) > 0)
+        ]
+        pools: dict = {}
+        for rule in spread:
+            assets = list(await self._find_assets_for_rule(rule))
+            if assets:
+                pools[rule.id] = assets
+        spread = [r for r in spread if r.id in pools]
+        if not spread:
             return
 
-        # If fill range is provided, spread entries evenly within it
-        if fill_start is not None and fill_end is not None and fill_end > fill_start:
-            span = fill_end - fill_start
-            step = max(1, span // (insertions_needed + 1))
-            for i in range(insertions_needed):
-                asset = assets[i % len(assets)]
-                insert_pos = fill_start + (i + 1) * step
-                await self._enqueue_asset(asset, insert_pos)
-        else:
-            for i in range(insertions_needed):
-                asset = assets[i % len(assets)]
-                time_offset = (i + 1) * interval_seconds
-                insert_pos = self.max_pos + int((time_offset / DEFAULT_DURATION))
-                await self._enqueue_asset(asset, insert_pos)
+        await self.db.flush()
+        rows = (await self.db.execute(
+            select(QueueEntry.id, QueueEntry.position, func.coalesce(Asset.duration, DEFAULT_DURATION))
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.position >= fill_start_pos,
+            )
+            .order_by(QueueEntry.position)
+        )).all()
+        if not rows:
+            return
+
+        tz_name = (await self.db.execute(
+            select(Station.timezone).where(Station.id == self.station_id)
+        )).scalar()
+        try:
+            zone = ZoneInfo(tz_name or "UTC")
+        except Exception:
+            zone = timezone.utc
+        fill_start_at = datetime.now(timezone.utc) + timedelta(seconds=queued_seconds)
+
+        songs_since = {r.id: 0 for r in spread}
+        next_due = {r.id: (r.interval_minutes or 0) * 60.0 for r in spread}
+        used = {r.id: 0 for r in spread}
+        elapsed = 0.0
+        merged: list = []  # (entry_id, old_position) for fill entries, Asset for new items
+        for entry_id, position, duration in rows:
+            merged.append((entry_id, position))
+            elapsed += float(duration)
+            for rule in spread:
+                if rule.rule_type == "rotation":
+                    songs_since[rule.id] += 1
+                    if songs_since[rule.id] < rule.songs_between:
+                        continue
+                    songs_since[rule.id] = 0
+                else:
+                    if elapsed < next_due[rule.id]:
+                        continue
+                    while next_due[rule.id] <= elapsed:
+                        next_due[rule.id] += rule.interval_minutes * 60.0
+                local = (fill_start_at + timedelta(seconds=elapsed)).astimezone(zone)
+                if not self._rule_covers(rule, local):
+                    continue
+                pool = pools[rule.id]
+                asset = pool[used[rule.id] % len(pool)]
+                used[rule.id] += 1
+                merged.append(asset)
+                elapsed += float(asset.duration or DEFAULT_DURATION)
+
+        if not any(used.values()):
+            return
+        moves = []
+        for offset, item in enumerate(merged):
+            position = fill_start_pos + offset
+            if isinstance(item, Asset):
+                await self._enqueue_asset(item, position)
+            elif item[1] != position:
+                moves.append({"b_id": item[0], "b_pos": position})
+        if moves:
+            table = QueueEntry.__table__
+            await self.db.execute(
+                update(table).where(table.c.id == bindparam("b_id")).values(position=bindparam("b_pos")),
+                moves,
+            )
+        self.max_pos = max(self.max_pos, fill_start_pos + len(merged) - 1)
+        logger.info("Rule items woven into the fill: %s", {r.name: used[r.id] for r in spread})
 
     async def _apply_daypart_rule(self, rule: ScheduleRule, shortfall: float) -> None:
         """Passive — defines fill spec via _get_fill_spec."""

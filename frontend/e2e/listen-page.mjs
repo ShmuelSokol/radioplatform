@@ -3,8 +3,9 @@
  * and a fake now-playing channel, desktop and iPhone size. Covers the buttons, the
  * now-playing card, the phone's lock-screen controls, song requests, the listener
  * profile, network loss and coming back to the tab, the server-stream mode (with a
- * small MP3 stream server on STREAM_PORT) and the hourly time check heard on time.
- * Parts: basics forms network polling switch player elapsed clock timecheck stream.
+ * small MP3 stream server on STREAM_PORT), the hourly time check heard on time, and
+ * short items and hard timed items handed over on the second (ONLY=handover).
+ * Parts: basics forms network polling switch player elapsed clock timecheck stream handover.
  * The socket back-off and polling part runs on a fake clock (page.clock).
  *
  *   cd frontend && npm run build && (npx vite preview --port 4311 --strictPort &)
@@ -512,8 +513,141 @@ async function timeCheck(browser, where, { preload = true, clock = 0 } = {}) {
   if (where === 'control room') {
     check(`${tag}: the song is faded down by the time check's time`, songAt.every((g) => g < 0.5), songAt.join());
   } else {
-    // Informational: the Listen page has no pre-fade (it does not know the queue)
+    // Informational: the Listen page pre-fades only when next_asset carries cut_at
     console.log(`info   ${tag}: song level at the due time ${songAt.join() || 'n/a'}`);
+  }
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// ── PR 157: short items are never crossfaded, a short item a little late starts from
+//    its first word, a hard item starts here at its time (next_asset.cut_at) and the
+//    page goes back to the server if the server never says it started ──
+async function startListening(browser, station) {
+  const { ctx } = await listenContext(browser, { viewport: { width: 1280, height: 900 } }, station);
+  const { page, errors } = await openListen(ctx, station.SID);
+  await page.getByText('On Air', { exact: true }).waitFor();
+  await listenBtn(page).click();
+  return { ctx, page, errors };
+}
+const heardIn = (s, id, min = 0.05) => s.decks.some((d) => d.src === id && d.playing && d.gain > min);
+const deckOf = (s, id) => s.decks.find((d) => d.src === id && d.playing);
+function longestSilence(samples, from = -Infinity, rel = (s) => s.at / 1000) {
+  let gap = 0, longest = 0, last = null;
+  for (const s of samples) {
+    if (rel(s) < from) continue;
+    const step = last === null ? 0 : (s.at - last) / 1000;
+    last = s.at;
+    gap = s.decks.some((d) => d.playing && d.gain > 0.05) ? 0 : gap + step;
+    longest = Math.max(longest, gap);
+  }
+  return longest;
+}
+
+// A 7 s station ID on air, a song next. The server moves on at the file's end, or
+// early at the item's crossfade point (3 s before the end): either way the song comes
+// in only when the station ID has finished, never faded over it.
+async function shortItemHandover(browser, serverAt) {
+  const tag = `short item (server moves on ${serverAt === 'end' ? 'at its end' : 'at its crossfade point, 3 s early'})`;
+  const station = makeStation();
+  const cur = station.playing();
+  cur.asset_id = 'j1';
+  const dur = station.byId.j1.duration;
+  const start = Date.now() + 500; // started just as the listener arrives
+  cur.started_at = new Date(start).toISOString();
+  const nextId = station.pending()[0].asset_id;
+  const { ctx, page, errors } = await startListening(browser, station);
+  await timeUntil(page, `() => window.__audible().some(d => d.src === 'j1')`, 4000);
+  const moveAt = serverAt === 'end' ? start + dur * 1000 + 300 : start + (dur - 3) * 1000;
+  setTimeout(() => station.goOnAir(nextId, { started_at: new Date(serverAt === 'end' ? start + dur * 1000 : moveAt).toISOString() }), moveAt - Date.now());
+  const samples = await watchDecks(page, start + dur * 1000 + 2500 - Date.now(), 25);
+  const first = samples.find((s) => heardIn(s, nextId));
+  const idAt = first ? deckOf(first, 'j1') : null;
+  check(`${tag}: the song is not heard until the station ID has finished`,
+    !!first && (!idAt || idAt.t >= dur - 0.4), !first ? 'song never heard' : idAt ? `song in with ${(dur - idAt.t).toFixed(2)} s of the ID left` : 'after the ID');
+  let both = 0;
+  for (let i = 1; i < samples.length; i++) if (heardIn(samples[i], 'j1', 0.2) && heardIn(samples[i], nextId, 0.2)) both += (samples[i].at - samples[i - 1].at) / 1000;
+  check(`${tag}: never crossfaded (heard together at most 0.2 s)`, both <= 0.2, `${both.toFixed(2)} s together`);
+  const hole = longestSilence(samples);
+  check(`${tag}: no hole between them`, hole < 0.5, `longest silence ${hole.toFixed(2)} s`);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// The song on air, then the server's message that the time check went on air arrives
+// `late` seconds after it started (and it was not pre-loaded). Up to 3 s late it is
+// heard from its first word; later than that the page joins it where it is now.
+async function lateShortItem(browser, late) {
+  const tag = `time check announced ${late} s late`;
+  const station = makeStation();
+  const songId = station.playing().asset_id;
+  const { ctx, page, errors } = await startListening(browser, station);
+  await timeUntil(page, `() => window.__audible().some(d => d.src === '${songId}')`, 4000);
+  await sleep(1500);
+  const tcStart = Date.now() - late * 1000;
+  station.goOnAir('tc', { started_at: new Date(tcStart).toISOString() });
+  const nextId = station.pending()[0].asset_id;
+  // The server moves on when the time check ends by its clock (5 s after it started)
+  const serverEnd = tcStart + station.byId.tc.duration * 1000;
+  setTimeout(() => station.goOnAir(nextId, { started_at: new Date(serverEnd).toISOString() }), Math.max(0, serverEnd - Date.now()));
+  const samples = await watchDecks(page, 6500, 25);
+  const first = samples.find((s) => heardIn(s, 'tc'));
+  const from = first ? deckOf(first, 'tc').t : null;
+  if (late <= 3) {
+    check(`${tag}: heard from its first word`, from !== null && from < 0.6, from === null ? 'never heard' : `first heard at ${from} s into it`);
+    const cut = samples.find((s) => heardIn(s, nextId, 0.2) && deckOf(s, 'tc') && deckOf(s, 'tc').t < station.byId.tc.duration - 0.4);
+    check(`${tag}: the next item waits for it to finish`, !cut, cut ? `next item in at ${deckOf(cut, 'tc').t} s of the time check` : '');
+  } else {
+    check(`${tag}: joined where it is now, not from the top`, from !== null && from >= 3, from === null ? 'never heard' : `first heard at ${from} s into it`);
+  }
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// A hard time check due at T, pre-loaded as next_asset with cut_at = T. The server's
+// message that it started arrives 1.5 s after T (`confirm`), or never: then the page
+// goes back to the song after 4 s.
+async function prearmedTimeCheck(browser, confirm) {
+  const tag = `hard time check started on the page (${confirm ? 'server confirms 1.5 s late' : 'server never confirms'})`;
+  const station = makeStation();
+  const T = Date.now() + 9000;
+  station.pending().forEach((e) => { e.position += 1; });
+  station.add({ asset_id: 'tc', position: 2, source: 'block', preempt_at: new Date(T).toISOString(), hard_timed: true });
+  const songId = station.playing().asset_id;
+  const sent = station.nowPlaying();
+  check(`${tag}: next_asset carries cut_at`, sent.next_asset?.id === 'tc' && sent.next_asset?.cut_at === new Date(T).toISOString(), JSON.stringify(sent.next_asset));
+  const { ctx, page, errors } = await startListening(browser, station);
+  await timeUntil(page, `() => window.__audible().some(d => d.src === '${songId}')`, 4000);
+  await timeUntil(page, `() => window.__decks().some(d => d.src === 'tc' && !d.playing)`, 6000);
+  if (confirm) setTimeout(() => station.goOnAir('tc', { started_at: new Date(T).toISOString() }), T + 1500 - Date.now());
+  const samples = await watchDecks(page, T + (confirm ? 4000 : 7500) - Date.now(), 25);
+  const rel = (s) => (s.now - T) / 1000;
+  const first = samples.find((s) => heardIn(s, 'tc'));
+  const heardAt = first ? rel(first) : null;
+  check(`${tag}: heard at its time, before the server's message`, heardAt !== null && heardAt >= -0.1 && heardAt <= 0.35,
+    heardAt === null ? 'never' : `${heardAt.toFixed(2)} s after its time`);
+  // 0.3 s fade from the moment it starts (its deck starts playing). The 2 s pre-fade on
+  // its own reaches silence only 0.4 s after the time, still above 0.01 0.34 s in.
+  const started = samples.find((s) => deckOf(s, 'tc'));
+  const t0 = started ? rel(started) : 0;
+  const songLate = samples.filter((s) => rel(s) >= t0 + 0.34 && rel(s) <= t0 + 1).map((s) => deckOf(s, songId)?.gain ?? 0);
+  check(`${tag}: the song is out 0.3 s after the time check starts`, songLate.length > 0 && songLate.every((g) => g < 0.01),
+    `started ${t0.toFixed(2)} s after its time; song level then ${songLate.slice(0, 4).join()}`);
+  const hole = longestSilence(samples, -2, rel);
+  check(`${tag}: no hole`, hole < 0.5, `longest silence ${hole.toFixed(2)} s`);
+  if (confirm) {
+    const restarts = samples.filter((s, i) => i > 0 && deckOf(s, 'tc') && deckOf(samples[i - 1], 'tc') && deckOf(s, 'tc').t + 0.5 < deckOf(samples[i - 1], 'tc').t);
+    const songBack = samples.filter((s) => rel(s) > 0.5 && heardIn(s, songId));
+    check(`${tag}: the server's message does not restart it or bring the song back`, restarts.length === 0 && songBack.length === 0,
+      `${restarts.length} restarts, song heard in ${songBack.length} samples`);
+  } else {
+    const songBefore4 = samples.filter((s) => rel(s) > 0.5 && rel(s) < 3.8 && heardIn(s, songId));
+    check(`${tag}: stays on the time check until the 4 s are up`, songBefore4.length === 0, `song heard in ${songBefore4.length} samples`);
+    const back = samples.find((s) => rel(s) > 3.8 && heardIn(s, songId, 0.2));
+    const live = back ? (back.now - new Date(station.playing().started_at).getTime()) / 1000 : 0;
+    const pos = back ? deckOf(back, songId).t : null;
+    check(`${tag}: goes back to the song on air, at its live position`, !!back && rel(back) <= 6 && Math.abs(pos - live) < 2,
+      back ? `back ${rel(back).toFixed(2)} s after the time, at ${pos} s (live ${live.toFixed(1)})` : 'song never came back');
   }
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
@@ -770,6 +904,15 @@ try {
     await timeCheck(browser, 'Listen', { preload: false });
     await timeCheck(browser, 'control room');
     await timeCheck(browser, 'control room', { preload: false });
+  }
+  if (run('handover')) {
+    // PR 157: short items, late short items, hard items started here at cut_at
+    await shortItemHandover(browser, 'end');
+    await shortItemHandover(browser, 'cross');
+    await lateShortItem(browser, 2);
+    await lateShortItem(browser, 3.6);
+    await prearmedTimeCheck(browser, true);
+    await prearmedTimeCheck(browser, false);
   }
   if (run('stream')) {
     const stream = await startStreamServer(STREAM_PORT);
