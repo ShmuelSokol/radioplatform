@@ -54,7 +54,8 @@ export default function AdminArchives() {
   const [stationFilter, setStationFilter] = useState<string>('');
 
   const { data: stationsData } = useStations();
-  const { data, isLoading } = useArchives(stationFilter ? { station_id: stationFilter } : undefined);
+  // drafts: the admin list must keep unpublished archives, or one set to Draft vanishes
+  const { data, isLoading } = useArchives(stationFilter ? { station_id: stationFilter, drafts: true } : { drafts: true });
   const createMut = useCreateArchive();
   const updateMut = useUpdateArchive();
   const deleteMut = useDeleteArchive();
@@ -140,11 +141,11 @@ export default function AdminArchives() {
           Show Archives
           {data && <span className="ml-2 text-gray-500 text-sm font-normal">({data.total})</span>}
         </h1>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 min-w-0 max-w-full">
           <select
             value={stationFilter}
             onChange={e => setStationFilter(e.target.value)}
-            className="bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700"
+            className="min-w-0 max-w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700"
           >
             <option value="">All Stations</option>
             {stations.map(s => (
@@ -253,7 +254,7 @@ export default function AdminArchives() {
               <h2 className="text-lg font-bold text-cyan-300">
                 {editingId ? 'Edit Archive' : 'New Archive'}
               </h2>
-              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-white text-xl">&times;</button>
+              <button onClick={() => setShowModal(false)} aria-label="Close" className="text-gray-500 hover:text-white text-xl">&times;</button>
             </div>
             <div className="p-5 space-y-4">
               {!editingId && (

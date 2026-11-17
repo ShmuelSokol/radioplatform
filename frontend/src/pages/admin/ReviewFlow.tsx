@@ -182,7 +182,7 @@ export default function ReviewFlow() {
               </div>
               {/* BPM + Tempo Category */}
               {currentAsset.asset_type === 'music' && (
-                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-4">
+                <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap items-center gap-x-4 gap-y-2 min-w-0">
                   <div className="text-sm">
                     <span className="text-gray-500">BPM: </span>
                     <span className="font-medium">
@@ -191,7 +191,7 @@ export default function ReviewFlow() {
                         : 'Not detected'}
                     </span>
                   </div>
-                  <div className="text-sm flex items-center gap-2">
+                  <div className="text-sm flex items-center gap-2 min-w-0 max-w-full">
                     <span className="text-gray-500">Tempo:</span>
                     <select
                       value={currentAsset.category ?? ''}
@@ -202,7 +202,7 @@ export default function ReviewFlow() {
                           { onSuccess: () => refetchItems() }
                         );
                       }}
-                      className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="min-w-0 max-w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
                     >
                       <option value="">Uncategorized</option>
                       {categories?.map((cat) => (
@@ -266,7 +266,7 @@ export default function ReviewFlow() {
             </div>
 
             {/* Action buttons */}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={() => handleAction('approved')}
                 disabled={updateMutation.isPending}

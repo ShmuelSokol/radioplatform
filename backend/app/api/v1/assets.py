@@ -1,4 +1,5 @@
 import hashlib
+import asyncio
 import logging
 import uuid
 
@@ -107,7 +108,7 @@ async def ffmpeg_check(_user: User = Depends(require_manager)):
             step["wav_md5"] = hashlib.md5(wav_data).hexdigest()
 
             # Convert WAV to MP2
-            converted, duration, ext = convert_audio(wav_data, f"test_{label}.wav", "mp2")
+            converted, duration, ext = await asyncio.to_thread(convert_audio, wav_data, f"test_{label}.wav", "mp2")
             step["mp2_size"] = len(converted)
             step["mp2_md5"] = hashlib.md5(converted).hexdigest()
             step["mp2_duration"] = duration
@@ -124,7 +125,7 @@ async def ffmpeg_check(_user: User = Depends(require_manager)):
             step["mpg_size"] = len(mpg_data)
 
             # Convert MPG to MP2 (this is the path the user's .mpg files take)
-            mpg_converted, mpg_dur, mpg_ext = convert_audio(mpg_data, f"test_{label}.mpg", "mp2")
+            mpg_converted, mpg_dur, mpg_ext = await asyncio.to_thread(convert_audio, mpg_data, f"test_{label}.mpg", "mp2")
             step["mpg_to_mp2_size"] = len(mpg_converted)
             step["mpg_to_mp2_md5"] = hashlib.md5(mpg_converted).hexdigest()
             step["mpg_to_mp2_duration"] = mpg_dur
@@ -304,8 +305,8 @@ async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: f
                     data = await download_file(file_path)
 
                 # Detect silence
-                regions = detect_silence(data, threshold_db=threshold_db, min_duration=min_silence)
-                total_duration = get_audio_duration(data)
+                regions = await asyncio.to_thread(detect_silence, data, threshold_db=threshold_db, min_duration=min_silence)
+                total_duration = await asyncio.to_thread(get_audio_duration, data)
 
                 if not regions or total_duration <= 0:
                     job["skipped"] += 1
@@ -331,7 +332,7 @@ async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: f
                     continue
 
                 # Trim
-                trimmed_data, new_duration = trim_audio(data, trim_start, trim_end)
+                trimmed_data, new_duration = await asyncio.to_thread(trim_audio, data, trim_start, trim_end)
 
                 # Upload trimmed file
                 new_key = generate_asset_key("trimmed.mp3")
@@ -342,7 +343,7 @@ async def _run_bulk_auto_trim(job_id: str, asset_ids: list[str], threshold_db: f
                 if "original_file_path" not in extra:
                     extra["original_file_path"] = asset.file_path
                 trim_entry = {"from": asset.file_path, "to": new_key, "trim_start": trim_start, "trim_end": trim_end, "auto": True}
-                extra.setdefault("trim_history", []).append(trim_entry)
+                extra["trim_history"] = [*(extra.get("trim_history") or []), trim_entry]  # new list: an in-place append is not saved
                 extra.pop("silence_regions", None)
 
                 asset.file_path = new_key
@@ -627,7 +628,7 @@ async def get_audio_url(
                 from app.services.audio_convert_service import convert_audio
 
                 data = await download_file(file_path)
-                converted, duration, new_ext = convert_audio(data, f"convert{ext}", "mp3")
+                converted, duration, new_ext = await asyncio.to_thread(convert_audio, data, f"convert{ext}", "mp3")
                 # Upload MP3 alongside original
                 new_path = file_path.rsplit(".", 1)[0] + new_ext
                 await upload_file(converted, new_path, "audio/mpeg")
@@ -689,6 +690,17 @@ async def get_enhance_presets(
     return {"presets": ENHANCEMENT_PRESETS}
 
 
+def _check_filters(filters: list[dict]) -> None:
+    """Refuse an unknown filter or an out-of-range value with a clear 400 before any
+    audio work (the values are range-checked numbers, so nothing else reaches ffmpeg)."""
+    from app.services.enhance_service import build_filter_chain
+
+    try:
+        build_filter_chain(filters)
+    except (ValueError, TypeError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=str(e) or "Invalid filter")
+
+
 async def _download_asset_data(file_path: str) -> bytes:
     """Download asset audio data from storage or URL."""
     if file_path.startswith("http://") or file_path.startswith("https://"):
@@ -725,9 +737,10 @@ async def enhance_asset_endpoint(
 
     if not filters:
         raise HTTPException(status_code=400, detail="No filters or preset specified")
+    _check_filters(filters)
 
     input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
-    enhanced_data, new_duration = enhance_audio(data, filters, input_ext)
+    enhanced_data, new_duration = await asyncio.to_thread(enhance_audio, data, filters, input_ext)
 
     # Upload enhanced file
     new_key = generate_asset_key("enhanced.mp3")
@@ -743,7 +756,7 @@ async def enhance_asset_endpoint(
         "preset": body.preset,
         "filters": filters if not body.preset else None,
     }
-    extra.setdefault("enhance_history", []).append(enhance_entry)
+    extra["enhance_history"] = [*(extra.get("enhance_history") or []), enhance_entry]  # new list: an in-place append is not saved
 
     asset.file_path = new_key
     if new_duration > 0:
@@ -768,7 +781,7 @@ async def auto_enhance_endpoint(
     data = await _download_asset_data(asset.file_path)
 
     input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
-    enhanced_data, new_duration, filters_applied, reasons = auto_enhance(data, input_ext)
+    enhanced_data, new_duration, filters_applied, reasons = await asyncio.to_thread(auto_enhance, data, input_ext)
 
     # Upload enhanced file
     new_key = generate_asset_key("ai-enhanced.mp3")
@@ -785,7 +798,7 @@ async def auto_enhance_endpoint(
         "filters": filters_applied,
         "reasons": reasons,
     }
-    extra.setdefault("enhance_history", []).append(enhance_entry)
+    extra["enhance_history"] = [*(extra.get("enhance_history") or []), enhance_entry]  # new list: an in-place append is not saved
 
     asset.file_path = new_key
     if new_duration > 0:
@@ -824,9 +837,11 @@ async def enhance_preview_endpoint(
 
     if not filters:
         raise HTTPException(status_code=400, detail="No filters or preset specified")
+    _check_filters(filters)
 
     input_ext = "." + asset.file_path.rsplit(".", 1)[-1].lower() if "." in asset.file_path else ".mp3"
-    preview_data = enhance_preview(
+    preview_data = await asyncio.to_thread(
+        enhance_preview,
         data, filters,
         start_seconds=body.start_seconds,
         duration_seconds=body.duration_seconds,
@@ -855,7 +870,8 @@ async def detect_audience_endpoint(
     asset = await get_asset(db, asset_id)
     data = await _download_asset_data(asset.file_path)
 
-    segments = detect_audience_segments(
+    segments = await asyncio.to_thread(
+        detect_audience_segments,
         data,
         quiet_threshold_db=quiet_threshold_db,
         silence_threshold_db=silence_threshold_db,
@@ -955,7 +971,7 @@ async def download_asset(
 
     from app.services.audio_convert_service import convert_audio
     input_ext = "." + file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ".mp3"
-    converted, _duration, _ext = convert_audio(data, f"download{input_ext}", format)
+    converted, _duration, _ext = await asyncio.to_thread(convert_audio, data, f"download{input_ext}", format)
 
     return Response(
         content=converted,
@@ -1011,7 +1027,7 @@ async def detect_silence_endpoint(
         data = await download_file(file_path)
 
     from app.services.silence_service import detect_silence
-    regions = detect_silence(data, threshold_db=threshold_db, min_duration=min_duration)
+    regions = await asyncio.to_thread(detect_silence, data, threshold_db=threshold_db, min_duration=min_duration)
 
     # Store in metadata_extra
     extra = dict(asset.metadata_extra or {})
@@ -1046,7 +1062,7 @@ async def trim_asset_endpoint(
         data = await download_file(file_path)
 
     from app.services.silence_service import trim_audio
-    trimmed_data, new_duration = trim_audio(data, trim_start, trim_end)
+    trimmed_data, new_duration = await asyncio.to_thread(trim_audio, data, trim_start, trim_end)
 
     # Upload trimmed file
     from app.services.storage_service import generate_asset_key, upload_file as upload_storage
@@ -1058,7 +1074,7 @@ async def trim_asset_endpoint(
     if "original_file_path" not in extra:
         extra["original_file_path"] = asset.file_path
     trim_entry = {"from": asset.file_path, "to": new_key, "trim_start": trim_start, "trim_end": trim_end}
-    extra.setdefault("trim_history", []).append(trim_entry)
+    extra["trim_history"] = [*(extra.get("trim_history") or []), trim_entry]  # new list: an in-place append is not saved
     extra.pop("silence_regions", None)
 
     asset.file_path = new_key
@@ -1099,7 +1115,7 @@ async def restore_original(
             data = await download_file(original)
 
         from app.services.silence_service import get_audio_duration
-        asset.duration = get_audio_duration(data)
+        asset.duration = await asyncio.to_thread(get_audio_duration, data)
     except Exception:
         pass  # Keep existing duration if we can't recalculate
 
@@ -1126,6 +1142,10 @@ async def bulk_create_assets(
     assets_data = body.get("assets", [])
     if not assets_data:
         return {"created": 0}
+
+    for i, item in enumerate(assets_data):
+        if not isinstance(item, dict) or not item.get("title") or not item.get("file_path"):
+            raise HTTPException(status_code=422, detail=f"Item {i + 1} needs a title and a file_path")
 
     created = []
     for item in assets_data:

@@ -66,8 +66,8 @@ async def create_invoice(
     _=Depends(require_manager),
 ):
     invoice = Invoice(
-        sponsor_id=data.sponsor_id,
-        campaign_id=data.campaign_id,
+        sponsor_id=UUID(str(data.sponsor_id)),
+        campaign_id=UUID(str(data.campaign_id)) if data.campaign_id else None,
         amount_cents=data.amount_cents,
         currency=data.currency,
         due_date=data.due_date,
@@ -129,11 +129,26 @@ async def create_checkout_session(
         }],
         mode="payment",
         metadata={"invoice_id": str(invoice.id)},
-        success_url=f"{settings.CORS_ORIGINS[0]}/sponsor/billing?payment=success" if settings.CORS_ORIGINS else "http://localhost:3000/sponsor/billing?payment=success",
-        cancel_url=f"{settings.CORS_ORIGINS[0]}/sponsor/billing?payment=cancelled" if settings.CORS_ORIGINS else "http://localhost:3000/sponsor/billing?payment=cancelled",
+        # Back to the public site (the first CORS origin is localhost by default)
+        success_url=f"{settings.FRONTEND_URL}/sponsor/billing?payment=success",
+        cancel_url=f"{settings.FRONTEND_URL}/sponsor/billing?payment=cancelled",
     )
 
     return CheckoutResponse(checkout_url=session.url)
+
+
+def _plain(obj):
+    """A Stripe object as plain dicts. Stripe 15+ objects are not dicts any more
+    (`.get` raises), and CI and Railway install the newest stripe; older versions
+    have no recursive `to_dict`, so nested values are converted here."""
+    if isinstance(obj, dict) and type(obj) is dict:
+        return {k: _plain(v) for k, v in obj.items()}
+    to_dict = getattr(obj, "to_dict_recursive", None) or getattr(obj, "to_dict", None)
+    if to_dict is not None:
+        return _plain(dict(to_dict()))
+    if isinstance(obj, list):
+        return [_plain(v) for v in obj]
+    return obj
 
 
 @router.post("/webhook")
@@ -158,12 +173,18 @@ async def stripe_webhook(
         raise BadRequestError("Invalid webhook signature")
 
     if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        invoice_id = session.get("metadata", {}).get("invoice_id")
+        session = _plain(event["data"]["object"])
+        invoice_id = (session.get("metadata") or {}).get("invoice_id")
+        try:
+            invoice_id = UUID(str(invoice_id)) if invoice_id else None
+        except ValueError:
+            invoice_id = None  # not one of ours
         if invoice_id:
             result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
             invoice = result.scalar_one_or_none()
-            if invoice:
+            # Stripe may deliver the same event more than once: mark paid and
+            # email the sponsor only the first time.
+            if invoice and invoice.status != InvoiceStatus.PAID:
                 invoice.status = InvoiceStatus.PAID
                 invoice.paid_at = datetime.now(timezone.utc)
                 invoice.stripe_payment_intent_id = session.get("payment_intent")

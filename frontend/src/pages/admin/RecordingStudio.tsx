@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import AudioMixer from './AudioMixer';
 import { useStations } from '../../hooks/useStations';
 import {
@@ -39,6 +39,16 @@ function VUMeter({ level }: { level: number }) {
 }
 
 // ── Inline Readout Recorder ─────────────────────────────────────────────
+/** The take lives only in this tab until it is saved: ask before the tab is closed or reloaded. */
+function useWarnBeforeLeaving(unsaved: boolean) {
+  useEffect(() => {
+    if (!unsaved) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [unsaved]);
+}
+
 function ReadoutRecorder({
   readout,
   onSaved,
@@ -48,6 +58,7 @@ function ReadoutRecorder({
 }) {
   const recorder = useStudioRecorder();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useWarnBeforeLeaving(recorder.isRecording || !!previewUrl);
   const [saving, setSaving] = useState(false);
   const [savedFile, setSavedFile] = useState<File | null>(null);
   const updateReadout = useUpdateWeatherReadout();
@@ -124,7 +135,7 @@ function ReadoutRecorder({
       {recorder.error && <div className="text-xs text-red-400">{recorder.error}</div>}
       <div className="flex gap-2">
         {!recorder.isRecording ? (
-          <button onClick={recorder.startRecording}
+          <button onClick={recorder.startRecording} aria-label="Start recording" title="Start recording"
             className="px-3 py-1 text-xs bg-red-700 hover:bg-red-600 rounded text-white">
             Record
           </button>
@@ -160,6 +171,7 @@ function ReadoutRecorder({
 function GeneralRecorder() {
   const recorder = useStudioRecorder();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useWarnBeforeLeaving(recorder.isRecording || !!previewUrl);
   const [savedFile, setSavedFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [title, setTitle] = useState('');
@@ -219,7 +231,7 @@ function GeneralRecorder() {
       {/* Controls */}
       <div className="flex justify-center gap-3">
         {!recorder.isRecording && !previewUrl && (
-          <button onClick={recorder.startRecording}
+          <button onClick={recorder.startRecording} aria-label="Start recording" title="Start recording"
             className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-500 flex items-center justify-center shadow-lg transition">
             <div className="w-6 h-6 rounded-full bg-white" />
           </button>

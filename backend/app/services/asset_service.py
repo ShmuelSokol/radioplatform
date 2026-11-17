@@ -1,4 +1,5 @@
 import hashlib
+import asyncio
 import logging
 import uuid
 
@@ -40,7 +41,7 @@ async def create_asset(
     )
 
     # Convert to target format and extract duration
-    converted_data, duration, out_ext = convert_audio(file_data, source_name, target_format)
+    converted_data, duration, out_ext = await asyncio.to_thread(convert_audio, file_data, source_name, target_format)
 
     # Generate storage key with the correct extension
     store_filename = _force_extension(filename, out_ext)
@@ -64,7 +65,7 @@ async def create_asset(
     if asset_type == "music" and not category:
         try:
             from app.services.bpm_service import detect_bpm
-            bpm, tempo_category = detect_bpm(converted_data, source_name)
+            bpm, tempo_category = await asyncio.to_thread(detect_bpm, converted_data, source_name)
             if bpm is not None:
                 category = tempo_category
                 metadata_extra = {"bpm": bpm}

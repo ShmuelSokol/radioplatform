@@ -388,6 +388,34 @@ async function desktop(browser, width, height) {
   await ctx.close();
 }
 
+// Phone held sideways (Shmuel, 2026-11-16: "Landscape mode on mobile is unusable": the
+// menu, transport and tabs filled the ~300 px height and no queue row was visible).
+async function phoneLandscape(browser, contextOpts, tag) {
+  const { page, ctx, errors } = await open(browser, contextOpts);
+  await page.getByTestId('queue-row').first().waitFor();
+  await page.waitForTimeout(400);
+  const m = await page.evaluate(() => {
+    const vh = window.innerHeight, vw = window.innerWidth;
+    const seen = (el) => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top >= -1 && r.bottom <= vh + 1 && r.left >= -1 && r.right <= vw + 1; };
+    const rows = [...document.querySelectorAll('[data-testid=queue-row]')].filter(seen).length;
+    const next = [...document.querySelectorAll('[data-testid=control-room] button')].find(b => /Go next/.test(b.textContent));
+    const remaining = document.querySelector('[data-testid=remaining]');
+    const tabs = document.querySelector('[aria-label="Control room sections"]');
+    return { rows, vh, vw, docW: document.documentElement.scrollWidth,
+      next: !!next && seen(next), remaining: !!remaining && seen(remaining), tabs: !!tabs && seen(tabs) };
+  });
+  check(`${tag}: at least 4 queue rows visible`, m.rows >= 4, `${m.rows} rows in ${m.vw}x${m.vh}`);
+  check(`${tag}: Go next, remaining time and the tabs are on screen with the queue`, m.next && m.remaining && m.tabs, JSON.stringify(m));
+  check(`${tag}: no sideways scrolling`, m.docW <= m.vw, `doc ${m.docW} in ${m.vw}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const menu = await page.evaluate(() => { const n = document.querySelector('nav'); const r = n.getBoundingClientRect(); return r.top >= 0 && r.height > 0; });
+  check(`${tag}: the site menu is reachable by scrolling up`, menu);
+  await page.evaluate(() => document.querySelector('[data-testid=control-room]').scrollIntoView({ block: 'start' }));
+  await shot(page, `${tag.replace(/\s+/g, '-')}`);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 async function phone(browser, deviceName) {
   const tag = deviceName;
   const { page, backend, ctx, errors } = await open(browser, { ...devices[deviceName] });
@@ -757,6 +785,9 @@ await desktop(browser, 2560, 1440);
 await desktop(browser, 1024, 768);
 await phone(browser, 'iPhone 13');
 await phone(browser, 'iPhone SE');
+await phoneLandscape(browser, { ...devices['iPhone 13 landscape'] }, 'iPhone 13 landscape');
+// iPhone Pro Max in Safari with the tab bar showing (Shmuel's screenshot): about 932 x 300
+await phoneLandscape(browser, { viewport: { width: 932, height: 300 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 }, 'iPhone Pro Max landscape in Safari');
 await phone(browser, 'iPad Mini');
 await longQueue(browser, { viewport: { width: 1440, height: 900 } }, 'desktop long queue', 26);
 await longQueue(browser, { ...devices['iPhone 13'] }, 'phone long queue', 66);

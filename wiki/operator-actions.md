@@ -92,6 +92,6 @@ A burst of three Nexts on KBR Jerusalem skipped the weather 3.2 s after the firs
 put it on air. Now Next does nothing while a timed item is on air (time check, weather,
 sponsorship, program block: `_is_timed_entry`, i.e. preempt_at set or source ad_slot /
 block). The response carries `protected: true` and the control room says it plays to
-the end; on an engine station the engine is not asked to skip. Play-now still puts
+the end; on an engine station the engine is not asked to skip. Play-now (fire-now) still puts
 something else on air. Songs stay skippable one per press. Test:
 `backend/tests/test_rapid_next.py`.
