@@ -10,6 +10,8 @@ A `SpotSchedule` row = "air this sponsor's asset N times in each chosen daypart,
 
 `reconcile_spot_slots()` makes the station's pending `source="ad_slot"` queue entries match the plan for the next 7 days (adds missing, deletes stale). It runs from `QueueReplenishService._schedule_ad_slots()` and right after any schedule create/update/delete.
 
+**Saves stay under 1 s (S-6).** `api/v1/spot_schedules._refresh_queues` refreshes up to `INLINE_MAX_STATIONS` (3) stations inside the request; more (a schedule for every station, 80+ stations took 2-6 s) are returned and handed to `refresh_in_background` after the commit (own session per station, 4 at a time). Deleting an every-station schedule commits it switched off, and the background job deletes the row once the stations have dropped its slots. Each refresh re-softens rebuilt block items when HS is off. The Databank end-date PATCH uses the same path, and with no `station_id` it is 400 unless every schedule of the spot is station-less. Tests: `tests/test_spot_save_speed_and_end_dates.py` (set `spot_schedules.session_factory` to the test session maker to run the background part).
+
 ## Things you would not guess from the code
 
 - **Legacy fallback is keyed on "no schedule rows at all".** A station with zero spot schedules can play the single asset titled `automation_config.ad_slot_asset_title` (default "KOL BRAMAH TEST SPONSOR") in every :15/:30/:45 slot, but only if it sets `ad_slot_legacy_spot = true`. As soon as one schedule row exists (even inactive), only scheduled spots air.
