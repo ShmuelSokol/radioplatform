@@ -129,3 +129,28 @@ async def test_match_needs_the_right_to_operate_the_station(client, db_session):
     assert r.status_code == 403, r.text
     queued = (await db_session.execute(select(QueueEntry).where(QueueEntry.station_id == fm.id))).scalars().all()
     assert queued == []
+
+
+@pytest.mark.asyncio
+async def test_approving_a_queued_request_again_does_not_queue_it_twice(client, db_session, auth_headers):
+    """F-MATCH-23: a second Approve (double tap, two screens) on a queued request is a no-op."""
+    from sqlalchemy import select
+
+    from app.models.queue_entry import QueueEntry
+    from app.models.song_request import RequestStatus, SongRequest
+    from app.models.station import Station
+
+    made = await _library(db_session)
+    st = Station(id=uuid.uuid4(), name="Web", timezone="UTC")
+    db_session.add(st)
+    song = made[("One Day", "Matisyahu")]
+    req = SongRequest(id=uuid.uuid4(), station_id=st.id, requester_name="Listener", song_title="One Day",
+                      asset_id=song.id, status=RequestStatus.PENDING)
+    db_session.add(req)
+    await db_session.commit()
+    for _ in range(2):
+        r = await client.patch(f"/api/v1/song-requests/{req.id}", json={"status": "approved"}, headers=auth_headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "queued"
+    queued = (await db_session.execute(select(QueueEntry).where(QueueEntry.station_id == st.id))).scalars().all()
+    assert len(queued) == 1

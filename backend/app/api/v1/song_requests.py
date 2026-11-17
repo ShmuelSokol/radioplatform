@@ -269,13 +269,17 @@ async def update_request(
             req.reviewed_at = datetime.now(timezone.utc)
             await add_to_queue(db, str(req.asset_id), str(req.station_id))
     if body.status:
-        req.status = body.status
+        # Already on air or played: approving again must not queue the song a second time
+        old_status = req.status
+        was_queued = str(getattr(old_status, "value", old_status)) in ("queued", "played")
+        approving = str(getattr(body.status, "value", body.status)) in ("approved", "queued")
+        req.status = old_status if (was_queued and approving) else body.status
         req.reviewed_by = user.id
         req.reviewed_at = datetime.now(timezone.utc)
 
         # When approving a matched request, add the asset to the queue
         if body.status in (RequestStatus.APPROVED.value, RequestStatus.QUEUED.value,
-                           RequestStatus.APPROVED, RequestStatus.QUEUED) and req.asset_id:
+                           RequestStatus.APPROVED, RequestStatus.QUEUED) and req.asset_id and not was_queued:
             # Approving puts the song on that station's air: same rule as operating it.
             await _check_operator(db, user, req.station_id)
             req.status = RequestStatus.QUEUED
