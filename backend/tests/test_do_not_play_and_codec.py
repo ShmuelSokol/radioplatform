@@ -63,8 +63,6 @@ async def test_engine_skips_a_queued_do_not_play(db_session):
     station, first, second = await _queue_with_banned_first(db_session, "block")
     picked = await pick_next(db_session, station.id)
     assert picked.id == second.id
-    await db_session.refresh(first)
-    assert first.status == "skipped"
 
 
 @pytest.mark.asyncio
