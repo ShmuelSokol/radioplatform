@@ -67,6 +67,8 @@ class EngineState:
     last_contact: float = 0.0
     last_alert: float = 0.0
     on_emergency: bool = False
+    # True once open emergency alerts were cleared after a start from the queue
+    emergency_cleared: bool = False
     # Asset of each entry handed to the engine (newest last), so a start report for an
     # entry deleted meanwhile (a schedule redraw) still shows what is on air
     handed: dict[str, str] = field(default_factory=dict)
@@ -609,7 +611,7 @@ async def handle_started(
                 station_id,
                 state,
                 force=True,
-                title="Playout engine is on its emergency playlist",
+                title=EMERGENCY_ALERT_TITLE,
                 message=(
                     "The engine could not get a track from the backend and is playing "
                     "its local emergency files."
@@ -617,6 +619,17 @@ async def handle_started(
             )
         return {"ok": True, "known": False}
 
+    if state.on_emergency or not state.emergency_cleared:
+        # Back on the station's own queue: the emergency alert has served its purpose.
+        # Also checked once per process, since a backend restart forgets on_emergency.
+        state.emergency_cleared = True
+        try:
+            from app.services.alert_service import clear_alerts
+
+            await clear_alerts(db, station_id, EMERGENCY_ALERT_TITLE,
+                               "the engine went back to the station's queue")
+        except Exception as e:
+            logger.warning("Could not clear the emergency alert: %s", e)
     state.on_emergency = False
     if state.cued_entry_id == str(entry.id):
         state.cued_entry_id = None
@@ -661,6 +674,9 @@ async def handle_started(
 
 
 # ── Scheduler tick ───────────────────────────────────────────────────────────
+
+
+EMERGENCY_ALERT_TITLE = "Playout engine is on its emergency playlist"
 
 
 async def _alert(

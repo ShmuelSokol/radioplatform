@@ -58,6 +58,9 @@ RECENT_KEEP = 200
 SERIOUS = {"late_timed", "hour_missing", "dead_air", "engine_drift"}
 
 
+DRIFT_TITLE = "Stream server and site disagree"
+
+
 @dataclass
 class Finding:
     kind: str
@@ -74,6 +77,7 @@ class _StationState:
     dead_since: float | None = None
     drift_since: float | None = None
     drift_entry: str | None = None
+    drift_cleared: bool = False  # open drift alerts cleared since this process started
     hours_checked: set = field(default_factory=set)
 
 
@@ -277,8 +281,19 @@ class AirWatch:
                     detail = ("The stream server does not answer." if status is None else
                               f"The stream server plays {status.get('title') or engine_entry}, "
                               f"the site shows {_title(current) if current else 'nothing'}.")
-                    add("engine_drift", "Stream server and site disagree", detail, f"{int(st.drift_since)}")
+                    add("engine_drift", DRIFT_TITLE, detail, f"{int(st.drift_since)}")
             else:
+                if st.drift_since is not None or not st.drift_cleared:
+                    # In step again (or first pass since a restart): an open "disagree"
+                    # alert is over, so it clears itself
+                    st.drift_cleared = True
+                    from app.services.alert_service import clear_alerts
+
+                    try:
+                        await clear_alerts(db, station.id, f"{station.name}: {DRIFT_TITLE}",
+                                           "the stream server and the site agree again")
+                    except Exception as e:
+                        logger.warning("Could not clear the drift alert: %s", e)
                 st.drift_since = st.drift_entry = None
 
         return found

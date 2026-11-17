@@ -126,6 +126,28 @@ async def resolve_alert(db: AsyncSession, alert_id: UUID | str, user_id: UUID | 
     return alert
 
 
+async def clear_alerts(db: AsyncSession, station_id: UUID | str, title: str, why: str) -> int:
+    """Resolve the open alerts with this title on this station because the problem went
+    away by itself (no user). Returns how many were cleared."""
+    rows = (await db.execute(
+        select(Alert).where(
+            Alert.station_id == station_id,
+            Alert.title == title,
+            Alert.is_resolved == False,  # noqa: E712
+        )
+    )).scalars().all()
+    now = datetime.now(timezone.utc)
+    for alert in rows:
+        alert.is_resolved = True
+        alert.resolved_at = now
+        ctx = dict(alert.context or {})
+        ctx["cleared_by_itself"] = why
+        alert.context = ctx
+    if rows:
+        await db.flush()
+    return len(rows)
+
+
 async def reopen_alert(db: AsyncSession, alert_id: UUID | str) -> Alert:
     """Reopen a resolved alert."""
     result = await db.execute(select(Alert).where(Alert.id == alert_id))
