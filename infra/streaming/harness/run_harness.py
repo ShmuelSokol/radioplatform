@@ -110,6 +110,14 @@ class Stack:
         emerg = self.dir / "emergency"
         emerg.mkdir(exist_ok=True)
         self._tone(emerg / "emergency.mp3", EMERGENCY_FREQ, 20)
+        # A blackout's silence asset (60 s of nothing)
+        silent = self.audio / "silence.mp3"
+        if not silent.exists():
+            subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                 "anullsrc=r=44100:cl=stereo", "-t", "60", "-b:a", "128k", str(silent)],
+                check=True,
+            )
         name, f0, f1, secs = CHIRP
         path = self.audio / f"{name}.mp3"
         if not path.exists():
@@ -513,6 +521,11 @@ class Harness:
                          metadata_extra={"audio_analysis": {
                              "version": 99, "cue_in_seconds": 0.0, "cue_out_seconds": 40.0,
                              "cross_start_seconds": 37.0, "replay_gain_db": -6.0}}))
+            aid = uuid.uuid4()
+            self.assets["silence"] = aid
+            db.add(Asset(id=aid, title="Silence", artist="Harness", duration=60.0,
+                         file_path=f"http://127.0.0.1:{AUDIO_PORT}/silence.mp3", asset_type="silence",
+                         review_status="approved"))
             # song1's file at -6 dB, a jingle for mix-over (its own tone, so it can be told
             # apart from a timed song3quiet still playing)
             aid = uuid.uuid4()
@@ -1390,6 +1403,142 @@ async def sc_engine_crash_restart(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s after the restart")
 
 
+async def sc_duplicate_timed_id(h: Harness) -> None:
+    """H-10: the same timed item handed over twice (a retried /timed after a lost answer, a
+    backend restart) airs once, on time."""
+    name = "duplicate_timed_id"
+    await wait_music(h)
+    due = at(20)
+    ids = await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    entry_id = str(ids[0])
+    await asyncio.sleep(max(0, due.timestamp() - time.time() - 12))
+    uri = (f'annotate:kbr_entry="{entry_id}",kbr_lane="timed",kbr_kind="jingle",title="time":'
+           f"http://127.0.0.1:{AUDIO_PORT}/time.mp3")
+    codes = [_control("/timed", {"uri": uri, "at": due.timestamp(), "id": entry_id}) for _ in range(2)]
+    h.check(name, codes == [200, 200], f"/timed sent twice more: {codes}")
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + TONES["time"][1] + 8)
+    starts = await h.started_times("time", due.timestamp() - 5)
+    late = starts[0][0] - due.timestamp() if starts else None
+    h.check(name, late is not None and abs(late) <= 2.0,
+            f"time check {'never' if late is None else f'{late:+.1f} s'}")
+    heard = h.heard(due.timestamp() - 3, due.timestamp() + TONES["time"][1] * 3 + 4)
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    clock = tone_name(TONES["time"][0])
+    h.check(name, runs.count(clock) == 1, f"time check heard once: {runs}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+
+
+async def sc_blackout_ended_early(h: Harness) -> None:
+    """H-10 / B-JOB: a blackout (Shabbos, Yom Tov) puts silence on air; when it is ended
+    early (its end moved to now) the silence is dropped and station music is back within a
+    few seconds, with no silence left queued."""
+    from sqlalchemy import delete, update
+
+    from app.db.engine import async_session_factory
+    from app.models.holiday_window import HolidayWindow
+
+    name = "blackout_ended_early"
+    await wait_music(h)
+    wid = uuid.uuid4()
+    now = datetime.now(UTC)
+    async with async_session_factory() as db:
+        db.add(HolidayWindow(id=wid, name="Harness blackout", start_datetime=now - timedelta(seconds=1),
+                             end_datetime=now + timedelta(minutes=10), is_blackout=True,
+                             affected_stations={"station_ids": [str(STATION_ID)]}))
+        await db.commit()
+    try:
+        silent_from = None
+        for _ in range(60):
+            cur = await h.on_air()
+            if cur and cur.asset and cur.asset.asset_type == "silence":
+                silent_from = time.time()
+                break
+            await asyncio.sleep(1)
+        h.check(name, silent_from is not None, "silence on air once the blackout starts")
+        if silent_from is None:
+            return
+        await asyncio.sleep(8)
+        quiet = h.heard(silent_from + 2, time.time() - 1)
+        loud = [t for t, db, _ in quiet if db > -45]
+        h.check(name, not loud, f"nothing heard during the blackout ({len(loud)} loud windows)")
+        ended = time.time()
+        async with async_session_factory() as db:
+            await db.execute(update(HolidayWindow).where(HolidayWindow.id == wid)
+                             .values(end_datetime=datetime.now(UTC)))
+            await db.commit()
+        back = None
+        for _ in range(40):
+            cur = await h.on_air()
+            if cur and cur.asset and cur.asset.asset_type == "music":
+                back = time.time()
+                break
+            await asyncio.sleep(0.5)
+        h.check(name, back is not None and back - ended <= 10.0,
+                f"music on air {'never' if back is None else f'{back - ended:.1f} s'} after the blackout ended")
+        await asyncio.sleep(10)
+        tail = [n for _, n in timeline(h.heard(time.time() - 6, time.time() - 1))]
+        h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"station music heard: {tail}")
+        left = [e for e in await h.rows() if e.status in ("pending", "playing")
+                and e.asset_id == h.assets["silence"]]
+        h.check(name, not left, f"no silence left in the queue ({len(left)})")
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(delete(HolidayWindow).where(HolidayWindow.id == wid))
+            await db.commit()
+
+
+async def sc_block_with_slow_shiur(h: Harness, delay: float = 15.0) -> None:
+    """Jerusalem 18:00Z 2026-11-17: a block of time check, announcement and the day's Daf
+    Yomi shiur (one hard group). The shiur is a big file that takes a while to arrive. After
+    the announcement the shiur must follow, not a song from the music lane."""
+    name = f"block_with_slow_shiur_{delay:g}s"
+    await wait_music(h)
+    due = at(25)
+    h.stack.slow_files["shiur.mp3"] = delay
+    try:
+        await h.queue([(n, {"preempt_at": due, "timing_mode": "hard", "source": "block"})
+                       for n in ("time", "announce", "shiur")])
+        await asyncio.sleep(max(0, due.timestamp() - time.time()) + 12 + delay + 8)
+    finally:
+        h.stack.slow_files.pop("shiur.mp3", None)
+    starts = {n: await h.started_times(n, due.timestamp() - 5) for n in ("time", "announce", "shiur")}
+    h.check(name, bool(starts["time"]) and abs(starts["time"][0][0] - due.timestamp()) <= 2.0,
+            f"time check on time ({[_fmt(x[0]) for x in starts['time']]})")
+    h.check(name, bool(starts["shiur"]), f"shiur aired ({[_fmt(x[0]) for x in starts['shiur']]})")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset_id == h.assets["shiur"],
+            f"shiur on air at the end ({cur.asset.title if cur else None})")
+    heard = h.heard(due.timestamp() - 3, time.time() - 1)
+    h.print_timeline(heard, due.timestamp())
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    after = runs[runs.index("announce") + 1:] if "announce" in runs else []
+    if delay < 20:
+        h.check(name, bool(after) and after[0] == "shiur", f"after the announcement: {after}; heard {runs}")
+    else:
+        # Its file arrives ~20 s after the announcement: a song fills in, then the shiur
+        h.check(name, "shiur" in after and after[-1] == "shiur", f"after the announcement: {after}; heard {runs}")
+        arrived = due.timestamp() - 25 + delay
+        if starts["shiur"]:
+            h.check(name, starts["shiur"][0][0] - arrived <= 3.0,
+                    f"shiur on air {starts['shiur'][0][0] - arrived:+.1f} s after its file arrived")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    # Next during the shiur moves on to music (and the hour-long shiur would otherwise
+    # still be on air for the next scenario)
+    t0 = time.time()
+    try:
+        code = await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+    except Exception as e:  # noqa: BLE001
+        code = repr(e)
+    h.check(name, code == 200, f"engine answers /skip during the shiur ({code}, {time.time() - t0:.1f} s)")
+    await asyncio.sleep(6)
+    tail = [n for _, n in timeline(h.heard(time.time() - 3, time.time() - 0.5))]
+    h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"music after Next: {tail}")
+
+
 SCENARIOS = {
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
@@ -1417,6 +1566,11 @@ SCENARIOS = {
     "track_level": sc_track_level,
     "song_with_level_muted_under_time_check": sc_level_song_muted,
     "timed_and_mix_over_levels": sc_lane_levels,
+    "duplicate_timed_id": sc_duplicate_timed_id,
+    "block_with_slow_shiur": sc_block_with_slow_shiur,
+    # the shiur's file arrives only after the announcement has ended: music fills in
+    "block_with_very_slow_shiur": lambda h: sc_block_with_slow_shiur(h, 45.0),
+    "blackout_ended_early": sc_blackout_ended_early,
     "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,

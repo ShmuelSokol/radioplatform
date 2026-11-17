@@ -94,7 +94,7 @@ async def test_upcoming_items_are_queued_once(monkeypatch):
     monkeypatch.setattr(upcoming_analysis, "_run", fake_run)
     fresh = SimpleNamespace(id=uuid.uuid4(), file_path="a.mp3", metadata_extra=None)
     done = SimpleNamespace(id=uuid.uuid4(), file_path="b.mp3", metadata_extra={
-        "audio_analysis": {"version": ANALYSIS_VERSION}})
+        "audio_analysis": {"version": ANALYSIS_VERSION, "loudness_lufs": -16.0, "replay_gain_db": -2.0}})
     for _ in range(3):
         upcoming_analysis.request(fresh)
         upcoming_analysis.request(done)
@@ -170,4 +170,63 @@ async def test_start_cue_measured_when_none_stored():
     async with _range_server(lead, []) as client:
         a = await analyze_by_range("https://cdn.example.com/s.mp3", None, client=client)
     assert 1.2 < a["cue_in_seconds"] < 1.8
-    assert a["replay_gain_db"] == 0.0
+    # no stored loudness: it is measured, not left at a made-up -18 LUFS
+    assert a["loudness_method"] == "sampled"
+
+
+def _tone_mp3(seconds: float, volume: float) -> bytes:
+    return subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+         f"anoisesrc=c=pink:a={volume}:d={seconds}", "-ac", "1", "-ar", "44100",
+         "-b:a", "128k", "-f", "mp3", "pipe:1"], capture_output=True, check=True).stdout
+
+
+@needs_ffmpeg
+@pytest.mark.asyncio
+@pytest.mark.parametrize("volume", [0.05, 1.0])
+async def test_loudness_sampled_when_none_was_measured(volume):
+    """Jerusalem 18:00Z: items analysed only from their ends kept -18 LUFS / 0 dB and
+    aired from -13.5 to -19.3 LUFS. Now three pieces are measured, within 1 dB of a
+    full measurement, reading under half the file."""
+    from app.services.audio_analysis_service import analyze_audio_bytes
+    from app.services.tail_analysis import analyze_by_range
+
+    song = _tone_mp3(150, volume)
+    full = analyze_audio_bytes(song)
+    served = []
+    fake = {"cue_in_seconds": 0.0, "loudness_lufs": -18.0, "replay_gain_db": 0.0,
+            "method": "range", "version": ANALYSIS_VERSION}
+    async with _range_server(song, served) as client:
+        a = await analyze_by_range("https://cdn.example.com/s.mp3", fake, client=client)
+    assert a["loudness_method"] == "sampled"
+    assert a["loudness_lufs"] == pytest.approx(full["loudness_lufs"], abs=1.0)
+    assert a["replay_gain_db"] == pytest.approx(full["replay_gain_db"], abs=1.0)
+    assert abs(a["replay_gain_db"]) > 2  # neither test file is near -18 LUFS
+    assert sum(served) < 0.5 * len(song)
+    # measured once: the next range analysis keeps it
+    async with _range_server(song, []) as client:
+        again = await analyze_by_range("https://cdn.example.com/s.mp3", a, client=client)
+    assert again["loudness_lufs"] == a["loudness_lufs"] and again["loudness_method"] == "sampled"
+
+
+def test_unmeasured_loudness_is_analysed_again():
+    from app.models.asset import has_real_loudness
+
+    fake = {"loudness_lufs": -18.0, "replay_gain_db": 0.0, "method": "range", "version": ANALYSIS_VERSION}
+    assert not has_real_loudness(fake)
+    assert needs_analysis(SimpleNamespace(metadata_extra={"audio_analysis": fake}))
+    kept = {**fake, "loudness_lufs": -14.2, "replay_gain_db": -3.8}  # kept from a full analysis
+    assert has_real_loudness(kept)
+    assert not needs_analysis(SimpleNamespace(metadata_extra={"audio_analysis": kept}))
+    sampled = {**fake, "loudness_method": "sampled"}  # really measured at -18
+    assert has_real_loudness(sampled)
+    full = {"loudness_lufs": -18.0, "replay_gain_db": 0.0, "version": ANALYSIS_VERSION}
+    assert has_real_loudness(full)
+
+
+def test_combined_loudness_is_a_power_average():
+    from app.services.tail_analysis import combine_loudness
+
+    lufs, peak = combine_loudness([(-10.0, -1.0), (-20.0, -5.0), (None, None), (-70.0, -60.0)])
+    assert lufs == pytest.approx(-12.6, abs=0.05) and peak == -1.0
+    assert combine_loudness([(None, None)]) is None

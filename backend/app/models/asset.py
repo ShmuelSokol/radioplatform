@@ -159,7 +159,21 @@ def stored_analysis(metadata_extra) -> dict:
     return {k: analysis[k] for k in ("cue_in_seconds", "replay_gain_db", "loudness_lufs") if k in analysis}
 
 
+def has_real_loudness(analysis) -> bool:
+    """False for an analysis whose loudness was never measured: a range-only
+    analysis (services/tail_analysis.py) of an item with no earlier full analysis
+    stored the default -18 LUFS and 0 dB, so the item played unadjusted (Jerusalem
+    18:00Z, items from -13.5 to -19.3 LUFS)."""
+    if not isinstance(analysis, dict) or not analysis:
+        return False
+    if analysis.get("method") == "range" and not analysis.get("loudness_method"):
+        return not (analysis.get("loudness_lufs", -18.0) == -18.0 and analysis.get("replay_gain_db", 0.0) == 0.0)
+    return "loudness_lufs" in analysis or "replay_gain_db" in analysis
+
+
 def needs_analysis(asset) -> bool:
-    """True when the item has no analysis, or one older than ANALYSIS_VERSION."""
+    """True when the item has no analysis, one older than ANALYSIS_VERSION, or one
+    whose loudness was never measured."""
     analysis = (asset.metadata_extra or {}).get("audio_analysis") if isinstance(asset.metadata_extra, dict) else None
-    return not isinstance(analysis, dict) or analysis.get("version", 1) < ANALYSIS_VERSION
+    return (not isinstance(analysis, dict) or analysis.get("version", 1) < ANALYSIS_VERSION
+            or not has_real_loudness(analysis))

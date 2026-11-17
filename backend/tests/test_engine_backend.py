@@ -1239,3 +1239,35 @@ async def test_emergency_alert_clears_itself_on_a_known_start(client, db_session
     row = (await db_session.execute(select(Alert).execution_options(populate_existing=True))).scalar_one()
     assert row.is_resolved is True
     assert "queue" in row.context["cleared_by_itself"]
+
+
+@pytest.mark.asyncio
+async def test_blackout_starting_now_moves_the_engine_on(client, db_session, eng):
+    """H-10 (harness blackout_ended_early): a blackout that is already running when it is
+    filled (made or moved while active) marked its first silence as playing here but left
+    the engine's song on air, so music aired into Shabbos while the site showed silence.
+    Now the silence is queued, the engine is flushed and skipped, and its /next gets the silence."""
+    station, entries, engine, _ = eng
+    await _on_air(client, station, entries[0].id)
+    silence = Asset(id=uuid.uuid4(), title="Silence", duration=300.0, asset_type="silence",
+                    file_path="https://cdn.example.com/audio/silence.mp3")
+    db_session.add(silence)
+    now = datetime.now(UTC)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", is_blackout=True,
+                                 start_datetime=now - timedelta(seconds=5),
+                                 end_datetime=now + timedelta(minutes=20)))
+    await db_session.commit()
+    n = await queue_module.fill_blackout_queue(db_session, station.id)
+    assert n >= 4
+    assert engine.paths()[-2:] == ["/flush", "/skip"]
+    rows = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.asset_id == silence.id)
+        .execution_options(populate_existing=True))).scalars().all()
+    assert rows and all(r.status == "pending" for r in rows)  # the engine reports the start
+    r = await _next(client, station)
+    assert r.status_code == 200
+    assert r.json()["entry_id"] in {str(x.id) for x in rows}
+    # Filled once: the next scheduler pass does not skip again
+    sent = len(engine.paths())
+    assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
+    assert len(engine.paths()) == sent

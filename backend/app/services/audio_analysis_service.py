@@ -10,6 +10,30 @@ from app.services.silence_service import detect_silence, get_audio_duration
 
 logger = logging.getLogger(__name__)
 
+def measure_loudness(data: bytes) -> tuple[float | None, float | None]:
+    """(integrated LUFS, true peak dBFS) of some audio, from FFmpeg loudnorm's
+    measuring pass. (None, None) when it cannot be measured."""
+    cmd = [
+        settings.FFMPEG_PATH, "-hide_banner", "-i", "pipe:0",
+        "-af", "loudnorm=I=-18:LRA=11:TP=-1.5:print_format=json",
+        "-f", "null", "-",
+    ]
+    result = subprocess.run(cmd, input=data, capture_output=True, timeout=300)
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    json_match = re.search(r"\{[^}]*\"input_i\"[^}]*\}", stderr, re.DOTALL)
+    if not json_match:
+        return None, None
+    try:
+        loudnorm_data = json.loads(json_match.group())
+        lufs, tp = float(loudnorm_data["input_i"]), float(loudnorm_data["input_tp"])
+    except (json.JSONDecodeError, ValueError, TypeError, KeyError):
+        logger.warning("Failed to parse loudnorm JSON output")
+        return None, None
+    if lufs != lufs or lufs in (float("inf"), float("-inf")):
+        return None, None
+    return lufs, tp
+
+
 def analyze_audio_bytes(file_data: bytes) -> dict:
     """Analyze audio bytes and return loudness + cue point data.
 
@@ -17,25 +41,9 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
     cue_out_seconds, cross_start_seconds, replay_gain_db.
     """
     # 1. Measure loudness via FFmpeg loudnorm (first pass / print_format=json)
-    cmd = [
-        settings.FFMPEG_PATH, "-i", "pipe:0",
-        "-af", "loudnorm=I=-18:LRA=11:TP=-1.5:print_format=json",
-        "-f", "null", "-",
-    ]
-    result = subprocess.run(cmd, input=file_data, capture_output=True, timeout=300)
-    stderr = result.stderr.decode("utf-8", errors="replace")
-
-    # Extract the JSON block from stderr (loudnorm prints it at end)
-    loudness_lufs = -18.0
-    true_peak_dbfs = -1.5
-    json_match = re.search(r"\{[^}]*\"input_i\"[^}]*\}", stderr, re.DOTALL)
-    if json_match:
-        try:
-            loudnorm_data = json.loads(json_match.group())
-            loudness_lufs = float(loudnorm_data.get("input_i", -18.0))
-            true_peak_dbfs = float(loudnorm_data.get("input_tp", -1.5))
-        except (json.JSONDecodeError, ValueError, TypeError):
-            logger.warning("Failed to parse loudnorm JSON output")
+    loudness_lufs, true_peak_dbfs = measure_loudness(file_data)
+    if loudness_lufs is None:
+        loudness_lufs, true_peak_dbfs = -18.0, -1.5
 
     # 2. Get total duration
     total_duration = get_audio_duration(file_data)

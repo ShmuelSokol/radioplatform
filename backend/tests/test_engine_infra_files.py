@@ -59,7 +59,7 @@ def test_levels_and_output_processing():
     for call in re.findall(r"amplify\(([^\n]*)\)", liq):
         assert 'override="liq_amplify"' in call or "override=null()" in call, call
     assert "compress(threshold=-14., ratio=3." in liq
-    assert "limit(threshold=-1., radio)" in liq
+    assert "limit(threshold=-2., radio)" in liq
     assert "%mp3(bitrate=320, samplerate=44100, stereo=true" in liq
     assert 'environment.get(default="Kol B\'ramah", "KBR_STATION_NAME")' in liq
 
@@ -70,7 +70,10 @@ def test_crossfade_and_timed_group_constants():
     assert "cross(duration=3., transition, main)" in liq
     assert "thread.run(delay=1.5, {timed_armed := false})" in liq
     assert "abs(at - timed_group_at()) > 0.5" in liq
-    assert 'timed_armed() or (on_air_lane() == "timed" and timed_queue.length() > 0)' in liq
+    # length() leaves out items already fetched, so the gate also stays open while one
+    # is ready (Jerusalem 18:00Z: the shiur after the announcement was not aired)
+    assert ('timed_armed() or (on_air_lane() == "timed" and '
+            '(timed_queue.length() > 0 or timed_queue.is_ready()))') in liq
 
 
 def test_control_endpoints_are_local_and_guarded():
@@ -163,11 +166,18 @@ def test_setup_reads_every_station():
 
 def test_take_over_waits_for_the_timed_file():
     """V1-8: the music is not muted before the timed item's file has arrived, and a slow
-    download is given 90 s instead of the 20 s default."""
+    download is given 90 s instead of the 20 s default. The whole group is fetched
+    ahead (prefetch=10), and an item still downloading when the one before it ends
+    follows once it arrives (harness block_with_slow_shiur / block_with_very_slow_shiur)."""
     liq = _liq()
-    assert 'request.queue(id="timed", interactive=false, timeout=90.)' in liq
-    rec = liq.index("def rec go_on_air()")
-    body = liq[rec:liq.index("timed_queue.push(r)", rec)]
+    assert 'request.queue(id="timed", interactive=false, timeout=90., prefetch=10)' in liq
+    rec = liq.index("def rec attempt()")
+    body = liq[rec:liq.index("def schedule_timed", rec)]
     assert "timed_queue.is_ready()" in body
-    assert "thread.run(delay=0.25, go_on_air)" in body
-    assert body.index("is_ready") < body.index("take_over()")
+    assert "thread.run(delay=0.25, attempt)" in body
+    assert body.index("is_ready") < body.index("timed_take_over()")
+    # counted before the push: the push can wait for the download
+    sched = liq[liq.index("def schedule_timed"):]
+    assert sched.index("timed_pending := timed_pending() + 1") < sched.index("timed_queue.push(r)")
+    started = liq[liq.index("def send_started"):]
+    assert 'was == "timed" and lane != "timed" and timed_pending() > 0 and not timed_waiting()' in started

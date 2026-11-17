@@ -147,14 +147,22 @@ end
 # ── Timed lane: hard-timed items and Play Now ────────────────────────────────
 # A time check is handed over about 45 s ahead; give its file time to arrive (the default
 # 20 s dropped a slow download, harness slow_timed_file)
-timed_queue = request.queue(id="timed", interactive=false, timeout=90.)
+# prefetch: every item of a group starts downloading when it is handed over. With the
+# default (1) the next file was only fetched once the item before it started, and the
+# Daf Yomi shiur after a 6 s announcement was not there in time: the music lane played
+# instead (Jerusalem 18:00Z 2026-11-17; harness block_with_slow_shiur)
+timed_queue = request.queue(id="timed", interactive=false, timeout=90., prefetch=10)
 timed_armed = ref(false)
 # Which lane is on air right now ("main", "timed" or "emergency")
 on_air_lane = ref("")
 # Items due at the same time form a group (a block: ID, weather, sponsors). Once the lane
 # is on air it stays on until the group has played through, in the order it was handed over.
+# length() counts only requests not yet fetched: an item already fetched (the next one of
+# the group, downloaded while the one before it plays) is not in it. Counting on length()
+# alone closed the lane before the third item of a group, and the Daf Yomi shiur after
+# the time check and announcement was left behind (Jerusalem 18:00Z 2026-11-17).
 def timed_open() =
-  timed_armed() or (on_air_lane() == "timed" and timed_queue.length() > 0)
+  timed_armed() or (on_air_lane() == "timed" and (timed_queue.length() > 0 or timed_queue.is_ready()))
 end
 # Per-track level for timed items too (time checks, sponsors), as on the music lane
 timed = switch(id="timed_gate", track_sensitive=true,
@@ -163,62 +171,82 @@ timed = switch(id="timed_gate", track_sensitive=true,
 # Start time of the last group scheduled to take over
 timed_group_at = ref(-1.)
 
+def timed_take_over() =
+  ramp_master(target=0., duration=skip_fade, fun () -> begin
+    # Mute the music lane, put the timed item on air at full level. The interrupted
+    # song does not resume: when the music lane comes back it moves to its next song
+    # (see report_started).
+    timed_armed := true
+    if on_air_lane() == "main" then
+      main_gain := 0.
+      main_interrupted := true
+      master_gain := 1.
+    elsif on_air_lane() == "timed" then
+      # An earlier timed item is still on air (a block's shiur, a Play Now): end it,
+      # or this group waits behind it. The 21:00 time check aired at 21:09 after the
+      # 20:00 block's Daf Yomi (2026-11-16). The backend has already queued the
+      # shiur to carry on afterwards when the station pauses long items.
+      # But not an item that has only just started, or one about to end by itself:
+      # with the station set to wait, the group is due exactly when the shiur ends,
+      # so the item on air at this moment is the group's own first item (the time
+      # check), and skipping it dropped the time check (harness, 2026-11-17).
+      elapsed = timed_queue.elapsed()
+      left = timed_queue.remaining()
+      if elapsed > 1.0 and (left < 0. or left > 1.0) then
+        timed_queue.skip()
+      else
+        log.important("timed: item on air just started or is ending; not cut (elapsed #{elapsed}, left #{left})")
+      end
+      thread.run(delay=0.1, {master_gain := 1.})
+    else
+      master_gain := 1.
+    end
+    thread.run(delay=1.5, {timed_armed := false})
+  end)
+end
+# Put the timed lane on air as soon as its next item's file is there (up to `limit`
+# tries, 0.25 s apart); meanwhile the music carries on. Muting it while the file was
+# missing left 16 s of silence and the time check never aired (harness slow_timed_file).
+timed_waiting = ref(false)
+# Timed items handed over and not started yet (length() leaves out one being fetched)
+timed_pending = ref(0)
+# `group`: the group this wait is for; it stops if a later group has been scheduled
+# since (that group's own wait takes over), so a later time check is never pulled early
+def timed_go_on_air(limit, group) =
+  tries = ref(0)
+  timed_waiting := true
+  def rec attempt() =
+    if group != timed_group_at() then
+      timed_waiting := false
+    elsif not timed_queue.is_ready() and tries() < limit then
+      if tries() == 0 then log.important("timed: item not ready at its time; music carries on until it is") end
+      tries := tries() + 1
+      thread.run(delay=0.25, attempt)
+    else
+      timed_waiting := false
+      if timed_queue.is_ready() then
+        timed_take_over()
+      else
+        log.important("timed: item never arrived; giving up on it")
+        timed_pending := 0
+      end
+    end
+  end
+  attempt()
+end
+
 # Load the item now; put it on air at `at` (unix seconds). The music fades under it.
 def schedule_timed(~uri, ~at) =
   r = request.create(uri)
-  def take_over() =
-    ramp_master(target=0., duration=skip_fade, fun () -> begin
-      # Mute the music lane, put the timed item on air at full level. The interrupted
-      # song does not resume: when the music lane comes back it moves to its next song
-      # (see report_started).
-      timed_armed := true
-      if on_air_lane() == "main" then
-        main_gain := 0.
-        main_interrupted := true
-        master_gain := 1.
-      elsif on_air_lane() == "timed" then
-        # An earlier timed item is still on air (a block's shiur, a Play Now): end it,
-        # or this group waits behind it. The 21:00 time check aired at 21:09 after the
-        # 20:00 block's Daf Yomi (2026-11-16). The backend has already queued the
-        # shiur to carry on afterwards when the station pauses long items.
-        # But not an item that has only just started, or one about to end by itself:
-        # with the station set to wait, the group is due exactly when the shiur ends,
-        # so the item on air at this moment is the group's own first item (the time
-        # check), and skipping it dropped the time check (harness, 2026-11-17).
-        elapsed = timed_queue.elapsed()
-        left = timed_queue.remaining()
-        if elapsed > 1.0 and (left < 0. or left > 1.0) then
-          timed_queue.skip()
-        else
-          log.important("timed: item on air just started or is ending; not cut (elapsed #{elapsed}, left #{left})")
-        end
-        thread.run(delay=0.1, {master_gain := 1.})
-      else
-        master_gain := 1.
-      end
-      thread.run(delay=1.5, {timed_armed := false})
-    end)
-  end
-  tries = ref(0)
-  def rec go_on_air() =
-    if not timed_queue.is_ready() and tries() < 180 then
-      # Its file has not arrived yet: leave the music playing and try again shortly.
-      # Muting it now left 16 s of silence and the time check never aired (harness
-      # slow_timed_file, 2026-11-17).
-      if tries() == 0 then log.important("timed: item not ready at its time; music carries on until it is") end
-      tries := tries() + 1
-      thread.run(delay=0.25, go_on_air)
-    else
-      take_over()
-    end
-  end
   # Pushed here, not in a thread, so a group keeps the order it was handed over in
+  # Counted before the push: with prefetch the push itself can wait for the download
+  timed_pending := timed_pending() + 1
   timed_queue.push(r)
   # One take-over per group: the rest of the group follows from the queue
   if abs(at - timed_group_at()) > 0.5 then
     timed_group_at := at
     wait = at - time() - skip_fade
-    thread.run(delay=(if wait > 0. then wait else 0. end), go_on_air)
+    thread.run(delay=(if wait > 0. then wait else 0. end), {timed_go_on_air(180, at)})
   end
 end
 
@@ -252,7 +280,9 @@ end
 
 # ── Broadcast sound: gentle compression and a limiter on the whole output ────
 radio = compress(threshold=-14., ratio=3., attack=20., release=200., radio)
-radio = limit(threshold=-1., radio)
+# -2 dB, not -1: the limiter sees sample peaks, and the MP3 encoder adds up to about
+# 1 dB between samples (Jerusalem showed true peaks of -0.2 dBFS with -1)
+radio = limit(threshold=-2., radio)
 
 # ── Tell the backend what really went on air ─────────────────────────────────
 def report_to_backend(entry, lane, title) =
@@ -289,7 +319,16 @@ timed_dropped = ref([])
 def send_started(m) =
   entry = m["kbr_entry"]
   lane = if entry == "" then "emergency" else m["kbr_lane"] end
+  was = on_air_lane()
   on_air_lane := lane
+  if lane == "timed" and timed_pending() > 0 then timed_pending := timed_pending() - 1 end
+  if was == "timed" and lane != "timed" and timed_pending() > 0 and not timed_waiting() then
+    # A group's next item was not ready when the item before it ended (its file still
+    # downloading), so the music lane filled in. Put the group back on air the moment
+    # it is there instead of leaving it stranded in the timed lane.
+    log.important("timed: rest of the group not ready; music meanwhile, it follows when it is")
+    timed_go_on_air(480, timed_group_at())
+  end
   if lane == "timed" and entry != "" and list.mem(entry, timed_dropped()) then
     log.important("timed: entry #{entry} was dropped by the backend; skipping it")
     timed_queue.skip()
