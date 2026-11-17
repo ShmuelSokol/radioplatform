@@ -639,8 +639,11 @@ async def _resume_playback_on_startup():
                                 message=f"Station '{station.name}' has no pending entries after queue replenish on startup",
                                 station_id=station.id,
                             )
+                            # create_alert only flushes: without this the alert was lost
+                            # whenever nothing else committed after it (last station)
+                            await db.commit()
                         except Exception:
-                            pass
+                            logger.warning("Could not record the empty-queue alert", exc_info=True)
                 except Exception as e:
                     logger.error("Failed to resume station %s: %s", station.name, e, exc_info=True)
 
@@ -693,10 +696,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Bug reports: push "fix ready" to ntfy (see wiki/bug-reports.md)
     from app.services.bug_report_service import notify_loop
     bug_task = _asyncio.get_running_loop().create_task(notify_loop())
+    # On-air self-check: late time checks, dead air, drift (see wiki/air-watch.md)
+    from app.services.air_watch import watch_loop
+    watch_task = _asyncio.get_running_loop().create_task(watch_loop())
 
     yield
 
     bug_task.cancel()
+    watch_task.cancel()
 
     backfill_task.cancel()
     index_task.cancel()

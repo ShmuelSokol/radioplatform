@@ -76,10 +76,21 @@ export function usePfl() {
       setPaused(true);
       setError(message);
     };
-    const mediaFailed = (a: HTMLAudioElement) => {
+    // Chrome reports a file it could not fetch at all (connection dropped, server
+    // down) as "not supported", the same as an MP2 file. Ask for its first bytes to
+    // tell them apart: only a file that arrives but cannot be decoded is unplayable.
+    const reachable = async (src: string) => {
+      try {
+        const res = await fetch(src, { headers: { Range: 'bytes=0-1' }, cache: 'no-store' });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    };
+    const mediaFailed = async (a: HTMLAudioElement) => {
       const code = a.error?.code;
-      if (code === 2) fail(NETWORK_MESSAGE);
-      else fail(UNPLAYABLE_MESSAGE);
+      if (code === 2) { fail(NETWORK_MESSAGE); return; }
+      fail(a.src && !(await reachable(a.src)) ? NETWORK_MESSAGE : UNPLAYABLE_MESSAGE);
     };
     try {
       const a = new Audio() as SinkAudio;
@@ -94,7 +105,7 @@ export function usePfl() {
       a.src = url;
       a.preload = 'auto';
       a.onended = ended;
-      a.onerror = () => mediaFailed(a);
+      a.onerror = () => { void mediaFailed(a); };
       setUrl(url);
       await a.play();
     } catch (e) {
@@ -105,10 +116,9 @@ export function usePfl() {
         setPaused(true);
       } else if (name === 'AbortError') {
         // Replaced by another item
-      } else if (name === 'NotSupportedError') {
-        fail(UNPLAYABLE_MESSAGE);
-      } else if (audioRef.current?.error) {
-        mediaFailed(audioRef.current);
+      } else if (name === 'NotSupportedError' || audioRef.current?.error) {
+        if (audioRef.current) await mediaFailed(audioRef.current);
+        else fail(UNPLAYABLE_MESSAGE);
       } else {
         fail(NETWORK_MESSAGE);
       }

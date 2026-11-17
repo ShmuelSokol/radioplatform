@@ -231,6 +231,10 @@ async def rate_song(
     db: AsyncSession = Depends(get_db),
 ):
     """Rate or favorite a song. Upserts if a rating already exists."""
+    try:
+        data.asset_id = uuid.UUID(str(data.asset_id))  # the schema allows str; the column is a UUID
+    except ValueError:
+        raise NotFoundError("Asset not found")
     # Verify asset exists
     asset = await db.execute(select(Asset).where(Asset.id == data.asset_id))
     asset_obj = asset.scalar_one_or_none()
@@ -365,7 +369,11 @@ async def enter_raffle(
         raise BadRequestError("Raffle is not open")
 
     now = datetime.now(timezone.utc)
-    if now < raffle_obj.starts_at or now > raffle_obj.ends_at:
+
+    def _aware(t):
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+    if now < _aware(raffle_obj.starts_at) or now > _aware(raffle_obj.ends_at):
         raise BadRequestError("Raffle is not active right now")
 
     # Check duplicate

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSongRequests, useUpdateSongRequest, useDeleteSongRequest, useTopRequested } from '../../hooks/useSongRequests';
 import Spinner from '../../components/Spinner';
+import MatchToSong from './MatchToSong';
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-blue-900 text-blue-300',
@@ -55,6 +56,10 @@ export default function SongRequests() {
   const requests = data?.requests ?? [];
   const total = data?.total ?? 0;
   const topRequested = topData?.top_requested ?? [];
+
+  const handleMatch = (id: string, assetId: string) => {
+    updateMut.mutate({ id, data: { asset_id: assetId } });
+  };
 
   const handleApprove = (id: string) => {
     updateMut.mutate({ id, data: { status: 'approved' } });
@@ -182,7 +187,7 @@ export default function SongRequests() {
                     <td className="px-3 py-1.5 text-cyan-300 max-w-[140px] truncate">{req.requester_name}</td>
                     <td className="px-3 py-1.5 text-white max-w-[200px] truncate font-medium">{req.song_title}</td>
                     <td className="px-3 py-1.5 text-gray-400 max-w-[140px] truncate">{req.song_artist || '--'}</td>
-                    <td className="px-3 py-1.5 max-w-[180px] truncate">
+                    <td className="px-3 py-1.5 max-w-[220px]">
                       {req.matched_asset_title ? (
                         <span className="text-green-400 text-[11px]">
                           {req.matched_asset_title}
@@ -190,6 +195,15 @@ export default function SongRequests() {
                         </span>
                       ) : (
                         <span className="text-gray-600 text-[11px]">--</span>
+                      )}
+                      {req.status !== 'queued' && req.status !== 'played' && req.status !== 'rejected' && (
+                        <div className="mt-0.5">
+                          <MatchToSong
+                            initial={[req.song_title, req.song_artist].filter(Boolean).join(' ')}
+                            busy={updateMut.isPending}
+                            onPick={(a) => handleMatch(req.id, a.id)}
+                          />
+                        </div>
                       )}
                     </td>
                     <td className="px-3 py-1.5 text-gray-500 text-[11px] max-w-[200px] truncate hidden lg:table-cell">
@@ -270,7 +284,14 @@ export default function SongRequests() {
                     <span className="text-gray-600 mx-1">&middot;</span>
                     <span className="text-gray-500">{timeAgo(req.created_at)}</span>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-start">
+                    {req.status !== 'queued' && req.status !== 'played' && req.status !== 'rejected' && (
+                      <MatchToSong
+                        initial={[req.song_title, req.song_artist].filter(Boolean).join(' ')}
+                        busy={updateMut.isPending}
+                        onPick={(a) => handleMatch(req.id, a.id)}
+                      />
+                    )}
                     {req.status === 'pending' && (
                       <>
                         <button onClick={() => handleApprove(req.id)} className="text-green-400 hover:text-green-300">Approve</button>

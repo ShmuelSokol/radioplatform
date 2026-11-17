@@ -21,7 +21,10 @@ export default function Login() {
       authLogin(tokens.access_token, tokens.refresh_token);
       navigate('/admin/dashboard');
     } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || 'Login failed';
+      // The sign-in limit answers 429 with no 'detail'; do not show the raw 'status code 429'.
+      const msg = err?.response?.status === 429
+        ? 'Too many sign-in attempts. Wait a minute and try again.'
+        : err?.response?.data?.detail || err?.message || 'Login failed';
       setError(typeof msg === 'string' ? msg : 'Invalid email or password');
     } finally {
       setLoading(false);
@@ -36,8 +39,9 @@ export default function Login() {
           <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>
         )}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+          <label htmlFor="login-username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
           <input
+            id="login-username"
             type="text"
             autoCapitalize="none"
             autoCorrect="off"
@@ -48,8 +52,9 @@ export default function Login() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+          <label htmlFor="login-password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
           <input
+            id="login-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createServer } from 'vite';
+import { serveRange } from './lib/fake-station.mjs';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,9 +21,15 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
   if (!ok) failures++;
 };
+// A known site bug: prints XFAIL while it stands, XPASS (and fails) once fixed, so the
+// mark is taken off
+const xfail = (name, ok, bug, detail = '') => {
+  console.log(`${ok ? 'XPASS' : 'XFAIL'}  ${name}  [BUG ${bug}]${detail ? `  (${detail})` : ''}`);
+  if (ok) failures++;
+};
 
 // Test tones: asset id -> [frequency, seconds]
-const TONES = { a: [440, 20], b: [660, 12], c: [880, 12], d: [550, 40] };
+const TONES = { a: [440, 20], b: [660, 12], c: [880, 12], d: [550, 40], t: [1000, 5] };
 function wav(freq, seconds) {
   const rate = 8000, n = rate * seconds, buf = Buffer.alloc(44 + n * 2);
   buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
@@ -37,6 +44,8 @@ const A = { id: 'a', dur: 20, cross: 17 };
 const B = { id: 'b', dur: 12, cross: 9 };
 const C = { id: 'c', dur: 12, cross: 9 };
 const D = { id: 'd', dur: 40, cross: 37 };
+// A 5 s time check: short items hand over at their end (0.3 s before), not by crossfade
+const T = { id: 't', dur: 5, cross: 4.7 };
 const now = () => new Date().toISOString();
 
 // Each scenario starts with song "a" on air, then calls change() and is watched for `watch` seconds.
@@ -206,6 +215,20 @@ const SCENARIOS = {
     },
     end: { src: 'b', minT: 0, maxT: 7 },
   },
+  // All Day Stories, 10 PM 2026-11-16: the server moved on to the paused story 3.3 s into
+  // a 5 s time check and the story was heard over the last 1.8 s of it. The page lets a
+  // short item finish; the story follows it with no gap.
+  'time-check-not-talked-over': {
+    start: { ...T, nextId: 'd' }, wait: 3.3, watch: 6,
+    change: (set) => set({ ...D, nextId: 'a', startedAt: now() }),
+    overlapOf: ['t', 'd'], end: { src: 'd', minT: 3, maxT: 5.5 },
+  },
+  // The same with the server's own hand-over 0.3 s before the end: no overlap either
+  'time-check-hands-over-at-its-end': {
+    start: { ...T, nextId: 'd' }, wait: 4.7, watch: 5,
+    change: (set) => set({ ...D, nextId: 'a', startedAt: now() }),
+    overlapOf: ['t', 'd'], end: { src: 'd', minT: 3.5, maxT: 5.5 },
+  },
   // Switching while the station's own crossfade is under way
   'switch-station-during-crossfade': {
     start: { ...A, nextId: 'b' }, wait: 17.5, watch: 4,
@@ -252,6 +275,7 @@ async function run(name, sc) {
   const nextNow = (id, fade) => page.evaluate(([i, f]) => window.__nextNow(i, f), [id, fade]);
   sc.change(set, startA, nextNow);
   let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, firstSilent = null, last = [];
+  let overlap = 0;
   const target = sc.end?.src;
   while (Date.now() - t0 < sc.watch * 1000) {
     last = await page.evaluate(() => window.__snap());
@@ -259,6 +283,7 @@ async function run(name, sc) {
     silentFor = audible.length ? 0 : silentFor + 0.2;
     if (firstSilent === null && !audible.length) firstSilent = (Date.now() - t0) / 1000;
     longestSilence = Math.max(longestSilence, silentFor);
+    if (sc.overlapOf && sc.overlapOf.every((id) => audible.some((d) => d.src === id && d.gain > 0.2))) overlap += 0.2;
     if (firstNew === null && audible.some((d) => d.src === target && d.t < 4)) firstNew = (Date.now() - t0) / 1000;
     if (outGone === null && !audible.some((d) => d.src === sc.start.id)) outGone = (Date.now() - t0) / 1000;
     await sleep(200);
@@ -281,6 +306,10 @@ async function run(name, sc) {
   if (sc.audibleWithin) {
     check(`${name}: new song audible within ${sc.audibleWithin} s`, firstNew !== null && firstNew <= sc.audibleWithin,
       firstNew === null ? 'never' : `${firstNew.toFixed(2)} s`);
+  }
+  if (sc.overlapOf) {
+    check(`${name}: "${sc.overlapOf[1]}" is not heard over "${sc.overlapOf[0]}"`, overlap <= 0.4,
+      `heard together for about ${overlap.toFixed(1)} s`);
   }
   if (sc.noSeekOn) {
     const seeks = (await page.evaluate(() => window.__seeks)).filter((x) => x.src === sc.noSeekOn);
@@ -506,7 +535,53 @@ function wavStereo(fl, fr, seconds) {
   return buf;
 }
 
+// F-PLAYER-14: an item starts at its cue-in point and plays at its replay gain; the
+// next item, pre-loaded, starts at its own cue-in with its own gain
+async function cueInAndReplayGain() {
+  const page = await browser.newPage();
+  await page.route('**/__tone/*.wav', (r) => {
+    const id = r.request().url().split('/').pop().replace('.wav', '');
+    return serveRange(r, wav(...TONES[id])); // byte ranges, so the player can seek
+  });
+  await page.route('**/assets/*/audio-url', (r) => {
+    const id = r.request().url().split('/').slice(-2)[0];
+    return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: `/__tone/${id}.wav` }) });
+  });
+  await page.goto(`${base}e2e/audio-harness/index.html`);
+  await page.waitForFunction(() => typeof window.__set === 'function');
+  const set = (s) => page.evaluate((x) => window.__set(x), s);
+  await set({ ...A, cross: 9, cueIn: 5, rg: -6, nextId: 'b', nextCueIn: 2, nextRg: -12, startedAt: now() });
+  await sleep(1500);
+  let snap = await page.evaluate(() => window.__snap());
+  const a = snap.find((d) => d.src === 'a' && d.playing);
+  check('cue-in: the item starts at its cue-in point (5 s), not at 0', !!a && a.t >= 5 && a.t <= 7.5, JSON.stringify(snap));
+  check('replay gain: -6 dB plays at half level', !!a && Math.abs(a.gain - 0.5) < 0.03, a ? `gain ${a.gain}` : 'not playing');
+  // The server counts an item's time from the top of the file (it hands over at
+  // started_at + cross_start, and a resumed shiur is started with started_at moved back),
+  // so a listener who joins later is put at the file's elapsed time. A listener who was
+  // there when the item started is cue_in seconds ahead of that.
+  xfail('cue-in: a listener there from the start is at the same point as one joining now', !!a && Math.abs(a.t - 1.5) < 1,
+    'cue-in-ahead: player starts at cue_in but the server counts from 0, so listeners differ by cue_in and the hand-over waits up to cue_in - 1 s past the crossfade point',
+    a ? `deck at ${a.t} s, station at 1.5 s` : '');
+  // The player's own crossfade brings the next item in at its own cue-in (2 s)
+  let x = null;
+  for (let i = 0; i < 60 && !x; i++) {
+    await sleep(200);
+    snap = await page.evaluate(() => window.__snap());
+    x = snap.find((d) => d.src === 'b' && d.playing);
+  }
+  check('cue-in: at the crossfade the next item comes in from its own cue-in (2 s)', !!x && x.t >= 2 && x.t <= 2.6, JSON.stringify(snap));
+  await set({ ...B, cueIn: 2, rg: -12, nextId: 'c', startedAt: now() });
+  await sleep(3000);
+  snap = await page.evaluate(() => window.__snap());
+  const b = snap.find((d) => d.src === 'b' && d.playing && d.gain > 0.05);
+  check('cue-in: the next item plays on from its cue-in point', !!b && b.t >= 4.5 && b.t <= 8, JSON.stringify(snap));
+  check('replay gain: the next item plays at its own gain (-12 dB = 0.25)', !!b && Math.abs(b.gain - 0.25) < 0.03, b ? `gain ${b.gain}` : 'not playing');
+  await page.close();
+}
+
 try {
+  if (!only || only === 'cue-gain') await cueInAndReplayGain();
   if (!only || only === 'stereo') await stereo();
   if (!only || only === 'listen-mid-item') await listenMidItem();
   if (!only || only === 'listen-cold') await listenFromCold();

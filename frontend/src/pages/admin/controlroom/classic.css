@@ -117,3 +117,29 @@ select.qn-field option { background: var(--qn-face); color: #000; }
   background-repeat: repeat-x;
 }
 .qn-splitter:hover, .qn-splitter:focus-visible { background-color: #d8d8d8; outline: none; }
+
+/* Phone landscape (Shmuel, 2026-11-16: "Landscape mode on mobile is unusable"): the
+ * site menu, the transport and the tabs took the whole ~300 px height and left no room
+ * for the queue. Sideways, the transport sits in a left column and the queue with its
+ * tabs fills the right one at full height; the site menu scrolls away above them.
+ * Keep the query in step with PHONE_LANDSCAPE in Dashboard.tsx. */
+@media (orientation: landscape) and (max-height: 500px) and (max-width: 1023.98px) {
+  .app-shell:has(.cr-root) { height: auto; overflow: visible; }
+  .app-shell:has(.cr-root) > nav { position: static; }
+  .app-shell:has(.cr-root) > main { flex: none; height: 100vh; height: 100dvh; }
+  .cr-root { flex-direction: row; }
+  .cr-root > header {
+    width: 42%;
+    max-width: 400px;
+    min-width: 260px;
+    overflow-y: auto;
+    border-bottom: 0;
+    border-right: 2px solid var(--qn-shadow);
+    padding-left: env(safe-area-inset-left);
+    background: #c0c0c0;
+  }
+  .cr-root > header > div:first-child { flex-wrap: wrap; row-gap: 0.25rem; }
+  .cr-root > .cr-side { flex: 1 1 0; min-width: 0; padding-right: env(safe-area-inset-right); }
+  .cr-root .cr-tabs { padding-top: 2px; }
+  .cr-root .cr-tabs > button { height: 2.25rem; flex-direction: row; gap: 0.35rem; }
+}

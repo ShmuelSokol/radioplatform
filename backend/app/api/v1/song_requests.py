@@ -7,8 +7,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.core.dependencies import get_db, require_manager
-from app.core.exceptions import NotFoundError
+from app.core.dependencies import get_db, may_operate_station, require_manager
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.asset import Asset
 from app.models.song_request import SongRequest, RequestStatus
 from app.models.user import User
@@ -37,8 +37,16 @@ router = APIRouter(prefix="/song-requests", tags=["song-requests"])
 @limiter.limit("10/minute")
 async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSession = Depends(get_db)):
     """Public: submit a song request with fuzzy matching and auto-approval."""
+    from app.models.station import Station
+
+    try:
+        station_id = uuid.UUID(str(body.station_id))
+    except ValueError:
+        raise NotFoundError("Station not found")
+    if await db.get(Station, station_id) is None:
+        raise NotFoundError("Station not found")
     req = SongRequest(
-        station_id=body.station_id,
+        station_id=station_id,
         requester_name=body.requester_name,
         song_title=body.song_title,
         song_artist=body.song_artist,
@@ -48,7 +56,7 @@ async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSes
 
     # Fuzzy match against library
     matched_asset, confidence = await fuzzy_match_asset(
-        db, body.song_title, body.song_artist, body.station_id
+        db, body.song_title, body.song_artist, station_id
     )
 
     response_extra = {
@@ -67,7 +75,7 @@ async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSes
         response_extra["matched_asset_artist"] = matched_asset.artist
 
         # Check auto-approve eligibility
-        can_auto = await check_auto_approve(db, matched_asset, body.station_id)
+        can_auto = await check_auto_approve(db, matched_asset, station_id)
         if can_auto:
             req.status = RequestStatus.QUEUED
             # reviewed_by stays NULL to distinguish auto from manual
@@ -77,8 +85,8 @@ async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSes
             await db.flush()
 
             # Add to playback queue
-            position = await add_to_queue(db, str(matched_asset.id), body.station_id)
-            pos_info = await get_queue_position_info(db, body.station_id, position)
+            position = await add_to_queue(db, str(matched_asset.id), station_id)
+            pos_info = await get_queue_position_info(db, station_id, position)
 
             response_extra["auto_approved"] = True
             response_extra["queue_position"] = position
@@ -226,7 +234,20 @@ async def update_request(
         raise NotFoundError("Song request not found")
 
     if body.asset_id is not None:
-        req.asset_id = body.asset_id
+        # Matched by hand ("Match to a song"): the song must exist in the library
+        try:
+            matched = await db.get(Asset, uuid.UUID(str(body.asset_id)))
+        except ValueError:
+            matched = None
+        if matched is None:
+            raise NotFoundError("Song not found in the library")
+        req.asset_id = matched.id
+        # Approved earlier without a match: it goes to the queue now
+        if not body.status and req.status in (RequestStatus.APPROVED, RequestStatus.APPROVED.value):
+            req.status = RequestStatus.QUEUED
+            req.reviewed_by = user.id
+            req.reviewed_at = datetime.now(timezone.utc)
+            await add_to_queue(db, str(req.asset_id), str(req.station_id))
     if body.status:
         req.status = body.status
         req.reviewed_by = user.id
@@ -235,6 +256,12 @@ async def update_request(
         # When approving a matched request, add the asset to the queue
         if body.status in (RequestStatus.APPROVED.value, RequestStatus.QUEUED.value,
                            RequestStatus.APPROVED, RequestStatus.QUEUED) and req.asset_id:
+            # Approving puts the song on that station's air: same rule as operating it.
+            from app.models.station import Station
+
+            station = await db.get(Station, uuid.UUID(str(req.station_id)))
+            if station is not None and not may_operate_station(user, station):
+                raise ForbiddenError("Your login is not set up to operate this station")
             req.status = RequestStatus.QUEUED
             await add_to_queue(db, str(req.asset_id), str(req.station_id))
 
@@ -261,7 +288,7 @@ async def delete_request(
 
 # Public: get pending requests count for a station (shown on listen page)
 @router.get("/station/{station_id}/count")
-async def get_request_count(station_id: str, db: AsyncSession = Depends(get_db)):
+async def get_request_count(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """Public: count pending song requests for a station."""
     result = await db.execute(
         select(func.count(SongRequest.id)).where(

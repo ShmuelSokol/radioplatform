@@ -2,6 +2,7 @@
 Twilio Voice service for live call-in handling.
 No-op when twilio_voice_enabled is False.
 """
+import asyncio
 import logging
 from uuid import UUID
 
@@ -66,7 +67,7 @@ async def move_caller_to_conference(call_sid: str | None, conference_name: str) 
         response.append(dial)
 
         # Redirect the call
-        client.calls(call_sid).update(twiml=str(response))
+        await asyncio.to_thread(client.calls(call_sid).update, twiml=str(response))
         logger.info("Caller %s moved to conference %s", call_sid, conference_name)
         return True
     except Exception as e:
@@ -84,7 +85,7 @@ async def end_caller(call_sid: str | None) -> bool:
         from twilio.rest import Client
 
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        client.calls(call_sid).update(status="completed")
+        await asyncio.to_thread(client.calls(call_sid).update, status="completed")
         logger.info("Ended call %s", call_sid)
         return True
     except Exception as e:

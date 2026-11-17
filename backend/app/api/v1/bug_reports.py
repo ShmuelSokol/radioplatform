@@ -87,7 +87,7 @@ def _decode_screenshot(data_url: str | None) -> tuple[bytes | None, str | None]:
         raw = base64.b64decode(b64, validate=False)
     except Exception:
         return None, None
-    if len(raw) > MAX_SCREENSHOT_BYTES:
+    if not raw or len(raw) > MAX_SCREENSHOT_BYTES:  # bad base64 decodes to nothing
         return None, None
     return raw, mime
 

@@ -4,7 +4,7 @@ Sponsors see their own campaigns; managers see all.
 """
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -172,7 +172,7 @@ async def update_campaign_status(
         from app.services.email_service import send_campaign_status_update
         sponsor = campaign.sponsor
         if sponsor and sponsor.contact_email:
-            await send_campaign_status_update(sponsor.contact_email, campaign.name, data.status)
+            await send_campaign_status_update(sponsor.contact_email, campaign.name, data.status.value)
     except Exception as e:
         logger.warning(f"Failed to send campaign status email: {e}")
 
@@ -291,20 +291,19 @@ async def upload_draft_audio(
     if not draft:
         raise NotFoundError("Draft not found")
 
-    # Store via Supabase storage if available, otherwise note the filename
-    try:
-        from app.services.supabase_storage_service import supabase_storage
-        from app.config import settings
+    # Store the file where the library keeps its audio (S3, Supabase or local disk).
+    # A failed upload is reported, never recorded as a path that holds nothing.
+    from app.services.storage_service import upload_file
 
-        if settings.supabase_storage_enabled:
-            file_bytes = await file.read()
-            path = f"ad-drafts/{campaign_id}/{draft_id}/{file.filename}"
-            url = await supabase_storage.upload(path, file_bytes, file.content_type or "audio/mpeg")
-            draft.audio_file_path = url
-        else:
-            draft.audio_file_path = f"ad-drafts/{campaign_id}/{draft_id}/{file.filename}"
-    except Exception:
-        draft.audio_file_path = f"ad-drafts/{campaign_id}/{draft_id}/{file.filename}"
+    safe_name = "".join(c for c in (file.filename or "audio") if c.isalnum() or c in "._- ") or "audio"
+    key = f"ad-drafts/{campaign_id}/{draft_id}/{safe_name}"
+    file_bytes = await file.read()
+    try:
+        await upload_file(file_bytes, key, file.content_type or "audio/mpeg")
+    except Exception as exc:
+        logger.warning("Draft audio upload failed for %s: %s", key, exc)
+        raise HTTPException(status_code=502, detail="The audio could not be stored. Please try again.")
+    draft.audio_file_path = key
 
     await db.commit()
     await db.refresh(draft)

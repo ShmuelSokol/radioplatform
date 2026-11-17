@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import apiClient from '../../api/client';
 import type { StationListResponse, Station } from '../../types';
@@ -33,21 +33,47 @@ function formatTime12h(time24: string): string {
   return `${h12}:${m.toString().padStart(2, '0')} ${suffix}`;
 }
 
-function todayStr(): string {
+/** Today's date (YYYY-MM-DD) and the minutes since midnight in a time zone: the
+ * guide lists a station's blocks in the station's own time, so "today" and "Now" must
+ * use the station's clock, not the viewer's. */
+function clockIn(timeZone?: string): { date: string; mins: number } {
   const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timeZone || undefined, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(d);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '00';
+    return { date: `${get('year')}-${get('month')}-${get('day')}`, mins: Number(get('hour')) * 60 + Number(get('minute')) };
+  } catch {
+    return {
+      date: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
+      mins: d.getHours() * 60 + d.getMinutes(),
+    };
+  }
 }
 
-function isCurrentBlock(block: EpgBlock, selectedDate: string): boolean {
+function todayStr(timeZone?: string): string {
+  return clockIn(timeZone).date;
+}
+
+function isCurrentBlock(block: EpgBlock, selectedDate: string, timeZone?: string): boolean {
   if (!block.start_time || !block.end_time) return false;
-  if (selectedDate !== todayStr()) return false;
-  const now = new Date();
+  const now = clockIn(timeZone);
   const [sh, sm] = block.start_time.split(':').map(Number);
   const [eh, em] = block.end_time.split(':').map(Number);
-  const nowMins = now.getHours() * 60 + now.getMinutes();
   const startMins = sh * 60 + sm;
   const endMins = eh * 60 + em;
-  return nowMins >= startMins && nowMins < endMins;
+  if (endMins <= startMins) {
+    // Overnight (e.g. 22:00-02:00): the evening part on its own date, the early part
+    // on the next date
+    if (selectedDate === now.date) return now.mins >= startMins;
+    const next = new Date(selectedDate + 'T12:00:00Z');
+    next.setUTCDate(next.getUTCDate() + 1);
+    return next.toISOString().slice(0, 10) === now.date && now.mins < endMins;
+  }
+  if (selectedDate !== now.date) return false;
+  return now.mins >= startMins && now.mins < endMins;
 }
 
 export default function ProgramGuide() {
@@ -64,6 +90,12 @@ export default function ProgramGuide() {
   });
 
   const stations: Station[] = stationsData?.stations ?? [];
+  const stationTz = stations.find(s => s.id === selectedStation)?.timezone;
+  // Until the person picks a date, "today" follows the chosen station's clock
+  const [datePicked, setDatePicked] = useState(false);
+  useEffect(() => {
+    if (!datePicked && stationTz) setSelectedDate(todayStr(stationTz));
+  }, [stationTz, datePicked]);
 
   // Auto-select first station
   useMemo(() => {
@@ -85,7 +117,7 @@ export default function ProgramGuide() {
   });
 
   const blocks = epgData?.blocks ?? [];
-  const dateLabel = selectedDate === todayStr() ? 'Today' : new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const dateLabel = selectedDate === todayStr(stationTz) ? 'Today' : new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
     <div className="min-h-screen bg-[#0a0a28] text-white">
@@ -117,7 +149,7 @@ export default function ProgramGuide() {
           <input
             type="date"
             value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
+            onChange={(e) => { setSelectedDate(e.target.value); setDatePicked(true); }}
             className="bg-[#12123a] border border-[#2a2a5e] text-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 transition"
           />
         </div>
@@ -161,7 +193,7 @@ export default function ProgramGuide() {
 
             <div className="space-y-1">
               {blocks.map((block) => {
-                const isCurrent = isCurrentBlock(block, selectedDate);
+                const isCurrent = isCurrentBlock(block, selectedDate, stationTz);
                 const modeClass = playbackModeColors[block.playback_mode] || 'bg-gray-600/20 text-gray-400 border-gray-500/30';
 
                 return (

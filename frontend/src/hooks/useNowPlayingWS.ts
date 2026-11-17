@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { serverNow } from '../lib/serverClock';
 
 export interface NowPlayingData {
   station_id: string;
@@ -42,6 +43,10 @@ const STALE_AFTER_HIDDEN_MS = 5_000;
 // An item still shown this long after its end means the updates stopped
 const OVERDUE_AFTER_MS = 6_000;
 const OVERDUE_CHECK_MS = 4_000;
+// Same default as the API client: without VITE_API_URL these reads went to
+// "undefined/now-playing/..." and the polling fall-back, back-from-background and
+// overdue re-reads never reached the server.
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 
 export const useNowPlayingWS = (stationId: string) => {
   const [nowPlaying, setNowPlaying] = useState<NowPlayingData | null>(null);
@@ -85,7 +90,7 @@ export const useNowPlayingWS = (stationId: string) => {
         if (!current()) return;
         try {
           const response = await fetch(
-            `${import.meta.env.VITE_API_URL}/now-playing/${stationId}`
+            `${API_BASE}/now-playing/${stationId}`
           );
           if (response.ok) {
             const data = await response.json();
@@ -220,7 +225,7 @@ export const useNowPlayingWS = (stationId: string) => {
       hiddenAt = 0;
       if (away < STALE_AFTER_HIDDEN_MS) return;
       const gen = generation.current;
-      fetch(`${import.meta.env.VITE_API_URL}/now-playing/${stationId}`)
+      fetch(`${API_BASE}/now-playing/${stationId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => { if (data && gen === generation.current) setNowPlaying(data); })
         .catch(() => {});
@@ -244,8 +249,8 @@ export const useNowPlayingWS = (stationId: string) => {
     if (!isFinite(end)) return;
     const gen = generation.current;
     const check = () => {
-      if (Date.now() < end + OVERDUE_AFTER_MS || gen !== generation.current) return;
-      fetch(`${import.meta.env.VITE_API_URL}/now-playing/${stationId}`)
+      if (serverNow() < end + OVERDUE_AFTER_MS || gen !== generation.current) return;
+      fetch(`${API_BASE}/now-playing/${stationId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (!data || gen !== generation.current) return;

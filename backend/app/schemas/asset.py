@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,7 +22,7 @@ class AssetResponse(BaseModel):
     created_at: datetime | None = None
     last_played_at: datetime | None = None
     vote: int = 0
-    release_date: str | None = None
+    release_date: date | str | None = None  # the column is a Date; str kept for SQLite tests
     sponsor_id: uuid.UUID | str | None = None
     sponsor_name: str | None = None
 

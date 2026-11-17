@@ -1,5 +1,6 @@
 """Audio enhancement / restoration via FFmpeg filters."""
 import logging
+import math
 import re
 import subprocess
 from typing import Any
@@ -248,6 +249,20 @@ def detect_audience_segments(
 # AI Auto-Enhancement — analyze audio, then build optimal filter chain
 # ---------------------------------------------------------------------------
 
+def _db_value(pattern: str, text: str, default: float) -> float:
+    """The number FFmpeg printed for pattern, or default. FFmpeg prints "-inf" for
+    digital silence (e.g. a file that starts or ends silent), which float() of the
+    matched "-" used to turn into a 500 on auto-enhance."""
+    m = re.search(pattern, text)
+    if not m:
+        return default
+    try:
+        v = float(m.group(1))
+    except ValueError:
+        return default
+    return v if math.isfinite(v) else default
+
+
 def analyze_audio(file_data: bytes) -> dict[str, Any]:
     """Analyze audio characteristics using FFmpeg volumedetect + astats.
 
@@ -265,11 +280,9 @@ def analyze_audio(file_data: bytes) -> dict[str, Any]:
     stats: dict[str, Any] = {}
 
     # Parse volumedetect output
-    m = re.search(r"mean_volume:\s*([-\d.]+)\s*dB", stderr_vol)
-    stats["mean_volume"] = float(m.group(1)) if m else -20.0
+    stats["mean_volume"] = _db_value(r"mean_volume:\s*([-\d.]+)\s*dB", stderr_vol, -20.0)
 
-    m = re.search(r"max_volume:\s*([-\d.]+)\s*dB", stderr_vol)
-    stats["max_volume"] = float(m.group(1)) if m else 0.0
+    stats["max_volume"] = _db_value(r"max_volume:\s*([-\d.]+)\s*dB", stderr_vol, 0.0)
 
     # Run astats for more detailed analysis (RMS, peak, crest factor, noise floor)
     cmd_stats = [
@@ -281,23 +294,17 @@ def analyze_audio(file_data: bytes) -> dict[str, Any]:
     stderr_stats = res_stats.stderr.decode("utf-8", errors="replace")
 
     # Parse astats — look for Overall RMS level and other metrics
-    m = re.search(r"RMS level dB:\s*([-\d.]+)", stderr_stats)
-    stats["rms_level"] = float(m.group(1)) if m else stats["mean_volume"]
+    stats["rms_level"] = _db_value(r"RMS level dB:\s*([-\d.]+)", stderr_stats, stats["mean_volume"])
 
-    m = re.search(r"Peak level dB:\s*([-\d.]+)", stderr_stats)
-    stats["peak_level"] = float(m.group(1)) if m else stats["max_volume"]
+    stats["peak_level"] = _db_value(r"Peak level dB:\s*([-\d.]+)", stderr_stats, stats["max_volume"])
 
-    m = re.search(r"Noise floor dB:\s*([-\d.]+)", stderr_stats)
-    stats["noise_floor"] = float(m.group(1)) if m else -60.0
+    stats["noise_floor"] = _db_value(r"Noise floor dB:\s*([-\d.]+)", stderr_stats, -60.0)
 
-    m = re.search(r"Crest factor:\s*([-\d.]+)", stderr_stats)
-    stats["crest_factor"] = float(m.group(1)) if m else 10.0
+    stats["crest_factor"] = _db_value(r"Crest factor:\s*([-\d.]+)", stderr_stats, 10.0)
 
-    m = re.search(r"Dynamic range:\s*([-\d.]+)", stderr_stats)
-    stats["dynamic_range"] = float(m.group(1)) if m else 20.0
+    stats["dynamic_range"] = _db_value(r"Dynamic range:\s*([-\d.]+)", stderr_stats, 20.0)
 
-    m = re.search(r"Flat factor:\s*([-\d.]+)", stderr_stats)
-    stats["flat_factor"] = float(m.group(1)) if m else 0.0
+    stats["flat_factor"] = _db_value(r"Flat factor:\s*([-\d.]+)", stderr_stats, 0.0)
 
     # Compute derived metrics
     stats["headroom"] = abs(stats["max_volume"])  # dB below 0

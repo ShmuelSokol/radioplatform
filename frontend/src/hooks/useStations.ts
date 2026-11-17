@@ -1,11 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listStations, createStation, updateStation, deleteStation } from '../api/stations';
+import { listAllStations, createStation, updateStation, deleteStation } from '../api/stations';
 import type { Station } from '../types';
 
 export function useStations() {
   return useQuery({
     queryKey: ['stations'],
-    queryFn: () => listStations(),
+    queryFn: () => listAllStations(),
   });
 }
 

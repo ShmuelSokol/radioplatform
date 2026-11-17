@@ -32,7 +32,7 @@ If grep returns nothing relevant, you're in genuinely new territory — proceed 
 Start by reading `wiki/README.md` if the topic might already be covered. If creating a new page, also update `wiki/README.md` index.
 
 ## What is this?
-Multi-channel radio streaming platform with playlist automation, ad insertion, weather/time announcements (ElevenLabs TTS), silence trimming, timezone-aware scheduling (Sabbath/holiday blackouts, sunset/sunrise rules), and admin + public listener UIs. Includes a Telegram bot for remote development via Claude.
+Multi-channel radio streaming platform with playlist automation, ad insertion, weather/time announcements (ElevenLabs TTS), silence trimming, timezone-aware scheduling (Sabbath/holiday blackouts, sunset/sunrise rules), and admin + public listener UIs.
 
 ## Live URLs
 - **Frontend**: https://kbrlive.com (alias: https://studio-kolbramah-radio.vercel.app)
@@ -47,7 +47,6 @@ Multi-channel radio streaming platform with playlist automation, ad insertion, w
 - **TTS**: ElevenLabs API for weather/time announcements
 - **Weather**: OpenWeatherMap API (current + 3-day forecast)
 - **Storage**: Supabase Storage for audio files (bucket: `audio`)
-- **Bot**: Telegram bot with Claude API + OpenAI Whisper for voice transcription
 - **Workers**: Celery + Redis (not yet deployed — needed for media processing)
 - **Media**: FFmpeg for transcoding, clipping, HLS generation
 - **Streaming**: in-browser player today; a single playout engine (Liquidsoap 2.2 + Icecast on its own server) is built and switched off until the server exists. See `wiki/streaming-architecture.md`
@@ -81,11 +80,6 @@ radioplatform/
 │       ├── hooks/                # 22 custom hooks
 │       ├── stores/               # Zustand: authStore, playerStore
 │       └── types/                # TypeScript interfaces
-├── bot/
-│   ├── main.py                   # Telegram bot — Claude Code over Telegram
-│   ├── pyproject.toml            # Bot dependencies
-│   ├── .env                      # Bot secrets (not committed)
-│   └── .env.example              # Template
 ├── docs/                         # API reference documentation
 ├── docker/                       # Dockerfiles, nginx.conf
 ├── infra/streaming/              # Playout engine server: radio.liq, setup.sh, Icecast, nginx, systemd
@@ -173,6 +167,7 @@ radioplatform/
 | playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen) |
 | call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
+| air_watch | air_watch.py | /air-watch (staff): recent on-air self-check findings |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
 | weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); ElevenLabs is only the fallback |
 
@@ -217,6 +212,7 @@ radioplatform/
 | call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |
 | activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
+| air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship; alerts + ntfy (see `wiki/air-watch.md`) |
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
@@ -339,20 +335,6 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/sponsor/campaigns/:id` → CampaignDetail (sponsor-protected)
 - `/sponsor/billing` → SponsorBilling (sponsor-protected)
 - `/sponsor/wording` → CheckWording (sponsor-protected)
-
-## Telegram Bot (`bot/`)
-Claude Code accessible over Telegram for remote development.
-
-**Capabilities**: Read/write/edit files, run bash, git, deploy to Vercel, voice notes (Whisper transcription)
-
-**Tools**: read_file, write_file, edit_file, run_bash, list_files
-
-**Config** (in `bot/.env`):
-- `TELEGRAM_BOT_TOKEN` — from @BotFather
-- `ANTHROPIC_API_KEY` — Claude API key
-- `OPENAI_API_KEY` — for Whisper voice transcription (optional)
-
-**Run locally**: `cd bot && uv run python main.py`
 
 ## CRITICAL: Read Before You Write
 > **NEVER guess function names, class names, import paths, or field names.**
@@ -483,17 +465,21 @@ cd frontend && npx vercel --prod --yes
 # Browser check of the control room against a fake backend (desktop + phone sizes)
 cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/control-room.mjs
 
+# Every control room button, the Listen page, call-in and release-pickup timings, same fake backend (ONLY=<part> for one part; see wiki/audio-engine.md)
+cd frontend && for s in control-room-actions listen-page call-in release-timing; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 
 # Many stations x many listeners: does everyone switch songs together? (see wiki/multi-station-load.md)
 cd backend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... uv run python loadtests/multi_station.py --base http://localhost:8000 --listeners 150
 
+# Run the real playout engine locally against the backend, with timing scenarios (see wiki/engine-harness.md)
+cd backend && uv run python ../infra/streaming/harness/run_harness.py
+
 # Run load tests (install locust first: pip install locust)
 cd backend && locust -f loadtests/locustfile.py --host https://api.kbrlive.com
 
-# Run Telegram bot locally
-cd bot && uv run python main.py
 
 # Node.js path (not in system PATH)
 export PATH="/c/Users/shmue/.node/node-v20.19.2-win-x64:$PATH"

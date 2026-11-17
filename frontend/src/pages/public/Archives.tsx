@@ -144,6 +144,7 @@ export default function Archives() {
                 {/* Play button overlay */}
                 <button
                   onClick={() => handlePlay(archive)}
+                  aria-label={playingId === archive.id ? `Pause ${archive.title}` : `Play ${archive.title}`}
                   className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition"
                 >
                   <span className="w-14 h-14 rounded-full bg-white/90 shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transform scale-75 group-hover:scale-100 transition-all">

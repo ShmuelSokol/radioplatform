@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useStations } from '../../hooks/useStations';
+import { useAuthStore } from '../../stores/authStore';
 import {
   useLiveShows,
   useCreateLiveShow,
@@ -21,6 +22,8 @@ const TABS = ['all', 'scheduled', 'live', 'ended'] as const;
 
 export default function LiveShows() {
   const [activeTab, setActiveTab] = useState<string>('all');
+  // Deleting a show is admin only on the server; others were offered a button that always failed
+  const isAdmin = useAuthStore(s => s.user?.role) === 'admin';
   const [showModal, setShowModal] = useState(false);
   const [editingShow, setEditingShow] = useState<LiveShow | null>(null);
 
@@ -202,7 +205,7 @@ export default function LiveShows() {
                     </Link>
                   </>
                 )}
-                {(show.status === 'scheduled' || show.status === 'ended') && (
+                {isAdmin && (show.status === 'scheduled' || show.status === 'ended') && (
                   <button
                     onClick={() => {
                       if (confirm('Delete this show?')) deleteMut.mutate(show.id);

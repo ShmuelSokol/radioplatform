@@ -57,7 +57,8 @@ function Harness() {
   const cut = s?.queue ? nextCut(s.queue) : null;
   const engine = useAudioEngine(
     s ? { id: s.id, title: s.id, artist: null, asset_type: 'music', category: null, duration: s.dur } : null,
-    0, !!s, cut?.preempt_at ?? null, cut?.asset_id ?? null, 2000, 0, 0, s?.cross ?? 0, 0, s?.nextId ?? null, 0, 0, null, null, s?.startedAt ?? null,
+    0, !!s, cut?.preempt_at ?? null, cut?.asset_id ?? null, 2000, s?.cueIn ?? 0, 0, s?.cross ?? 0, s?.rg ?? 0,
+    s?.nextId ?? null, s?.nextCueIn ?? 0, s?.nextRg ?? 0, null, null, s?.startedAt ?? null,
     s?.fade ?? null,
   );
   w.__listen = engine.initAudio;

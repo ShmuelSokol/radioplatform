@@ -2,6 +2,7 @@
 AI-powered email drafting using Claude API.
 Generates professional email text for manager-to-sponsor outreach.
 """
+import asyncio
 import logging
 
 from app.config import settings
@@ -59,7 +60,8 @@ The email should be:
 Write only the email body (no subject line). Do not include "Dear" or signature — just the body paragraphs."""
 
     try:
-        message = client.messages.create(
+        message = await asyncio.to_thread(
+            client.messages.create,
             model="claude-sonnet-4-20250514",
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],

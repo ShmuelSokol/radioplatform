@@ -2,6 +2,7 @@
 AI email drafting & sending endpoints.
 Managers can generate AI-drafted emails and send them to sponsors.
 """
+from html import escape
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -54,7 +55,7 @@ async def send_drafted_email(
 ):
     html_body = f"""
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-        {data.body.replace(chr(10), '<br />')}
+        {escape(data.body).replace(chr(10), '<br />')}
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
         <p style="color: #9ca3af; font-size: 12px;">Kol B'ramah Radio</p>
     </div>

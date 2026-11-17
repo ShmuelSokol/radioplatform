@@ -14,6 +14,15 @@ from app.schemas.station import StationCreate, StationUpdate
 logger = logging.getLogger(__name__)
 
 
+def window_covers_station(window: HolidayWindow, station_id) -> bool:
+    """A blackout with no station list covers every station."""
+    affected = window.affected_stations
+    if affected is None:
+        return True
+    ids = affected.get("station_ids", []) if isinstance(affected, dict) else []
+    return str(station_id) in [str(i) for i in ids]
+
+
 async def auto_generate_holidays_for_station(db: AsyncSession, station: Station, months_ahead: int = 13) -> int:
     """Generate Shabbos + Yom Tov blackout windows for a station. Returns count of created windows."""
     from app.services.shabbos_service import (
@@ -44,14 +53,16 @@ async def auto_generate_holidays_for_station(db: AsyncSession, station: Station,
     created = 0
     for w in all_windows:
         w_start = datetime.fromisoformat(w["start_datetime"])
-        # Skip if a window with same name exists and start is within 1 hour
+        # Skip if a window with same name that covers THIS station starts within 1 hour.
+        # A window of another station does not count: matching on name and time alone
+        # left a second station in the same area with no Shabbos at all.
         dup_stmt = select(HolidayWindow).where(
             HolidayWindow.name == w["name"],
             HolidayWindow.start_datetime >= w_start - timedelta(hours=1),
             HolidayWindow.start_datetime <= w_start + timedelta(hours=1),
         )
         dup_result = await db.execute(dup_stmt)
-        if dup_result.scalar_one_or_none():
+        if any(window_covers_station(d, station.id) for d in dup_result.scalars().all()):
             continue
 
         record = HolidayWindow(

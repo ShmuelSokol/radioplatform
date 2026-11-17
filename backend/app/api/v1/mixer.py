@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends
@@ -59,7 +60,8 @@ async def mix_tracks(
     # Mix
     from app.services.mixer_service import mix_audio
 
-    mixed_data, duration = mix_audio(
+    mixed_data, duration = await asyncio.to_thread(
+        mix_audio,
         backtrack_data=bt_data,
         overlay_data=ov_data,
         bt_ext=bt_ext,

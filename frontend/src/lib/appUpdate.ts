@@ -28,6 +28,7 @@
  *   station is (takeResume). Browsers that refuse to start audio without a tap
  *   (Safari, iPhone) show a "tap to keep listening" prompt instead.
  */
+import { noteServerTime, serverNow } from './serverClock';
 
 declare const __APP_VERSION__: string;
 
@@ -63,7 +64,6 @@ export interface ReleasePolicy {
   server_time?: string;
 }
 let policy: ReleasePolicy = { mode: 'auto', push: null };
-let serverOffsetMs = 0; // server clock minus this browser's clock
 let pushDueSince = 0;
 let waitingFor: string | null = null;
 const policyListeners = new Set<(p: ReleasePolicy) => void>();
@@ -96,7 +96,7 @@ export function onPolicy(fn: (p: ReleasePolicy) => void): () => void {
 function setPolicy(next: ReleasePolicy) {
   if (next.server_time) {
     const t = new Date(next.server_time).getTime();
-    if (isFinite(t)) serverOffsetMs = t - Date.now();
+    if (isFinite(t)) noteServerTime(next.server_time);
   }
   const pushChanged = next.push?.id !== policy.push?.id;
   policy = { mode: next.mode === 'manual' ? 'manual' : 'auto', push: next.push ?? null };
@@ -255,7 +255,7 @@ async function check(force = false) {
 function activePush(): ReleasePush | null {
   const push = policy.push;
   if (!push) return null;
-  const now = Date.now() + serverOffsetMs;
+  const now = serverNow();
   const at = push.at ? new Date(push.at).getTime() : 0;
   if (now < at) return null;
   if (push.version) {

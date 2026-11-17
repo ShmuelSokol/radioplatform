@@ -6,6 +6,19 @@ export const listUsers = async (skip = 0, limit = 50): Promise<UserListResponse>
   return res.data;
 };
 
+/** Every user, page by page: the server sends at most 100 at a time, and the Users
+ *  screen has no paging, so with one call the users after the first 50 never showed. */
+export const listAllUsers = async (): Promise<UserListResponse> => {
+  const first = await listUsers(0, 100);
+  const users = [...first.users];
+  while (users.length < first.total) {
+    const next = await listUsers(users.length, 100);
+    if (!next.users.length) break;
+    users.push(...next.users);
+  }
+  return { ...first, users, total: Math.max(first.total, users.length) };
+};
+
 export const createUser = async (data: {
   email: string; password: string; role: string; display_name?: string;
   phone_number?: string; title?: string; alert_preferences?: Record<string, unknown>;
