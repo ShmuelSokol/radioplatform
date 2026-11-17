@@ -256,9 +256,22 @@ screen sat at 0:00 until Next. Now: `handle_next` never hands out an entry in
 `row_number()` UPDATE; `pick_next` is read-only (placeholders and do_not_play filtered in
 the SELECT; an UPDATE there held row locks inside the scheduler's long pass); a song still
 "on air" 30 s past its end raises "Playout engine did not move on"; automatic flushes of
-the pre-loaded track wait 15 s between them and never happen in the last 45 s of an item.
+the pre-loaded track wait 15 s between them and never happen in the last 45 s of an item, unless a timed item is due then.
 
 Engine side (`radio.liq`): every track change is reported (`on_track` too), so untagged
 emergency files raise the emergency alert; the emergency folder was empty on the server
 (silence), so the engine now copies each song it airs there (newest 40, `kbr_kind=music`);
 big songs get 120 s to download.
+
+## iPhone Safari plays an HLS copy (2026-11-17)
+
+iPhone Safari has no Media Source Extensions for MP3, and its plain `<audio>` on the
+Icecast stream waited about 10 s before the first sound. Each engine also writes the same
+programme as HLS (`output.file.hls`, 1 s MP3 segments with Apple's packed-audio ID3
+timestamps) to `KBR_HLS_DIR` (`/var/lib/kbr-engine/hls/<station id>`); nginx serves it
+uncached at `/hls/<station id>/mp3.m3u8`. `lib/liveStream.ts` uses it when the browser has
+no MSE for MP3 but plays HLS natively (`canPlayType('application/vnd.apple.mpegurl')`),
+derived from the Icecast URL (`/live-<id>` -> `/hls/<id>/mp3.m3u8`), and falls back to the
+plain stream on an error or no sound within 8 s. In a local rig (hls.js in Chromium) the
+first sound came 0.2-0.6 s after load. Needs a `setup.sh` rerun on the server. Real iPhone
+and CarPlay not yet tested.

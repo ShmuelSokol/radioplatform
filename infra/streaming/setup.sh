@@ -88,7 +88,9 @@ KBR_STATION_ID=${SID}
 KBR_STATION_NAME="${SNAME}"
 KBR_CONTROL_PORT=${PORT}
 KBR_ICECAST_MOUNT=/live-${SID}
+KBR_HLS_DIR=/var/lib/kbr-engine/hls/${SID}
 SENV
+  mkdir -p "/var/lib/kbr-engine/hls/${SID}"; chown liquidsoap:liquidsoap "/var/lib/kbr-engine/hls/${SID}"
   chown root:liquidsoap "$STATION_DIR/$SID.env"; chmod 640 "$STATION_DIR/$SID.env"
   cat >> "$CONTROL_INC" <<LOC
 location /control/${SID}/ {
@@ -152,7 +154,7 @@ echo "Engines: ${RUNNING} of ${TOTAL} running"
 systemctl is-active --quiet icecast2 && echo "Icecast: running" || echo "Icecast: NOT running"
 echo "Memory:  $(free -m | awk '/^Mem:/{print $3" MB used of "$2" MB"}')"
 if [ "$TLS" = yes ]; then
-  echo "HTTPS:   ready (streams at https://${DOMAIN}/live-<station id>)"
+  echo "HTTPS:   ready (streams at https://${DOMAIN}/live-<station id>, iPhone HLS at /hls/<station id>/mp3.m3u8)"
 else
   echo "HTTPS:   NOT set up yet. Point ${DOMAIN} (DNS A record) at ${MY_IP:-this server}, then run this script again."
 fi
