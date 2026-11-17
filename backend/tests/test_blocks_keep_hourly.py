@@ -105,6 +105,12 @@ async def test_kept_hour_plays_time_weather_then_the_block(db_session: AsyncSess
     # hour). Run in the last minutes before an hour, the loop has already left out the coming
     # hour (too close to queue) while the block still has it: a lone block at either end only.
     lone = [at for at, v in by_hour.items() if v == [ids["sched"]]]
+    # Run inside the blocks' 2-minute safety margin before an hour, the hourly loop (which has
+    # no margin) still queues that hour's time and weather while the block leaves it out: the
+    # first hour may then have the time and weather alone.
+    first = min(by_hour)
+    if by_hour[first] == [ids["clock"], ids["weather"]]:
+        lone.append(first)
     assert len(lone) <= 2 and all(at in (min(by_hour), max(by_hour)) for at in lone), lone
     full = [v for at, v in by_hour.items() if at not in lone]
     assert len(full) >= 46

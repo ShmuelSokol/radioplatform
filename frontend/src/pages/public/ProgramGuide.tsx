@@ -11,6 +11,8 @@ interface EpgBlock {
   end_time: string | null;
   playback_mode: string;
   schedule_name: string | null;
+  /** Shabbos / Yom Tov: the station is off the air */
+  off_air?: boolean;
 }
 
 interface EpgResponse {
@@ -24,6 +26,7 @@ const playbackModeColors: Record<string, string> = {
   shuffle: 'bg-purple-600/20 text-purple-300 border-purple-500/30',
   weighted: 'bg-amber-600/20 text-amber-300 border-amber-500/30',
   rotation: 'bg-green-600/20 text-green-300 border-green-500/30',
+  off_air: 'bg-gray-700/30 text-gray-400 border-gray-500/30',
 };
 
 function formatTime12h(time24: string): string {
@@ -200,7 +203,7 @@ export default function ProgramGuide() {
 
                 return (
                   <div
-                    key={block.id}
+                    key={`${block.id}-${block.start_time}`}
                     className={`relative flex gap-4 group ${
                       isCurrent ? '' : ''
                     }`}
@@ -241,7 +244,7 @@ export default function ProgramGuide() {
 
                         {/* Playback mode badge */}
                         <span className={`text-[10px] uppercase font-medium px-2 py-0.5 rounded-full border ${modeClass}`}>
-                          {block.playback_mode}
+                          {block.off_air ? 'off air' : block.playback_mode}
                         </span>
                       </div>
 
