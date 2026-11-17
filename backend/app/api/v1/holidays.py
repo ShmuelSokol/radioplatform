@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.dependencies import get_db, require_manager
+from app.core.dependencies import get_db, may_operate_station, require_manager
 from app.models.asset import Asset
 from app.models.holiday_window import HolidayWindow
 from app.models.station import Station
@@ -28,6 +28,31 @@ from app.schemas.holiday import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/holidays", tags=["holidays"])
+
+
+async def _check_stations(db: AsyncSession, user, affected) -> None:
+    """A blackout silences the stations it covers, so changing one is operating
+    them: the login must be allowed on every station the window covers (no list
+    = every active station, the protected FM feed included). Admins always pass."""
+    if user.role.value == "admin":
+        return
+    ids = (affected or {}).get("station_ids") if affected is not None else None
+    if affected is None or ids is None:
+        stations = (await db.execute(select(Station).where(Station.is_active == True))).scalars().all()
+    else:
+        keys = []
+        for sid in ids:
+            try:
+                keys.append(UUID(str(sid)))
+            except ValueError:
+                continue
+        stations = (await db.execute(select(Station).where(Station.id.in_(keys)))).scalars().all() if keys else []
+    refused = [st.name for st in stations if not may_operate_station(user, st)]
+    if refused:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your login is not set up to operate {', '.join(sorted(refused))}",
+        )
 
 
 @router.get("", response_model=HolidayListResponse)
@@ -131,6 +156,7 @@ async def create_holiday(
     _=Depends(require_manager),
 ):
     dump = data.model_dump()
+    await _check_stations(db, _, dump.get("affected_stations"))
     if not dump.get("reason"):
         dump["reason"] = _infer_reason(dump["name"])
     record = HolidayWindow(**dump)
@@ -173,7 +199,11 @@ async def update_holiday(
         from app.core.exceptions import NotFoundError
         raise NotFoundError("Holiday window not found")
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    await _check_stations(db, _, record.affected_stations)
+    if "affected_stations" in changes:
+        await _check_stations(db, _, changes["affected_stations"])
+    for key, value in changes.items():
         setattr(record, key, value)
 
     await db.commit()
@@ -194,6 +224,7 @@ async def delete_holiday(
         from app.core.exceptions import NotFoundError
         raise NotFoundError("Holiday window not found")
 
+    await _check_stations(db, _, record.affected_stations)
     await db.delete(record)
     await db.commit()
 
@@ -211,7 +242,7 @@ async def preview_blackouts(
         merge_overlapping_windows,
     )
 
-    stmt = select(Station).where(Station.id == str(data.station_id))
+    stmt = select(Station).where(Station.id == UUID(str(data.station_id)))
     result = await db.execute(stmt)
     station = result.scalar_one_or_none()
     if not station:
@@ -274,11 +305,13 @@ async def auto_generate_blackouts(
     )
 
     # Look up station
-    stmt = select(Station).where(Station.id == str(data.station_id))
+    stmt = select(Station).where(Station.id == UUID(str(data.station_id)))
     result = await db.execute(stmt)
     station = result.scalar_one_or_none()
     if not station:
         raise HTTPException(status_code=404, detail="Station not found")
+    if not may_operate_station(_, station):
+        raise HTTPException(status_code=403, detail="Your login is not set up to operate this station")
 
     if not station.latitude or not station.longitude:
         raise HTTPException(

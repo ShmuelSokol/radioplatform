@@ -302,15 +302,20 @@ async def _authenticate_ws(websocket: WebSocket, show_id: str) -> User | None:
                 await websocket.close(code=4001)
                 return None
 
-            # Allow admin/manager OR the show's host
-            if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+            if user.role == UserRole.ADMIN:
                 return user
 
-            # Check if this user is the host of the show
+            # A manager, or the show's own host, who may also operate the show's
+            # station: a login not assigned to the protected FM station must not
+            # put its microphone on that station's air (V1-148).
+            from app.core.dependencies import may_operate_station
+            from app.models.station import Station
             from app.services.live_show_service import get_show
-            show = await get_show(db, show_id)
-            if show and show.host_user_id == user.id:
-                return user
+            show = await get_show(db, uuid.UUID(str(show_id)))
+            if show and (user.role == UserRole.MANAGER or show.host_user_id == user.id):
+                station = await db.get(Station, show.station_id)
+                if station is None or may_operate_station(user, station):
+                    return user
 
             logger.warning("WS auth: user %s lacks permission for show %s", user.id, show_id)
             await websocket.close(code=4001)

@@ -188,3 +188,191 @@ async def test_queuing_a_weather_readout_needs_the_station(client: AsyncClient, 
     assert r.status_code == 200, r.text
     q = (await db_session.execute(select(QueueEntry).where(QueueEntry.station_id == web.id))).scalars().all()
     assert [e.asset_id for e in q] == [song.id]
+
+
+# ---- V1-41: queue entries are looked up within the station in the URL ----
+
+@pytest.mark.asyncio
+async def test_queue_entry_of_another_station_cannot_be_changed_through_my_station(
+    client: AsyncClient, db_session: AsyncSession
+):
+    fm, web, _, song, spot, _ = await _world(db_session)
+    dj = await _login(db_session, UserRole.DJ)  # may operate Web, not FM
+    fm_entries = [QueueEntry(id=uuid.uuid4(), station_id=fm.id, asset_id=a.id, position=i, status="pending")
+                  for i, a in enumerate([song, spot, song], start=1)]
+    db_session.add_all(fm_entries)
+    await db_session.commit()
+    target = fm_entries[1]
+    base = f"/api/v1/stations/{web.id}/queue"
+    calls = [
+        ("POST", f"{base}/move-up", {"entry_id": str(target.id), "new_position": 0}),
+        ("POST", f"{base}/move-down", {"entry_id": str(target.id), "new_position": 0}),
+        ("PUT", f"{base}/reorder", {"entry_id": str(target.id), "new_position": 9}),
+        ("POST", f"{base}/reorder-dnd", {"entry_id": str(target.id), "new_position": 1}),
+        ("DELETE", f"{base}/{target.id}", None),
+    ]
+    for method, url, body in calls:
+        r = await client.request(method, url, json=body, headers=dj)
+        assert r.status_code == 404, (method, url, r.status_code, r.text)
+    rows = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == fm.id).order_by(QueueEntry.position)
+    )).scalars().all()
+    assert [(e.id, e.position) for e in rows] == [(e.id, i) for i, e in enumerate(fm_entries, start=1)]
+    # and the FM URL itself is refused for this DJ
+    r = await client.request("DELETE", f"/api/v1/stations/{fm.id}/queue/{target.id}", headers=dj)
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_own_station_queue_moves_still_work(client: AsyncClient, db_session: AsyncSession):
+    _, web, _, song, spot, _ = await _world(db_session)
+    dj = await _login(db_session, UserRole.DJ)
+    a = QueueEntry(id=uuid.uuid4(), station_id=web.id, asset_id=song.id, position=1, status="pending")
+    b = QueueEntry(id=uuid.uuid4(), station_id=web.id, asset_id=spot.id, position=2, status="pending")
+    db_session.add_all([a, b])
+    await db_session.commit()
+    r, took = await _timed(client.post(f"/api/v1/stations/{web.id}/queue/move-up",
+                                       json={"entry_id": str(b.id), "new_position": 0}, headers=dj))
+    assert r.status_code == 200, r.text
+    assert took < 0.3  # S-3
+    await db_session.refresh(a)
+    await db_session.refresh(b)
+    assert (b.position, a.position) == (1, 2)
+
+
+# ---- V1-94: holidays (blackouts) silence stations ----
+
+@pytest.mark.asyncio
+async def test_blackouts_follow_station_permissions(client: AsyncClient, db_session: AsyncSession):
+    from app.models.holiday_window import HolidayWindow
+
+    fm, web, other, *_ = await _world(db_session)
+    manager = await _login(db_session, UserRole.MANAGER)  # all but FM
+    admin = await _login(db_session, UserRole.ADMIN)
+    window = {"name": "Test", "start_datetime": "2030-01-04T21:00:00Z", "end_datetime": "2030-01-05T22:00:00Z",
+              "is_blackout": True}
+
+    r = await client.post("/api/v1/holidays", json={**window, "affected_stations": {"station_ids": [str(fm.id)]}},
+                          headers=manager)
+    assert r.status_code == 403
+    # no list = every station, the FM feed included
+    r = await client.post("/api/v1/holidays", json={**window, "affected_stations": None}, headers=manager)
+    assert r.status_code == 403
+    r, took = await _timed(client.post("/api/v1/holidays",
+                                       json={**window, "affected_stations": {"station_ids": [str(web.id)]}},
+                                       headers=manager))
+    assert r.status_code == 201, r.text
+    assert took < SAVE_LIMIT
+    mine = r.json()["id"]
+    # widening their own window onto FM is refused
+    r = await client.put(f"/api/v1/holidays/{mine}",
+                         json={"affected_stations": {"station_ids": [str(web.id), str(fm.id)]}}, headers=manager)
+    assert r.status_code == 403
+
+    r = await client.post("/api/v1/holidays", json={**window, "affected_stations": None}, headers=admin)
+    assert r.status_code == 201
+    shabbos_all = r.json()["id"]
+    assert (await client.delete(f"/api/v1/holidays/{shabbos_all}", headers=manager)).status_code == 403
+    assert (await client.put(f"/api/v1/holidays/{shabbos_all}", json={"name": "x"},
+                             headers=manager)).status_code == 403
+    assert await db_session.get(HolidayWindow, uuid.UUID(shabbos_all)) is not None
+
+    fm.latitude, fm.longitude = 40.0, -74.0
+    await db_session.commit()
+    r = await client.post("/api/v1/holidays/auto-generate", json={"station_id": str(fm.id), "months_ahead": 1},
+                          headers=manager)
+    assert r.status_code == 403
+    assert (await client.delete(f"/api/v1/holidays/{mine}", headers=manager)).status_code == 204
+
+
+# ---- V1-98: archives ----
+
+@pytest.mark.asyncio
+async def test_archives_follow_station_permissions(client: AsyncClient, db_session: AsyncSession):
+    fm, web, *_ = await _world(db_session)
+    manager = await _login(db_session, UserRole.MANAGER)
+    admin = await _login(db_session, UserRole.ADMIN)
+    body = {"title": "Show", "audio_url": "https://x/a.mp3"}
+    assert (await client.post("/api/v1/archives", json={**body, "station_id": str(fm.id)},
+                              headers=manager)).status_code == 403
+    r = await client.post("/api/v1/archives", json={**body, "station_id": str(web.id)}, headers=manager)
+    assert r.status_code == 201, r.text
+    assert (await client.post("/api/v1/archives", json={**body, "station_id": "nope"},
+                              headers=manager)).status_code == 404
+    r = await client.post("/api/v1/archives", json={**body, "station_id": str(fm.id)}, headers=admin)
+    fm_archive = r.json()["id"]
+    assert (await client.patch(f"/api/v1/archives/{fm_archive}", json={"title": "x"},
+                               headers=manager)).status_code == 403
+    assert (await client.delete(f"/api/v1/archives/{fm_archive}", headers=manager)).status_code == 403
+
+
+# ---- V1-96: weather readouts ----
+
+@pytest.mark.asyncio
+async def test_weather_readout_writes_follow_station_permissions(client: AsyncClient, db_session: AsyncSession):
+    fm, *_ = await _world(db_session)
+    manager = await _login(db_session, UserRole.MANAGER)
+    ro = WeatherReadout(id=uuid.uuid4(), station_id=fm.id, readout_date=date.today(), script_text="Sunny")
+    db_session.add(ro)
+    await db_session.commit()
+    assert (await client.post("/api/v1/weather-readouts/", json={"station_id": str(fm.id)},
+                              headers=manager)).status_code == 403
+    assert (await client.patch(f"/api/v1/weather-readouts/{ro.id}", json={"script_text": "Rain"},
+                               headers=manager)).status_code == 403
+    assert (await client.post(f"/api/v1/weather-readouts/{ro.id}/regenerate", headers=manager)).status_code == 403
+    assert (await client.delete(f"/api/v1/weather-readouts/{ro.id}", headers=manager)).status_code == 403
+    await db_session.refresh(ro)
+    assert ro.script_text == "Sunny"
+
+
+# ---- V1-99: weather spot and hourly time clip uploads change every station of a region ----
+
+@pytest.mark.asyncio
+async def test_region_uploads_need_every_station_of_the_region(client: AsyncClient, db_session: AsyncSession):
+    fm, web, other, *_ = await _world(db_session)
+    fm.automation_config = {"weather_region": "jerusalem"}
+    await db_session.commit()
+    manager = await _login(db_session, UserRole.MANAGER)  # all but FM
+
+    def files():
+        return {"file": ("a.mp3", b"not really audio", "audio/mpeg")}
+
+    # FM plays Jerusalem: a manager who may not operate FM cannot replace Jerusalem's clips
+    r = await client.put("/api/v1/weather-spots/2030-01-01?region=jerusalem", files=files(), headers=manager)
+    assert r.status_code == 403
+    r = await client.put("/api/v1/time-announcements/9?region=jerusalem", files=files(), headers=manager)
+    assert r.status_code == 403
+    # default-region time clips are the fallback for every station, FM included
+    r = await client.put("/api/v1/time-announcements/9", files=files(), headers=manager)
+    assert r.status_code == 403
+    # the default region's weather spot is not played by FM (it never falls back to another city)
+    r = await client.put("/api/v1/weather-spots/2030-01-01", files=files(), headers=manager)
+    assert r.status_code != 403
+    fm_manager = await _login(db_session, UserRole.MANAGER, [str(fm.id)])
+    r = await client.put("/api/v1/time-announcements/9?region=jerusalem", files=files(), headers=fm_manager)
+    assert r.status_code != 403
+
+
+# ---- V1-101: the body guard reads JSON only; other encodings must not slip through ----
+
+@pytest.mark.asyncio
+async def test_form_encoded_write_cannot_skip_the_station_check(client: AsyncClient, db_session: AsyncSession):
+    from app.models.schedule import Schedule
+
+    fm, *_ = await _world(db_session)
+    manager = await _login(db_session, UserRole.MANAGER)
+    r = await client.post("/api/v1/schedules", data={"name": "Sneaky", "station_id": str(fm.id)}, headers=manager)
+    assert r.status_code in (403, 422), r.text
+    assert (await db_session.execute(select(Schedule))).scalars().all() == []
+
+
+# ---- V1-102: reading is not restricted by station (wiki/station-permissions.md) ----
+
+@pytest.mark.asyncio
+async def test_restricted_staff_can_still_read_other_stations(client: AsyncClient, db_session: AsyncSession):
+    fm, web, *_ = await _world(db_session)
+    dj = await _login(db_session, UserRole.DJ, [str(web.id)])
+    assert (await client.get(f"/api/v1/stations/{fm.id}/queue", headers=dj)).status_code == 200
+    manager = await _login(db_session, UserRole.MANAGER, [str(web.id)])
+    r = await client.get("/api/v1/program-blocks", params={"station_id": str(fm.id)}, headers=manager)
+    assert r.status_code == 200

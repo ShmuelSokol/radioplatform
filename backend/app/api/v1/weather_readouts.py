@@ -73,6 +73,8 @@ async def create_readout(
     station = await db.get(Station, uuid.UUID(str(body.station_id)))
     if not station:
         raise HTTPException(404, "Station not found")
+    if not may_operate_station(_user, station):
+        raise HTTPException(403, "Your login is not set up to operate this station")
 
     target_date = body.readout_date or date.today()
 
@@ -161,6 +163,9 @@ async def update_readout(
     readout = await db.get(WeatherReadout, readout_id)
     if not readout:
         raise HTTPException(404, "Readout not found")
+    station = await db.get(Station, readout.station_id)
+    if station is not None and not may_operate_station(_user, station):
+        raise HTTPException(403, "Your login is not set up to operate this station")
 
     if body.script_text is not None:
         readout.script_text = body.script_text
@@ -189,6 +194,8 @@ async def regenerate_readout(
     station = await db.get(Station, readout.station_id)
     if not station:
         raise HTTPException(404, "Station not found")
+    if not may_operate_station(_user, station):
+        raise HTTPException(403, "Your login is not set up to operate this station")
 
     lat = station.latitude or 40.0968
     lon = station.longitude or -74.2179
@@ -252,6 +259,9 @@ async def delete_readout(
     readout = await db.get(WeatherReadout, readout_id)
     if not readout:
         raise HTTPException(404, "Readout not found")
+    station = await db.get(Station, readout.station_id)
+    if station is not None and not may_operate_station(_user, station):
+        raise HTTPException(403, "Your login is not set up to operate this station")
 
     await db.delete(readout)
     await db.commit()

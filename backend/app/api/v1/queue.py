@@ -2085,7 +2085,11 @@ async def move_up(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Move a queue entry up (lower position number)."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    # The entry must belong to the station in the URL: the station permission check
+    # is made on that station, so another station's entry id must not get through.
+    result = await db.execute(
+        select(QueueEntry).where(QueueEntry.id == body.entry_id, QueueEntry.station_id == station_id)
+    )
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2115,7 +2119,11 @@ async def move_down(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Move a queue entry down (higher position number)."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    # The entry must belong to the station in the URL: the station permission check
+    # is made on that station, so another station's entry id must not get through.
+    result = await db.execute(
+        select(QueueEntry).where(QueueEntry.id == body.entry_id, QueueEntry.station_id == station_id)
+    )
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2143,7 +2151,11 @@ async def reorder_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    # The entry must belong to the station in the URL: the station permission check
+    # is made on that station, so another station's entry id must not get through.
+    result = await db.execute(
+        select(QueueEntry).where(QueueEntry.id == body.entry_id, QueueEntry.station_id == station_id)
+    )
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
@@ -2266,7 +2278,11 @@ async def reorder_dnd(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Drag-and-drop reorder: move entry to new position with rule validation."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    # The entry must belong to the station in the URL: the station permission check
+    # is made on that station, so another station's entry id must not get through.
+    result = await db.execute(
+        select(QueueEntry).where(QueueEntry.id == body.entry_id, QueueEntry.station_id == station_id)
+    )
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2320,7 +2336,9 @@ async def remove_from_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == entry_id))
+    result = await db.execute(
+        select(QueueEntry).where(QueueEntry.id == entry_id, QueueEntry.station_id == station_id)
+    )
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
