@@ -189,6 +189,29 @@ def test_setup_rerun_restarts_only_what_changed():
         assert part in sh[sh.index('ENG_SUM="$(sum_of'):skip]
 
 
+def test_each_station_has_its_own_emergency_music():
+    """Droplet, 2026-11-17: one shared emergency folder held only Jerusalem's songs, so Main
+    would have fallen back to them. Each engine gets its own folder, seeded so it is never
+    empty; only music from the main lane is ever copied into it."""
+    sh = _read("setup.sh")
+    assert "KBR_EMERGENCY_DIR=/var/lib/kbr-engine/emergency/${SID}" in sh
+    station_env = sh[sh.index('cat > "$STATION_DIR/$SID.env"'):sh.index("SENV\n", sh.index('cat > "$STATION_DIR/$SID.env"') + 40)]
+    assert "KBR_EMERGENCY_DIR" in station_env
+    assert "-maxdepth 1 -type f -name '*.mp3' -exec cp -n {} \"$EMERG/\"" in sh
+    liq = _read("radio.liq")
+    assert 'if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end' in liq
+
+
+def test_a_skip_is_checked_and_repeated_once():
+    """Harness next_twice, 2026-11-17: a Next within 3 s of a song change only ended cross's
+    transition and the song stayed on air. skip_main() skips again when no change followed."""
+    liq = _read("radio.liq")
+    assert "main_changed_at := time()" in liq[liq.index("def transition(ending, starting) ="):liq.index("main = cross(")]
+    body = liq[liq.index("def skip_main() ="):liq.index("def skip_on_air(")]
+    assert body.count("main.skip()") == 2 and "main_changed_at() < asked" in body
+    assert "skip_main()" in liq[liq.index("def skip_on_air("):liq.index('control("/skip"') if 'control("/skip"' in liq else len(liq)]
+
+
 def test_no_secret_in_infra_files():
     """V1-24: nothing that looks like a generated secret (48 hex chars) is committed."""
     for f in INFRA.iterdir():

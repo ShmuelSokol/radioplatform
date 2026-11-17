@@ -103,7 +103,13 @@ main = amplify(1., override="liq_amplify", main_requests)
 # After Next or a timed item the old song must not come back, so that change is a clean cut
 # (the music has already been faded out by then).
 hard_cut = ref(false)
+# When the music lane last changed song (`cross` calls transition() at that moment).
+# For up to 3 s after a change `cross` is still playing its transition, and a skip then
+# only ends the transition: the song stays on air. skip_main() uses this to see whether
+# a skip really changed the song.
+main_changed_at = ref(0.)
 def transition(ending, starting) =
+  main_changed_at := time()
   if hard_cut() then
     hard_cut := false
     add(normalize=false, [starting.source])
@@ -265,16 +271,37 @@ overlay_queue = request.queue(id="overlay", interactive=false)
 overlay = amplify(1., override="liq_amplify", overlay_queue)
 radio = add(normalize=false, [program, overlay])
 
+# Skip the song on air in the music lane. A second Next within 3 s of a song change was
+# lost (harness next_twice, 2026-11-17): the skip only ended cross's transition. So the
+# skip is checked: if no song change followed within 0.3 s, it is given once more.
+# The output stays faded down until the change (at most 0.4 s), so the old song is not
+# heard again in between.
+def skip_main() =
+  asked = time()
+  hard_cut := true
+  main.skip()
+  thread.run(delay=0.1, {if main_changed_at() >= asked then master_gain := 1. end})
+  thread.run(delay=0.3, {
+    if main_changed_at() < asked and on_air_lane() != "timed" then
+      log.important("skip: no song change after the skip (transition still playing); skipping again")
+      hard_cut := true
+      main.skip()
+      thread.run(delay=0.1, {master_gain := 1.})
+    else
+      master_gain := 1.
+    end
+  })
+end
+
 # Next: fade out quickly, skip whatever is on air, come back at full level on the new track
 def skip_on_air(~seconds) =
   ramp_master(target=0., duration=seconds, fun () -> begin
     if on_air_lane() == "timed" then
       timed_queue.skip()
+      thread.run(delay=0.1, {master_gain := 1.})
     else
-      hard_cut := true
-      main.skip()
+      skip_main()
     end
-    thread.run(delay=0.1, {master_gain := 1.})
   end)
 end
 

@@ -106,7 +106,18 @@ KBR_STATION_NAME="${SNAME}"
 KBR_CONTROL_PORT=${PORT}
 KBR_ICECAST_MOUNT=/live-${SID}
 KBR_HLS_DIR=/var/lib/kbr-engine/hls/${SID}
+KBR_EMERGENCY_DIR=/var/lib/kbr-engine/emergency/${SID}
 SENV
+  # Each station keeps its own emergency music (copies of its last 40 songs). With one
+  # shared folder a second station would have fallen back to the first one's songs. A new
+  # folder starts with what the shared one holds, so it is never empty, and fills with
+  # the station's own songs as they air.
+  EMERG="/var/lib/kbr-engine/emergency/${SID}"
+  if [ ! -d "$EMERG" ]; then
+    mkdir -p "$EMERG"
+    find /var/lib/kbr-engine/emergency -maxdepth 1 -type f -name '*.mp3' -exec cp -n {} "$EMERG/" \; 2>/dev/null || true
+  fi
+  chown -R liquidsoap:liquidsoap "$EMERG"
   mkdir -p "/var/lib/kbr-engine/hls/${SID}"; chown liquidsoap:liquidsoap "/var/lib/kbr-engine/hls/${SID}"
   chown root:liquidsoap "$STATION_DIR/$SID.env"; chmod 640 "$STATION_DIR/$SID.env"
   cat >> "$CONTROL_INC" <<LOC
