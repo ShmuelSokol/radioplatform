@@ -142,7 +142,9 @@ def ramp_master(~target, ~duration, after) =
 end
 
 # ── Timed lane: hard-timed items and Play Now ────────────────────────────────
-timed_queue = request.queue(id="timed", interactive=false)
+# A time check is handed over about 45 s ahead; give its file time to arrive (the default
+# 20 s dropped a slow download, harness slow_timed_file)
+timed_queue = request.queue(id="timed", interactive=false, timeout=90.)
 timed_armed = ref(false)
 # Which lane is on air right now ("main", "timed" or "emergency")
 on_air_lane = ref("")
@@ -159,7 +161,7 @@ timed_group_at = ref(-1.)
 # Load the item now; put it on air at `at` (unix seconds). The music fades under it.
 def schedule_timed(~uri, ~at) =
   r = request.create(uri)
-  def go_on_air() =
+  def take_over() =
     ramp_master(target=0., duration=skip_fade, fun () -> begin
       # Mute the music lane, put the timed item on air at full level. The interrupted
       # song does not resume: when the music lane comes back it moves to its next song
@@ -191,6 +193,19 @@ def schedule_timed(~uri, ~at) =
       end
       thread.run(delay=1.5, {timed_armed := false})
     end)
+  end
+  tries = ref(0)
+  def rec go_on_air() =
+    if not timed_queue.is_ready() and tries() < 180 then
+      # Its file has not arrived yet: leave the music playing and try again shortly.
+      # Muting it now left 16 s of silence and the time check never aired (harness
+      # slow_timed_file, 2026-11-17).
+      if tries() == 0 then log.important("timed: item not ready at its time; music carries on until it is") end
+      tries := tries() + 1
+      thread.run(delay=0.25, go_on_air)
+    else
+      take_over()
+    end
   end
   # Pushed here, not in a thread, so a group keeps the order it was handed over in
   timed_queue.push(r)

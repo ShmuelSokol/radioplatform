@@ -28,6 +28,8 @@ const STATUS_TEXT: Record<Status, string> = {
   error: '',
 };
 
+const KNOWN_CALL_STATUS: string[] = ['waiting', 'screening', 'approved', 'on_air'];
+
 export default function CallIn() {
   const { stationId } = useParams<{ stationId: string }>();
   const [active, setActive] = useState<ActiveShow | null>(null);
@@ -36,13 +38,15 @@ export default function CallIn() {
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
+  const [lookupFailed, setLookupFailed] = useState(false);
   const hangUpRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!stationId) return;
     let stop = false;
     const load = () => apiClient.get<ActiveShow>(`/live-shows/station/${stationId}/active`)
-      .then((r) => { if (!stop) setActive(r.data); }).catch(() => {});
+      .then((r) => { if (!stop) { setActive(r.data); setLookupFailed(false); } })
+      .catch(() => { if (!stop) setLookupFailed(true); });
     load();
     const t = setInterval(load, 15000);
     return () => { stop = true; clearInterval(t); };
@@ -138,7 +142,8 @@ export default function CallIn() {
           if (msg.type !== 'call_status') return;
           if (msg.status === 'completed' || msg.status === 'abandoned') finish('ended');
           else if (msg.status === 'rejected') finish('rejected');
-          else setStatus(msg.status as Status);
+          // A status this page does not know keeps the call panel as it is
+          else if (KNOWN_CALL_STATUS.includes(msg.status)) setStatus(msg.status as Status);
         } catch { /* not ours */ }
       };
       ws.onclose = (e) => {
@@ -153,32 +158,38 @@ export default function CallIn() {
   };
 
   const inCall = ['connecting', 'waiting', 'screening', 'approved', 'on_air'].includes(status);
+  const callOver = status === 'ended' || status === 'rejected';
   const show = active?.show;
+  // Once a call has started, the call state wins over the 15 s show poll: if the host
+  // turns calls off or the show ends mid-call, the mic is still open and the caller
+  // must keep the status and Hang up until the server ends the call
+  const showForm = !!active?.active && !!show && show.calls_enabled;
 
   return (
     <div className="max-w-xl mx-auto px-4">
       <div className="bg-white shadow rounded-lg p-6 sm:p-8">
         <h1 className="text-2xl font-bold mb-1">Call in to the show</h1>
-        {!active ? (
-          <p className="text-gray-500">Loading…</p>
+        {inCall || callOver ? null : !active ? (
+          <p className="text-gray-500">{lookupFailed ? 'Could not reach the station. Trying again…' : 'Loading…'}</p>
         ) : !active.active || !show ? (
           <p className="text-gray-600">There is no live show on right now. Please try again when the show is on.</p>
         ) : !show.calls_enabled ? (
           <p className="text-gray-600"><b>{show.title}</b> is not taking calls right now.</p>
-        ) : (
+        ) : null}
+        {(showForm || inCall || callOver) && (
           <>
-            <p className="text-gray-600 mb-5">Live now: <b>{show.title}</b></p>
-            {!inCall && status !== 'ended' && status !== 'rejected' && (
+            {show && <p className="text-gray-600 mb-5">Live now: <b>{show.title}</b></p>}
+            {showForm && !inCall && !callOver && (
               <div className="space-y-3">
                 <label className="block">
                   <span className="text-sm text-gray-700">Your name</span>
                   <input value={name} onChange={(e) => setName(e.target.value)} maxLength={100}
-                    className="mt-1 w-full border rounded px-3 py-2" placeholder="Name" />
+                    className="mt-1 w-full min-h-[44px] border rounded px-3 py-2" placeholder="Name" />
                 </label>
                 <label className="block">
                   <span className="text-sm text-gray-700">What would you like to talk about? (optional)</span>
                   <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300}
-                    className="mt-1 w-full border rounded px-3 py-2" />
+                    className="mt-1 w-full min-h-[44px] border rounded px-3 py-2" />
                 </label>
                 <p className="text-xs text-gray-500">Headphones work best: the show is heard on this page while you wait. Turn off any radio playing nearby.</p>
                 <button onClick={callIn} disabled={!name.trim()}
@@ -206,10 +217,15 @@ export default function CallIn() {
                 </button>
               </div>
             )}
-            {(status === 'ended' || status === 'rejected') && (
+            {callOver && (
               <div className="space-y-3">
                 <p className="text-gray-700">{STATUS_TEXT[status]}</p>
-                <Link to={`/listen/${stationId}`} className="text-brand-600 underline">Back to listening</Link>
+                {/* Back to the form, name and topic still filled, no reload */}
+                <button onClick={() => { setError(null); setStatus('idle'); }}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-full text-lg font-medium">
+                  Call again
+                </button>
+                <Link to={`/listen/${stationId}`} className="inline-flex items-center min-h-[44px] text-brand-600 underline">Back to listening</Link>
               </div>
             )}
           </>

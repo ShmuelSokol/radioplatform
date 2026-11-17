@@ -16,7 +16,9 @@ hard block when the next hour's time check is due), queued_shiur_spans_hour[_wai
 song_spans_hour, soft_timed_waits_for_song, soft_pauses_long_shiur, soft_waits_for_short_shiur,
 rapid_next, empty_queue, slow_started, three_item_timed_group, two_groups_0.3s_apart,
 two_groups_1s_apart, backend_unreachable (the proxy answers 502: emergency files, no silence,
-back on the queue by itself), control_endpoints (wrong/missing token 403, /timed id dedupe).
+back on the queue by itself), control_endpoints (wrong/missing token 403, /timed id dedupe), slow_timed_file (the
+time check file arrives after its time), queue_change_drops_preloaded, engine_starts_backend_down
+(restarts the engine, so it runs last).
 A full run takes about 25 minutes. Exit code 0 when all
 pass. Liquidsoap and Icecast refuse to run as root; the harness runs them as `nobody`.
 Ports 8100, 8181, 8190, 8191, 8010: one run at a time per machine.

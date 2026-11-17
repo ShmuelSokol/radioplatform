@@ -1015,6 +1015,61 @@ async function timedPreload(browser) {
   await c2.close();
 }
 
+// ── F-CR-SIDE-6: a live show on air: the control room hears the host, not the music ──
+async function liveShow(browser, contextOpts, tag) {
+  const station = makeStation();
+  const { ctx, np } = await adminContext(browser, contextOpts, station);
+  await ctx.routeWebSocket(/\/ws\/(site|listeners)|\/ws\/live\/(?!station)/, () => {});
+  let live = null; // the page's /ws/live/station/<id>/listen socket
+  await ctx.routeWebSocket(/\/ws\/live\/station\/[^/]+\/listen/, (ws) => {
+    live = ws;
+    ws.send(JSON.stringify({ type: 'live_state', live: false, show_id: null, sample_rate: 24000 }));
+  });
+  // Counts the host's frames the page plays (24 kHz buffers; the music decks are media elements)
+  await ctx.addInitScript(() => {
+    window.__liveFrames = 0;
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...a) {
+      if (this.buffer && this.buffer.sampleRate === 24000) window.__liveFrames++;
+      return start.apply(this, a);
+    };
+  });
+  const { page, errors } = await newPage(ctx);
+  await page.goto(`${BASE}/admin/dashboard`);
+  await page.getByTestId('queue-row').first().waitFor();
+  await listenHere(page);
+  check(`${tag}: music heard before the show`, (await page.evaluate(() => window.__audible().length)) === 1);
+  const sid = live && live.url().split('/').slice(-2)[0];
+  check(`${tag}: listens for the station's live show`, sid === station.SID, live ? live.url() : 'no socket');
+
+  // The host goes on air: the music stops here and the host's voice plays
+  const t0 = Date.now();
+  live.send(JSON.stringify({ type: 'live_state', live: true, show_id: 'ls1', sample_rate: 24000 }));
+  const silentAfter = await timeUntil(page, '() => window.__audible().length === 0', 3000);
+  check(`${tag}: the music stops when the host goes on air`, silentAfter >= 0, `${silentAfter >= 0 ? Date.now() - t0 : 'still playing'} ms`);
+  const frame = Buffer.alloc(2040 * 2);
+  for (let i = 0; i < 2040; i++) frame.writeInt16LE(Math.round(6000 * Math.sin(2 * Math.PI * 440 * i / 24000)), i * 2);
+  for (let i = 0; i < 12; i++) { live.send(frame); await sleep(85); }
+  const frames = await page.evaluate(() => window.__liveFrames);
+  check(`${tag}: the host is heard in the control room`, frames >= 10, `${frames} of 12 frames played`);
+  check(`${tag}: no music under the host`, (await page.evaluate(() => window.__audible().length)) === 0, JSON.stringify(await page.evaluate(() => window.__decks())));
+
+  // The show ends: the music comes back once the station sends what it plays now,
+  // not from the stale now-playing held when the show began
+  live.send(JSON.stringify({ type: 'live_state', live: false, show_id: null, sample_rate: 24000 }));
+  await sleep(300);
+  const before = await page.evaluate(() => window.__liveFrames);
+  live.send(frame);
+  await sleep(300);
+  check(`${tag}: nothing of the host is played after the show`, (await page.evaluate(() => window.__liveFrames)) === before);
+  check(`${tag}: the stale song does not resume before the station says what plays`, (await page.evaluate(() => window.__audible().length)) === 0);
+  np.raw({ type: 'now_playing', data: station.nowPlaying() });
+  const back = await timeUntil(page, '() => window.__audible().length === 1', 4000);
+  check(`${tag}: the music returns after the show`, back >= 0, `${back} ms`);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Engine mode: the control room plays the stream, falls back on error ─────────────
 async function engineMode(browser, stream) {
   const tag = 'engine mode';
@@ -1135,7 +1190,10 @@ try {
   if (run('speed')) { await speed(browser, DESKTOP, 'speed desktop'); await speed(browser, PHONE, 'speed iPhone'); }
   if (run('mix')) await mixOver(browser);
   if (run('timed')) await timedPreload(browser);
-  if (run('live')) await liveShowHeard(browser);
+  if (run('live')) {
+    await liveShow(browser, DESKTOP, 'live show desktop'); await liveShow(browser, PHONE, 'live show iPhone');
+    await liveShowHeard(browser);
+  }
   if (run('cut')) {
     await cutCountdown(browser, DESKTOP, 'cut desktop'); await cutCountdown(browser, PHONE, 'cut iPhone');
     await cutCountdown(browser, { ...devices['iPhone 13 landscape'] }, 'cut iPhone sideways');

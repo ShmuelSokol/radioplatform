@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -341,7 +341,51 @@ async def get_active_show_for_station(
     }
 
 
-# --- Twilio webhooks (no auth — validated by Twilio signature) ---
+# --- Twilio webhooks (no login; signed by Twilio with X-Twilio-Signature) ---
+
+def twilio_signature(auth_token: str, url: str, params) -> str:
+    """Twilio's request signature: base64 HMAC-SHA1 of the full URL followed by every
+    POST parameter as name+value, sorted by name, keyed with the account's auth token."""
+    import base64
+    import hashlib
+    import hmac
+
+    data = url + "".join(f"{k}{v}" for k, v in sorted(params, key=lambda kv: kv[0]))
+    digest = hmac.new(auth_token.encode(), data.encode(), hashlib.sha1).digest()
+    return base64.b64encode(digest).decode()
+
+
+def _twilio_urls(request: Request) -> list[str]:
+    """The URL Twilio may have signed: behind Railway's proxy the app sees http, and
+    Twilio was given BACKEND_PUBLIC_URL, so try those spellings too."""
+    url = str(request.url)
+    urls = [url]
+    if url.startswith("http://"):
+        urls.append("https://" + url[len("http://"):])
+    if settings.BACKEND_PUBLIC_URL:
+        tail = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        urls.append(settings.BACKEND_PUBLIC_URL.rstrip("/") + tail)
+    return urls
+
+
+async def require_twilio_signature(request: Request) -> None:
+    """Refuse a webhook not signed by Twilio, so nobody can add fake callers to a show's
+    queue or mark real callers as hung up. Checked whenever TWILIO_AUTH_TOKEN is set."""
+    import hmac
+
+    token = settings.TWILIO_AUTH_TOKEN
+    if not token:
+        return
+    given = request.headers.get("X-Twilio-Signature", "")
+    form = await request.form()
+    params = list(form.multi_items())
+    if given and any(
+        hmac.compare_digest(twilio_signature(token, url, params), given) for url in _twilio_urls(request)
+    ):
+        return
+    logger.warning("Twilio webhook %s refused: bad or missing signature", request.url.path)
+    raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
 
 def _phone_key(number) -> str:
     """A phone number as its numerals only, to compare +1 (555) 000-0002 with +15550000002."""
@@ -364,7 +408,7 @@ async def _station_for_number(db: AsyncSession, number) -> uuid.UUID | None:
     return None
 
 
-@router.post("/twilio/inbound")
+@router.post("/twilio/inbound", dependencies=[Depends(require_twilio_signature)])
 async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     """Twilio inbound call webhook — find active show, create CallInRequest, return hold TwiML."""
     form = await request.form()
@@ -414,7 +458,7 @@ async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     return Response(content=twiml, media_type="application/xml")
 
 
-@router.post("/twilio/status")
+@router.post("/twilio/status", dependencies=[Depends(require_twilio_signature)])
 async def twilio_status(request: Request, db: AsyncSession = Depends(get_db)):
     """Twilio call status callback — update call status when caller hangs up."""
     form = await request.form()

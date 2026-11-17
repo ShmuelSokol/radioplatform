@@ -321,3 +321,12 @@ hand-over and `/next`, so the time check never aired (harness `engine_starts_bac
 Now the hello is retried every 5 s until it answers 200. A late hello is safe: `/next`
 sends `given` each time and `/timed` ignores an id it already holds. Needs `setup.sh`
 rerun. Checklist V1-1.
+
+## A time check whose file is late does not mute the music (2026-11-17)
+
+The take-over muted the music lane at the item's time whether or not its file had arrived.
+A time check whose download took 23 s (handed over about 20 s ahead) gave 16 s of silence,
+and the timed queue's default 20 s download limit then dropped it, so it never aired
+(harness `slow_timed_file`). Now `go_on_air` waits until `timed_queue.is_ready()` (polled
+every 0.25 s, for up to 45 s) while the music plays on, then takes over; the timed queue
+allows 90 s per download. Needs `setup.sh` rerun. Checklist V1-8.

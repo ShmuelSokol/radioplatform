@@ -153,3 +153,15 @@ def test_setup_reads_every_station():
     """V1-22. Reproduction: 101 active stations, run setup.sh with 'all' -> 100 engines."""
     sh = _read("setup.sh")
     assert "stations?limit=100\"" not in sh
+
+
+def test_take_over_waits_for_the_timed_file():
+    """V1-8: the music is not muted before the timed item's file has arrived, and a slow
+    download is given 90 s instead of the 20 s default."""
+    liq = _liq()
+    assert 'request.queue(id="timed", interactive=false, timeout=90.)' in liq
+    rec = liq.index("def rec go_on_air()")
+    body = liq[rec:liq.index("timed_queue.push(r)", rec)]
+    assert "timed_queue.is_ready()" in body
+    assert "thread.run(delay=0.25, go_on_air)" in body
+    assert body.index("is_ready") < body.index("take_over()")

@@ -1,9 +1,17 @@
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { listStationsOnAir } from '../../api/stations';
 import PlayoutBadge from '../../components/audio/PlayoutBadge';
 import { useStations } from '../../hooks/useStations';
 
 export default function StationList() {
   const { data, isLoading, isError } = useStations();
+  // What is really on air, one request for the whole list (refreshed every 30 s)
+  const { data: onAir } = useQuery({
+    queryKey: ['stations-on-air'],
+    queryFn: listStationsOnAir,
+    refetchInterval: 30000,
+  });
 
   return (
     <div>
@@ -16,7 +24,7 @@ export default function StationList() {
       {isError && (
         <div className="text-center py-10">
           <p className="text-gray-500 mb-2">Unable to connect to the server.</p>
-          <p className="text-sm text-gray-400">The backend API is not yet configured.</p>
+          <p className="text-sm text-gray-400">Please try again in a moment.</p>
         </div>
       )}
 
@@ -37,19 +45,23 @@ export default function StationList() {
                     {station.name}
                   </h2>
                   <p className="text-sm text-gray-500">{station.type} &middot; {station.timezone}</p>
-                  <PlayoutBadge stationId={station.id} className="mt-1" />
+                  <PlayoutBadge stationId={station.id} listener className="mt-1" />
                   {station.description && (
                     <p className="text-sm text-gray-400 mt-1 line-clamp-2">{station.description}</p>
                   )}
                 </div>
               </div>
-              <div className="mt-4">
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  station.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
-                }`}>
-                  {station.is_active ? 'On Air' : 'Offline'}
-                </span>
-              </div>
+              {/* On Air only when the station is switched on and something plays;
+                  no pill until that is known */}
+              {(!station.is_active || onAir) && (
+                <div className="mt-4">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    station.is_active && onAir?.includes(station.id) ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {station.is_active && onAir?.includes(station.id) ? 'On Air' : 'Offline'}
+                  </span>
+                </div>
+              )}
             </Link>
           ))}
           {data?.stations?.length === 0 && (
