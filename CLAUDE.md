@@ -479,6 +479,9 @@ cd frontend && npx vercel --prod --yes
 # Browser check of the control room against a fake backend (desktop + phone sizes)
 cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/control-room.mjs
 
+# Every control room button, the Listen page, call-in and release-pickup timings, same fake backend (ONLY=<part> for one part; see wiki/audio-engine.md)
+cd frontend && for s in control-room-actions listen-page call-in release-timing; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 

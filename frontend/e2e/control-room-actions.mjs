@@ -502,6 +502,18 @@ async function phoneRows(browser) {
   check(`${tag}: on air elapsed hidden on a phone`, !(await page.getByText('On air', { exact: true }).isVisible()));
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
+  // Tablet widths (768-1023 px) use the phone layout without breaking
+  for (const width of [768, 900, 1023]) {
+    const st = makeStation({ queueSize: 10 });
+    const room = await openRoom(browser, { viewport: { width, height: 1100 }, hasTouch: true }, st);
+    const more = room.page.getByRole('button', { name: 'More', exact: true });
+    const fits = await room.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth);
+    await room.page.getByRole('button', { name: 'Library', exact: true }).last().tap();
+    const libOpen = await room.page.getByPlaceholder(/Search/).first().isVisible().catch(() => false);
+    check(`${tag}: (tablet ${width} px) phone layout, no overflow, bottom tabs work`, await more.isVisible() && fits && libOpen && room.errors.length === 0,
+      `more=${await more.isVisible()} fits=${fits} library=${libOpen} ${room.errors.join(' | ')}`);
+    await room.ctx.close();
+  }
 }
 
 // ── Library ─────────────

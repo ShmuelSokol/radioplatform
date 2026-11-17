@@ -40,3 +40,5 @@ Every merge to main restarts the backend. Two rules keep that inaudible:
 - **One scheduler at a time.** Railway keeps the old process alive until the new one is healthy, so two schedulers overlap. `SchedulerEngine._hold_lease` (table `scheduler_leases`, 15s lease renewed every 3s tick, released on shutdown) lets only one advance queues. A lease row, not `pg_advisory_lock`: the Supabase transaction pooler does not keep session locks.
 
 Tested locally: second backend started beside the first → nothing on air changed; first stopped → second took the lease and advanced the next song exactly once.
+
+Time limits (2 min reload guard, 5 min playing push, 90 s resume, 30 s idle, 2 min audio grace, 10 min away, push at on the server clock, unnamed push lasts 1 h, offline check retried) are pinned by `frontend/e2e/release-timing.mjs`, which runs the built site under Playwright's fake clock.

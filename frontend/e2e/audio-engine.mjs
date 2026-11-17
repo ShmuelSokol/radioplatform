@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createServer } from 'vite';
+import { serveRange } from './lib/fake-station.mjs';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,6 +20,12 @@ let failures = 0;
 const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
   if (!ok) failures++;
+};
+// A known site bug: prints XFAIL while it stands, XPASS (and fails) once fixed, so the
+// mark is taken off
+const xfail = (name, ok, bug, detail = '') => {
+  console.log(`${ok ? 'XPASS' : 'XFAIL'}  ${name}  [BUG ${bug}]${detail ? `  (${detail})` : ''}`);
+  if (ok) failures++;
 };
 
 // Test tones: asset id -> [frequency, seconds]
@@ -506,7 +513,53 @@ function wavStereo(fl, fr, seconds) {
   return buf;
 }
 
+// F-PLAYER-14: an item starts at its cue-in point and plays at its replay gain; the
+// next item, pre-loaded, starts at its own cue-in with its own gain
+async function cueInAndReplayGain() {
+  const page = await browser.newPage();
+  await page.route('**/__tone/*.wav', (r) => {
+    const id = r.request().url().split('/').pop().replace('.wav', '');
+    return serveRange(r, wav(...TONES[id])); // byte ranges, so the player can seek
+  });
+  await page.route('**/assets/*/audio-url', (r) => {
+    const id = r.request().url().split('/').slice(-2)[0];
+    return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: `/__tone/${id}.wav` }) });
+  });
+  await page.goto(`${base}e2e/audio-harness/index.html`);
+  await page.waitForFunction(() => typeof window.__set === 'function');
+  const set = (s) => page.evaluate((x) => window.__set(x), s);
+  await set({ ...A, cross: 9, cueIn: 5, rg: -6, nextId: 'b', nextCueIn: 2, nextRg: -12, startedAt: now() });
+  await sleep(1500);
+  let snap = await page.evaluate(() => window.__snap());
+  const a = snap.find((d) => d.src === 'a' && d.playing);
+  check('cue-in: the item starts at its cue-in point (5 s), not at 0', !!a && a.t >= 5 && a.t <= 7.5, JSON.stringify(snap));
+  check('replay gain: -6 dB plays at half level', !!a && Math.abs(a.gain - 0.5) < 0.03, a ? `gain ${a.gain}` : 'not playing');
+  // The server counts an item's time from the top of the file (it hands over at
+  // started_at + cross_start, and a resumed shiur is started with started_at moved back),
+  // so a listener who joins later is put at the file's elapsed time. A listener who was
+  // there when the item started is cue_in seconds ahead of that.
+  xfail('cue-in: a listener there from the start is at the same point as one joining now', !!a && Math.abs(a.t - 1.5) < 1,
+    'cue-in-ahead: player starts at cue_in but the server counts from 0, so listeners differ by cue_in and the hand-over waits up to cue_in - 1 s past the crossfade point',
+    a ? `deck at ${a.t} s, station at 1.5 s` : '');
+  // The player's own crossfade brings the next item in at its own cue-in (2 s)
+  let x = null;
+  for (let i = 0; i < 60 && !x; i++) {
+    await sleep(200);
+    snap = await page.evaluate(() => window.__snap());
+    x = snap.find((d) => d.src === 'b' && d.playing);
+  }
+  check('cue-in: at the crossfade the next item comes in from its own cue-in (2 s)', !!x && x.t >= 2 && x.t <= 2.6, JSON.stringify(snap));
+  await set({ ...B, cueIn: 2, rg: -12, nextId: 'c', startedAt: now() });
+  await sleep(3000);
+  snap = await page.evaluate(() => window.__snap());
+  const b = snap.find((d) => d.src === 'b' && d.playing && d.gain > 0.05);
+  check('cue-in: the next item plays on from its cue-in point', !!b && b.t >= 4.5 && b.t <= 8, JSON.stringify(snap));
+  check('replay gain: the next item plays at its own gain (-12 dB = 0.25)', !!b && Math.abs(b.gain - 0.25) < 0.03, b ? `gain ${b.gain}` : 'not playing');
+  await page.close();
+}
+
 try {
+  if (!only || only === 'cue-gain') await cueInAndReplayGain();
   if (!only || only === 'stereo') await stereo();
   if (!only || only === 'listen-mid-item') await listenMidItem();
   if (!only || only === 'listen-cold') await listenFromCold();
