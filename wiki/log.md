@@ -238,3 +238,4 @@ INGEST 2026-11-17 program-blocks.md announcement left out when its programme has
 INGEST 2026-11-17 streaming-architecture.md setup.sh rerun restarted Icecast + all engines at once (50 s off air, catch-up 7.6 s on 1 core); now script checked first, unchanged engines left running, changed ones one at a time
 INGEST 2026-11-17 engine-harness.md next_twice: a Next within ~3 s of a Next is lost on the engine (crossfade window); next_after_idle and Next-after-restart pass with PR 212's kept connection
 INGEST 2026-11-17 engine-harness.md fit_before_hour: PR 221's song fitting checked on the real engine (story swapped behind a 40 s song, time check +0.1 s, no silence)
+INGEST 2026-11-17 docs/main-engine-cutover.md before/after test list and blockers for moving Main onto the stream server (tick boxes in test-checklist.md are not a pass mark: 624 unticked rows name a CI test)
