@@ -643,7 +643,7 @@ async def _resume_playback_on_startup():
                             # whenever nothing else committed after it (last station)
                             await db.commit()
                         except Exception:
-                            pass
+                            logger.warning("Could not record the empty-queue alert", exc_info=True)
                 except Exception as e:
                     logger.error("Failed to resume station %s: %s", station.name, e, exc_info=True)
 

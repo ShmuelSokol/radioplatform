@@ -31,6 +31,21 @@ DEFAULT_DURATION = 180  # 3 minutes fallback
 MAX_ADS_PER_RUN = 504  # 7 days × 24h × 3 quarter-hour slots
 
 
+
+def local_hour_marks(now: datetime, zone, hours: int) -> list[datetime]:
+    """The UTC moments in the next `hours` hours at which the station's own clock reads
+    hh:00. Hours were taken on the UTC clock, so a station in a half-hour zone (India,
+    UTC+5:30) heard its time check at local hh:30. Every zone offset in use is a
+    multiple of 15 minutes, so stepping through UTC quarter hours finds each local
+    hour; on the autumn DST day 1 AM comes twice (two marks), in spring 2 AM none."""
+    base = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+    marks = []
+    for k in range(hours * 4 + 1):
+        at = base + timedelta(minutes=15 * k)
+        if at > now and at.astimezone(zone).minute == 0:
+            marks.append(at)
+    return marks
+
 class QueueReplenishService:
     """Handles smart queue replenishment using schedule rules."""
 
@@ -895,11 +910,16 @@ class QueueReplenishService:
         from app.config import settings
         from app.services.spot_schedule_service import default_timing
 
+        from app.services.weather_spot_service import station_announcement_zone
+
         station_timing = self.automation_config.get("spot_timing")
+        # Each station announces its own time (Jerusalem said New York's 1 AM at 8 AM)
+        zone = await station_announcement_zone(self.db, self.station_id)
 
         def timing_for(at: datetime) -> str:
-            # Station default: on the second at :00, after the song otherwise
-            return default_timing(at.minute, station_timing)
+            # Station default: on the second at :00, after the song otherwise. The
+            # station's own minute: in a half-hour zone (India) UTC :30 is local :00.
+            return default_timing(at.astimezone(zone).minute, station_timing)
 
         # Time and weather queued before timing_mode existed had none, which counted as
         # "on the second", so a :30 weather cut the song. Give them the station default.
@@ -929,13 +949,10 @@ class QueueReplenishService:
         from app.services.weather_spot_service import (
             get_or_create_weather_spot_assets,
             slot_key_for,
-            station_announcement_zone,
             station_weather_region,
         )
 
         now = datetime.now(timezone.utc)
-        # Each station announces its own time (Jerusalem said New York's 1 AM at 8 AM)
-        zone = await station_announcement_zone(self.db, self.station_id)
         await self._drop_wrong_hour_announcements(zone)
         # ...and plays its own city's weather
         region = station_weather_region(self.automation_config)
@@ -971,12 +988,26 @@ class QueueReplenishService:
 
         # Schedule for the next 48 hours (weather data only reliable ~48h out;
         # future runs will extend as hours come within range)
+        # No time check or weather inside Shabbos / Yom Tov: queued 48 h ahead, a
+        # Saturday-morning time check came due during the blackout and cut the silence
+        from app.services.spot_schedule_service import load_blackouts
+
+        blackouts = await load_blackouts(self.db, self.station_id, now, now + timedelta(hours=49))
+
+        def off_air(at: datetime) -> bool:
+            return any(b.covers(at) for b in blackouts)
+
         hours_scheduled = 0
-        for h in range(48):
-            hour_boundary = (now + timedelta(hours=h)).replace(minute=0, second=0, microsecond=0)
+        for hour_boundary in local_hour_marks(now, zone, 48):
             half_boundary = hour_boundary + timedelta(minutes=30)
-            need_hour = hour_boundary > now and hour_boundary not in existing_preempts
-            need_half = half_hour_weather and half_boundary > now and half_boundary not in existing_preempts
+            need_hour = hour_boundary not in existing_preempts and not off_air(hour_boundary)
+            need_half = (
+                half_hour_weather
+                and half_boundary > now
+                and half_boundary.astimezone(zone).minute == 30
+                and half_boundary not in existing_preempts
+                and not off_air(half_boundary)
+            )
             if not need_hour and not need_half:
                 continue
 

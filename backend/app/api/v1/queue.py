@@ -542,15 +542,34 @@ async def _skip_placeholders(db: AsyncSession, station_id) -> None:
     )
 
 
-async def _pick_next_pending(db: AsyncSession, station_id, now_utc: datetime) -> QueueEntry | None:
+async def _pick_next_pending(
+    db: AsyncSession, station_id, now_utc: datetime, silence_only: bool = False
+) -> QueueEntry | None:
     """The next queue entry due to play: a timed item whose time has come (soft or
     hard), otherwise the first pending entry by position (future timed entries wait).
 
     Hard items count too: the weather that follows the hourly time check is due at
     the same moment but sits at the end of the queue by position. Picking by
     position started the next song when the time check ended, and the weather then
-    cut it a moment later (heard live at 13:00 ET, 2026-11-16)."""
+    cut it a moment later (heard live at 13:00 ET, 2026-11-16).
+
+    `silence_only` (during a blackout): only the blackout's silence may start; a time
+    check or anything else queued for those hours waits until it is over."""
     await _skip_placeholders(db, station_id)
+    if silence_only:
+        silence_ids = select(Asset.id).where(Asset.asset_type == "silence").scalar_subquery()
+        res = await db.execute(
+            select(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.asset_id.in_(silence_ids),
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now_utc),
+            )
+            .order_by(QueueEntry.preempt_at.nullsfirst(), QueueEntry.position)
+            .limit(1)
+        )
+        return res.scalar_one_or_none()
     ad_result = await db.execute(
         select(QueueEntry)
         .where(
@@ -1036,6 +1055,13 @@ async def _check_advance_locked(
         .limit(1)
     )
     preempt_entry = preempt_result.scalar_one_or_none()
+    if (
+        preempt_entry
+        and is_blackout
+        and (preempt_entry.asset is None or preempt_entry.asset.asset_type != "silence")
+    ):
+        # Shabbos / Yom Tov: nothing but silence goes on air, timed or not
+        preempt_entry = None
     if preempt_entry and _same_timed_group(current, preempt_entry):
         # The item on air belongs to the same timed group (time check, then weather):
         # the rest of the group follows it, it does not cut it
@@ -1115,7 +1141,10 @@ async def _check_advance_locked(
         # Looping: the same item goes in again as the next thing to play
         await add_loop_repeat(db, station_id)
 
-    next_entry = await _pick_next_pending(db, station_id, now_utc)
+    if is_blackout:
+        next_entry = await _pick_next_pending(db, station_id, now_utc, silence_only=True)
+    else:
+        next_entry = await _pick_next_pending(db, station_id, now_utc)
     if not next_entry and not is_blackout:
         # The queue ran out: fill it and carry on rather than going silent
         next_entry = await _refill_for_next(db, station_id)
@@ -1578,6 +1607,21 @@ async def get_last_played(
     return {"last_played": {asset_id: ts.isoformat() for asset_id, ts in rows.items()}}
 
 
+def _station_entry(station_id, entry_id):
+    """A queue entry of THIS station. Looking entries up by id alone let anyone allowed
+    on one station move or delete another station's entries (the protected FM feed
+    included) by sending their ids to their own station's URL."""
+    return select(QueueEntry).where(QueueEntry.id == entry_id, QueueEntry.station_id == station_id)
+
+
+async def _require_assets(db: AsyncSession, asset_ids) -> None:
+    """404 for an unknown asset, instead of a database error (500) on insert."""
+    wanted = set(asset_ids)
+    found = set((await db.execute(select(Asset.id).where(Asset.id.in_(wanted)))).scalars().all())
+    if wanted - found:
+        raise NotFoundError("Asset not found")
+
+
 @router.post("/add", status_code=201)
 async def add_to_queue(
     station_id: uuid.UUID,
@@ -1585,6 +1629,7 @@ async def add_to_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    await _require_assets(db, [body.asset_id])
     result = await db.execute(
         select(func.max(QueueEntry.position))
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
@@ -1607,6 +1652,7 @@ async def bulk_add_to_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    await _require_assets(db, body.asset_ids)
     result = await db.execute(
         select(func.max(QueueEntry.position))
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
@@ -1632,6 +1678,7 @@ async def play_next(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
+    await _require_assets(db, [body.asset_id])
     await db.execute(
         update(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
@@ -1699,7 +1746,11 @@ async def fire_now(
 
     # The operator asked for this item: it goes on air even if a song change is in progress
     async with advance_lock(station_id):
-        skipped = await _skip_current_locked(station_id, db, keep_incoming=False)
+        # Play-now wins over a time check on air too (only Next is refused there);
+        # it answered "on air" while the item was only queued behind the time check
+        skipped = await _skip_current_locked(
+            station_id, db, keep_incoming=False, protect_timed=False
+        )
     done = {**queued, "message": "Going on air", "on_air": True, "queue": skipped.get("queue")}
     _remember_fire_request(station_id, body.client_request_id, done)
     return done
@@ -1809,7 +1860,9 @@ async def _skip_current_locked(
     db: AsyncSession,
     fade_seconds: float | None = None,
     keep_incoming: bool = True,
+    protect_timed: bool = True,
 ):
+    """`protect_timed`: Next leaves a timed item on air alone; play-now (False) does not."""
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
@@ -1818,7 +1871,7 @@ async def _skip_current_locked(
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
-    if current and _is_timed_entry(current):
+    if current and protect_timed and _is_timed_entry(current):
         # Next never skips a time check, weather or sponsorship: it plays to the end and
         # Next works again after it (Shmuel, 2026-11-16: a burst of Nexts skipped the
         # Jerusalem weather 3.2 s in). Play-now still puts something else on air.
@@ -2085,7 +2138,7 @@ async def move_up(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Move a queue entry up (lower position number)."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    result = await db.execute(_station_entry(station_id, body.entry_id))
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2115,7 +2168,7 @@ async def move_down(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Move a queue entry down (higher position number)."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    result = await db.execute(_station_entry(station_id, body.entry_id))
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2143,7 +2196,7 @@ async def reorder_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    result = await db.execute(_station_entry(station_id, body.entry_id))
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
@@ -2266,7 +2319,7 @@ async def reorder_dnd(
     _user: User = Depends(require_dj_or_manager),
 ):
     """Drag-and-drop reorder: move entry to new position with rule validation."""
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == body.entry_id))
+    result = await db.execute(_station_entry(station_id, body.entry_id))
     entry = result.scalar_one_or_none()
     if not entry or entry.status != "pending":
         raise NotFoundError("Entry not found or not pending")
@@ -2320,7 +2373,7 @@ async def remove_from_queue(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    result = await db.execute(select(QueueEntry).where(QueueEntry.id == entry_id))
+    result = await db.execute(_station_entry(station_id, entry_id))
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")

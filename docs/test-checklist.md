@@ -16,7 +16,7 @@ the limits in section S. A row passes only when it does the right thing **and** 
 
 - [ ] S-1 Button press to visible change on screen (optimistic or confirmed): under 150 ms | both | covered: NOT COVERED
 - [ ] S-2 Go next / Fade / Soft fade / Play now: next item audible in the control room within 0.5 s (browser) or 1.5 s (engine, incl. stream delay) | both | covered: partial (e2e/audio-engine.mjs browser only)
-- [ ] S-3 Every operator API call (skip, fire-now, insert, loop, mix-over, move, remove, reorder) answers in under 300 ms server time, 1 s round trip from the US East Coast | both | covered: NOT COVERED
+- [ ] S-3 Every operator API call (skip, fire-now, insert, loop, mix-over, move, remove, reorder) answers in under 300 ms server time, 1 s round trip from the US East Coast | both | covered: tests/test_speed_operator_actions.py::test_operator_calls_answer_within_300_ms (server time, test DB); live: backend/loadtests/operator_speed.py
 - [ ] S-4 Queue, now-playing and library search reads: under 300 ms server time; library search results on screen under 500 ms | n.a. | covered: NOT COVERED
 - [ ] S-5 Every admin page: first content under 1.5 s, interactive under 2.5 s on a warm load (desktop and iPhone) | n.a. | covered: NOT COVERED
 - [ ] S-6 Saves (schedule, block, playlist, station settings, program block, spot schedule): confirmed under 1 s; on-air effect on time | both | covered: NOT COVERED
@@ -202,13 +202,13 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-CHANNELS-4 `DELETE /channels/{channel_id}` [require_manager] delete channel | modes: n.a. | NOT COVERED
 
 ### controls.py (prefix `/stations`) — router guard: require_station_operator on writes
-- [ ] B-CONTROLS-1 `POST /stations/{station_id}/controls/play` [require_dj_or_manager] play | modes: both | NOT COVERED
+- [ ] B-CONTROLS-1 `POST /stations/{station_id}/controls/play` [require_dj_or_manager] play | modes: both | covered: tests/test_controls_streams_scheduler.py::test_controls_play_with_empty_redis_queue; BUG controls 500 without Redis (tests/test_controls_streams_scheduler.py::test_controls_do_not_500_without_redis, xfail)
 - [ ] B-CONTROLS-2 ↳ play/pause/stop/play-now/enqueue respect require_station_operator (protected station) | modes: both | covered: tests/test_station_permissions.py
-- [ ] B-CONTROLS-3 `POST /stations/{station_id}/controls/pause` [require_dj_or_manager] pause | modes: both | NOT COVERED
+- [ ] B-CONTROLS-3 `POST /stations/{station_id}/controls/pause` [require_dj_or_manager] pause | modes: both | covered: tests/test_controls_streams_scheduler.py::test_controls_pause_and_enqueue; BUG 500 without Redis (xfail)
 - [ ] B-CONTROLS-4 `POST /stations/{station_id}/controls/stop` [require_dj_or_manager] stop | modes: both | covered: tests/test_station_permissions.py
-- [ ] B-CONTROLS-5 `POST /stations/{station_id}/controls/play-now` [require_dj_or_manager] play now endpoint | modes: both | NOT COVERED
-- [ ] B-CONTROLS-6 ↳ play-now starts the asset immediately; interplay with queue's single player | modes: both | NOT COVERED
-- [ ] B-CONTROLS-7 `POST /stations/{station_id}/controls/enqueue` [require_dj_or_manager] enqueue | modes: both | NOT COVERED
+- [ ] B-CONTROLS-5 `POST /stations/{station_id}/controls/play-now` [require_dj_or_manager] play now endpoint | modes: both | covered: BUG play-now runs an HLS player beside the queue (tests/test_controls_streams_scheduler.py::test_controls_play_now_goes_through_the_queue, xfail)
+- [ ] B-CONTROLS-6 ↳ play-now starts the asset immediately; interplay with queue's single player | modes: both | covered: BUG second player (tests/test_controls_streams_scheduler.py::test_controls_play_now_goes_through_the_queue, xfail)
+- [ ] B-CONTROLS-7 `POST /stations/{station_id}/controls/enqueue` [require_dj_or_manager] enqueue | modes: both | covered: tests/test_controls_streams_scheduler.py::test_controls_pause_and_enqueue
 
 ### copy_review.py (prefix `/sponsorship`)
 - [ ] B-COPYREVIEW-1 `GET /sponsorship/rules` [require_sponsor_or_manager] get rules | modes: n.a. | covered: tests/test_copy_review.py
@@ -301,14 +301,14 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 
 ### now_playing.py (prefix `/now-playing`)
 - [ ] B-NOWPLAYING-1 `GET /now-playing/{station_id}` [PUBLIC] Get current now-playing state for a station. | modes: both | covered: tests/test_now_playing_broadcast.py
-- [ ] B-NOWPLAYING-2 `GET /now-playing/{station_id}/active-block` [PUBLIC] get active block | modes: both | NOT COVERED
-- [ ] B-NOWPLAYING-3 ↳ returns schedule block active now (sun-relative times resolved) | modes: both | NOT COVERED
+- [ ] B-NOWPLAYING-2 `GET /now-playing/{station_id}/active-block` [PUBLIC] get active block | modes: both | covered: tests/test_controls_streams_scheduler.py::test_active_block_none_and_fixed
+- [ ] B-NOWPLAYING-3 ↳ returns schedule block active now (sun-relative times resolved) | modes: both | covered: tests/test_controls_streams_scheduler.py::test_active_block_resolves_sunset_times
 - [ ] B-NOWPLAYING-4 `PATCH /now-playing/{station_id}` [require_dj_or_manager] update now playing | modes: both | covered: tests/test_now_playing_broadcast.py
 - [ ] B-NOWPLAYING-5 `DELETE /now-playing/{station_id}` [require_dj_or_manager] Clear now-playing state for a station. | modes: both | covered: tests/test_now_playing_broadcast.py
 
 ### nowplaying.py (prefix `/ws`) — NOT MOUNTED (dead code)
-- [ ] B-NOWPLAYING-6 `WEBSOCKET /ws/nowplaying/{station_id}` [PUBLIC] nowplaying websocket | modes: both | NOT COVERED
-- [ ] B-NOWPLAYING-7 ↳ DEAD CODE: nowplaying.py router is not mounted in api/v1/__init__.py - confirm/remove | modes: n.a. | NOT COVERED
+- [ ] B-NOWPLAYING-6 `WEBSOCKET /ws/nowplaying/{station_id}` [PUBLIC] nowplaying websocket | modes: both | covered: tests/test_controls_streams_scheduler.py::test_old_nowplaying_socket_is_not_mounted
+- [ ] B-NOWPLAYING-7 ↳ DEAD CODE: nowplaying.py router is not mounted in api/v1/__init__.py - confirm/remove | modes: n.a. | covered: tests/test_controls_streams_scheduler.py::test_old_nowplaying_socket_is_not_mounted (confirmed not mounted)
 
 ### playlists.py (prefix `/playlists`) — router guard: station_write_guard(template/slot)
 - [ ] B-PLAYLISTS-1 `GET /playlists` [require_manager] list templates | modes: both | NOT COVERED
@@ -364,27 +364,27 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-QUEUE-2 ↳ next_due/up-next shows a timed item due before the song ends | modes: both | covered: tests/test_up_next_shows_timed_item.py
 - [ ] B-QUEUE-3 ↳ items with no duration do not break the read | modes: both | covered: tests/test_items_without_length.py
 - [ ] B-QUEUE-4 ↳ queue read failure returns graceful error, not 500 storm | modes: both | covered: tests/test_queue_read_failure.py
-- [ ] B-QUEUE-5 ↳ viewer may read; sponsor 403 | modes: n.a. | NOT COVERED
-- [ ] B-QUEUE-6 `GET /stations/{station_id}/queue/log` [require_staff] Get recent play history. | modes: both | NOT COVERED
-- [ ] B-QUEUE-7 ↳ recent play history ordered newest first, limit param | modes: both | NOT COVERED
-- [ ] B-QUEUE-8 `GET /stations/{station_id}/queue/last-played` [require_staff] Get the most recent play time for each asset. | modes: both | NOT COVERED
+- [ ] B-QUEUE-5 ↳ viewer may read; sponsor 403 | modes: n.a. | covered: tests/test_queue_endpoints.py::test_viewer_may_read_the_queue_and_a_sponsor_may_not
+- [ ] B-QUEUE-6 `GET /stations/{station_id}/queue/log` [require_staff] Get recent play history. | modes: both | covered: tests/test_queue_endpoints.py::test_play_log_is_newest_first_and_honours_limit
+- [ ] B-QUEUE-7 ↳ recent play history ordered newest first, limit param | modes: both | covered: tests/test_queue_endpoints.py::test_play_log_is_newest_first_and_honours_limit
+- [ ] B-QUEUE-8 `GET /stations/{station_id}/queue/last-played` [require_staff] Get the most recent play time for each asset. | modes: both | covered: tests/test_queue_endpoints.py::test_last_played_gives_the_latest_play_per_item
 - [ ] B-QUEUE-9 ↳ served from last_played in-memory cache; new plays appear without full re-read | modes: both | covered: tests/test_last_played_cache.py
-- [ ] B-QUEUE-10 `POST /stations/{station_id}/queue/add` [require_dj_or_manager] add to queue | modes: both | NOT COVERED
-- [ ] B-QUEUE-11 ↳ appends at end with source=manual; unknown asset -> error | modes: both | NOT COVERED
-- [ ] B-QUEUE-12 `POST /stations/{station_id}/queue/bulk-add` [require_dj_or_manager] bulk add to queue | modes: both | NOT COVERED
-- [ ] B-QUEUE-13 `POST /stations/{station_id}/queue/play-next` [require_dj_or_manager] play next | modes: both | NOT COVERED
-- [ ] B-QUEUE-14 ↳ shifts pending positions +1 and inserts after the playing item; empty queue -> position 1 | modes: both | NOT COVERED
+- [ ] B-QUEUE-10 `POST /stations/{station_id}/queue/add` [require_dj_or_manager] add to queue | modes: both | covered: tests/test_queue_endpoints.py::test_add_appends_at_the_end_as_manual
+- [ ] B-QUEUE-11 ↳ appends at end with source=manual; unknown asset -> error | modes: both | covered: tests/test_queue_endpoints.py::test_unknown_asset_is_refused_with_404 (was 500, fixed)
+- [ ] B-QUEUE-12 `POST /stations/{station_id}/queue/bulk-add` [require_dj_or_manager] bulk add to queue | modes: both | covered: tests/test_queue_endpoints.py::test_bulk_add_appends_all_in_order
+- [ ] B-QUEUE-13 `POST /stations/{station_id}/queue/play-next` [require_dj_or_manager] play next | modes: both | covered: tests/test_queue_endpoints.py::test_play_next_goes_right_after_the_item_on_air
+- [ ] B-QUEUE-14 ↳ shifts pending positions +1 and inserts after the playing item; empty queue -> position 1 | modes: both | covered: tests/test_queue_endpoints.py::test_play_next_on_an_empty_queue_gets_position_one
 - [ ] B-QUEUE-15 `POST /stations/{station_id}/queue/fire-now` [require_dj_or_manager] Put an asset on air now (one call instead of play-next + skip). | modes: both | covered: tests/test_operator_actions.py, tests/test_playout_engine.py
 - [ ] B-QUEUE-16 ↳ browser: item starts immediately, current skipped, response carries new queue | modes: browser | covered: tests/test_operator_actions.py
 - [ ] B-QUEUE-17 ↳ engine: item handed to engine timed lane; engine down -> 503 and item stays queued as next | modes: engine | covered: tests/test_playout_engine.py
 - [ ] B-QUEUE-18 ↳ mode=after-current only queues it | modes: both | covered: tests/test_playout_engine.py
 - [ ] B-QUEUE-19 ↳ client_request_id repeat returns duplicate:true without firing twice | modes: both | covered: tests/test_operator_actions.py
-- [ ] B-QUEUE-20 ↳ fire-now while a timed item (time/weather) is on air still puts the item on air | modes: browser | NOT COVERED
+- [ ] B-QUEUE-20 ↳ fire-now while a timed item (time/weather) is on air still puts the item on air | modes: browser | covered: tests/test_queue_endpoints.py::test_fire_now_during_a_timed_item_still_goes_on_air (was only queued, fixed)
 - [ ] B-QUEUE-21 `POST /stations/{station_id}/queue/mix-over` [require_dj_or_manager] Play an asset on top of what is on air. The item on air carries on and the queue | modes: both | covered: tests/test_operator_actions.py
 - [ ] B-QUEUE-22 ↳ browser: WS mix_over broadcast to station listeners; queue does not move | modes: browser | covered: tests/test_operator_actions.py
 - [ ] B-QUEUE-23 ↳ engine: engine_overlay; engine down -> 503 | modes: engine | NOT COVERED
 - [ ] B-QUEUE-24 ↳ asset without audio file -> 409; unknown asset -> 404 | modes: both | covered: tests/test_operator_actions.py
-- [ ] B-QUEUE-25 ↳ PlayLog row written with source=manual | modes: both | NOT COVERED
+- [ ] B-QUEUE-25 ↳ PlayLog row written with source=manual | modes: both | covered: tests/test_queue_endpoints.py::test_mix_over_logs_once_and_ignores_a_double_tap
 - [ ] B-QUEUE-26 `POST /stations/{station_id}/queue/skip` [require_dj_or_manager] skip current | modes: both | covered: tests/test_activity_log.py, tests/test_operator_actions.py, tests/test_playout_engine.py
 - [ ] B-QUEUE-27 ↳ fade=hard -> 0 s, fade (default) -> 0.5 s, soft -> 3 s returned and broadcast | modes: both | covered: tests/test_operator_actions.py
 - [ ] B-QUEUE-28 ↳ timed item on air (time/weather/sponsor) is protected: 'Timed item plays to the end' | modes: both | covered: tests/test_rapid_next.py
@@ -401,30 +401,30 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-QUEUE-39 ↳ insert after a given entry, or at top when no anchor; multiple assets keep order | modes: both | covered: tests/test_operator_actions.py
 - [ ] B-QUEUE-40 ↳ no asset ids -> 422; unknown asset -> 404 | modes: both | covered: tests/test_operator_actions.py
 - [ ] B-QUEUE-41 ↳ engine: flush so engine re-asks | modes: engine | NOT COVERED
-- [ ] B-QUEUE-42 `POST /stations/{station_id}/queue/move-up` [require_dj_or_manager] Move a queue entry up (lower position number). | modes: both | NOT COVERED
-- [ ] B-QUEUE-43 ↳ swap with previous pending; top entry stays | modes: both | NOT COVERED
-- [ ] B-QUEUE-44 `POST /stations/{station_id}/queue/move-down` [require_dj_or_manager] Move a queue entry down (higher position number). | modes: both | NOT COVERED
-- [ ] B-QUEUE-45 ↳ swap with next pending; last entry stays | modes: both | NOT COVERED
-- [ ] B-QUEUE-46 `PUT /stations/{station_id}/queue/reorder` [require_dj_or_manager] reorder queue | modes: both | NOT COVERED
-- [ ] B-QUEUE-47 ↳ bulk reorder by ids; engine pre-load flushed by next tick when head changes | modes: both | NOT COVERED
-- [ ] B-QUEUE-48 `POST /stations/{station_id}/queue/reorder-dnd` [require_dj_or_manager] Drag-and-drop reorder: move entry to new position with rule validation. | modes: both | NOT COVERED
-- [ ] B-QUEUE-49 ↳ non-pending entry -> 404 | modes: both | NOT COVERED
-- [ ] B-QUEUE-50 ↳ warnings for category transitions, rule conflicts and do_not_play | modes: both | NOT COVERED
+- [ ] B-QUEUE-42 `POST /stations/{station_id}/queue/move-up` [require_dj_or_manager] Move a queue entry up (lower position number). | modes: both | covered: tests/test_queue_endpoints.py::test_move_up_and_down_swap_with_neighbours
+- [ ] B-QUEUE-43 ↳ swap with previous pending; top entry stays | modes: both | covered: tests/test_queue_endpoints.py::test_move_up_and_down_swap_with_neighbours, tests/test_queue_endpoints.py::test_entries_of_another_station_cannot_be_changed_through_this_station (cross-station, fixed)
+- [ ] B-QUEUE-44 `POST /stations/{station_id}/queue/move-down` [require_dj_or_manager] Move a queue entry down (higher position number). | modes: both | covered: tests/test_queue_endpoints.py::test_move_up_and_down_swap_with_neighbours
+- [ ] B-QUEUE-45 ↳ swap with next pending; last entry stays | modes: both | covered: tests/test_queue_endpoints.py::test_move_up_and_down_swap_with_neighbours
+- [ ] B-QUEUE-46 `PUT /stations/{station_id}/queue/reorder` [require_dj_or_manager] reorder queue | modes: both | covered: tests/test_queue_endpoints.py::test_reorder_sets_the_position
+- [ ] B-QUEUE-47 ↳ bulk reorder by ids; engine pre-load flushed by next tick when head changes | modes: both | covered: tests/test_queue_endpoints.py::test_reorder_sets_the_position (browser part)
+- [ ] B-QUEUE-48 `POST /stations/{station_id}/queue/reorder-dnd` [require_dj_or_manager] Drag-and-drop reorder: move entry to new position with rule validation. | modes: both | covered: tests/test_queue_endpoints.py::test_drag_and_drop_moves_and_shifts_the_rest
+- [ ] B-QUEUE-49 ↳ non-pending entry -> 404 | modes: both | covered: tests/test_queue_endpoints.py::test_drag_and_drop_moves_and_shifts_the_rest
+- [ ] B-QUEUE-50 ↳ warnings for category transitions, rule conflicts and do_not_play | modes: both | covered: tests/test_queue_endpoints.py::test_drag_and_drop_warns_about_rules
 - [ ] B-QUEUE-51 `DELETE /stations/{station_id}/queue/{entry_id}` [require_dj_or_manager] remove from queue | modes: both | covered: tests/test_activity_log.py, tests/test_operator_actions.py, tests/test_playout_engine.py
 - [ ] B-QUEUE-52 ↳ remove pending entry; engine flush when it was the cued one | modes: both | covered: tests/test_playout_engine.py
 - [ ] B-QUEUE-53 `POST /stations/{station_id}/queue/start` [require_dj_or_manager] start playback | modes: both | covered: tests/test_queue_never_runs_dry.py
 - [ ] B-QUEUE-54 ↳ already playing -> 'Already playing', no second item started | modes: browser | covered: tests/test_one_player_per_station.py
-- [ ] B-QUEUE-55 ↳ blackout active -> silence entries queued | modes: browser | NOT COVERED
-- [ ] B-QUEUE-56 ↳ engine station -> 'Playout engine will start the next track' (no local start) | modes: engine | NOT COVERED
+- [ ] B-QUEUE-55 ↳ blackout active -> silence entries queued | modes: browser | covered: tests/test_queue_endpoints.py::test_start_during_a_blackout_queues_silence
+- [ ] B-QUEUE-56 ↳ engine station -> 'Playout engine will start the next track' (no local start) | modes: engine | covered: tests/test_queue_endpoints.py::test_start_on_an_engine_station_starts_nothing_locally
 - [ ] B-QUEUE-57 ↳ empty library -> 'Queue empty' | modes: browser | covered: tests/test_queue_never_runs_dry.py
-- [ ] B-QUEUE-58 `POST /stations/{station_id}/queue/preview-weather` [require_staff] Generate (or return cached) weather + time TTS for preview — does NOT insert into queue. | modes: both | NOT COVERED
-- [ ] B-QUEUE-59 ↳ returns cached time+weather audio for preview, inserts nothing | modes: n.a. | NOT COVERED
-- [ ] B-QUEUE-60 `POST /stations/{station_id}/queue/insert-weather` [require_manager] Force-insert time announcement + weather spot into queue (admin trigger). | modes: both | NOT COVERED
-- [ ] B-QUEUE-61 ↳ force-insert time + weather now (manager only) | modes: both | NOT COVERED
-- [ ] B-QUEUE-62 `POST /stations/{station_id}/queue/schedule-hourly` [require_manager] Force-run hourly announcement scheduling for this station. | modes: both | NOT COVERED
-- [ ] B-QUEUE-63 ↳ forces _schedule_hourly_announcements for station; no duplicates per hour | modes: both | NOT COVERED
-- [ ] B-QUEUE-64 `POST /stations/{station_id}/queue/force-replenish` [require_manager] Force a full queue replenish for debugging. | modes: both | NOT COVERED
-- [ ] B-QUEUE-65 ↳ full replenish runs, returns counts | modes: both | NOT COVERED
+- [ ] B-QUEUE-58 `POST /stations/{station_id}/queue/preview-weather` [require_staff] Generate (or return cached) weather + time TTS for preview — does NOT insert into queue. | modes: both | covered: tests/test_queue_endpoints.py::test_weather_triggers_with_clips, tests/test_queue_endpoints.py::test_weather_triggers_without_tts_say_so_and_insert_nothing
+- [ ] B-QUEUE-59 ↳ returns cached time+weather audio for preview, inserts nothing | modes: n.a. | covered: tests/test_queue_endpoints.py::test_weather_triggers_with_clips
+- [ ] B-QUEUE-60 `POST /stations/{station_id}/queue/insert-weather` [require_manager] Force-insert time announcement + weather spot into queue (admin trigger). | modes: both | covered: tests/test_queue_endpoints.py::test_weather_triggers_with_clips
+- [ ] B-QUEUE-61 ↳ force-insert time + weather now (manager only) | modes: both | covered: tests/test_queue_endpoints.py::test_weather_triggers_with_clips
+- [ ] B-QUEUE-62 `POST /stations/{station_id}/queue/schedule-hourly` [require_manager] Force-run hourly announcement scheduling for this station. | modes: both | covered: tests/test_queue_endpoints.py::test_schedule_hourly_is_manager_only_and_does_not_duplicate
+- [ ] B-QUEUE-63 ↳ forces _schedule_hourly_announcements for station; no duplicates per hour | modes: both | covered: tests/test_queue_endpoints.py::test_schedule_hourly_with_the_real_scheduler_does_not_duplicate
+- [ ] B-QUEUE-64 `POST /stations/{station_id}/queue/force-replenish` [require_manager] Force a full queue replenish for debugging. | modes: both | covered: tests/test_queue_endpoints.py::test_force_replenish_reports_counts
+- [ ] B-QUEUE-65 ↳ full replenish runs, returns counts | modes: both | covered: tests/test_queue_endpoints.py::test_force_replenish_reports_counts
 
 ### rds.py (prefix `/stations`)
 - [ ] B-RDS-1 `GET /stations/{station_id}/rds.txt` [PUBLIC] rds text | modes: both | covered: tests/test_rds.py
@@ -450,10 +450,10 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-RULES-5 `GET /rules/preview` [require_staff] Generate a preview of what the schedule would look like for a given date. | modes: n.a. | NOT COVERED
 
 ### scheduler.py (prefix `/scheduler`)
-- [ ] B-SCHEDULER-1 `POST /scheduler/start` [require_manager] Start the automatic scheduling engine. | modes: both | NOT COVERED
-- [ ] B-SCHEDULER-2 `POST /scheduler/stop` [require_manager] Stop the automatic scheduling engine. | modes: both | NOT COVERED
-- [ ] B-SCHEDULER-3 ↳ stopping scheduler halts browser-station advance; engine stations keep playing but timed hand-over stops | modes: both | NOT COVERED
-- [ ] B-SCHEDULER-4 `GET /scheduler/status` [PUBLIC] Get current scheduler status. | modes: both | NOT COVERED
+- [ ] B-SCHEDULER-1 `POST /scheduler/start` [require_manager] Start the automatic scheduling engine. | modes: both | covered: tests/test_controls_streams_scheduler.py::test_scheduler_start_stop_status
+- [ ] B-SCHEDULER-2 `POST /scheduler/stop` [require_manager] Stop the automatic scheduling engine. | modes: both | covered: tests/test_controls_streams_scheduler.py::test_scheduler_start_stop_status
+- [ ] B-SCHEDULER-3 ↳ stopping scheduler halts browser-station advance; engine stations keep playing but timed hand-over stops | modes: both | covered: tests/test_controls_streams_scheduler.py::test_stopped_scheduler_no_longer_advances (browser part)
+- [ ] B-SCHEDULER-4 `GET /scheduler/status` [PUBLIC] Get current scheduler status. | modes: both | covered: tests/test_controls_streams_scheduler.py::test_scheduler_start_stop_status
 
 ### schedules.py (prefix `/schedules`) — router guard: station_write_guard(schedule/block/entry, body winner/other ids)
 - [ ] B-SCHEDULES-1 `GET /schedules/epg/{station_id}` [PUBLIC] Public EPG: returns all schedule blocks for a station on a given day, sorted by start_time. | modes: both | NOT COVERED
@@ -565,8 +565,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-STREAMS-2 ↳ stream_url only when PLAYOUT_STREAM_LIVE and engine drives station; else null (browser) | modes: both | covered: tests/test_playout_engine.py
 - [ ] B-STREAMS-3 `GET /stations/{station_id}/now-playing` [PUBLIC] now playing | modes: both | covered (indirect, calls handler): tests/test_items_without_length.py, tests/test_next_shown_is_next_played.py
 - [ ] B-STREAMS-4 ↳ returns current queue item + next (predict_next_entry) for listener pre-load | modes: both | covered: tests/test_next_shown_is_next_played.py
-- [ ] B-STREAMS-5 `GET /stations/{station_id}/live-audio` [PUBLIC] Public endpoint: returns audio URL + timing for the currently playing track. | modes: both | NOT COVERED
-- [ ] B-STREAMS-6 ↳ audio URL + elapsed timing for current track; nothing playing -> empty; liquidsoap branch when LIQUIDSOAP_ENABLED | modes: browser | NOT COVERED
+- [ ] B-STREAMS-5 `GET /stations/{station_id}/live-audio` [PUBLIC] Public endpoint: returns audio URL + timing for the currently playing track. | modes: both | covered: tests/test_controls_streams_scheduler.py::test_live_audio_gives_url_timing_and_next, tests/test_controls_streams_scheduler.py::test_live_audio_nothing_playing
+- [ ] B-STREAMS-6 ↳ audio URL + elapsed timing for current track; nothing playing -> empty; liquidsoap branch when LIQUIDSOAP_ENABLED | modes: browser | covered: tests/test_controls_streams_scheduler.py::test_live_audio_storage_paths_and_liquidsoap_branch (next-item URL 500, fixed)
 
 ### users.py (prefix `/users`)
 - [ ] B-USERS-1 `GET /users/public/hosts` [PUBLIC] Public: list all hosts/DJs with public profiles. | modes: n.a. | NOT COVERED
@@ -613,28 +613,28 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 ### 2a. Scheduler loop (`services/scheduler_engine.py`, every 3 s, leader-only)
 - [ ] B-JOB-1 Scheduler takes a 15 s DB lease; only the leader process advances stations; second process stays idle | modes: both | covered: tests/test_scheduler_lease.py
 - [ ] B-JOB-2 Lease handover when leader dies: follower takes over within ~15 s, no double advance | modes: both | covered: tests/test_scheduler_lease.py
-- [ ] B-JOB-3 Each pass uses its own session and ends its transaction (no "idle in transaction" blocking deploy migrations) | modes: both | NOT COVERED
-- [ ] B-JOB-4 One station's exception rolls back, raises critical "Station check failed" alert, other stations still advance in the same pass | modes: both | NOT COVERED
+- [ ] B-JOB-3 Each pass uses its own session and ends its transaction (no "idle in transaction" blocking deploy migrations) | modes: both | covered: tests/test_scheduler_jobs.py::test_each_pass_ends_its_transaction
+- [ ] B-JOB-4 One station's exception rolls back, raises critical "Station check failed" alert, other stations still advance in the same pass | modes: both | covered: tests/test_scheduler_jobs.py::test_one_station_failing_does_not_stop_the_others
 - [ ] B-JOB-5 Browser station: `_advance_queue` -> `_check_advance` advances when duration elapsed (minus crossfade) | modes: browser | covered: tests/test_queue_advance.py
 - [ ] B-JOB-6 Browser: precise timer armed at cross_start (default 3 s before end; short/timed items 0.3 s) so server switch = client crossfade start | modes: browser | covered: tests/test_queue_advance.py, tests/test_song_change_gaps.py
 - [ ] B-JOB-7 Browser: poll does not advance before the end; precise timer does not advance too early | modes: browser | covered: tests/test_queue_advance.py
 - [ ] B-JOB-8 Browser: two concurrent advances (timer + poll + Next) promote only one entry (advance_lock) | modes: browser | covered: tests/test_queue_advance.py
-- [ ] B-JOB-9 Browser: duplicate "playing" rows cleaned to one (most recent) | modes: browser | NOT COVERED
-- [ ] B-JOB-10 Browser: playing entry with no started_at gets started_at=now | modes: browser | NOT COVERED
+- [ ] B-JOB-9 Browser: duplicate "playing" rows cleaned to one (most recent) | modes: browser | covered: tests/test_scheduler_jobs.py::test_duplicate_playing_rows_are_cleaned_to_the_newest
+- [ ] B-JOB-10 Browser: playing entry with no started_at gets started_at=now | modes: browser | covered: tests/test_scheduler_jobs.py::test_playing_entry_without_start_time_gets_now
 - [ ] B-JOB-11 Browser: `_arm_timed_start` arms an exact timer for a hard timed item due within 10 s (top-of-hour time check starts on the second, not up to 3 s late) | modes: browser | covered: tests/test_timed_start_on_time.py
 - [ ] B-JOB-12 Browser: soft timed item with hard_by fires when its wait runs out; without hard_by waits for the song end | modes: browser | covered: tests/test_timed_start_on_time.py
 - [ ] B-JOB-13 Browser: hard timed item due (preempt_at <= now) cuts the current song exactly at its time; current logged and marked played | modes: browser | covered: tests/test_timed_start_on_time.py, tests/test_top_of_hour_block.py
 - [ ] B-JOB-14 Browser: time check then weather (same timed group) - weather follows time with no song in between, does not cut it | modes: browser | covered: tests/test_top_of_hour_block.py
 - [ ] B-JOB-15 Browser: a time check queued twice for the same hour plays once (`_drop_timed_twins`) | modes: both | covered: tests/test_top_of_hour_block.py
 - [ ] B-JOB-16 Browser: timed item due within TIMED_EARLY_START_SECONDS starts early when the song ends a few seconds before (no gap) | modes: browser | covered: tests/test_timed_item_starts_early.py
-- [ ] B-JOB-17 END-TO-END: hourly time announcement starts at hh:00:00 (+/- 0.5 s) in a real running server with a song crossing the hour | modes: both | NOT COVERED
+- [ ] B-JOB-17 END-TO-END: hourly time announcement starts at hh:00:00 (+/- 0.5 s) in a real running server with a song crossing the hour | modes: both | covered: tests/test_scheduler_jobs.py::test_time_check_starts_on_the_second_with_the_real_timers (browser, in process with real timers)
 - [ ] B-JOB-18 END-TO-END: time announcement on the hour while a shiur plays, for each timed_during_long_items policy (pause/wait/cut) | modes: both | covered: tests/test_timed_pauses_shiur.py (browser only)
-- [ ] B-JOB-19 Time announcement on the hour when the scheduler pass is slow / a deploy restarts the backend at :59:50 | modes: both | NOT COVERED
-- [ ] B-JOB-20 Time announcement when the hourly entry was created late (preempt_at already past when queued) - must still air immediately, not by queue position | modes: both | NOT COVERED
-- [ ] B-JOB-21 Browser: precise advance does nothing when the process lost leadership or station is engine-driven | modes: browser | NOT COVERED
-- [ ] B-JOB-22 Browser: blackout ended while silence plays -> silence stopped at once, remaining silence entries cleared, next real song starts | modes: browser | NOT COVERED
+- [ ] B-JOB-19 Time announcement on the hour when the scheduler pass is slow / a deploy restarts the backend at :59:50 | modes: both | covered: tests/test_scheduler_jobs.py::test_time_check_after_a_restart_just_before_the_hour
+- [ ] B-JOB-20 Time announcement when the hourly entry was created late (preempt_at already past when queued) - must still air immediately, not by queue position | modes: both | covered: tests/test_scheduler_jobs.py::test_time_check_queued_late_airs_at_once_not_by_position
+- [ ] B-JOB-21 Browser: precise advance does nothing when the process lost leadership or station is engine-driven | modes: browser | covered: tests/test_scheduler_jobs.py::test_precise_advance_skipped_without_leadership
+- [ ] B-JOB-22 Browser: blackout ended while silence plays -> silence stopped at once, remaining silence entries cleared, next real song starts | modes: browser | covered: tests/test_scheduler_jobs.py::test_blackout_ended_while_silence_plays
 - [ ] B-JOB-23 Browser: queue ran out on advance -> `_refill_for_next` fills and continues (not during blackout) | modes: browser | covered: tests/test_queue_never_runs_dry.py
-- [ ] B-JOB-24 After each automatic change positions are compacted (playing=1) and replenish runs in background after the broadcast | modes: browser | NOT COVERED
+- [ ] B-JOB-24 After each automatic change positions are compacted (playing=1) and replenish runs in background after the broadcast | modes: browser | covered: tests/test_scheduler_jobs.py::test_positions_compacted_and_refill_after_the_change
 - [ ] B-JOB-25 Now-playing WS payload sent on every change; unchanged message not resent; older song never announced after newer | modes: both | covered: tests/test_now_playing_broadcast.py
 - [ ] B-JOB-26 Payload includes next entry = what the server will really pick at switch time (predict_next_entry) | modes: browser | covered: tests/test_next_shown_is_next_played.py, tests/test_next_follows_soft_slot.py
 - [ ] B-JOB-27 Upcoming analysis requested for on-air and next item when analysis missing/old (ANALYSIS_VERSION) | modes: both | covered: tests/test_song_change_gaps.py
@@ -650,14 +650,14 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-37 Engine tick skipped during a live show (live_show_id set) - verify timed items due during the show are dropped/handled | modes: engine | NOT COVERED
 - [ ] B-JOB-38 `_check_station`: live show active -> hard stop check only; stale live_show_id cleared and committed | modes: both | covered: tests/test_live_show_lifecycle.py
 - [ ] B-JOB-39 Live show reaches scheduled_end -> hard_stop_show committed once (not repeated every pass), WS show_hard_stopped broadcast | modes: both | covered: tests/test_live_show_lifecycle.py
-- [ ] B-JOB-40 Blackout check: HolidayWindow is_blackout covering now; affected_stations null = all stations, else listed ids only | modes: both | NOT COVERED
-- [ ] B-JOB-41 `fill_blackout_queue` queues silence for active AND upcoming blackouts each pass (no duplicates) | modes: both | NOT COVERED
+- [ ] B-JOB-40 Blackout check: HolidayWindow is_blackout covering now; affected_stations null = all stations, else listed ids only | modes: both | covered: tests/test_scheduler_jobs.py::test_blackout_covers_listed_stations_only
+- [ ] B-JOB-41 `fill_blackout_queue` queues silence for active AND upcoming blackouts each pass (no duplicates) | modes: both | covered: tests/test_scheduler_jobs.py::test_silence_queued_for_upcoming_and_active_blackouts_once, tests/test_scheduler_jobs.py::test_active_blackout_silences_the_station_now
 - [ ] B-JOB-42 Leftover now_playing rows (old second player) are deleted | modes: both | covered: tests/test_one_player_per_station.py
 - [ ] B-JOB-43 Station check never plays anything beside the queue | modes: browser | covered: tests/test_one_player_per_station.py
 - [ ] B-JOB-44 Dead air: nothing playing for silence_threshold_seconds (default SILENCE_DETECTION_SECONDS=30) -> one critical alert per spell + start_from_queue | modes: browser | covered: tests/test_one_player_per_station.py
-- [ ] B-JOB-45 Dead air timer reset when something plays; not counted during blackout | modes: browser | NOT COVERED
+- [ ] B-JOB-45 Dead air timer reset when something plays; not counted during blackout | modes: browser | covered: tests/test_scheduler_jobs.py::test_dead_air_timer_resets_and_ignores_blackouts
 - [ ] B-JOB-46 Engine station: no backend dead-air recovery (engine emergency playlist instead) | modes: engine | NOT COVERED
-- [ ] B-JOB-47 Daily: holiday coverage extended when < 365 days ahead or no window in next 7 days (`_maybe_extend_holidays`) | modes: both | NOT COVERED
+- [ ] B-JOB-47 Daily: holiday coverage extended when < 365 days ahead or no window in next 7 days (`_maybe_extend_holidays`) | modes: both | covered: tests/test_scheduler_jobs.py::test_daily_holiday_extension_is_per_station (per station, fixed)
 - [ ] B-JOB-48 Daily weather readout generated at station local generate_time (default 06:00) when weather_readout.enabled | modes: both | NOT COVERED
 - [ ] B-JOB-49 Weather readout auto-queued at queue_time when weather_readout.auto_queue | modes: both | NOT COVERED
 - [ ] B-JOB-50 Legacy Liquidsoap health check / push / skip only when LIQUIDSOAP_ENABLED (must stay off) | modes: browser | NOT COVERED
@@ -670,8 +670,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-55 Hourly time + weather scheduled for next 48 h at each hh:00 with preempt_at, one set per hour (exact-minute dedupe, ad_slot/block excluded) | modes: both | covered: tests/test_spot_schedules.py, tests/test_blocks_keep_hourly.py
 - [ ] B-JOB-56 Hourly entries get timing_mode from spot_timing default (hard on the hour, soft elsewhere); legacy NULL timing_mode backfilled | modes: both | covered: tests/test_spot_schedules.py
 - [ ] B-JOB-57 Half-hour weather at hh:30 only when weather_enabled and weather_interval_minutes == 30 | modes: both | covered: tests/test_blocks_keep_hourly.py
-- [ ] B-JOB-58 No hourly announcements when Supabase storage is not configured (logs skip) | modes: both | NOT COVERED
-- [ ] B-JOB-59 Each station announces its own local hour (station timezone); wrong-hour clips removed after timezone change | modes: both | covered: tests/test_time_announcement.py (text only); _drop_wrong_hour_announcements NOT COVERED
+- [ ] B-JOB-58 No hourly announcements when Supabase storage is not configured (logs skip) | modes: both | covered: tests/test_queue_endpoints.py::test_no_hourly_announcements_without_storage
+- [ ] B-JOB-59 Each station announces its own local hour (station timezone); wrong-hour clips removed after timezone change | modes: both | covered: tests/test_time_announcement.py (text only); tests/test_restart_holidays_timezones.py::test_wrong_hour_time_checks_are_replaced
 - [ ] B-JOB-60 Weather and time clips realigned to the station's weather_region | modes: both | covered: tests/test_weather_regions.py, tests/test_time_clip_regions.py
 - [ ] B-JOB-61 Uploaded time clip used for the hour; ElevenLabs only fallback (default region only); missing both -> no entry, no crash | modes: both | covered: tests/test_weather_spots.py
 - [ ] B-JOB-62 ElevenLabs failure pauses generation (backoff) then resumes | modes: both | NOT COVERED
@@ -701,8 +701,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 
 ### 2d. Long items (`services/long_items.py`) and resume
 - [ ] B-JOB-84 policy pause (default): time check plays, shiur re-queued as resume@<seconds> and continues where it stopped | modes: browser | covered: tests/test_timed_pauses_shiur.py
-- [ ] B-JOB-85 policy wait: hard timed items due before the shiur ends are deferred to its end (_defer_hard_until_end) | modes: browser | NOT COVERED
-- [ ] B-JOB-86 policy cut: time check cuts the shiur | modes: browser | NOT COVERED
+- [ ] B-JOB-85 policy wait: hard timed items due before the shiur ends are deferred to its end (_defer_hard_until_end) | modes: browser | covered: tests/test_restart_holidays_timezones.py::test_wait_defers_only_items_due_before_the_shiur_ends, tests/test_timed_pauses_shiur.py::test_wait_lets_the_shiur_finish_first
+- [ ] B-JOB-86 policy cut: time check cuts the shiur | modes: browser | covered: tests/test_restart_holidays_timezones.py::test_cut_ends_the_shiur_for_good, tests/test_timed_pauses_shiur.py::test_cut_keeps_the_old_behaviour
 - [ ] B-JOB-87 Long-item policies in ENGINE mode (engine timed lane always cuts? resume supported?) | modes: engine | NOT COVERED
 
 ### 2e. Startup (`main.py` lifespan)
@@ -713,9 +713,9 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-92 Dynamic "requested" category refreshed at startup | modes: n.a. | NOT COVERED
 - [ ] B-JOB-93 Restart: song still within its duration keeps playing (not cut); its open PlayLog kept | modes: browser | covered: tests/test_cold_start.py
 - [ ] B-JOB-94 Restart: only recent (STARTUP_OPEN_LOG_DAYS) open play logs closed | modes: both | covered: tests/test_cold_start.py
-- [ ] B-JOB-95 Restart: finished playing entries marked played + logged, EXCEPT engine stations (engine reports itself) | modes: both | NOT COVERED
+- [ ] B-JOB-95 Restart: finished playing entries marked played + logged, EXCEPT engine stations (engine reports itself) | modes: both | covered: tests/test_restart_holidays_timezones.py::test_restart_settles_finished_items_but_not_engine_stations
 - [ ] B-JOB-96 Restart: every active station replenished; browser stations started via start_from_queue; engine stations not started locally | modes: both | covered: tests/test_items_without_length.py (partial)
-- [ ] B-JOB-97 Restart with empty queue -> "Queue empty after restart" warning alert; recovered stale entries -> "Server restarted" info alert | modes: both | NOT COVERED
+- [ ] B-JOB-97 Restart with empty queue -> "Queue empty after restart" warning alert; recovered stale entries -> "Server restarted" info alert | modes: both | covered: tests/test_restart_holidays_timezones.py::test_restart_with_an_empty_queue_raises_a_warning (alert was never committed, fixed)
 - [ ] B-JOB-98 Scheduler started after resume; stopped cleanly on shutdown (lease released) | modes: both | covered: tests/test_scheduler_lease.py
 - [ ] B-JOB-99 Duration backfill runs once 60 s after start in background (limit 100) | modes: n.a. | covered: tests/test_items_without_length.py
 - [ ] B-JOB-100 Concurrent indexes built in background without blocking | modes: n.a. | NOT COVERED

@@ -52,19 +52,24 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
     asset = entry.asset
     file_path = asset.file_path
+    # Both the item on air and the next one may be stored files: the next item's URL
+    # used `bucket` while it was only set for a stored item on air (500 otherwise)
+    bucket = settings.SUPABASE_STORAGE_BUCKET
 
     # Build audio URL
     audio_url = None
     if file_path.startswith("http://") or file_path.startswith("https://"):
         audio_url = file_path
     elif settings.supabase_storage_enabled:
-        bucket = settings.SUPABASE_STORAGE_BUCKET
         audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
 
     # Calculate elapsed
     elapsed = 0.0
     if entry.started_at:
-        elapsed = (datetime.now(timezone.utc) - entry.started_at).total_seconds()
+        started = entry.started_at
+        if started.tzinfo is None:  # SQLite returns naive datetimes
+            started = started.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
 
     # Audio analysis data (defaults if missing)
     analysis = {}

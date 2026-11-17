@@ -212,8 +212,6 @@ class SchedulingService:
     def _block_matches_time(self, block: ScheduleBlock, at_time: datetime, station=None) -> bool:
         """Check if a schedule block is active at the given time."""
         current_time = at_time.time()
-        current_weekday = at_time.strftime("%A").lower()
-        current_day_of_month = at_time.day
         current_date = at_time.date()
 
         # Resolve start/end times (may be sun-relative)
@@ -230,34 +228,20 @@ class SchedulingService:
             )
 
         # Check time range (handle overnight blocks)
+        recurrence_day = current_date
         if effective_start <= effective_end:
             if not (effective_start <= current_time < effective_end):
                 return False
         else:
             if not (current_time >= effective_start or current_time < effective_end):
                 return False
+            if current_time < effective_end:
+                # After midnight of an overnight block (Friday 22:00-02:00 at 01:00 on
+                # Saturday): it is still the day the block started. Checking the new day
+                # stopped a Friday-only block at midnight.
+                recurrence_day = current_date - timedelta(days=1)
 
-        # Check recurrence
-        if block.recurrence_type == RecurrenceType.DAILY:
-            return True
-        elif block.recurrence_type == RecurrenceType.WEEKLY:
-            if block.recurrence_pattern:
-                return current_weekday in [d.lower() for d in block.recurrence_pattern]
-            return True
-        elif block.recurrence_type == RecurrenceType.MONTHLY:
-            if block.recurrence_pattern:
-                return current_day_of_month in block.recurrence_pattern
-            return True
-        elif block.recurrence_type == RecurrenceType.ONE_TIME:
-            # Check date range if provided
-            if block.start_date and block.end_date:
-                return block.start_date <= current_date <= block.end_date
-            elif block.start_date:
-                return current_date == block.start_date
-            # No dates specified — treat as always active (backwards compat)
-            return True
-
-        return False
+        return self._recurs_on(block, recurrence_day)
 
     async def get_next_asset_for_block(
         self, block: ScheduleBlock, station_id: UUID | str | None = None
