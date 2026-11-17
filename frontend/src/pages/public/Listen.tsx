@@ -16,6 +16,7 @@ import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { holdUpdates } from '../../lib/appUpdate';
 import { serverNow } from '../../lib/serverClock';
+import { displayTitle } from '../../lib/displayTitle';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
 import type { AssetInfo } from '../../types';
 
@@ -202,8 +203,9 @@ export default function Listen() {
 
   // What the phone shows on the lock screen and in the car (CarPlay, Android Auto):
   // the item on air, kept current as it changes
-  const nowTitle = wsNowPlaying?.asset?.title ?? null;
-  const nowArtist = wsNowPlaying?.asset?.artist ?? null;
+  // Underscores from file names shown as spaces (display only)
+  const nowTitle = displayTitle(wsNowPlaying?.asset?.title);
+  const nowArtist = displayTitle(wsNowPlaying?.asset?.artist);
   useEffect(() => {
     if (!userStarted || !('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
     try {
@@ -534,12 +536,12 @@ export default function Listen() {
                 &#9835;
               </div>
               <div className="flex-1">
-                <p className="font-medium">{wsAsset.title}</p>
+                <p className="font-medium">{displayTitle(wsAsset.title)}</p>
                 {wsAsset.artist && (
-                  <p className="text-sm text-gray-500">{wsAsset.artist}</p>
+                  <p className="text-sm text-gray-500">{displayTitle(wsAsset.artist)}</p>
                 )}
                 {wsAsset.album && (
-                  <p className="text-xs text-gray-400">{wsAsset.album}</p>
+                  <p className="text-xs text-gray-400">{displayTitle(wsAsset.album)}</p>
                 )}
               </div>
             </div>
@@ -570,16 +572,16 @@ export default function Listen() {
                 <div className="bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
                   {reqResult.auto_approved ? (
                     <>
-                      Your song has been added to the queue! Playing: <strong>{reqResult.matched_asset_title}</strong>
-                      {reqResult.matched_asset_artist && <> by {reqResult.matched_asset_artist}</>}.
+                      Your song has been added to the queue! Playing: <strong>{displayTitle(reqResult.matched_asset_title)}</strong>
+                      {reqResult.matched_asset_artist && <> by {displayTitle(reqResult.matched_asset_artist)}</>}.
                       {reqResult.songs_ahead != null && reqResult.estimated_wait_minutes != null && (
                         <> Will play in ~{reqResult.songs_ahead} song{reqResult.songs_ahead !== 1 ? 's' : ''} (~{reqResult.estimated_wait_minutes} min).</>
                       )}
                     </>
                   ) : reqResult.matched_asset_title ? (
                     <>
-                      We found: <strong>{reqResult.matched_asset_title}</strong>
-                      {reqResult.matched_asset_artist && <> by {reqResult.matched_asset_artist}</>}.
+                      We found: <strong>{displayTitle(reqResult.matched_asset_title)}</strong>
+                      {reqResult.matched_asset_artist && <> by {displayTitle(reqResult.matched_asset_artist)}</>}.
                       The station manager will review it shortly.
                     </>
                   ) : (

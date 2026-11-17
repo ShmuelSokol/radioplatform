@@ -5,7 +5,7 @@
  * profile, network loss and coming back to the tab, the server-stream mode (with a
  * small MP3 stream server on STREAM_PORT), the hourly time check heard on time, and
  * short items and hard timed items handed over on the second (ONLY=handover).
- * Parts: basics forms crm requests nothing shell live network polling switch player elapsed
+ * Parts: basics forms crm requests nothing shell live titles network polling switch player elapsed
  * clock timecheck stream streamretry resume handover. crm..shell, streamretry and resume
  * are the verifier's F-LISTEN-23..54 (listener profile, raffles, song request texts,
  * nothing on air as the server says it, stream retry, release resume on the stream,
@@ -1539,6 +1539,47 @@ async function liveSocket(browser) {
   }
 }
 
+// Library titles with file-name underscores ("Moed_Katan 4") read with spaces on the
+// Listen page (card, lock screen, song request result); data sent back is unchanged
+async function titleDisplay(browser) {
+  const tag = 'listen titles';
+  const station = makeStation({
+    shows: [],
+    extra: (method, path) => (path === '/song-requests' && method === 'POST'
+      ? { id: 'r9', status: 'approved', auto_approved: true, matched_asset_title: 'Moed_Katan 4', matched_asset_artist: 'Rav_Ploni', songs_ahead: 2, estimated_wait_minutes: 7 }
+      : undefined),
+  });
+  const a = station.byId[station.playing().asset_id];
+  Object.assign(a, { title: 'Moed_Katan 4', artist: 'Rav_Ploni', album: 'Shas__Shiurim' });
+  const { ctx } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']] });
+  const { page, errors } = await openListen(ctx, station.SID);
+  await page.getByText('On Air', { exact: true }).waitFor();
+  const card = await page.locator('h3', { hasText: 'Now Playing' }).locator('..').innerText();
+  check(`${tag}: Now Playing card shows "Moed Katan 4", "Rav Ploni", "Shas Shiurim" (no underscores)`,
+    card.includes('Moed Katan 4') && card.includes('Rav Ploni') && card.includes('Shas Shiurim') && !card.includes('_'), card.replace(/\n/g, ' | '));
+  await listenBtn(page).click();
+  await sleep(500);
+  const m = await page.evaluate(() => ({ title: navigator.mediaSession.metadata?.title, artist: navigator.mediaSession.metadata?.artist }));
+  check(`${tag}: lock screen shows "Moed Katan 4" by "Rav Ploni"`, m.title === 'Moed Katan 4' && m.artist === 'Rav Ploni', JSON.stringify(m));
+  // What goes back to the API is unchanged
+  await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 4000 });
+  await page.getByRole('button', { name: 'Rate 4 stars' }).click();
+  await sleep(600);
+  const rate = station.calls.filter((c) => c.path === '/crm/rate').pop();
+  check(`${tag}: the rating is sent for the item's id`, rate?.body.asset_id === a.id, JSON.stringify(rate?.body));
+  await page.getByRole('button', { name: 'Request a Song' }).click();
+  await page.getByPlaceholder('Enter your name').fill('Moshe');
+  await page.getByPlaceholder('What song would you like to hear?').fill('Moed_Katan 4');
+  await page.getByRole('button', { name: 'Submit Request' }).click();
+  await page.getByText('Your song has been added to the queue!', { exact: false }).waitFor({ timeout: 3000 }).catch(() => {});
+  const sent = station.calls.filter((c) => c.path === '/song-requests').pop();
+  check(`${tag}: a song request is sent exactly as typed (underscore kept)`, sent?.body.song_title === 'Moed_Katan 4', JSON.stringify(sent?.body));
+  const box = await page.locator('#song-request-form').innerText();
+  check(`${tag}: the request result shows "Moed Katan 4 by Rav Ploni"`, box.includes('Playing: Moed Katan 4 by Rav Ploni'), box.split('\n')[0]);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 const browser = await chromium.launch();
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 try {
@@ -1552,6 +1593,7 @@ try {
   if (run('nothing')) await nothingOnAir(browser);
   if (run('shell')) await pageShell(browser);
   if (run('live')) await liveSocket(browser);
+  if (run('titles')) await titleDisplay(browser);
   if (run('network')) await network(browser);
   if (run('polling')) await pollingFallback(browser);
   if (run('switch')) await stationSwitch(browser);
