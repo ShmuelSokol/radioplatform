@@ -967,6 +967,74 @@ async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntr
     )
 
 
+async def _soft_items_pause_long(
+    db: AsyncSession,
+    station_id,
+    current: QueueEntry,
+    policy: str | None,
+    now_utc: datetime,
+    horizon: datetime | None = None,
+) -> int:
+    """Soft timed items due while a shiur or story has more than five minutes left
+    become hard, so the station's rule (pause by default) lets them in; with less
+    left they keep waiting for its end (Shmuel, 2026-11-17: the 7:30 weather aired at
+    7:49 behind a shiur). With `horizon` (the engine, which needs timed items ahead of
+    time) items due up to then are looked at; without it, those due now. Nothing
+    changes while HS is off. Returns how many entries were made hard."""
+    from app.models.queue_entry import soft_timed
+    from app.models.station import Station
+    from app.services import long_items
+    from app.services.station_modes import hard_start_on
+
+    if policy not in ("pause", "cut") or current is None:
+        return 0
+    # HS off: the operator wants nothing to cut in, so soft items keep waiting
+    if not hard_start_on(await db.get(Station, station_id)):
+        return 0
+    end = long_items.ends_at(current)
+    if end is None:
+        return 0
+    rows = (
+        await db.execute(
+            select(QueueEntry.preempt_at)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                soft_timed(),
+                QueueEntry.preempt_at <= (horizon or now_utc),
+                *([QueueEntry.preempt_at > now_utc] if horizon is not None else []),
+            )
+            .distinct()
+        )
+    ).scalars().all()
+    changed = 0
+    for at in rows:
+        at_aware = _aware(at)
+        if current.preempt_at is not None and _aware(current.preempt_at) == at_aware:
+            continue  # the shiur is itself part of this group
+        due = max(at_aware, now_utc)
+        if (end - due).total_seconds() <= long_items.SOFT_PAUSE_MIN_LEFT_SECONDS:
+            continue
+        res = await db.execute(
+            update(QueueEntry)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at == at,
+                soft_timed(),
+            )
+            .values(timing_mode="hard", hard_by=None)
+            .execution_options(synchronize_session=False)
+        )
+        changed += res.rowcount or 0
+        logger.info(
+            "Station %s: soft group at %s pauses %s (%.0f s left)",
+            station_id, at_aware.isoformat(), current.asset_id, (end - due).total_seconds(),
+        )
+    return changed
+
+
 async def _queue_resume(
     db: AsyncSession, station_id, current: QueueEntry, timed: QueueEntry, now_utc: datetime
 ) -> None:
@@ -987,7 +1055,19 @@ async def _queue_resume(
             )
         )
     ).scalar() or timed.position
-    position = group_end + 1
+    # First after the group, ahead of every other pending item: a song queued at a
+    # lower position than the timed item would otherwise play before the shiur
+    # carries on (the group's own items are due and hard, so they still go first)
+    first_other = (
+        await db.execute(
+            select(func.min(QueueEntry.position)).where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at != timed.preempt_at),
+            )
+        )
+    ).scalar()
+    position = group_end + 1 if first_other is None else min(group_end + 1, first_other)
     await db.execute(
         update(QueueEntry)
         .where(
@@ -1050,6 +1130,8 @@ async def _check_advance_locked(
     if long_policy == "wait":
         # The station lets a shiur finish: timed items due before its end wait for it
         await _defer_hard_until_end(db, station_id, current)
+    elif long_policy:
+        await _soft_items_pause_long(db, station_id, current, long_policy, now_utc)
     preempt_result = await db.execute(
         select(QueueEntry)
         .where(

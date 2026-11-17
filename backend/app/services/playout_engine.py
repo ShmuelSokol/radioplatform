@@ -616,6 +616,28 @@ def _airs_until(entry) -> datetime | None:
     return start + timedelta(seconds=float(length))
 
 
+async def _soft_items_during_long(db: AsyncSession, station, now, horizon) -> None:
+    """A soft group (:30 weather, sponsorships) coming up while a shiur has more than
+    five minutes left becomes hard before it is handed over, so the long-item rule
+    below pauses the shiur for it (same rule as the browser player, queue.py)."""
+    from app.api.v1.queue import _soft_items_pause_long
+    from app.services import long_items
+
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station.id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current = res.unique().scalars().first()
+    if current is None or not long_items.is_long_form(current.asset):
+        return
+    if await _soft_items_pause_long(
+        db, station.id, current, long_items.policy(station), now, horizon=horizon
+    ):
+        await db.commit()
+
+
 async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, now, horizon) -> None:
     """A shiur or story on air when the next hard timed group is about to be handed over:
     the station's rule (automation_config.timed_during_long_items) decides. "pause" queues
@@ -815,6 +837,7 @@ async def tick(db: AsyncSession, station) -> None:
     # 1. Hand hard-timed items (hourly ID, time, weather) to the engine ahead of time
     horizon = now + timedelta(seconds=TIMED_LEAD_SECONDS)
     try:
+        await _soft_items_during_long(db, station, now, horizon)
         await _apply_long_item_rule(db, station, state, now, horizon)
     except Exception as e:
         logger.warning("Long-item rule for station %s failed: %s", station_id, e)

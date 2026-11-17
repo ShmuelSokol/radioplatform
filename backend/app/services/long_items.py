@@ -8,6 +8,12 @@ KBR Jerusalem). Each station chooses, in automation_config["timed_during_long_it
   "cut"              the time check cuts the shiur (the old behaviour)
 
 Music and short items are always cut as before.
+
+Soft timed items (the :15/:30/:45 weather and sponsorships) normally wait for the item
+on air to end. Behind a shiur that left Jerusalem's 7:30 weather until 7:49, so
+(Shmuel, 2026-11-17): if the shiur has more than SOFT_PAUSE_MIN_LEFT_SECONDS left
+when the soft item is due, the soft item is made hard and the station's rule applies
+(pause by default); with less left, it waits for the end. A "wait" station waits.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -24,6 +30,8 @@ LONG_FORM_MIN_SECONDS = 12 * 60
 RESUME_REWIND_SECONDS = 3.0
 # Closer than this to its end, an item is not resumed (it just ends)
 MIN_REMAINING_TO_RESUME = 30.0
+# A soft item due while a shiur has more than this left pauses it; less, it waits
+SOFT_PAUSE_MIN_LEFT_SECONDS = 5 * 60
 
 
 def policy(station) -> str:
