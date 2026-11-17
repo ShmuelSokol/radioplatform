@@ -3,17 +3,36 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "wiki/**"
+      - "docs/**"
+      - "**/*.md"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "wiki/**"
+      - "docs/**"
+      - "**/*.md"
+
+# A newer push to the same PR cancels the older, now-useless run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   backend-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
       - name: Install dependencies
         working-directory: backend
         run: pip install -e ".[dev]"
@@ -23,6 +42,7 @@ jobs:
 
   backend-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -51,6 +71,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
       - name: Install dependencies
         working-directory: backend
         run: pip install -e ".[dev]"
@@ -63,11 +85,14 @@ jobs:
 
   frontend-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         working-directory: frontend
         run: npm install
