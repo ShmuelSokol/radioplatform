@@ -201,8 +201,16 @@ async def set_spot_end_date(
     schedules = (await db.execute(sq)).scalars().all()
     if not schedules:
         raise HTTPException(status_code=409, detail="This spot has no schedule yet. Make one in Spot Schedule first.")
+    every_station_checked = False
     for s in schedules:
-        if s.station_id is not None and not may_operate_station(user, await _station(db, s.station_id)):
+        if s.station_id is None:
+            # Airs on every station, the protected FM station included
+            if not every_station_checked:
+                from app.api.v1.spot_schedules import _check_every_station
+
+                await _check_every_station(db, user)
+                every_station_checked = True
+        elif not may_operate_station(user, await _station(db, s.station_id)):
             raise HTTPException(status_code=403, detail="You are not assigned to this station")
         if body.end_date and s.start_date and body.end_date < s.start_date:
             raise HTTPException(status_code=422, detail="The end date is before the schedule starts")

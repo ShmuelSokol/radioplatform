@@ -14,7 +14,9 @@ Who may operate (change) which station. Reading is not restricted by station.
 - Queue entry lookups (move-up/down, reorder, reorder-dnd, DELETE) are filtered by the station in the URL, so another station's entry id cannot be changed through a station the login may operate.
 - Rules that cover several stations: a blackout (holiday window) may be created, edited or deleted only by a login allowed on EVERY station it covers (`affected_stations` null = every active station, the protected one included). A weather spot or hourly time clip upload for a region needs every station of that region (default-region time clips are every station's fallback, so they need all stations).
 
-Not restricted by station: objects that belong to no station (shared playlist templates, spot schedules for all stations), the library, rules. Those are limited by role only. Reading is never restricted by station.
+- A spot schedule for all stations (`station_id` null) airs on the protected FM station too, so creating, changing or deleting one, widening one to all stations, or moving its end date from the Databank needs `may_operate_every_station` (admins, or staff allowed on every station including the protected ones). Routes: `spot_schedules.py` (`_check_every_station`) and `databank.py` end-date. Test: `tests/test_every_station_spots.py` (review finding F-DATABANK-58).
+
+Not restricted by station: objects that belong to no station (shared playlist templates), the library, rules. Those are limited by role only. Reading is never restricted by station.
 
 Role matrix for every write route: `backend/tests/test_write_role_matrix.py` (a new write route must be added to its policy table); frontend `auth/access.ts` is checked against it by `test_access_mirror.py`.
 
