@@ -503,10 +503,15 @@ async def wait_music(h: Harness) -> None:
     await h.clear_pending()
     await h.queue([("song1", {}), ("song2", {}), ("song3", {}), ("song4", {})])
     end = time.time() + 60
+    pressed = 0.0
     while time.time() < end:
         e = await h.on_air()
         if e and e.asset and e.asset.asset_type == "music":
             return
+        # a talk or timed item left over from the last scenario: move on to the songs
+        if time.time() - pressed > 10:
+            h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+            pressed = time.time()
         await asyncio.sleep(0.5)
     raise RuntimeError("no song on air")
 
