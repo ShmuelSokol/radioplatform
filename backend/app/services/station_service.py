@@ -133,8 +133,10 @@ async def create_station(db: AsyncSession, data: StationCreate) -> Station:
         raise ConflictError(f"Station '{data.name}' already exists")
 
     station_data = data.model_dump()
-    # Auto-derive timezone from coordinates
-    if data.latitude is not None and data.longitude is not None:
+    # Auto-derive timezone from coordinates, unless the request names a time zone itself
+    # ("UTC", the default, counts as not chosen)
+    chose_tz = "timezone" in data.model_fields_set and data.timezone not in (None, "", "UTC")
+    if data.latitude is not None and data.longitude is not None and not chose_tz:
         from app.services.timezone_service import get_timezone_for_coords
         station_data["timezone"] = get_timezone_for_coords(data.latitude, data.longitude)
 
@@ -190,7 +192,10 @@ async def update_station(db: AsyncSession, station_id: uuid.UUID, data: StationU
     # Re-derive timezone when lat/lon changes
     new_lat = update_data.get("latitude", station.latitude)
     new_lon = update_data.get("longitude", station.longitude)
-    if ("latitude" in update_data or "longitude" in update_data) and new_lat is not None and new_lon is not None:
+    # A time zone sent in the same request is the user's choice and is kept ("UTC" is not one)
+    chose_tz = update_data.get("timezone") not in (None, "", "UTC")
+    if ("latitude" in update_data or "longitude" in update_data) and new_lat is not None and new_lon is not None \
+            and not chose_tz:
         from app.services.timezone_service import get_timezone_for_coords
         update_data["timezone"] = get_timezone_for_coords(new_lat, new_lon)
 
