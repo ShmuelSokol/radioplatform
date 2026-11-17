@@ -967,6 +967,11 @@ async def _defer_hard_until_end(db: AsyncSession, station_id, current: QueueEntr
     )
 
 
+# How far ahead a soft item that will pause a shiur is made hard on the browser player:
+# beyond the control room's 60 s pre-load, plus a queue refresh
+SOFT_PAUSE_LOOKAHEAD_SECONDS = 90.0
+
+
 async def _soft_items_pause_long(
     db: AsyncSession,
     station_id,
@@ -974,13 +979,17 @@ async def _soft_items_pause_long(
     policy: str | None,
     now_utc: datetime,
     horizon: datetime | None = None,
+    include_due: bool = True,
 ) -> int:
     """Soft timed items due while a shiur or story has more than five minutes left
     become hard, so the station's rule (pause by default) lets them in; with less
     left they keep waiting for its end (Shmuel, 2026-11-17: the 7:30 weather aired at
-    7:49 behind a shiur). With `horizon` (the engine, which needs timed items ahead of
-    time) items due up to then are looked at; without it, those due now. Nothing
-    changes while HS is off. Returns how many entries were made hard."""
+    7:49 behind a shiur). Items due up to `horizon` are looked at (default: now), so
+    they turn hard ahead of time: the control room then pre-loads them and fades the
+    shiur exactly on time, and the scheduler arms its exact timer. Done only when due,
+    the weather started on the next 3 s poll (+1.7 s live) without a pre-load. The
+    engine passes include_due=False (an overdue item cannot go to its timed lane).
+    Nothing changes while HS is off. Returns how many entries were made hard."""
     from app.models.queue_entry import soft_timed
     from app.models.station import Station
     from app.services import long_items
@@ -1003,7 +1012,7 @@ async def _soft_items_pause_long(
                 QueueEntry.preempt_at.isnot(None),
                 soft_timed(),
                 QueueEntry.preempt_at <= (horizon or now_utc),
-                *([QueueEntry.preempt_at > now_utc] if horizon is not None else []),
+                *([] if include_due else [QueueEntry.preempt_at > now_utc]),
             )
             .distinct()
         )
@@ -1131,7 +1140,10 @@ async def _check_advance_locked(
         # The station lets a shiur finish: timed items due before its end wait for it
         await _defer_hard_until_end(db, station_id, current)
     elif long_policy:
-        await _soft_items_pause_long(db, station_id, current, long_policy, now_utc)
+        await _soft_items_pause_long(
+            db, station_id, current, long_policy, now_utc,
+            horizon=now_utc + timedelta(seconds=SOFT_PAUSE_LOOKAHEAD_SECONDS),
+        )
     preempt_result = await db.execute(
         select(QueueEntry)
         .where(
