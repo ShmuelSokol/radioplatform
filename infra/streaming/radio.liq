@@ -33,10 +33,16 @@ settings.harbor.bind_addrs := ["127.0.0.1"]
 
 auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")]
 
+# What this engine understands, sent with /hello and every /next. 2 = timed groups handed
+# over in parallel (seq/of) and /timed_drop. The backend keeps to the old serial hand-over
+# for an engine that sends nothing.
+engine_proto = 2
+
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
 # track is requested, so the two cannot cross.
 try
-  ignore(http.post(headers=auth_headers, timeout=8., data="{}",
+  ignore(http.post(headers=auth_headers, timeout=8., data='{"proto":#{engine_proto}}',
+
                    "#{backend_url}/playout/#{station_id}/hello"))
 catch err do
   log.important("hello: backend unreachable: #{err}")
@@ -53,7 +59,7 @@ def next_request() =
   try
     handed = string.concat(separator=",", given())
     resp = http.get(headers=auth_headers, timeout=8.,
-                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}")
+                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}")
     if resp.status_code == 200 then
       let json.parse (data : {uri : string, entry_id : string}) = resp
       log.important("next: backend gave entry #{data.entry_id}")

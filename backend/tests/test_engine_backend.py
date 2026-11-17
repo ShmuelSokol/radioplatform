@@ -466,6 +466,9 @@ async def test_blackout_end_leaves_no_silence_in_the_timed_lane(client, db_sessi
     remains). The tick sends /flush + /skip; radio.liq's timed lane stays open while its
     queue has items, so the next silence goes on air (one more per tick)."""
     station, _, engine, _ = eng
+    # A current engine (radio.liq proto 2) announces itself; it understands /timed_drop
+    r = await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS, json={"proto": 2})
+    assert r.status_code == 200
     now = datetime.now(UTC)
     start = now + timedelta(seconds=20)
     first = await _add(db_session, station, title="Silence", duration=300.0, kind="silence",
@@ -496,6 +499,27 @@ async def test_blackout_end_leaves_no_silence_in_the_timed_lane(client, db_sessi
     assert engine.paths().index("/timed_drop") < engine.paths().index("/skip")
     for s in silences[1:]:
         assert (await _fresh(db_session, s.id)).status == "played"
+
+
+@pytest.mark.asyncio
+async def test_blackout_end_on_an_old_engine_sends_no_timed_drop(client, db_session, eng):
+    """An engine with no `proto` has no /timed_drop: at blackout end it gets the old
+    flush + skip only, and the silences still in its timed lane stay queued here."""
+    station, _, engine, _ = eng
+    start = datetime.now(UTC) + timedelta(seconds=20)
+    first = await _add(db_session, station, title="Silence", duration=300.0, kind="silence",
+                       position=1, preempt_at=start)
+    second = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=first.asset_id, position=2,
+                        status="pending", source="auto", preempt_at=start)
+    db_session.add(second)
+    await db_session.commit()
+    await playout_engine.tick(db_session, station)
+    assert [c["id"] for c in engine.timed()] == [str(first.id), str(second.id)]
+    await _on_air(client, station, first.id, lane="timed")
+    await playout_engine.tick(db_session, station)
+    assert "/timed_drop" not in engine.paths()
+    assert engine.paths()[-2:] == ["/flush", "/skip"]
+    assert (await _fresh(db_session, second.id)).status == "pending"
 
 
 @pytest.mark.asyncio
@@ -895,6 +919,7 @@ async def test_a_hung_engine_does_not_stall_the_scheduler_pass(db_session, eng):
     hard block items due in 30 s -> the tick takes 2 s. The scheduler loop (every 3 s) runs
     stations in turn, so browser stations wait as well."""
     station, _, engine, _ = eng
+    await playout_engine.handle_hello(station.id, 2)  # current radio.liq: proto 2
     at = datetime.now(UTC) + timedelta(seconds=30)
     for i in range(5):
         await _add(db_session, station, title=f"Block {i}", duration=20.0, kind="spot",
@@ -904,6 +929,61 @@ async def test_a_hung_engine_does_not_stall_the_scheduler_pass(db_session, eng):
     await playout_engine.tick(db_session, station)
     assert len(engine.timed()) == 5
     assert time.perf_counter() - t0 < limit(0.5)
+    # Each carries its place in the group, so the engine can put the group back in order
+    assert sorted((c["seq"], c["of"]) for c in engine.timed()) == [(i, 5) for i in range(5)]
+
+
+@pytest.mark.asyncio
+async def test_old_engine_gets_the_group_one_at_a_time(client, db_session, eng):
+    """An engine on the old radio.liq (no `proto` in /hello) queues timed items in the
+    order they arrive, so a group goes to it one item after another, in play order, with
+    no seq/of. KBR Jerusalem ran such an engine when the parallel hand-over was added."""
+    station, _, engine, _ = eng
+    r = await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS)  # old: no body
+    assert r.status_code == 200
+    assert playout_engine.get_state(station.id).engine_proto == 0
+    at = datetime.now(UTC) + timedelta(seconds=30)
+    block = [
+        await _add(db_session, station, title=f"Block {i}", duration=20.0, kind="spot",
+                   position=40 + i, source="block", timing_mode="hard", preempt_at=at)
+        for i in range(3)
+    ]
+    in_flight = {"now": 0, "max": 0}
+    real = engine.command
+
+    async def one_at_a_time(path, payload=None, **kw):
+        in_flight["now"] += 1
+        in_flight["max"] = max(in_flight["max"], in_flight["now"])
+        try:
+            await asyncio.sleep(0.05)
+            return await real(path, payload, **kw)
+        finally:
+            in_flight["now"] -= 1
+
+    playout_engine._command = one_at_a_time
+    await playout_engine.tick(db_session, station)
+    timed = engine.timed()
+    assert [c["id"] for c in timed] == [str(e.id) for e in block]
+    assert in_flight["max"] == 1
+    assert all("seq" not in c and "of" not in c for c in timed)
+
+
+@pytest.mark.asyncio
+async def test_engine_proto_comes_from_hello_and_next(client, db_session, eng):
+    """/hello sets the engine's protocol (a hello without it is an old engine again);
+    /next carries it too, so a restarted backend learns it within one item."""
+    station, _, _, _ = eng
+    state = lambda: playout_engine.get_state(station.id)  # noqa: E731
+    assert state().engine_proto == 0
+    await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS, json={"proto": 2})
+    assert state().engine_proto == 2
+    await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS, json={})
+    assert state().engine_proto == 0
+    playout_engine.reset_state()  # backend restart
+    await _next(client, station)
+    assert state().engine_proto == 0
+    await client.get(f"/api/v1/playout/{station.id}/next?given=&proto=2", headers=HEADERS)
+    assert state().engine_proto == 2
 
 
 # ── Verifier round 1, section B (V1-29..40) ──────────────────────────────────

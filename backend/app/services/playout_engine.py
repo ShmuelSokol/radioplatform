@@ -46,6 +46,11 @@ MIN_LOGGED_PLAY_SECONDS = 1.0
 # Raise an alert if the engine has not contacted us for this long
 ENGINE_SILENT_ALERT_SECONDS = 120.0
 ALERT_REPEAT_SECONDS = 1800.0
+# Engine protocol (radio.liq sends `proto` with /hello and /next). From this version it
+# takes a timed group in parallel (seq/of, reassembled in order) and /timed_drop. An
+# older engine queues timed items in arrival order and has no /timed_drop, so it gets
+# the serial hand-over and the plain flush + skip at blackout end.
+ENGINE_PROTO_GROUPS = 2
 
 
 @dataclass
@@ -82,6 +87,8 @@ class EngineState:
     watch_since: float = 0.0
     # Monotonic time old EngineHandoff rows were last pruned
     last_handoff_prune: float = 0.0
+    # Protocol version the engine last reported (0 = an engine that reports none)
+    engine_proto: int = 0
 
 
 HANDED_KEEP = 30
@@ -381,10 +388,16 @@ def _touch(state: EngineState) -> None:
     state.last_contact = time.monotonic()
 
 
-async def handle_hello(station_id) -> None:
+def _note_proto(state: EngineState, proto: int | None) -> None:
+    state.engine_proto = proto if isinstance(proto, int) and proto > 0 else 0
+
+
+async def handle_hello(station_id, proto: int | None = None) -> None:
     """The engine (re)started: it holds nothing of ours any more."""
     reset_state(station_id)
-    _touch(get_state(station_id))
+    state = get_state(station_id)
+    _note_proto(state, proto)
+    _touch(state)
     logger.info("Playout engine connected for station %s", station_id)
 
 
@@ -418,10 +431,15 @@ async def _reconcile_given(db: AsyncSession, station_id, given: list[str]) -> se
     return {str(i) for i in ids}
 
 
-async def handle_next(db: AsyncSession, station_id, given: list[str] | None = None) -> dict | None:
+async def handle_next(
+    db: AsyncSession, station_id, given: list[str] | None = None, proto: int | None = None
+) -> dict | None:
     """The engine wants its next track: {"uri", "entry_id"}, or None if the queue is empty."""
     state = get_state(station_id)
     _touch(state)
+    # Sent with every ask, so a backend restart learns it again within one item
+    if proto is not None:
+        _note_proto(state, proto)
     already_given = await _reconcile_given(db, station_id, given or [])
     state.given = set(already_given)
 
@@ -983,11 +1001,19 @@ async def _hand_over_timed(db: AsyncSession, station_id, state: EngineState, now
         groups.setdefault(at, []).append((entry, uri))
 
     handed: list[tuple[str, str]] = []
+    parallel = state.engine_proto >= ENGINE_PROTO_GROUPS
     for at, items in groups.items():
-        oks = await asyncio.gather(*(
-            engine_timed(station_id, uri, at.timestamp(), str(entry.id), seq=i, of=len(items))
-            for i, (entry, uri) in enumerate(items)
-        ))
+        if parallel:
+            oks = await asyncio.gather(*(
+                engine_timed(station_id, uri, at.timestamp(), str(entry.id), seq=i, of=len(items))
+                for i, (entry, uri) in enumerate(items)
+            ))
+        else:
+            # An older engine plays a group in the order it receives it: one at a time
+            oks = [
+                await engine_timed(station_id, uri, at.timestamp(), str(entry.id))
+                for entry, uri in items
+            ]
         for (entry, _), ok in zip(items, oks):
             key = str(entry.id)
             if ok:
@@ -1096,6 +1122,8 @@ async def tick(db: AsyncSession, station) -> None:
                     )
                 )
                 in_lane = [str(i) for i in res.scalars().all() if str(i) in state.timed_sent]
+                if state.engine_proto < ENGINE_PROTO_GROUPS:
+                    in_lane = []  # an older engine has no /timed_drop: flush + skip only
                 if in_lane:
                     await db.execute(
                         update(QueueEntry)
