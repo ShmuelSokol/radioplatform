@@ -267,22 +267,49 @@ async def test_only_placeholders_on_block_falls_back_to_filler(db_session: Async
 
 
 @pytest.mark.asyncio
-async def test_blocks_playlist_wins_over_its_own_songs(db_session: AsyncSession):
-    """F-BLOCKS-5: a block with both a working playlist and its own songs keeps
-    playing the playlist (a live block with stray songs listed must not change)."""
+async def test_own_songs_play_first_then_the_playlist(db_session: AsyncSession):
+    """F-BLOCKS-5: a block with both a playlist and songs added by hand plays the
+    added songs first, each once, in order, then the playlist fills the rest of the
+    block (Shmuel, 2026-11-17)."""
     station, schedule, _ = await _station(db_session)
     tpl = PlaylistTemplate(id=uuid.uuid4(), name="Mix", station_id=station.id, is_active=True)
     db_session.add(tpl)
     await db_session.flush()
     db_session.add(TemplateSlot(id=uuid.uuid4(), template_id=tpl.id, position=0, asset_type="music", category="Fast"))
-    db_session.add_all([_song(f"Fast {n}", category="Fast") for n in range(5)])
-    own = _song("Own")
+    db_session.add_all([_song(f"Fast {n}", category="Fast") for n in range(8)])
+    own = [_song("Own A"), _song("Own B")]
+    db_session.add_all(own)
+    await db_session.flush()
+    await _block(db_session, schedule, own, template_id=tpl.id, start=time(7, 0), end=time(10, 0))
+    plan = await generate(db_session, station, MONDAY_7AM, 1)
+    titles = [p.title for p in plan.picks]
+    assert titles[:2] == ["Own A", "Own B"]
+    assert titles[2:] and all(t.startswith("Fast") for t in titles[2:])
+    # The playlist starts at its first step: the hand-added songs did not move its cursor
+    assert plan.cursor.get(str(plan.picks[2].block_id)) == 0 or len(titles) > 2
+
+
+@pytest.mark.asyncio
+async def test_own_songs_play_first_again_on_the_next_run(db_session: AsyncSession):
+    """F-BLOCKS-5: the next day's run of the block starts with the added songs again."""
+    station, schedule, _ = await _station(db_session)
+    tpl = PlaylistTemplate(id=uuid.uuid4(), name="Mix", station_id=station.id, is_active=True)
+    db_session.add(tpl)
+    await db_session.flush()
+    db_session.add(TemplateSlot(id=uuid.uuid4(), template_id=tpl.id, position=0, asset_type="music", category="Fast"))
+    db_session.add_all([_song(f"Fast {n}", category="Fast") for n in range(8)])
+    own = _song("Opener")
     db_session.add(own)
     await db_session.flush()
-    await _block(db_session, schedule, [own], template_id=tpl.id)
-    plan = await generate(db_session, station, MONDAY_7AM, 1)
-    assert plan.picks and "Own" not in {p.title for p in plan.picks}
-    assert {p.category for p in plan.picks} == {"Fast"}
+    await _block(db_session, schedule, [own], template_id=tpl.id, start=time(7, 0), end=time(8, 0))
+    plan = await generate(db_session, station, MONDAY_7AM, 25)
+    in_block = [p for p in plan.picks if p.block_id]
+    runs = {}
+    for p in in_block:
+        runs.setdefault(p.at.astimezone(NY).date(), []).append(p.title)
+    assert len(runs) == 2
+    for titles in runs.values():
+        assert titles[0] == "Opener" and titles.count("Opener") == 1
 
 
 @pytest.mark.asyncio

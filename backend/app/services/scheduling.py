@@ -5,7 +5,7 @@ Handles time-based rules, recurrence, priority resolution, and now-playing state
 
 import logging
 import random
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -146,24 +146,30 @@ class SchedulingService:
         return best[1] if best else None
 
     def last_start(self, block: ScheduleBlock, local: datetime, station=None) -> datetime | None:
-        """Most recent moment (station time, naive) this block started, within 8 days.
+        """Most recent moment (station time, naive) this block started, or None.
+
+        How far back depends on the recurrence: daily and weekly blocks look back
+        8 days, a monthly block back to its previous day of the month (up to about
+        two months, for a 31st in a short month), and a one-time block with a date
+        range holds from its first start until the range ends.
 
         Only starts after the block was made count: a block saved at 6:40 to start
         at 6:52 has not started yet, even though yesterday's 6:52 is in the past
         (it used to take over the moment it was saved).
         """
         now = local.replace(tzinfo=None)
+        if (
+            block.recurrence_type == RecurrenceType.ONE_TIME
+            and block.start_date and block.end_date
+            and now >= datetime.combine(block.end_date + timedelta(days=1), time(0))
+        ):
+            return None  # the date range is over
         made = getattr(block, "created_at", None)
         if made is not None:
             if made.tzinfo is None:
                 made = made.replace(tzinfo=timezone.utc)
             made = made.astimezone(local.tzinfo).replace(tzinfo=None) if local.tzinfo else made.replace(tzinfo=None)
-        # From tomorrow back 8 days: a start with a sun offset can fall on the
-        # neighbouring calendar day (sunset + 90 min after midnight).
-        for back in range(-1, 9):
-            day = (local - timedelta(days=back)).date()
-            if not self._recurs_on(block, day):
-                continue
+        for day in self._start_days(block, now.date()):
             started = self._block_start(block, day, station)
             if started > now:
                 continue
@@ -171,6 +177,43 @@ class SchedulingService:
                 return None
             return started
         return None
+
+    @classmethod
+    def _start_days(cls, block: ScheduleBlock, today):
+        """Days this block may have started on, newest first, from tomorrow back.
+
+        Tomorrow is included because a start with a sun offset can fall on the
+        neighbouring calendar day (sunset + 90 min after midnight). Monthly days
+        are worked out directly instead of walking back day by day: this runs for
+        every song the playlist generator picks."""
+        tomorrow = today + timedelta(days=1)
+        pattern = block.recurrence_pattern
+        if block.recurrence_type == RecurrenceType.MONTHLY and pattern:
+            wanted = sorted({d for d in pattern if isinstance(d, int) and 1 <= d <= 31}, reverse=True)
+            year, month = tomorrow.year, tomorrow.month
+            # This month and the two before: a 31st can be two months back (March -> January).
+            for _ in range(3):
+                for d in wanted:
+                    try:
+                        day = date(year, month, d)
+                    except ValueError:
+                        continue  # no 31st this month
+                    if day <= tomorrow:
+                        yield day
+                year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+            return
+        if block.recurrence_type == RecurrenceType.ONE_TIME and block.start_date and block.end_date:
+            # Every day of the range is a start (last_start stops it once the range
+            # is over), so the newest start is at most a day or two back.
+            day = min(tomorrow, block.end_date)
+            while day >= block.start_date:
+                yield day
+                day -= timedelta(days=1)
+            return
+        for back in range(-1, 9):
+            day = today - timedelta(days=back)
+            if cls._recurs_on(block, day):
+                yield day
 
     @staticmethod
     def _recurs_on(block: ScheduleBlock, day) -> bool:
