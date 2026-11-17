@@ -204,7 +204,6 @@ radioplatform/
 | sms_service.py | Twilio SMS and WhatsApp notification delivery |
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
 | twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
-| live_audio_mixer.py | Audio mixer stub (future ffmpeg host+caller mixing) |
 | liquidsoap_client.py | Old telnet push client for Liquidsoap. Superseded by playout_engine.py; keep `LIQUIDSOAP_ENABLED` off |
 | duration_backfill.py | Measures the length of items that have none (they broke queue reads and restarts); runs once in the background after each start, and on demand via `POST /assets/backfill-durations` |
 | upcoming_analysis.py | Analyses the item on air and the next one in the background when their audio analysis is missing or older than `ANALYSIS_VERSION`, so song changes use real end and crossfade points (see `wiki/audio-engine.md`) |
