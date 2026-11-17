@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -61,6 +61,15 @@ class EngineState:
     handed: dict[str, str] = field(default_factory=dict)
     # "<entry on air>@<group time>" pairs whose long-item rule (pause/wait/cut) was applied
     long_done: set[str] = field(default_factory=set)
+    # What the engine last said it was handed (its own `given` list): never handed again
+    given: set[str] = field(default_factory=set)
+    # Monotonic time of the last automatic flush of the pre-loaded track
+    last_auto_flush: float = 0.0
+    # Entry already reported as running past its end
+    overrun_alerted: str | None = None
+    # Entries the engine reported on air, newest last. Never handed out again, even
+    # while their start report is still being written (it is not committed yet)
+    recent_started: list[str] = field(default_factory=list)
 
 
 HANDED_KEEP = 30
@@ -216,6 +225,8 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
     fields = {
         "kbr_entry": str(entry.id),
         "kbr_lane": lane,
+        # The engine keeps copies of music it played as its emergency fallback
+        "kbr_kind": (asset.asset_type or "").lower(),
         "title": asset.title or "",
         "artist": asset.artist or "",
     }
@@ -241,13 +252,19 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
 async def pick_next(
     db: AsyncSession, station_id, exclude_ids: set[str] | None = None
 ) -> QueueEntry | None:
-    from app.api.v1.queue import _skip_placeholders
+    from app.api.v1.queue import OPERATOR_SOURCES
+    from app.models.asset import not_placeholder
 
     now = datetime.now(UTC)
     exclude = {str(x) for x in (exclude_ids or set())}
-    # Same guard as the browser-player path: placeholders and do-not-play items
-    # queued by any automatic path are skipped before the engine is handed them.
-    await _skip_placeholders(db, station_id)
+    # Same rule as the browser-player path: placeholders and do-not-play items queued by
+    # an automatic path are never picked (an operator's own pick still is). Read-only on
+    # purpose: this runs inside the scheduler's long pass, and an UPDATE there held row
+    # locks that /next then waited on.
+    may_air = or_(
+        QueueEntry.source.in_(OPERATOR_SOURCES),
+        QueueEntry.asset_id.notin_(select(Asset.id).where(~not_placeholder())),
+    )
 
     def usable(entries):
         for e in entries:
@@ -265,6 +282,7 @@ async def pick_next(
             soft_timed(),
             QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now,
+            may_air,
         )
         # A block's items share one time and play in their order
         .order_by(QueueEntry.preempt_at, QueueEntry.position)
@@ -282,6 +300,7 @@ async def pick_next(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
             or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now),
+            may_air,
         )
         .order_by(QueueEntry.position)
         .limit(len(exclude) + 1)
@@ -338,10 +357,11 @@ async def handle_next(db: AsyncSession, station_id, given: list[str] | None = No
     state = get_state(station_id)
     _touch(state)
     already_given = await _reconcile_given(db, station_id, given or [])
+    state.given = set(already_given)
 
     # The engine only asks when it holds nothing pre-loaded, so an entry we already handed
     # out is on its way to air (its "started" report may not have reached us yet).
-    exclude = set(state.timed_sent) | already_given
+    exclude = set(state.timed_sent) | already_given | set(state.recent_started)
     if state.cued_entry_id:
         exclude.add(state.cued_entry_id)
 
@@ -391,6 +411,8 @@ async def handle_started(
     skipped = state.skip_requested
     state.skip_requested = False
     logger.info("Engine started -> entry=%s lane=%s", entry_id or "-", lane)
+    if entry_id:
+        state.recent_started = (state.recent_started + [str(entry_id)])[-10:]
 
     entry: QueueEntry | None = None
     if entry_id:
@@ -479,14 +501,25 @@ async def handle_started(
     if entry.status != "playing":
         mark_started(entry, now)
 
-    # Keep positions compact: playing first, then pending in order
-    compact = await db.execute(
-        select(QueueEntry)
+    # Keep positions compact: playing first, then pending in order. One statement: row by
+    # row it was ~690 UPDATEs on Main and made every start report take over 3 s.
+    await db.flush()
+    ranked = (
+        select(
+            QueueEntry.id.label("id"),
+            func.row_number()
+            .over(order_by=(QueueEntry.status.desc(), QueueEntry.position))
+            .label("rn"),
+        )
         .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
-        .order_by(QueueEntry.status.desc(), QueueEntry.position)
+        .subquery()
     )
-    for idx, e in enumerate(compact.scalars().all()):
-        e.position = idx + 1
+    await db.execute(
+        update(QueueEntry)
+        .where(QueueEntry.id == ranked.c.id, QueueEntry.position != ranked.c.rn)
+        .values(position=ranked.c.rn)
+        .execution_options(synchronize_session=False)
+    )
     entry_pk = entry.id
     await db.commit()
 
@@ -688,6 +721,79 @@ async def _apply_long_item_rule(db: AsyncSession, station, state: EngineState, n
     )
 
 
+# The engine downloads a whole file before it can play it. Its pre-loaded track is kept,
+# even if the queue head changed, when the item on air ends sooner than this: a flush
+# 8 s before a song's end left nothing ready and the emergency folder played for two
+# minutes on Main (2026-11-17 02:57Z). Operator actions still flush at once.
+KEEP_CUED_LAST_SECONDS = 45.0
+# At most one automatic flush this often (each one cancels a download in progress)
+AUTO_FLUSH_MIN_INTERVAL = 15.0
+
+
+async def _flush_if_head_changed(db: AsyncSession, station_id, state: EngineState, now) -> None:
+    # Same exclusions as handle_next: an entry the engine already holds is never the head
+    # it should be given, or the two would disagree and flush on every tick
+    exclude = set(state.timed_sent) | (state.given - {state.cued_entry_id})
+    desired = await pick_next(db, station_id, exclude)
+    if desired is not None and str(desired.id) == state.cued_entry_id:
+        return
+    mono = time.monotonic()
+    if mono - state.last_auto_flush < AUTO_FLUSH_MIN_INTERVAL:
+        return
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current = res.unique().scalars().first()
+    end = _airs_until(current) if current is not None else None
+    if end is not None and (end - now).total_seconds() < KEEP_CUED_LAST_SECONDS:
+        return
+    state.last_auto_flush = mono
+    logger.info(
+        "Queue head changed (%s -> %s): flushing the engine's pre-loaded track",
+        state.cued_entry_id,
+        desired.id if desired else None,
+    )
+    await engine_flush(station_id)
+
+
+# Alert when the item on air is still "on air" this long after its known end
+OVERRUN_ALERT_SECONDS = 30.0
+
+
+async def _check_overrun(db: AsyncSession, station_id, state: EngineState, now) -> None:
+    """Main stalled at the end of a song for two minutes with no alert (2026-11-17 02:57Z):
+    the engine never reported the next start. Say so within a minute."""
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current = res.unique().scalars().first()
+    end = _airs_until(current) if current is not None else None
+    if end is None or (now - end).total_seconds() < OVERRUN_ALERT_SECONDS:
+        return
+    if state.overrun_alerted == str(current.id):
+        return
+    state.overrun_alerted = str(current.id)
+    title = (current.asset.title if current.asset else None) or "The item on air"
+    await _alert(
+        db,
+        station_id,
+        state,
+        force=True,
+        title="Playout engine did not move on",
+        message=(
+            f"\"{title}\" should have ended at {end:%H:%M:%S} UTC, but the engine has not "
+            "reported the next item. The file may be longer than its stored length, or the "
+            "engine may be stuck: press Next, and check the engine's log."
+        ),
+    )
+
+
 async def tick(db: AsyncSession, station) -> None:
     """Called by the scheduler loop for the engine-driven station."""
     station_id = station.id
@@ -778,19 +884,13 @@ async def tick(db: AsyncSession, station) -> None:
 
     # 3. The queue changed after the engine pre-loaded its next track: make it ask again
     if state.cued_entry_id:
-        desired = await pick_next(db, station_id, set(state.timed_sent))
-        if desired is None or str(desired.id) != state.cued_entry_id:
-            logger.info(
-                "Queue head changed (%s -> %s): flushing the engine's pre-loaded track",
-                state.cued_entry_id,
-                desired.id if desired else None,
-            )
-            await engine_flush(station_id)
+        await _flush_if_head_changed(db, station_id, state, now)
 
     # 4. "After the song, but no later than hard_by": the song is still on, so fade it
     await _enforce_hard_by(db, station_id, state, now)
 
-    # 5. Watchdog
+    # 5. Watchdog: the item on air runs well past its end and nothing new was reported
+    await _check_overrun(db, station_id, state, now)
     if state.last_contact and time.monotonic() - state.last_contact > ENGINE_SILENT_ALERT_SECONDS:
         await _alert(
             db,

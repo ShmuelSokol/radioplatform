@@ -68,7 +68,9 @@ def next_request() =
   end
 end
 
-main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=30., next_request)
+# A long song is a big download: give it time to arrive (it is fetched while the song
+# before it plays)
+main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=120., next_request)
 # Per-track level from the library's audio analysis (backend sends liq_amplify)
 main = amplify(1., override="liq_amplify", main_requests)
 # Song-to-song: the outgoing song fades over 3s while the incoming one starts at full level.
@@ -210,6 +212,20 @@ def report_to_backend(entry, lane, title) =
   thread.run(fast=false, post)
 end
 
+# The emergency folder fills itself: a copy of each song that aired (the newest 40), so
+# if the backend cannot be reached the station plays its own music, not silence. It
+# was empty on the server (2026-11-17), which would have meant dead air.
+emergency_keep = 40
+def keep_for_emergency(played) =
+  if played != "" and file.exists(played) then
+    dest = "#{emergency_dir}/" ^ path.basename(played)
+    # Copied under a temporary name first, so the playlist never sees half a file
+    part = dest ^ ".part"
+    cmd = "cp -f #{process.quote(played)} #{process.quote(part)} && mv -f #{process.quote(part)} #{process.quote(dest)} && cd #{process.quote(emergency_dir)} && ls -1t | tail -n +#{emergency_keep + 1} | xargs -r rm -f"
+    thread.run(fast=false, {ignore(process.run(cmd))})
+  end
+end
+
 def send_started(m) =
   entry = m["kbr_entry"]
   lane = if entry == "" then "emergency" else m["kbr_lane"] end
@@ -224,6 +240,7 @@ def send_started(m) =
   else
     if lane == "main" then last_main_entry := entry end
     report_to_backend(entry, lane, m["title"])
+    if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end
   end
 end
 
@@ -239,6 +256,9 @@ def report_started(m) =
   end
 end
 program.on_metadata(report_started)
+# A new track with no tags at all (an emergency file) raises no metadata event: report
+# every track change too, or the backend never learns the engine is on emergency files
+program.on_track(report_started)
 
 # ── Control endpoints (localhost only; nginx adds TLS in front) ──────────────
 def authorized(req) =

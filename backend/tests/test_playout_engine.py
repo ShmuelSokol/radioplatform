@@ -643,3 +643,55 @@ async def test_a_song_on_air_is_not_resumed(client, db_session, engine_station):
 
     assert len([p for path, p in sent if path == "/timed"]) == 1
     assert not await _resumes(db_session, station, on_air.asset_id)
+
+
+@pytest.mark.asyncio
+async def test_an_item_running_past_its_end_raises_one_alert(client, db_session, engine_station):
+    from app.models.alert import Alert
+
+    station, entries, sent = engine_station
+    on_air = await db_session.get(QueueEntry, entries[0].id)
+    on_air.status = "playing"
+    on_air.started_at = datetime.now(UTC) - timedelta(seconds=180 + 45)
+    await db_session.commit()
+
+    await playout_engine.tick(db_session, station)
+    await playout_engine.tick(db_session, station)
+
+    alerts = (await db_session.execute(
+        select(Alert).where(Alert.title == "Playout engine did not move on")
+    )).scalars().all()
+    assert len(alerts) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_report_renumbers_the_queue(client, db_session, engine_station):
+    station, entries, sent = engine_station
+    third = await db_session.get(QueueEntry, entries[2].id)
+    third.position = 40
+    await db_session.commit()
+    res = await client.post(
+        f"/api/v1/playout/{station.id}/started",
+        headers=HEADERS,
+        json={"entry_id": str(entries[0].id), "lane": "main", "title": "x"},
+    )
+    assert res.status_code == 200
+    rows = (await db_session.execute(
+        select(QueueEntry.id, QueueEntry.position)
+        .where(QueueEntry.station_id == station.id)
+        .order_by(QueueEntry.position)
+        .execution_options(populate_existing=True)
+    )).all()
+    assert [p for _, p in rows] == [1, 2, 3, 4]
+    assert rows[0][0] == entries[0].id
+
+
+@pytest.mark.asyncio
+async def test_next_never_hands_out_what_just_started(client, db_session, engine_station):
+    # The start report is still being written (not committed) when the engine asks for the
+    # next track: the item on air must not come back as "next" (it would play twice).
+    station, entries, sent = engine_station
+    state = playout_engine.get_state(station.id)
+    state.recent_started.append(str(entries[0].id))
+    nxt = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert nxt.json()["entry_id"] == str(entries[1].id)
