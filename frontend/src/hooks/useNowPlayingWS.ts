@@ -45,6 +45,10 @@ const STALE_AFTER_HIDDEN_MS = 5_000;
 // An item still shown this long after its end means the updates stopped
 const OVERDUE_AFTER_MS = 6_000;
 const OVERDUE_CHECK_MS = 4_000;
+// While on the polling fall-back, try the socket again this often: polling carries
+// now-playing only, so mix-overs and an operator's change fade (change_fade_seconds,
+// sent once on the socket) were lost until the tab was hidden and shown again.
+const SOCKET_RETRY_WHILE_POLLING_MS = 60_000;
 // Same default as the API client: without VITE_API_URL these reads went to
 // "undefined/now-playing/..." and the polling fall-back, back-from-background and
 // overdue re-reads never reached the server.
@@ -84,7 +88,17 @@ export const useNowPlayingWS = (stationId: string) => {
       }
     };
 
+    // One more socket attempt later; if it fails, its close lands back here
+    const scheduleSocketRetry = () => {
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = setTimeout(() => {
+        reconnectTimer.current = null;
+        if (current() && usingPolling.current && !wsRef.current) connect();
+      }, SOCKET_RETRY_WHILE_POLLING_MS);
+    };
+
     const startPollingFallback = () => {
+      scheduleSocketRetry();
       if (pollTimer.current) return;
       usingPolling.current = true;
 
