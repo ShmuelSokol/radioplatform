@@ -1,5 +1,10 @@
 [build]
 builder = "NIXPACKS"
+# Deploy (and restart the backend) only when a file the backend runs changed.
+# Every merge used to restart it, although more than half change only the
+# website, tests, the wiki or the stream server's files. Patterns count from the
+# repository root, also with the service's root directory set to /backend.
+watchPatterns = ["/backend/**", "!/backend/tests/**", "!/backend/loadtests/**"]
 
 [deploy]
 startCommand = "bash start.sh"
