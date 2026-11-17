@@ -24,6 +24,7 @@ async def list_alerts(
     severity: str | None = Query(None),
     alert_type: str | None = Query(None),
     is_resolved: bool | None = Query(None),
+    station_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
@@ -31,7 +32,7 @@ async def list_alerts(
     try:
         alerts, total, unresolved_count = await alert_service.list_alerts(
             db, skip=skip, limit=limit, severity=severity,
-            alert_type=alert_type, is_resolved=is_resolved,
+            alert_type=alert_type, is_resolved=is_resolved, station_id=station_id,
         )
     except ValueError:
         raise HTTPException(422, "unknown severity or alert type")

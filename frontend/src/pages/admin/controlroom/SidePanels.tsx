@@ -212,7 +212,7 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
 export const ErrorsPanel = memo(function ErrorsPanel({ stationId, stationTz, canSee }: {
   stationId: string | null; stationTz?: string; canSee: boolean;
 }) {
-  const { data, isLoading, isError } = useAlerts(canSee ? { is_resolved: false, limit: 100 } : null);
+  const { data, isLoading, isError } = useAlerts(canSee ? { is_resolved: false, limit: 100, station_id: stationId ?? undefined } : null, true);
   const resolve = useResolveAlert();
   const rows = (data?.alerts ?? []).filter(a => !a.station_id || a.station_id === stationId);
   const sev = (s: string) => (s === 'critical' ? 'text-red-400' : s === 'warning' ? 'text-amber-300' : 'text-cyan-300');

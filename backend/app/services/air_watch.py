@@ -208,9 +208,24 @@ class AirWatch:
             important = e.asset.category in (TIME_CATEGORY, WEATHER_CATEGORY) or e.source in ("ad_slot", "block")
             if not important:
                 continue
-            twin = any(o.id != e.id and o.asset_id == e.asset_id and o.preempt_at == e.preempt_at
-                       and o.started_at is not None for o in rows)
-            if not twin:
+            # Aired in another form: the same item, or another of its kind for the same moment
+            # (a weather spot redrawn with a new recording, a time check replaced by a block's)
+            def kind(x):
+                return x.asset.category if x.asset is not None and x.asset.category in (
+                    TIME_CATEGORY, WEATHER_CATEGORY) else None
+
+            twin = any(o.id != e.id and o.preempt_at == e.preempt_at and o.started_at is not None
+                       and (o.asset_id == e.asset_id or (kind(e) is not None and kind(o) == kind(e))
+                            or o.source == "block")
+                       for o in rows)
+            if twin:
+                continue
+            if e.started_at is not None:
+                # It went on air and was cut (Panic, Next): not "never aired"
+                add("timed_skipped", f"{_title(e)} was cut short",
+                    f"Due {_local(_aware(e.preempt_at), station)}; it started at "
+                    f"{_local(_aware(e.started_at), station)} and was stopped before its end.", e.id)
+            else:
                 add("timed_skipped", f"{_title(e)} was skipped",
                     f"Due {_local(_aware(e.preempt_at), station)}; it never aired.", e.id)
 
@@ -274,13 +289,19 @@ class AirWatch:
 
     async def run_once(self, db: AsyncSession, now: datetime | None = None) -> list[Finding]:
         now = now or datetime.now(UTC)
-        stations = (await db.execute(select(Station).where(Station.is_active.is_(True)))).scalars().all()
+        station_ids = (await db.execute(select(Station.id).where(Station.is_active.is_(True)))).scalars().all()
         found: list[Finding] = []
-        for station in stations:
+        for station_id in station_ids:
             try:
+                # get() reloads a station expired by a rollback after another station failed
+                station = await db.get(Station, station_id, populate_existing=True)
+                if station is None:
+                    continue
                 found += await self.check_station(db, station, now)
             except Exception as e:
-                logger.warning("Air watch check failed for %s: %s", station.id, e)
+                logger.warning("Air watch check failed for %s: %s", station_id, e)
+                # One station's database error must not abort the session for the rest
+                await db.rollback()
         await self.report(db, found)
         await db.commit()
         self.last_run = now.isoformat()

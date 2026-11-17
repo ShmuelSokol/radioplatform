@@ -27,6 +27,7 @@ export const getAlerts = async (params?: {
   severity?: string;
   alert_type?: string;
   is_resolved?: boolean;
+  station_id?: string;
 }): Promise<AlertListResponse> => {
   const res = await apiClient.get<AlertListResponse>('/alerts', { params });
   return res.data;
