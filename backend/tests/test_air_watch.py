@@ -117,6 +117,25 @@ async def test_missing_hourly_time_check_is_reported(db_session):
 
 
 @pytest.mark.asyncio
+async def test_no_hour_alarm_while_hard_start_is_off(db_session):
+    """HS off: the time check waits for the song by design (station_modes.py)."""
+    from app.services.station_modes import HS_KEY, hard_start_on
+
+    st = await _station(db_session, **{HS_KEY: False})
+    assert not hard_start_on(st)
+    song = await _asset(db_session, "Song")
+    tc = await _asset(db_session, "Time", category="time_announcement", kind="jingle", duration=8)
+    hour = datetime(2026, 11, 17, 2, 0, tzinfo=UTC)
+    now = hour + timedelta(seconds=50)
+    db_session.add_all([
+        _entry(st, tc, status="played", started_at=hour - timedelta(hours=1)),
+        _entry(st, song, position=2, status="playing", started_at=now - timedelta(seconds=30)),
+    ])
+    await db_session.commit()
+    assert await AirWatch().check_station(db_session, st, now) == []
+
+
+@pytest.mark.asyncio
 async def test_hourly_time_check_on_time_is_fine(db_session):
     st = await _station(db_session)
     song = await _asset(db_session, "Song")

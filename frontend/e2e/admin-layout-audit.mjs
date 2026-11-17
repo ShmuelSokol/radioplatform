@@ -34,7 +34,7 @@ let pages = [
   '/admin/spot-schedule', '/admin/schedule-check', '/admin/sponsorship-rules', '/admin/playlists',
   '/admin/categories', '/admin/asset-types', '/admin/alerts', '/admin/analytics', '/admin/live',
   '/admin/requests', '/admin/archives', '/admin/studio', '/admin/listeners', '/admin/crm',
-  '/admin/program-clock', '/admin/activity', '/admin/dashboard',
+  '/admin/program-clock', '/admin/activity', '/admin/dashboard', '/admin/databank',
 ].filter(Boolean);
 if (process.env.ONLY) pages = pages.filter(p => p.startsWith(process.env.ONLY));
 

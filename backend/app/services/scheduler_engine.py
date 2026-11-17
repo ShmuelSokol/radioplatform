@@ -349,6 +349,11 @@ class SchedulerEngine:
                 continue
             station_name = station.name
             try:
+                # HS off: timed items that arrived since the last pass wait for the song too
+                from app.services.station_modes import soften_hard_items
+                if await soften_hard_items(db, station):
+                    await db.commit()
+                    station = await db.get(Station, station_id)
                 if settings.engine_drives(station.id):
                     # The playout engine owns the clock for this station: it asks for the
                     # next track and reports real starts. No time-based advance here.

@@ -74,7 +74,7 @@ export default function BugReporter() {
   // The control room fills the window to its edges: the floating button would cover
   // a queue row's insert button on a phone and the cart's buttons on a computer. There
   // it lives in the menu (phone) and in the status bar along the bottom (computer).
-  const hideFloating = pathname === '/admin/dashboard';
+  const hideFloating = pathname === '/admin/dashboard' || pathname === '/admin/databank';
   const startRef = useRef<() => void>(() => {});
 
   const start = async () => {

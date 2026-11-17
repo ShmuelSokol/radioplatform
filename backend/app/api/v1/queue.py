@@ -34,6 +34,7 @@ from app.schemas.queue import (
     QueueInsert,
     QueueLoop,
     QueueMixOver,
+    QueueModes,
     QueueReorder,
 )
 
@@ -1565,6 +1566,8 @@ async def _get_queue_impl(station_id, limit, db):
         "preempt_fade_ms": 2000,
         # Set while the operator has Loop on: this asset repeats until Loop off or Next
         "loop_asset_id": await loop_asset_id(db, station_id),
+        # HS and Spots mode switches (control room), see wiki/station-modes.md
+        "modes": await _station_modes(db, station_id),
     }
 
 
@@ -1864,14 +1867,23 @@ async def skip_current(
     return {**done, "fade_seconds": fade_seconds}
 
 
+async def _station_modes(db: AsyncSession, station_id) -> dict:
+    from app.models.station import Station
+    from app.services.station_modes import modes
+
+    return modes(await db.get(Station, station_id))
+
+
 async def _skip_current_locked(
     station_id: uuid.UUID,
     db: AsyncSession,
     fade_seconds: float | None = None,
     keep_incoming: bool = True,
     protect_timed: bool = True,
+    force: bool = False,
 ):
-    """`protect_timed`: Next leaves a timed item on air alone; play-now (False) does not."""
+    """`protect_timed`: Next leaves a timed item on air alone; play-now (False) does not.
+    `force` (Panic) cuts even a protected timed item."""
     result = await db.execute(
         select(QueueEntry)
         .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
@@ -1880,7 +1892,7 @@ async def _skip_current_locked(
     )
     playing_entries = result.scalars().all()
     current = playing_entries[0] if playing_entries else None
-    if current and protect_timed and _is_timed_entry(current):
+    if current and protect_timed and not force and _is_timed_entry(current):
         # Next never skips a time check, weather or sponsorship: it plays to the end and
         # Next works again after it (Shmuel, 2026-11-16: a burst of Nexts skipped the
         # Jerusalem weather 3.2 s in). Play-now still puts something else on air.
@@ -2074,6 +2086,69 @@ async def loop_current(
         "asset_id": await loop_asset_id(db, station_id),
         "queue": await _queue_after_action(db, station_id),
     }
+
+
+@router.post("/modes")
+async def set_station_modes(
+    station_id: uuid.UUID,
+    body: QueueModes,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """KBR Studio's HS and Spots mode switches. HS off: timed items wait for the song
+    on air. Spots mode off: no sponsorship spots are queued. See wiki/station-modes.md."""
+    from app.models.station import Station
+    from app.services.station_modes import set_modes
+
+    station = await db.get(Station, station_id)
+    if station is None:
+        raise NotFoundError("Station not found")
+    async with advance_lock(station_id):
+        result = await set_modes(db, station, body.hard_start, body.spots)
+        await db.commit()
+    if settings.engine_drives(station_id):
+        # The engine may hold a timed item or a spot as its next track: make it ask again
+        from app.services import playout_engine
+        await playout_engine.engine_flush(station_id)
+    return {"modes": result, "queue": await _queue_after_action(db, station_id)}
+
+
+@router.post("/panic")
+async def panic(
+    station_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_dj_or_manager),
+):
+    """Panic: cut whatever is on air at once (even a time check or a looping item)
+    and play the next good item; an empty queue is filled first. Logged as an alert."""
+    from app.services.alert_service import create_alert
+
+    if settings.engine_drives(station_id):
+        from app.services import playout_engine
+        await stop_loop(db, station_id)
+        await db.commit()
+        await playout_engine.engine_flush(station_id)
+        ok = await playout_engine.engine_skip(station_id, SKIP_FADE_SECONDS["hard"])
+        done = {"message": "Skipped" if ok else "The playout engine did not respond"}
+    else:
+        async with advance_lock(station_id):
+            done = await _skip_current_locked(
+                station_id, db, fade_seconds=SKIP_FADE_SECONDS["hard"], keep_incoming=False, force=True
+            )
+    try:
+        await create_alert(
+            db, alert_type="system", severity="warning",
+            title="Panic pressed in the control room",
+            message=(f"{user.email} pressed Panic and cut what was on air."
+                     if done.get("message") == "Skipped"
+                     else f"{user.email} pressed Panic: {done.get('message')}"),
+            station_id=station_id,
+        )
+        await db.commit()
+    except Exception:
+        logger.warning("Panic alert could not be written", exc_info=True)
+        await db.rollback()
+    return {**done, "queue": await _queue_after_action(db, station_id)}
 
 
 @router.post("/insert", status_code=201)

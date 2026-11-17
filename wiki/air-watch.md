@@ -26,3 +26,5 @@ station and kind per 15 min to `NTFY_TOPIC` (same topic as bug reports). `GET
 
 Tests: `backend/tests/test_air_watch.py`. Stations on "UTC" are read as New York time,
 like the hourly time checks.
+
+With HS (hard start) off a station's time check waits for the song on air by design, so `hour_missing` is not checked then (`station_modes.hard_start_on`). Test: `test_no_hour_alarm_while_hard_start_is_off`.

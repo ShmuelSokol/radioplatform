@@ -65,6 +65,13 @@ class QueueMixOver(BaseModel):
     client_request_id: str | None = Field(default=None, max_length=100)
 
 
+class QueueModes(BaseModel):
+    """HS (hard start) and Spots mode: leave one out to keep it as it is."""
+
+    hard_start: bool | None = None
+    spots: bool | None = None
+
+
 class QueueLoop(BaseModel):
     """Loop the item on air (it plays again each time it ends) until switched off or Next."""
 

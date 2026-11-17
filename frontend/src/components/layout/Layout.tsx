@@ -11,7 +11,7 @@ import PageViewTracker from './PageViewTracker';
 // Full-bleed "app" screens: fixed to the viewport, the nav stays on top and the
 // page manages its own scrolling panes (no max-width, no page padding).
 function isAppShell(pathname: string): boolean {
-  return pathname === '/admin/dashboard';
+  return pathname === '/admin/dashboard' || pathname === '/admin/databank';
 }
 
 export default function Layout() {

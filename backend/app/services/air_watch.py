@@ -153,7 +153,11 @@ class AirWatch:
         since_hour = (local_now - hour_start).total_seconds()
         hour_key = hour_start.isoformat()
         st = self.state(sid)
-        if (not blacked_out and HOUR_CHECK_AFTER_SECONDS <= since_hour < 600
+        # With HS (hard start) off the time check waits for the song on air by design
+        # (services/station_modes.py), so a late one is not a fault then.
+        from app.services.station_modes import hard_start_on
+
+        if (not blacked_out and hard_start_on(station) and HOUR_CHECK_AFTER_SECONDS <= since_hour < 600
                 and hour_key not in st.hours_checked):
             st.hours_checked.add(hour_key)
             st.hours_checked = {h for h in st.hours_checked if h >= (hour_start - timedelta(hours=3)).isoformat()}
