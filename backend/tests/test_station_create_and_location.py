@@ -84,22 +84,26 @@ async def test_blackout_failure_is_logged_and_station_still_created(
 
 @pytest.mark.asyncio
 async def test_coordinates_override_the_chosen_timezone(client: AsyncClient, auth_headers: dict):
-    """V1-86: lat/lon on create or update re-derives the time zone, even over one the user chose.
-    Changing other fields leaves the time zone alone."""
+    """V1-86: lat/lon on create or update re-derive the time zone, unless the same request names a
+    time zone itself (#169: the chosen zone wins). Changing other fields leaves the time zone alone."""
     r = await client.post("/api/v1/stations", json={"name": "TZ", "timezone": "Europe/London", **NEW_YORK},
                           headers=auth_headers)
     assert r.status_code == 201
     sid = r.json()["id"]
-    assert r.json()["timezone"] == "America/New_York"
+    assert r.json()["timezone"] == "Europe/London"  # named in the request: the choice wins
+    r = await client.post("/api/v1/stations", json={"name": "TZ2", **NEW_YORK}, headers=auth_headers)
+    assert r.json()["timezone"] == "America/New_York"  # no zone named: derived from coordinates
 
     r = await client.put(f"/api/v1/stations/{sid}", json={"timezone": "Europe/London"}, headers=auth_headers)
     assert r.json()["timezone"] == "Europe/London"  # no coordinates in the request: the choice stands
     r = await client.put(f"/api/v1/stations/{sid}", json={"description": "x"}, headers=auth_headers)
     assert r.json()["timezone"] == "Europe/London"
 
-    # sending coordinates (even with a chosen time zone) re-derives it
+    # coordinates with a chosen zone: the chosen zone stays; coordinates alone re-derive it
     r = await client.put(f"/api/v1/stations/{sid}", json={"timezone": "Europe/London", **JERUSALEM},
                          headers=auth_headers)
+    assert r.json()["timezone"] == "Europe/London"
+    r = await client.put(f"/api/v1/stations/{sid}", json=JERUSALEM, headers=auth_headers)
     assert r.json()["timezone"] == "Asia/Jerusalem"
     r = await client.put(f"/api/v1/stations/{sid}", json={"latitude": 40.7128}, headers=auth_headers)
     from app.services.timezone_service import get_timezone_for_coords
