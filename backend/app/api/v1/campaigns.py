@@ -84,15 +84,19 @@ async def create_campaign(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_sponsor_or_manager),
 ):
-    sponsor = await _get_sponsor_for_user(db, user)
-    if user.role == UserRole.SPONSOR and not sponsor:
-        raise ForbiddenError("No sponsor record linked to your account")
-
-    # For sponsors, always use their own sponsor_id
-    sponsor_id = sponsor.id if sponsor else None
-    if not sponsor_id:
-        # Manager creating — need to pick a sponsor; use first one for now
-        raise ForbiddenError("Managers must specify a sponsor_id when creating campaigns via the admin panel")
+    if user.role == UserRole.SPONSOR:
+        sponsor = await _get_sponsor_for_user(db, user)
+        if not sponsor:
+            raise ForbiddenError("No sponsor record linked to your account")
+        # A sponsor always creates for itself, whatever sponsor_id says
+        sponsor_id = sponsor.id
+    else:
+        # Staff create on a sponsor's behalf: they say which sponsor
+        if not data.sponsor_id:
+            raise HTTPException(status_code=422, detail="Choose the sponsor this campaign is for")
+        if (await db.execute(select(Sponsor.id).where(Sponsor.id == data.sponsor_id))).scalar_one_or_none() is None:
+            raise NotFoundError("Sponsor not found")
+        sponsor_id = data.sponsor_id
 
     campaign = AdCampaign(
         sponsor_id=sponsor_id,

@@ -139,7 +139,7 @@ async function transportEnd(browser) {
   // One station only: its name instead of a dropdown
   const st3 = makeStation({ stations: [{ id: 'st-1', name: 'Only Station', timezone: 'America/New_York', is_active: true, channels: [] }] });
   const { ctx: c3, page: p3 } = await openRoom(browser, DESKTOP, st3);
-  check(`${tag}: a single station shows its name, no dropdown`, await p3.getByLabel('Station').count() === 0 && (await headerText(p3)).includes('Only Station'));
+  check(`${tag}: a single station shows its name, no dropdown`, await p3.getByLabel('Station', { exact: true }).count() === 0 && (await headerText(p3)).includes('Only Station'));
   await c3.close();
 }
 
@@ -493,6 +493,15 @@ async function queueActions(browser) {
   station.goOnAir(tgt2.asset_id);
   await page.waitForFunction(() => !document.querySelector('[data-testid=insert-marker]'), null, { timeout: 4000 }).catch(() => {});
   check(`${tag}: marker disappears when that row starts playing`, await page.getByTestId('insert-marker').count() === 0);
+  // F-CR-QUEUE-12: a marker whose row already started is not used for a stale insert: the
+  // insert banners go, and an instant button goes back to its normal mode (no /insert sent)
+  const insertsBefore = writes(station, /\/insert$/).length;
+  const bannersGone = await page.getByText(/Inserting here|insert at the marked spot|Pick a song to insert/).count() === 0;
+  await page.getByTestId('hot-button').filter({ hasText: 'Station ID 7' }).click();
+  await sleep(SLOW + 400);
+  check(`${tag}: after the marked row started, no stale insert (banner gone, button fires normally)`,
+    bannersGone && writes(station, /\/insert$/).length === insertsBefore && writes(station, /\/(fire-now|next|play-next|mix-over|end)$/).length > 0,
+    writes(station, /./).slice(-2).map((c) => c.path).join(', '));
   const tgt3 = station.pending()[2];
   await rowOf(page, tgt3.id).getByTestId('insert-here').click();
   station.queue = station.queue.filter((e) => e.id !== tgt3.id);
@@ -1020,12 +1029,54 @@ async function engineMode(browser, stream) {
     if (!broken) {
       check(`${tag}: listening plays the server stream`, el.src === stream.url(station.SID) && !el.paused && !el.muted && el.t > 0.3, JSON.stringify(el));
       check(`${tag}: the built-in player only measures (not heard)`, (await page.evaluate(() => window.__outLevel())) < 0.01);
+      // F-CR-TRANSPORT-25: the meters still move while the station is heard through the server stream
+      const lit = () => page.locator('header .bg-cyan-400, header .bg-red-500').count();
+      const l1 = await lit(); await sleep(300); const l2 = await lit();
+      check(`${tag}: level meters move while the server stream is heard`, l1 > 0 && l2 > 0, `${l1}, ${l2} lit`);
     } else {
       check(`${tag}: a broken stream falls back to the built-in player`, (await page.evaluate(() => window.__outLevel())) > 0.1 && (await page.evaluate(() => window.__audible().length)) === 1, JSON.stringify(el));
     }
     check(`${tag}${broken ? ' (broken)' : ''}: no script errors`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   }
+}
+
+// ── F-CR-SIDE-6: a live show on air: the host is heard, the music stops, and returns after ─────
+async function liveShowHeard(browser) {
+  const tag = 'live show';
+  const station = makeStation();
+  const { ctx } = await adminContext(browser, DESKTOP, station);
+  await ctx.addInitScript(() => {
+    window.__hostFrames = 0;
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...a) { if (this.buffer && this.buffer.sampleRate === 24000) window.__hostFrames++; return start.apply(this, a); };
+  });
+  await ctx.routeWebSocket(/\/ws\/(site|listeners)/, () => {});
+  await ctx.routeWebSocket(/\/ws\/live\/(?!station)/, () => {});
+  let liveWs = null;
+  await ctx.routeWebSocket(/\/ws\/live\/station\/[^/]+\/listen/, (ws) => { liveWs = ws; ws.send(JSON.stringify({ type: 'live_state', live: false })); });
+  const { page, errors } = await newPage(ctx);
+  await page.goto(`${BASE}/admin/dashboard`);
+  await page.getByTestId('queue-row').first().waitFor();
+  await listenHere(page);
+  check(`${tag}: (set up) music heard before the show`, (await page.evaluate(() => window.__audible().length)) >= 1);
+  // The show goes on air: live_state then the host's 24 kHz PCM frames (a 440 Hz tone)
+  const frame = Buffer.alloc(2400 * 2);
+  for (let i = 0; i < 2400; i++) frame.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 440 * i / 24000)), i * 2);
+  liveWs.send(JSON.stringify({ type: 'live_state', live: true, sample_rate: 24000 }));
+  const feed = setInterval(() => { try { liveWs.send(frame); } catch { /* closed */ } }, 100);
+  await sleep(1500);
+  const during = await page.evaluate(() => ({ music: window.__audible().length, host: window.__hostFrames }));
+  check(`${tag}: during the show the host is heard here`, during.host >= 5, JSON.stringify(during));
+  check(`${tag}: during the show the music is silent`, during.music === 0, JSON.stringify(during));
+  // The show ends: the queue restarts on the server and pushes the item on air
+  clearInterval(feed);
+  liveWs.send(JSON.stringify({ type: 'live_state', live: false }));
+  station.goOnAir(station.pending()[0].asset_id);
+  await page.waitForFunction(() => window.__audible().length >= 1, null, { timeout: 5000 }).catch(() => {});
+  check(`${tag}: after the show the music is heard again`, (await page.evaluate(() => window.__audible().length)) >= 1);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
 }
 
 // A hard timed item due before the song ends: Remaining and the bar count to the cut,
@@ -1084,6 +1135,7 @@ try {
   if (run('speed')) { await speed(browser, DESKTOP, 'speed desktop'); await speed(browser, PHONE, 'speed iPhone'); }
   if (run('mix')) await mixOver(browser);
   if (run('timed')) await timedPreload(browser);
+  if (run('live')) await liveShowHeard(browser);
   if (run('cut')) {
     await cutCountdown(browser, DESKTOP, 'cut desktop'); await cutCountdown(browser, PHONE, 'cut iPhone');
     await cutCountdown(browser, { ...devices['iPhone 13 landscape'] }, 'cut iPhone sideways');
