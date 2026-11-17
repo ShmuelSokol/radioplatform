@@ -125,7 +125,7 @@ export function TransportButtons({ p, stacked, grid = false }: { p: Props; stack
   // grid: the phone-sideways button grid (Go next two cells wide first, then Fade,
   // Soft fade, and Loop on the next row); the parent is the 4-column grid.
   const btn = grid ? 'qn-btn h-11 px-1 text-xs min-w-0'
-    : `qn-btn shrink-0 ${stacked ? 'w-full h-9 text-sm' : 'h-11 px-2.5 text-xs'}`;
+    : `qn-btn shrink-0 ${stacked ? 'w-full h-9 [@media(max-height:800px)]:h-8 text-sm' : 'h-11 px-2.5 text-xs'}`;
   return (
     <div className={grid ? 'contents' : stacked ? 'flex flex-col gap-1' : 'flex items-center gap-1 shrink-0'} role="group" aria-label="Go to the next item">
       <button type="button" onClick={p.onLoop} disabled={!p.isPlaying || p.loopBusy}
@@ -136,7 +136,7 @@ export function TransportButtons({ p, stacked, grid = false }: { p: Props; stack
       </button>
       <button type="button" onClick={() => p.onNext('hard')} disabled={!p.isPlaying || p.nextBusy}
         title="Go to the next item now, with no fade (N)" data-testid="go-next"
-        className={`${btn} ${grid ? 'order-1 col-span-2 !text-base' : stacked ? '!h-11 !text-base' : '!px-3 !text-sm'} font-bold`}>
+        className={`${btn} ${grid ? 'order-1 col-span-2 !text-base' : stacked ? '!h-11 [@media(max-height:800px)]:!h-9 !text-base' : '!px-3 !text-sm'} font-bold`}>
         {p.nextBusy ? '…' : <><u>G</u>o next</>}
       </button>
       <button type="button" onClick={() => p.onNext('fade')} disabled={!p.isPlaying || p.nextBusy}
