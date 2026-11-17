@@ -924,10 +924,16 @@ const pressedStars = (page) => page.locator('button[aria-label^="Rate "][aria-pr
 const rateCalls = (station) => station.calls.filter((c) => c.path === '/crm/rate' && !c.failed);
 const storedPin = (page) => page.evaluate(() => localStorage.getItem('crm_pin'));
 
+/** Run one block of checks; an exception (a button that is not there) is one FAIL, and
+ *  the next block still runs. */
+async function guarded(tag, fn) {
+  try { await fn(); } catch (e) { check(`${tag}: block ran to the end`, false, String(e?.message ?? e).split('\n')[0]); }
+}
+
 async function crmProfile(browser) {
   const tag = 'listen crm';
   // F-LISTEN-23 (bug 1): register logs in, and the new PIN stays on screen until dismissed
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page, errors } = await openListen(ctx, station.SID);
@@ -946,9 +952,9 @@ async function crmProfile(browser) {
     check(`${tag}: "I've saved my PIN" dismisses it (F-LISTEN-23)`, await box().count() === 0 && await storedPin(page) === '654321');
     check(`${tag}: no script errors (register)`, errors.length === 0, errors.join(' | '));
     await ctx.close();
-  }
+  });
   // F-LISTEN-25: register fails, or register works but the login after it fails
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page } = await openListen(ctx, station.SID);
@@ -970,7 +976,7 @@ async function crmProfile(browser) {
     await page.getByText('Welcome, Rivka!').waitFor({ timeout: 3000 }).catch(() => {});
     check(`${tag}: and Login with it works (F-LISTEN-25)`, await page.getByText('Welcome, Rivka!').count() === 1);
     await ctx.close();
-  }
+  });
   // F-LISTEN-24 (bug 2): saved PIN on page load. Only a refused PIN (401) is forgotten.
   for (const [what, reply] of [['a network error', 'network'], ['a 500', { status: 500 }], ['a 429', { status: 429, detail: 'Too many wrong PINs. Please wait a few minutes and try again.' }], ['a 401 (PIN refused)', { status: 401 }]]) {
     const station = makeStation({ shows: [] });
@@ -1002,16 +1008,16 @@ async function crmProfile(browser) {
     await ctx.close();
   }
   // Auto-login that works: profile shows without typing
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']] });
     const { page } = await openListen(ctx, station.SID);
     await page.getByText('Welcome, Test Listener!').waitFor({ timeout: 4000 }).catch(() => {});
     check(`${tag}: saved PIN signs in on page load, no typing (F-LISTEN-24)`, await page.getByText('Welcome, Test Listener!').count() === 1);
     await ctx.close();
-  }
+  });
   // F-LISTEN-26: login refused for too many wrong PINs says so
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page } = await openListen(ctx, station.SID);
@@ -1026,9 +1032,9 @@ async function crmProfile(browser) {
     await page.getByText('Could not reach the server', { exact: false }).waitFor({ timeout: 3000 }).catch(() => {});
     check(`${tag}: no network on login says so, not "Invalid PIN"`, await page.getByText('Could not reach the server', { exact: false }).count() === 1);
     await ctx.close();
-  }
+  });
   // F-LISTEN-27..30, 33 (bug 3): rating and favourite
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const nextId = station.pending()[0].asset_id;
     station.ratings.set(nextId, { rating: 2, is_favorite: true }); // rated on an earlier day
@@ -1087,9 +1093,9 @@ async function crmProfile(browser) {
     check(`${tag}: Logout clears the stored PIN, a reload stays logged out (F-LISTEN-33)`, await storedPin(page) === null && await page.getByText('Welcome,', { exact: false }).count() === 0 && await page.getByPlaceholder('Enter 6-digit PIN').count() === 1);
     check(`${tag}: no script errors (rating)`, errors.length === 0, errors.join(' | '));
     await ctx.close();
-  }
+  });
   // F-LISTEN-31, 32 (bug 4): raffles
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']] });
     const { page, errors } = await openListen(ctx, station.SID);
@@ -1132,7 +1138,7 @@ async function crmProfile(browser) {
     await sleep(500);
     check(`${tag}: no raffle open -> no raffle box (F-LISTEN-32)`, await p3.getByText('Win a Shabbos package').count() === 0 && await p3.getByRole('button', { name: 'Enter Raffle' }).count() === 0);
     await c3.close();
-  }
+  });
 }
 
 // F-LISTEN-34..36: song request texts and errors
@@ -1215,16 +1221,16 @@ async function nothingOnAir(browser) {
     await ctx.close();
   }
   // Page opened while the station is stopped: the server greets with data:null
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ stopped: true });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page } = await openListen(ctx, station.SID);
     await page.getByText('Nothing playing right now').waitFor({ timeout: 3000 }).catch(() => {});
     check(`${tag}: opened while stopped (greeting data:null) -> Nothing playing / Offline (F-LISTEN-37)`, await nothingShown(page));
     await ctx.close();
-  }
+  });
   // The server sends nothing at all when the queue runs dry; the overdue re-read answers null
-  {
+  await guarded(tag, async () => {
     const station = makeStation();
     const cur = station.playing();
     cur.started_at = new Date(Date.now() - (station.byId[cur.asset_id].duration - 2) * 1000).toISOString();
@@ -1238,9 +1244,9 @@ async function nothingOnAir(browser) {
     check(`${tag}: no message at all, the overdue re-read answers null -> Nothing playing (F-LISTEN-37, bug 5 fixed)`, ms >= 0 && await nothingShown(page), `${ms} ms after the item's end -2 s`);
     check(`${tag}: no script errors (overdue)`, errors.length === 0, errors.join(' | '));
     await ctx.close();
-  }
+  });
   // Back from the background: the re-read answers null
-  {
+  await guarded(tag, async () => {
     const station = makeStation();
     const { ctx } = await listenContext(browser, DESK, station);
     const { page } = await openListen(ctx, station.SID);
@@ -1253,7 +1259,7 @@ async function nothingOnAir(browser) {
     await page.getByText('Nothing playing right now').waitFor({ timeout: 3000 }).catch(() => {});
     check(`${tag}: back from the background, the null re-read and data:null greeting clear the old item (F-LISTEN-37)`, await nothingShown(page));
     await ctx.close();
-  }
+  });
 }
 
 // F-LISTEN-38, 39 (bug 6): a failed stream is tried again; F-LISTEN-52: no CORS
@@ -1291,7 +1297,7 @@ async function streamRetry(browser, stream) {
     await ctx.close();
   }
   // F-LISTEN-52: a stream origin without CORS: fetch refused, the plain element plays, no error shown
-  {
+  await guarded(tag, async () => {
     const station = makeStation();
     const base = station.nowPlaying;
     station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.noCorsUrl(station.SID) }; };
@@ -1305,7 +1311,7 @@ async function streamRetry(browser, stream) {
     check(`${tag}: no error shown for the no-CORS stream (F-LISTEN-52)`, await page.getByRole('alert').count() === 0 && (await audibleSrc(page)).length === 0);
     check(`${tag}: no script errors (no CORS)`, errors.length === 0, errors.join(' | '));
     await ctx.close();
-  }
+  });
 }
 
 // F-LISTEN-41 (bug 7): release resume on a server-stream station with Safari's rule
@@ -1340,7 +1346,7 @@ async function streamResume(browser, stream) {
 async function pageShell(browser) {
   const tag = 'listen shell';
   // F-LISTEN-40: volume row only after Listen, hidden after Stop
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page } = await openListen(ctx, station.SID);
@@ -1353,7 +1359,7 @@ async function pageShell(browser) {
     await stopBtn(page).click();
     check(`${tag}: volume row hidden after Stop (F-LISTEN-40)`, await vol() === 0);
     await ctx.close();
-  }
+  });
   // F-LISTEN-47: the station lookup cannot reach the server
   for (const [what, setup] of [['a 503', (st) => st.replyNext.set('/stations/st-1', [{ status: 503 }, { status: 503 }, { status: 503 }, { status: 503 }])], ['no network', (st) => st.replyNext.set('/stations/st-1', ['network', 'network', 'network', 'network'])]]) {
     const station = makeStation({ shows: [] });
@@ -1386,7 +1392,7 @@ async function pageShell(browser) {
     await ctx.close();
   }
   // F-LISTEN-51: lock screen before any now-playing arrives, and no Media Session at all
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station, { ws: { greet: false } });
     const { page, errors } = await openListen(ctx, station.SID);
@@ -1405,7 +1411,7 @@ async function pageShell(browser) {
     const heard = await timeUntil(p2, `() => window.__audible().length === 1`, 3000);
     check(`${tag}: a browser with no Media Session API still plays (F-LISTEN-51)`, !has && heard >= 0 && e2.length === 0, `mediaSession ${has}, ${heard} ms, ${e2.join(' | ')}`);
     await c2.close();
-  }
+  });
   // F-LISTEN-53: small phone and phone sideways: no sideways scroll with the PIN row and register form open
   for (const [label, opts] of [['320 px phone', { viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true }], ['iPhone sideways', { ...devices['iPhone 13 landscape'] }]]) {
     const station = makeStation({ shows: [] });
@@ -1434,7 +1440,7 @@ async function pageShell(browser) {
     await ctx.close();
   }
   // F-LISTEN-54: anonymous visitor's menu on a phone, Admin Login on both sizes
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, { ...devices['iPhone 13'] }, station);
     const { page } = await openListen(ctx, station.SID);
@@ -1459,9 +1465,9 @@ async function pageShell(browser) {
     await p2.getByRole('heading', { name: 'Kol Berama' }).waitFor();
     check(`${tag}: desktop: Admin Login shown, no menu button (F-LISTEN-54)`, await p2.getByRole('link', { name: 'Admin Login' }).isVisible() && !(await p2.getByRole('button', { name: 'Menu' }).isVisible()));
     await c2.close();
-  }
+  });
   // F-LISTEN-46: live banner keeps its state when the poll fails, goes within 15 s of the end; no call-in link with calls off
-  {
+  await guarded(tag, async () => {
     const station = makeStation({ shows: [{ id: 'ls9', station_id: 'st-1', title: 'Motzei Shabbos Live', status: 'live', calls_enabled: false }] });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page } = await openListen(ctx, station.SID);
@@ -1474,7 +1480,7 @@ async function pageShell(browser) {
     const gone = await timeUntil(page, `() => !document.body.innerText.includes('LIVE: Motzei Shabbos Live')`, 17000);
     check(`${tag}: the banner goes within 15 s of the show's end (F-LISTEN-46)`, gone >= 0 && gone <= 16000, `${gone} ms`);
     await ctx.close();
-  }
+  });
 }
 
 const browser = await chromium.launch();
