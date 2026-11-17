@@ -224,3 +224,5 @@ UPDATE 2026-11-17 audio-engine.md warm-up retried every 250 ms and plays muted u
 INGEST 2026-11-17 streaming-architecture.md timed lane closed after its last item was fetched (length() leaves fetched items out): Daf Yomi missed at 18:00Z; prefetch=10, is_ready gate, follow-up take-over for a late file
 INGEST 2026-11-17 streaming-architecture.md range-only analysis never measured loudness (-18/0 made up); now sampled from 3 pieces, needs_analysis redoes them; limiter -2 dB
 INGEST 2026-11-17 streaming-architecture.md blackout starting now on an engine station: silence queued pending + engine flush/skip (song used to play into the blackout)
+INGEST 2026-11-17 streaming-architecture.md engine items analysed before /next hands them over (liq_amplify was missing on late-analysed items); alimiter true-peak limiter replaces limit()
+INGEST 2026-11-17 program-blocks.md announcement left out when its programme has nothing to play; the hourly 'KBR schedule: Daf Yomi' clip is a separate block (data)

@@ -280,9 +280,22 @@ end
 
 # ── Broadcast sound: gentle compression and a limiter on the whole output ────
 radio = compress(threshold=-14., ratio=3., attack=20., release=200., radio)
-# -2 dB, not -1: the limiter sees sample peaks, and the MP3 encoder adds up to about
-# 1 dB between samples (Jerusalem showed true peaks of -0.2 dBFS with -1)
-radio = limit(threshold=-2., radio)
+# Brickwall limiter with look-ahead (FFmpeg alimiter): no peak gets past -3 dBFS, so
+# with the up to ~1 dB the MP3 encoder adds between samples, true peaks stay under
+# -2 dBFS. Liquidsoap's own limit() is a compressor with a 50 ms attack: peaks got
+# through it (true peaks of -0.6 dBFS on Jerusalem with threshold -2, 2026-11-17).
+def true_peak_limit(s) =
+  def graph_of(graph) =
+    let {audio = a} = source.tracks(ffmpeg.raw.encode.audio(%ffmpeg(%audio.raw), s))
+    a = ffmpeg.filter.audio.input(graph, pass_metadata=true, a)
+    a = ffmpeg.filter.alimiter(graph, limit=0.708, attack=5., release=50., level=false, a)
+    a = ffmpeg.filter.audio.output(graph, pass_metadata=true, a)
+    source({audio = a, metadata = track.metadata(a), track_marks = track.track_marks(a)})
+  end
+  ffmpeg.raw.decode.audio(ffmpeg.filter.create(graph_of))
+end
+# (an FFmpeg filter source counts as fallible; it never stops while radio plays)
+radio = mksafe(true_peak_limit(radio))
 
 # ── Tell the backend what really went on air ─────────────────────────────────
 def report_to_backend(entry, lane, title) =

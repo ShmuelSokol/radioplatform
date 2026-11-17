@@ -230,3 +230,30 @@ def test_combined_loudness_is_a_power_average():
     lufs, peak = combine_loudness([(-10.0, -1.0), (-20.0, -5.0), (None, None), (-70.0, -60.0)])
     assert lufs == pytest.approx(-12.6, abs=0.05) and peak == -1.0
     assert combine_loudness([(None, None)]) is None
+
+
+@needs_ffmpeg
+@pytest.mark.asyncio
+async def test_unbelievable_sampled_loudness_falls_back_to_the_whole_file(monkeypatch):
+    """The Carlebach story "Yisrael Betach" read -3.1 LUFS from its sampled pieces. A
+    reading louder than -5 LUFS is not stored from pieces: the whole file is measured."""
+    from app.services import tail_analysis
+    from app.services.tail_analysis import LoudnessNotSampledError, analyze_by_range
+
+    song = _tone_mp3(60, 0.3)
+    monkeypatch.setattr(tail_analysis, "combine_loudness", lambda m: (-3.1, -0.1))
+    async with _range_server(song, []) as client:
+        with pytest.raises(LoudnessNotSampledError):
+            await analyze_by_range("https://cdn.example.com/s.mp3", None, client=client)
+
+
+def test_bad_sampled_reading_is_analysed_again_and_loud_items_turn_down_further():
+    from app.models.asset import has_real_loudness
+    from app.services.audio_analysis_service import replay_gain_for
+
+    bad = {"loudness_lufs": -3.1, "replay_gain_db": -12.0, "method": "range",
+           "loudness_method": "sampled", "version": ANALYSIS_VERSION}
+    assert not has_real_loudness(bad)
+    assert needs_analysis(SimpleNamespace(metadata_extra={"audio_analysis": bad}))
+    assert replay_gain_for(-3.1) == -14.9
+    assert replay_gain_for(5.0) == -20.0 and replay_gain_for(-40.0) == 12.0
