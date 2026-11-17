@@ -227,3 +227,4 @@ INGEST 2026-11-17 streaming-architecture.md range-only analysis never measured l
 INGEST 2026-11-17 streaming-architecture.md blackout starting now on an engine station: silence queued pending + engine flush/skip (song used to play into the blackout)
 INGEST 2026-11-17 streaming-architecture.md engine items analysed before /next hands them over (liq_amplify was missing on late-analysed items); alimiter true-peak limiter replaces limit()
 INGEST 2026-11-17 program-blocks.md announcement left out when its programme has nothing to play; the hourly 'KBR schedule: Daf Yomi' clip is a separate block (data)
+INGEST 2026-11-17 streaming-architecture.md setup.sh rerun restarted Icecast + all engines at once (50 s off air, catch-up 7.6 s on 1 core); now script checked first, unchanged engines left running, changed ones one at a time

@@ -62,8 +62,11 @@ secret() { openssl rand -hex 24; }
 old() { [ -f "$ENV_FILE" ] && grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2- || true; }
 TOKEN="$(old KBR_PLAYOUT_TOKEN)";            TOKEN="${TOKEN:-$(secret)}"
 SOURCE_PW="$(old KBR_ICECAST_SOURCE_PASSWORD)"; SOURCE_PW="${SOURCE_PW:-$(secret)}"
+# Kept between runs, so an unchanged Icecast configuration stays byte for byte the same
+RELAY_PW="$(old KBR_ICECAST_RELAY_PASSWORD)"; RELAY_PW="${RELAY_PW:-$(secret)}"
+ADMIN_PW="$(old KBR_ICECAST_ADMIN_PASSWORD)"; ADMIN_PW="${ADMIN_PW:-$(secret)}"
 
-curl -fsSL "$RAW/radio.liq" -o /etc/kbr-engine/radio.liq
+curl -fsSL "$RAW/radio.liq" -o /etc/kbr-engine/radio.liq.new
 curl -fsSL "$RAW/kbr-engine@.service" -o /etc/systemd/system/kbr-engine@.service
 curl -fsSL "$RAW/nginx-stream.conf" -o /tmp/kbr-nginx.conf
 curl -fsSL "$RAW/icecast.xml" -o /tmp/kbr-icecast.xml
@@ -76,13 +79,15 @@ KBR_EMERGENCY_DIR=/var/lib/kbr-engine/emergency
 KBR_ICECAST_HOST=127.0.0.1
 KBR_ICECAST_PORT=8000
 KBR_ICECAST_SOURCE_PASSWORD=${SOURCE_PW}
+KBR_ICECAST_RELAY_PASSWORD=${RELAY_PW}
+KBR_ICECAST_ADMIN_PASSWORD=${ADMIN_PW}
 KBR_SKIP_FADE_SECONDS=0.5
 ENV
 chown root:liquidsoap "$ENV_FILE"; chmod 640 "$ENV_FILE"
 umask 022
 
 sed -e "s/STREAM_DOMAIN/${DOMAIN}/" -e "s/SOURCE_PASSWORD/${SOURCE_PW}/" \
-    -e "s/RELAY_PASSWORD/$(secret)/" -e "s/ADMIN_PASSWORD/$(secret)/" \
+    -e "s/RELAY_PASSWORD/${RELAY_PW}/" -e "s/ADMIN_PASSWORD/${ADMIN_PW}/" \
     /tmp/kbr-icecast.xml > /etc/icecast2/icecast.xml
 chown icecast2:icecast /etc/icecast2/icecast.xml; chmod 640 /etc/icecast2/icecast.xml
 sed -i 's/^ENABLE=.*/ENABLE=true/' /etc/default/icecast2 2>/dev/null || true
@@ -92,6 +97,7 @@ CONTROL_INC=/etc/nginx/kbr-control.inc
 : > "$CONTROL_INC"
 PORT=$FIRST_PORT
 WANTED=""
+PORTS=""
 while IFS='|' read -r SID SNAME; do
   [ -n "$SID" ] || continue
   cat > "$STATION_DIR/$SID.env" <<SENV
@@ -111,6 +117,7 @@ location /control/${SID}/ {
 }
 LOC
   WANTED="$WANTED $SID"
+  PORTS="$PORTS $SID=$PORT"
   PORT=$((PORT + 1))
 done <<< "$STATION_LINES"
 
@@ -132,15 +139,76 @@ for f in "$STATION_DIR"/*.env; do
   SID="$(basename "$f" .env)"
   case " $WANTED " in *" $SID "*) ;; *)
     systemctl disable --now "kbr-engine@$SID" 2>/dev/null || true
-    rm -f "$f"; echo "Removed engine for $SID";;
+    rm -f "$f" "/var/lib/kbr-engine/applied/$SID"; echo "Removed engine for $SID";;
   esac
 done
+# ── Restart only what changed, one engine at a time ──────────────────────────
+# A rerun used to restart Icecast and every engine at the same moment. Each engine
+# start checks the whole script at full CPU for about 20 s; on a one-core server two
+# of them at once left a station off air for about 50 s and the others stuttering
+# ("We must catchup" in the journal, 2026-11-17). Now: the new script is checked
+# before it replaces the old one, Icecast and an engine whose script and settings
+# are unchanged keep running, and changed engines restart one after the other.
+APPLIED=/var/lib/kbr-engine/applied
+mkdir -p "$APPLIED"
+sum_of() { cat "$@" 2>/dev/null | sha256sum | cut -d' ' -f1; }
+
+FIRST_SID="$(echo $WANTED | awk '{print $1}')"
+if ! cmp -s /etc/kbr-engine/radio.liq.new /etc/kbr-engine/radio.liq; then
+  echo "New engine script: checking it before any engine restarts..."
+  chmod 644 /etc/kbr-engine/radio.liq.new
+  # Low priority: the check must not take CPU from an engine that is on air
+  # No HLS folder or test file for the check: it must not touch a running engine's files
+  if ! ( set -a; . "$ENV_FILE"; . "$STATION_DIR/$FIRST_SID.env"; set +a
+         export KBR_HLS_DIR= KBR_DEBUG_WAV=
+         nice -n 19 runuser -u liquidsoap -- liquidsoap --check /etc/kbr-engine/radio.liq.new ); then
+    rm -f /etc/kbr-engine/radio.liq.new
+    echo "The new engine script does not pass its check. Nothing was restarted; the engines keep running the old script."
+    exit 1
+  fi
+  mv /etc/kbr-engine/radio.liq.new /etc/kbr-engine/radio.liq
+else
+  rm -f /etc/kbr-engine/radio.liq.new
+fi
+
 systemctl enable icecast2 nginx >/dev/null
-systemctl restart icecast2
+ICE_SUM="$(sum_of /etc/icecast2/icecast.xml /etc/default/icecast2)"
+if [ "$ICE_SUM" != "$(cat "$APPLIED/icecast" 2>/dev/null)" ] || ! systemctl is-active --quiet icecast2; then
+  systemctl restart icecast2
+  echo "$ICE_SUM" > "$APPLIED/icecast"
+  ICE_RESTARTED=yes
+  echo "Icecast restarted (its settings changed)"
+else
+  ICE_RESTARTED=no
+fi
 nginx -t && systemctl reload nginx
-for SID in $WANTED; do
+
+engine_answers() {  # $1 = control port
+  [ "$(curl -s -o /dev/null -w '%{http_code}' -m 3 -X POST -H "X-Playout-Token: ${TOKEN}" \
+        -H 'Content-Type: application/json' -d '{}' "http://127.0.0.1:$1/status")" = 200 ]
+}
+for PAIR in $PORTS; do
+  SID="${PAIR%%=*}"; EPORT="${PAIR##*=}"
   systemctl enable "kbr-engine@$SID" >/dev/null 2>&1
+  ENG_SUM="$(sum_of /etc/kbr-engine/radio.liq /etc/systemd/system/kbr-engine@.service "$ENV_FILE" "$STATION_DIR/$SID.env")"
+  if [ "$ENG_SUM" = "$(cat "$APPLIED/$SID" 2>/dev/null)" ] && [ "$ICE_RESTARTED" = no ] \
+     && systemctl is-active --quiet "kbr-engine@$SID"; then
+    echo "Engine $SID: unchanged, left running"
+    continue
+  fi
   systemctl restart "kbr-engine@$SID"
+  # Wait until it answers before the next one starts (its start-up needs the CPU)
+  for _ in $(seq 1 45); do
+    sleep 2
+    if engine_answers "$EPORT"; then break; fi
+  done
+  if engine_answers "$EPORT"; then
+    echo "$ENG_SUM" > "$APPLIED/$SID"
+    echo "Engine $SID: restarted and answering"
+  else
+    rm -f "$APPLIED/$SID"
+    echo "Engine $SID: restarted but NOT answering after 90 s (journalctl -u kbr-engine@$SID -n 50)"
+  fi
 done
 
 # HTTPS needs the domain to point at this machine already
