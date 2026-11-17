@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.dependencies import get_db, may_operate_station, require_manager
+from app.services.station_service import window_covers_station
 from app.models.asset import Asset
 from app.models.holiday_window import HolidayWindow
 from app.models.station import Station
@@ -340,14 +341,17 @@ async def auto_generate_blackouts(
 
     for w in all_windows:
         w_start = datetime.fromisoformat(w["start_datetime"])
-        # Skip if a window with same name exists and start is within 1 hour
+        # Skip if a window with same name that covers THIS station starts within 1 hour.
+        # Another station's window does not count: matching on name and time alone
+        # left a second station in the same area with no Shabbos at all (and two
+        # matches made scalar_one_or_none fail). Same rule as the daily extension.
         dup_stmt = select(HolidayWindow).where(
             HolidayWindow.name == w["name"],
             HolidayWindow.start_datetime >= w_start - timedelta(hours=1),
             HolidayWindow.start_datetime <= w_start + timedelta(hours=1),
         )
         dup_result = await db.execute(dup_stmt)
-        if dup_result.scalar_one_or_none():
+        if any(window_covers_station(d, station.id) for d in dup_result.scalars().all()):
             skipped += 1
             continue
 

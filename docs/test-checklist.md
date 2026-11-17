@@ -239,11 +239,11 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-HOLIDAYS-2 `POST /holidays` [require_manager] create holiday | modes: both | covered: tests/test_holidays.py
 - [ ] B-HOLIDAYS-3 `PUT /holidays/{holiday_id}` [require_manager] update holiday | modes: both | covered: tests/test_holidays.py
 - [ ] B-HOLIDAYS-4 `DELETE /holidays/{holiday_id}` [require_manager] delete holiday | modes: both | covered: tests/test_holidays.py
-- [ ] B-HOLIDAYS-5 `POST /holidays/preview` [require_manager] Preview auto-generated blackout windows without saving to DB. | modes: both | NOT COVERED
+- [x] B-HOLIDAYS-5 `POST /holidays/preview` [require_manager] Preview auto-generated blackout windows without saving to DB. | modes: both | covered: tests/test_holiday_generation_endpoints.py::test_preview_lists_windows_and_saves_nothing
 - [ ] B-HOLIDAYS-6 `POST /holidays/auto-generate` [require_manager] Auto-generate Shabbos & Yom Tov blackout windows based on station location. | modes: both | covered: partial (tests/test_station_write_permissions.py::test_blackouts_follow_station_permissions: station check only)
-- [ ] B-HOLIDAYS-7 ↳ Shabbos/Yom Tov windows from station location (candle-lighting/havdalah) | modes: both | NOT COVERED
-- [ ] B-HOLIDAYS-8 `POST /holidays/ensure-silence-asset` [require_manager] Ensure a silence audio asset exists. Creates one via FFmpeg if needed. | modes: both | NOT COVERED
-- [ ] B-HOLIDAYS-9 ↳ creates silence asset via FFmpeg if missing | modes: n.a. | NOT COVERED
+- [x] B-HOLIDAYS-7 ↳ Shabbos/Yom Tov windows from station location (candle-lighting/havdalah) | modes: both | covered: tests/test_holiday_generation_endpoints.py::test_auto_generate_uses_the_stations_own_sunset, ::test_second_station_in_the_same_town_gets_its_own_shabbos (FIXED: the endpoint's duplicate check ignored which station a window covers, so a second station in the same area got no Shabbos at all), ::test_moving_a_station_moves_its_shabbos (BUG xfail: windows made for the old location stay after the station's latitude/longitude change)
+- [x] B-HOLIDAYS-8 `POST /holidays/ensure-silence-asset` [require_manager] Ensure a silence audio asset exists. Creates one via FFmpeg if needed. | modes: both | covered: tests/test_holiday_generation_endpoints.py::test_ensure_silence_asset_makes_it_once
+- [x] B-HOLIDAYS-9 ↳ creates silence asset via FFmpeg if missing | modes: n.a. | covered: tests/test_holiday_generation_endpoints.py::test_ensure_silence_asset_makes_it_once, ::test_ensure_silence_asset_reports_ffmpeg_failure
 
 ### icecast.py (prefix `/icecast`)
 - [ ] B-ICECAST-1 `GET /icecast/status` [require_admin] Get Icecast configuration status. | modes: n.a. | NOT COVERED
@@ -433,12 +433,12 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 ### reviews.py (prefix `/reviews`)
 - [ ] B-REVIEWS-1 `POST /reviews/queues` [require_manager] create queue | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-REVIEWS-2 `GET /reviews/queues` [require_staff] list queues | modes: n.a. | covered: tests/test_role_access.py
-- [ ] B-REVIEWS-3 `GET /reviews/queues/{queue_id}` [require_staff] get queue | modes: n.a. | NOT COVERED
-- [ ] B-REVIEWS-4 `GET /reviews/queues/{queue_id}/items` [require_staff] list queue items | modes: n.a. | NOT COVERED
-- [ ] B-REVIEWS-5 `GET /reviews/queues/{queue_id}/next` [require_staff] Get the next unreviewed item and assign to current user. | modes: n.a. | NOT COVERED
+- [x] B-REVIEWS-3 `GET /reviews/queues/{queue_id}` [require_staff] get queue | modes: n.a. | covered: tests/test_review_next_reviewers.py::test_queue_and_items_reads, tests/test_review_queues.py::test_queue_progress_and_audit
+- [x] B-REVIEWS-4 `GET /reviews/queues/{queue_id}/items` [require_staff] list queue items | modes: n.a. | covered: tests/test_review_next_reviewers.py::test_queue_and_items_reads
+- [x] B-REVIEWS-5 `GET /reviews/queues/{queue_id}/next` [require_staff] Get the next unreviewed item and assign to current user. | modes: n.a. | covered: tests/test_review_next_reviewers.py::test_two_reviewers_never_get_the_same_item, tests/test_review_queues.py::test_next_claims_first_pending
 - [ ] B-REVIEWS-6 `PATCH /reviews/items/{item_id}` [require_staff] update item | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-REVIEWS-7 `POST /reviews/queues/{queue_id}/batch-update` [require_manager] batch update | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
-- [ ] B-REVIEWS-8 `GET /reviews/assets/{asset_id}/history` [require_staff] get asset history | modes: n.a. | NOT COVERED
+- [x] B-REVIEWS-8 `GET /reviews/assets/{asset_id}/history` [require_staff] get asset history | modes: n.a. | covered: tests/test_review_queues.py::test_history_and_comments
 - [ ] B-REVIEWS-9 `POST /reviews/assets/{asset_id}/comment` [require_staff] add comment | modes: n.a. | covered: partial (tests/test_write_role_matrix.py::test_write_role_matrix: role guard only)
 - [ ] B-REVIEWS-10 `GET /reviews/queues/{queue_id}/activity` [require_staff] get queue activity | modes: n.a. | NOT COVERED
 
@@ -546,7 +546,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 ### stations.py (prefix `/stations`)
 - [ ] B-STATIONS-1 `POST /stations` [require_manager] create | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
 - [ ] B-STATIONS-2 ↳ manager+ only; dj/viewer/sponsor 403 | modes: n.a. | covered: tests/test_write_role_matrix.py::test_write_role_matrix
-- [ ] B-STATIONS-3 ↳ timezone, lat/lon, automation_config saved; new station gets queue on next replenish | modes: both | NOT COVERED
+- [x] B-STATIONS-3 ↳ timezone, lat/lon, automation_config saved; new station gets queue on next replenish | modes: both | covered: tests/test_station_changes_on_air.py::test_new_station_settings_saved_and_it_goes_on_air
 - [ ] B-STATIONS-4 `GET /stations` [PUBLIC] list all | modes: n.a. | covered: tests/test_activity_log.py, tests/test_bug_reports.py, tests/test_queue.py
 - [ ] B-STATIONS-5 `GET /stations/geocode` [require_manager] Search for cities by name using OpenStreetMap Nominatim. Returns up to 5 results. | modes: n.a. | NOT COVERED
 - [ ] B-STATIONS-6 ↳ Nominatim lookup returns <=5 results; upstream failure handled | modes: n.a. | NOT COVERED
@@ -554,8 +554,8 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-STATIONS-8 `PUT /stations/{station_id}` [require_manager] update | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
 - [ ] B-STATIONS-9 ↳ non-admin cannot toggle `protected` (403) | modes: n.a. | covered: tests/test_station_permissions.py
 - [ ] B-STATIONS-10 ↳ manager not assigned to station gets 403 | modes: n.a. | covered: tests/test_station_permissions.py
-- [ ] B-STATIONS-11 ↳ changing automation_config (weather_region, spot_timing, timed_during_long_items...) takes effect at next replenish | modes: both | NOT COVERED
-- [ ] B-STATIONS-12 ↳ changing timezone moves hourly time clips to the new local hour (_drop_wrong_hour_announcements) | modes: both | NOT COVERED
+- [x] B-STATIONS-11 ↳ changing automation_config (weather_region, spot_timing, timed_during_long_items...) takes effect at next replenish | modes: both | covered: tests/test_station_changes_on_air.py::test_automation_config_change_takes_effect_at_next_refill
+- [x] B-STATIONS-12 ↳ changing timezone moves hourly time clips to the new local hour (_drop_wrong_hour_announcements) | modes: both | covered: tests/test_station_changes_on_air.py::test_timezone_change_moves_time_checks_to_the_new_local_hour
 - [ ] B-STATIONS-13 `DELETE /stations/{station_id}` [require_manager] delete | modes: n.a. | covered: tests/test_activity_log.py, tests/test_station_permissions.py, tests/test_stations.py
 - [ ] B-STATIONS-14 ↳ protected station: only admin may delete | modes: n.a. | covered: tests/test_station_permissions.py
 - [ ] B-STATIONS-15 ↳ delete cascades queue/schedules/now-playing without orphan errors in scheduler loop | modes: both | NOT COVERED
@@ -607,7 +607,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-WEBSOCKET-1 `WEBSOCKET /ws/alerts` [PUBLIC] WebSocket endpoint for real-time alert notifications to admin clients. | modes: both | NOT COVERED
 - [ ] B-WEBSOCKET-2 `WEBSOCKET /ws/now-playing/{station_id}` [PUBLIC] websocket now playing | modes: both | NOT COVERED
 - [ ] B-WEBSOCKET-3 ↳ receives now_playing on every change (incl. engine started reports), stream_url field | modes: both | covered: tests/test_now_playing_broadcast.py
-- [ ] B-WEBSOCKET-4 ↳ mix_over and fade_seconds messages delivered | modes: browser | NOT COVERED
+- [x] B-WEBSOCKET-4 ↳ mix_over and fade_seconds messages delivered | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_mix_over_and_fade_reach_the_browser_players
 ## 2. Background jobs and periodic behaviour
 
 ### 2a. Scheduler loop (`services/scheduler_engine.py`, every 3 s, leader-only)
@@ -660,7 +660,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-47 Daily: holiday coverage extended when < 365 days ahead or no window in next 7 days (`_maybe_extend_holidays`) | modes: both | covered: tests/test_scheduler_jobs.py::test_daily_holiday_extension_is_per_station (per station, fixed)
 - [ ] B-JOB-48 Daily weather readout generated at station local generate_time (default 06:00) when weather_readout.enabled | modes: both | NOT COVERED
 - [ ] B-JOB-49 Weather readout auto-queued at queue_time when weather_readout.auto_queue | modes: both | NOT COVERED
-- [ ] B-JOB-50 Legacy Liquidsoap health check / push / skip only when LIQUIDSOAP_ENABLED (must stay off) | modes: browser | NOT COVERED
+- [x] B-JOB-50 Legacy Liquidsoap health check / push / skip only when LIQUIDSOAP_ENABLED (must stay off) | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_legacy_liquidsoap_is_off_by_default, ::test_legacy_liquidsoap_when_switched_on
 
 ### 2b. Queue replenish (`services/queue_replenish_service.py`)
 - [ ] B-JOB-51 requests_only station: fill from approved song requests / popular (popular_request_threshold, default 3) | modes: both | NOT COVERED
@@ -685,7 +685,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-JOB-70 Global sponsors inserted only for stations using global rules | modes: both | NOT COVERED
 - [ ] B-JOB-71 oldies_only filter (oldies_min_years, default 10) | modes: both | NOT COVERED
 - [ ] B-JOB-72 No rules -> random music fill; library empty -> queue_empty alert | modes: both | NOT COVERED
-- [ ] B-JOB-73 Replenish skipped during blackout after advance; serialized per station (_refill_lock); slow refill (>5 s) logged | modes: both | NOT COVERED
+- [x] B-JOB-73 Replenish skipped during blackout after advance; serialized per station (_refill_lock); slow refill (>5 s) logged | modes: both | covered: tests/test_refill_legacy_ws_email.py::test_advance_tops_up_the_queue_but_not_during_blackout, ::test_refills_of_one_station_run_one_at_a_time, ::test_slow_refill_is_logged
 - [ ] B-JOB-74 Quick successive playlist edits share one background rebuild | modes: both | covered: tests/test_listeners_live.py
 
 ### 2c. Schedule refresh / spots / blocks
@@ -767,14 +767,14 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [ ] B-SET-23 PLAYOUT_ENGINE_ENABLED + PLAYOUT_ENGINE_STATION_ID(s) -> engine_drives(station) true only for listed stations | modes: engine | covered: tests/test_playout_engine.py
 - [ ] B-SET-24 PLAYOUT_ENGINE_URL / engine_control_url per station; PLAYOUT_ENGINE_TOKEN both ways | modes: engine | covered: tests/test_playout_engine.py
 - [ ] B-SET-25 PLAYOUT_STREAM_LIVE -> stream_url published, site plays engine stream | modes: engine | covered: tests/test_playout_status.py
-- [ ] B-SET-26 LIQUIDSOAP_ENABLED (legacy telnet) must stay off; when on, skip/push calls made | modes: browser | NOT COVERED
+- [x] B-SET-26 LIQUIDSOAP_ENABLED (legacy telnet) must stay off; when on, skip/push calls made | modes: browser | covered: tests/test_refill_legacy_ws_email.py::test_legacy_liquidsoap_is_off_by_default, ::test_legacy_liquidsoap_when_switched_on
 - [ ] B-SET-27 SILENCE_DETECTION_SECONDS default 30 | modes: browser | covered: tests/test_station_settings.py::test_dead_air_alert_follows_silence_threshold
 - [ ] B-SET-28 ELEVENLABS_API_KEY/VOICE_ID unset -> no TTS fallback, uploaded clips only | modes: both | covered: tests/test_weather_spots.py
 - [ ] B-SET-29 OPENWEATHERMAP_API_KEY unset -> weather disabled gracefully | modes: both | NOT COVERED
-- [ ] B-SET-30 SUPABASE_URL/SERVICE_KEY unset -> uploads/local storage path; hourly announcements skipped | modes: both | NOT COVERED
+- [x] B-SET-30 SUPABASE_URL/SERVICE_KEY unset -> uploads/local storage path; hourly announcements skipped | modes: both | covered: tests/test_station_changes_on_air.py::test_no_storage_skips_hourly_time_checks, ::test_no_storage_keeps_uploads_on_local_disk
 - [ ] B-SET-31 ICECAST_* (icecast_enabled) -> /icecast start/stop usable | modes: n.a. | NOT COVERED
 - [ ] B-SET-32 STRIPE_* (stripe_enabled) -> checkout/webhook enabled else refused | modes: n.a. | covered: tests/test_auth_security.py::test_stripe_webhook_off_when_stripe_not_configured, tests/test_admin_crud.py::test_campaigns_and_billing_keep_sponsors_apart
-- [ ] B-SET-33 RESEND_API_KEY -> emails sent else skipped | modes: n.a. | NOT COVERED
+- [x] B-SET-33 RESEND_API_KEY -> emails sent else skipped | modes: n.a. | covered: tests/test_refill_legacy_ws_email.py::test_email_sent_only_with_resend_key
 - [ ] B-SET-34 ANTHROPIC_API_KEY -> AI email drafts and copy review via Claude; else keyword fallback | modes: n.a. | covered: tests/test_copy_review.py
 - [ ] B-SET-35 TWILIO_* (twilio_enabled / twilio_voice_enabled) -> SMS alerts and phone call-ins | modes: n.a. | NOT COVERED
 - [ ] B-SET-36 BUG_REPORTS_GITHUB_TOKEN / BUG_REPORTS_REPO -> mirror to GitHub | modes: n.a. | covered: tests/test_bug_reports.py
