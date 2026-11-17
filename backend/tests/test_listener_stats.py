@@ -82,7 +82,6 @@ async def test_today_peak_never_below_current(client, db_session, auth_headers, 
     assert t["peak_today"] == 2 and t["active_now"] == 0
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: a new listener's first heartbeat waits for the ip-api.com lookup (up to 3 s)")
 @pytest.mark.asyncio
 async def test_first_heartbeat_does_not_wait_for_geo(client, db_session, monkeypatch):
     st = await _station(db_session)
@@ -98,7 +97,6 @@ async def test_first_heartbeat_does_not_wait_for_geo(client, db_session, monkeyp
     assert time.perf_counter() - t0 < limit(0.3)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: listener 'today' starts at UTC midnight, not the station's local midnight")
 @pytest.mark.asyncio
 async def test_today_is_station_local(client, db_session, auth_headers, geo_calls):
     st = Station(id=uuid.uuid4(), name="NY", type=StationType.INTERNET, timezone="America/New_York")
@@ -123,7 +121,6 @@ async def test_today_is_station_local(client, db_session, auth_headers, geo_call
     assert t["total_sessions"] == expected
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: the listener IP is the client-supplied first X-Forwarded-For hop, so a script can pose as any address")
 @pytest.mark.asyncio
 async def test_spoofed_forwarded_for_is_not_trusted(client, db_session, geo_calls):
     st = await _station(db_session)

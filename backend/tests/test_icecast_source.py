@@ -50,6 +50,7 @@ async def test_icecast_down_is_retried_and_stop_forgets_the_client(monkeypatch):
     """Icecast down: logged and retried every 5 s until stopped; stop cancels the
     task and removes the client."""
     monkeypatch.setattr(settings, "ICECAST_HOST", "ice.test")
+    monkeypatch.setattr(settings, "ICECAST_SOURCE_PASSWORD", "configured-for-test")
     attempts = []
 
     async def failing_put(self, url, **kw):
@@ -74,7 +75,6 @@ async def test_icecast_down_is_retried_and_stop_forgets_the_client(monkeypatch):
     assert "st-9" not in icecast_service._icecast_clients
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: with ICECAST_HOST set and no password configured, the source streams with the default 'hackme'")
 @pytest.mark.asyncio
 async def test_default_password_is_not_used(monkeypatch):
     monkeypatch.setattr(settings, "ICECAST_HOST", "ice.test")

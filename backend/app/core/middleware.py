@@ -123,10 +123,10 @@ def _setup_rate_limiting(app: FastAPI) -> None:
     try:
         from slowapi import Limiter, _rate_limit_exceeded_handler
         from slowapi.errors import RateLimitExceeded
-        from slowapi.util import get_remote_address
+        from app.core.client_ip import rate_limit_key
 
         limiter = Limiter(
-            key_func=get_remote_address,
+            key_func=rate_limit_key,
             default_limits=["200/minute"],
             storage_uri="memory://",
         )

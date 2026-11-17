@@ -41,6 +41,9 @@ const SHORT_ITEM_SECONDS = 20;
 const SHORT_ITEM_HANDOVER_SECONDS = 0.3;
 // A short item still playing when the server moves on is let finish, up to this long
 const LET_FINISH_MAX_SECONDS = 8;
+// On the page, a short item hands over this close to the end of its file, its last
+// moment fading as the next item comes in
+const SHORT_END_HANDOVER_SECONDS = 0.15;
 function handOverPoint(crossStart: number, fileDuration: number): number {
   const short = isFinite(fileDuration) && fileDuration > 0 && fileDuration < SHORT_ITEM_SECONDS;
   const fileEnd = short
@@ -52,10 +55,17 @@ function handOverPoint(crossStart: number, fileDuration: number): number {
 }
 // A change heard less than this far into the new item starts it from the top (no seek)
 const START_FROM_TOP_SECONDS = 1.0;
+// A short item (time check) brought up this late after an item change still starts from the top
+const LATE_SHORT_FROM_TOP_SECONDS = 3.0;
 // A timed item's lead-in fade ends this long after its due time (see the preempt fade)
 const PREEMPT_FADE_OVERHANG_MS = 400;
 // A hard timed item is loaded on the idle deck this long before its time
 const TIMED_PRELOAD_AHEAD_MS = 60_000;
+// The page starts a pre-loaded hard timed item itself at its time (see the pre-arm),
+// fading the item on air this fast; a page that only gets there this late leaves it
+// to the server's message
+const PREARM_FADE_SECONDS = 0.3;
+const PREARM_LATE_MS = 500;
 
 /** Seek only when it moves the position: even a seek to where the element already
  *  is makes Safari re-decode and can repeat a few hundred milliseconds. */
@@ -466,7 +476,7 @@ export function useAudioEngine(
   }, []);
 
   // ── Crossfade execution ──
-  const executeCrossfade = useCallback(() => {
+  const executeCrossfade = useCallback((fadeOutSeconds: number = CROSSFADE_DURATION) => {
     const ctx = ctxRef.current;
     const activeDeck = getActiveDeck();
     const inactiveDeck = getInactiveDeck();
@@ -486,7 +496,7 @@ export function useAudioEngine(
     // Fade out active deck
     activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
     activeDeck.gain.gain.setValueAtTime(activeDeck.gain.gain.value, ctx.currentTime);
-    activeDeck.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + CROSSFADE_DURATION);
+    activeDeck.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeOutSeconds);
 
     // After crossfade completes, swap decks
     crossfadeTimerRef.current = setTimeout(() => {
@@ -497,7 +507,7 @@ export function useAudioEngine(
       crossfadeTriggeredRef.current = false;
       trackChangeTimeRef.current = Date.now();
       setSwapTick(t => t + 1);
-    }, CROSSFADE_DURATION * 1000 + 100);
+    }, fadeOutSeconds * 1000 + 100);
   }, [getActiveDeck, getInactiveDeck, replayGainMultiplier]);
 
   // ── Track changes → bring the new track on air ──
@@ -621,10 +631,9 @@ export function useAudioEngine(
     const letFinish = operatorFade == null && !replay && !outDeck.audio.paused && !outDeck.audio.ended
       && deckAssetRef.current[outLabel] != null
       && isFinite(outDur) && outDur > 0 && outDur < SHORT_ITEM_SECONDS
-      && outDur - outTime > 0.05 && outDur - outTime < LET_FINISH_MAX_SECONDS
-      // behind the server's hand-over point: it started late here
-      && outTime < outEnd - 0.5;
+      && outDur - outTime > 0.05 && outDur - outTime < LET_FINISH_MAX_SECONDS;
 
+    const outWasPlaying = !outDeck.audio.paused && !outDeck.audio.ended && deckAssetRef.current[outLabel] != null;
     let wentLive = false;
     const goLive = () => {
       if (wentLive || token !== changeTokenRef.current) return;
@@ -656,6 +665,11 @@ export function useAudioEngine(
       // of a second in: Safari lands an MP3 seek on an earlier frame, so the opening
       // was heard twice. Being that little behind the server is inaudible.
       if (startPos - cueIn < START_FROM_TOP_SECONDS) startPos = cueIn;
+      // A time check or station ID that comes in a little late here (a slow download)
+      // is heard from its first word, not joined in the middle; the item after it then
+      // waits for it to finish (letFinish). Not when sound is only now switched on.
+      if (isFinite(inDur) && inDur > 0 && inDur < SHORT_ITEM_SECONDS && outWasPlaying
+        && startPos - cueIn < LATE_SHORT_FROM_TOP_SECONDS) startPos = cueIn;
       seekIfNeeded(inDeck.audio, startPos);
       inDeck.gain.gain.cancelScheduledValues(now);
       inDeck.gain.gain.setValueAtTime(0, now);
@@ -800,6 +814,40 @@ export function useAudioEngine(
     return () => { cancelled = true; };
   }, [preloadId, preloadUrlOverride, audioReady, swapTick, nowPlayingAsset?.id, getDeck]);
 
+  // ── A hard timed item starts here at its exact time ──
+  // The server starts it at its time, but its message reaches the page a second or
+  // more later (13:00Z 2026-11-17: pages started the time check 1.1-1.8 s late). The
+  // item is pre-loaded on the idle deck, so the page brings it up itself at the due
+  // time, the way an operator's Next is heard at once; the server's message then
+  // confirms it. If it is not loaded, or the server says otherwise, the page follows
+  // the server as before.
+  useEffect(() => {
+    if (!nextPreemptAt || !nextPreemptAssetId || !isPlaying || !audioReady) return;
+    const due = new Date(nextPreemptAt).getTime();
+    if (!isFinite(due)) return;
+    const wait = due - serverNow();
+    if (wait < -PREARM_LATE_MS || wait > 300000) return;
+    const id = nextPreemptAssetId;
+    const timer = setTimeout(() => {
+      if (lastAssetId.current === id || crossfadingRef.current) return; // already announced
+      const ctx = ctxRef.current;
+      if (!ctx || ctx.state !== 'running') return;
+      const idle = otherDeck(activeDeckRef.current);
+      const deck = getDeck(idle);
+      if (!deck || deckAssetRef.current[idle] !== id || deck.audio.readyState < 2) return;
+      const known = nextAssetIdRef.current === id;
+      setLocalNext({
+        asset: { id, title: id, artist: null, asset_type: 'music', category: null, duration: null },
+        startedAt: new Date(due).toISOString(),
+        cueIn: known ? nextCueInRef.current : 0,
+        replayGainDb: known ? nextReplayGainDbRef.current : 0,
+        fade: PREARM_FADE_SECONDS,
+        at: due,
+      });
+    }, Math.max(0, wait));
+    return () => clearTimeout(timer);
+  }, [nextPreemptAt, nextPreemptAssetId, isPlaying, audioReady, getDeck]);
+
   // ── Preempt fade-out: schedule precise fade before hourly announcements ──
   useEffect(() => {
     if (!nextPreemptAt || !nextPreemptAssetId || !isPlaying || !audioReady) return;
@@ -927,7 +975,8 @@ export function useAudioEngine(
       const activeLabel = activeDeckRef.current;
       const activeDeck = getDeck(activeLabel);
       const nextId = nextAssetIdRef.current;
-      if (!activeDeck || activeDeck.audio.paused || !nextId) return;
+      // (a short item that has just ended still hands over: the check runs every 100 ms)
+      if (!activeDeck || (activeDeck.audio.paused && !activeDeck.audio.ended) || !nextId) return;
       // The crossfade point belongs to the track the server says is on air. While a
       // change is pending (Next was pressed and the new track is not up yet) the active
       // deck still holds the old track, so that point must not be applied to it.
@@ -937,7 +986,11 @@ export function useAudioEngine(
 
       const ct = activeDeck.audio.currentTime;
       const dur = activeDeck.audio.duration;
-      const crossPoint = handOverPoint(crossStartRef.current, dur);
+      // A short spoken item (time check, station ID) is never crossfaded: the next item
+      // comes in when it has really finished. All Day Stories, 03:00Z 2026-11-17: the
+      // paused story was faded in over the last seconds of the time check.
+      const short = isFinite(dur) && dur > 0 && dur < SHORT_ITEM_SECONDS;
+      const crossPoint = short ? Math.max(0.1, dur - SHORT_END_HANDOVER_SECONDS) : handOverPoint(crossStartRef.current, dur);
       if (crossPoint > 0 && ct >= crossPoint) {
         // Do not run ahead of the server: wait until it is (nearly) at the crossfade
         // point too. It announces the next track there, which brings it on air anyway.
@@ -948,7 +1001,7 @@ export function useAudioEngine(
           if (serverPos < crossPoint - MAX_LEAD_SECONDS) return;
         }
         crossfadeTriggeredRef.current = true;
-        executeCrossfade();
+        executeCrossfade(short ? SHORT_END_HANDOVER_SECONDS : CROSSFADE_DURATION);
       }
     }, CROSSFADE_CHECK_MS);
     return () => clearInterval(timer);

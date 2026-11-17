@@ -77,21 +77,31 @@ def trim_audio(
     trim_start: float,
     trim_end: float,
 ) -> tuple[bytes, float]:
-    """Trim audio to [trim_start, trim_end] using stream copy.
+    """Trim audio to [trim_start, trim_end] into an MP3.
 
+    An MP3 is cut by stream copy (no quality loss). Anything else (WAV, FLAC,
+    MP2...) cannot be copied into an MP3 file, so it is encoded.
     Returns (trimmed_bytes, new_duration).
     """
     duration = trim_end - trim_start
-    cmd = [
-        settings.FFMPEG_PATH, "-i", "pipe:0",
-        "-ss", str(trim_start),
-        "-to", str(trim_end),
-        "-c", "copy",
-        "-f", "mp3",
-        "pipe:1",
-    ]
-    result = subprocess.run(cmd, input=file_data, capture_output=True, timeout=120)
-    if result.returncode != 0:
+
+    def run(codec_args: list[str]) -> subprocess.CompletedProcess:
+        cmd = [
+            settings.FFMPEG_PATH, "-v", "error", "-i", "pipe:0",
+            "-ss", str(trim_start),
+            "-to", str(trim_end),
+            "-vn", *codec_args,
+            "-f", "mp3",
+            "pipe:1",
+        ]
+        return subprocess.run(cmd, input=file_data, capture_output=True, timeout=120)
+
+    from app.services.audio_convert_service import probe_codec
+
+    result = run(["-c:a", "copy"]) if probe_codec(file_data) == "mp3" else None
+    if result is None or result.returncode != 0 or not result.stdout:
+        result = run(["-c:a", "libmp3lame", "-b:a", "256k", "-ar", "44100"])
+    if result.returncode != 0 or not result.stdout:
         raise RuntimeError(f"FFmpeg trim failed: {result.stderr[:500]}")
 
     return result.stdout, duration

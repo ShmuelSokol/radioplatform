@@ -30,3 +30,7 @@ like the hourly time checks.
 With HS (hard start) off a station's time check waits for the song on air by design, so `hour_missing` is not checked then (`station_modes.hard_start_on`). Test: `test_no_hour_alarm_while_hard_start_is_off`.
 
 Each pass asks every engine station's stream server for its status at once (`asyncio.gather`), so a hung server costs the pass one 3 s timeout in total, not 3 s per station (`test_hung_stream_servers_keep_a_pass_under_five_seconds`). An operator's Remove of a time check is quiet by design (the row is deleted); a Panic cut on air is reported as "cut short".
+
+## Soft items behind a shiur (2026-11-17)
+
+A soft item due while a shiur had more than 5 minutes left should have paused it (`long_items.SOFT_PAUSE_MIN_LEFT_SECONDS`, see `hourly-slots.md`). It is normally made hard 90 s ahead, so the hard-item check covers it. If it is still soft and waiting `SOFT_STUCK_SECONDS` (30 s) after its time, air watch reports a `late_timed` finding "<item> is waiting behind <shiur>". There is no report on a "wait" station, with HS off, or when the item belongs to the shiur's own block.

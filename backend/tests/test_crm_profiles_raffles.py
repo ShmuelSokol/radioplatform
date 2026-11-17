@@ -173,7 +173,6 @@ async def test_raffle_dates_and_entry(client, auth_headers, db_session):
     assert (await client.post(f"{API}/raffles/{later.id}/enter", headers=pin)).status_code == 400
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: raffle station_id is ignored; every active raffle shows on every station's Listen page")
 @pytest.mark.asyncio
 async def test_raffle_shows_only_on_its_station(client, db_session):
     from app.models.station import Station, StationType

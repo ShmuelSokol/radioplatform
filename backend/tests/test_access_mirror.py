@@ -91,8 +91,6 @@ SCREEN_WRITES = {
 KNOWN_MISMATCH = {
     "/admin/studio": "BUG: DJs may open the Recording Studio and are not marked view-only, but saving a take "
                      "(POST /assets/upload) is managers only, so a DJ's recording is refused at the end",
-    "/admin/bug-reports": "BUG: managers open Bug reports without a View only marker, but changing a report's "
-                          "status (PATCH /bug-reports/{id}) is admin only",
     "/admin/program-clock": "BUG: managers may change the program clock (WRITE_ROLES MANAGERS) but deleting a "
                             "rule there (DELETE /rules/{id}) is admin only",
 }

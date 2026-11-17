@@ -395,6 +395,18 @@ async def _run_analysis_background(asset_id: str):
 _bulk_analyze_jobs: dict[str, dict] = {}
 
 
+def _lost_job(**counts) -> dict:
+    """Status of a bulk job this process does not know. Jobs run inside the web
+    process, so a restart (deploy) both stops the job and forgets it: the poll
+    answers "failed" with the reason instead of 404, so the page stops waiting.
+    Starting the job again picks up only what is still left (analysis skips items
+    already measured; auto-trim skips items with no silence left)."""
+    return {
+        "status": "failed", "total": 0, "processed": 0, "errors": 0, **counts,
+        "detail": "This job stopped when the server restarted. Start it again to finish the rest.",
+    }
+
+
 async def _run_bulk_analyze(job_id: str, asset_ids: list[str]):
     """Background task: analyze audio for multiple assets."""
     from app.db.session import async_session_factory
@@ -479,7 +491,7 @@ async def bulk_analyze_status(
     """Poll the status of a bulk audio analysis job."""
     job = _bulk_analyze_jobs.get(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        return {"job_id": job_id, **_lost_job(analyzed=0)}
     return {"job_id": job_id, **job}
 
 
@@ -535,7 +547,7 @@ async def bulk_auto_trim_status(
     """Poll the status of a bulk auto-trim job."""
     job = _bulk_trim_jobs.get(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        return BulkAutoTrimStatusResponse(job_id=job_id, **_lost_job(trimmed=0, skipped=0))
     return BulkAutoTrimStatusResponse(job_id=job_id, **job)
 
 

@@ -29,6 +29,15 @@ it cannot choose a candidate it was never shown.
 5 "B'tzeis Yisroel". Duplicates crowd out the candidate list and spread any ranking
 signal across interchangeable rows.
 
+## Readings of one request (2026-11-17)
+
+`request_readings()` scores several readings of what the listener typed and keeps the
+best: as typed; "X by Y"; "X - Y" both ways round ("Song - Singer", "Singer - Song");
+and, with no separator and no artist, a library artist's exact (normalized) name at the
+start or end of the title box ("matisyahu one day"). Only artist names already in the
+library are tried, so a request costs a few readings, not one per word. The as-typed
+reading is always kept, so titles that contain "by" or a dash still match.
+
 ## Conclusion
 
 Selection is the cheap win; **recall is the real ceiling**. A smarter selection layer

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_ip import client_ip
 from app.core.dependencies import get_db
 from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.live_show import LiveShow, LiveShowStatus
@@ -44,8 +45,7 @@ async def start_web_call(station_id: uuid.UUID, body: WebCallIn, request: Reques
                          db: AsyncSession = Depends(get_db)):
     """Join the queue of the station's live show. Returns the call and the token its
     page uses on /ws/live/call/{call_id}."""
-    ip = request.client.host if request.client else "?"
-    if _rate_limited(request.headers.get("x-forwarded-for", ip).split(",")[0].strip()):
+    if _rate_limited(client_ip(request) or "?"):
         raise HTTPException(429, "Too many calls in a few minutes. Please wait a little and try again.")
     show = (await db.execute(
         select(LiveShow).where(LiveShow.station_id == station_id, LiveShow.status == LiveShowStatus.LIVE).limit(1)

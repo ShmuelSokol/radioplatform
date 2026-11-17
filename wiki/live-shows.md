@@ -16,6 +16,13 @@ How a host goes on air (built 2026-11-16, after Shmuel's first test shows never 
 
 Checks: `tests/test_live_show_on_air.py` and `tests/test_live_show_lifecycle.py`. A browser check (fake mic → Listen page) was run by hand on 2026-11-16.
 
+## Phone call-ins: which show (2026-11-17)
+`POST /live-shows/twilio/inbound` routes by the number dialled (`To`): a station whose
+`broadcast_config.call_in_number` matches it (numerals compared) gets the call, and only its
+LIVE show with calls on; none live there = the no-show message. A number no station claims
+(the shared `TWILIO_VOICE_NUMBER`) keeps the old rule: the most recently started live show
+with calls on. Test: `tests/test_alerts_calls_twilio.py::test_phone_call_reaches_the_dialled_station`.
+
 ## Web call-ins (2026-11-16, Shmuel chose these over phone lines for now)
 A listener calls from `/call/<station id>` (linked from the Listen page's live banner when the show takes calls). No Twilio.
 1. **Join** (`POST /call-in/{station_id}`, public, 5 per address per 10 min): creates a normal `CallInRequest` (`caller_phone` "Web caller", name, topic in `notes`) for the station's LIVE show with `calls_enabled`, and sends the screener a `caller_queued` event carrying the whole call. It returns a token, an HMAC of the call id with the JWT secret (`services/call_in.py`), so nothing new is stored.

@@ -151,6 +151,19 @@ cut about 1.8 s early and the resumed story was heard over it (All Day Stories, 
 2026-11-16). Tests: `backend/tests/test_handover_rule.py`, e2e `audio-engine.mjs`
 scenarios `time-check-not-talked-over` and `time-check-hands-over-at-its-end`.
 
+Since 2026-11-17 (All Day Stories 03:00Z: the paused story came in 2.9 s over the time
+check): the page's own crossfade check never crossfades a short item; the next item
+comes in 0.15 s before the file's end (also after `ended`, the check runs every 100 ms).
+`letFinish` holds for any short item still talking when the server moves on. A short
+item brought up up to 3 s late after an item change starts from its first word, not
+joined mid-sentence. And a pre-loaded hard timed item (or a soft one at its `hard_by`)
+starts on the page at its due time by itself (pre-arm, via `localNext` with a 0.3 s fade
+of the item on air); the server's message confirms it a moment later. Pages were
+1.1-1.8 s late waiting for that message. Listen gets the due time from
+`next_asset.cut_at` in the now-playing message (control room: from the queue,
+`nextCut`). Scenarios `story-resumes-after-time-check`,
+`story-resumes-after-late-time-check`, `hard-time-check-starts-on-time-before-the-message`.
+
 ## Server clock, not the device clock (2026-11-17)
 Every position and due time (`started_at`, `preempt_at`, `ends_at`, a push's `at`) is server time, so the player compares them with `serverNow()` from `src/lib/serverClock.ts`, never `Date.now()`. The offset is measured from `server_time` in the release policy (`lib/appUpdate.ts`, on connect and every minute). Before, a PC 20 s fast joined every song 20 s in and faded the song for the hourly time check 20 s early. Used by useAudioEngine (live position, timed fades, crossfade, playNextNow), useNowPlayingWS (overdue check), Listen, Dashboard, `controlroom/timing.ts nextCut` and the transport clock. Checked by `e2e/listen-page.mjs` ONLY=clock (device clock 20 s fast and 30 s slow).
 
