@@ -1,0 +1,37 @@
+assets 10699
+groups with same title+artist: 2095 extra copies: 3290 by type: {'music': 4240, 'shiur': 1084, 'stories': 37, 'spot': 4, 'jingle': 20}
+music-only groups: 1637 extra: 2483
+groups whose copies are all within 1 s duration: 1814 extra: 2692
+assets with a stored hash: 0
+dup copies referenced by playlists/queue/etc: 702 of 5385
+groups where 2+ copies are referenced: 94
+playlist rows pointing at dup copies: 0 pending/playing queue rows: 791
+
+largest groups:
+  11x Shlomo Carlebach - Mimkomcha [music] durs [195, 195, 201, 254, 264, 311, 312, 345, 347, 385, 431] refs 0
+  11x Shlomo Carlebach - Mizmor Shir [music] durs [75, 178, 178, 199, 199, 212, 283, 283, 283, 519, 560] refs 0
+  11x Shlomo Carlebach - nusach [music] durs [43, 46, 65, 88, 97, 147, 161, 247, 263, 284, 346] refs 0
+  11x Shlomo Carlebach - Niggun  [shiur] durs [37, 67, 92, 130, 130, 135, 147, 177, 190, 397, 466] refs 0
+  9x Shlomo Carlebach - Haneshama Lach [music] durs [53, 53, 96, 96, 96, 190, 211, 234, 237] refs 0
+  9x Shlomo Carlebach - Asher Bara [music] durs [61, 61, 104, 104, 131, 131, 131, 183, 203] refs 0
+  8x Shlomo Carlebach - Adir Hu [music] durs [192, 212, 223, 251, 254, 266, 315, 315] refs 0
+  8x Shlomo Carlebach - Am Yisrael Chai [music] durs [85, 159, 196, 197, 321, 321, 449, 880] refs 1
+  8x Shlomo Carlebach - Eliyahu Hanavi [music] durs [156, 179, 199, 199, 231, 238, 271, 271] refs 0
+  8x Shlomo Carlebach - Lulei Torascha [music] durs [143, 144, 164, 166, 178, 202, 244, 263] refs 0
+  8x Shlomo Carlebach - Ahavas Olam [music] durs [168, 168, 189, 252, 260, 263, 263, 418] refs 0
+  8x Shlomo Carlebach - Shomer Yisroel [music] durs [201, 201, 201, 201, 201, 248, 248, 368] refs 0
+  8x Tek-noy - Sapru [music] durs [297, 297, 297, 297, 297, 297, 297, 297] refs 1
+  8x Shlomo Carlebach - Speech [shiur] durs [49, 66, 73, 90, 156, 181, 187, 308] refs 0
+  7x Shlomo Carlebach - Ki Mitzion [music] durs [186, 187, 208, 231, 231, 261, 331] refs 0
+  7x Shlomo Carlebach - Shalom Aleichem [music] durs [52, 104, 104, 104, 123, 242, 533] refs 0
+  7x Shlomo Carlebach - Yehi Shalom [music] durs [182, 193, 193, 193, 211, 376, 1248] refs 1
+  7x Shlomo Carlebach - Hashmi'ini [music] durs [139, 139, 147, 207, 217, 253, 294] refs 0
+  7x Shlomo Carlebach - Simcha Le'artzecha [music] durs [169, 246, 285, 294, 434, 518, 649] refs 1
+  7x Shlomo Carlebach - Lema'an Achai [shiur] durs [139, 191, 195, 197, 208, 231, 262] refs 0
+  7x Shlomo Carlebach - new niggun [shiur] durs [45, 69, 109, 129, 139, 146, 274] refs 0
+  6x eshoma Orchestra - K' Ish Echos [music] durs [293, 293, 293, 293, 293, 293] refs 3
+  6x Rabbi Yitzchok Shechter - Pesachim 46 [shiur] durs [2741, 2741, 2741, 2741, 2741, 2741] refs 0
+  6x Rabbi Yitzchok Shechter - Pesachim 52 [shiur] durs [2840, 2840, 2840, 2840, 2840, 2840] refs 0
+  6x Rabbi Yitzchok Shechter - Pesachim 53 [shiur] durs [2788, 2788, 2788, 2788, 2788, 2788] refs 0
+
+copies by created date (top): [('2026-02-20', 4741), ('2026-02-22', 611), ('2026-02-19', 13), ('2026-07-08', 4), ('2026-11-17', 2), ('2026-06-16', 2), ('2026-06-17', 2), ('2026-06-18', 2)]
