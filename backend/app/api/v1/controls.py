@@ -4,6 +4,7 @@ the asset on air through the queue, the station's one player."""
 import logging
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.exceptions import RedisError
@@ -25,10 +26,12 @@ NO_REDIS = "These old controls need Redis, which is not set up. Use the control 
 
 
 async def _redis_call(coro):
-    """Run a Redis-backed control; no Redis is a 409 with a plain reason, not a 500."""
+    """Run a Redis-backed control; no Redis is a 409 with a plain reason, not a 500.
+    With Redis up, the old player also calls its stream server over HTTP: that being
+    unreachable is the same "not set up" answer (CI has Redis but no stream server)."""
     try:
         return await coro
-    except (RedisError, OSError, ValueError) as exc:
+    except (RedisError, OSError, ValueError, httpx.HTTPError) as exc:
         logger.warning("Old controls without Redis: %s", exc)
         raise ConflictError(NO_REDIS) from exc
 
