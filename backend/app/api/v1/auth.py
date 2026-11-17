@@ -110,8 +110,11 @@ async def seed_reset_admin(
     db: AsyncSession = Depends(get_db),
     _admin: "User" = Depends(require_admin),
 ):
-    """Reset admin credentials — requires existing admin auth."""
-    result = await db.execute(select(User).where(User.role == UserRole.ADMIN))
+    """Reset admin credentials — requires existing admin auth.
+    Resets the FIRST admin (oldest); with two admins this used to crash (500)."""
+    result = await db.execute(
+        select(User).where(User.role == UserRole.ADMIN).order_by(User.created_at).limit(1)
+    )
     existing = result.scalar_one_or_none()
     if existing:
         existing.email = "admin"
