@@ -309,9 +309,44 @@ async def test_the_scheduler_pass_fits_the_queue_on_both_players(db_session: Asy
 
     await SchedulerEngine()._check_all_stations(db_session)
     assert [who for who, _ in seen] == [player]
-    assert seen[0][1][:2] == ["A", "Five minutes"], seen  # fitted before the player looked: it now ends at the hour
+    assert seen[0][1][:2] == ["A", "Long"], seen  # fitted before the player looked
     _, played, lost = await _lost_at_the_hour(db_session, station_id, ENDS)
     assert lost <= hour_fit.ACCEPTABLE_CUT and played > 200
     # The next pass (a second later) does not look again
     await SchedulerEngine()._check_all_stations(db_session)
     assert seen[1][1] == seen[0][1]
+
+
+@pytest.mark.asyncio
+async def test_a_fit_that_ends_just_after_the_hour_beats_one_that_ends_just_before(db_session: AsyncSession):
+    """F-HOURFIT-8: song changes drift by a few seconds. A fit ending a few seconds
+    early is one drift away from letting another song start (live, Jerusalem
+    21:47: fitted to lose 0 s, then 219 s ten seconds later), so a song that
+    runs a little past the hour is chosen over one that stops a little short."""
+    station = await _station(db_session)
+    station_id = station.id
+    # Room for the last song: 300 s. 'Short of it' would end 5 s early, 'Past it' 6 s late.
+    ends = HOUR - timedelta(seconds=300)
+    await _queue(db_session, station, ends, [("Far too long", 500.0), ("Short of it", 298.0), ("Past it", 309.0)])
+    assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=2)) is True
+    await db_session.commit()
+    assert (await _order(db_session, station_id))[0] == "Past it"
+
+
+@pytest.mark.asyncio
+async def test_a_songs_own_crossfade_point_is_used(db_session: AsyncSession):
+    """F-HOURFIT-9: songs on this station hand over 3 to 12 s before their file ends.
+    The fit counts each song up to its measured crossfade point, as the players do."""
+    from app.models.asset import ANALYSIS_VERSION
+
+    station = await _station(db_session)
+    station_id = station.id
+    ends = HOUR - timedelta(seconds=300)
+    await _queue(db_session, station, ends, [("Far too long", 500.0), ("Long tail", 340.0), ("Plain", 325.0)])
+    tail = (await db_session.execute(select(Asset).where(Asset.title == "Long tail"))).scalar_one()
+    # Hands over at 302 s: 2 s past the hour, though the file runs 40 s past it
+    tail.metadata_extra = {"audio_analysis": {"version": ANALYSIS_VERSION, "cross_start_seconds": 302.0}}
+    await db_session.commit()
+    assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=2)) is True
+    await db_session.commit()
+    assert (await _order(db_session, station_id))[0] == "Long tail"

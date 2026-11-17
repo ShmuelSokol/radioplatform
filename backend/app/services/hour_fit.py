@@ -40,8 +40,13 @@ ACCEPTABLE_CUT = 15.0
 WORTH_IT = 20.0
 # A timed item due within this of a song's end starts at once (queue.TIMED_EARLY_START_SECONDS)
 EARLY_START = 8.0
-# Songs overlap by about this much at a change
+# Songs overlap by about this much at a change when a song has no measured
+# crossfade point (queue.handover_seconds gives each song's own)
 CROSSFADE = 3.0
+# Ending a little after the hard item costs only the fade; ending before it relies
+# on the early start and, a second or two earlier still, lets one more song start.
+# Song changes drift by a few seconds, so a fit that ends early counts as worse.
+EARLY_COST = 10.0
 # A song starting this soon is already announced to listeners' pages: not moved
 FROZEN = 30.0
 # Seconds between looks per station (the scheduler passes every second or two)
@@ -63,17 +68,26 @@ def _aware(dt: datetime) -> datetime:
 
 
 def _seconds(entry) -> float | None:
+    """How long the entry holds the air: its length up to the point where it hands
+    over to the next item (the same rule the players use), or None if unknown."""
     asset = entry.asset
     value = getattr(asset, "duration", None) if asset is not None else None
-    return float(value) if value and value > 0 else None
+    if not value or value <= 0:
+        return None
+    from app.api.v1.queue import handover_seconds
+
+    return max(1.0, float(value) - handover_seconds(entry))
 
 
 def _cut(total: float, room: float) -> float | None:
-    """Seconds lost to the fade when `total` seconds of songs fill `room` seconds,
-    or None when they end early enough that one more song would start and be cut."""
+    """Cost of filling `room` seconds with `total` seconds of songs: the seconds lost
+    to the fade, or a little more than that for ending just before the hard item.
+    None when they end early enough that one more song would start and be cut."""
     if total < room - EARLY_START:
         return None
-    return max(0.0, total - room)
+    if total < room:
+        return EARLY_COST + (room - total)
+    return total - room
 
 
 async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None = None, *, force: bool = False) -> bool:
@@ -142,7 +156,7 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         length = _seconds(playing)
         if length is None:
             return False  # its end is unknown: nothing can be planned around it
-        at = max(now, _aware(playing.started_at) + timedelta(seconds=length - CROSSFADE))
+        at = max(now, _aware(playing.started_at) + timedelta(seconds=length))
     last_start = hard_at - timedelta(seconds=EARLY_START)
     if at >= last_start:
         return False  # the item on air runs to the hard item
@@ -164,7 +178,7 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         if length is None:
             return False
         slots.append(_Slot(entry, at, length))
-        at += timedelta(seconds=length - CROSSFADE)
+        at += timedelta(seconds=length)
     if not slots:
         return False
     last = slots[-1]
@@ -208,7 +222,7 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
                     continue
                 if _artist(a) and _artist(a) == _artist(b):
                     continue
-                cut = _cut(_seconds(a) + _seconds(b) - CROSSFADE, room2)
+                cut = _cut(_seconds(a) + _seconds(b), room2)
                 if cut is not None and cut < best_cut:
                     best_cut, best = cut, (a, b)
     if best is None or loses - best_cut < WORTH_IT:
