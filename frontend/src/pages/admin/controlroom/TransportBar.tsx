@@ -29,6 +29,8 @@ interface Props {
   elapsed: number;
   remaining: number;
   duration: number;
+  /** When a hard timed item will cut the item on air before its end (ISO time); Remaining then counts to it. */
+  cutAt?: string | null;
   /** Seconds of intro left on the item on air; 0 when there is none or it has passed. */
   introSeconds: number;
   onStart: () => void;
@@ -140,7 +142,12 @@ export function TransportButtons({ p, stacked }: { p: Props; stacked: boolean })
 }
 
 export default function TransportBar(p: Props) {
-  const progress = p.duration > 0 ? Math.min(100, (p.elapsed / p.duration) * 100) : 0;
+  // With a cut coming, the bar fills up to the cut (elapsed + remaining), not to the file's end.
+  const barTotal = p.cutAt ? p.elapsed + p.remaining : p.duration;
+  const progress = barTotal > 0 ? Math.min(100, (p.elapsed / barTotal) * 100) : 0;
+  const cutClock = p.cutAt ? new Date(p.cutAt).toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', ...(p.stationTz ? { timeZone: p.stationTz } : {}),
+  }) : null;
   const ending = p.isPlaying && p.remaining > 0 && p.remaining <= 10;
   const { audio } = p;
 
@@ -211,8 +218,11 @@ export default function TransportBar(p: Props) {
           <span className="hidden lg:block">{stationSelect}</span>
           <PlayoutBadge stationId={p.stationId} dark className="hidden lg:inline-flex" />
         </div>
-        <div className="leading-none shrink-0">
-          <div className="qn-lcd-label">Remaining</div>
+        <div className="leading-none shrink-0"
+          title={cutClock ? `This item fades at ${cutClock} for a timed item` : undefined}>
+          <div className="qn-lcd-label" data-testid="remaining-label">
+            Remaining{cutClock && <span className="!text-yellow-300"> · fades {cutClock}</span>}
+          </div>
           <div className={`qn-digits text-3xl lg:text-[44px] ${remainingCls}`} data-testid="remaining">{remainingText}</div>
         </div>
         {intro}
