@@ -68,9 +68,9 @@ export default function MatchToSong({
           onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
           placeholder="Search the library"
           aria-label="Search the library for the requested song"
-          className="w-44 bg-[#0a0a28] border border-[#2a2a5e] rounded px-2 py-1 text-[12px] text-white"
+          className="w-44 max-w-[60vw] bg-[#0a0a28] border border-[#2a2a5e] rounded px-2 py-1 text-[16px] sm:text-[12px] text-white"
         />
-        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 text-[11px]" aria-label="Close search">
+        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 text-[11px] min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0" aria-label="Close search">
           ✕
         </button>
       </div>
@@ -84,7 +84,7 @@ export default function MatchToSong({
             key={a.id}
             type="button"
             onClick={() => { onPick(a); setOpen(false); }}
-            className="block w-full text-left px-2 py-1.5 text-[12px] hover:bg-[#1e1e50] border-b border-[#1a1a3e] last:border-0"
+            className="block w-full text-left px-2 py-1.5 min-h-[44px] sm:min-h-0 text-[12px] hover:bg-[#1e1e50] border-b border-[#1a1a3e] last:border-0"
           >
             <span className="text-white">{a.title}</span>
             {a.artist && <span className="text-gray-400"> — {a.artist}</span>}

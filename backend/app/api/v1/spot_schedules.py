@@ -114,6 +114,8 @@ async def preview_spot_plan(
 ):
     """Look ahead: every sponsor spot planned for the next N days on a station,
     plus any spot that could not be given a slot."""
+    from app.services.station_modes import spots_on
+
     station = await _get_or_404(db, Station, station_id, "Station")
     now = datetime.now(UTC)
     placements, unplaced = await plan_for_station(db, station, days=days, now=now)
@@ -163,6 +165,7 @@ async def preview_spot_plan(
             OffAirWindow(name=b.name, start=b.start, end=b.end, skipped_plays=n)
             for b, n in sorted(skipped.items(), key=lambda kv: kv[0].start)
         ],
+        spots_off=not spots_on(station),
     )
 
 

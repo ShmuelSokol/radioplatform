@@ -537,8 +537,22 @@ export default function Dashboard() {
   }, [looping, qc, refreshQueue]);
 
   // HS and Spots mode switches, Panic (KBR Studio's control panel)
-  const modes = (queueData as { modes?: StationModes } | undefined)?.modes ?? { hard_start: true, spots: true };
+  // Until the queue (which carries the modes) has loaded, the real state is unknown:
+  // the buttons stay greyed so nobody presses them on a wrong state
+  const knownModes = (queueData as { modes?: StationModes } | undefined)?.modes;
+  const modes = knownModes ?? { hard_start: true, spots: true };
   const [modesBusy, setModesBusy] = useState(false);
+  // A mode change made in another control room arrives on the now-playing channel
+  useEffect(() => {
+    const onModes = (ev: Event) => {
+      const d = (ev as CustomEvent<{ station_id?: string; hard_start?: boolean; spots?: boolean }>).detail;
+      if (!d?.station_id || typeof d.hard_start !== 'boolean' || typeof d.spots !== 'boolean') return;
+      const next = { hard_start: d.hard_start, spots: d.spots };
+      qc.setQueryData(['queue', d.station_id], (old: unknown) => (old && typeof old === 'object' ? { ...old, modes: next } : old));
+    };
+    window.addEventListener('kbr-modes', onModes);
+    return () => window.removeEventListener('kbr-modes', onModes);
+  }, [qc]);
   const changeModes = useCallback(async (next: Partial<StationModes>) => {
     const sid = latest.current.stationId;
     if (!sid) return;
@@ -584,7 +598,7 @@ export default function Dashboard() {
   }, [qc, refreshQueue]);
   const modeProps = {
     stationId: stationId ?? null,
-    hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId,
+    hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId, modesKnown: !!knownModes,
     canChange: !!user && user.role !== 'viewer',
     onHardStart: () => changeModes({ hard_start: !modes.hard_start }),
     onSpots: () => changeModes({ spots: !modes.spots }),

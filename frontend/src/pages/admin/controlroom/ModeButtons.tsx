@@ -11,6 +11,8 @@ export interface ModeProps {
   hardStart: boolean;
   spots: boolean;
   busy: boolean;
+  /** False until the server has said which modes are on: HS and Spots stay greyed */
+  modesKnown?: boolean;
   canChange: boolean;
   onHardStart: () => void;
   onSpots: () => void;
@@ -49,14 +51,14 @@ export default function ModeButtons({ p, stacked }: { p: ModeProps; stacked: boo
   const isArmed = !!armed && armed.station === p.stationId;
   return (
     <div className={stacked ? 'flex flex-col gap-1' : 'flex gap-1 p-1 bg-[#c0c0c0]'} role="group" aria-label="Station modes">
-      <button type="button" data-testid="mode-hs" aria-pressed={p.hardStart} disabled={p.busy || !p.canChange} onClick={p.onHardStart}
+      <button type="button" data-testid="mode-hs" aria-pressed={p.hardStart} disabled={p.busy || !p.canChange || p.modesKnown === false} onClick={p.onHardStart}
         title={p.hardStart
           ? 'HS (hard start) is on: the time check and hard blocks start on the second, fading the song. Press to make them wait for the song to end.'
           : 'HS is off: timed items wait for the song on air to end. Press to start them on the second again.'}
         className={`${btn} ${p.hardStart ? '' : '!bg-amber-300'}`}>
         HS{stacked ? '' : p.hardStart ? ' on' : ' off'}
       </button>
-      <button type="button" data-testid="mode-spots" aria-pressed={p.spots} disabled={p.busy || !p.canChange} onClick={p.onSpots}
+      <button type="button" data-testid="mode-spots" aria-pressed={p.spots} disabled={p.busy || !p.canChange || p.modesKnown === false} onClick={p.onSpots}
         title={p.spots
           ? 'Spots mode is on: scheduled sponsorships play. Press to stop putting sponsorships on the air.'
           : 'Spots mode is off: no sponsorships play. Press to put them back.'}
