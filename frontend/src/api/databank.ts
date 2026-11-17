@@ -39,6 +39,10 @@ export const listDbItems = async (p: DbItemsParams): Promise<{ total: number; it
   return (await apiClient.get('/databank/items', { params })).data;
 };
 
+/** Every type (category) in the whole table, not just the page on screen. */
+export const listDbTypes = async (assetType: string): Promise<string[]> =>
+  (await apiClient.get('/databank/types', { params: { asset_type: assetType } })).data.types;
+
 /** One row of Spots.db. */
 export interface DbSpot {
   id: string;

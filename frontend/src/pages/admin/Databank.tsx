@@ -6,7 +6,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { isManager } from '../../auth/access';
 import { updateAsset } from '../../api/assets';
 import {
-  listDbItems, listDbSpots, setSpotEndDate,
+  listDbItems, listDbSpots, listDbTypes, setSpotEndDate,
   type DbFiles, type DbItem, type DbSort, type DbSpot,
 } from '../../api/databank';
 import { listProgramBlocks, type ProgramBlock } from '../../api/programBlocks';
@@ -50,6 +50,17 @@ export function kbrWeekdays(days: string): string {
   return days.split(',').map(s => s.trim()).filter(Boolean).map(d => (Number(d) + 1) % 7).sort((a, b) => a - b).join('');
 }
 
+/** The server's words for a refused change. FastAPI's 422 answers carry a list of
+ *  problems, not a sentence: rendering that list as text crashed the page. */
+export function errText(e: any, fallback: string): string {
+  const d = e?.response?.data?.detail;
+  if (typeof d === 'string' && d) return d;
+  if (Array.isArray(d) && d.length) {
+    return d.map(x => (typeof x === 'string' ? x : String(x?.msg ?? '')).replace(/^Value error, /, '')).filter(Boolean).join(' ') || fallback;
+  }
+  return fallback;
+}
+
 /* ── Edit-in-place cell ──────────────────────────────────── */
 
 function EditCell({ value, type = 'text', onSave, onCancel, list }: {
@@ -58,17 +69,42 @@ function EditCell({ value, type = 'text', onSave, onCancel, list }: {
 }) {
   const [v, setV] = useState(value);
   const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); ref.current?.select?.(); }, []);
+  // Enter, Esc and leaving the box each end the edit once (no second save on blur)
+  const done = useRef(false);
+  const finish = (save: boolean) => {
+    if (done.current) return;
+    done.current = true;
+    if (save && v !== value) onSave(v); else onCancel();
+  };
+  useEffect(() => {
+    const el = ref.current;
+    el?.focus({ preventScroll: true }); el?.select?.();
+    // On a phone the keyboard covers the lower half: bring the row to the top of
+    // the list (only the list scrolls, never the page under the fixed toolbar)
+    const list = el?.closest('[data-testid="db-table"]') as HTMLElement | null;
+    if (el && list) {
+      const top = el.getBoundingClientRect().top - list.getBoundingClientRect().top;
+      const phone = !window.matchMedia('(min-width: 1024px)').matches;
+      if (phone) list.scrollTop += top - 4;
+      else if (top < 0 || top > list.clientHeight - 24) list.scrollTop += top - list.clientHeight / 2;
+    }
+  }, []);
   return (
     <input ref={ref} type={type} value={v} list={list} data-testid="db-edit-input"
       onChange={e => setV(e.target.value)}
+      onClick={e => e.stopPropagation()}
       onKeyDown={e => {
         e.stopPropagation();
-        if (e.key === 'Enter') onSave(v);
-        if (e.key === 'Escape') onCancel();
+        if (e.key === 'Enter') { e.preventDefault(); if (done.current) return; done.current = true; onSave(v); }
+        if (e.key === 'Escape') finish(false);
       }}
-      onBlur={() => (v === value ? onCancel() : onSave(v))}
-      className="w-full h-full min-h-[24px] px-1 bg-white text-black font-normal outline-none border border-[#000080]" />
+      onBlur={e => {
+        // Turning Edit mode off closes the box without saving
+        if ((e.relatedTarget as HTMLElement | null)?.closest?.('[data-edit-toggle]')) finish(false);
+        else finish(v !== value);
+      }}
+      // 16 px on a phone: smaller text makes iPhone Safari zoom the page
+      className="w-full h-full min-h-[24px] px-1 bg-white text-black font-normal text-[16px] lg:text-[13px] outline-none border border-[#000080]" />
   );
 }
 
@@ -115,7 +151,11 @@ export default function Databank() {
     setTabRaw(t); setPage(0); setSel(null); setEditing(null); setCategory('');
     setSort(t === 'jingles' ? 'title' : 'artist'); setDesc(false);
   };
-  useEffect(() => { setPage(0); }, [search, category, sort, desc, files]);
+  // A new Find, type, sort or file filter goes back to page 1 in the same render,
+  // so no request goes out for the old page number with the new filter
+  const filterKey = JSON.stringify([search, category, sort, desc, files]);
+  const [pageKey, setPageKey] = useState(filterKey);
+  if (pageKey !== filterKey) { setPageKey(filterKey); if (page !== 0) setPage(0); }
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(null), 5000);
@@ -180,9 +220,16 @@ export default function Databank() {
   }, [blocksQ.data, search]);
 
   const items = useMemo(() => itemsQ.data?.items ?? [], [itemsQ.data]);
+  // Types of the whole table (not just the 200 rows on screen); spots are all loaded already
+  const typesQ = useQuery({
+    queryKey: ['databank-types', assetType],
+    queryFn: () => listDbTypes(assetType),
+    enabled: itemsTab,
+    staleTime: 60_000,
+  });
   const typesSeen = useMemo(() => Array.from(new Set(
-    (tab === 'spots' ? spots.map(s => s.category) : items.map(i => i.type)).filter(Boolean) as string[],
-  )).sort(), [items, spots, tab]);
+    (tab === 'spots' ? (spotsQ.data?.spots ?? []).map(s => s.category) : [...(typesQ.data ?? []), ...items.map(i => i.type)]).filter(Boolean) as string[],
+  )).sort((a, b) => a.localeCompare(b)), [items, spotsQ.data, typesQ.data, tab]);
 
   // Status bar numbers, as in the old program: Page, Rec (selected), View (found), Tot (all)
   const ids: string[] = tab === 'spots' ? spots.map(s => s.id) : tab === 'blocks' ? blockRows.map(r => r.key) : items.map(i => i.id);
@@ -218,9 +265,10 @@ export default function Databank() {
       setNotice({ ok: true, text: 'Saved.' });
       await qc.invalidateQueries({ queryKey: ['databank-items'] });
       await qc.invalidateQueries({ queryKey: ['databank-spots'] });
+      if (field === 'type') void qc.invalidateQueries({ queryKey: ['databank-types'] });
       void qc.invalidateQueries({ queryKey: ['assets'] });
     } catch (e: any) {
-      setNotice({ ok: false, text: e?.response?.data?.detail ?? 'Could not save that change.' });
+      setNotice({ ok: false, text: errText(e, 'Could not save that change.') });
     }
   };
 
@@ -232,7 +280,7 @@ export default function Databank() {
       await qc.invalidateQueries({ queryKey: ['databank-spots'] });
       void qc.invalidateQueries({ queryKey: ['spot-schedules'] });
     } catch (e: any) {
-      setNotice({ ok: false, text: e?.response?.data?.detail ?? 'Could not change the end date.' });
+      setNotice({ ok: false, text: errText(e, 'Could not change the end date.') });
     }
   };
 
@@ -271,7 +319,8 @@ export default function Databank() {
       ? <EditCell value={value} type={type} list={list} onSave={v => saveAsset(id, field, v)} onCancel={() => setEditing(null)} />
       : null;
   const startEdit = (id: string, field: string) => (e: React.MouseEvent) => {
-    if (!canEdit) return;
+    // Old rows stay on screen while a new sort or page loads: not editable meanwhile
+    if (!canEdit || (itemsTab && itemsQ.isPlaceholderData)) return;
     e.stopPropagation();
     setSel(id);
     setEditing({ id, field });
@@ -291,7 +340,8 @@ export default function Databank() {
     `qn-row w-full text-left ${sel === id ? 'qn-row-cur' : ''} ${pfl.playingId === id ? 'outline outline-1 outline-[#2bff4a] -outline-offset-1' : ''} ${extra}`;
 
   const songsTable = (
-    <div role="table" aria-label={tab === 'songs' ? 'Songs' : 'Jingles'} className="min-w-0">
+    <div role="table" aria-label={tab === 'songs' ? 'Songs' : 'Jingles'} aria-busy={itemsQ.isPlaceholderData || undefined}
+      className={`min-w-0 ${itemsQ.isPlaceholderData ? 'opacity-60' : ''}`}>
       {isDesktop ? (
         <>
           <div role="row" className="qn-log-head sticky top-0 z-10 grid h-5" style={{ gridTemplateColumns: tab === 'songs' ? GRID_SONGS : GRID_JINGLES }}>
@@ -343,7 +393,7 @@ export default function Databank() {
         ))
       )}
       {itemsQ.isLoading && <p className="p-3 font-normal">Loading…</p>}
-      {!itemsQ.isLoading && items.length === 0 && <p className="p-3 font-normal">{search || category ? 'Nothing matches.' : 'Nothing here yet.'}</p>}
+      {!itemsQ.isLoading && items.length === 0 && <p className="p-3 font-normal">{search || category || files !== 'all' ? 'Nothing matches.' : 'Nothing here yet.'}</p>}
     </div>
   );
 
@@ -394,7 +444,7 @@ export default function Databank() {
         );
       })}
       {spotsQ.isLoading && <p className="p-3 font-normal">Loading…</p>}
-      {!spotsQ.isLoading && spots.length === 0 && <p className="p-3 font-normal">{search ? 'Nothing matches.' : 'No spots in the library yet.'}</p>}
+      {!spotsQ.isLoading && spots.length === 0 && <p className="p-3 font-normal">{(spotsQ.data?.spots.length ?? 0) > 0 ? 'Nothing matches.' : 'No spots in the library yet.'}</p>}
     </div>
   );
 
@@ -455,7 +505,7 @@ export default function Databank() {
         <div className="flex gap-1 w-full lg:w-auto" role="tablist" aria-label="Table">
           {TABS.map(t => (
             <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
-              className="qn-btn flex-1 lg:flex-none h-11 lg:h-8 px-3 text-sm">{t.label}</button>
+              className="qn-btn flex-1 min-w-0 lg:flex-none h-11 lg:h-8 px-1 sm:px-3 text-sm">{t.label}</button>
           ))}
         </div>
         {tab !== 'log' && (
@@ -487,7 +537,7 @@ export default function Databank() {
                 aria-label="Pre-listen to the selected item">🎧</button>
             )}
             {manager && tab !== 'blocks' && (
-              <button type="button" aria-pressed={editMode} onClick={() => { setEditMode(!editMode); setEditing(null); }}
+              <button type="button" aria-pressed={editMode} data-edit-toggle onClick={() => { setEditMode(!editMode); setEditing(null); }}
                 className={`qn-btn h-11 lg:h-8 px-3 text-sm ${editMode ? '!text-[#000080]' : ''}`} data-testid="db-edit-mode"
                 title="Edit mode: click a cell to change it">{editMode ? '✎ Editing' : 'Edit mode'}</button>
             )}
@@ -535,11 +585,11 @@ export default function Databank() {
       {tab !== 'log' && (
         <div className="shrink-0 bg-[#c0c0c0] border-t border-white flex items-stretch gap-1 p-0.5 text-[12px] text-black pb-[max(0.125rem,env(safe-area-inset-bottom))]" data-testid="db-status">
           {itemsTab && (
-            <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="qn-btn px-2 min-h-[32px]" aria-label="Previous page">◀</button>
+            <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="qn-btn px-3 lg:px-2 min-h-[44px] lg:min-h-[32px]" aria-label="Previous page">◀</button>
           )}
           <span className="qn-sunken px-2 flex items-center">Page {page + 1}{itemsTab && pages > 1 ? ` of ${pages}` : ''}</span>
           {itemsTab && (
-            <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} className="qn-btn px-2 min-h-[32px]" aria-label="Next page">▶</button>
+            <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} className="qn-btn px-3 lg:px-2 min-h-[44px] lg:min-h-[32px]" aria-label="Next page">▶</button>
           )}
           {goTo !== null ? (
             <input type="number" min={1} max={Math.max(1, view)} autoFocus value={goTo} data-testid="db-goto"
@@ -557,15 +607,15 @@ export default function Databank() {
                 if (itemsTab && Math.floor(idx / PAGE) !== page) { pendingRec.current = idx % PAGE; setPage(Math.floor(idx / PAGE)); }
                 else selectIndex(itemsTab ? idx % PAGE : idx);
               }}
-              className="qn-field w-24 px-1 text-[16px] lg:text-[12px]" />
+              className="qn-field w-24 px-1 min-h-[44px] lg:min-h-0 text-[16px] lg:text-[12px]" />
           ) : (
-            <button type="button" onClick={() => setGoTo('')} className="qn-sunken px-2 flex items-center min-h-[32px]" data-testid="db-rec"
+            <button type="button" onClick={() => setGoTo('')} className="qn-sunken px-2 flex items-center min-h-[44px] lg:min-h-[32px]" data-testid="db-rec"
               title="123: go to a record number">Rec {recIdx >= 0 ? (itemsTab ? page * PAGE : 0) + recIdx + 1 : 0}</button>
           )}
           <span className="qn-sunken px-2 flex items-center" data-testid="db-view">View {view}</span>
           <span className="qn-sunken px-2 flex items-center" data-testid="db-tot">Tot {tot}</span>
           <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
-            className="ml-auto px-2 underline hover:text-red-700 min-h-[32px]">🐞<span className="hidden sm:inline"> Report a bug</span></button>
+            className="ml-auto px-2 underline hover:text-red-700 min-h-[44px] lg:min-h-[32px]" data-testid="db-report-bug">🐞<span className="hidden sm:inline"> Report a bug</span></button>
         </div>
       )}
     </div>
