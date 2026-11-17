@@ -23,7 +23,9 @@ function dbfs(samples: Float32Array): number {
 const SYNC_INTERVAL = 10000;
 const SYNC_THRESHOLD = 5;
 const TRACK_CHANGE_COOLDOWN = 15000;
-const CROSSFADE_DURATION = 3.0; // seconds
+// Song crossfade when the server did not say (asset.overlap_seconds carries the station's
+// own setting, default 1 s since 2026-11-17)
+const CROSSFADE_DURATION = 1.0; // seconds
 // At a song-to-song crossfade the incoming item comes up this fast; only the outgoing one
 // fades over CROSSFADE_DURATION. A 3 s fade-in of the incoming song over the quiet tail of
 // the outgoing one was heard as 2 to 3 s of near silence at every change.
@@ -46,12 +48,23 @@ const LET_FINISH_MAX_SECONDS = 8;
 // On the page, a short item hands over this close to the end of its file, its last
 // moment fading as the next item comes in
 const SHORT_END_HANDOVER_SECONDS = 0.15;
-function handOverPoint(crossStart: number, fileDuration: number): number {
-  const short = isFinite(fileDuration) && fileDuration > 0 && fileDuration < SHORT_ITEM_SECONDS;
+// An overlap shorter than this is no crossfade at all: the item plays to its end
+const NO_OVERLAP_BELOW_SECONDS = 0.5;
+/** Plays to its end with no crossfade: a short item, anything spoken (the server sends
+ *  overlap 0 for every item that is not a song: two sponsorships in a row overlapped by
+ *  3 s) and songs on a station whose crossfade is set to 0. `overlap` undefined = not
+ *  told, a song with the default crossfade. */
+function playsToEnd(fileDuration: number, overlap: number | undefined): boolean {
+  if (!(isFinite(fileDuration) && fileDuration > 0)) return false;
+  return fileDuration < SHORT_ITEM_SECONDS || (overlap != null && overlap < NO_OVERLAP_BELOW_SECONDS);
+}
+function handOverPoint(crossStart: number, fileDuration: number, overlap?: number): number {
+  const short = playsToEnd(fileDuration, overlap);
+  const fade = overlap ?? CROSSFADE_DURATION;
   const fileEnd = short
     ? Math.max(0.1, fileDuration - SHORT_ITEM_HANDOVER_SECONDS)
-    : isFinite(fileDuration) && fileDuration > CROSSFADE_DURATION
-      ? fileDuration - CROSSFADE_DURATION : 0;
+    : isFinite(fileDuration) && fileDuration > fade
+      ? fileDuration - fade : 0;
   if (crossStart > 0 && fileEnd > 0) return Math.min(crossStart, fileEnd);
   return crossStart > 0 ? crossStart : fileEnd;
 }
@@ -193,7 +206,22 @@ export function useAudioEngine(
   // Whether the page shows level meters. Listener pages pass false: reading the
   // levels re-drew the whole page many times a second for a meter nobody sees.
   meter: boolean = true,
+  // How long the item on air, and the one after it, overlap what follows them at
+  // their end (asset.overlap_seconds: the station's song crossfade, 0 for anything
+  // spoken). undefined = not told.
+  currentOverlap?: number,
+  nextOverlap?: number,
 ): AudioEngineState {
+  // Overlap by item, as the server told it; decks are looked up by the item they hold
+  const overlapByAssetRef = useRef<Map<string, number>>(new Map());
+  if (nowPlayingAsset?.id && currentOverlap != null) overlapByAssetRef.current.set(nowPlayingAsset.id, currentOverlap);
+  if (nextAssetId && nextOverlap != null) overlapByAssetRef.current.set(nextAssetId, nextOverlap);
+  if (overlapByAssetRef.current.size > 200) {
+    const keep = [...overlapByAssetRef.current].slice(-50);
+    overlapByAssetRef.current = new Map(keep);
+  }
+  const overlapOf = useCallback((id: string | null | undefined): number | undefined =>
+    (id ? overlapByAssetRef.current.get(id) : undefined), []);
   // ── Operator's Next heard at once (control room) ──
   // The item the operator moved to, played here before the server confirms it. While
   // it stands, the player follows it instead of the server's now-playing.
@@ -671,13 +699,14 @@ export function useAudioEngine(
     // manual change (Next / play-now)?
     const outTime = outDeck.audio.currentTime;
     const outDur = outDeck.audio.duration;
-    const outEnd = handOverPoint(outCross, outDur);
+    const outOverlap = overlapOf(deckAssetRef.current[outLabel]);
+    const outEnd = handOverPoint(outCross, outDur, outOverlap);
     const naturalEnd = !outDeck.audio.paused && outEnd > 0 && outTime >= outEnd - NATURAL_END_WINDOW_SECONDS;
     // An operator's Next carries the fade they chose; it wins even near the end of the item
     // (a short looped jingle is nearly always "near the end").
     const asked = changeFadeRef.current;
     const operatorFade = asked != null && isFinite(asked) ? Math.min(10, Math.max(0.03, asked)) : null;
-    const fadeOut = operatorFade ?? (naturalEnd ? CROSSFADE_DURATION : SKIP_FADE_OUT);
+    const fadeOut = operatorFade ?? (naturalEnd ? Math.max(SHORT_END_HANDOVER_SECONDS, outOverlap ?? CROSSFADE_DURATION) : SKIP_FADE_OUT);
     const fadeIn = SKIP_FADE_IN;
     // A short spoken item (time check, weather) that started late on this page is
     // still talking when the server moves on: let it finish, never talk over it.
@@ -685,13 +714,13 @@ export function useAudioEngine(
     // time check. An operator's Next still cuts at once.
     const letFinish = operatorFade == null && !replay && !outDeck.audio.paused && !outDeck.audio.ended
       && deckAssetRef.current[outLabel] != null
-      && isFinite(outDur) && outDur > 0 && outDur < SHORT_ITEM_SECONDS
+      && playsToEnd(outDur, outOverlap)
       && outDur - outTime > 0.05 && outDur - outTime < LET_FINISH_MAX_SECONDS;
 
     const outWasPlaying = !outDeck.audio.paused && !outDeck.audio.ended && deckAssetRef.current[outLabel] != null;
     // A short spoken item on air here (or one that has just ended) hands over to this one
     const outWasShort = operatorFade == null && !replay && deckAssetRef.current[outLabel] != null
-      && isFinite(outDur) && outDur > 0 && outDur < SHORT_ITEM_SECONDS
+      && playsToEnd(outDur, outOverlap)
       && (outWasPlaying || (outDeck.audio.ended && outDur - outTime < 0.5));
     let wentLive = false;
     const goLive = () => {
@@ -760,7 +789,7 @@ export function useAudioEngine(
       // A time check or station ID that comes in a little late here (a slow download)
       // is heard from its first word, not joined in the middle; the item after it then
       // waits for it to finish (letFinish). Not when sound is only now switched on.
-      if (isFinite(inDur) && inDur > 0 && inDur < SHORT_ITEM_SECONDS && outWasPlaying
+      if (playsToEnd(inDur, overlapOf(assetId)) && outWasPlaying
         && startPos - cueIn < LATE_SHORT_FROM_TOP_SECONDS) startPos = cueIn;
       // Likewise whatever follows a time check this page played to its end (the next
       // item of a program block, the Daf Yomi announcement): from its first word.
@@ -1159,8 +1188,9 @@ export function useAudioEngine(
       // A short spoken item (time check, station ID) is never crossfaded: the next item
       // comes in when it has really finished. All Day Stories, 03:00Z 2026-11-17: the
       // paused story was faded in over the last seconds of the time check.
-      const short = isFinite(dur) && dur > 0 && dur < SHORT_ITEM_SECONDS;
-      const crossPoint = short ? Math.max(0.1, dur - SHORT_END_HANDOVER_SECONDS) : handOverPoint(crossStartRef.current, dur);
+      const overlap = overlapOf(deckAssetRef.current[activeLabel]);
+      const short = playsToEnd(dur, overlap);
+      const crossPoint = short ? Math.max(0.1, dur - SHORT_END_HANDOVER_SECONDS) : handOverPoint(crossStartRef.current, dur, overlap);
       if (crossPoint > 0 && ct >= crossPoint) {
         // Do not run ahead of the server: wait until it is (nearly) at the crossfade
         // point too. It announces the next track there, which brings it on air anyway.
@@ -1171,7 +1201,7 @@ export function useAudioEngine(
           if (serverPos < crossPoint - MAX_LEAD_SECONDS) return;
         }
         crossfadeTriggeredRef.current = true;
-        executeCrossfade(short ? SHORT_END_HANDOVER_SECONDS : CROSSFADE_DURATION);
+        executeCrossfade(short ? SHORT_END_HANDOVER_SECONDS : (overlap ?? CROSSFADE_DURATION));
       }
     }, CROSSFADE_CHECK_MS);
     return () => clearInterval(timer);

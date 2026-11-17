@@ -454,17 +454,63 @@ SHORT_ITEM_SECONDS = 20.0
 SHORT_ITEM_HANDOVER_SECONDS = 0.3
 
 
+# Only music is crossfaded. Anything spoken (sponsorship, shiur, story, weather, jingle)
+# plays to its last word and the next item starts after it: two sponsorships played
+# back to back overlapped by 3 s (Shmuel, 2026-11-17).
+CROSSFADE_TYPES = ("music",)
+# Shmuel, 2026-11-17: 1 second unless a station sets its own
+DEFAULT_CROSSFADE_SECONDS = 1.0
+# The audio analysis stores a song's crossfade point this long before its audible end
+ANALYSIS_CROSS_SECONDS = 3.0
+MAX_CROSSFADE_SECONDS = 10.0
+# Station setting automation_config["crossfade_seconds"] (0 = songs do not overlap),
+# kept here per station id so the one hand-over rule needs no database read. The
+# scheduler refreshes it every pass and the station API on save.
+_station_crossfade: dict[str, float] = {}
+
+
+def crossfade_setting(config: dict | None) -> float:
+    value = (config or {}).get("crossfade_seconds")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return DEFAULT_CROSSFADE_SECONDS
+    return min(MAX_CROSSFADE_SECONDS, max(0.0, float(value)))
+
+
+def note_station_crossfade(station) -> None:
+    if station is not None:
+        _station_crossfade[str(station.id)] = crossfade_setting(station.automation_config)
+
+
+def is_crossfaded(asset) -> bool:
+    return asset is not None and (getattr(asset, "asset_type", None) or "music").lower() in CROSSFADE_TYPES
+
+
+def overlap_seconds(entry) -> float:
+    """How long the item on air overlaps the one after it when it ends by itself:
+    the station's song crossfade for a song, 0 for everything else."""
+    asset = entry.asset if entry is not None else None
+    duration = (asset.duration if asset else None) or DEFAULT_DURATION
+    if (
+        not is_crossfaded(asset)
+        or duration < SHORT_ITEM_SECONDS
+        or getattr(entry, "preempt_at", None) is not None
+        or getattr(entry, "source", None) in ("ad_slot", "block")
+    ):
+        return 0.0
+    return _station_crossfade.get(str(getattr(entry, "station_id", "")), DEFAULT_CROSSFADE_SECONDS)
+
+
 def handover_seconds(entry) -> float:
     """How long before its end the item on air hands over to the next one. The one rule
     for the scheduler's timer, the now-playing message (cross_start) and the queue's
     look-ahead, so the server and the listeners' pages change at the same moment."""
     asset = entry.asset if entry is not None else None
     duration = (asset.duration if asset else None) or DEFAULT_DURATION
-    cross_seconds = 3.0
     extra = getattr(asset, "metadata_extra", None) if asset else None
     analysis = stored_analysis(extra) if extra else {}
     cross_start = analysis.get("cross_start_seconds")
-    if duration < SHORT_ITEM_SECONDS or (
+    overlap = overlap_seconds(entry)
+    if not is_crossfaded(asset) or duration < SHORT_ITEM_SECONDS or (
         getattr(entry, "preempt_at", None) is not None or getattr(entry, "source", None) in ("ad_slot", "block")
     ):
         # A time check, weather or sponsorship is not crossfaded: handing over at
@@ -473,7 +519,12 @@ def handover_seconds(entry) -> float:
         # 22:00 ET: 1.8 s of the time check under the story).
         cross_seconds = SHORT_ITEM_HANDOVER_SECONDS
     elif isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
-        cross_seconds = duration - cross_start
+        # The analysis puts the crossfade point 3 s before the song's audible end;
+        # a shorter or longer station crossfade moves the hand-over with it.
+        audible_end = min(duration, cross_start + ANALYSIS_CROSS_SECONDS)
+        cross_seconds = duration - audible_end + max(overlap, SHORT_ITEM_HANDOVER_SECONDS)
+    else:
+        cross_seconds = max(overlap, SHORT_ITEM_HANDOVER_SECONDS)
     return min(cross_seconds, max(0.0, duration / 2))
 
 

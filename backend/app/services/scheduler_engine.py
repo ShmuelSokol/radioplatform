@@ -430,6 +430,8 @@ class SchedulerEngine:
                     # Run queue-based playback advancement (handles silence entries during blackout too)
                     await self._advance_queue(db, station_id)
                 station = await db.get(Station, station_id)  # fresh if the advance rolled back
+                from app.api.v1.queue import note_station_crossfade
+                note_station_crossfade(station)
                 await self._check_station(db, station)
             except Exception as e:
                 logger.error(f"Error checking station {station_id}: {e}", exc_info=True)
@@ -807,7 +809,7 @@ class SchedulerEngine:
         cue_out = analysis.get("cue_out_seconds", asset.duration or 180.0)
         # Where pages hand over: the same rule the queue advances by, so a short or
         # timed item is not crossfaded 3 s before its end on the page
-        from app.api.v1.queue import handover_seconds
+        from app.api.v1.queue import handover_seconds, overlap_seconds
         cross_start = (asset.duration or 180.0) - handover_seconds(entry)
         replay_gain_db = analysis.get("replay_gain_db", 0)
 
@@ -851,6 +853,7 @@ class SchedulerEngine:
                 # pages start it at that moment themselves instead of a second later
                 # when this message reaches them. None = it follows the item on air.
                 "cut_at": _cut_time(next_entry, entry),
+                "overlap_seconds": overlap_seconds(next_entry),
             }
 
             # Pre-queue next track in Liquidsoap for gapless transitions
@@ -883,6 +886,9 @@ class SchedulerEngine:
                 "intro_seconds": asset.intro_seconds,
                 "cue_out": cue_out,
                 "cross_start": cross_start,
+                # How long it overlaps the next item at its end: the station's song
+                # crossfade, 0 for anything spoken (pages never crossfade those)
+                "overlap_seconds": overlap_seconds(entry),
                 "replay_gain_db": replay_gain_db,
             },
             "next_asset": next_asset_data,

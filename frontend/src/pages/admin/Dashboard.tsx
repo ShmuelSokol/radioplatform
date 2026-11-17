@@ -291,6 +291,9 @@ export default function Dashboard() {
     wsNowPlaying?.change_fade_seconds ?? null,
     false, // started below, on the first click or key anywhere in this tab
     false, // silent until the speaker button: the meters move either way
+    true,
+    wsNowPlaying?.asset?.overlap_seconds,
+    wsNowPlaying?.next_asset?.overlap_seconds,
   );
 
   // ── Level meters always; sound on this computer only after the speaker button ──

@@ -241,3 +241,29 @@ The server counts an item from the top of the file (hand-over at `started_at + c
 `e2e/lib/fake-station.mjs` is a fake backend for page.route (queue, actions, live shows, CRM, now-playing socket, site socket, ranged tone files, `skewClock`) with an audio probe (`window.__decks()`, `__audible()`, `__outLevel()`, Media Session handlers). Suites on the built site (`npx vite preview --port 4311 --strictPort`): `control-room-actions.mjs` (every control room button, desktop + iPhone, S-1/S-2 timings), `listen-page.mjs` (Listen page, lock screen, network loss, socket back-off/polling, stream mode with `lib/stream-server.mjs`, time check on the second), `listener-pages.mjs` (a11y basics of the public pages, global player bar), `call-in.mjs`, `release-timing.mjs` (release pickup limits under a fake clock). Each takes `ONLY=<part>`.
 
 Real WebKit (Safari's engine): `e2e/webkit/listener-webkit.py` drives WebKitGTK's MiniBrowser through Selenium (`apt-get install webkit2gtk-driver xvfb gstreamer1.0-plugins-good gstreamer1.0-libav`, `pip install selenium`, `xvfb-run -a python3 e2e/webkit/listener-webkit.py` with the site on `vite preview --port 4183`). `e2e/webkit/fake-server.mjs` serves the same `makeStation()` answers over plain HTTP + WebSocket and proxies the site. WebKitGTK refuses sound without a tap like Safari (`--autoplay-policy=allow` turns that off), has MSE for MP3 and, under WebDriver, ignores `--enable-mediasource=false`, so `?kbr_no_mse=1` removes `window.MediaSource` to get the iPhone's path. No native HLS, so the iPhone's HLS branch is not reachable; narrowest window about 447 px. It does not stand in for iOS (audio session, lock screen, background, CarPlay): a real iPhone is still needed.
+
+## Only songs overlap; the crossfade length is a station setting (2026-11-17)
+
+Shmuel played several sponsorships one after the other and each faded into the next: any
+item of 20 s or more that was not timed got the 3 s song crossfade, speech included.
+Now `queue.overlap_seconds(entry)` is the rule: the station's song crossfade for a song
+(`asset_type == "music"`), 0 for everything else (sponsorship, shiur, story, jingle,
+weather), for short items and for timed ones. `handover_seconds` hands a non-song over
+0.3 s before the end of its file; a song at `audible end - crossfade` (the analysis stores
+`cross_start_seconds` 3 s before the audible end, `ANALYSIS_CROSS_SECONDS`).
+
+- Setting: `automation_config.crossfade_seconds` (0 to 10, default 1 since Shmuel asked
+  for 1 s; 0 = songs do not overlap). Stations page, Automation Config, "Song crossfade
+  (seconds)". `queue._station_crossfade` keeps it per station in memory
+  (`note_station_crossfade`: every scheduler pass and on station save), so the hand-over
+  rule needs no database read.
+- Pages get `asset.overlap_seconds` and `next_asset.overlap_seconds` in now-playing.
+  `useAudioEngine.playsToEnd()` treats overlap < 0.5 s like a short item (never
+  crossfaded, `letFinish`, next item from its first word); otherwise the outgoing song
+  fades over that many seconds.
+- The engine gets `kbr_overlap` on every track. radio.liq still overlaps 3 s for
+  everything in the main lane until its own change lands (after PR 224).
+- Checks: `tests/test_handover_rule.py`, `test_handover_agreement.py`; e2e
+  `audio-engine.mjs` `sponsorship-after-sponsorship-no-overlap`,
+  `sponsorship-not-talked-over-when-the-server-is-early`, `song-after-sponsorship-no-overlap`,
+  `songs-with-crossfade-zero-do-not-overlap`, `songs-still-crossfade-by-default`.
