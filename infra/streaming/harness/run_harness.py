@@ -1353,6 +1353,43 @@ async def sc_lane_levels(h: Harness) -> None:
     timed = tone_db(w, t0, t1.timestamp() + 2, t1.timestamp() + 7, TONES["song3"][0])
     h.check(name, -32.5 <= timed <= -28.5, f"timed item at {timed:.1f} dBFS (expected about -30.5)")
 
+async def sc_engine_crash_restart(h: Harness) -> None:
+    """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
+    the backend up. It says hello, plays station music (not emergency files) within a few
+    seconds, the site follows it, and a time check handed over before the crash still airs
+    on time."""
+    name = "engine_crash_restart"
+    await wait_music(h)
+    due = at(40)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(6)
+    before = await h.on_air()
+    h.stack.restart_engine()
+    started = h.stack.wav_t0
+    await asyncio.sleep(15)
+    heard = h.heard(started, time.time() - 1)
+    first = next((t for t, db, _ in heard if db > -45), None)
+    h.check(name, first is not None and first - started <= 5.0,
+            f"sound {'never' if first is None else f'{first - started:.1f} s'} after the restart")
+    names = [n for _, n in timeline(h.heard(started + 6, time.time() - 1))]
+    h.check(name, bool(names) and all(n.startswith("song") for n in names),
+            f"station music after the restart, no emergency files: {names}")
+    st = await h.on_air()
+    h.check(name, st is not None and st.started_at is not None and st.started_at.timestamp() >= started - 1,
+            f"the site shows the item the restarted engine plays ({st.asset.title if st else None}; "
+            f"before the crash {before.asset.title if before else None})")
+    playing = [e for e in await h.rows() if e.status == "playing"]
+    h.check(name, len(playing) == 1, f"one item on air ({len(playing)})")
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + 10)
+    starts = await h.started_times("time", due.timestamp() - 5)
+    late = starts[0][0] - due.timestamp() if starts else None
+    h.check(name, late is not None and abs(late) <= 2.0,
+            f"time check handed over before the crash aired on time: "
+            f"{'never' if late is None else f'{late:+.1f} s'}")
+    gap, _ = longest_silence(h.heard(started + 6, time.time() - 1))
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s after the restart")
+
+
 SCENARIOS = {
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
@@ -1380,6 +1417,7 @@ SCENARIOS = {
     "track_level": sc_track_level,
     "song_with_level_muted_under_time_check": sc_level_song_muted,
     "timed_and_mix_over_levels": sc_lane_levels,
+    "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
