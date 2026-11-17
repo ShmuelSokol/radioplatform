@@ -2,6 +2,7 @@
 SMS and WhatsApp notification service via Twilio.
 No-op when TWILIO_ACCOUNT_SID is not configured.
 """
+import asyncio
 import logging
 
 from app.config import settings
@@ -19,7 +20,8 @@ async def send_sms(to: str, body: str) -> bool:
         from twilio.rest import Client
 
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        client.messages.create(
+        await asyncio.to_thread(
+            client.messages.create,
             body=body,
             from_=settings.TWILIO_PHONE_NUMBER,
             to=to,
@@ -41,7 +43,8 @@ async def send_whatsapp(to: str, body: str) -> bool:
         from twilio.rest import Client
 
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        client.messages.create(
+        await asyncio.to_thread(
+            client.messages.create,
             body=body,
             from_=f"whatsapp:{settings.TWILIO_PHONE_NUMBER}",
             to=f"whatsapp:{to}",

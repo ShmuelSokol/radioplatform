@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.asset import Asset
+from app.models.asset import Asset, fit_for_random_pick
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.song_request import SongRequest, RequestStatus
@@ -58,8 +58,10 @@ async def fuzzy_match_asset(
     Returns (best_asset, confidence) where confidence >= 0.6 means a match.
     Title weighted 70%, artist 30%.
     """
+    # Only songs an automatic pick may air: never do-not-play, test items,
+    # placeholders, block-only recordings or rejected songs.
     result = await db.execute(
-        select(Asset).where(Asset.asset_type == "music")
+        select(Asset).where(Asset.asset_type == "music", fit_for_random_pick())
     )
     assets = result.scalars().all()
     if not assets:
@@ -155,6 +157,10 @@ async def add_to_queue(
     Returns the new entry's position.
     """
     from sqlalchemy import update
+
+    # Callers pass ids as strings; the columns are UUIDs.
+    station_id = uuid.UUID(str(station_id))
+    asset_id = uuid.UUID(str(asset_id))
 
     # Find the highest position among request-sourced pending entries
     result = await db.execute(

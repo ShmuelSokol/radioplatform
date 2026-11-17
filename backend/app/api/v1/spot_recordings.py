@@ -4,6 +4,7 @@ audio, listen, approve. An approved recording becomes a library asset tied to
 the sponsor, ready for the Spot Schedule. See wiki/spot-recordings.md.
 """
 
+import asyncio
 import logging
 import re
 import uuid
@@ -186,7 +187,7 @@ async def upload_audio(
     from app.services.audio_convert_service import convert_audio
 
     try:
-        converted, seconds, ext = convert_audio(raw, file.filename or "spot.wav", "mp3")
+        converted, seconds, ext = await asyncio.to_thread(convert_audio, raw, file.filename or "spot.wav", "mp3")
     except Exception:
         logger.exception("Spot audio conversion failed")
         raise HTTPException(status_code=422, detail="That file could not be read as audio")

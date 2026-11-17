@@ -37,8 +37,16 @@ router = APIRouter(prefix="/song-requests", tags=["song-requests"])
 @limiter.limit("10/minute")
 async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSession = Depends(get_db)):
     """Public: submit a song request with fuzzy matching and auto-approval."""
+    from app.models.station import Station
+
+    try:
+        station_id = uuid.UUID(str(body.station_id))
+    except ValueError:
+        raise NotFoundError("Station not found")
+    if await db.get(Station, station_id) is None:
+        raise NotFoundError("Station not found")
     req = SongRequest(
-        station_id=body.station_id,
+        station_id=station_id,
         requester_name=body.requester_name,
         song_title=body.song_title,
         song_artist=body.song_artist,
@@ -48,7 +56,7 @@ async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSes
 
     # Fuzzy match against library
     matched_asset, confidence = await fuzzy_match_asset(
-        db, body.song_title, body.song_artist, body.station_id
+        db, body.song_title, body.song_artist, station_id
     )
 
     response_extra = {
@@ -67,7 +75,7 @@ async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSes
         response_extra["matched_asset_artist"] = matched_asset.artist
 
         # Check auto-approve eligibility
-        can_auto = await check_auto_approve(db, matched_asset, body.station_id)
+        can_auto = await check_auto_approve(db, matched_asset, station_id)
         if can_auto:
             req.status = RequestStatus.QUEUED
             # reviewed_by stays NULL to distinguish auto from manual
@@ -77,8 +85,8 @@ async def submit_request(request: Request, body: SongRequestCreate, db: AsyncSes
             await db.flush()
 
             # Add to playback queue
-            position = await add_to_queue(db, str(matched_asset.id), body.station_id)
-            pos_info = await get_queue_position_info(db, body.station_id, position)
+            position = await add_to_queue(db, str(matched_asset.id), station_id)
+            pos_info = await get_queue_position_info(db, station_id, position)
 
             response_extra["auto_approved"] = True
             response_extra["queue_position"] = position
