@@ -357,13 +357,16 @@ async def _skip_placeholders(db: AsyncSession, station_id) -> None:
     them aired on KBR Jerusalem at 18:56 ET on 2026-11-16."""
     from app.models.asset import not_placeholder
 
+    from app.services.station_blocks import blocked_asset_ids
+
     ids = select(Asset.id).where(~not_placeholder()).scalar_subquery()
     await db.execute(
         update(QueueEntry)
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            QueueEntry.asset_id.in_(ids),
+            # ... or an item this station alone was told not to play
+            or_(QueueEntry.asset_id.in_(ids), QueueEntry.asset_id.in_(blocked_asset_ids(station_id))),
             or_(QueueEntry.source.is_(None), QueueEntry.source.notin_(OPERATOR_SOURCES)),
         )
         .values(status="skipped")
@@ -623,8 +626,11 @@ async def _refill_for_next(db: AsyncSession, station_id) -> QueueEntry | None:
         return entry
 
     for only_music in (True, False):
+        from app.services.station_blocks import blocked_asset_ids
+
         query = select(Asset).where(
-            Asset.file_path.isnot(None), Asset.file_path != "", fit_for_random_pick()
+            Asset.file_path.isnot(None), Asset.file_path != "", fit_for_random_pick(),
+            Asset.id.notin_(blocked_asset_ids(station_id)),
         )
         if only_music:
             query = query.where(Asset.asset_type == "music")

@@ -8,6 +8,8 @@ from difflib import SequenceMatcher
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.station_blocks import blocked_asset_ids
+
 from app.models.asset import Asset, fit_for_random_pick
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
@@ -109,7 +111,11 @@ async def fuzzy_match_asset(
     # score needs are read (the library has ~23,000 songs; loading whole rows took
     # about a second per request), and only the winner is loaded in full.
     result = await db.execute(
-        select(Asset.id, Asset.title, Asset.artist).where(Asset.asset_type == "music", fit_for_random_pick())
+        select(Asset.id, Asset.title, Asset.artist).where(
+            Asset.asset_type == "music", fit_for_random_pick(),
+            # nor a song this station was told not to play
+            Asset.id.notin_(blocked_asset_ids(station_id)),
+        )
     )
     rows = result.all()
     if not rows:

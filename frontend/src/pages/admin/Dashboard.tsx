@@ -166,6 +166,21 @@ export default function Dashboard() {
   // ── UI state ───────────────────────────────────────────────
   const [pane, setPane] = useState<Pane>('queue');
   const [sideTab, setSideTab] = useStored<SideTab>('kbr_ctl_side_tab', 'library');
+  // The right-hand button column: does it hold more than is showing below?
+  const controlsRef = useRef<HTMLElement>(null);
+  const [controlsMore, setControlsMore] = useState(false);
+  const checkControlsMore = useCallback(() => {
+    const el = controlsRef.current;
+    setControlsMore(!!el && el.scrollHeight - el.scrollTop - el.clientHeight > 6);
+  }, []);
+  useEffect(() => {
+    const el = controlsRef.current;
+    if (!el) return;
+    checkControlsMore();
+    const watch = new ResizeObserver(checkControlsMore);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [isDesktop, checkControlsMore]);
   const [fireMode, setFireMode] = useStored<FireMode>('kbr_ctl_fire_mode', 'now');
   const [insertBeforeId, setInsertBeforeId] = useState<string | null>(null);
   const [queueDateFilter, setQueueDateFilter] = useState('');
@@ -949,7 +964,7 @@ export default function Dashboard() {
       )}
 
       {songTarget && (
-        <SongPanel target={songTarget} stationId={stationId ?? null} canEdit={isManager(user?.role)}
+        <SongPanel target={songTarget} stationId={stationId ?? null} stationName={station?.name ?? null} canEdit={isManager(user?.role)}
           onClose={closeSong} onToast={songToast} />
       )}
 
@@ -983,27 +998,37 @@ export default function Dashboard() {
               />
               <div className="min-h-0" style={{ flex: `${1 - splitShown} 1 0` }}>{sidePanel(sideTab)}</div>
             </div>
-            <aside className="w-28 xl:w-32 shrink-0 min-h-0 overflow-y-auto bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white [&>*]:shrink-0" aria-label="Controls">
+            {/* The whole column fits a 900 px high window (buttons are a little lower under 1000 px);
+                on a shorter one it scrolls, and "more" at the bottom says so until the end is reached */}
+            <aside ref={controlsRef} onScroll={checkControlsMore}
+              className="w-28 xl:w-32 shrink-0 min-h-0 overflow-y-auto bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white [&>*]:shrink-0" aria-label="Controls">
               {/* Loop, Go next and the fades stay at the top when a short window makes the column
                   scroll (a scrolled column hid half of Loop under the transport, 2026-11-18) */}
               <div className="sticky top-0 z-10 -mt-1.5 pt-1.5 pb-1 bg-[#c0c0c0]" data-testid="cr-transport-pinned">
                 <TransportButtons p={transport} stacked />
               </div>
-              <div className="h-1" />
+              <div className="h-1 [@media(max-height:1000px)]:hidden" />
               {/* HS, Spots mode, Panic and DB right under the transport, so they are on screen even on a
                   1280x720 window (F-MODES-54); the lower-pane tabs come after and may scroll */}
               <ModeButtons p={modeProps} stacked />
-              <Link to="/admin/databank" className="qn-btn h-8 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
+              <Link to="/admin/databank" className="qn-btn h-8 [@media(max-height:1000px)]:h-7 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
                 data-testid="cr-databank">DB</Link>
-              <div className="h-2" />
+              <div className="h-2 [@media(max-height:1000px)]:h-1" />
               <div className="flex flex-col gap-1" role="tablist" aria-label="Lower pane">
                 {SIDE_TABS.map(t => (
                   <button key={t.id} type="button" role="tab" aria-selected={sideTab === t.id} onClick={() => setSideTab(t.id)}
-                    className={`qn-btn h-8 text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
+                    className={`qn-btn h-8 [@media(max-height:1000px)]:h-7 text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
                     {t.id === 'live' && liveShow ? '● Live' : t.label}
                   </button>
                 ))}
               </div>
+              {controlsMore && (
+                <button type="button" tabIndex={-1} data-testid="cr-controls-more" title="More buttons below: scroll or press here"
+                  onClick={() => controlsRef.current?.scrollTo({ top: controlsRef.current.scrollHeight, behavior: 'smooth' })}
+                  className="sticky bottom-0 z-10 -mt-6 -mb-1.5 h-5 text-[11px] font-bold leading-none bg-[#000080] text-white border-t border-white">
+                  ▼ more
+                </button>
+              )}
             </aside>
           </div>
           <PflDeck pfl={pfl} />

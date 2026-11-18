@@ -33,7 +33,7 @@ export default function ModeButtons({ p, stacked, grid = false }: { p: ModeProps
     setArmed(null);
   }, [p.stationId]);
   // grid: cells of the phone-sideways button grid, after Loop (TransportButtons grid)
-  const btn = grid ? 'qn-btn h-11 px-1 text-xs min-w-0' : `qn-btn ${stacked ? 'w-full h-8 text-sm' : 'flex-1 h-11 text-xs'}`;
+  const btn = grid ? 'qn-btn h-11 px-1 text-xs min-w-0' : `qn-btn ${stacked ? 'w-full h-8 [@media(max-height:1000px)]:h-7 text-sm' : 'flex-1 h-11 text-xs'}`;
   const panic = () => {
     const sid = p.stationId;
     if (!sid) return;
