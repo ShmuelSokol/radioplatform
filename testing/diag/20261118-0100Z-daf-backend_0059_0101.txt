@@ -1,0 +1,24 @@
+INFO:     100.64.0.14:37090 - "GET /api/v1/live-shows/station/d0740efe-3f25-4067-96f8-d8bc84c64dc3/active HTTP/1.1" 200 OK
+2026-11-18 00:59:15,891 INFO app.services.playout_engine: Station d0740efe-3f25-4067-96f8-d8bc84c64dc3: 21bdbf8d-72b6-495d-b924-b19b247d7669 pauses at 897 s for the timed group at 2026-11-18 01:00:00+00:00; it resumes after
+INFO:     100.64.0.12:58688 - "GET /api/v1/live-shows/station/d0740efe-3f25-4067-96f8-d8bc84c64dc3/active HTTP/1.1" 200 OK
+2026-11-18 00:59:18,107 INFO app.services.playout_engine: Handed timed entry 0d2e7b60-18c1-43e5-91c4-c21598a44e0a to the engine for 2026-11-18T01:00:00+00:00
+2026-11-18 00:59:18,107 INFO app.services.playout_engine: Handed timed entry e7b0f69c-49fb-46f1-8505-34046e4e0db2 to the engine for 2026-11-18T01:00:00+00:00
+INFO:     100.64.0.14:40768 - "GET /api/v1/live-shows/station/d0740efe-3f25-4067-96f8-d8bc84c64dc3/active HTTP/1.1" 200 OK
+INFO:     100.64.0.5:60358 - "GET /api/v1/live-shows/station/d0740efe-3f25-4067-96f8-d8bc84c64dc3/active HTTP/1.1" 200 OK
+2026-11-18 01:00:00,186 INFO app.services.playout_engine: Engine started -> entry=0d2e7b60-18c1-43e5-91c4-c21598a44e0a lane=timed
+INFO:     100.64.0.17:14750 - "GET /api/v1/program-blocks?station_id=d0740efe-3f25-4067-96f8-d8bc84c64dc3 HTTP/1.1" 200 OK
+INFO:     100.64.0.3:16422 - "GET /api/v1/live-shows/station/d0740efe-3f25-4067-96f8-d8bc84c64dc3/active HTTP/1.1" 200 OK
+2026-11-18 01:00:02,796 INFO app.services.program_block_service: Program blocks for station d0740efe-3f25-4067-96f8-d8bc84c64dc3: +1 -0
+INFO:     100.64.0.14:28554 - "POST /api/v1/playout/d0740efe-3f25-4067-96f8-d8bc84c64dc3/started HTTP/1.1" 200 OK
+2026-11-18 01:00:06,527 INFO app.services.playout_engine: Engine started -> entry=e7b0f69c-49fb-46f1-8505-34046e4e0db2 lane=timed
+INFO:     100.64.0.6:43214 - "POST /api/v1/playout/d0740efe-3f25-4067-96f8-d8bc84c64dc3/started HTTP/1.1" 200 OK
+2026-11-18 01:00:12,993 WARNING app.services.air_watch: Air watch late_timed on Kol B'ramah Main: Daf Yomi Bechoros 60 - R' Yosef Sokol (2026-11-17) aired 10 s late. Due 8:00:00 PM, started 8:00:10 PM.
+INFO:     100.64.0.12:60156 - "GET /api/v1/playout/d0740efe-3f25-4067-96f8-d8bc84c64dc3/next?given=238172ea-8a2d-401c-8a8e-59d540321d01,616820f5-87b3-4cbd-a718-23dcd90a36cb,c9e182d9-4d11-4ddf-b6e3-0d87ba02bae6,6a00a537-7ab7-4c90-87dc-cb7f8c6c473d&proto=2 HTTP/1.1" 200 OK
+INFO:     100.64.0.4:51788 - "GET /api/v1/live-shows/station/d0740efe-3f25-4067-96f8-d8bc84c64dc3/active HTTP/1.1" 200 OK
+INFO:     100.64.0.16:45236 - "GET /api/v1/playout/d0740efe-3f25-4067-96f8-d8bc84c64dc3/next?given=8743a5a6-3fff-4bef-9f50-f3138913bf44,238172ea-8a2d-401c-8a8e-59d540321d01,616820f5-87b3-4cbd-a718-23dcd90a36cb,c9e182d9-4d11-4ddf-b6e3-0d87ba02bae6,6a00a537-7ab7-4c90-87dc-cb7f8c6c473d&proto=2 HTTP/1.1" 200 OK
+2026-11-18 01:00:17,932 WARNING app.api.v1.websocket: Dropped stale now_playing for station d0740efe-3f25-4067-96f8-d8bc84c64dc3 (started 2026-11-18T00:45:21.743189+00:00, on air since 2026-11-18T01:00:06.527164+00:00)
+INFO:     100.64.0.12:60156 - "POST /api/v1/playout/d0740efe-3f25-4067-96f8-d8bc84c64dc3/started HTTP/1.1" 200 OK
+INFO:     100.64.0.2:16680 - "GET /api/v1/now-playing/d0740efe-3f25-4067-96f8-d8bc84c64dc3 HTTP/1.1" 200 OK
+INFO:     100.64.0.10:46410 - "GET /api/v1/live-shows/station/d0740efe-3f25-4067-96f8-d8bc84c64dc3/active HTTP/1.1" 200 OK
+INFO:     100.64.0.17:53354 - "GET /api/v1/live-shows/station/d0740efe-3f25-4067-96f8-d8bc84c64dc3/active HTTP/1.1" 200 OK
+2026-11-18 01:00:58,919 INFO app.api.v1.websocket: WebSocket disconnected for station d0740efe-3f25-4067-96f8-d8bc84c64dc3
