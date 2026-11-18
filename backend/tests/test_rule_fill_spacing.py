@@ -56,8 +56,8 @@ async def test_rounds_of_a_short_list_keep_each_story_far_from_itself(db_session
     station_id = await _stories_station(db_session)
     await QueueReplenishService(db_session, station_id).replenish()
     order = await _order(db_session, station_id)
-    # 7 days of half-hour stories from 20: every story comes round many times
-    assert len(order) > 300
+    # half-hour stories from 20: every story comes round several times
+    assert len(order) >= 150
     assert _closest_repeat(order) >= STORIES * 3 // 4 - 1, _closest_repeat(order)
 
 
@@ -100,5 +100,5 @@ async def test_a_rule_filled_station_can_be_drawn_again(client: AsyncClient, db_
     assert r.json()["removed"] == 4
     db_session.expire_all()
     order = await _order(db_session, station_id)
-    assert len(order) > 300
+    assert len(order) >= 150
     assert _closest_repeat(order) >= STORIES * 3 // 4 - 1, _closest_repeat(order)

@@ -848,8 +848,12 @@ class QueueReplenishService:
                 continue  # try next pass with fewer exclusions
 
             batch_count = 0
-            for asset in self._in_turn(candidates) if passes >= 3 else candidates:
-                if filled >= shortfall:
+            in_turn = passes >= 3
+            # In turn, the rounds left are drawn as one run (a list is used at
+            # most max_passes times a fill, so one song never fills a week)
+            run = len(candidates) * (max_passes - passes + 1)
+            for asset in self._in_turn(candidates) if in_turn else candidates:
+                if filled >= shortfall or (in_turn and batch_count >= run):
                     break
                 dur = asset.duration or DEFAULT_DURATION
                 self.max_pos += 1
@@ -870,7 +874,7 @@ class QueueReplenishService:
 
             logger.info("Pass %d: filled %.1fs from %d candidates (%d used)", passes, filled, len(candidates), batch_count)
 
-            if filled >= shortfall:
+            if filled >= shortfall or in_turn:
                 break
 
         logger.info("Total filled %.1fs of %s content in %d passes", filled, asset_type, passes)
