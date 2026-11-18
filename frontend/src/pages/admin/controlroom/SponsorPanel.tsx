@@ -270,8 +270,10 @@ export default function SponsorPanel({ target, stationId, canSkip, canManage, ca
                 {missedPast.length ? (
                   <ul className="text-xs">
                     {missedPast.map(m => (
-                      <li key={`${m.local_date}-${m.daypart}`} className="py-0.5" data-testid="sponsor-missed-row">
-                        <b>{m.day}</b>, {(DAYPART_TEXT[m.daypart] ?? m.daypart).split(' (')[0].toLowerCase()}: {m.played} of {m.promised} aired
+                      <li key={`${m.local_date}-${m.daypart}-${m.local_time ?? ''}`} className="py-0.5" data-testid="sponsor-missed-row">
+                        {m.local_time
+                          ? <><b>{m.day}</b>, {m.local_time}: did not air</>
+                          : <><b>{m.day}</b>, {(DAYPART_TEXT[m.daypart] ?? m.daypart).split(' (')[0].toLowerCase()}: {m.played} of {m.promised} aired</>}
                       </li>
                     ))}
                   </ul>
