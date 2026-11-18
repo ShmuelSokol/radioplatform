@@ -1124,6 +1124,7 @@ async def sc_fit_before_hour(h: Harness) -> None:
     h.check(name, tone_name(TONES["story"][0]) not in before,
             f"the story did not start before the time check: {runs}")
     # Any 40 s song will do: since PR 248 the fit may pick one from the refill instead
+    before = [n for n in before if n != "mix"]  # the fade into the time check
     h.check(name, bool(before) and before[-1].startswith("song"),
             f"a 40 s song was moved up and was on air at the hour: {before}")
     marks = timeline(heard)
