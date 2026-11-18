@@ -567,8 +567,10 @@ class Harness:
         from app.models.user import User, UserRole
 
         async with async_session_factory() as db:
+            # No broadcast delay: no host audio is sent here, and with a delay the show
+            # takes the station over only once listeners hear the host (PR 316)
             db.add(Station(id=STATION_ID, name="Harness", timezone="America/New_York",
-                           automation_config={}))
+                           automation_config={"live_delay_seconds": 0}))
             db.add(User(id=uuid.uuid4(), email=ADMIN_EMAIL, hashed_password=hash_password(ADMIN_PASSWORD),
                         role=UserRole.ADMIN, is_active=True))
             for name, (freq, secs, kind, category) in TONES.items():
