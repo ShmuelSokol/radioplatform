@@ -55,6 +55,15 @@ async def main() -> None:
             db.add(user)
         user.hashed_password = hash_password(password)
         user.role, user.is_active = UserRole.ADMIN, True
+        # One sign-in per role, same password, for the walk as each role (ROLE=viewer ...)
+        for role in (UserRole.MANAGER, UserRole.DJ, UserRole.VIEWER, UserRole.SPONSOR):
+            mail = email.replace("admin", role.value) if "admin" in email else f"{role.value}-{email}"
+            other = (await db.execute(select(User).where(User.email == mail))).scalar_one_or_none()
+            if other is None:
+                other = User(id=uuid.uuid4(), email=mail, role=role, is_active=True, display_name=f"Walk {role.value}")
+                db.add(other)
+            other.hashed_password = hash_password(password)
+            other.role, other.is_active = role, True
         for name, tag, tz, wants in STATIONS:
             # Every mode has an explicit value, so the walk's end-of-run check sees a switch left changed
             st = Station(id=uuid.uuid4(), name=name, timezone=tz, automation_config={

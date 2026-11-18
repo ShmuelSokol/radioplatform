@@ -74,12 +74,59 @@ async def ensure_tables():
         logger.exception("DATABASE SETUP FAILED: tables were not created; /health will report 'starting'")
 
 
+def model_enum_labels() -> dict[str, list[str]]:
+    """Every enum type of the models with the labels SQLAlchemy sends (member NAMES)."""
+    from sqlalchemy import Enum as SAEnum
+
+    from app.db.base import Base
+
+    labels: dict[str, list[str]] = {}
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            kind = column.type
+            if isinstance(kind, SAEnum) and kind.name:
+                known = labels.setdefault(kind.name, [])
+                known += [label for label in kind.enums if label not in known]
+    return labels
+
+
+async def add_missing_enum_labels(raw_conn) -> list[str]:
+    """Adds the labels a database's enum types lack (asyncpg connection, autocommit).
+
+    A member added to a Python enum after its type was created is missing from the
+    database until this runs: 'DJ' was once added as 'dj', so creating a DJ user
+    failed on production only (the tests' SQLite has no enum types). Returns what
+    it added, as "type.LABEL".
+    """
+    added = []
+    for name, wanted in sorted(model_enum_labels().items()):
+        rows = await raw_conn.fetch(
+            "SELECT enumlabel FROM pg_enum WHERE enumtypid = to_regtype($1)::oid", name)
+        have = {r["enumlabel"] for r in rows}
+        if not have:
+            continue  # the type does not exist yet: create_all makes it whole
+        for label in wanted:
+            if label in have:
+                continue
+            safe = label.replace("'", "''")
+            try:
+                await raw_conn.execute(f"ALTER TYPE {name} ADD VALUE IF NOT EXISTS '{safe}'")
+                added.append(f"{name}.{label}")
+            except Exception as e:
+                logger.warning(f"Enum label {name}.{label} not added: {e}")
+    logger.info("Enum labels added: %s", ", ".join(added) or "none, every label the models send is there")
+    return added
+
+
 async def _add_missing_columns(engine):
     """Add columns that were added to models but missing from existing DB tables."""
 
     # ALTER TYPE ADD VALUE cannot run inside a transaction — use autocommit
     enum_migrations = [
         "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'SPONSOR'",
+        # The model stores a role by its NAME. The DJ role was first added as 'dj', which
+        # the code never writes, so creating a DJ user failed (production, 2026-11-18).
+        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'DJ'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'LIVE_SHOW'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'SILENCE'",
         # Live show enum types (created by create_all, but safe to re-run)
@@ -103,6 +150,10 @@ async def _add_missing_columns(engine):
                     await raw_conn.execute(sql)
                 except Exception as e:
                     logger.warning(f"Enum migration skipped ({sql[:50]}...): {e}")
+            try:
+                await add_missing_enum_labels(raw_conn)
+            except Exception as e:
+                logger.warning(f"Enum labels not checked: {e}")
         finally:
             await raw_conn.close()
     except Exception as e:
@@ -189,8 +240,6 @@ async def _add_missing_columns(engine):
         # Listener sessions index for fast heartbeat lookups
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_heartbeat ON listener_sessions (last_heartbeat)",
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_started ON listener_sessions (started_at)",
-        # DJ role enum value
-        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'dj'",
         # User activity tracking
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS intro_seconds DOUBLE PRECISION",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
@@ -426,36 +475,67 @@ CONCURRENT_INDEXES = {
 }
 
 
-async def _build_concurrent_indexes() -> None:
+INDEX_BUILD_TRIES = 5
+INDEX_BUILD_WAIT = 30.0  # seconds between tries
+
+
+async def _build_indexes_once(conn, names) -> list[str]:
+    """Builds the named indexes that are missing or unusable. Returns those still missing."""
+    missing = []
+    for name in names:
+        target = CONCURRENT_INDEXES[name]
+        try:
+            valid = await conn.fetchval(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = $1", name,
+            )
+            if valid:
+                continue
+            if valid is False:  # a build that was interrupted leaves an unusable index
+                await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+            started = asyncio.get_running_loop().time()
+            await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
+            logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+        except Exception as e:
+            logger.warning("Index %s not built: %s", name, e)
+            missing.append(name)
+    return missing
+
+
+async def _build_concurrent_indexes(dsn: str | None = None, wait: float = INDEX_BUILD_WAIT) -> list[str]:
+    """Builds CONCURRENT_INDEXES in the background; a failed connection or build is
+    tried again, and the outcome is logged once either way (so the log of any start
+    says which indexes exist). Returns the names still missing."""
     import asyncpg
 
-    if not settings.DATABASE_URL.startswith("postgresql"):
-        return
-    dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-    try:
-        conn = await asyncpg.connect(dsn, statement_cache_size=0)
-    except Exception as e:
-        logger.warning("Could not connect to build indexes: %s", e)
-        return
-    try:
-        await conn.execute("SET statement_timeout = '10min'")
-        for name, target in CONCURRENT_INDEXES.items():
+    if dsn is None:
+        if not settings.DATABASE_URL.startswith("postgresql"):
+            return []
+        dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    missing = list(CONCURRENT_INDEXES)
+    for attempt in range(1, INDEX_BUILD_TRIES + 1):
+        try:
+            conn = await asyncpg.connect(dsn, statement_cache_size=0)
+        except Exception as e:
+            logger.warning("Could not connect to build indexes (try %d of %d): %s", attempt, INDEX_BUILD_TRIES, e)
+        else:
             try:
-                valid = await conn.fetchval(
-                    "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
-                    "WHERE c.relname = $1", name,
-                )
-                if valid:
-                    continue
-                if valid is False:  # a build that was interrupted leaves an unusable index
-                    await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
-                started = asyncio.get_running_loop().time()
-                await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
-                logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+                await conn.execute("SET statement_timeout = '10min'")
+                missing = await _build_indexes_once(conn, missing)
             except Exception as e:
-                logger.warning("Index %s not built: %s", name, e)
-    finally:
-        await conn.close()
+                logger.warning("Index build stopped (try %d of %d): %s", attempt, INDEX_BUILD_TRIES, e)
+            finally:
+                await conn.close()
+            if not missing:
+                break
+        if attempt < INDEX_BUILD_TRIES:
+            await asyncio.sleep(wait)
+    if missing:
+        logger.error("INDEXES MISSING after %d tries: %s", INDEX_BUILD_TRIES, ", ".join(missing))
+    else:
+        logger.info("Indexes in place: %s", ", ".join(CONCURRENT_INDEXES))
+    return missing
+
 
 async def _wait_for_database(limit: float = 90.0) -> None:
     """Nothing starts until the database answers. A process that came up while

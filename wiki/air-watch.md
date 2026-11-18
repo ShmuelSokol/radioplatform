@@ -46,3 +46,5 @@ Each pass reads, per station, the entry on air plus what started or came due in 
 with `ix_queue_entries_station_started` and `ix_queue_entries_station_preempt` (built in
 the background by `CONCURRENT_INDEXES` in `app/main.py`) and one statement that joins
 three indexed lookups. A new time-window read on `queue_entries` needs an index too.
+
+The two indexes are built in the background after start (`CONCURRENT_INDEXES`). The build retries a refused connection or a failed build, and every start logs `Indexes in place: ...` (or `INDEXES MISSING ...` as an error), so the log answers whether they exist. An index that already exists logs no `Built index` line.
