@@ -1,0 +1,61 @@
+name,station,asset_title,start_date,end_date,days_of_week,dayparts,plays_per_daypart,fixed_times,timing_mode,is_active,updated_at
+TEST contract 01 - Authentic Kosher Chinese,KBR Jerusalem,TEST SPONSOR 01 - Authentic Kosher Chinese,2026-11-17,2026-11-17,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",2,,,True,2026-11-17T19:48:26.56303+00:00
+TEST contract 02 - Glatt Bite,Kol B'ramah - All Day Stories,TEST SPONSOR 02 - Glatt Bite,2026-11-17,2026-11-18,"0,1,2,3,4,5,6","morning,evening",1,,,True,2026-11-17T20:02:13.925828+00:00
+TEST contract 03 - Bun Burger Kitchen,KBR Jerusalem,TEST SPONSOR 03 - Bun Burger Kitchen,2026-11-17,2026-11-18,"0,1,2,3,4,5,6",afternoon,3,,,True,2026-11-17T20:12:17.368087+00:00
+TEST contract 04 - Estreia,Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,2026-11-19,2026-11-21,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",1,,,True,2026-11-17T20:13:19.588431+00:00
+TEST contract 05 - Kepshuto,KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,2026-11-20,2026-11-23,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",1,,,True,2026-11-17T20:15:21.748915+00:00
+TEST contract 06 - Taquito,Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,2026-11-17,2026-11-30,"0,1,2,3",morning,2,,,True,2026-11-17T20:17:23.682388+00:00
+TEST contract 07 - Pita Hut,KBR Jerusalem,TEST SPONSOR 07 - Pita Hut,2026-11-17,2026-11-30,6,"afternoon,evening",1,,,True,2026-11-17T20:19:28.624874+00:00
+TEST contract 08 - Southside Smokehouse,Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,2026-11-17,2026-11-24,"0,1,2,3,4,5,6",overnight,2,,,True,2026-11-17T20:21:31.053483+00:00
+TEST contract 09 - Cafotteria Modern Eatery,KBR Jerusalem,TEST SPONSOR 09 - Cafotteria Modern Eatery,2026-11-17,2026-11-19,"0,1,2,3,4,5,6",morning,1,"08:15,17:45",,True,2026-11-17T20:23:33.720501+00:00
+TEST contract 10 - Pizzaleh,KBR Jerusalem,TEST SPONSOR 10 - Pizzaleh,2026-11-17,2026-11-18,"0,1,2,3,4,5,6",morning,1,14:00,hard,True,2026-11-17T20:25:35.942676+00:00
+TEST contract 11 - Pizza Plus,Kol B'ramah - All Day Stories,TEST SPONSOR 11 - Pizza Plus,2026-11-17,,"0,1,2,3,4,5,6",morning,1,,,False,2026-11-18T14:00:19.478161+00:00
+TEST contract 12 - Goldstar Caterers,KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,2026-11-17,2026-11-24,"0,1,2,3,4,5,6",evening,4,,,True,2026-11-17T20:28:41.383483+00:00
+TEST contract 13 - Gourmet Glatt North,Kol B'ramah - All Day Stories,TEST SPONSOR 13 - Gourmet Glatt North,2026-11-17,2026-11-18,"0,1,2,3,4,5,6",afternoon,2,,,True,2026-11-18T14:00:16.55733+00:00
+TEST contract 15 - Gelbstein's Bakery and Cafe,Kol B'ramah - All Day Stories,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,2026-11-17,2026-11-26,"1,2,3",evening,1,,,True,2026-11-17T20:34:49.472497+00:00
+TEST contract 16 - Bagel Nosh,Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,2026-11-17,2026-11-19,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",6,,,True,2026-11-17T20:36:51.761017+00:00
+TEST contract 17 - Lakewood Gingerbread House,KBR Jerusalem,TEST SPONSOR 17 - Lakewood Gingerbread House,2026-11-18,2026-11-18,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",1,,,True,2026-11-17T20:38:54.399821+00:00
+TEST contract 18 - Judaica Square North,Kol B'ramah - All Day Stories,TEST SPONSOR 18 - Judaica Square North,2026-11-22,2026-11-25,"0,1,2,3,4,5,6","morning,afternoon",1,,,True,2026-11-17T20:40:56.778338+00:00
+TEST contract 19 - Israel Bookshop Publications,KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,2026-11-17,2026-11-21,"0,1,2,3,4,5,6","morning,overnight",2,,,True,2026-11-17T20:42:58.950841+00:00
+TEST contract 20 - Ice Cream House Lakewood,Kol B'ramah - All Day Stories,TEST SPONSOR 20 - Ice Cream House Lakewood,2026-11-17,2026-11-20,"0,1,2,3,4,5,6","afternoon,evening",1,,hard,True,2026-11-17T20:45:01.554268+00:00
+TEST contract M01 - Authentic Kosher Chinese,Kol B'ramah Main,TEST SPONSOR 01 - Authentic Kosher Chinese,2026-11-17,2026-11-17,"0,1,2,3,4,5,6",evening,2,,,True,2026-11-17T22:50:06.140735+00:00
+TEST contract M02 - Glatt Bite,Kol B'ramah Main,TEST SPONSOR 02 - Glatt Bite,2026-11-17,2026-11-18,"0,1,2,3,4,5,6","morning,evening",1,,,True,2026-11-17T22:50:06.432393+00:00
+TEST contract M03 - Bun Burger Kitchen,Kol B'ramah Main,TEST SPONSOR 03 - Bun Burger Kitchen,2026-11-19,2026-11-21,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",1,,,True,2026-11-17T22:50:06.663035+00:00
+TEST contract M04 - Estreia,Kol B'ramah Main,TEST SPONSOR 04 - Estreia,2026-11-17,2026-11-30,"0,1,2,3",morning,2,,,True,2026-11-17T22:50:06.895408+00:00
+TEST contract M05 - Kepshuto,Kol B'ramah Main,TEST SPONSOR 05 - Kepshuto,2026-11-17,2026-11-30,6,"afternoon,evening",1,,,True,2026-11-17T22:50:07.129092+00:00
+TEST contract M06 - Taquito,Kol B'ramah Main,TEST SPONSOR 06 - Taquito,2026-11-17,2026-11-19,"0,1,2,3,4,5,6",morning,1,"08:15,18:45,22:45",,True,2026-11-17T22:50:07.362046+00:00
+TEST contract M07 - Pita Hut,Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,2026-11-17,2026-11-24,"0,1,2,3,4,5,6",evening,4,,,True,2026-11-17T22:50:07.599554+00:00
+TEST contract M08 - Southside Smokehouse,Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,2026-11-17,2026-11-24,"0,1,2,3,4,5,6",overnight,2,,,True,2026-11-17T22:50:07.840994+00:00
+TEST contract M09 - Cafotteria Modern Eatery,Kol B'ramah Main,TEST SPONSOR 09 - Cafotteria Modern Eatery,2026-11-17,2026-11-18,"0,1,2,3,4,5,6",afternoon,2,,,True,2026-11-18T14:00:17.473377+00:00
+TEST contract M10 - Pizzaleh,Kol B'ramah Main,TEST SPONSOR 10 - Pizzaleh,2026-11-17,,"0,1,2,3,4,5,6",morning,1,,,False,2026-11-18T14:00:19.714208+00:00
+TEST contract M12 - Goldstar Caterers,Kol B'ramah Main,TEST SPONSOR 12 - Goldstar Caterers,2026-11-20,2026-11-23,"0,1,2,3,4,5,6","morning,afternoon,evening,overnight",1,,,True,2026-11-17T22:50:08.774247+00:00
+TEST contract N21 - Cedar Lane Shoe Repair,Kol B'ramah Main,TEST SPONSOR 21 - Cedar Lane Shoe Repair (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",morning,3,,,True,2026-11-18T13:35:00.862336+00:00
+TEST contract N22 - Golden Challah Bakery,Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6","morning,afternoon",2,,,True,2026-11-18T13:35:03.840757+00:00
+TEST contract N23 - Pine Street Tutoring Center,Kol B'ramah Main,TEST SPONSOR 23 - Pine Street Tutoring Center (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6","morning,afternoon,evening",1,,,True,2026-11-18T13:35:06.49792+00:00
+TEST contract N24 - Shalom Home Appliances,Kol B'ramah Main,TEST SPONSOR 24 - Shalom Home Appliances (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",afternoon,3,,,True,2026-11-18T13:35:09.782243+00:00
+TEST contract N25 - Riverside Fresh Fish,Kol B'ramah Main,TEST SPONSOR 25 - Riverside Fresh Fish (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",evening,3,,,True,2026-11-18T13:35:12.366069+00:00
+TEST contract N26 - Bright Smile Pediatric Dental,Kol B'ramah Main,TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in),2026-11-18,2026-11-30,"0,1,2,3,6","morning,evening",2,,,True,2026-11-18T13:35:14.877345+00:00
+TEST contract N27 - Kesher Moving and Storage,Kol B'ramah Main,TEST SPONSOR 27 - Kesher Moving and Storage (stand-in),2026-11-18,2026-11-30,"0,1,2,3,6",morning,2,,,True,2026-11-18T13:35:17.721411+00:00
+TEST contract N28 - Yaffa's Sheitel Studio,Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),2026-11-18,2026-11-25,"0,1,2,3,4,5,6","afternoon,evening",2,,,True,2026-11-18T13:35:20.10845+00:00
+TEST contract N29 - Maple Grove Seforim,Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),2026-11-18,2026-11-20,"0,1,2,3,4,5,6","morning,afternoon,evening",2,,,True,2026-11-18T13:35:22.616794+00:00
+TEST contract N30 - Oak Tree Pharmacy,Kol B'ramah Main,TEST SPONSOR 30 - Oak Tree Pharmacy (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6","morning,overnight",1,,,True,2026-11-18T13:35:25.17262+00:00
+TEST contract N31 - Blue Ribbon Car Wash,Kol B'ramah Main,TEST SPONSOR 31 - Blue Ribbon Car Wash (stand-in),2026-11-19,2026-11-30,"0,1,2,3,4,5,6",morning,1,,,True,2026-11-18T13:35:27.638447+00:00
+TEST contract N32 - Tova's Simcha Hall,Kol B'ramah Main,TEST SPONSOR 32 - Tova's Simcha Hall (stand-in),2026-11-19,2026-11-30,"0,1,2,3,4,5,6",afternoon,2,,,True,2026-11-18T13:35:30.056586+00:00
+TEST contract N33 - Beacon Hill Insurance Agency,Kol B'ramah Main,TEST SPONSOR 33 - Beacon Hill Insurance Agency (stand-in),2026-11-18,2026-11-30,6,evening,1,,,True,2026-11-18T13:35:32.773513+00:00
+TEST contract N34 - Little Sprouts Playgroup,Kol B'ramah Main,TEST SPONSOR 34 - Little Sprouts Playgroup (stand-in),2026-11-18,2026-11-19,"0,1,2,3,4,5,6","morning,afternoon",1,,,True,2026-11-18T13:35:35.307353+00:00
+TEST contract N35 - Main Street Hardware,Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),2026-11-18,2026-11-22,"0,1,2,3,4,5,6","morning,afternoon,evening",3,,,True,2026-11-18T13:35:37.715984+00:00
+TEST contract N36 - Shefa Organic Produce,Kol B'ramah Main,TEST SPONSOR 36 - Shefa Organic Produce (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",morning,2,,,True,2026-11-18T13:35:40.446659+00:00
+TEST contract N37 - Keter Torah Judaica,Kol B'ramah Main,TEST SPONSOR 37 - Keter Torah Judaica (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",afternoon,1,,,True,2026-11-18T13:35:43.090858+00:00
+TEST contract N38 - Elm Avenue Physical Therapy,Kol B'ramah Main,TEST SPONSOR 38 - Elm Avenue Physical Therapy (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",evening,2,,,True,2026-11-18T13:35:45.767846+00:00
+TEST contract N39 - Simcha Floral Design,Kol B'ramah Main,TEST SPONSOR 39 - Simcha Floral Design (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6","morning,afternoon,evening",1,,,True,2026-11-18T13:35:48.415036+00:00
+TEST contract N40 - Rosewood Furniture Gallery,Kol B'ramah Main,TEST SPONSOR 40 - Rosewood Furniture Gallery (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6","morning,evening",1,,,True,2026-11-18T13:35:50.882032+00:00
+TEST contract N41 - Tzedek Accounting Services,Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6","morning,afternoon,evening",1,"07:15,12:15,17:15",soft,True,2026-11-18T13:35:53.478747+00:00
+TEST contract N42 - Sunrise Kosher Pizza,Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),2026-11-18,2026-11-30,"0,1,2,3,6","morning,afternoon,evening",1,"09:15,15:15",soft,True,2026-11-18T13:35:56.172828+00:00
+TEST contract N43 - Harmony Music School,Kol B'ramah Main,TEST SPONSOR 43 - Harmony Music School (stand-in),2026-11-18,2026-11-30,"0,2","afternoon,evening",1,,,True,2026-11-18T13:35:59.38775+00:00
+TEST contract N44 - Clearview Window Cleaning,Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),2026-11-18,2026-11-24,"0,1,2,3,4,5,6","morning,afternoon",3,,,True,2026-11-18T13:36:01.784047+00:00
+TEST contract N45 - Parkside Pediatrics,Kol B'ramah Main,TEST SPONSOR 45 - Parkside Pediatrics (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",morning,1,,,True,2026-11-18T13:36:04.227233+00:00
+TEST contract N46 - Royal Linen Rentals,Kol B'ramah Main,TEST SPONSOR 46 - Royal Linen Rentals (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",afternoon,2,,,True,2026-11-18T13:36:06.912828+00:00
+TEST contract N47 - Greenfield Landscaping,Kol B'ramah Main,TEST SPONSOR 47 - Greenfield Landscaping (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6",evening,1,,,True,2026-11-18T13:36:10.901247+00:00
+TEST contract N48 - Chessed Home Health Aides,Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),2026-11-18,2026-11-30,"0,1,2,3,4,5,6","morning,afternoon,evening",2,,,True,2026-11-18T13:36:13.438164+00:00
+TEST contract N49 - Lakeview Optical,Kol B'ramah Main,TEST SPONSOR 49 - Lakeview Optical (stand-in),2026-11-18,2026-11-30,4,"morning,afternoon",1,,,True,2026-11-18T13:36:16.155541+00:00
+TEST contract N50 - Hadar Shabbos Gift Baskets,Kol B'ramah Main,TEST SPONSOR 50 - Hadar Shabbos Gift Baskets (stand-in),2026-11-20,2026-11-30,"0,1,2,3,4,5,6","morning,afternoon,evening",1,,,True,2026-11-18T13:36:18.783945+00:00
