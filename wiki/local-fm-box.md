@@ -106,11 +106,52 @@ together, all but the newest carry `more: true`: they are recorded (queue, play 
 without a now-playing broadcast or a refill, so pages do not flick through the outage. Harness `local_box_offline`
 checks the time check is recorded at its second although it was reported later.
 
+## Stage 3a (2026-11-18): sound card output
+
+`KBR_ALSA_DEVICE` in the engine's env (as `aplay -L` names it; needs `alsa-utils`)
+adds `output.alsa` to radio.liq. Empty on the stream server: none of it runs there.
+
+- The card has its own clock behind `buffer(buffer=0.2, max=0.6)`. The engine's clock
+  stays the computer's, so timed items, Icecast and HLS are as without a card. The card
+  is 0.1 to 0.6 s behind the stream. With `max=2.` the lag once grew to 1.5 s and stayed
+  there (a buffer never drains), so the cap is what keeps FM's time check within a second.
+- **A card cannot be brought back inside a running Liquidsoap 2.2.4.** Tried: with
+  `settings.clock.allow_streaming_errors` a failed output's clock stops for good
+  (`out.start()` later "starts" it with no sound); `out.start()` on a missing device
+  raises an OCaml failure that `try/catch` does not catch and kills the thread. Without
+  the setting a failed output shuts the whole engine down.
+- So the engine asks first (`aplay ... -d 1 /dev/zero` must succeed) and leans on
+  systemd (`Restart=always`): card there at start = use it, and if it fails later the
+  engine exits and is started again; card not there at start = stream only, probe every
+  10 s, `shutdown()` once when it answers so the restart uses it. Measured in a loop
+  standing in for systemd: missing at start, appears (in use 20 s later), dies (engine
+  back in 8 s without it), returns (in use 18 s later).
+- Not solved: long-run drift between the computer's clock and the card's (the buffer
+  absorbs 0.4 s; `buffer.adaptative` follows drift by resampling, at a tiny pitch cost).
+  Decide on the real card.
+
+Testing without a sound card: PulseAudio with a null sink is a paced ALSA device and
+its monitor can be recorded (ALSA's own `null` device does not pace):
+
+```bash
+apt-get install -y pulseaudio pulseaudio-utils alsa-utils libasound2-plugins
+pulseaudio --daemonize=yes --exit-idle-time=-1 --disallow-exit -n \
+  --load="module-native-protocol-unix auth-anonymous=1 socket=/tmp/kbr-pulse.sock" \
+  --load="module-null-sink sink_name=fm rate=44100" --load="module-always-sink"
+chmod 666 /tmp/kbr-pulse.sock   # the harness runs the engine as "nobody"
+cd backend && PULSE_SERVER=unix:/tmp/kbr-pulse.sock KBR_HARNESS_ALSA_DEVICE=pulse \
+  uv run python ../infra/streaming/harness/run_harness.py --local-box next_twice local_box_sound_card
+```
+
+`local_box_sound_card` records the sink and the stream side by side: same items in the
+same order through a Next and a hard time check, card within 1.5 s of the stream, no gaps.
+
 ## Known gaps (next stages; nothing is installed at BMG yet)
 
 
-1. **Sound card output** in radio.liq (`output.alsa` behind an env var), and the box's
-   own audio sent up to Icecast for online listeners.
+1. The box's own audio sent up to Icecast for online listeners (today the box's engine
+   needs an Icecast beside it, as on the stream server). The sound card output is not
+   yet tried on a real card: lag and drift over days need the real hardware.
 2. For up to 40 s after a box's relay stops polling, its station's commands still go
    to the relay and fail before they fall back to HTTPS (`CONNECTED_SECONDS`). Air watch
    reports it as engine drift ("The local FM box does not answer") after its usual
