@@ -36,7 +36,7 @@ def test_engine_says_hello_before_asking_for_tracks():
     assert "if resp.status_code == 200 then" in liq[hello:]
     first_call = liq.index("send_hello()", liq.index("def send_hello()") + 20)
     assert first_call < liq.index("request.dynamic(")
-    assert "thread.run.recurrent(delay=5." in liq[first_call:liq.index("request.dynamic(")]
+    assert "thread.run.recurrent(fast=false, delay=5." in liq[first_call:liq.index("request.dynamic(")]
 
 
 def test_main_lane_request_settings():
@@ -354,3 +354,17 @@ def test_the_limiter_is_not_wrapped_in_mksafe_and_a_long_gap_starts_the_timed_it
     assert "if left > 1. and timed_pending() > 0 and timed_queue.is_ready() then" in liq
     assert "{if timed_early() != at then timed_go_on_air(180, at) end}" in liq
 
+
+
+def test_quick_steps_have_task_queues_the_backend_calls_cannot_fill():
+    """Jerusalem 2026-11-18: with the backend answering in 3 to 4 s, the engine's start
+    report and its ask for the next item filled Liquidsoap's two task queues and the
+    "level back up" step after Next waited behind them: up to 3.8 s of digital silence
+    (harness slow_backend_no_gap). The quick steps need queues of their own, and every
+    call to the backend made from a task must be marked slow so it stays off them."""
+    liq = _liq()
+    fast = int(re.search(r"settings\.scheduler\.fast_queues\s*:=\s*(\d+)", liq).group(1))
+    generic = int(re.search(r"settings\.scheduler\.generic_queues\s*:=\s*(\d+)", liq).group(1))
+    assert fast >= 4 and generic >= 4
+    assert "thread.run(fast=false, post)" in liq
+    assert "thread.run.recurrent(fast=false, delay=5., fun () -> begin\n    send_hello()" in liq
