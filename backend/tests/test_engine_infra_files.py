@@ -354,3 +354,22 @@ def test_the_limiter_is_not_wrapped_in_mksafe_and_a_long_gap_starts_the_timed_it
     assert "if left > 1. and timed_pending() > 0 and timed_queue.is_ready() then" in liq
     assert "{if timed_early() != at then timed_go_on_air(180, at) end}" in liq
 
+
+
+def test_sound_card_output_is_off_unless_named_and_asks_before_using_the_card():
+    """Local FM box: the sound card output exists only with KBR_ALSA_DEVICE (the stream
+    server sets none), sits behind a buffer on its own clock, and is used only after the
+    card answered a probe; a missing card means stream only and one restart when it is
+    back (wiki/local-fm-box.md)."""
+    liq = _liq()
+    assert 'alsa_device = environment.get("KBR_ALSA_DEVICE")' in liq
+    start = liq.index('if alsa_device != "" then')
+    block = liq[start:liq.index("encoded = ffmpeg.encode.audio(")]
+    assert liq.count("output.alsa(") == 1 and "output.alsa(" in block
+    assert "if card_there() then" in block
+    assert "card = buffer(buffer=0.2, max=0.6, fallible=true, radio)" in block
+    assert 'bufferize=false, fallible=true, card)' in block
+    assert "shutdown()" in block and "every=10." in block
+    # No engine setting file of the stream server names a card
+    for name in ("kbr-engine.env.example", "setup.sh"):
+        assert "KBR_ALSA_DEVICE" not in (INFRA / name).read_text()

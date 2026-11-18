@@ -648,6 +648,41 @@ if debug_wav != "" then
   output.file(%wav, fallible=true, debug_wav, radio)
 end
 
+# ── Sound card out (a local FM box feeding the transmitter) ──────────────────
+# Only when KBR_ALSA_DEVICE is set (e.g. "default" or "hw:1,0"); the stream server
+# leaves it empty and none of this runs. The card runs on its own clock behind a small
+# buffer: the engine's clock stays the computer's, so timed items, Icecast and HLS are
+# exactly as without a card. The card is 0.2 to 0.6 s behind the stream (the buffer never
+# holds more, so the time check on FM stays within a second).
+#
+# A card that is missing or unplugged must not take the station down, and Liquidsoap
+# 2.2 cannot bring a failed output back inside a running engine (its clock stops for
+# good, and a failed start raises an error no handler can catch; both tried
+# 2026-11-18). So the engine asks before it uses the card, and lets systemd do the rest:
+#   - card there at start: use it. If it then fails, the engine exits (Liquidsoap's own
+#     rule for a failed output) and systemd starts it again within seconds;
+#   - card not there at start: stream only, look for it every 10 s, and when it is
+#     back restart once to use it (the FM signal was silent anyway).
+alsa_device = environment.get("KBR_ALSA_DEVICE")
+def card_there() =
+  process.test(timeout=4., "aplay -q -D #{process.quote(alsa_device)} -t raw -f cd -d 1 /dev/zero")
+end
+if alsa_device != "" then
+  if card_there() then
+    log(level=2, "sound card #{alsa_device}: on")
+    card = buffer(buffer=0.2, max=0.6, fallible=true, radio)
+    output.alsa(id="sound_card", device=alsa_device, bufferize=false, fallible=true, card)
+  else
+    log(level=2, "sound card #{alsa_device}: not there, stream only; looking for it every 10 s")
+    thread.run(delay=10., every=10., fun () -> begin
+      if card_there() then
+        log(level=2, "sound card #{alsa_device}: back, restarting to use it")
+        shutdown()
+      end
+    end)
+  end
+end
+
 # ── One MP3 encode for both outputs ──────────────────────────────────────────
 # Best MP3 quality: 320 kbps, 44.1 kHz stereo, slowest and best encoder setting
 # (compression_level 0 is LAME's quality 0). Encoded once and copied to Icecast and to
