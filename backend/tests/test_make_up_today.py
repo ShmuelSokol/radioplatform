@@ -104,3 +104,26 @@ def test_a_full_later_break_is_skipped():
     out = settle_today(placed + full, breaks, [], NY, now, {})
     p = next(x for x in out if x.schedule is spot)
     assert p.local == _local(17, 45)
+
+
+@pytest.mark.asyncio
+async def test_talk_windows_start_after_the_items_before_them_in_their_group(db_session):
+    from app.models.queue_entry import QueueEntry
+    from app.services.spot_schedule_service import talk_windows
+
+    st = await _station(db_session)
+    time_check = Asset(id=uuid.uuid4(), title="TEST time", file_path="t.mp3", duration=10.0, asset_type="announcement")
+    intro = Asset(id=uuid.uuid4(), title="TEST Daf intro", file_path="i.mp3", duration=50.0, asset_type="announcement")
+    daf = Asset(id=uuid.uuid4(), title="TEST Daf Yomi", file_path="d.mp3", duration=3360.0, asset_type="shiur")
+    song = Asset(id=uuid.uuid4(), title="TEST song", file_path="s.mp3", duration=200.0, asset_type="music")
+    db_session.add_all([time_check, intro, daf, song])
+    await db_session.flush()
+    at = _local(20, 0).astimezone(UTC)
+    for pos, a in enumerate([time_check, intro, daf], start=1):
+        db_session.add(QueueEntry(id=uuid.uuid4(), station_id=st.id, asset_id=a.id, position=pos,
+                                  status="pending", preempt_at=at, source="block"))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=st.id, asset_id=song.id, position=9,
+                              status="pending", preempt_at=_local(21, 0).astimezone(UTC)))
+    await db_session.commit()
+    windows = await talk_windows(db_session, st, NY, _local(19, 0).astimezone(UTC))
+    assert windows == [(_local(20, 1), _local(20, 57))]
