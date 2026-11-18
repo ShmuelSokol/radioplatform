@@ -76,8 +76,9 @@ below); two engines must never pull one station's queue. So the path is closed u
 station is named in `PLAYOUT_RELAY_STATION_ID` (empty by default): a box set up with a
 wrong or copied station id gets 403 on the poll and takes nothing, and every switch of
 routing is logged as a warning. Until the box can feed Icecast, try it only under a
-station of its own, never under Main's id. (The same mistake on `/next` would still
-split a queue: `/next` trusts the token alone, as it does for any engine.)
+station of its own, never under Main's id. (The same mistake on `/next` is caught too since
+2026-11-18: each engine run sends its own id and a second engine with the station's id is
+refused with 409 and an alert; see "One engine per station" in streaming-architecture.md.)
 A command nobody fetched within its wait
 (4 s unless the caller gives `wait=`) is withdrawn, never delivered late. `wait=` and
 `slow_is_ok=` mean the same as by HTTPS: the relay is told how much of the wait is left

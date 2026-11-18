@@ -407,3 +407,22 @@ Main 13:27:42Z: Shmuel pressed Next by hand; the next item was "prepared" with 0
 
 ## The live show is on the stream (engine proto 5, 2026-11-18)
 The live lane used to be blank: the host was heard only through the listener pages' own socket. Now it plays the show from the backend's `GET /playout/{station}/live.mp3` (PR 317: after the broadcast delay, with Dumps and time checks, MP3 192 kbps; 204 when no show is heard; EOF when the delay has played out). `radio.liq` opens it with `input.http(start=false, ...)` on `/live on` and stops it on `/live off`; the token goes in ffmpeg's `headers` string arg, never in the URL (the endpoint refuses `?token=`). The lane is `fallback([live_feed, blank])` inside the `host_gate` switch, so before the first audio, during a stall and after EOF it is quiet, never music or emergency. `/playout-status` reports `engine_proto` and `live_on_stream` (proto >= `ENGINE_PROTO_LIVE_AUDIO`, 5), which listener pages use to switch to the stream for a show. Harness `live_show_on_the_stream` (the harness proxy serves a 1200 Hz "HOST" tone as live.mp3): host heard 1.5 s after the start, an 8 s stall is quiet (silence 2.4 s after the stall, host back 1.7 s after the feed returns), music back 1.0 s after the end, no emergency music. The harness station has `live_delay_seconds: 0`, since no host audio is sent there.
+
+## One engine per station (instance id)
+
+Every engine run makes a random id (`engine_instance` in radio.liq) and sends it as
+`X-Playout-Instance` with every call to the backend (hello, next, started) and in its
+`/status`. A local FM box's relay passes it on. The backend (`playout_engine.instance_ok`,
+dependency `_one_engine` in `api/v1/playout.py`) plays a station to one engine only: a
+caller whose id differs from the station's known engine is checked against the station's
+control line (the stream server's URL, or the box's relay while it polls). If that line
+answers with another id, the caller gets 409 on hello, next and started, takes nothing
+from the queue and does not reset what the real engine holds; a critical alert
+"Two playout engines for one station" is raised once, and the refused id is rechecked
+only every 60 s. A restart is never refused (the old engine is gone; the line answers with
+the new id or not yet at all), a control line that does not answer means the caller is
+taken (a blip must not take a station off air), and after a backend restart the first
+caller is checked the same way. An engine that sends no id is not checked. The refused
+engine's log says `hello: REFUSED`. Tests: `test_a_second_engine_with_the_same_station_id_is_refused`,
+relay `test_the_engine_instance_id_reaches_the_backend_and_a_refusal_reaches_the_engine`,
+harness `second_engine_refused`.

@@ -268,7 +268,7 @@ class Stack:
                 if stack.slow_backend:
                     time.sleep(stack.slow_backend)
                 headers = {k: v for k, v in self.headers.items()
-                           if k.lower() in ("x-playout-token", "content-type", "accept")}
+                           if k.lower() in ("x-playout-token", "x-playout-instance", "content-type", "accept")}
                 req = urllib.request.Request(f"http://127.0.0.1:{BACKEND_PORT}{self.path}", data=body,
                                              method=method, headers=headers)
                 try:
@@ -607,9 +607,10 @@ class Harness:
 
         async with async_session_factory() as db:
             # No broadcast delay: no host audio is sent here, and with a delay the show
-            # takes the station over only once listeners hear the host (PR 316)
+            # takes the station over only once listeners hear the host (PR 316). For the same
+            # reason no hand-back to music when no host audio arrives (PR 321)
             db.add(Station(id=STATION_ID, name="Harness", timezone="America/New_York",
-                           automation_config={"live_delay_seconds": 0}))
+                           automation_config={"live_delay_seconds": 0, "live_host_gone_seconds": 0}))
             db.add(User(id=uuid.uuid4(), email=ADMIN_EMAIL, hashed_password=hash_password(ADMIN_PASSWORD),
                         role=UserRole.ADMIN, is_active=True))
             for name, (freq, secs, kind, category) in TONES.items():
@@ -3536,6 +3537,80 @@ async def sc_site_matches_stream(h: Harness) -> None:
     h.check(name, len(playing) == 1, f"one item on air on the site ({len(playing)})")
 
 
+async def sc_second_engine_refused(h: Harness) -> None:
+    """One engine per station (local FM box safety): a second engine started with the same
+    station id (a box set up with a copied id) is refused at hello and at every ask, takes
+    nothing from the queue, and a critical alert is raised; the station's own engine plays
+    on without a gap and the site keeps showing what it plays."""
+    from sqlalchemy import select
+
+    from app.db.engine import async_session_factory
+    from app.models.alert import Alert
+    from app.services import playout_engine
+
+    name = "second_engine_refused"
+    await wait_music(h)
+    t_start = time.time()
+    second_dir = h.stack.dir / "second"
+    (second_dir / "emergency").mkdir(parents=True, exist_ok=True)
+    os.chmod(second_dir, 0o777)
+    os.chmod(second_dir / "emergency", 0o777)
+    env = dict(os.environ)
+    env.update({
+        "KBR_BACKEND_URL": f"http://127.0.0.1:{BACKEND_PROXY_PORT}/api/v1",
+        "KBR_STATION_ID": str(STATION_ID), "KBR_PLAYOUT_TOKEN": TOKEN,
+        "KBR_CONTROL_PORT": str(CONTROL_PORT + 1),
+        "KBR_EMERGENCY_DIR": str(second_dir / "emergency"),
+        "KBR_ICECAST_PORT": str(ICECAST_PORT), "KBR_ICECAST_SOURCE_PASSWORD": TOKEN,
+        "KBR_ICECAST_MOUNT": "/harness-second", "KBR_HLS_DIR": str(second_dir),
+        "KBR_DEBUG_WAV": "", "KBR_ALSA_DEVICE": "",
+    })
+    log_path = second_dir / "engine.log"
+    cmd = ["liquidsoap", str(RADIO_LIQ)]
+    if os.geteuid() == 0:
+        cmd = ["runuser", "-u", "nobody", "--"] + cmd
+    p = subprocess.Popen(cmd, env=env, stdout=open(log_path, "a"), stderr=subprocess.STDOUT,
+                         start_new_session=True)
+    try:
+        await asyncio.sleep(25)
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+            p.wait(timeout=10)
+        except Exception:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except Exception:
+                pass
+    log = log_path.read_text(errors="replace")
+    h.check(name, "hello: REFUSED" in log, "the second engine's hello was refused")
+    h.check(name, "next: backend gave entry" not in log, "the second engine got nothing from the queue")
+    async with async_session_factory() as db:
+        alerts = (await db.execute(select(Alert).where(
+            Alert.station_id == STATION_ID, Alert.title == playout_engine.SECOND_ENGINE_ALERT_TITLE,
+        ))).scalars().all()
+    h.check(name, len(alerts) >= 1, f"a critical alert was raised ({len(alerts)})")
+    heard = h.heard(t_start, time.time() - 1)
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"the station's own engine played on: longest silence {gap:.1f} s")
+    names = [n for _, n in timeline(heard) if n != "silence"]
+    h.check(name, bool(names) and all(n.startswith("song") for n in names),
+            f"station music only on the station's engine: {names}")
+    st = await h.on_air()
+    def engine_status() -> dict | None:
+        req = urllib.request.Request(f"http://127.0.0.1:{CONTROL_PORT}/status", method="POST", data=b"{}",
+                                     headers={"X-Playout-Token": TOKEN, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json.loads(r.read())
+        except Exception:
+            return None
+
+    status = await asyncio.to_thread(engine_status)
+    h.check(name, st is not None and status is not None and status.get("entry_id") == str(st.id),
+            "the site shows what the station's engine plays")
+
+
 async def sc_engine_crash_restart(h: Harness) -> None:
     """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
     the backend up. It says hello, plays station music (not emergency files) within a few
@@ -3931,6 +4006,7 @@ SCENARIOS = {
     "next_on_a_busy_server": sc_next_on_a_busy_server,
     "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,
+    "second_engine_refused": sc_second_engine_refused,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
