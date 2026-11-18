@@ -258,6 +258,13 @@ async function reach(browser) {
     await panel(page).waitFor();
     check(`${tag}: Song on the row on air opens the ON AIR panel`, await page.getByTestId('song-on-air').isVisible());
     await page.keyboard.press('Escape');
+    // an unselected row: a plain click on its Song button still lands (the mouse is over the row by then)
+    await page.mouse.move(5, 5);
+    await rowOf(page, p[6].id).getByTestId('row-song').click({ timeout: 3000 });
+    await panel(page).waitFor();
+    check(`${tag}: Song on an unselected row can be pressed with a mouse`, (await page.getByTestId('song-name').innerText()).includes(station.byId[p[6].asset_id].title));
+    await page.keyboard.press('Escape');
+    await page.mouse.move(5, 5);
     // an unselected row still keeps them out of the way
     check(`${tag}: an unselected, unhovered row hides its buttons`, (await rowOf(page, p[5].id).getByTestId('row-quick').evaluate((el) => getComputedStyle(el).opacity)) === '0');
     // Right-hand column: scrolling to its last tab never moves Loop
@@ -280,6 +287,35 @@ async function reach(browser) {
     const hs = await aside.getByRole('button', { name: /^HS/ }).boundingBox();
     check(`${tag}: HS is below the pinned buttons, not under them, at the top of the scroll`, !!hs && hs.y >= after.y + 4 * 32, JSON.stringify(hs));
     check(`${tag}: the last tab (Errors) can still be reached and pressed`, await aside.getByRole('tab').last().getAttribute('aria-selected') === 'true');
+    check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+}
+
+// ── A queue time on another day: the day name stays on its own row ──
+async function dayName(browser) {
+  for (const [name, opts] of [['desktop 1366x900', { viewport: { width: 1366, height: 900 } }], ['desktop 1024x768', { viewport: { width: 1024, height: 768 } }], ['iPhone 13', PHONE], ['iPhone SE', PHONE_SE], ['iPhone 13 sideways', PHONE_LAND]]) {
+    const tag = `day name ${name}`;
+    const station = songStation({ queueSize: 700 });
+    const { ctx, page, errors } = await openRoom(browser, opts, station);
+    const pick = page.getByLabel('Show day');
+    await pick.dispatchEvent('pointerdown');
+    await page.waitForFunction(() => document.querySelector('select[aria-label="Show day"]').options.length >= 3, null, { timeout: 8000 });
+    await pick.selectOption({ index: 2 });
+    await sleep(500);
+    const rows = await page.locator('[data-testid=queue-row]').evaluateAll((els) => els.slice(0, 12).map((row) => {
+      const t = row.querySelector('[data-testid=air-time]');
+      const rr = row.getBoundingClientRect();
+      const range = document.createRange(); range.selectNodeContents(t);
+      const tr = range.getBoundingClientRect();
+      let sib = t.nextElementSibling; while (sib && sib.getBoundingClientRect().width === 0) sib = sib.nextElementSibling;
+      const next = sib.getBoundingClientRect();
+      return { text: t.innerText.replace(/\s+/g, ' '), inRow: tr.top >= rr.top - 0.5 && tr.bottom <= rr.bottom + 0.5, clear: tr.right <= next.left + 0.5, cut: t.scrollWidth > t.clientWidth + 1 };
+    }));
+    check(`${tag}: rows of another day show the day name`, rows.length > 3 && rows.every((r) => /(Sun|Mon|Tue|Wed|Thu|Fri|Sat)/.test(r.text)), JSON.stringify(rows[0]));
+    check(`${tag}: time and day name stay inside their own row`, rows.every((r) => r.inRow), JSON.stringify(rows.filter((r) => !r.inRow)[0]));
+    check(`${tag}: time and day name do not run into the next column or get cut`, rows.every((r) => r.clear && !r.cut), JSON.stringify(rows.filter((r) => !r.clear || r.cut)[0]));
+    await shot(page, `day-name-${name.replace(/\W+/g, '-')}`);
     check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   }
@@ -342,6 +378,7 @@ try {
   if (run('row')) await queueRow(browser);
   if (run('refusals')) await refusals(browser);
   if (run('reach')) await reach(browser);
+  if (run('day')) await dayName(browser);
   if (run('phone')) {
     await phone(browser, PHONE, 'iPhone 13');
     await phone(browser, PHONE_SE, 'iPhone SE');

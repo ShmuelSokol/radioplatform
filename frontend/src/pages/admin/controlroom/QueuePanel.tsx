@@ -162,7 +162,7 @@ function QueuePanel(p: Props) {
       </div>
       <div className="hidden lg:flex shrink-0 h-[18px] items-stretch qn-log-head text-[11px] leading-[18px] pr-3" aria-hidden="true">
         <span className="w-7 shrink-0" />
-        <span className="w-[92px] shrink-0">Time</span>
+        <span className="w-[124px] shrink-0">Time</span>
         <span className="w-12 shrink-0">Length</span>
         <span className="flex-1">Title</span>
         <span className="hidden xl:block w-28 shrink-0">Type</span>
@@ -256,9 +256,9 @@ function QueuePanel(p: Props) {
                   </button>
                 )}
 
-                <span className="w-[62px] lg:w-[92px] shrink-0 tabular-nums text-[13px] leading-tight" data-testid="air-time">
+                <span className="w-[62px] lg:w-[124px] shrink-0 tabular-nums text-[13px] leading-tight lg:whitespace-nowrap lg:overflow-hidden" data-testid="air-time">
                   {start.time}
-                  <span className="block lg:inline lg:ml-1 text-[10px] opacity-70">{start.sub}</span>
+                  <span className="block lg:inline lg:ml-1 text-[10px] opacity-70 whitespace-nowrap">{start.sub}</span>
                 </span>
                 <span className="hidden lg:block w-12 shrink-0 tabular-nums text-[13px]">{fmtDur(a?.duration)}</span>
 
@@ -299,7 +299,7 @@ function QueuePanel(p: Props) {
                 <span className="lg:hidden w-11 shrink-0 text-right tabular-nums text-sm">{fmtDur(a?.duration)}</span>
 
                 {/* Desktop quick actions */}
-                <span className={`hidden lg:flex absolute right-28 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg ${isSel || isCur ? '' : 'opacity-0 pointer-events-none'} group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto`} data-testid="row-quick" onClick={(e) => e.stopPropagation()}>
+                <span className={`hidden lg:flex absolute right-28 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg ${isSel || isCur ? '' : 'opacity-0 pointer-events-none [@media(hover:hover)]:pointer-events-auto'} group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto`} data-testid="row-quick" onClick={(e) => e.stopPropagation()}>
                   {a && !isSilence && p.onSong && (
                     <button type="button" onClick={() => p.onSong?.(entry)} title="Song: category, do not play, details"
                       aria-label={`Song actions for ${title}`} data-testid="row-song" className="qn-btn px-1 h-5 text-[10px]">Song</button>
