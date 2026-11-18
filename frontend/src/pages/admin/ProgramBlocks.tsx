@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { rememberStation, stationToShow } from '../../lib/lastStation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listAssets } from '../../api/assets';
 import { listAssetTypes } from '../../api/playlists';
@@ -98,7 +99,7 @@ export default function ProgramBlocks() {
   const { data: stationData } = useStations();
   const stations = stationData?.stations ?? [];
   const [stationId, setStationId] = useState('');
-  const station = stationId || stations[0]?.id || '';
+  const station = stationToShow(stations, stationId);
 
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState('');
@@ -234,7 +235,7 @@ export default function ProgramBlocks() {
             <select
               aria-label="Station"
               value={station}
-              onChange={(e) => setStationId(e.target.value)}
+              onChange={(e) => { setStationId(e.target.value); rememberStation(e.target.value); }}
               className="px-3 py-2 border rounded-lg"
             >
               {stations.map((s) => (

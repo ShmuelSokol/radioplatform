@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
+import { guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const SHOTS = process.env.SHOTS_DIR || '';
@@ -31,7 +32,7 @@ const VIEWS = [
   { name: 'iphone', opts: { ...devices['iPhone 13'] }, desktop: false },
 ];
 
-const browser = await chromium.launch();
+const browser = guardBrowser(await chromium.launch());
 for (const view of VIEWS) {
   const ctx = await browser.newContext(view.opts);
   await ctx.addInitScript(([a, r]) => { localStorage.setItem('access_token', a); localStorage.setItem('refresh_token', r); }, [login.access_token, login.refresh_token]);
@@ -159,4 +160,4 @@ for (const view of VIEWS) {
 }
 await browser.close();
 console.log(failures ? `${failures} failed` : 'All passed');
-process.exit(failures ? 1 : 0);
+process.exit((failures ? 1 : 0) || (guardVerdict() ? 1 : 0));

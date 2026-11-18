@@ -13,6 +13,16 @@ import {
   chromium, devices, checker, sleep, makeStation, adminContext, newPage, watchDecks, timeClick, timeUntil,
 } from './lib/fake-station.mjs';
 import { startStreamServer } from './lib/stream-server.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// What this test provokes on purpose; anything else the screen, console or network shows
+// fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/warning toast: (The time, weather and sponsorships always play to the end|That item just started|Loop is on|Panic: cut what was on air|Sound moved to another control room tab)/, 'amber on purpose: each tells the operator what the press did or why it did nothing');
+allowEverywhere(/No weather announcement is available|preview-weather|Could not load the weather preview/, 'the preview is made to fail once to see the message');
+allowEverywhere(/Panic: The playout engine did not respond/, 'the engine is made unreachable to see what Panic says');
+allowEverywhere(/queue\/move-up|That did not go through/, 'a move is made to fail to see the message and the row going back');
+allowEverywhere(/Category transition conflict|Daypart rule "All Day Stories" expects stories/, 'the fake station answers a move with these reminders; the test checks they show');
+allowEverywhere(/__tone\/m1\.wav|Couldn't load this file|blocked\.wav|:4322\/missing/, 'audio files made to fail for the pre-listen and retry checks');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
 const STREAM_PORT = Number(process.env.STREAM_PORT || 4322);

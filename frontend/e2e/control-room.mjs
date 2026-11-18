@@ -13,6 +13,7 @@ import { createRequire } from 'node:module';
 
 // require() so a globally installed Playwright is found too (npx playwright / NODE_PATH).
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
+import { guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
 
 const BASE = process.env.BASE_URL || 'http://localhost:4173';
 const SHOTS = process.env.SHOTS_DIR || '';
@@ -789,7 +790,7 @@ async function playlistsInstant(browser) {
   await ctx.close();
 }
 
-const browser = await chromium.launch();
+const browser = guardBrowser(await chromium.launch());
 await stationSwitch(browser);
 await metersWithoutListening(browser);
 await playlistsInstant(browser);
@@ -797,7 +798,7 @@ await pflDeck(browser, { viewport: { width: 1440, height: 900 } }, 'pfl deck des
 await pflDeck(browser, { ...devices['iPhone 13'] }, 'pfl deck iPhone');
 await pflUnplayable(browser, { viewport: { width: 1440, height: 900 } }, 'pfl unplayable desktop');
 await pflUnplayable(browser, { ...devices['iPhone 13'] }, 'pfl unplayable iPhone');
-if (process.env.ONLY === 'station-switch') { await browser.close(); process.exit(failures ? 1 : 0); }
+if (process.env.ONLY === 'station-switch') { await browser.close(); process.exit((failures ? 1 : 0) || (guardVerdict() ? 1 : 0)); }
 await desktop(browser, 1440, 900);
 await desktop(browser, 2560, 1440);
 await desktop(browser, 1024, 768);
@@ -811,4 +812,4 @@ await longQueue(browser, { viewport: { width: 1440, height: 900 } }, 'desktop lo
 await longQueue(browser, { ...devices['iPhone 13'] }, 'phone long queue', 66);
 await browser.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
-process.exit(failures ? 1 : 0);
+process.exit((failures ? 1 : 0) || (guardVerdict() ? 1 : 0));

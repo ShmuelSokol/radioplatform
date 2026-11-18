@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { rememberStation, stationToShow } from '../../lib/lastStation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listSponsors } from '../../api/sponsors';
 import { getAssetAudioUrl, listAssets } from '../../api/assets';
@@ -124,7 +125,8 @@ export default function SpotSchedules() {
   // station (Main) showed "none planned" while 180 plays were queued on two others.
   const scheduledStation = (schedules ?? []).find((x) => x.is_active && x.station_id)?.station_id;
   const withSchedules = stations.find((st) => String(st.id) === String(scheduledStation))?.id;
-  const stationId = previewStation || withSchedules || stations[0]?.id || '';
+  // ...unless a station was being worked on in this browser: then that one
+  const stationId = stationToShow(stations, previewStation, withSchedules);
 
   const { data: spotResults, isFetching: searching } = useQuery({
     queryKey: ['spot-search', spotSearch],
@@ -552,7 +554,7 @@ export default function SpotSchedules() {
           <h2 className="text-lg font-semibold">Next 7 days</h2>
           <select
             value={stationId}
-            onChange={(e) => setPreviewStation(e.target.value)}
+            onChange={(e) => { setPreviewStation(e.target.value); rememberStation(e.target.value); }}
             className="px-3 py-1 border rounded-lg"
           >
             {stations.map((s) => (

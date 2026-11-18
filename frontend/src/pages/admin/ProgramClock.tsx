@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
+import { rememberStation, stationToShow } from '../../lib/lastStation';
 import { useStations, useUpdateStation } from '../../hooks/useStations';
 import { useStationRules, useCreateRule, useUpdateRule, useDeleteRule } from '../../hooks/useRules';
 import type { ScheduleRule, Station } from '../../types';
@@ -96,9 +97,9 @@ export default function ProgramClock() {
   const station: Station | undefined = stations.find((s: Station) => s.id === stationId);
   const autoConfig = station?.automation_config ?? {};
 
-  // Auto-select first station
+  // Open on the station last worked on in this browser, else the first
   if (!stationId && stations.length > 0) {
-    setStationId(stations[0].id);
+    setStationId(stationToShow(stations));
   }
 
   const { data: rulesData, isLoading: rulesLoading } = useStationRules(stationId);
@@ -209,7 +210,7 @@ export default function ProgramClock() {
           {/* Station picker */}
           <select
             value={stationId ?? ''}
-            onChange={e => setStationId(e.target.value || null)}
+            onChange={e => { setStationId(e.target.value || null); rememberStation(e.target.value); }}
             className="bg-[#12123a] border border-[#2a2a5e] rounded px-3 py-1.5 text-sm text-cyan-200"
           >
             {stations.map((s: Station) => (

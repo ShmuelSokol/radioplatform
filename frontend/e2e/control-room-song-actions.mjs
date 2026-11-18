@@ -10,6 +10,11 @@
  * Exits non-zero if a check fails.
  */
 import { chromium, devices, checker, sleep, makeStation, adminContext, newPage } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose (anything else shown fails the run, e2e/lib/guard.mjs)
+allowEverywhere(/do-not-play|That did not go through/, 'do not play is made to fail once to see the message');
+allowEverywhere(/PATCH .*\/assets\/|status of 403|Only managers can change the library|is not allowed to do that/, 'a login without library rights tries a change to see the refusal');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
 const SHOTS = process.env.SHOTS || '';

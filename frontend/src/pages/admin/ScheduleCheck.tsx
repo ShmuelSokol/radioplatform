@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { rememberStation, stationToShow } from "../../lib/lastStation";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -64,7 +65,7 @@ export default function ScheduleCheck() {
   const { data: stationData } = useStations();
   const stations = stationData?.stations ?? [];
   const [stationId, setStationId] = useState("");
-  const activeStation = stationId || stations[0]?.id || "";
+  const activeStation = stationToShow(stations, stationId);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["schedule-look-ahead", activeStation],
@@ -115,7 +116,7 @@ export default function ScheduleCheck() {
         </div>
         <select
           value={activeStation}
-          onChange={(e) => setStationId(e.target.value)}
+          onChange={(e) => { setStationId(e.target.value); rememberStation(e.target.value); }}
           className="border rounded-lg px-3 py-2"
         >
           {stations.map((s) => (
