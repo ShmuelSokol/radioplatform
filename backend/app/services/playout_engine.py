@@ -1006,11 +1006,9 @@ async def handle_started(
         # Back on the station's own queue: the emergency alert has served its purpose.
         # Also checked once per process, since a backend restart forgets on_emergency.
         state.emergency_cleared = True
-        # In the background, in its own session: the alerts read took 0.87 s inside a
-        # start report on production (2026-11-18 10:45Z), and the engine waits for it
-        task = asyncio.create_task(_clear_emergency_alert(station_id))
-        _background.add(task)
-        task.add_done_callback(_background.discard)
+        clear_emergency = True
+    else:
+        clear_emergency = False
     state.on_emergency = False
     if state.cued_entry_id == str(entry.id):
         state.cued_entry_id = None
@@ -1025,6 +1023,13 @@ async def handle_started(
     await compact_positions(db, station_id)
     entry_pk = entry.id
     await db.commit()
+    if clear_emergency:
+        # In the background, in its own session, once this report's own changes are
+        # committed: the alerts read took 0.87 s inside a start report on production
+        # (2026-11-18 10:45Z), and the engine waits for the answer
+        task = asyncio.create_task(_clear_emergency_alert(station_id))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
 
     if quiet:
         return {"ok": True, "known": True}
