@@ -258,6 +258,11 @@ def timed_go_on_air(limit, group) =
   attempt()
 end
 
+# The group (its `at`) that went on air early because the music lane had run out a few
+# seconds before it: its own timer must not take over a second time (it would cut the
+# group's first item).
+timed_early = ref(-1.)
+
 # Load the item now; put it on air at `at` (unix seconds). The music fades under it.
 def schedule_timed(~uri, ~at) =
   r = request.create(uri)
@@ -269,7 +274,9 @@ def schedule_timed(~uri, ~at) =
   if abs(at - timed_group_at()) > 0.5 then
     timed_group_at := at
     wait = at - time() - skip_fade
-    thread.run(delay=(if wait > 0. then wait else 0. end), {timed_go_on_air(180, at)})
+    # (unless the group already went on air early: see the hold lane)
+    thread.run(delay=(if wait > 0. then wait else 0. end),
+               {if timed_early() != at then timed_go_on_air(180, at) end})
   end
 end
 
@@ -377,8 +384,13 @@ def true_peak_limit(s) =
   end
   ffmpeg.raw.decode.audio(ffmpeg.filter.create(graph_of))
 end
-# (an FFmpeg filter source counts as fallible; it never stops while radio plays)
-radio = mksafe(true_peak_limit(radio))
+# An FFmpeg filter source counts as fallible (it never stops while radio plays), and it
+# stays that way: the outputs below take a fallible source. It used to be wrapped in
+# mksafe(), and with that the engine could spin at 100% CPU at start and never play,
+# depending on nothing more than the number of definitions in this file: mksafe's switch
+# asked the filter whether it was ready before its input was set up, and the filter
+# ran its inner clock forever (gdb, 2026-11-18).
+radio = true_peak_limit(radio)
 
 # ── Tell the backend what really went on air ─────────────────────────────────
 def report_to_backend(entry, lane, title) =
@@ -438,7 +450,22 @@ def send_started(m) =
     thread.run(delay=0.15, {main_gain := 1.})
   elsif lane == "hold" then
     # Not reported: nothing from the queue is on air and it is not the emergency music
-    log.important("hold: quiet until the timed item due in #{timed_group_at() - time()} s")
+    left = timed_group_at() - time()
+    if left > 3. and timed_pending() > 0 and timed_queue.is_ready() then
+      # More than a moment to fill: the timed item starts now, a few seconds early,
+      # as it does on the browser player (a timed item due within 8 s of a song
+      # change starts at that change). Jerusalem 00:00Z 2026-11-18: 6.6 s to the
+      # hour were filled with the start of a song that was then cut.
+      log.important("hold: timed item due in #{left} s starts now, after the song")
+      timed_early := timed_group_at()
+      # Opening the timed lane is all it takes: nothing is on air to fade or mute.
+      # (Not timed_take_over(): one more call into it from here and Liquidsoap spins
+      # at start, see wiki/streaming-architecture.md.)
+      timed_armed := true
+      thread.run(delay=1.5, {timed_armed := false})
+    else
+      log.important("hold: quiet until the timed item due in #{left} s")
+    end
   elsif lane == "live" then
     log.important("live: a host is on air; the stream is quiet")
   else
@@ -601,7 +628,7 @@ end)
 # Optional: also write the output to a WAV file (testing only)
 debug_wav = environment.get("KBR_DEBUG_WAV")
 if debug_wav != "" then
-  output.file(%wav, debug_wav, radio)
+  output.file(%wav, fallible=true, debug_wav, radio)
 end
 
 # ── One MP3 encode for both outputs ──────────────────────────────────────────

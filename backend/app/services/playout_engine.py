@@ -54,8 +54,10 @@ ENGINE_PROTO_GROUPS = 2
 # From this version the engine stays quiet for the last seconds before a hard timed item
 # when it has no song (its hold lane); an older engine would play emergency music there.
 ENGINE_PROTO_HOLD = 3
-# A song that would start this close before a hard timed item is not handed out
-HOLD_BEFORE_HARD_SECONDS = 4.0
+# A song that would start this close before a hard timed item is not handed out. The
+# engine fills up to 3 s with quiet and starts the timed item early for more, as the
+# browser player does (queue.TIMED_EARLY_START_SECONDS, the same 8 s).
+HOLD_BEFORE_HARD_SECONDS = 8.0
 
 
 @dataclass

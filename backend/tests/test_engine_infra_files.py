@@ -61,7 +61,7 @@ def test_levels_and_output_processing():
     assert "compress(threshold=-14., ratio=3." in liq
     # Look-ahead brickwall at -3 dBFS (limit() is a compressor: true peaks got through)
     assert "ffmpeg.filter.alimiter(graph, limit=0.708" in liq and "level=false" in liq
-    assert "radio = mksafe(true_peak_limit(radio))" in liq
+    assert "radio = true_peak_limit(radio)" in liq
     assert "limit(threshold=" not in liq
     # 320 kbps, 44.1 kHz stereo, best encoder setting; encoded once and copied to both
     # outputs (two encoders cost 14.9% of a core against 8.7% for one, 2026-11-17)
@@ -325,3 +325,17 @@ def test_status_answers_before_the_first_track_and_setup_tries_a_new_script_for_
     assert setup.index("liquidsoap --check /etc/kbr-engine/radio.liq.new") < trial
     assert trial < setup.index("mv /etc/kbr-engine/radio.liq.new /etc/kbr-engine/radio.liq")
     assert "The new engine script does not start" in setup
+
+
+def test_the_limiter_is_not_wrapped_in_mksafe_and_a_long_gap_starts_the_timed_item_early():
+    # mksafe() around the FFmpeg limiter made the engine spin at start depending on the
+    # number of definitions in the script (one unused ref was enough). And a song that
+    # ends more than 3 s before a hard item is followed by that item at once (Jerusalem
+    # 00:00Z 2026-11-18: 6.6 s were filled with the start of a song that was then cut).
+    liq = (INFRA / "radio.liq").read_text()
+    assert "radio = true_peak_limit(radio)" in liq
+    assert "mksafe(true_peak_limit" not in liq
+    assert "output.file(%wav, fallible=true, debug_wav, radio)" in liq
+    assert "if left > 3. and timed_pending() > 0 and timed_queue.is_ready() then" in liq
+    assert "{if timed_early() != at then timed_go_on_air(180, at) end}" in liq
+

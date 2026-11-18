@@ -802,7 +802,7 @@ async def test_a_song_is_still_handed_out_when_there_is_room_or_the_hard_item_cu
 ):
     station, entries, sent = engine_station
     url = f"/api/v1/playout/{station.id}/next?proto=3"
-    # 20 s of room after the song change: the next song is worth starting
+    # 18 s of room after the song change: the next song is worth starting
     await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=77.0)
     assert (await client.get(url, headers=HEADERS)).json()["entry_id"] == str(entries[1].id)
     # The hard item is due while the song on air still plays: the song after it is
