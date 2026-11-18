@@ -127,6 +127,8 @@ def test_public_get_list_is_what_we_reviewed():
         "/api/v1/song-requests/station/{station_id}/count", "/api/v1/archives", "/api/v1/archives/{archive_id}",
         "/api/v1/archives/station/{station_id}/rss", "/api/v1/crm/raffles/active", "/api/v1/playout-status",
         "/api/v1/site-release",
+        # an emergency alert's audio for the browser player (random file names, the alert itself is public)
+        "/api/v1/emergency/audio/{name}",
         # schedules: the program guide is public; the other reads are used by admin screens but have
         # always been open (tests/test_schedules.py reads them with no login). They hold block names,
         # times and which library items a block plays: nothing secret (see B-ROLE-18).
@@ -151,8 +153,8 @@ async def test_public_gets_work_anonymously_and_leak_nothing(client: AsyncClient
         started = time.perf_counter()
         r = await client.get(url, params=params)
         took = time.perf_counter() - started
-        if path.endswith("/stream") or path.endswith("/live-audio"):
-            # no stream configured / no live show audio: a polite refusal, never a crash
+        if path.endswith("/stream") or path.endswith("/live-audio") or "/emergency/audio/" in path:
+            # no stream configured / no live show audio / no such alert file: a polite refusal, never a crash
             if r.status_code >= 500 and r.status_code != 503:
                 problems.append(f"{path}: {r.status_code}")
         elif r.status_code != 200:

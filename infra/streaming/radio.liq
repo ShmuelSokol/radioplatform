@@ -55,9 +55,10 @@ auth_headers = [("X-Playout-Token", token), ("X-Playout-Instance", engine_instan
 # over in parallel (seq/of) and /timed_drop. 3 = the hold lane (quiet before a hard item
 # when no song is handed out). 4 = the next item is loaded while a host is on air (the
 # live lane keeps it off the stream until the show ends). 5 = the live lane plays the
-# show from the backend's live.mp3 (listener pages then hear it on the stream). The
+# show from the backend's live.mp3 (listener pages then hear it on the stream). 6 = the
+# emergency alert lane (/alert, /alert_stop, /alert_line; reports to /alert). The
 # backend keeps to the old serial hand-over for an engine that sends nothing.
-engine_proto = 5
+engine_proto = 6
 
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
 # track is requested, so the two cannot cross. If the backend cannot be reached (or
@@ -308,9 +309,18 @@ timed_early = ref(-1.)
 # Into the timed lane: the item is queued and its group gets its take-over.
 # Into the timed lane: the item counts as pending and its group gets its take-over.
 # `push=false` when its file is still downloading: the download pushes it when done.
+# Timed items the backend took back (/timed_drop): skipped the moment they would start.
+# Silence left in the timed lane when a blackout ended went on air one item per Next.
+timed_dropped = ref([])
+# The entries handed to the lane and their group's time, so an alert can take back a
+# group that fell due while it was on air (see alert_drop_stale_timed)
+timed_entries = ref([])
 def timed_admit(r, at, ~push=true) =
   # Counted before the push: with prefetch the push itself can wait for the download
   timed_pending := timed_pending() + 1
+  found = r/kbr_entry="([^"]+)"/.exec(request.uri(r))
+  entry = list.assoc(default="", 1, found)
+  if entry != "" then timed_entries := list.prefix(50, (at, entry) :: timed_entries()) end
   # Pushed here, not in a thread, so a group keeps the order it was handed over in
   if push then timed_queue.push(r) end
   # One take-over per group: the rest of the group follows from the queue
@@ -438,6 +448,129 @@ program = radio
 overlay_queue = request.queue(id="overlay", interactive=false)
 overlay = amplify(1., override="liq_amplify", overlay_queue)
 radio = add(normalize=false, [program, overlay])
+
+# ── Emergency alert lane: above everything, live shows and time checks included ─
+# An emergency alert (EAS) takes the station over the moment it arrives, plays whole,
+# and the programme carries on where it stood. Two ways in:
+#   - /alert from the backend: an audio file (the API, a staff test). Queued here, so
+#     two alerts play one after the other, never over each other.
+#   - the alert line (a local FM box only, KBR_ALERT_ALSA_DEVICE): the EAS decoder's
+#     audio output wired into a line input. Sound on it takes the air at once and the
+#     air is handed back after KBR_ALERT_LINE_RELEASE seconds of quiet; /alert_line
+#     {"on": true} forces it on (a relay contact, a local script). Works with no
+#     internet: nothing here waits on the backend.
+# Below this lane everything stands still meanwhile (a song or a shiur pauses and
+# resumes); hard items that came due during the alert are dropped afterwards, as after
+# a live show, so a time check never airs minutes late. Sits after the master level and
+# the mix-over, so a fade, a Next or a jingle never touches it; before the compressor and
+# limiter, so it is never louder than the programme allows. The backend is told when each
+# alert starts and ends (POST /playout/{station}/alert) for its log, page and ntfy.
+alert_queue = request.queue(id="alert", interactive=false, timeout=60., prefetch=1)
+alert_play = amplify(1., override="liq_amplify", alert_queue)
+alert_line_device = environment.get("KBR_ALERT_ALSA_DEVICE")
+alert_line_release = float_of_string(environment.get(default="4.", "KBR_ALERT_LINE_RELEASE"))
+alert_line_threshold = float_of_string(environment.get(default="-40.", "KBR_ALERT_LINE_THRESHOLD"))
+# Forced on by /alert_line, and heard on the line (sound above the threshold)
+alert_line_forced = ref(false)
+alert_line_heard = ref(false)
+def alert_line_open() = alert_line_forced() or alert_line_heard() end
+alert_lanes = ref([alert_play])
+if alert_line_device != "" then
+  line_in = input.alsa(id="alert_line_in", device=alert_line_device, bufferize=true)
+  line_in = blank.detect(
+    id="alert_line_detect", threshold=alert_line_threshold, max_blank=alert_line_release,
+    min_noise=0.15, track_sensitive=false, start_blank=true,
+    on_noise={alert_line_heard := true},
+    {alert_line_heard := false},
+    line_in)
+  # Kept running whether or not the line is on air, so its sound is always noticed
+  output.dummy(id="alert_line_watch", fallible=true, line_in)
+  line_in = buffer(id="alert_line_buffer", buffer=0.1, max=1., fallible=true, line_in)
+  line_lane = switch(id="alert_line_gate", track_sensitive=false, [(alert_line_open, line_in)])
+  alert_lanes := [alert_play, line_lane]
+  log.important("alert line: listening on #{alert_line_device}")
+end
+alert_lane = fallback(id="alert_lane", track_sensitive=false, alert_lanes())
+
+# What the alert lane is doing, for the reports below and /status
+alert_on_air = ref(false)
+alert_current = ref("")      # the backend's alert id ("" for the line)
+alert_source = ref("")       # "api" or "line"
+alert_started_at = ref(0.)
+
+def alert_report(phase, id, source, started) =
+  payload = json.stringify({phase=phase, alert_id=id, source=source, at=time(),
+                            started_at=started})
+  thread.run(fast=false, fun () -> begin
+    try
+      resp = http.post(headers=auth_headers, timeout=8., data=payload,
+                       "#{backend_url}/playout/#{station_id}/alert")
+      log.important("alert: #{phase} reported, backend answered #{resp.status_code}")
+    catch err do
+      log.important("alert: #{phase} not reported, backend unreachable: #{err}")
+    end
+  end)
+end
+
+# A hard group that came due while the alert was on air never started: drop it, as the
+# backend does (it closes those items), so it does not play late, now or before the
+# next group. Items due later stay.
+def alert_drop_stale_timed() =
+  if timed_pending() > 0 and timed_group_at() <= time() and timed_group_at() >= alert_started_at() - 1. then
+    log.important("alert: the timed group due #{time() - timed_group_at()} s ago is dropped")
+    # Taken back as the backend's /timed_drop does: each is skipped the moment it would
+    # start. Skipping here did not work: the lane is not playing during the alert, and
+    # a skip then left it so the next group's items aired with no start report and only
+    # the first of them played (harness: alert over a time check, then a 3-item group).
+    at = timed_group_at()
+    gone = list.map(snd, list.filter(fun (x) -> abs(fst(x) - at) <= 0.5, timed_entries()))
+    timed_dropped := list.prefix(100, list.append(gone, timed_dropped()))
+    timed_pending := 0
+    timed_armed := false
+    # Its take-over had already muted the music lane (behind the alert, so unheard):
+    # the item it would have interrupted simply carries on, as after any pause
+    if main_interrupted() then
+      main_interrupted := false
+      main_gain := 1.
+    end
+    master_gain := 1.
+  end
+end
+
+def alert_began(id, source) =
+  if not alert_on_air() then
+    alert_on_air := true
+    alert_current := id
+    alert_source := source
+    alert_started_at := time()
+    log.important("alert: ON AIR (#{source} #{id})")
+    alert_report("started", id, source, alert_started_at())
+  elsif id != "" and id != alert_current() then
+    # The next alert of the queue follows straight on: report the change
+    alert_report("ended", alert_current(), alert_source(), alert_started_at())
+    alert_current := id
+    alert_source := source
+    alert_started_at := time()
+    alert_report("started", id, source, alert_started_at())
+  end
+end
+alert_lane.on_track(fun (m) -> alert_began(m["kbr_alert"], if m["kbr_alert"] != "" then "api" else "line" end))
+alert_lane.on_metadata(fun (m) -> if m["kbr_alert"] != "" then alert_began(m["kbr_alert"], "api") end)
+
+# The lane went quiet: the programme is back
+thread.run.recurrent(delay=0.25, fun () -> begin
+  if alert_line_open() and not alert_on_air() then alert_began("", "line") end
+  if alert_on_air() and not alert_queue.is_ready() and not alert_line_open() then
+    alert_on_air := false
+    log.important("alert: off air after #{time() - alert_started_at()} s; programme resumes")
+    alert_report("ended", alert_current(), alert_source(), alert_started_at())
+    alert_drop_stale_timed()
+    alert_current := ""
+  end
+  0.25
+end)
+
+radio = fallback(id="with_alert", track_sensitive=false, [alert_lane, radio])
 
 # Skip the song on air in the music lane. A second Next within 3 s of a song change was
 # lost (harness next_twice, 2026-11-17): the skip only ended cross's transition. So the
@@ -587,9 +720,6 @@ def keep_for_emergency(played) =
   end
 end
 
-# Timed items the backend took back (/timed_drop): skipped the moment they would start.
-# Silence left in the timed lane when a blackout ended went on air one item per Next.
-timed_dropped = ref([])
 
 def send_started(m) =
   entry = m["kbr_entry"]
@@ -597,7 +727,7 @@ def send_started(m) =
   lane = if entry != "" then m["kbr_lane"] elsif live_on() then "live" elsif hold_open() then "hold" else "emergency" end
   was = on_air_lane()
   on_air_lane := lane
-  if lane == "timed" and timed_pending() > 0 then timed_pending := timed_pending() - 1 end
+  if lane == "timed" and timed_pending() > 0 and not list.mem(entry, timed_dropped()) then timed_pending := timed_pending() - 1 end
   if was == "timed" and lane != "timed" and timed_pending() > 0 and not timed_waiting() then
     # A group's next item was not ready when the item before it ended (its file still
     # downloading), so the music lane filled in. Put the group back on air the moment
@@ -827,6 +957,34 @@ control("/overlay", fun (req) -> begin
   '{"ok":true}'
 end)
 
+# An emergency alert: {"uri": ..., "id": ...}. Takes the air at once over everything.
+control("/alert", fun (req) -> begin
+  let json.parse (body : {uri : string, id : string?}) = req.body()
+  id = null.default(body.id, {""})
+  log.important("alert: #{id} arrived, loading")
+  alert_queue.push(request.create(body.uri))
+  '{"ok":true}'
+end)
+
+# Stop: the alert on air ends now and any alert waiting behind it is dropped.
+control("/alert_stop", fun (_) -> begin
+  log.important("alert: stopped by the backend")
+  alert_queue.set_queue([])
+  alert_queue.skip()
+  alert_line_forced := false
+  '{"ok":true}'
+end)
+
+# The alert line forced on or off ({"on": bool}): a relay contact or a local script.
+control("/alert_line", fun (req) -> begin
+  let json.parse (body : {on : bool}) = req.body()
+  alert_line_forced := body.on
+  state = if body.on then "on" else "off" end
+  has_line = if alert_line_device != "" then "true" else "false" end
+  log.important("alert line: forced #{state}")
+  '{"ok":true,"line":#{has_line}}'
+end)
+
 control("/status", fun (_) -> begin
   m = program.last_metadata() ?? []
   # Before the music lane's first track its remaining time is infinite, which JSON
@@ -836,7 +994,8 @@ control("/status", fun (_) -> begin
   left = if left >= 0. and left < 1000000. then left else -1. end
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
                   main_remaining=left, timed_waiting=timed_queue.length() + list.length(timed_room()),
-                  live=live_on(), instance=engine_instance})
+                  live=live_on(), instance=engine_instance,
+                  alert=alert_on_air(), alert_id=alert_current(), alert_source=alert_source()})
 end)
 
 # Optional: also write the output to a WAV file (testing only)
