@@ -148,15 +148,21 @@ def in_category(category):
 
 
 def not_contract_audio():
-    """SQL condition: no spot schedule uses the asset. Sponsorship audio airs only
-    through its contract (the spot planner) or an operator's own pick; a rotation
-    or block that draws "a spot" at random would air it outside its dates, days
-    and caps (2026-11-17)."""
-    from sqlalchemy import select
+    """SQL condition: not sponsorship audio. Sponsorship audio airs only through its
+    contract (the spot planner) or an operator's own pick; a rotation or block that
+    draws "a spot" at random would air it outside its dates, days and caps (2026-11-17).
+
+    Sponsorship audio is any asset a spot schedule uses, and any asset tied to a
+    sponsor (`sponsor_id`, set when a schedule first uses it or a recording is
+    approved). The tie stays when a contract moves to new audio: on 2026-11-18 the
+    30 stand-in recordings, swapped out of their contracts for the real voice, were
+    drawn as filler minutes later on all three stations and two aired.
+    """
+    from sqlalchemy import and_, select
 
     from app.models.spot_schedule import SpotSchedule
 
-    return Asset.id.notin_(select(SpotSchedule.asset_id))
+    return and_(Asset.id.notin_(select(SpotSchedule.asset_id)), Asset.sponsor_id.is_(None))
 
 
 def fit_for_random_pick():
