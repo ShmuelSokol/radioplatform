@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import ContractEditor from '../../components/sponsors/ContractEditor';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -302,7 +303,7 @@ function ContractTable({ title, rows, listen, account, empty }: {
               <th className="px-3 py-2">Spot</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2 hidden md:table-cell">Station</th>
-              <th className="px-3 py-2 hidden lg:table-cell">When it airs</th>
+              <th className="px-3 py-2 hidden md:table-cell">When it airs</th>
               <th className="px-3 py-2 hidden md:table-cell">Dates</th>
               <th className="px-3 py-2 hidden md:table-cell">Plays</th>
               <th className="px-3 py-2"><span className="sr-only">Actions</span></th>
@@ -321,6 +322,7 @@ function ContractLine({ c, listen, account }: { c: ClientContract; listen: Retur
   const queryClient = useQueryClient();
   const mayChange = useMayChange('/admin/spot-schedule');
   const [editingEnd, setEditingEnd] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [end, setEnd] = useState(c.end_date ?? '');
   const [error, setError] = useState('');
   useEffect(() => setEnd(c.end_date ?? ''), [c.end_date]);
@@ -345,7 +347,7 @@ function ContractLine({ c, listen, account }: { c: ClientContract; listen: Retur
         {c.problem && <div className="text-xs text-red-700 mt-1" data-testid="contract-problem">{c.problem}, so it does not air.</div>}
       </td>
       <td className="px-3 py-2 hidden md:table-cell" data-label="Station">{c.station_name}</td>
-      <td className="px-3 py-2 hidden lg:table-cell" data-label="When it airs">{describeContract(c)}</td>
+      <td className="px-3 py-2 hidden md:table-cell" data-label="When it airs">{describeContract(c)}</td>
       <td className="px-3 py-2 hidden md:table-cell" data-label="Dates">
         {c.start_date ? day(c.start_date) : 'From the start'} to {c.end_date ? day(c.end_date) : 'no end date'}
         {editingEnd && (
@@ -369,6 +371,12 @@ function ContractLine({ c, listen, account }: { c: ClientContract; listen: Retur
           <button className="px-2 py-1 border rounded text-xs" onClick={() => listen.toggle(c.id, () => getAssetAudioUrl(c.asset_id))}>
             {listen.playing?.key === c.id ? 'Stop' : 'Listen'}
           </button>
+          {mayChange && (
+            <button className="px-3 py-1 rounded text-xs bg-blue-600 text-white font-semibold" data-testid="contract-edit" onClick={() => setEditing(true)}>
+              Edit
+            </button>
+          )}
+          {editing && <ContractEditor contract={c} sponsorId={account.client.id} onClose={() => setEditing(false)} />}
           {mayChange && c.state !== 'ended' && (
             <button className="px-2 py-1 border rounded text-xs" disabled={mut.isPending} onClick={() => mut.mutate({ is_active: !c.is_active })}>
               {c.is_active ? 'Pause' : 'Resume'}

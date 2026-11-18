@@ -76,6 +76,12 @@ for (const [name, device] of SIZES) {
   await page.getByRole('tab', { name: /Contracts/ }).click();
   await page.getByTestId('contract-table').first().waitFor();
   await noSideways('contracts'); await shot('3-contracts');
+  // every contract has Edit: the whole contract in one dialog, closed with Esc
+  await page.getByTestId('contract-edit').first().click();
+  await page.getByTestId('contract-editor').waitFor();
+  await noSideways('contract editor'); await shot('3b-edit-contract');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('contract-editor').waitFor({ state: 'detached' });
 
   await page.getByRole('tab', { name: 'Play history' }).click();
   await page.getByTestId('play-table').waitFor();
