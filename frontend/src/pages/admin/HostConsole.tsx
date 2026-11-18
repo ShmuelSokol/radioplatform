@@ -5,6 +5,8 @@ import { useLiveShowWS } from '../../hooks/useLiveShowWS';
 import { useHostAudio } from '../../hooks/useHostAudio';
 import CartPanel from './live/CartPanel';
 import ChatPanel from './live/ChatPanel';
+import CohostPanel from './live/CohostPanel';
+import { useCohost } from '../../hooks/useCohost';
 import TalkButton, { TalkNote } from './live/TalkButton';
 import { useTalkback } from '../../hooks/useTalkback';
 import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../../api/liveShows';
@@ -18,7 +20,8 @@ const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AI
 export default function HostConsole() {
   const { showId } = useParams<{ showId: string }>();
   const navigate = useNavigate();
-  const { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat } = useLiveShowWS(showId);
+  const { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat, cohosts } = useLiveShowWS(showId);
+  const co = useCohost(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
   const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting } = useHostAudio(showId);
@@ -201,7 +204,9 @@ export default function HostConsole() {
               {!isRecording ? (
                 <button
                   onClick={startRecording}
-                  className="bg-green-800 hover:bg-green-700 text-green-200 px-4 py-2 rounded text-sm font-bold transition flex-1"
+                  disabled={co.on}
+                  title={co.on ? 'You are on the show as a co-host. Leave it first to host.' : undefined}
+                  className="bg-green-800 hover:bg-green-700 text-green-200 px-4 py-2 rounded text-sm font-bold transition flex-1 disabled:opacity-50"
                 >
                   Start Broadcasting
                 </button>
@@ -361,6 +366,7 @@ export default function HostConsole() {
             )}
           </div>
           <ChatPanel showId={showId} lastChat={lastChat} />
+          <CohostPanel showId={showId} co={co} named={cohosts} hosting={isRecording} />
         </div>
 
         {/* Right: Approved queue */}

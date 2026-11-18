@@ -165,3 +165,13 @@ The qnet skin greys every disabled button whatever its colour (`!important` in `
 ## A pass in the second before first air (harness, 2026-11-18)
 
 `playout_engine.tick` used to send "live off" whenever the station was not the show's, and in the second between the early quiet (`on_soon`) and the take-over it is not yet: a pass falling there started a song that the take-over cut 0.6 to 0.9 s later. The tick now leaves the engine alone while `_show_about_to_be_heard`.
+
+## Co-host from another place
+
+**Join as co-host** on the Host Console (`pages/admin/live/CohostPanel.tsx`, `hooks/useCohost.ts`) opens `/ws/live/{show}/cohost` (the same sign-in rule as the host's microphone: admin, manager, or the show's own host). The server gives the co-host a `CallerLine` (`cohost` = their name, key `cohost:<user id>`, always on air, no call behind it), so they are mixed into the show exactly like a caller on air: through the delay (Dump covers them), heard by the host and the callers, and they hear everyone but themselves. Up to three. The lines close with the show (`drop_cohosts`, code 4000); joining a show that is not live closes with 4009.
+
+- The host's microphone carries the show: the mix runs on the host's frames, so a co-host is heard only while a host is broadcasting. A co-host cannot keep the show on air alone.
+- `GET /live-shows/{id}/air` lists `cohosts`; the show's socket sends a `cohosts` event on every change.
+- The co-host's microphone uses echo cancellation (they hear the show from the same page); a steady test tone comes through about ten times quieter than a scripted host's, a voice does not.
+- A page that is co-hosting cannot also start broadcasting as the host, and the other way round.
+- Tests `tests/test_live_cohost.py`, browser check `ONLY=cohost`.

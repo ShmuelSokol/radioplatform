@@ -240,6 +240,8 @@ export interface AirStatus {
   /** Title of the station's filler (plays after a Dump while the delay refills), if one is ready */
   filler?: string | null;
   host_silent_for?: number;
+  /** Names of the co-hosts on the show now */
+  cohosts?: string[];
 }
 
 export const getAirStatus = async (showId: string): Promise<AirStatus> => {
