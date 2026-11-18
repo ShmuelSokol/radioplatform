@@ -252,6 +252,21 @@ async def _command(
 ) -> bool:
     """`slow_is_ok`: the engine got the command and is still working on it when `wait` runs
     out (a /timed answers only once the file is downloaded). That counts as taken."""
+    from app.services import playout_tunnel
+
+    if playout_tunnel.connected(station_id):
+        # A local FM box: no inbound line, its relay fetches the command (playout_tunnel).
+        # Same rules as by HTTPS: `wait` is how long the answer is waited for, and a
+        # command the relay picked up whose answer is not in yet is "still loading".
+        got = await playout_tunnel.send(station_id, path, payload or {}, timeout=wait)
+        if got is not None and got[0] == 200:
+            return True
+        if got is not None and got[0] == playout_tunnel.STILL_WORKING:
+            logger.warning("Playout engine %s by relay: no answer after %.0f s%s", path, wait,
+                           " (still loading; taken)" if slow_is_ok else "")
+            return slow_is_ok
+        logger.warning("Playout engine %s by relay -> %s", path, "not fetched" if got is None else got[0])
+        return False
     url = settings.engine_control_url(station_id) + path
     try:
         resp = await _client().post(
@@ -273,6 +288,12 @@ async def _command(
 
 async def engine_status(station_id) -> dict | None:
     """What the engine says is on air (its /status), or None when it does not answer."""
+    from app.services import playout_tunnel
+
+    if playout_tunnel.connected(station_id):
+        got = await playout_tunnel.send(station_id, "/status", {}, timeout=3.0)
+        data = got[1] if got is not None and got[0] == 200 else None
+        return data if isinstance(data, dict) and data.get("ok") else None
     url = settings.engine_control_url(station_id) + "/status"
     try:
         resp = await _client().post(

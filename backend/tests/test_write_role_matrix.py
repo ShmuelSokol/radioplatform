@@ -57,6 +57,7 @@ PUBLIC_WRITES = {
     ("POST", "/song-requests"),
     ("POST", "/playout/{station_id}/started"),
     ("POST", "/playout/{station_id}/hello"),
+    ("POST", "/playout/{station_id}/commands/poll"),
 }
 
 # Allowed roles are not sent to these: with no input they would really run

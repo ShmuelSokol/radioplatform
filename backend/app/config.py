@@ -230,10 +230,20 @@ class Settings(BaseSettings):
     PLAYOUT_ENGINE_TOKEN: str = ""  # shared secret, sent both ways in X-Playout-Token
     # When true, listeners and the dashboard play the station's stream instead of the in-browser player
     PLAYOUT_STREAM_LIVE: bool = False
+    # Stations whose engine is a local FM box with no inbound line, comma-separated: that
+    # box's relay fetches the station's commands (playout_tunnel) and then NONE of them go
+    # to PLAYOUT_ENGINE_URL. One engine per station: the box replaces the stream server's
+    # engine for a station listed here. Empty = no station can use the relay path, so a
+    # mistyped id on a box cannot take another station's commands.
+    PLAYOUT_RELAY_STATION_ID: str = ""
 
     @property
     def engine_station_ids(self) -> set[str]:
         return {s.strip() for s in self.PLAYOUT_ENGINE_STATION_ID.split(",") if s.strip()}
+
+    @property
+    def relay_station_ids(self) -> set[str]:
+        return {s.strip() for s in self.PLAYOUT_RELAY_STATION_ID.split(",") if s.strip()}
 
     @property
     def playout_engine_enabled(self) -> bool:
