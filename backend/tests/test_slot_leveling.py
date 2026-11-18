@@ -119,3 +119,31 @@ def test_without_blocks_a_slot_spreads_over_its_clock_slots_and_never_doubles_up
 def test_a_spread_play_is_labelled_with_its_contracts_slot():
     placed, _ = plan_spots([_spot("a", "late_morning")], NY, DAY, 1, breaks=_breaks(9, 12))
     assert [p.daypart for p in placed] == ["late_morning"]
+
+
+def test_one_sponsors_plays_are_not_in_neighbouring_breaks():
+    """Seen on Main 2026-11-18: one sponsor at 7:00, 7:15 and 7:45 PM with other breaks as empty."""
+    wide = [_spot("busy", "evening", plays=3)] + [_spot(f"o{i}", "evening") for i in range(9)]
+    placed, unplaced = plan_spots(wide, NY, DAY, 1, breaks=_breaks(18, 24))
+    assert not unplaced
+    busy = sorted(p.local for p in placed if p.schedule.name == "busy")
+    assert all((b - a).total_seconds() >= 3600 for a, b in zip(busy, busy[1:]))
+    # still level: no break holds more than one
+    assert max(_counts(placed).values()) == 1
+
+
+def test_two_contracts_of_one_sponsor_are_kept_apart_too():
+    a = _spot("a", "early_morning")
+    b = _spot("b", "early_morning")
+    b.sponsor_id = a.sponsor_id
+    placed, _ = plan_spots([a, b], NY, DAY, 1, breaks=_breaks(6, 9))
+    t = sorted(p.local for p in placed)
+    assert (t[1] - t[0]).total_seconds() >= 3600
+
+
+def test_keeping_apart_never_beats_levelling():
+    # A sponsor with 4 plays in one hour's 4 breaks: they must go one per break
+    placed, unplaced = plan_spots([_spot("x", "early_morning", plays=4)] + [_spot(f"o{i}", "early_morning") for i in range(8)],
+                                  NY, DAY, 1, breaks=_breaks(6, 9))
+    assert not unplaced
+    assert max(_counts(placed).values()) == 1
