@@ -15,6 +15,10 @@ import { fileURLToPath } from 'url';
 import {
   chromium, checker, sleep, makeStation, adminContext, newPage, timeClick, timeUntil,
 } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/warning toast: (HS is off|Spots mode is off|Panic: cut what was on air)/, 'amber on purpose: each says what the switch just did');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4184';
 const ONLY = process.env.ONLY || '';

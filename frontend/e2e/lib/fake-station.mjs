@@ -26,6 +26,11 @@ export const chromium = guarded(pw.chromium);
 export const webkit = guarded(pw.webkit);
 export const devices = pw.devices;
 export { allowEverywhere };
+// The fake backend fails only when a test tells it to, so a refused or failed API call is
+// the test's own doing here. What the SCREEN then shows (a toast, an alert) is still
+// judged: a test lists the messages it provokes. Against a real backend (walkthrough.mjs,
+// admin-flows.mjs) network failures are judged too.
+allowEverywhere(/^(HTTP \d+|request failed|console error: Failed to load resource)/, 'provoked through the fake backend');
 
 /** PASS/FAIL printing. `known` maps a check name to the bug it shows: those are
  *  expected to fail (printed XFAIL) and a pass there is an error (XPASS) so the

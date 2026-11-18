@@ -11,6 +11,11 @@
 import {
   chromium, devices, checker, makeStation, adminContext, newPage, sleep, timeClick, timeUntil,
 } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/There are \d+ records here|V is a whole number|Intro is seconds|The title cannot be empty|You may not change this item|is not allowed to do that|Could not save that change|The end date is before the schedule starts/, 'wrong values and refused saves are typed in to see each message');
+allowEverywhere(/Can't play this file/, 'an unplayable file is pre-listened to see the message');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4181';
 const ONLY = process.env.ONLY || '';

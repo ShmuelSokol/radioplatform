@@ -18,6 +18,10 @@
 import {
   chromium, devices, checker, sleep, makeStation, routeApi, routeNowPlaying, AUDIO_PROBE, routeSiteSocket,
 } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/This recording could not be played/, 'a broken recording is played to see the message');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
 const ONLY = process.env.ONLY || '';
@@ -228,6 +232,19 @@ async function stationListChecks(browser) {
       text.includes('Unable to connect to the server') && !text.includes('not yet configured'), text.slice(0, 200).replace(/\n/g, ' '));
     await ctx.close();
   }
+  // Kol B'ramah Main is listed first, then the rest as the server orders them (by name)
+  {
+    const st = stationFor({}, { stations: [
+      { id: 'st-jer', name: 'KBR Jerusalem', timezone: 'Asia/Jerusalem' },
+      { id: 'st-stories', name: "Kol B'ramah - All Day Stories", timezone: 'America/New_York' },
+      { id: 'st-main', name: "Kol B'ramah Main", timezone: 'America/New_York' },
+    ] });
+    const { ctx, page } = await openAt(browser, DESKTOP, st, '/stations');
+    await page.getByText('KBR Jerusalem').waitFor({ timeout: 8000 }).catch(() => {});
+    const order = await page.locator('a[href^="/listen/"]').evaluateAll((els) => els.map((e) => e.getAttribute('href').split('/').pop()));
+    check(`${tag}: Kol B'ramah Main is the first station in the list, the others follow in order`, order.join(',') === 'st-main,st-jer,st-stories', order.join(','));
+    await ctx.close();
+  }
   const list = pagedStations(120, (i) => (i === 2 ? { is_active: false, name: 'Feed 003 (old)' } : i === 0 ? { description: 'Torah, music and news. '.repeat(20) } : {}));
   // On air: Kol B'ramah (st-1) and the inactive st-3; Feed 002 is switched on with nothing playing
   const st = stationFor({ '/stations': (m, q) => pageOf(list, q, 'stations'), '/now-playing': () => ({ playing: ['st-1', 'st-3'] }) }, {
@@ -299,6 +316,28 @@ async function guideChecks(browser) {
   const tag = 'F-GUIDE';
   const epgCalls = [];
   const epg = (blocks) => ({ '^/schedules/epg/': (m, q, path) => { epgCalls.push(q.date); return { station_id: path.split('/').pop(), date: q.date, blocks }; } });
+  // The guide opens on Kol B'ramah Main, not on the first name in the alphabet; a link
+  // can name a station; a listener's own choice is remembered (walk-through, 2026-11-18)
+  {
+    const THREE = [
+      { id: 'st-jer', name: 'KBR Jerusalem', timezone: 'Asia/Jerusalem' },
+      { id: 'st-stories', name: "Kol B'ramah - All Day Stories", timezone: 'America/New_York' },
+      { id: 'st-main', name: "Kol B'ramah Main", timezone: 'America/New_York' },
+    ];
+    const st = stationFor(epg(GUIDE_DAY), { stations: THREE });
+    const chosen = (page) => page.getByLabel('Station').inputValue();
+    const { ctx, page } = await openAt(browser, DESKTOP, st, '/guide');
+    await page.getByText('Morning shiurim').waitFor({ timeout: 8000 }).catch(() => {});
+    check(`${tag}: with three stations the guide opens on Kol B'ramah Main, not the first in the list`, await chosen(page) === 'st-main', await chosen(page));
+    await page.goto(`${BASE}/guide?station=st-jer`);
+    await page.getByText('Morning shiurim').waitFor({ timeout: 8000 }).catch(() => {});
+    check(`${tag}: a link that names a station opens on that station`, await chosen(page) === 'st-jer', await chosen(page));
+    await page.getByLabel('Station').selectOption('st-stories');
+    await page.goto(`${BASE}/guide`);
+    await page.getByText('Morning shiurim').waitFor({ timeout: 8000 }).catch(() => {});
+    check(`${tag}: a station the listener chose is the one the guide opens on next time`, await chosen(page) === 'st-stories', await chosen(page));
+    await ctx.close();
+  }
   // F-GUIDE-4: 01:00 in New York (the station's zone) on 2026-11-17 = 06:00Z
   {
     const st = stationFor(epg(GUIDE_DAY));
