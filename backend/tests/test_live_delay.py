@@ -1031,3 +1031,49 @@ async def test_a_time_check_cut_by_the_show_does_not_come_back_after_it(db_sessi
     left = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.station_id == station.id, QueueEntry.status == "pending"))).scalars().all()
     assert [e.asset_id for e in left if e.asset_id == clock_asset.id] == []
+
+
+# ---------- the stream carries the show (engine proto 5) ----------
+
+@pytest.mark.asyncio
+async def test_pages_are_told_when_the_stream_carries_the_show_and_can_decline_the_audio(db_session, _quiet, monkeypatch):
+    from app.config import settings
+    from app.services import playout_engine
+
+    class Sock:
+        def __init__(self):
+            self.frames, self.texts = 0, []
+
+        async def send_bytes(self, data):
+            self.frames += 1
+
+        async def send_text(self, text):
+            self.texts.append(text)
+
+    relay = live_shows_ws.live_relay
+    station = str(uuid.uuid4())
+    assert relay.state(station)["on_stream"] is False                 # browser-player station
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", station)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "t")
+    monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", True)
+    monkeypatch.setattr(settings, "ICECAST_STREAM_URL", "https://stream.invalid/live")
+    playout_engine.reset_state(station)
+    assert settings.public_stream_url(station)
+    assert relay.state(station)["on_stream"] is False                 # an older engine: pages play the frames
+    playout_engine.get_state(station).engine_proto = playout_engine.ENGINE_PROTO_LIVE_AUDIO
+    assert relay.state(station)["on_stream"] is True
+
+    stream_page, other_page = Sock(), Sock()
+    relay.listeners[station] = {stream_page, other_page}
+    relay.no_audio.add(stream_page)                                   # it sent {"type":"audio","on":false}
+    try:
+        await relay._send_frame(station, b"\x00\x00" * 10)
+        await relay.broadcast_state(station)
+        assert (stream_page.frames, other_page.frames) == (0, 1)      # no show audio for the stream's page
+        assert len(stream_page.texts) == 1 and len(other_page.texts) == 1   # both still learn the state
+    finally:
+        relay.listeners.pop(station, None)
+        relay.no_audio.discard(stream_page)
+        playout_engine.reset_state(station)

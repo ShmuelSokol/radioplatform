@@ -151,6 +151,8 @@ WRITE_POLICY = {
     ("PATCH", "/live-shows/{show_id}/calls/{call_id}"): ON_AIR,
     ("POST", "/live-shows/{show_id}/calls/{call_id}/approve"): ON_AIR,
     ("POST", "/live-shows/{show_id}/dump"): ON_AIR,
+    ("POST", "/live-shows/{show_id}/calls/{call_id}/hold"): ON_AIR,
+    ("POST", "/live-shows/{show_id}/calls/next"): ON_AIR,
     ("POST", "/live-shows/{show_id}/delay"): ON_AIR,
     ("POST", "/live-shows/{show_id}/calls/{call_id}/end-call"): ON_AIR,
     ("POST", "/live-shows/{show_id}/calls/{call_id}/on-air"): ON_AIR,

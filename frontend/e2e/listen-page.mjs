@@ -1545,6 +1545,53 @@ async function liveSocket(browser) {
   }
 }
 
+// A live show on a stream-server station. When the stream carries the show itself
+// (engine proto 5: live_state says on_stream) the page plays the host from the stream
+// and declines the socket's audio; otherwise it mutes the stream and plays the socket.
+async function liveOnStream(browser, stream) {
+  for (const carried of [true, false]) {
+    const tag = `listen live show, stream ${carried ? 'carries it' : 'does not carry it'}`;
+    const station = makeStation({ shows: [{ id: 'ls9', station_id: 'st-1', title: 'Motzei Shabbos Live', status: 'live' }] });
+    const realNp = station.nowPlaying;
+    station.nowPlaying = (extra) => ({ ...realNp(extra), stream_url: stream.url(station.SID) });
+    station.playout = { stations: { [station.SID]: { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } };
+    const { ctx } = await listenContext(browser, DESK, station);
+    await ctx.addInitScript(() => {
+      window.__liveFrames = 0;
+      const AC = window.AudioContext;
+      const cbs = AC.prototype.createBufferSource;
+      AC.prototype.createBufferSource = function (...a) { window.__liveFrames++; return cbs.apply(this, a); };
+    });
+    const said = [];
+    let timer = null;
+    await ctx.routeWebSocket(/\/ws\/live\/station\/[^/]+\/listen/, (ws) => {
+      ws.onMessage((m) => { try { said.push(JSON.parse(m)); } catch { /* not json */ } });
+      ws.send(JSON.stringify({ type: 'live_state', live: true, sample_rate: 24000, on_stream: carried }));
+      const frame = Buffer.alloc(4800);
+      for (let i = 0; i < 2400; i++) frame.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 300 * i / 24000)), i * 2);
+      // A server that ignored the page's wish: the page must still not play these
+      timer = setInterval(() => { try { ws.send(frame); } catch { /* closed */ } }, 100);
+    });
+    const { page, errors } = await openListen(ctx, station.SID);
+    await page.getByText('LIVE: Motzei Shabbos Live').waitFor({ timeout: 5000 });
+    await listenBtn(page).click();
+    await sleep(3500);
+    const a = await page.evaluate(() => { const el = document.querySelector('audio'); return { paused: el.paused, muted: el.muted, t: el.currentTime, frames: window.__liveFrames }; });
+    if (carried) {
+      check(`${tag}: the stream plays the show (not muted)`, !a.paused && !a.muted && a.t > 0.3, JSON.stringify(a));
+      check(`${tag}: the page's own copy of the host stays silent (not heard twice)`, a.frames === 0, `${a.frames} frames played`);
+      check(`${tag}: the page asks the server for no show audio`, said.some((m) => m.type === 'audio' && m.on === false), JSON.stringify(said));
+    } else {
+      check(`${tag}: the stream is muted during the show`, a.muted, JSON.stringify(a));
+      check(`${tag}: the host is heard from the live feed`, a.frames > 5, `${a.frames} frames played`);
+      check(`${tag}: the page does not decline the show audio`, !said.some((m) => m.type === 'audio' && m.on === false), JSON.stringify(said));
+    }
+    check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+    clearInterval(timer);
+    await ctx.close();
+  }
+}
+
 // Library titles with file-name underscores ("Moed_Katan 4") read with spaces on the
 // Listen page (card, lock screen, song request result); data sent back is unchanged
 async function titleDisplay(browser) {
@@ -1631,6 +1678,10 @@ try {
   if (run('stream')) {
     const stream = await startStreamServer(STREAM_PORT);
     try { await streamMode(browser, stream); } finally { await stream.close(); }
+  }
+  if (run('livestream')) {
+    const stream = await startStreamServer(STREAM_PORT);
+    try { await liveOnStream(browser, stream); } finally { await stream.close(); }
   }
   if (run('streamretry') || run('resume')) {
     const stream = await startStreamServer(STREAM_PORT);

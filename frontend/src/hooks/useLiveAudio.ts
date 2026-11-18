@@ -29,6 +29,25 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
   const [onAir, setOnAir] = useState(false);
   // The server has said whether a show is on air since this socket opened
   const [known, setKnown] = useState(false);
+  // The station's stream carries the show and this page plays that stream: the frames
+  // sent here are not played (the host would be heard twice) and the server is asked
+  // not to send them
+  const [onStream, setOnStream] = useState(false);
+  const pageStreamRef = useRef(false);      // the page says it plays the server stream
+  const serverStreamRef = useRef(false);    // the server says its stream carries the show
+  const wsRef = useRef<WebSocket | null>(null);
+  const applyStream = useCallback(() => {
+    const on = pageStreamRef.current && serverStreamRef.current;
+    setOnStream(on);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'audio', on: !on }));
+  }, []);
+  /** The page plays (or stopped playing) the station's server stream */
+  const setUsesStream = useCallback((uses: boolean) => {
+    if (pageStreamRef.current === uses) return;
+    pageStreamRef.current = uses;
+    applyStream();
+  }, [applyStream]);
   const connectNow = !opts.onlyWhenEnabled || enabled;
   const ctxRef = useRef<AudioContext | null>(null);
   const gainRef = useRef<GainNode | null>(null);
@@ -75,6 +94,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
       // Only while a show is on air: a frame still in flight after the host left
       // must not play over the music that comes back
       if (!enabledRef.current || !liveRef.current) return;
+      if (pageStreamRef.current && serverStreamRef.current) return;
       const ctx = ensureCtx();
       if (ctx.state !== 'running') { ctx.resume().catch(() => {}); return; }
       const pcm = new Int16Array(buf);
@@ -94,6 +114,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
     const connect = () => {
       if (closed) return;
       ws = new WebSocket(listenUrl(stationId));
+      wsRef.current = ws;
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => { attempts = 0; };
       ws.onmessage = (e) => {
@@ -103,6 +124,10 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
             if (msg.type === 'live_state') {
               if (msg.sample_rate) rateRef.current = msg.sample_rate;
               liveRef.current = !!msg.live;
+              if (serverStreamRef.current !== !!msg.on_stream || pageStreamRef.current) {
+                serverStreamRef.current = !!msg.on_stream;
+                applyStream();
+              }
               setOnAir(!!msg.live);
               setKnown(true);
               nextTimeRef.current = 0;
@@ -124,12 +149,13 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
       closed = true;
       if (retry) clearTimeout(retry);
       if (ws) { ws.onclose = null; ws.close(); }
+      wsRef.current = null;
       setOnAir(false);
       setKnown(false);
     };
-  }, [stationId, connectNow, ensureCtx]);
+  }, [stationId, connectNow, ensureCtx, applyStream]);
 
   useEffect(() => () => { ctxRef.current?.close().catch(() => {}); ctxRef.current = null; }, []);
 
-  return { onAir, known, unlock, setLevel };
+  return { onAir, known, unlock, setLevel, onStream, setUsesStream };
 }
