@@ -368,3 +368,16 @@ def test_quick_steps_have_task_queues_the_backend_calls_cannot_fill():
     assert fast >= 4 and generic >= 4
     assert "thread.run(fast=false, post)" in liq
     assert "thread.run.recurrent(fast=false, delay=5., fun () -> begin\n    send_hello()" in liq
+
+
+def test_next_waits_for_the_next_file_instead_of_skipping_into_nothing():
+    """Jerusalem 05:55:39Z 2026-11-18: Next into a shiur whose file needed 3 s put a
+    second of emergency music on air. The item on air plays on until the music lane
+    has its next file (at most skip_wait), and a second press meanwhile is not a second
+    skip."""
+    liq = _liq()
+    skip = liq[liq.index("def skip_on_air("):liq.index("def go_live(")]
+    assert "main_loaded()" in skip and "time() - asked > skip_wait" in skip
+    assert "skip_waiting" in skip
+    assert re.search(r"skip_wait\s*=\s*(\d+)\.", liq) and float(re.search(r"skip_wait\s*=\s*(\d+)\.", liq).group(1)) >= 10
+    assert "list.length(main_requests.queue()) > 0" in liq

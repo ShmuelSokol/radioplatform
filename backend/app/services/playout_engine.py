@@ -718,7 +718,8 @@ async def handle_next(
         task.add_done_callback(_background.discard)
 
     if state.engine_proto >= ENGINE_PROTO_HOLD and await _hold_before_hard_item(
-        db, station_id, state.cued_entry_id or (given[0] if given else None)
+        db, station_id, state.cued_entry_id or (given[0] if given else None),
+        skipping=state.skip_requested,
     ):
         return None
 
@@ -791,7 +792,8 @@ async def handle_next(
 
 
 async def _hold_before_hard_item(
-    db: AsyncSession, station_id, cued: str | None = None, now: datetime | None = None
+    db: AsyncSession, station_id, cued: str | None = None, now: datetime | None = None,
+    skipping: bool = False,
 ) -> bool:
     """True when the item on air ends within a few seconds before a hard timed item.
 
@@ -818,6 +820,12 @@ async def _hold_before_hard_item(
 
     # Where the next song would start: the crossfade point of the item on air
     change = max(now, end - timedelta(seconds=handover_seconds(current))) if end is not None else now
+    if skipping:
+        # Next was pressed: the item on air ends now, whatever its length. Without this
+        # the engine waiting to skip was handed nothing (the song on air "ends seconds
+        # before the hard item") and Next put emergency music on air.
+        change = now
+        end = end or now
     held = None
     if cued and (current is None or str(current.id) != str(cued)):
         try:
