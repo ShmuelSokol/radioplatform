@@ -233,16 +233,11 @@ async def regenerate(
     Keeps what is playing, anything a person queued, requests, sponsor spots and
     timed items (time, weather).
     """
-    from app.services.playlist_generator_service import settings_for
+    from app.services.schedule_refresh_service import replace_automatic_songs
 
-    from app.services.schedule_refresh_service import replace_automatic_songs, uses_block_playlists
-
-    station = await _station(db, station_id)
-    # A station whose schedule blocks have playlists fills from them whatever the
-    # switch says (see QueueReplenishService.replenish), so it can be redrawn too.
-    if not settings_for(station.automation_config).enabled and not await uses_block_playlists(db, station_id):
-        raise HTTPException(status_code=409, detail="Playlist generation is switched off")
-
+    # Any station can be drawn again, whichever way it fills its queue: from
+    # playlist sequences, from its blocks, or from schedule rules.
+    await _station(db, station_id)
     removed = await replace_automatic_songs(db, station_id)
     return {"removed": removed, "queued_hours": round(await _queued_seconds(db, station_id) / 3600, 1)}
 

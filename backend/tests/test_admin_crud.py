@@ -476,16 +476,6 @@ async def test_scheduler_status_is_public_and_start_stop_are_managers(client: As
 
 
 @pytest.mark.asyncio
-async def test_regenerate_refused_while_generation_is_off(client: AsyncClient, db_session: AsyncSession):
-    """V1-153"""
-    st = await _station(db_session)
-    _, h = await _headers(db_session, UserRole.MANAGER)
-    r = await client.post("/api/v1/playlists/generation/regenerate", params={"station_id": str(st.id)}, headers=h)
-    assert r.status_code == 409, r.text
-    assert "switched off" in r.text
-
-
-@pytest.mark.asyncio
 async def test_regenerate_works_for_a_station_that_fills_from_its_blocks(
     client: AsyncClient, db_session: AsyncSession
 ):

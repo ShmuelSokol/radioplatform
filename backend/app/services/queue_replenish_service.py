@@ -61,6 +61,10 @@ class QueueReplenishService:
         self.db = db
         self.station_id = station_id
         self.automation_config: dict = {}
+        # Where each item last stands in the queue (its highest position), and
+        # what aired in the last two hours: used when the list is used up
+        self.last_place: dict = {}
+        self.recent_ids: set = set()
 
     async def _load_automation_config(self) -> None:
         """Load the station's automation_config JSONB."""
@@ -212,12 +216,16 @@ class QueueReplenishService:
         self.max_pos = result.scalar() or 0
 
         result = await self.db.execute(
-            select(QueueEntry.asset_id).where(
+            select(QueueEntry.asset_id, QueueEntry.position).where(
                 QueueEntry.station_id == self.station_id,
                 QueueEntry.status.in_(["pending", "playing"]),
             )
         )
-        self.queued_ids = {row[0] for row in result.all()}
+        queued = result.all()
+        self.queued_ids = {row[0] for row in queued}
+        for asset_id, position in queued:
+            if position is not None and position > self.last_place.get(asset_id, -1):
+                self.last_place[asset_id] = position
 
         cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
         result = await self.db.execute(
@@ -228,6 +236,7 @@ class QueueReplenishService:
             )
         )
         recent_ids = {row[0] for row in result.all()}
+        self.recent_ids = recent_ids
         self.exclude_ids = self.queued_ids | recent_ids
 
         rules = await self._load_rules()
@@ -670,6 +679,7 @@ class QueueReplenishService:
         )
         self.db.add(entry)
         self.queued_ids.add(asset.id)
+        self.last_place[asset.id] = max(position, self.last_place.get(asset.id, -1))
         self.max_pos = max(self.max_pos, position)
         logger.debug("Enqueued %s '%s' at position %d", asset.asset_type, asset.title, position)
 
@@ -838,7 +848,7 @@ class QueueReplenishService:
                 continue  # try next pass with fewer exclusions
 
             batch_count = 0
-            for asset in candidates:
+            for asset in self._in_turn(candidates) if passes >= 3 else candidates:
                 if filled >= shortfall:
                     break
                 dur = asset.duration or DEFAULT_DURATION
@@ -864,6 +874,30 @@ class QueueReplenishService:
                 break
 
         logger.info("Total filled %.1fs of %s content in %d passes", filled, asset_type, passes)
+
+    def _in_turn(self, candidates):
+        """The list has been used up and items come round again: yield the one
+        whose last place in the queue is furthest back, chosen at random among
+        the most rested quarter, for as long as the caller asks.
+
+        A fresh random order for each round put the end of one round next to
+        the start of the next (All Day Stories had one story twice 11 minutes
+        apart on 2026-11-18), and a top-up of one or two items could pick the
+        story queued a moment ago.
+        """
+        import random
+
+        def rest(asset):
+            place = self.last_place.get(asset.id)
+            if place is not None:
+                return (2, place)
+            return (1, 0) if asset.id in self.recent_ids else (0, 0)
+
+        order = sorted(candidates, key=lambda a: (rest(a), random.random()))
+        while order:
+            asset = order.pop(random.randrange(max(1, len(order) // 4)))
+            yield asset
+            order.append(asset)
 
     async def _replenish_requests_only(self) -> None:
         """Fill queue exclusively from song requests (approved/queued) + popular requests."""
