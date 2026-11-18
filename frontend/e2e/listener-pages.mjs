@@ -203,7 +203,7 @@ async function globalPlayer(browser) {
     const els0 = await elements();
 
     // every listener page in turn: never silent, never restarted, the bar says what is on
-    for (const [path, ready] of [['/guide', 'Program Guide'], ['/hosts', 'Reb Moshe'], ['/archives', 'Thursday Night Live'], ['/stations', "Kol B'ramah"]]) {
+    for (const [path, ready] of [['/guide', 'Schedule'], ['/hosts', 'Reb Moshe'], ['/archives', 'Thursday Night Live'], ['/stations', "Kol B'ramah"]]) {
       const heard = await listenWhile(1500, async () => { await go(path); await page.locator('main').getByText(ready).locator('visible=true').first().waitFor({ timeout: 5000 }); });
       check(`${tag}: moving to ${path} is never silent (sampled every 50 ms)`, heard.silent === 0 && heard.n > 20, JSON.stringify(heard));
       check(`${tag}: moving to ${path} does not restart the song`, heard.restarts === 0, JSON.stringify(heard));
@@ -268,7 +268,7 @@ async function globalPlayer(browser) {
       if (await burger.isVisible().catch(() => false)) await burger.click();
       await nav.getByRole('link', { name: label, exact: true }).locator('visible=true').first().click();
     };
-    for (const [label, path, ready] of [['Program Guide', '/guide', 'Program Guide'], ['DJs', '/hosts', 'Reb Moshe'], ['Archives', '/archives', 'Thursday Night Live'], ['Stations', '/stations', "Kol B'ramah"]]) {
+    for (const [label, path, ready] of [['Schedule', '/guide', 'Schedule'], ['DJs', '/hosts', 'Reb Moshe'], ['Archives', '/archives', 'Thursday Night Live'], ['Stations', '/stations', "Kol B'ramah"]]) {
       const heard = await listenWhile(1500, async () => { await tapMenu(label); await page.locator('main').getByText(ready).locator('visible=true').first().waitFor({ timeout: 5000 }); });
       check(`${tag}: tapping "${label}" in the menu keeps the station on, no gap, no restart, bar shown`,
         new URL(page.url()).pathname === path && heard.silent === 0 && heard.restarts === 0 && heard.n > 20 && (await bar.count()) === 1, JSON.stringify(heard));

@@ -145,7 +145,7 @@ export default function ProgramGuide() {
       <div className="max-w-3xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-cyan-300 mb-1">Program Guide</h1>
+          <h1 className="text-3xl font-bold text-cyan-300 mb-1">Schedule</h1>
           <p className="text-gray-500 text-sm">Browse the daily schedule for any station</p>
         </div>
 

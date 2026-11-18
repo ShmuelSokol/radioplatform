@@ -1459,7 +1459,7 @@ async function pageShell(browser) {
     check(`${tag}: phone: the menu button is shown, at least 44 px (F-LISTEN-54)`, !!box && box.height >= 44 && box.width >= 44, JSON.stringify(box));
     check(`${tag}: phone: Admin Login shown (F-LISTEN-54)`, await page.getByRole('link', { name: 'Admin Login' }).isVisible());
     const nav = page.locator('nav');
-    for (const [name, path] of [['Stations', '/stations'], ['Program Guide', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives']]) {
+    for (const [name, path] of [['Stations', '/stations'], ['Schedule', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives']]) {
       await menu.tap();
       const link = nav.getByRole('link', { name, exact: true }).filter({ visible: true });
       const shown = await link.count();
