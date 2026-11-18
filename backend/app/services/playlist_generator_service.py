@@ -185,6 +185,10 @@ class _Library:
                 stmt = stmt.where(in_category(category), not_placeholder(), not_contract_audio())
             else:
                 stmt = stmt.where(fit_for_random_pick())
+            # nor an item this station was told not to play ("Not on this station")
+            from app.services.station_blocks import blocked_asset_ids
+
+            stmt = stmt.where(Asset.id.notin_(blocked_asset_ids(self.station_id)))
             rows = []
             if self.min_vote:
                 rows = list((await self.db.execute(stmt.where(Asset.vote >= self.min_vote))).all())

@@ -511,6 +511,7 @@ async def pick_next(
 ) -> QueueEntry | None:
     from app.api.v1.queue import OPERATOR_SOURCES
     from app.models.asset import not_placeholder
+    from app.services.station_blocks import blocked_asset_ids
 
     now = datetime.now(UTC)
     exclude = {str(x) for x in (exclude_ids or set())}
@@ -520,7 +521,11 @@ async def pick_next(
     # locks that /next then waited on.
     may_air = or_(
         QueueEntry.source.in_(OPERATOR_SOURCES),
-        QueueEntry.asset_id.notin_(select(Asset.id).where(~not_placeholder())),
+        and_(
+            QueueEntry.asset_id.notin_(select(Asset.id).where(~not_placeholder())),
+            # nor an item this station alone was told not to play
+            QueueEntry.asset_id.notin_(blocked_asset_ids(station_id)),
+        ),
     )
     # Nor a sponsorship whose contract no longer covers today (it waited past its
     # last day behind a long item). Read-only here too; the queue refill marks them.

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
-import { setDoNotPlay, updateAsset } from '../../../api/assets';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getStationBlock, setDoNotPlay, setStationBlock, updateAsset } from '../../../api/assets';
 import { useAssetDetail } from '../../../hooks/useAssets';
 import { useCategories } from '../../../hooks/useCategories';
 import { useAssetTypes } from '../../../hooks/useAssetTypes';
@@ -14,6 +14,8 @@ export interface SongTarget { asset: CtlAsset; onAir: boolean }
 interface Props {
   target: SongTarget;
   stationId: string | null;
+  /** The station whose control room this is, named on the "Not on this station" choice */
+  stationName?: string | null;
   /** Managers and admins change things; everyone else only looks */
   canEdit: boolean;
   onClose: () => void;
@@ -31,10 +33,12 @@ function errText(e: unknown, fallback: string): string {
 /**
  * Quick actions on one song, opened from the song on air or a queue row: change its
  * category, stop it from playing again (or allow it again), fix its details, or go
- * to its Library page. Nothing here touches the audio on air; "do not play" removes
- * the song's waiting copies from the queue on the server.
+ * to its Library page. Two ways to stop a song, each with its own undo: "Not on this
+ * station" keeps it off the station whose control room this is and no other; "Do not
+ * play this song again" takes it off every station (the library is shared). Nothing
+ * here touches the audio on air; both remove the song's waiting copies on the server.
  */
-export default function SongPanel({ target, stationId, canEdit, onClose, onToast }: Props) {
+export default function SongPanel({ target, stationId, stationName, canEdit, onClose, onToast }: Props) {
   const qc = useQueryClient();
   const id = target.asset.id;
   const { data: full } = useAssetDetail(id);
@@ -44,6 +48,13 @@ export default function SongPanel({ target, stationId, canEdit, onClose, onToast
 
   const category = full ? full.category : target.asset.category ?? null;
   const blocked = isDnp(category);
+  const here = stationName || 'this station';
+  const { data: offHere } = useQuery({
+    queryKey: ['asset-station-block', id, stationId],
+    queryFn: () => getStationBlock(id, stationId as string),
+    enabled: !!stationId,
+  });
+  const blockedHere = offHere === true;
   const [title, setTitle] = useState(target.asset.title);
   const [artist, setArtist] = useState(target.asset.artist ?? '');
   const [type, setType] = useState(target.asset.asset_type ?? 'music');
@@ -68,6 +79,7 @@ export default function SongPanel({ target, stationId, canEdit, onClose, onToast
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['asset', id] });
     qc.invalidateQueries({ queryKey: ['assets'] });
+    qc.invalidateQueries({ queryKey: ['asset-station-block', id] });
     if (stationId) {
       qc.invalidateQueries({ queryKey: ['queue', stationId] });
       qc.invalidateQueries({ queryKey: ['now-playing', stationId] });
@@ -97,7 +109,17 @@ export default function SongPanel({ target, stationId, canEdit, onClose, onToast
     if (!res.do_not_play) return `Allowed again${res.category ? `, back in “${res.category}”` : ''}`;
     const gone = res.removed_from_queue;
     const left = res.still_to_play;
-    return `Will not play again. ${gone === 0 ? 'No waiting copies in the queue' : `${gone} waiting ${gone === 1 ? 'copy' : 'copies'} removed`}`
+    return `Will not play again on any station. ${gone === 0 ? 'No waiting copies in the queue' : `${gone} waiting ${gone === 1 ? 'copy' : 'copies'} removed`}`
+      + (left > 0 ? `; ${left} already on air, loaded or timed will still play.` : '.');
+  }, 'That did not go through. Try again.');
+
+  const toggleHere = () => run('here', async () => {
+    const res = await setStationBlock(id, stationId as string, !blockedHere);
+    const name = res.station_name || here;
+    if (!res.blocked) return `Allowed on ${name} again`;
+    const gone = res.removed_from_queue;
+    const left = res.still_to_play;
+    return `Will not play on ${name}. Other stations are not changed. ${gone === 0 ? 'No waiting copies in this queue' : `${gone} waiting ${gone === 1 ? 'copy' : 'copies'} removed`}`
       + (left > 0 ? `; ${left} already on air, loaded or timed will still play.` : '.');
   }, 'That did not go through. Try again.');
 
@@ -133,8 +155,11 @@ export default function SongPanel({ target, stationId, canEdit, onClose, onToast
           <div className="bg-black qn-sunken px-2 py-1.5">
             <div className="text-[var(--qn-digit)] font-bold text-base leading-tight break-words" data-testid="song-name">{assetLabel(full ?? target.asset)}</div>
             <div className={`text-xs font-bold mt-0.5 ${blocked ? 'text-red-400' : 'text-[var(--qn-yellow)]'}`} data-testid="song-state">
-              {blocked ? 'DO NOT PLAY: never picked automatically' : `${category || 'No category'} · ${full?.asset_type ?? target.asset.asset_type ?? ''}`}
+              {blocked ? 'DO NOT PLAY: never picked automatically on any station' : `${category || 'No category'} · ${full?.asset_type ?? target.asset.asset_type ?? ''}`}
             </div>
+            {blockedHere && !blocked && (
+              <div className="text-xs font-bold mt-0.5 text-red-400" data-testid="song-state-here">NOT ON THIS STATION: {here} never picks it</div>
+            )}
           </div>
 
           {!canEdit && (
@@ -151,19 +176,42 @@ export default function SongPanel({ target, stationId, canEdit, onClose, onToast
             <span className="block text-[11px] mt-0.5">Saved as soon as you pick. Copies already in the queue stay where they are.</span>
           </label>
 
-          <div>
-            <button type="button" onClick={toggleDnp} disabled={!canEdit || !!busy} data-testid="song-dnp"
-              aria-pressed={blocked}
-              className={`qn-btn w-full h-12 lg:h-9 text-base lg:text-sm font-bold ${blocked ? '' : '!text-red-700'}`}>
-              {busy === 'dnp' ? 'Working…' : blocked ? '✓ Allow it to play again' : '⛔ Do not play this song again'}
-            </button>
-            <span className="block text-[11px] mt-0.5">
-              {blocked
-                ? 'Puts the song back in the category it had before.'
-                : target.onAir
-                  ? 'It finishes playing now (press Next to cut it). Its waiting copies leave the queue on every station.'
-                  : 'Its waiting copies leave the queue on every station. Nothing on air is interrupted.'}
-            </span>
+          <div className="border-t border-[#808080] pt-2 space-y-2" data-testid="song-stop">
+            <div className="text-xs font-bold">Stop this song from playing</div>
+            {stationId && (
+              <div>
+                <button type="button" onClick={toggleHere} disabled={!canEdit || !!busy || offHere === undefined} data-testid="song-here"
+                  aria-pressed={blockedHere}
+                  className={`qn-btn w-full min-h-12 lg:min-h-10 px-2 py-1 leading-tight ${blockedHere ? '' : '!text-red-700'}`}>
+                  <span className="block text-base lg:text-sm font-bold">
+                    {busy === 'here' ? 'Working…' : blockedHere ? '✓ Allow on this station again' : '⛔ Not on this station'}
+                  </span>
+                  <span className="block text-[11px] !text-black truncate" data-testid="song-here-scope">Only {here}</span>
+                </button>
+                <span className="block text-[11px] mt-0.5" data-testid="song-here-help">
+                  {blockedHere
+                    ? `${here} may pick it again. Nothing else changes.`
+                    : `${target.onAir ? 'It finishes playing now (press Next to cut it). ' : ''}Its waiting copies leave this queue and ${here} stops picking it. The other stations keep playing it.`}
+                </span>
+              </div>
+            )}
+            <div>
+              <button type="button" onClick={toggleDnp} disabled={!canEdit || !!busy} data-testid="song-dnp"
+                aria-pressed={blocked}
+                className={`qn-btn w-full min-h-12 lg:min-h-10 px-2 py-1 leading-tight ${blocked ? '' : '!text-red-700'}`}>
+                <span className="block text-base lg:text-sm font-bold">
+                  {busy === 'dnp' ? 'Working…' : blocked ? '✓ Allow it to play again' : '⛔ Do not play this song again'}
+                </span>
+                <span className="block text-[11px] !text-black" data-testid="song-dnp-scope">Every station</span>
+              </button>
+              <span className="block text-[11px] mt-0.5" data-testid="song-dnp-help">
+                {blocked
+                  ? `Puts the song back in the category it had before, on every station.${blockedHere ? ` It stays off ${here} until you allow it there too.` : ''}`
+                  : target.onAir
+                    ? 'It finishes playing now (press Next to cut it). Its waiting copies leave the queue on every station.'
+                    : 'Its waiting copies leave the queue on every station. Nothing on air is interrupted.'}
+              </span>
+            </div>
           </div>
 
           <fieldset disabled={!canEdit || !!busy} className="space-y-2 border-t border-[#808080] pt-2">
