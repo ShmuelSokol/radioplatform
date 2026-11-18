@@ -316,3 +316,4 @@ INGEST 2026-11-18 operator-actions.md Next waits in the engine for the next file
 UPDATE 2026-11-18 streaming-architecture.md start reports: an ordinary /started is recorded at the engine's own time (`at`, believed up to 60 s old), not when the report got through
 INGEST 2026-11-18 streaming-architecture.md music lane stays muted until the next item starts after a timed group or live show; /flush makes an idle lane ask again at once (slow backend: old-song fragment, emergency music)
 INGEST 2026-11-18 streaming-architecture.md engine waiting room: timed items loaded ahead stay outside the timed lane until 9 s before their time (a Play now pulled the loaded time check early; two loaded groups aired at the second's time)
+INGEST 2026-11-18 streaming-architecture.md skip back to music after a timed item is checked and repeated: a take-over during a song change left the old song playing muted to its end (silence since PR 280)

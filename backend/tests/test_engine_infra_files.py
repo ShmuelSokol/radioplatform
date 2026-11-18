@@ -411,7 +411,8 @@ def test_the_music_lane_stays_muted_until_the_next_item_starts_and_loads_it_ahea
     liq = _liq()
     back = liq[liq.index("elsif lane == \"main\" and main_interrupted() and entry == last_main_entry() then"):]
     back = back[:back.index("elsif lane == \"hold\"")]
-    assert "main.skip()" in back and "main_gain := 1." not in back and "main_interrupted := false" not in back
+    first = back[:back.index("def rec check")]
+    assert "main.skip()" in first and "main_gain := 1." not in first and "main_interrupted := false" not in first
     flush = liq[liq.index('control("/flush"'):]
     flush = flush[:flush.index("end)")]
     assert 'on_air_lane() != "main" and not live_on()' in flush
@@ -441,3 +442,18 @@ def test_timed_items_loaded_ahead_wait_outside_the_lane_until_their_own_time():
     admit = liq[liq.index("def timed_admit(r, at) ="):]
     admit = admit[:admit.index("\nend\n")]
     assert "timed_group_at := at" in admit and "timed_go_on_air(180, at)" in admit
+
+
+def test_the_skip_back_to_music_is_checked_and_never_leaves_the_lane_muted():
+    """A timed item that took over during a song change: on the way back the skip only
+    ended cross's transition, the interrupted song played on muted to its end (silence
+    for the rest of the song) and no start was reported (harness, 2026-11-18)."""
+    liq = _liq()
+    back = liq[liq.index("elsif lane == \"main\" and main_interrupted() and entry == last_main_entry() then"):]
+    back = back[:back.index("elsif lane == \"hold\"")]
+    assert back.count("main.skip()") == 2
+    assert 'main_interrupted() and on_air_lane() == "main" and main_changed_at() < asked' in back
+    # not over an item already being read; and in the end sound rather than silence
+    assert "if main_fetched_at() < asked then" in back
+    give_up = back[back.index("would not go"):]
+    assert "main_gain := 1." in give_up and "main_interrupted := false" in give_up

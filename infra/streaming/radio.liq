@@ -323,7 +323,9 @@ timed_room_lead = 9.
 def timed_room_admit(at) =
   mine = list.filter(fun (x) -> abs(x.at - at) <= 0.5, timed_room())
   timed_room := list.filter(fun (x) -> abs(x.at - at) > 0.5, timed_room())
+  log.important("timed: #{list.length(mine)} item(s) due in #{at - time()} s enter the lane")
   list.iter(fun (x) -> timed_admit(x.r, x.at), mine)
+  log.important("timed: entered; ready #{timed_queue.is_ready()}")
 end
 
 # Load the item now; put it on air at `at` (unix seconds). The music fades under it.
@@ -336,6 +338,7 @@ def schedule_timed(~uri, ~at) =
   if at - time() > timed_room_lead + 0.2 and abs(at - timed_group_at()) > 0.5 then
     first = not list.exists(fun (x) -> abs(x.at - at) <= 0.5, timed_room())
     timed_room := list.append(timed_room(), [{at=at, r=r}])
+    log.important("timed: item due in #{at - time()} s loaded; it waits outside the lane (first of its group: #{first})")
     if first then
       thread.run(delay=at - time() - timed_room_lead, {timed_room_admit(at)})
     end
@@ -556,7 +559,33 @@ def send_started(m) =
     # next item was not loaded yet (a slow backend), the last second of the interrupted
     # song played, then silence (after a live show and after a timed group, 2026-11-18).
     hard_cut := true
+    asked = time()
     main.skip()
+    # The skip is checked, as Next's is (skip_main). When the timed item had taken over
+    # during a song change, the skip only ended cross's transition and the interrupted
+    # song played on, muted, to its end: up to minutes of silence, and the backend never
+    # heard of a start (harness timed_and_mix_over_levels then duplicate_timed_id,
+    # 2026-11-18). Before the lane stayed muted this was the "old song comes back after
+    # the time check" fault. Given again up to 3 times; if the old song still will not
+    # go, it is let through rather than leaving the stream silent.
+    def rec check(n) =
+      if main_interrupted() and on_air_lane() == "main" and main_changed_at() < asked then
+        if n < 3 then
+          # (not over an item that is already being read: see skip_main)
+          if main_fetched_at() < asked then
+            log.important("back to music: the interrupted song is still there after the skip; skipping again")
+            hard_cut := true
+            main.skip()
+          end
+          thread.run(delay=0.5, {check(n + 1)})
+        else
+          log.important("back to music: the interrupted song would not go; letting it play")
+          main_gain := 1.
+          main_interrupted := false
+        end
+      end
+    end
+    thread.run(delay=0.5, {check(0)})
   elsif lane == "hold" then
     # Not reported: nothing from the queue is on air and it is not the emergency music
     left = timed_group_at() - time()
