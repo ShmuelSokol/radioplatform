@@ -505,41 +505,14 @@ class QueueReplenishService:
         return True
 
     async def _load_rules(self) -> list[ScheduleRule]:
-        """Load ALL active rules for this station across all time windows.
-
-        Station-specific rules take priority. If ANY exist for this station,
-        global rules (station_id IS NULL) are ignored entirely.
+        """Load ALL active rules for this station across all time windows
+        (see rules_for_station).
 
         NOTE: Hour/day filtering is intentionally removed here. When filling a
         7-day queue window we need all daypart rules so _fill_content_time_aware
         can distribute content correctly across morning/afternoon/evening slots.
         """
-        result = await self.db.execute(
-            select(ScheduleRule)
-            .where(
-                ScheduleRule.is_active == True,
-                ScheduleRule.station_id == self.station_id,
-            )
-            .order_by(ScheduleRule.priority.desc())
-        )
-        station_rules = list(result.scalars().all())
-
-        if station_rules:
-            logger.info(
-                "Station %s: using %d station-specific rule(s), ignoring global rules",
-                self.station_id, len(station_rules),
-            )
-            return station_rules
-
-        result = await self.db.execute(
-            select(ScheduleRule)
-            .where(
-                ScheduleRule.is_active == True,
-                ScheduleRule.station_id.is_(None),
-            )
-            .order_by(ScheduleRule.priority.desc())
-        )
-        return list(result.scalars().all())
+        return await rules_for_station(self.db, self.station_id)
 
     def _get_fill_spec(self, rules: list[ScheduleRule]) -> tuple[str, str | None]:
         """Return (asset_type, category) for gap-filling from the top daypart rule."""
@@ -562,15 +535,7 @@ class QueueReplenishService:
 
     @staticmethod
     def _rule_covers(rule: ScheduleRule, local: datetime) -> bool:
-        """Whether a rule's hours and days include this station-local moment."""
-        days = (rule.days_of_week or "0,1,2,3,4,5,6").split(",")
-        if str(local.weekday()) not in days:
-            return False
-        start = rule.hour_start or 0
-        end = 24 if rule.hour_end is None else rule.hour_end
-        if start <= end:
-            return start <= local.hour < end
-        return local.hour >= start or local.hour < end  # range past midnight (22-2)
+        return rule_covers(rule, local)
 
     async def _spread_rule_items(
         self, rules: list[ScheduleRule], fill_start_pos: int, queued_seconds: float,
@@ -1317,3 +1282,47 @@ class QueueReplenishService:
     # Backwards-compat alias
     async def _fill_random_music(self, shortfall: float) -> None:
         await self._fill_content(shortfall, asset_type="music", category=None)
+
+
+async def rules_for_station(db: AsyncSession, station_id) -> list[ScheduleRule]:
+    """The active rules that apply to one station, highest priority first.
+
+    A station's own rules win: if it has any, the global rules (no station) are
+    ignored entirely. A rule that belongs to another station never applies. Every
+    place that judges a station by its rules reads them here (the fill, the warning
+    on a queue move, the Rules preview): on 2026-11-17 a queue move on Kol B'ramah
+    Main was warned about by the All Day Stories station's rule because that check
+    read every station's rules.
+    """
+    own = list(
+        (
+            await db.execute(
+                select(ScheduleRule)
+                .where(ScheduleRule.is_active == True, ScheduleRule.station_id == station_id)  # noqa: E712
+                .order_by(ScheduleRule.priority.desc())
+            )
+        ).scalars().all()
+    )
+    if own:
+        return own
+    return list(
+        (
+            await db.execute(
+                select(ScheduleRule)
+                .where(ScheduleRule.is_active == True, ScheduleRule.station_id.is_(None))  # noqa: E712
+                .order_by(ScheduleRule.priority.desc())
+            )
+        ).scalars().all()
+    )
+
+
+def rule_covers(rule: ScheduleRule, local: datetime) -> bool:
+    """Whether a rule's hours and days include this station-local moment."""
+    days = (rule.days_of_week or "0,1,2,3,4,5,6").split(",")
+    if str(local.weekday()) not in days:
+        return False
+    start = rule.hour_start or 0
+    end = 24 if rule.hour_end is None else rule.hour_end
+    if start <= end:
+        return start <= local.hour < end
+    return local.hour >= start or local.hour < end  # range past midnight (22-2)

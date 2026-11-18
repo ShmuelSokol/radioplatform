@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useStations, useCreateStation, useUpdateStation, useDeleteStation } from '../../hooks/useStations';
 import apiClient from '../../api/client';
 import Spinner from '../../components/Spinner';
+import PlayoutBadge from '../../components/audio/PlayoutBadge';
 import { useAuth } from '../../hooks/useAuth';
 
 export default function Stations() {
@@ -149,6 +150,7 @@ export default function Stations() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timezone</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plays from</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
@@ -163,6 +165,9 @@ export default function Stations() {
                 <td className="px-6 py-4 whitespace-nowrap font-medium">{station.name}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{station.type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{station.timezone}</td>
+                <td className="px-6 py-4 whitespace-nowrap" data-testid="station-plays-from">
+                  <PlayoutBadge stationId={station.id} chip />
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                     station.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -197,7 +202,7 @@ export default function Stations() {
               </tr>
               {expandedStation === station.id && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-4 bg-gray-50 space-y-6">
+                  <td colSpan={6} className="px-6 py-4 bg-gray-50 space-y-6">
                     <LocationConfig
                       latitude={station.latitude}
                       longitude={station.longitude}
@@ -221,7 +226,7 @@ export default function Stations() {
             })}
             {data?.stations.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-gray-500">
+                <td colSpan={6} className="px-6 py-10 text-center text-gray-500">
                   No stations yet
                 </td>
               </tr>

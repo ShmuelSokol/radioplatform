@@ -292,8 +292,43 @@ async def test_play_next_in_a_songs_last_seconds_keeps_the_held_song_until_next(
         json={"asset_id": str(playing.asset_id)},
     )
     assert res.status_code == 201 and commands == [] and state.cued_entry_id == str(pending.id)
+    item = res.json()["id"]
     res = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade=hard", headers=auth_headers)
-    assert res.json()["message"] == "Skipped" and commands == ["/flush", "/skip"]
+    # The item is loaded and then put on air (the timed lane, like Play now), and the
+    # held song is taken back. Never flush-then-skip: on Main (03:46Z 2026-11-18) the
+    # skip came while the item's file was still downloading and the item was lost.
+    assert res.json()["message"] == "Skipped" and commands == ["/timed", "/flush"]
+    assert item in state.timed_sent and state.cued_entry_id is None and state.skip_requested
+    # What the engine is handed next is the song it held, not the item again
+    from app.services import playout_engine
+    state.given = set()
+    got = await playout_engine.handle_next(db_session, station.id, given=[])
+    assert got["entry_id"] == str(pending.id)
+
+
+@pytest.mark.asyncio
+async def test_next_when_the_engine_refuses_the_item_falls_back_to_a_plain_skip(
+    client, auth_headers, db_session, monkeypatch
+):
+    from app.services import playout_engine
+
+    station, playing, pending, state, commands = await _engine_station(
+        db_session, monkeypatch, elapsed_seconds=160.0
+    )
+    res = await client.post(
+        f"/api/v1/stations/{station.id}/queue/play-next", headers=auth_headers,
+        json={"asset_id": str(playing.asset_id)},
+    )
+    item = res.json()["id"]
+
+    async def refuse_timed(path, payload=None, **_kw):
+        commands.append(path)
+        return path != "/timed"
+
+    monkeypatch.setattr(playout_engine, "_command", refuse_timed)
+    res = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade=hard", headers=auth_headers)
+    assert res.json()["message"] == "Skipped" and commands == ["/timed", "/skip"]
+    assert item not in state.timed_sent and state.cued_entry_id == str(pending.id)
 
 
 @pytest.mark.asyncio

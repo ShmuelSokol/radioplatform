@@ -101,6 +101,11 @@ end
 # A long song is a big download: give it time to arrive (it is fetched while the song
 # before it plays)
 main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=120., next_request)
+# When the music lane last began reading a new item (before `cross` has buffered its
+# start and called transition()). skip_main() uses it to tell a skip that took (the next
+# item is on its way) from one that only ended a transition.
+main_fetched_at = ref(0.)
+main_requests.on_track(fun (_) -> main_fetched_at := time())
 # Per-track level from the library's audio analysis (backend sends liq_amplify)
 main = amplify(1., override="liq_amplify", main_requests)
 # Song-to-song: the outgoing song fades out under the incoming one, which starts at full
@@ -109,6 +114,7 @@ main = amplify(1., override="liq_amplify", main_requests)
 # sponsorship, a time check, a shiur) has overlap 0 and is never talked over: the next
 # item starts when it has ended (Shmuel 2026-11-17: sponsorships played in a row ran
 # into each other). `liq_cross_duration` tells `cross` how early to call transition().
+# A song is not crossfaded into a spoken item either: it fades out, then the item starts.
 # After Next or a timed item the old song must not come back, so that change is a clean cut
 # (the music has already been faded out by then).
 hard_cut = ref(false)
@@ -128,9 +134,17 @@ def transition(ending, starting) =
     # The incoming song is listed first: `add` passes on the titles of its first source
     # only, and the start report to the backend is made from them.
     overlap = float_of_string(default=default_overlap, ending.metadata["kbr_overlap"])
+    # A song before anything spoken (Shmuel 2026-11-17, "Song ends first, then speech":
+    # the last second of a song played under the first words of a sponsorship). Every
+    # item carries its kind; none (the emergency music) counts as a song.
+    kind = starting.metadata["kbr_kind"]
+    speech_next = kind != "" and kind != "music"
     if overlap < 0.05 then
       # No overlap: the last moment of the ending item plays out, then the next starts
       sequence([ending.source, starting.source])
+    elsif speech_next then
+      # The song fades out over its last moment, and only then the spoken item starts
+      sequence([fade.out(duration=overlap, ending.source), starting.source])
     else
       add(normalize=false, [starting.source, fade.out(duration=overlap, ending.source)])
     end
@@ -329,7 +343,10 @@ def skip_main() =
   main.skip()
   thread.run(delay=0.1, {if main_changed_at() >= asked then master_gain := 1. end})
   thread.run(delay=0.3, {
-    if main_changed_at() < asked and on_air_lane() != "timed" then
+    # Not when the next item is already being read: on the busy server its start took
+    # longer than 0.3 s to buffer, and the second skip ran over it (Main 03:46Z
+    # 2026-11-18: a sponsorship never aired and a second of emergency music played)
+    if main_changed_at() < asked and main_fetched_at() < asked and on_air_lane() != "timed" then
       log.important("skip: no song change after the skip (transition still playing); skipping again")
       hard_cut := true
       main.skip()

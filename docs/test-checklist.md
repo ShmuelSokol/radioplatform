@@ -412,6 +412,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [x] B-QUEUE-48 `POST /stations/{station_id}/queue/reorder-dnd` [require_dj_or_manager] Drag-and-drop reorder: move entry to new position with rule validation. | modes: both | covered: tests/test_queue_endpoints.py::test_drag_and_drop_moves_and_shifts_the_rest
 - [x] B-QUEUE-49 ↳ non-pending entry -> 404 | modes: both | covered: tests/test_queue_endpoints.py::test_drag_and_drop_moves_and_shifts_the_rest
 - [x] B-QUEUE-50 ↳ warnings for category transitions, rule conflicts and do_not_play | modes: both | covered: tests/test_queue_endpoints.py::test_drag_and_drop_warns_about_rules
+- [x] B-QUEUE-50b ↳ a move is judged only by this station's rules (its own, or the global ones when it has none), never another station's, at the station's own clock and weekday; the move is done whatever the warning says (live 2026-11-17: a move on Kol B'ramah Main was warned about by the All Day Stories rule); the Rules preview takes a station and shows only its rules | modes: both | covered: tests/test_rules_station_scope.py (6 tests)
 - [x] B-QUEUE-51 `DELETE /stations/{station_id}/queue/{entry_id}` [require_dj_or_manager] remove from queue | modes: both | covered: tests/test_activity_log.py, tests/test_operator_actions.py, tests/test_playout_engine.py
 - [x] B-QUEUE-52 ↳ remove pending entry; engine flush when it was the cued one | modes: both | covered: tests/test_playout_engine.py
 - [x] B-QUEUE-53 `POST /stations/{station_id}/queue/start` [require_dj_or_manager] start playback | modes: both | covered: tests/test_queue_never_runs_dry.py
@@ -1282,6 +1283,7 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [x] F-RULES-2 New rule: type, asset type, station, numeric params, days of week buttons, date, active | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-2 desktop: new rule needs a name (validation) (+3 more)
 - [x] F-RULES-3 Schedule preview toggle shows preview | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-3 desktop: Preview Schedule shows generated slots; Hide Preview (+1 more)
 - [x] F-RULES-4 Only admin can change; others view only | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-4 manager: rules are view only (no New Rule, no Edit/Del) (+2 more)
+- [ ] F-RULES-5 A global rule says which stations follow it: "used by every station", "used by <names> only", or "not used by any station (each has rules of its own)" in amber; inactive rules say nothing | sizes: both | n.a. | covered: NOT COVERED by an automated test (type check and lint only; live look by the PC requested 2026-11-18)
 
 ## Schedules (/admin/schedules)
 
