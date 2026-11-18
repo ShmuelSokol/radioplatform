@@ -715,6 +715,7 @@ async def test_a_song_matched_during_shabbos_or_a_live_show_does_not_air(client,
     # Live show on another station
     st2, song2, _, req2 = await _request_setup(db_session, status=RequestStatus.APPROVED)
     now = datetime.now(UTC)
+    st2.automation_config = {**(st2.automation_config or {}), "live_delay_seconds": 0}  # the show takes the air at once
     show = LiveShow(id=uuid.uuid4(), station_id=st2.id, title="Live", status=LiveShowStatus.SCHEDULED,
                     scheduled_start=now, scheduled_end=now + timedelta(hours=1))
     db_session.add(show)
