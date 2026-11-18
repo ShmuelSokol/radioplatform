@@ -169,14 +169,14 @@ export function makeStation(opts = {}) {
     assets.push({ id: `m${i}`, title: i % 7 === 0 ? `Nigun Simcha ${i}` : `Song number ${i} with a fairly long descriptive title`, artist: `Artist ${i % 9}`, album: `Album ${i % 5}`, duration: 150 + (i % 90), asset_type: 'music', category: i % 3 ? 'lively' : 'slow' });
   }
   for (let i = 1; i <= 9; i++) assets.push({ id: `j${i}`, title: `Station ID ${i}`, artist: null, album: null, duration: 6 + i, asset_type: 'jingle', category: 'ids', intro_seconds: i === 3 ? 6 : null });
-  for (let i = 1; i <= 4; i++) assets.push({ id: `s${i}`, title: `Kol Berama sponsor business ${i}`, artist: null, album: null, duration: 30, asset_type: 'spot', category: null });
+  for (let i = 1; i <= 4; i++) assets.push({ id: `s${i}`, title: `Kol B'ramah sponsor business ${i}`, artist: null, album: null, duration: 30, asset_type: 'spot', category: null });
   assets.push({ id: 'tc', title: 'Time check', artist: null, album: null, duration: 5, asset_type: 'zmanim', category: 'time' });
   assets.push({ id: 'wx', title: 'Weather', artist: null, album: null, duration: 20, asset_type: 'spot', category: 'weather' });
   assets.push({ id: 'sil', title: 'Silence', artist: null, album: null, duration: 600, asset_type: 'silence', category: null });
   if (opts.noJingles) for (let i = assets.length - 1; i >= 0; i--) if (assets[i].asset_type === 'jingle') assets.splice(i, 1);
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
   const stations = opts.stations || [
-    { id: SID, name: 'Kol Berama', timezone: 'America/New_York', is_active: true, channels: [] },
+    { id: SID, name: "Kol B'ramah", timezone: 'America/New_York', is_active: true, channels: [] },
     { id: 'st-2', name: 'Second Feed', timezone: 'Asia/Jerusalem', is_active: true, channels: [] },
   ];
   let seq = 0;

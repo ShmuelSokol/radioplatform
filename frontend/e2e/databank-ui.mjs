@@ -186,7 +186,7 @@ if (run('open')) {
   check('F-DATABANK-1 desktop DB button opens the Databank on Songs', true);
   check('F-DATABANK-1 title bar names the file and the station',
     (await page.locator('.qn-title').innerText()).replace(/\s+/g, ' ').includes('KBR Database - [Songs.db]')
-    && (await page.locator('.qn-title').innerText()).includes('Kol Berama'));
+    && (await page.locator('.qn-title').innerText()).includes("Kol B'ramah"));
   await page.getByRole('tab', { name: 'Spots' }).click();
   check('F-DATABANK-1 file name follows the tab', (await page.locator('.qn-title').innerText()).includes('[Spots.db]'));
   // Spot schedule link (Spots tab), bug reporter, Control room

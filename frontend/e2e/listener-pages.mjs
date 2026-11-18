@@ -95,7 +95,7 @@ async function a11y(browser, contextOpts, tag) {
   page.on('pageerror', (e) => errors.push(String(e)));
   const tap = (loc) => (contextOpts.isMobile ? loc.tap() : loc.click());
   const pages = [
-    { path: '/stations', ready: () => page.getByText('Kol Berama').first().waitFor() },
+    { path: '/stations', ready: () => page.getByText("Kol B'ramah").first().waitFor() },
     {
       path: `/listen/${station.SID}`,
       ready: async () => { await page.getByText('On Air', { exact: true }).waitFor(); },
@@ -179,7 +179,7 @@ const goInApp = (page, path) => page.evaluate((p) => { history.pushState({}, '',
 /** A station list the API answers page by page (skip/limit, 50 by default) like the server. */
 function pagedStations(n, extraFields = () => ({})) {
   return Array.from({ length: n }, (_, i) => ({
-    id: i === 0 ? 'st-1' : `st-${i + 1}`, name: i === 0 ? 'Kol Berama' : `Feed ${String(i + 1).padStart(3, '0')}`,
+    id: i === 0 ? 'st-1' : `st-${i + 1}`, name: i === 0 ? "Kol B'ramah" : `Feed ${String(i + 1).padStart(3, '0')}`,
     timezone: i === 1 ? 'Asia/Jerusalem' : 'America/New_York', type: 'internet', is_active: true, description: null, channels: [], ...extraFields(i),
   }));
 }
@@ -229,7 +229,7 @@ async function stationListChecks(browser) {
     await ctx.close();
   }
   const list = pagedStations(120, (i) => (i === 2 ? { is_active: false, name: 'Feed 003 (old)' } : i === 0 ? { description: 'Torah, music and news. '.repeat(20) } : {}));
-  // On air: Kol Berama (st-1) and the inactive st-3; Feed 002 is switched on with nothing playing
+  // On air: Kol B'ramah (st-1) and the inactive st-3; Feed 002 is switched on with nothing playing
   const st = stationFor({ '/stations': (m, q) => pageOf(list, q, 'stations'), '/now-playing': () => ({ playing: ['st-1', 'st-3'] }) }, {
     // st-2 on the server stream but out of step (engine title must not show), st-4 server not answering
     playout: { stations: {
@@ -245,9 +245,9 @@ async function stationListChecks(browser) {
       const off = cards.filter({ hasText: 'Feed 003 (old)' });
       check(`${tag}-4 ${view}: an inactive station is listed with an "Offline" pill and a working /listen link (today's behaviour; decide)`,
         await off.count() === 1 && (await off.innerText()).includes('Offline') && (await off.getAttribute('href')) === '/listen/st-3');
-      const first = cards.filter({ hasText: 'Kol Berama' });
+      const first = cards.filter({ hasText: "Kol B'ramah" });
       const pill = async (name) => (await cards.filter({ hasText: name }).locator('span.rounded-full').last().innerText()).trim();
-      const p1 = await pill('Kol Berama'), p2 = await pill('Feed 002'), p3 = await pill('Feed 003 (old)');
+      const p1 = await pill("Kol B'ramah"), p2 = await pill('Feed 002'), p3 = await pill('Feed 003 (old)');
       const onAirReads = st.calls.filter((c) => c.path === '/now-playing').length;
       const perCard = st.calls.filter((c) => /^\/(now-playing|stations)\/[^/]+(\/now-playing)?$/.test(c.path)).length;
       check(`${tag}-5 ${view}: "On Air" only when something plays; a switched-on station with nothing playing says Offline; an inactive one stays Offline`,
@@ -532,7 +532,7 @@ async function archivesChecks(browser) {
     const c3 = await card('Zero length').innerText();
     const clamp = await card('Motzei Shabbos Live').locator('p.line-clamp-2').evaluate((el) => getComputedStyle(el).webkitLineClamp).catch(() => '');
     check(`${tag}-9: duration badge h:mm:ss / m:ss, host | station, recorded date, description clamped`,
-      c1.includes('1:02:05') && c2.includes('2:05') && /Reb Moshe\s*\|\s*Kol Berama/.test(c1) && /\d{4}/.test(c1) && clamp === '2', c1.slice(0, 80).replace(/\n/g, ' / '));
+      c1.includes('1:02:05') && c2.includes('2:05') && /Reb Moshe\s*\|\s*Kol B'ramah/.test(c1) && /\d{4}/.test(c1) && clamp === '2', c1.slice(0, 80).replace(/\n/g, ' / '));
     check(`${tag}-9: a 0 duration shows no stray "0"; a station not in the list shows "Unknown"`,
       zeroBadges.length === 0 && !/(^|\n)0(\n|$)/.test(c3) && c3.includes('Unknown'), `badges=${JSON.stringify(zeroBadges)} text=${c3.replace(/\n/g, ' / ')}`);
     // -8 RSS
