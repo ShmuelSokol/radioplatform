@@ -50,6 +50,10 @@ async def station_status(db: AsyncSession, station_id: str) -> dict:
         "engine_ok": engine is not None,
         "in_sync": in_sync,
         "engine_title": engine.get("title") if engine else None,
+        # The engine's protocol (from its hello and every ask). From 5 its stream carries
+        # a live show, so listener pages play the stream then instead of their own feed
+        "engine_proto": playout_engine.get_state(station_id).engine_proto,
+        "live_on_stream": playout_engine.get_state(station_id).engine_proto >= playout_engine.ENGINE_PROTO_LIVE_AUDIO,
     }
     if station_id in settings.relay_station_ids:
         # A local FM box: what its relay last said about itself (None = not heard from)
