@@ -242,8 +242,8 @@ async def _explain(session, station_id) -> None:
         ))).first()
         log.warning(
             "LAST-PLAYED DIAGNOSIS: the first whole-history read after this start, timed by the database, "
-            "took %.1f s as seen from here. Table %s, indexes %s, about %s rows. Indexes: %s. Plan: %s",
-            plan_took, size[0], size[1], size[2],
+            "took %.0f ms as seen from here. Table %s, indexes %s, about %s rows. Indexes: %s. Plan: %s",
+            plan_took * 1000, size[0], size[1], size[2],
             "; ".join(f"{name}: {definition}" for name, definition in indexes),
             " / ".join(row[0] for row in plan),
         )

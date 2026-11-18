@@ -613,14 +613,19 @@ async def _log_database_link() -> None:
 # pages its visibility map marks clean, and only VACUUM marks them: on
 # 2026-11-18 the last-played read of play_logs fetched 139,992 of 145,557 rows
 # from the table anyway. Inserts alone start autovacuum late (20% of the table).
-VACUUM_TABLES = ("play_logs", "queue_entries")
+VACUUM_TABLES = ("play_logs", "queue_entries", "assets", "alerts")
 VACUUM_EVERY_DAYS = 7
+# A table with this share of dead rows is vacuumed whatever its last vacuum.
+# queue_entries has 700 to 900 rows rewritten at every song change.
+VACUUM_DEAD_SHARE = 0.10
 
 
 async def _vacuum_stale_tables() -> None:
     """After startup, in the background: VACUUM (ANALYZE) each of VACUUM_TABLES
-    not vacuumed in the last week, and make autovacuum come sooner for them.
-    VACUUM does not block reads or writes."""
+    that was not vacuumed in the last week or holds many dead rows, and make
+    autovacuum come sooner for them. VACUUM does not block reads or writes.
+    Every table gets a log line either way, with its sizes and dead rows:
+    nobody can look at the live database directly."""
     import asyncpg
 
     if not settings.DATABASE_URL.startswith("postgresql"):
@@ -638,10 +643,20 @@ async def _vacuum_stale_tables() -> None:
             try:
                 row = await conn.fetchrow(
                     "SELECT greatest(last_vacuum, last_autovacuum) AS last, "
-                    "now() - greatest(last_vacuum, last_autovacuum) > make_interval(days => $2) AS old "
+                    "coalesce(now() - greatest(last_vacuum, last_autovacuum) > make_interval(days => $2), true) AS old, "
+                    "n_live_tup AS live, n_dead_tup AS dead, vacuum_count + autovacuum_count AS runs, "
+                    "pg_size_pretty(pg_table_size(relid)) AS size, pg_size_pretty(pg_indexes_size(relid)) AS indexes "
                     "FROM pg_stat_user_tables WHERE relname = $1", table, VACUUM_EVERY_DAYS,
                 )
-                if row is None or (row["last"] is not None and not row["old"]):
+                if row is None:
+                    continue
+                state = (
+                    f"{row['live']} live and {row['dead']} dead rows, table {row['size']}, indexes {row['indexes']}, "
+                    f"last vacuum {row['last'] or 'never'}, {row['runs']} vacuums so far"
+                )
+                many_dead = row["dead"] > 1000 and row["dead"] > VACUUM_DEAD_SHARE * max(row["live"], 1)
+                if not row["old"] and not many_dead:
+                    logger.info("Vacuum not needed for %s: %s", table, state)
                     continue
                 await conn.execute(
                     f"ALTER TABLE {table} SET (autovacuum_vacuum_insert_scale_factor = 0.02, "
@@ -649,9 +664,14 @@ async def _vacuum_stale_tables() -> None:
                 )
                 started = asyncio.get_running_loop().time()
                 await conn.execute(f"VACUUM (ANALYZE) {table}")
+                after = await conn.fetchrow(
+                    "SELECT pg_size_pretty(pg_table_size(relid)) AS size, "
+                    "pg_size_pretty(pg_indexes_size(relid)) AS indexes "
+                    "FROM pg_stat_user_tables WHERE relname = $1", table,
+                )
                 logger.info(
-                    "Vacuumed %s in %.1f s (last vacuum before: %s)",
-                    table, asyncio.get_running_loop().time() - started, row["last"],
+                    "Vacuumed %s in %.1f s. Before: %s. After: table %s, indexes %s",
+                    table, asyncio.get_running_loop().time() - started, state, after["size"], after["indexes"],
                 )
             except Exception as e:
                 logger.warning("Vacuum of %s failed: %s", table, e)
