@@ -59,7 +59,6 @@ const VIEWS = {
 // Checks that fail because the SITE is wrong. Key = check name prefix, value = the bug.
 // A listed check that passes is reported as FIXED? so the list stays honest.
 const KNOWN_BUGS = {
-  'F-STUDIO-1 dj': 'a DJ may open the recording studio and record, but Save is refused (POST /assets/upload is manager-only: 403 "Manager access required"); the take is lost',
   'V2-101 a11y-gaps': 'basic accessibility gaps (fields without labels, grey-on-dark text under 4.5:1, see the detail per page); totals printed after the a11y section',
 };
 
@@ -326,7 +325,7 @@ const PUBLIC_ROUTES = ['/stations', '/guide', '/hosts', '/archives'];
 // Screens a role may open but not change (F-ACCESS-10/11): the "View only" pill.
 const VIEW_ONLY = {
   admin: [],
-  manager: ['/admin/rules'],
+  manager: ['/admin/rules', '/admin/bug-reports'],   // managers read bug reports; only an admin closes them
   dj: ['/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns'],
   viewer: ['/admin/dashboard', '/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns'],
 };
@@ -934,7 +933,7 @@ section('stations', async () => {
     }, page);
     await step(`F-STATIONS-5 ${view}: expand row, search location, Save Location updates coordinates and timezone`, async () => {
       await rowOf(page, name).click();
-      const panel = page.locator('td[colspan="5"]');
+      const panel = page.getByTestId('station-panel');
       await panel.getByPlaceholder('Search for a city...').fill('Lakewood');
       await panel.getByRole('button', { name: /Lakewood, New Jersey/ }).click();
       const { ms } = await timedSave(page, 'save location', (m, p) => m === 'PUT' || m === 'PATCH' ? p.startsWith('/stations/') : false, () => panel.getByRole('button', { name: 'Save Location' }).click());
@@ -943,7 +942,7 @@ section('stations', async () => {
       return `saved in ${ms} ms`;
     }, page);
     await step(`F-STATIONS-6/7 ${view}: automation config (hourly ID, time, weather + interval, long items) saves fast and sticks after reload`, async () => {
-      const panel = page.locator('td[colspan="5"]');
+      const panel = page.getByTestId('station-panel');
       const interval = panel.locator('input[type=number]');
       assert(await interval.isDisabled(), 'interval enabled while weather is off');
       await panel.getByText('Hourly Station ID Jingle').click();
@@ -957,14 +956,14 @@ section('stations', async () => {
       assert(cfg.hourly_station_id && cfg.hourly_time_announcement && cfg.weather_enabled && cfg.weather_interval_minutes === 45 && cfg.timed_during_long_items === 'cut', `sent ${JSON.stringify(cfg)}`);
       await page.reload();
       await rowOf(page, name).click();
-      const p2 = page.locator('td[colspan="5"]');
+      const p2 = page.getByTestId('station-panel');
       assert(await p2.getByTestId('timed-during-long-items').inputValue() === 'cut', 'long-items choice lost');
       assert(await p2.locator('input[type=number]').inputValue() === '45', 'interval lost');
       assert(await p2.getByText('Hourly Time Announcement').locator('input').isChecked(), 'hourly time lost');
       return `saved in ${ms} ms`;
     }, page);
     await step(`F-STATIONS-8 ${view}: turning Hourly Time Announcement off is saved (queue effect needs storage, see backend tests)`, async () => {
-      const panel = page.locator('td[colspan="5"]');
+      const panel = page.getByTestId('station-panel');
       await panel.getByText('Hourly Time Announcement').click();
       const { resp } = await timedSave(page, 'save automation', (m, p) => (m === 'PUT' || m === 'PATCH') && p.startsWith('/stations/'), () => panel.getByRole('button', { name: 'Save Automation Config' }).click());
       const cfg = resp.request().postDataJSON().automation_config;
@@ -2598,6 +2597,8 @@ async function uploadFixture(title, { type = 'music', file } = {}) {
   form.append('artist', `E2E Library Artist ${RUN}`);
   return api('POST', '/assets/upload', { token: USERS.admin.token, form });
 }
+// Badge menus open in a floating layer on the page (components/FloatingMenu.tsx), outside the row
+const menu = page => page.locator('[data-floating-menu]');
 const libRow = (page, title) => page.locator('tbody tr', { has: page.locator(`td[title="${title}"]`) }).first();
 
 section('assets', async () => {
@@ -2684,23 +2685,23 @@ section('assets', async () => {
   }, page);
   await step('F-ASSETS-6 category badge sets and clears a category; sponsor badge search sets and clears a sponsor', async () => {
     const row = libRow(page, `E2E Lib A ${RUN}`);
-    await row.getByTitle('Change category').click();
-    await timedSave(page, 'set category', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => row.getByRole('button', { name: cat.name }).click());
-    await until(async () => (await row.getByTitle('Change category').innerText()).includes(cat.name), 'badge shows the category');
-    await row.getByTitle('Change category').click();
-    await timedSave(page, 'clear category', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => row.getByRole('button', { name: 'Clear category' }).click());
-    await until(async () => !(await row.getByTitle('Change category').innerText()).includes(cat.name), 'category cleared');
+    await row.getByTitle(/category/i).click();
+    await timedSave(page, 'set category', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => menu(page).getByRole('button', { name: cat.name }).click());
+    await until(async () => (await row.getByTitle(/category/i).innerText()).includes(cat.name), 'badge shows the category');
+    await row.getByTitle(/category/i).click();
+    await timedSave(page, 'clear category', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => menu(page).getByRole('button', { name: 'Clear category' }).click());
+    await until(async () => !(await row.getByTitle(/category/i).innerText()).includes(cat.name), 'category cleared');
     // Another section may have linked this spot to the sponsor already: start without one
     await api('PATCH', `/assets/${spot.id}`, { token: USERS.admin.token, body: { sponsor_id: null } }).catch(() => {});
     await titleBox.fill(spot.title);
     const srow = libRow(page, spot.title);
     await srow.waitFor();
-    await srow.getByTitle(/Set sponsor|Change sponsor/).click();
+    await srow.getByTitle(/Set sponsor|change sponsor/i).click();
     await page.getByPlaceholder('Search sponsors...').fill(FX.sponsor.name.slice(0, 12));
-    await timedSave(page, 'set sponsor', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => srow.getByRole('button', { name: FX.sponsor.name }).click());
-    await srow.getByTitle('Change sponsor').waitFor();
-    await srow.getByTitle('Change sponsor').click();
-    await timedSave(page, 'clear sponsor', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => srow.getByRole('button', { name: 'Clear sponsor' }).click());
+    await timedSave(page, 'set sponsor', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => menu(page).getByRole('button', { name: FX.sponsor.name }).click());
+    await srow.getByTitle(/change sponsor/i).waitFor();
+    await srow.getByTitle(/change sponsor/i).click();
+    await timedSave(page, 'clear sponsor', (m, p) => (m === 'PATCH' || m === 'PUT') && p.startsWith('/assets/'), () => menu(page).getByRole('button', { name: 'Clear sponsor' }).click());
     await srow.getByTitle('Set sponsor').waitFor();
   }, page);
   await step('F-ASSETS-7 row checkboxes, select all on the page, "Select all N", "Clear, keep only this page"', async () => {
@@ -2732,7 +2733,7 @@ section('assets', async () => {
     await page.getByText('2 selected').waitFor();
     await page.getByRole('button', { name: 'Set Category' }).click();
     await timedSave(page, 'bulk category', (m, p) => m !== 'GET' && p.startsWith('/assets'), () => page.getByRole('button', { name: cat.name, exact: true }).last().click());
-    await until(async () => (await libRow(page, `E2E Lib B ${RUN}`).getByTitle('Change category').innerText()).includes(cat.name), 'bulk category shown');
+    await until(async () => (await libRow(page, `E2E Lib B ${RUN}`).getByTitle(/category/i).innerText()).includes(cat.name), 'bulk category shown');
     for (const t of [`E2E Lib A ${RUN}`, `E2E Lib B ${RUN}`]) await libRow(page, t).locator('input[type=checkbox]').check();
     await page.getByRole('button', { name: 'Download', exact: true }).first().click();
     const downloads = [];
@@ -3105,8 +3106,8 @@ section('studio', async () => {
         const r = await timedResponse(page, (m, p) => m === 'POST' && p.startsWith('/assets/upload'), () => save.click());
         assert(r.status < 300, `save ${r.status}`);
         const a = await r.resp.json();
-        // V2-100: the take is stored as an uncompressed WAV
-        assert(/\.wav$/i.test(a.file_path || ''), `stored as ${a.file_path}`);
+        // V2-100 (fixed): the take is stored as MP3, not an uncompressed WAV
+        assert(/\.mp3$/i.test(a.file_path || ''), `stored as ${a.file_path}`);
         assert(a.asset_type === 'jingle', `type ${a.asset_type}`);
         return `saved ${a.duration ? a.duration.toFixed(1) + ' s ' : ''}${a.file_path.split('.').pop()}`;
       }, page);
@@ -3280,8 +3281,11 @@ section('public', async () => {
   const now = new Date();
   const s = hm(new Date(now.getTime() - 30 * 60e3)), e = hm(new Date(now.getTime() + 30 * 60e3));
   const block = (name, start, end, extra = {}) => api('POST', '/schedules/blocks', { token: T, body: { schedule_id: gsc.id, name, recurrence_type: 'daily', start_time: `${start}:00`, end_time: `${end}:00`, priority: 1, playback_mode: 'shuffle', ...extra } });
-  await block(`E2E On Now ${RUN}`, s, e);
-  await block(`E2E Sunset Show ${RUN}`, '12:00', '13:00', { start_sun_event: 'sunset', start_sun_offset: 0 });
+  // The block on now outranks the sunset one, and the sunset one ends before midnight: it used to
+  // end at 13:00, so it ran from sunset through the night to 1 PM and covered the "On Now" block
+  // (the guide was right to show it; the test data was wrong).
+  await block(`E2E On Now ${RUN}`, s, e, { priority: 9 });
+  await block(`E2E Sunset Show ${RUN}`, '12:00', '23:59', { start_sun_event: 'sunset', start_sun_offset: 0 });
   await block(`E2E Overlap A ${RUN}`, '05:00', '06:00', { priority: 5 });
   await block(`E2E Overlap B ${RUN}`, '05:00', '06:00', { priority: 1 });
   // A public host with no display name (V2-127)
@@ -3829,9 +3833,9 @@ const A11Y_GAP_PAGES = new Set([
   '/admin/schedules', '/admin/holidays',
   '/admin/spot-schedule', '/admin/spot-recordings', '/admin/schedule-check', '/admin/sponsorship-rules',
   '/admin/playlists', '/admin/alerts', '/admin/site-updates',
-  '/admin/analytics', '/admin/live', '/admin/live/:id/host', '/admin/requests',
+  '/admin/analytics', '/admin/live', '/admin/live/:id/host',
   '/admin/archives', '/admin/audio-enhance/:id', '/admin/studio', '/admin/listeners',
-  '/admin/program-clock', '/guide', '/archives', '/listen/:id',
+  '/admin/program-clock', '/guide', '/listen/:id',
 ]);
 section('a11y', async () => {
   const jobs = [

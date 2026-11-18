@@ -109,7 +109,7 @@ async def alerts_ws_user(token: str, db):
 
     from sqlalchemy import select
 
-    from app.core.security import decode_token
+    from app.core.security import decode_token, token_is_current
     from app.models.user import User, UserRole
 
     try:
@@ -124,6 +124,8 @@ async def alerts_ws_user(token: str, db):
         return None
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if user is None or not user.is_active or user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        return None
+    if not token_is_current(payload, user):
         return None
     return user
 

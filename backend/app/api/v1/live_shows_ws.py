@@ -12,7 +12,7 @@ import numpy as np
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
-from app.core.security import decode_token
+from app.core.security import decode_token, token_is_current
 from app.db.session import get_async_session
 from app.models.user import User, UserRole
 
@@ -298,7 +298,7 @@ async def _authenticate_ws(websocket: WebSocket, show_id: str) -> User | None:
             result = await db.execute(select(User).where(User.id == uuid.UUID(user_id_str)))
             user = result.scalar_one_or_none()
 
-            if not user or not user.is_active:
+            if not user or not user.is_active or not token_is_current(payload, user):
                 await websocket.close(code=4001)
                 return None
 

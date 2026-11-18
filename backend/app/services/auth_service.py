@@ -10,6 +10,7 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    token_is_current,
     verify_password,
 )
 from app.models.user import User
@@ -31,9 +32,9 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
 def create_tokens(user: User) -> dict:
     access_token = create_access_token(
         subject=str(user.id),
-        extra_claims={"role": user.role.value},
+        extra_claims={"role": user.role.value, "sv": int(user.session_version or 0)},
     )
-    refresh_token = create_refresh_token(subject=str(user.id))
+    refresh_token = create_refresh_token(subject=str(user.id), extra_claims={"sv": int(user.session_version or 0)})
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -60,5 +61,8 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> dict:
 
     if not user or not user.is_active:
         raise UnauthorizedError("User not found or inactive")
+    if not token_is_current(payload, user):
+        # The password or role changed since this token was made
+        raise UnauthorizedError("Signed out: sign in again")
 
     return create_tokens(user)

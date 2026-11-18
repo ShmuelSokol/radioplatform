@@ -664,15 +664,22 @@ async def test_upload_format_choice_stores_a_playable_format(client, auth_header
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG (owner question): 'Keep Original' of an MP2 file, and the OGG choice, still store a format that "
-    "Safari or the engine's MP3 decoder may not play. Should Keep Original still turn MP2 into MP3, "
-    "and should the upload form offer only MP3 / M4A / WAV / Keep Original?"))
 async def test_keep_original_of_an_mp2_file_stores_a_browser_format(client, auth_headers, db_session, local_storage):
+    """V2-126 (decided 2026-11-18): Keep Original keeps every format except MP2, which becomes
+    MP3 because nothing here plays MP2; the upload screen says so next to the choice."""
     r = await client.post("/api/v1/assets/upload", files={"file": ("old.mp2", _audio("mp2", 2), "audio/mpeg")},
                           data={"title": "Old", "format": "original", "asset_type": "spot"}, headers=auth_headers)
     assert r.status_code == 201
-    assert _probe(await storage_service.download_file(r.json()["file_path"]))["codec"] != "mp2"
+    assert _probe(await storage_service.download_file(r.json()["file_path"]))["codec"] == "mp3"
+    # Any other format really is kept
+    r = await client.post("/api/v1/assets/upload", files={"file": ("take.flac", _audio("flac", 2), "audio/flac")},
+                          data={"title": "Kept", "format": "original", "asset_type": "spot"}, headers=auth_headers)
+    assert r.status_code == 201
+    assert r.json()["file_path"].endswith(".flac")
+    assert (await storage_service.download_file(r.json()["file_path"]))[:4] == b"fLaC"
+    page = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src", "pages", "admin", "AssetUpload.tsx")
+    if os.path.exists(page):
+        assert "Keep Original (MP2 files are still converted to MP3 so they can play)" in open(page, encoding="utf-8").read()
 
 
 def test_studio_saves_takes_as_mp3():
