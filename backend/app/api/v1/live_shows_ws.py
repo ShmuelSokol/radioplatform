@@ -225,6 +225,8 @@ class StationLiveRelay:
             return
 
         self.on_air[station_id] = show_id
+        from app.services import scheduler_engine as _sched
+        _sched.forget_host_left(station_id)   # a host is sending: a later leaving counts afresh
         if air is not None and air.show_id == show_id and not air.closed \
                 and (not air.finishing or air.finish_reason == "host left"):
             # The host came back (a reload, a network drop): carry on in the same delay
@@ -277,6 +279,7 @@ class StationLiveRelay:
             from app.services import scheduler_engine as _sched
             if _air.finish_reason == "host left" and _air.ever_heard \
                     and _sched._scheduler_instance is not None and _sched._scheduler_instance.running:
+                _sched.note_host_left(_station, _air.clock() - _air.last_input)
                 # The last words of a host who left have played out: look now whether
                 # the station goes back to music, not on the scheduler's next pass
                 # (up to 3 s more silence; harness measured 3.6 to 3.9 s)
@@ -313,6 +316,8 @@ class StationLiveRelay:
             await self.broadcast_state(station_id)
             return
         air.finish("host left")
+        from app.services import scheduler_engine as _sched
+        _sched.note_host_left(station_id, air.clock() - air.last_input)
         if air.drained() or not air.listening:
             await air.stop()
 

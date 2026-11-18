@@ -1188,3 +1188,62 @@ async def test_engine_quieted_for_a_show_about_to_be_heard_is_not_told_the_show_
         assert playout_engine._show_about_to_be_heard(sid) is False
     finally:
         relay.quieted_early.discard(sid)
+
+
+# ---------- PC live check after PR 340 (2026-11-18) ----------
+
+@pytest.mark.asyncio
+async def test_the_wait_for_a_gone_host_counts_from_their_leaving_without_a_scheduler_pass(db_session, _quiet, monkeypatch):
+    """KBR Jerusalem, delay 15 and limit 15: the count began when the delay had played
+    out, 17.5 s of silence after the host's last words."""
+    from app.services import scheduler_engine
+
+    engine = scheduler_engine.SchedulerEngine()
+    monkeypatch.setattr(scheduler_engine, "_scheduler_instance", engine)
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 2, "live_host_gone_seconds": 2})
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    await relay.set_on_air(sid, str(show.id), delay=2.0)
+    await relay.audio(sid, speech(0.05).tobytes())
+    air = relay.airs[sid]
+    air.last_input = air.clock() - 1.0          # the last frame came a second before the socket closed
+    await relay.host_left(sid, str(show.id))
+    since = engine._host_gone_since[sid]
+    assert 0.9 <= time.monotonic() - since <= 1.5
+    # Back before anything looked: the next leaving is counted afresh
+    await relay.set_on_air(sid, str(show.id), delay=2.0)
+    assert sid not in engine._host_gone_since
+    await relay.airs[sid].stop()
+
+
+@pytest.mark.asyncio
+async def test_live_mp3_opens_with_silence_in_the_second_before_the_show_is_heard(client, db_session, _quiet, monkeypatch):
+    """The engine is told to go quiet a second before first air and connects at once:
+    204 then meant it connected only after the show had begun (2.3 s of silence)."""
+    import shutil
+
+    from app.config import settings
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "engine-secret")
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 3})
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    await relay.set_on_air(sid, str(show.id), delay=3.0)
+    air = relay.airs[sid]
+    url = f"/api/v1/playout/{station.id}/live.mp3"
+    token = {"X-Playout-Token": "engine-secret"}
+    assert (await client.get(url, headers=token)).status_code == 204          # filling, not about to be heard
+    air.told_soon = True
+
+    async def end_soon():
+        await asyncio.sleep(1.0)
+        await air.stop()
+
+    ending = asyncio.ensure_future(end_soon())
+    r = await asyncio.wait_for(client.get(url, headers=token), 15)
+    await ending
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg"
+    assert len(r.content) > 8000 and r.content[0] == 0xFF       # about a second of (silent) audio already
+    assert air.taps == set()

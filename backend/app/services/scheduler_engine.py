@@ -1120,6 +1120,21 @@ def _cut_time(entry, on_air=None) -> str | None:
 _scheduler_instance: Optional[SchedulerEngine] = None
 
 
+def note_host_left(station_id, silent_for: float) -> None:
+    """The host of a live show stopped sending `silent_for` seconds ago: the wait of
+    `live_host_gone_seconds` counts from then, whenever the scheduler next looks.
+    (KBR Jerusalem 2026-11-18: with a 15 s delay and a 15 s limit the count began only
+    when the delay had played out, 17.5 s of silence after the host's last words.)"""
+    if _scheduler_instance is not None:
+        _scheduler_instance._host_gone_since.setdefault(str(station_id), time.monotonic() - max(0.0, silent_for))
+
+
+def forget_host_left(station_id) -> None:
+    """The host is back: a later leaving is counted afresh."""
+    if _scheduler_instance is not None:
+        _scheduler_instance._host_gone_since.pop(str(station_id), None)
+
+
 def get_scheduler() -> SchedulerEngine:
     """Get or create the global scheduler instance."""
     global _scheduler_instance

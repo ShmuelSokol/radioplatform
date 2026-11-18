@@ -209,6 +209,7 @@ export function makeStation(opts = {}) {
     nextEntryId: undefined,   // override next_entry_id in the queue answer
     pushOnChange: opts.pushOnChange ?? true,
     modes: { hard_start: true, spots: true },
+    air: null,                // a live show's air status instead of "on air, 15 s delay"
   };
   const pending = () => queue.filter((e) => e.status === 'pending').sort((a, b) => a.position - b.position);
   const playing = () => queue.find((e) => e.status === 'playing');
@@ -312,6 +313,19 @@ export function makeStation(opts = {}) {
       live.shows.push(show);
       return show;
     }
+    // A live show's own reads (control room badge, host console, call screener). A show
+    // that is live is on air with a full 15 s delay unless the test sets `station.air`.
+    const lsr = /^\/live-shows\/([^/]+)\/(air|dumps|chat|calls|time-remaining)$/.exec(path);
+    if (lsr && method === 'GET') {
+      const sh = live.shows.find((x) => x.id === lsr[1]);
+      const on = sh?.status === 'live';
+      if (lsr[2] === 'air') return s.air || { show_id: lsr[1], mode: on ? 'steady' : 'off', on_air: on, delay: on ? 15 : 0, target: 15, configured: 15, dump_size: 0, safe: on, dumps: 0, finishing: false, auto_exit: false, insert: null, next_insert: null, host_silent_for: 0 };
+      if (lsr[2] === 'dumps') return { dumps: [] };
+      if (lsr[2] === 'chat') return { messages: [] };
+      if (lsr[2] === 'calls') return { calls: [], total: 0 };
+      return { seconds: 3600 };
+    }
+    if (path === '/caller-profiles') return { callers: [] };
     const lsm = /^\/live-shows\/([^/]+)\/(start|end)$/.exec(path);
     if (lsm) { const sh = live.shows.find((x) => x.id === lsm[1]); sh.status = lsm[2] === 'start' ? 'live' : 'ended'; return sh; }
     if (/^\/live-shows\/station\/[^/]+\/active$/.test(path)) {
