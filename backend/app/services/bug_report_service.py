@@ -95,8 +95,17 @@ def issue_body(report, files: dict[str, str]) -> str:
     lines += ["", "### Files"]
     for name, url in files.items():
         lines.append(f"- [{name}]({url})")
+    shot_info = ctx.get("screenshot") if isinstance(ctx.get("screenshot"), dict) else {}
     if "screenshot" in files:
         lines += ["", "### Screenshot", f"![screenshot]({files['screenshot']}?raw=true)"]
+        if shot_info.get("picked_by_person"):
+            lines.append("(The site could not take it; the reporter added this picture.)")
+    else:
+        # Said out loud so a run of reports without pictures gets noticed (bug 8: Safari
+        # sent none for days and nobody saw it)
+        why = "; ".join(_short(t, 200) for t in (shot_info.get("failed") or [])[:4])
+        lines += ["", "### Screenshot", "**None came with this report.** " + (
+            f"Why: {why}" if why else "The page sent none (box unticked, or a site version from before 2026-11-18).")]
     lines += [
         "",
         "<!-- Read context.json (browser state, console, network) and server-log.json"
