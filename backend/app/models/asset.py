@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from datetime import date
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.core.hebrew_text import fix_garbled_hebrew
 
 asset_categories = Table(
     "asset_categories",
@@ -19,11 +20,12 @@ asset_categories = Table(
 
 
 def tidy_text(value, keep_empty: bool = False):
-    """Tabs and line breaks become one space, the ends are trimmed; an empty artist or
-    album becomes None (a title stays text: the column needs one)."""
+    """Tabs, line breaks and runs of spaces become one space, the ends are trimmed; an empty artist or
+    album becomes None (a title stays text: the column needs one). Hebrew that arrives
+    garbled as accented Latin letters is put right (app/core/hebrew_text.py)."""
     if not isinstance(value, str):
         return value
-    out = re.sub(r"[\t\r\n\x0b\x0c\u00a0]+", " ", value).strip()
+    out = fix_garbled_hebrew(re.sub(r"[\s\u00a0]+", " ", value).strip())  # runs of spaces too, like scripts/sql/tidy_asset_text.sql
     return out if out or keep_empty else None
 
 
