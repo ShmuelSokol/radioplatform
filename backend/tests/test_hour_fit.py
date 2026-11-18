@@ -348,9 +348,41 @@ async def test_a_songs_own_crossfade_point_is_used(db_session: AsyncSession):
     ends = HOUR - timedelta(seconds=300)
     await _queue(db_session, station, ends, [("Far too long", 500.0), ("Long tail", 340.0), ("Plain", 325.0)])
     tail = (await db_session.execute(select(Asset).where(Asset.title == "Long tail"))).scalar_one()
-    # Hands over at 302 s: 2 s past the hour, though the file runs 40 s past it
-    tail.metadata_extra = {"audio_analysis": {"version": ANALYSIS_VERSION, "cross_start_seconds": 302.0}}
+    # Hands over at 308 s: 8 s past the hour, though the file runs 40 s past it
+    tail.metadata_extra = {"audio_analysis": {"version": ANALYSIS_VERSION, "cross_start_seconds": 308.0}}
     await db_session.commit()
     assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=2)) is True
     await db_session.commit()
     assert (await _order(db_session, station_id))[0] == "Long tail"
+
+
+@pytest.mark.asyncio
+async def test_a_fit_that_ends_a_second_past_the_hour_is_not_trusted(db_session: AsyncSession):
+    """F-HOURFIT-10: live, Jerusalem 23:00Z: the song fitted to end 1 s past the hour
+    ended 1.9 s before it, so a 4-minute song was started and cut after 2.4 s. A song
+    with a few seconds to spare past the hour is chosen over one that only just
+    reaches it."""
+    station = await _station(db_session)
+    station_id = station.id
+    ends = HOUR - timedelta(seconds=300)
+    # Both counted to their hand-over point (file length less the 3 s overlap)
+    await _queue(db_session, station, ends, [("Far too long", 500.0), ("Only just", 304.0), ("To spare", 312.0)])
+    assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=2)) is True
+    await db_session.commit()
+    assert (await _order(db_session, station_id))[0] == "To spare"
+
+
+@pytest.mark.asyncio
+async def test_a_song_due_to_end_seconds_before_the_hour_is_not_left_alone(db_session: AsyncSession):
+    """F-HOURFIT-11: live, Jerusalem 00:00Z: the song on air was due to end 6.6 s
+    before the hour. The fit read that as "loses nothing" and did nothing; a 4-minute
+    song was started and cut after 6.8 s. A song that runs a little past the hour
+    takes its place."""
+    station = await _station(db_session)
+    station_id = station.id
+    ends = HOUR - timedelta(seconds=300)
+    # 'Ends early' hands over 6 s before the hour; 'Runs past' 12 s after it
+    await _queue(db_session, station, ends, [("Ends early", 297.0), ("Next one", 280.0), ("Runs past", 315.0)])
+    assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=2)) is True
+    await db_session.commit()
+    assert (await _order(db_session, station_id))[0] == "Runs past"
