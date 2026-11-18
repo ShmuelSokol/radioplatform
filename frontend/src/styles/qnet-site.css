@@ -172,7 +172,8 @@ nav.qn-site .qn-brand:hover { background: transparent; color: #000080; }
 @media (max-width: 639px) {
   table.phone-cards, table.phone-cards > tbody, table.phone-cards > tbody > tr { display: block !important; width: 100%; min-width: 0; }
   table.phone-cards > thead { display: none !important; }
-  table.phone-cards > tbody > tr { padding: 8px 10px; border-top: 1px solid #808080; }
+  /* 56 px kept clear on the right: the bug button floats there and must never sit on a card's words */
+  table.phone-cards > tbody > tr { padding: 8px 56px 8px 10px; border-top: 1px solid #808080; }
   table.phone-cards > tbody > tr > td {
     display: block !important;
     width: auto;
@@ -185,4 +186,15 @@ nav.qn-site .qn-brand:hover { background: transparent; color: #000080; }
   table.phone-cards > tbody > tr > td:first-child { font-weight: 700; font-size: 15px; }
   table.phone-cards > tbody > tr > td[data-label]::before { content: attr(data-label) ": "; font-weight: 400; opacity: 0.75; }
   table.phone-cards > tbody > tr > td:last-child:not(:first-child) { display: flex !important; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 6px !important; }
+  /* The row's actions are real buttons a thumb can hit (44 px), not small text links
+     side by side. Delete (`data-danger`) sits apart from the others so it is not hit by
+     mistake; every Delete also asks first. */
+  table.phone-cards > tbody > tr > td:last-child:not(:first-child) > div { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  table.phone-cards > tbody > tr > td:last-child:not(:first-child) button,
+  table.phone-cards > tbody > tr > td:last-child:not(:first-child) a {
+    min-height: 44px !important; height: auto !important; min-width: 44px; padding: 0 14px !important;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 14px !important; border: 1px solid #808080; border-radius: 2px; background: #d4d0c8; color: #000 !important;
+  }
+  table.phone-cards > tbody > tr > td:last-child:not(:first-child) [data-danger] { order: 99; margin-left: 28px; color: #a00000 !important; border-color: #a00000; }
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '../../hooks/useUsers';
+import { useAuthStore } from '../../stores/authStore';
 import Spinner from '../../components/Spinner';
 import { useStations } from '../../hooks/useStations';
 
@@ -27,6 +28,7 @@ export default function Users() {
   const createMut = useCreateUser();
   const updateMut = useUpdateUser();
   const deleteMut = useDeleteUser();
+  const me = useAuthStore((st) => st.user);
 
   const [showForm, setShowForm] = useState(false);
   const [email, setEmail] = useState('');
@@ -395,10 +397,12 @@ export default function Users() {
                   <td className="px-3 py-1.5 flex gap-2">
                     <button onClick={() => startEdit(u)}
                       className="text-yellow-400 hover:text-yellow-300 text-[11px]">Edit</button>
-                    <button onClick={() => { if (confirm('Delete this user?')) deleteMut.mutate(u.id); }}
-                      className="text-red-400 hover:text-red-300 text-[11px]">Delete</button>
+                    {/* Your own login: the server refuses both, so the page does not offer them */}
+                    <button data-danger disabled={u.id === me?.id} title={u.id === me?.id ? 'You cannot delete your own account' : undefined}
+                      onClick={() => { if (confirm('Delete this user?')) deleteMut.mutate(u.id); }}
+                      className="text-red-400 hover:text-red-300 text-[11px] disabled:opacity-40 disabled:cursor-not-allowed">Delete</button>
                     {u.is_active ? (
-                      <button onClick={() => { setRowError(null); updateMut.mutate({ id: u.id, data: { is_active: false } }, { onError: (err: any) => {
+                      <button disabled={u.id === me?.id} title={u.id === me?.id ? 'You cannot disable your own account' : undefined} onClick={() => { setRowError(null); updateMut.mutate({ id: u.id, data: { is_active: false } }, { onError: (err: any) => {
                         // A refused Disable (your own account) used to do nothing on screen
                         const msg = err?.response?.data?.detail || err?.message || 'Could not disable this account';
                         setRowError(typeof msg === 'string' ? msg : JSON.stringify(msg));

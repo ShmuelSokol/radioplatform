@@ -3,6 +3,7 @@ import { useHolidays, useCreateHoliday, useUpdateHoliday, useDeleteHoliday } fro
 import { useStations } from '../../hooks/useStations';
 import { HolidayWindow, HolidayFilters } from '../../api/holidays';
 import Spinner from '../../components/Spinner';
+import { formatInZone, fromZonedInput, toZonedInput } from '../../lib/stationTime';
 
 const REASON_OPTIONS = [
   'Shabbos', 'Rosh Hashanah', 'Yom Kippur', 'Sukkot',
@@ -20,13 +21,6 @@ const REASON_COLORS: Record<string, string> = {
   'Manual': 'bg-gray-100 text-gray-700',
 };
 
-function formatDt(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric',
-    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
-  });
-}
 
 function durationHours(start: string, end: string): string {
   const ms = new Date(end).getTime() - new Date(start).getTime();
@@ -48,6 +42,14 @@ export default function Holidays() {
   const [reasonFilter, setReasonFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('active_upcoming');
   const [stationFilter, setStationFilter] = useState('');
+  // Times are shown and typed on a station's clock, never the viewer's: the station a
+  // window names (or the one filtered on), else the first station in the list.
+  const zoneOf = (stationIds?: string[] | null): string | undefined => {
+    const pick = (stationIds ?? []).map((id) => stationList.find((s: any) => s.id === id)).find(Boolean)
+      ?? stationList.find((s: any) => s.id === stationFilter)
+      ?? stationList[0];
+    return (pick as any)?.timezone || undefined;
+  };
 
   const filters: HolidayFilters = useMemo(() => ({
     limit: 500,
@@ -86,8 +88,8 @@ export default function Holidays() {
     setForm({
       name: h.name,
       reason: h.reason || '',
-      start_datetime: h.start_datetime.slice(0, 16),
-      end_datetime: h.end_datetime.slice(0, 16),
+      start_datetime: toZonedInput(h.start_datetime, zoneOf(h.affected_stations?.station_ids)),
+      end_datetime: toZonedInput(h.end_datetime, zoneOf(h.affected_stations?.station_ids)),
       is_blackout: h.is_blackout,
       affected_station_ids: h.affected_stations?.station_ids || [],
       all_stations: !h.affected_stations,
@@ -97,11 +99,12 @@ export default function Holidays() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const zone = zoneOf(form.all_stations ? null : form.affected_station_ids);
     const payload = {
       name: form.name,
       reason: form.reason || null,
-      start_datetime: new Date(form.start_datetime).toISOString(),
-      end_datetime: new Date(form.end_datetime).toISOString(),
+      start_datetime: fromZonedInput(form.start_datetime, zone),
+      end_datetime: fromZonedInput(form.end_datetime, zone),
       is_blackout: form.is_blackout,
       affected_stations: form.all_stations ? null : { station_ids: form.affected_station_ids },
       replacement_content: null,
@@ -215,6 +218,9 @@ export default function Holidays() {
                 className="w-full px-4 py-2 border rounded-lg" />
             </div>
           </div>
+          <p className="text-xs text-gray-500" data-testid="blackout-zone">
+            Times are on the station's clock ({zoneOf(form.all_stations ? null : form.affected_station_ids) ?? 'your own time'}).
+          </p>
           <div className="flex items-center gap-4">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={form.is_blackout} onChange={e => setForm({ ...form, is_blackout: e.target.checked })} />
@@ -280,8 +286,8 @@ export default function Holidays() {
                         </span>
                       </td>
                       <td className="px-4 py-2.5 font-medium text-gray-900">{h.name}</td>
-                      <td data-label="Music off" className="px-4 py-2.5 text-gray-600">{formatDt(h.start_datetime)}</td>
-                      <td data-label="Music on" className="px-4 py-2.5 text-gray-600">{formatDt(h.end_datetime)}</td>
+                      <td data-label="Music off" className="px-4 py-2.5 text-gray-600">{formatInZone(h.start_datetime, zoneOf(h.affected_stations?.station_ids))}</td>
+                      <td data-label="Music on" className="px-4 py-2.5 text-gray-600">{formatInZone(h.end_datetime, zoneOf(h.affected_stations?.station_ids))}</td>
                       <td data-label="Duration" className="px-4 py-2.5 text-right text-gray-600">{durationHours(h.start_datetime, h.end_datetime)}</td>
                       <td data-label="Status" className="px-4 py-2.5 text-center">
                         {status === 'active' && (
@@ -304,7 +310,7 @@ export default function Holidays() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                           </svg>
                         </button>
-                        <button onClick={() => { if (confirm('Delete this blackout window?')) deleteMut.mutate(h.id); }}
+                        <button data-danger onClick={() => { if (confirm('Delete this blackout window?')) deleteMut.mutate(h.id); }}
                           className="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 ml-1" title="Delete">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
