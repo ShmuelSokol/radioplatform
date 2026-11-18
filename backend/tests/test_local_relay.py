@@ -743,3 +743,85 @@ def test_relay_reports_an_engine_still_loading_as_working_not_failed(tmp_path):
         assert relay._engine_call("/timed", {}, wait=0.5)[0] == 502
     finally:
         srv.shutdown()
+
+
+def test_relay_tells_the_site_how_the_box_is_doing(rig):
+    fake, relay, clock = rig
+    now = clock["now"]
+    fake.plan = {"generated_at": now, "blackouts": [], "entries": [fake.entry("a", 1), fake.entry("b", 2)]}
+    relay.sync_plan()
+    relay.download(fake.url("a"))
+    assert relay._poll(0) is True
+    sent = json.loads([c for c in fake.calls if "/commands/poll" in c[1]][-1][2])["health"]
+    assert sent["clock_ok"] is True and sent["plan_entries"] == 2 and sent["plan_audio_missing"] == 1
+    assert sent["reports_kept"] == 0 and sent["disk_free_gb"] > 0 and sent["up_seconds"] >= 0
+    assert sent["engine_ok"] is True  # the fake engine answers /status
+    # The clock falls behind the plan (started with no internet and a flat battery)
+    clock["now"] = now - 3600
+    assert relay.health(max_age=0)["clock_ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_box_health_is_kept_shown_and_alerted(client, db_session, tunnel_station, monkeypatch):
+    from app.services import playout_engine, playout_tunnel
+    from app.services.air_watch import SERIOUS, AirWatch
+
+    sid = tunnel_station
+    st = Station(id=sid, name="FM", timezone="America/New_York", automation_config={})
+    db_session.add(st)
+    await db_session.commit()
+    url = f"/api/v1/playout/{sid}/commands/poll"
+
+    async def engine_status(_sid):
+        return {"ok": True, "entry_id": None}  # in step with the site: nothing on air
+    monkeypatch.setattr(playout_engine, "engine_status", engine_status)
+
+    assert playout_tunnel.box_health(sid) is None
+    watch = AirWatch()
+    _check = watch.check_station
+
+    async def box_only(*a, **kw):  # the station has nothing on air here: other findings are not the point
+        return [f for f in await _check(*a, **kw) if f.kind.startswith("box_")]
+    watch.check_station = box_only
+    assert [f.kind for f in await watch.check_station(db_session, st, datetime.now(UTC), mono=0.0)] == []
+
+    good = {"clock_ok": True, "engine_ok": True, "plan_age_seconds": 12.5, "plan_entries": 800,
+            "plan_audio_missing": 0, "reports_kept": 0, "disk_free_gb": 210.4, "up_seconds": 99}
+    body = {"wait": 0, "health": {**good, "password": "x", "plan_entries": "800"}}
+    assert (await client.post(url, json=body, headers=HEADERS)).status_code == 200
+    kept = playout_tunnel.box_health(sid)
+    assert {k: kept[k] for k in good} == good and "password" not in kept and kept["seen_seconds_ago"] < 5
+    assert playout_tunnel.box_problems(kept) == []
+    assert [f.kind for f in await watch.check_station(db_session, st, datetime.now(UTC), mono=1.0)] == []
+
+    # Public status carries it for the station list and the control room
+    from app.api.v1 import playout_status
+    playout_status._cache.clear()
+    shown = (await client.get("/api/v1/playout-status")).json()["stations"][str(sid)]
+    assert shown["box"]["disk_free_gb"] == 210.4 and shown["box"]["clock_ok"] is True
+
+    # Clock wrong and disk nearly full: reported at once, once per spell; missing audio
+    # only when it has been missing for 15 minutes
+    bad = {**good, "clock_ok": False, "disk_free_gb": 1.2, "plan_audio_missing": 3}
+    await client.post(url, json={"wait": 0, "health": bad}, headers=HEADERS)
+    found = await watch.check_station(db_session, st, datetime.now(UTC), mono=10.0)
+    assert sorted(f.kind for f in found) == ["box_clock", "box_disk"]
+    assert "box_clock" in SERIOUS and "music only" in [f for f in found if f.kind == "box_clock"][0].detail
+    again = await watch.check_station(db_session, st, datetime.now(UTC), mono=20.0)
+    assert {f.key for f in again} == {f.key for f in found}  # same spell, same alert
+    late = await watch.check_station(db_session, st, datetime.now(UTC), mono=10.0 + 15 * 60 + 1)
+    assert sorted(f.kind for f in late) == ["box_audio", "box_clock", "box_disk"]
+    # Also during a live show: the box's clock does not wait for the show to end
+    st.automation_config = {"live_show_id": "x"}
+    assert "box_clock" in [f.kind for f in await watch.check_station(db_session, st, datetime.now(UTC), mono=30.0)]
+    st.automation_config = {}
+    # Put right, then wrong again: a new alert
+    await client.post(url, json={"wait": 0, "health": good}, headers=HEADERS)
+    assert [f.kind for f in await watch.check_station(db_session, st, datetime.now(UTC), mono=40.0)] == []
+    await client.post(url, json={"wait": 0, "health": bad}, headers=HEADERS)
+    new = await watch.check_station(db_session, st, datetime.now(UTC), mono=50.0)
+    assert {f.key for f in new if f.kind == "box_clock"} != {f.key for f in found if f.kind == "box_clock"}
+    # A station with no box reports nothing of the kind
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", "")
+    assert playout_tunnel.box_health(sid) is None
+    assert [f.kind for f in await watch.check_station(db_session, st, datetime.now(UTC), mono=60.0)] == []

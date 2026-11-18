@@ -17,7 +17,7 @@ from app.config import settings
 from app.db.session import get_db
 from app.models.asset import Asset
 from app.models.queue_entry import QueueEntry
-from app.services import playout_engine
+from app.services import playout_engine, playout_tunnel
 
 router = APIRouter(prefix="/playout-status", tags=["playout"])
 
@@ -51,6 +51,9 @@ async def station_status(db: AsyncSession, station_id: str) -> dict:
         "in_sync": in_sync,
         "engine_title": engine.get("title") if engine else None,
     }
+    if station_id in settings.relay_station_ids:
+        # A local FM box: what its relay last said about itself (None = not heard from)
+        result["box"] = playout_tunnel.box_health(station_id)
     _cache[station_id] = (time.monotonic(), result)
     return result
 
