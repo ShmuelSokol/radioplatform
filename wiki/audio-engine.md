@@ -154,6 +154,27 @@ cut about 1.8 s early and the resumed story was heard over it (All Day Stories, 
 2026-11-16). Tests: `backend/tests/test_handover_rule.py`, e2e `audio-engine.mjs`
 scenarios `time-check-not-talked-over` and `time-check-hands-over-at-its-end`.
 
+### A song ends before anything spoken (2026-11-18)
+
+Shmuel chose "Song ends first, then speech" (2026-11-17 9:39 PM ET): on Main the last
+second of a song (its crossfade) played under the first words of a sponsorship. A song
+followed by a spoken item (anything that is not a song: `queue.is_song`) is not
+crossfaded into it. Which item follows is only known from the queue, so
+`predict_next_entry()` notes it per entry on air (`_speech_follows`) and the one rule
+reads that: `overlap_seconds` is 0, the hand-over is 0.3 s before the song's analysed
+end (0.7 s later than with the 1 s crossfade) and the now-playing message carries
+`asset.end_fade_seconds` (the station's crossfade, at least 0.3 s). The scheduler asks
+`predict_next_entry` before arming its timer each pass, so a sponsorship put next
+during the song moves the timer too. On the page (`useAudioEngine`): the song's gain
+ramps to 0 at its end (`songEndPoint` = the hand-over point + 0.3 s), and the spoken
+item starts from its first word when the song is silent, whether the server's message
+(`letFinish` to the song's end, only within 1.5 s of it so a hard timed item still cuts
+in at once) or the page's own check brings it in. Browser player only: the engine's
+`kbr_overlap` is unchanged and radio.liq decides for itself. Not covered: a hard timed
+item on the hour still fades the song under its first 0.4 s (`PREEMPT_FADE_OVERHANG_MS`).
+Tests: `backend/tests/test_song_ends_before_speech.py`, e2e `audio-engine.mjs`
+`song-ends-before-a-sponsorship`, `...-late-message`, `time-check-cuts-a-song-that-ends-before-speech`.
+
 Since 2026-11-17 (All Day Stories 03:00Z: the paused story came in 2.9 s over the time
 check): the page's own crossfade check never crossfades a short item; the next item
 comes in 0.15 s before the file's end (also after `ended`, the check runs every 100 ms).
