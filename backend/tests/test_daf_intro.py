@@ -83,6 +83,14 @@ def test_a_made_clip_is_checked_against_what_was_heard():
     assert not ok("maseches menachos daf fourteen", "Menachos", 4)
     assert not ok("maseches menachos daf forty four", "Menachos", 34)
     assert not ok("maseches bechoros daf thirty four", "Menachos", 34)
+    # How the voice's Arachin came back from Whisper on the PC (2026-11-18)
+    assert ok("Up next, today's daf. We begin Masakas Arachan, daf two.", "Arachin", 2)
+
+
+def test_the_recognition_prompt_names_every_masechta_and_no_daf():
+    prompt = daf_intro.whisper_prompt()
+    assert all(name in prompt for name, _, _, _ in daf_intro.MASECHTOS)
+    assert not any(ch.isdigit() for ch in prompt)
 
 
 def test_the_plan_lists_one_clip_a_day():
