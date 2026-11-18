@@ -74,10 +74,10 @@ radioplatform/
 ├── frontend/
 │   └── src/
 │       ├── api/                  # 14 API client modules + Axios client with JWT interceptor
-│       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer, NowPlaying)
+│       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer = the bar on listener pages, ListenHost keeps the Listen page playing across them; see `wiki/listener-player-bar.md`)
 │       ├── pages/admin/          # Dashboard, Stations, Assets, AssetUpload, Schedules, Rules, Users, Login, SongRequests, Archives
 │       ├── pages/public/         # StationList, Listen, ProgramGuide, Hosts, Archives
-│       ├── hooks/                # 22 custom hooks
+│       ├── hooks/                # 21 custom hooks
 │       ├── stores/               # Zustand: authStore, playerStore
 │       └── types/                # TypeScript interfaces
 ├── docs/                         # API reference documentation
@@ -263,7 +263,7 @@ radioplatform/
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
-- Listen.tsx — Listen to a station (HLS primary + client-side fallback, song requests)
+- Listen.tsx — Listen to a station (server stream or built-in player, song requests); keeps playing, with a bar, on the other listener pages
 - ProgramGuide.tsx — Public EPG with station/date picker and timeline
 - Hosts.tsx — Public DJ/host profile cards
 - Archives.tsx — Public show archive browser with playback
@@ -277,7 +277,7 @@ radioplatform/
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
 - CheckWording.tsx — Sponsor proposes wording, gets back what must change and why
 
-### Hooks (`frontend/src/hooks/`) — 22 hooks
+### Hooks (`frontend/src/hooks/`) — 21 hooks
 | Hook | Description |
 |------|-------------|
 | useAuth.ts | Authentication state + mutations |
@@ -287,7 +287,6 @@ radioplatform/
 | useSchedules.ts | Schedule/block/playlist entry hooks |
 | useRules.ts | Scheduling rules |
 | useUsers.ts | User management |
-| useAudioPlayer.ts | Audio playback controls |
 | useAudioEngine.ts | Audio engine integration |
 | useNowPlaying.ts | Now-playing polling |
 | useNowPlayingWS.ts | Now-playing WebSocket (with polling fallback) |

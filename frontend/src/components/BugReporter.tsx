@@ -90,9 +90,7 @@ export default function BugReporter() {
         stationId: player.stationId,
         stationName: player.stationName,
         isPlaying: player.isPlaying,
-        hlsUrl: player.hlsUrl,
         currentTrack: player.currentTrack,
-        volume: player.volume,
       },
     });
     setShot(await captureScreen());

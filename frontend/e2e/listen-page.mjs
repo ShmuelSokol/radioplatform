@@ -26,7 +26,7 @@ import { allowEverywhere } from './lib/guard.mjs';
 
 // Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
 allowEverywhere(/Could not save your rating|Please log in again|Raffle is not active|Cannot reach the server right now/, 'rating, raffle and the server are made to fail to see each message');
-allowEverywhere(/blocked by CORS policy.*nocors/, 'a stream without CORS is served to check the player copes');
+allowEverywhere(/nocors.*blocked by CORS policy|blocked by CORS policy.*nocors/, 'a stream without CORS is served to check the player copes');
 import { startStreamServer } from './lib/stream-server.mjs';
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
