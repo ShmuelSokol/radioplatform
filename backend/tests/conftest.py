@@ -260,3 +260,24 @@ def _forget_recent_panics():
     queue_module._last_panic.clear()
     yield
     queue_module._last_panic.clear()
+
+
+@pytest.fixture(autouse=True)
+def app_log_reaches_caplog(caplog):
+    """A test that reads `caplog` sees the app's log lines however it is run.
+
+    The "app" logger does not pass lines up to the root logger (app/main.py), which
+    is where caplog listens. Whether a line reached caplog depended on which tests
+    had run before: several tests passed in the whole suite and failed when their
+    file ran by itself (found 2026-11-18). So caplog's handler also listens on the
+    "app" logger while it does not propagate.
+    """
+    import logging
+
+    app_logger = logging.getLogger("app")
+    added = not app_logger.propagate and caplog.handler not in app_logger.handlers
+    if added:
+        app_logger.addHandler(caplog.handler)
+    yield
+    if added:
+        app_logger.removeHandler(caplog.handler)
