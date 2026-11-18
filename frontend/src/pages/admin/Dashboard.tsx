@@ -572,9 +572,12 @@ export default function Dashboard() {
   useEffect(() => {
     const el = dashStreamAudioRef.current;
     if (!el) return;
-    el.muted = !listenHere || muted;
+    // During a live show the operator hears the host from the live feed (at once);
+    // the stream carries the same show seconds later (stream server proto 5) and
+    // would be the host a second time
+    el.muted = !listenHere || muted || live.onAir;
     el.volume = volume;
-  }, [volume, muted, listenHere]);
+  }, [volume, muted, listenHere, live.onAir]);
   const setLiveLevel = live.setLevel;
   useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
   useEffect(() => { setLiveEnabled(audioReady && listenHere); }, [audioReady, listenHere]);

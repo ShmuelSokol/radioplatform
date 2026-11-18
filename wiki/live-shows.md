@@ -34,6 +34,13 @@ Shmuel: "live isn't live, it's 15 or 20 seconds delayed, so this way you could c
 
 Checks: `tests/test_live_delay.py` (audio whose sample values say when it was spoken, so each test can say exactly what reached listeners) and `frontend/e2e/live-delay.cjs <station id>` against a real backend: part A sends a scripted host microphone (a 1000 Hz "curse", Dump, and the listener socket must never receive it), part B presses every control in a browser on desktop and phone sizes, part C is the station settings, part D (`ONLY=desk`, `PLAYOUT_TOKEN` for live.mp3) Cough and Mute, the dump log, Put On Air while not safe. `e2e/web-call-in.cjs` sets the delay to 0 for its run.
 
+## The show on the stream (engine proto 5, 2026-11-18)
+Since the engine plays `/playout/{id}/live.mp3` its stream carries the show, so a page that plays the stream and also the socket's frames would play the host twice, seconds apart. `live_state` now carries `on_stream` (`StationLiveRelay.on_stream`: engine station, public stream on, engine proto 5 or more).
+- **Listen page** (plays the stream): `useLiveAudio.setUsesStream(true)`. With `on_stream` it does not play the frames, does not mute the stream, and sends `{"type":"audio","on":false}` so the server stops sending it show audio (`live_relay.no_audio`). Without `on_stream` (older engine, or the stream failed and the page fell back to its own player) it behaves as before: stream muted, frames played.
+- **Control room**: keeps playing the frames (the operator hears the host at once) and mutes its stream element while a show is on air.
+- FM (a local box) gets the show the same way, through the engine.
+- Check: `e2e/listen-page.mjs` part `livestream`.
+
 ## Caller desk (2026-11-18)
 - **The caller's topic and notes** (`pages/admin/live/CallerNote.tsx`): the topic a web caller types goes into `CallInRequest.notes`. It was stored and shown nowhere, so the host put callers on air blind. Every caller card on the Call Screener and the Host Console now shows it, editable in place (`PATCH .../calls/{id}`, which already broadcast `caller_updated` with the notes).
 - **Hold** (`POST .../calls/{id}/hold`): the caller on air goes back to Approved, still connected and hearing the show. 409 when not on air.
