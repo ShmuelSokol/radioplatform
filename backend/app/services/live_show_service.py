@@ -305,6 +305,7 @@ async def take_over_station(db: AsyncSession, station: Station, show: LiveShow, 
             logger.warning("Could not quiet the engine for the live show: %s", e)
 
 
+EARLY_START = 8.0   # how early a hard timed item may start (queue.TIMED_EARLY_START_SECONDS)
 HOLD_LIMIT = 45.0   # the longest a show waits for timed items before it is heard anyway
 
 
@@ -353,7 +354,11 @@ async def hold_for_timed_items(station_id: str, air) -> None:
         try:
             async for db in get_async_session():
                 now = datetime.now(timezone.utc)
-                within = max(0.0, air.target - air.buffered) + 2.0
+                # Also an item due up to EARLY_START after that: when the song before
+                # it ends early the player starts the item early, and a take-over in
+                # that moment left 0.8 s of the time check on the stream, with the
+                # whole check again over the delay 8 s later (harness, 2026-11-18)
+                within = max(0.0, air.target - air.buffered) + 2.0 + EARLY_START
                 end = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within)
                 await db.rollback()
                 if end is not None:

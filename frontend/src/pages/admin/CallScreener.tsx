@@ -6,6 +6,8 @@ import { approveCall, rejectCall, putCallerOnAirAsking, endCall, holdCall, nextC
 import type { CallInRequest } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
+import TalkButton, { TalkNote } from './live/TalkButton';
+import { useTalkback } from '../../hooks/useTalkback';
 
 export default function CallScreener() {
   const { showId } = useParams<{ showId: string }>();
@@ -13,6 +15,7 @@ export default function CallScreener() {
   const { data: showData } = useLiveShow(showId);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [nameValue, setNameValue] = useState('');
+  const talk = useTalkback(showId);
 
   const currentShow = show || showData;
 
@@ -96,6 +99,12 @@ export default function CallScreener() {
         <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={!!onAirCaller} compact />
       </div>
 
+      <TalkNote
+
+        name={talk.talkingTo ? (callers.find(c => c.id === talk.talkingTo)?.caller_name || "the caller") : null}
+
+        error={talk.error} onStop={talk.stop} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Waiting callers */}
         <div>
@@ -153,7 +162,7 @@ export default function CallScreener() {
                         {caller.caller_phone} &middot; waiting {getWaitTime(caller)}
                       </div>
                     </div>
-                    <span className="text-[10px] bg-amber-800 text-amber-200 px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] bg-amber-800 text-white px-2 py-0.5 rounded-full">
                       Hold
                     </span>
                   </div>
@@ -173,6 +182,7 @@ export default function CallScreener() {
                     >
                       Reject
                     </button>
+                    <TalkButton callId={caller.id} talkingTo={talk.talkingTo} onStart={talk.start} onStop={talk.stop} />
                   </div>
                 </div>
               ))}
@@ -268,6 +278,7 @@ export default function CallScreener() {
                     >
                       Put On Air
                     </button>
+                    <TalkButton callId={caller.id} talkingTo={talk.talkingTo} onStart={talk.start} onStop={talk.stop} />
                     <button
                       onClick={() => handleEndCall(caller.id)}
                       className="bg-red-900 hover:bg-red-800 text-red-300 px-3 py-1.5 rounded text-[11px] transition"

@@ -4,6 +4,8 @@ import { useLiveShow, useEndLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
 import { useHostAudio } from '../../hooks/useHostAudio';
 import CartPanel from './live/CartPanel';
+import TalkButton, { TalkNote } from './live/TalkButton';
+import { useTalkback } from '../../hooks/useTalkback';
 import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
@@ -18,7 +20,10 @@ export default function HostConsole() {
   // Cough: silent while the button (or the C key) is held. Mute: stays silent until pressed again.
   const [micOff, setMicOff] = useState(false);
   const [coughing, setCoughing] = useState(false);
-  useEffect(() => { setMuted(micOff || coughing); }, [micOff, coughing, setMuted]);
+  // Talking to a caller off the air: the host's microphone to listeners is closed meanwhile
+  const [talking, setTalking] = useState(false);
+  const talk = useTalkback(showId, setTalking);
+  useEffect(() => { setMuted(micOff || coughing || talking); }, [micOff, coughing, talking, setMuted]);
   useEffect(() => { if (!isRecording) { setMicOff(false); setCoughing(false); } }, [isRecording]);
   useEffect(() => {
     if (!isRecording) return;
@@ -160,6 +165,12 @@ export default function HostConsole() {
         </button>
       </div>
 
+      <TalkNote
+
+        name={talk.talkingTo ? (callers.find(c => c.id === talk.talkingTo)?.caller_name || "the caller") : null}
+
+        error={talk.error} onStop={talk.stop} />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left column: Countdown + Mic */}
         <div className="space-y-4">
@@ -227,7 +238,9 @@ export default function HostConsole() {
             )}
             {isRecording && muted && (
               <div className="text-yellow-400 text-sm mb-2 font-bold" role="status" data-testid="mic-muted-note">
-                MIC OFF: listeners do not hear you. Callers on air are still heard.
+                {talking
+                  ? 'TALKING OFF AIR: only the caller hears you. Listeners do not. Press End talk to go back.'
+                  : 'MIC OFF: listeners do not hear you. Callers on air are still heard.'}
               </div>
             )}
 
@@ -251,7 +264,7 @@ export default function HostConsole() {
                   : `Listeners hear you in ${Math.max(0, Math.ceil(air.target - air.delay))} s. Start talking now.`}
               </div>
             )}
-            {isRecording && air?.on_air && (
+            {isRecording && air?.on_air && !muted && (
               <div className="text-red-400 text-sm mt-2 font-bold" data-testid="heard-note">
                 {air.delay > 0.5
                   ? `Listeners hear you ${air.delay.toFixed(0)} s later.`
@@ -350,6 +363,9 @@ export default function HostConsole() {
                     </div>
                     <div className="text-[11px] text-gray-500 mb-2">{caller.caller_phone}</div>
                     <CallerNote showId={showId} caller={caller} />
+                    <div className="mb-2">
+                      <TalkButton callId={caller.id} talkingTo={talk.talkingTo} onStart={talk.start} onStop={talk.stop} />
+                    </div>
                     <button
                       onClick={() => handlePutOnAir(caller.id)}
                       disabled={!!onAirCaller}

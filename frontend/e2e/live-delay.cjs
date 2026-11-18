@@ -10,6 +10,7 @@
  * Part G (ONLY=record): the show is recorded and appears in Archives as a draft.
  * Part F (ONLY=callers): the caller desk (the caller's topic and notes, Hold, Next caller).
  * Part H (ONLY=carts): carts on the Host Console (jingles played into the show).
+ * Part I (ONLY=talk): talkback, the screener or host talking to a caller off the air.
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
  * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
@@ -767,6 +768,155 @@ function hostMic(showId, token) {
       await sleep(5000);
       const list2 = (await api('GET', `/archives?drafts=true&limit=100&station_id=${STATION}`)).json;
       check('G6 "Record every live show" off: nothing is recorded', !(list2.archives || list2.items || []).some((a) => a.title === title2));
+    }
+    // ---------- Part I: talkback (talking to a caller off the air) ----------
+    if (!ONLY || ONLY === 'talk') {
+      await setConfig({ live_delay_seconds: 0, live_host_gone_seconds: 0 });
+      const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'talk-'));
+      { const rate = 48000, n = rate * 30, buf = Buffer.alloc(44 + n * 2);
+        buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+        buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+        for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 1000 * i / rate)), 44 + i * 2);
+        fs.writeFileSync(path.join(DIR, 'staff.wav'), buf); }
+      // Every browser microphone in this part "says" 1000 Hz; the script's host says 440 and its caller 700
+      const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.join(DIR, 'staff.wav')}`, '--autoplay-policy=no-user-gesture-required'] });
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const open = async (url, opts = {}, signedIn = true) => {
+        const page = await (await browser.newContext({ permissions: ['microphone'], ...opts })).newPage();
+        if (signedIn) await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409|dynamically imported module|MIME type/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        page.on('dialog', (d) => { problems.push(`${url}: dialog "${d.message()}"`); d.dismiss(); });
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      /** A web caller driven by the script: says 700 Hz, keeps what it hears and is told */
+      const scriptCaller = async (name) => {
+        const r = await fetch(`${API}/call-in/${STATION}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, note: '' }) }).then((x) => x.json());
+        const c = { id: r.call_id || r.id, frames: [], msgs: [], sent: 0, ws: new WebSocket(`${API.replace(/^http/, 'ws')}/ws/live/call/${r.call_id || r.id}`) };
+        c.ws.binaryType = 'arraybuffer';
+        await new Promise((res) => { c.ws.onopen = () => { c.ws.send(JSON.stringify({ type: 'auth', token: r.token })); res(); }; });
+        c.ws.onmessage = (e) => { if (typeof e.data === 'string') c.msgs.push(JSON.parse(e.data)); else c.frames.push({ at: Date.now(), pcm: new Int16Array(e.data) }); };
+        const t0 = Date.now();
+        c.timer = setInterval(() => { if (c.ws.readyState !== 1) return; const due = Math.floor((Date.now() - t0) / 1000 * RATE) - c.sent; if (due > 0) { c.ws.send(tone(700, due, c.sent).buffer); c.sent += due; } }, 40);
+        c.heard = (f, from, to) => power(c.frames.filter((x) => x.at >= from && x.at < to).flatMap((x) => Array.from(x.pcm)), f);
+        c.close = () => { clearInterval(c.timer); c.ws.close(); };
+        return c;
+      };
+      const heard = (l, f, from, to) => power(l.frames.filter((x) => x.at >= from && x.at < to).flatMap((x) => Array.from(x.pcm)), f);
+      let show, mic, caller;
+      try {
+        show = await newShow('Delay test I');
+        await api('POST', `/live-shows/${show.id}/start`);
+        const statusOf = async (id) => ((await api('GET', `/live-shows/${show.id}/calls`)).json.calls.find((c) => c.id === id) || {}).status;
+        const l = listener();
+        mic = hostMic(show.id, token);
+        await mic.ready;
+        await sleep(1500);
+        caller = await scriptCaller('Chaim from Monsey');
+        const screener = await open(`/admin/live/${show.id}/screen`, { viewport: { width: 1440, height: 900 } });
+        const card = screener.locator('div.rounded-lg').filter({ hasText: 'Chaim from Monsey' }).last();
+        await card.getByRole('button', { name: 'Approve' }).waitFor({ timeout: 15000 });
+        await sleep(1500);
+        const t0 = Date.now();
+        check('I1 a waiting caller hears the show', caller.heard(440, t0 - 1200, t0) > 0.004, caller.heard(440, t0 - 1200, t0).toFixed(4));
+        check('I2 every waiting caller has a "Talk off air" button', /Talk off air/.test(await T(card, 'talk-button').innerText()));
+
+        // The screener talks to the caller
+        await T(card, 'talk-button').click();
+        await T(screener, 'talk-banner').waitFor({ timeout: 5000 });
+        await sleep(2500);
+        const t1 = Date.now();
+        check('I3 the screen says who is being talked to and that listeners hear nothing', /Talking off air to Chaim from Monsey\. Listeners hear nothing of this\./.test(await T(screener, 'talk-banner').innerText()) && /End talk/.test(await T(card, 'talk-button').innerText()), await T(screener, 'talk-banner').innerText());
+        check('I4 the caller\'s page is told', caller.msgs.some((m) => m.type === 'talk' && m.on === true));
+        const cs = caller.heard(1000, t1 - 1500, t1), ch = caller.heard(440, t1 - 1500, t1);
+        check('I5 the caller hears the screener and not the show', cs > 0.004 && ch < 0.001, `screener ${cs.toFixed(4)} show ${ch.toFixed(4)}`);
+        const ls = heard(l, 1000, t1 - 1500, t1), lc = heard(l, 700, t1 - 1500, t1), lh = heard(l, 440, t1 - 1500, t1);
+        check('I6 listeners hear the host only: nothing of the screener or the caller', ls < 0.001 && lc < 0.001 && lh > 0.004, `screener ${ls.toFixed(4)} caller ${lc.toFixed(4)} host ${lh.toFixed(4)}`);
+        await shot(screener, 'screener-talkback');
+
+        // A second person takes the caller over (here: this script, to read what the staff side receives)
+        const staff = { frames: [], closed: null, ws: new WebSocket(`${API.replace(/^http/, 'ws')}/ws/live/${show.id}/talk/${caller.id}`) };
+        staff.ws.binaryType = 'arraybuffer';
+        staff.ws.onopen = () => staff.ws.send(JSON.stringify({ type: 'auth', token }));
+        staff.ws.onmessage = (e) => { if (typeof e.data !== 'string') staff.frames.push({ at: Date.now(), pcm: new Int16Array(e.data) }); };
+        staff.ws.onclose = (e) => { staff.closed = e.code; };
+        await T(screener, 'talk-banner').waitFor({ state: 'detached', timeout: 5000 });
+        await sleep(1500);
+        const t2 = Date.now();
+        check('I7 taken over by someone else: the first screen goes back by itself, with no error', await T(screener, 'talk-banner').count() === 0 && /Talk off air/.test(await T(card, 'talk-button').innerText()));
+        check('I8 the person talking hears the caller', heard(staff, 700, t2 - 1200, t2) > 0.004, heard(staff, 700, t2 - 1200, t2).toFixed(4));
+
+        // On air: the talk ends first
+        await api('POST', `/live-shows/${show.id}/calls/${caller.id}/approve`);
+        await api('POST', `/live-shows/${show.id}/calls/${caller.id}/on-air?force=true`);
+        await sleep(1500);
+        const t3 = Date.now();
+        check('I9 putting the caller on air ends the talk', staff.closed === 4000 && caller.msgs.some((m) => m.type === 'talk' && m.on === false) && await statusOf(caller.id) === 'on_air', `closed ${staff.closed}`);
+        check('I10 and now listeners hear the caller', heard(l, 700, t3 - 1000, t3) > 0.004);
+        // Talk to a caller who is on air: refused, and the screen says why
+        check('I11 no Talk button on the caller on air', await screener.getByTestId('talk-button').count() === 0);
+        await api('POST', `/live-shows/${show.id}/calls/${caller.id}/hold`);
+        mic.close();
+        await sleep(600);
+
+        // The host talks to the caller: the host's microphone to listeners closes meanwhile
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await host.getByText('Start Broadcasting').click();
+        await T(host, 'mute-button').waitFor({ timeout: 9000 });
+        await sleep(2000);
+        const t4 = Date.now();
+        check('I12 the host is on air (1000 Hz from the browser microphone)', heard(l, 1000, t4 - 1200, t4) > 0.004);
+        await T(host, 'talk-button').click();
+        await T(host, 'talk-banner').waitFor({ timeout: 5000 });
+        await sleep(2500);
+        const t5 = Date.now();
+        check('I13 the host screen says TALKING OFF AIR', /TALKING OFF AIR: only the caller hears you/.test(await T(host, 'mic-muted-note').innerText()), await T(host, 'mic-muted-note').innerText());
+        check('I14 while the host talks to the caller listeners hear nothing of it, and the caller hears the host', heard(l, 1000, t5 - 1500, t5) < 0.001 && heard(l, 700, t5 - 1500, t5) < 0.001 && caller.heard(1000, t5 - 1500, t5) > 0.004,
+          `listeners ${heard(l, 1000, t5 - 1500, t5).toFixed(4)} caller hears ${caller.heard(1000, t5 - 1500, t5).toFixed(4)}`);
+        await shot(host, 'host-talkback');
+        await T(host, 'talk-banner').getByRole('button', { name: 'End talk' }).click();
+        await sleep(2500);
+        const t6 = Date.now();
+        check('I15 End talk: the host is back on air and the note is gone', heard(l, 1000, t6 - 1200, t6) > 0.004 && await T(host, 'mic-muted-note').count() === 0 && await T(host, 'talk-banner').count() === 0);
+        check('I16 a muted microphone stays muted after a talk', await (async () => {
+          await T(host, 'mute-button').click(); await T(host, 'talk-button').click(); await T(host, 'talk-banner').waitFor({ timeout: 5000 });
+          await T(host, 'talk-button').click(); await sleep(1800);
+          const t = Date.now(); return /Unmute mic/.test(await T(host, 'mute-button').innerText()) && heard(l, 1000, t - 1000, t) < 0.001; })());
+
+        // The caller's own page says it, and a caller who left gives a clear message
+        const page = await open(`/call/${STATION}`, { ...devices['iPhone 13'] }, false);
+        await page.getByPlaceholder('Name').fill('Dina from Brooklyn');
+        await page.getByRole('button', { name: 'Call in' }).click();
+        const cardD = screener.locator('div.rounded-lg').filter({ hasText: 'Dina from Brooklyn' }).last();
+        await T(cardD, 'talk-button').waitFor({ timeout: 10000 });
+        await sleep(800);
+        await T(cardD, 'talk-button').click();
+        await T(page, 'talk-note').waitFor({ timeout: 6000 });
+        check('I17 the caller\'s page says the staff are talking to them and they are not on air', /talking to you now\. You are not on the air/.test(await T(page, 'talk-note').innerText()), await T(page, 'talk-note').innerText());
+        await shot(page, 'caller-talkback-phone');
+        await T(cardD, 'talk-button').click();
+        await T(page, 'talk-note').waitFor({ state: 'detached', timeout: 5000 });
+        check('I18 End talk: the note on the caller\'s page goes away', true);
+        caller.close();
+        await sleep(700);
+        const cardC = screener.locator('div.rounded-lg').filter({ hasText: 'Chaim from Monsey' }).last();
+        if (await T(cardC, 'talk-button').count()) {
+          await T(cardC, 'talk-button').click();
+          await screener.getByText(/not connected from the website any more/).waitFor({ timeout: 5000 });
+          check('I19 a caller whose page is gone: the screen says they cannot be talked to here', await T(screener, 'talk-banner').getByText('Talking off air').count() === 0);
+        } else check('I19 a caller whose page is gone is no longer listed', true);
+        check('I20 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        await api('POST', `/live-shows/${show.id}/end`);
+      } finally {
+        if (mic) mic.close();
+        if (caller) caller.close();
+        await browser.close();
+      }
     }
   } finally {
     await endAll();
