@@ -30,6 +30,17 @@ settings.log.level := 3
 # No telnet. Control is HTTP on localhost only, with a shared token.
 settings.server.telnet := false
 settings.harbor.bind_addrs := ["127.0.0.1"]
+# Task queues. The engine's quick steps (level back up after Next or a timed item, the
+# fade itself, a time check's take-over at its second) run as tasks, and so do its
+# calls to the backend and every download. Liquidsoap's default is two queues for all
+# of them: with the backend answering in 3 to 4 s, a start report and the ask for the
+# next item filled both, the "level back up" task waited behind them, and the stream
+# was digital silence for 2.6 to 3.8 s after Next and after a time check (Jerusalem
+# 2026-11-18 05:30Z to 06:02Z; harness slow_backend_no_gap). Now the quick steps have
+# queues the slow calls cannot take (a call marked fast=false never runs on a fast
+# queue), and there is room for a whole timed group downloading at once.
+settings.scheduler.fast_queues := 6
+settings.scheduler.generic_queues := 6
 
 auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")]
 
@@ -63,7 +74,7 @@ def send_hello() =
 end
 send_hello()
 if not hello_done() then
-  thread.run.recurrent(delay=5., fun () -> begin
+  thread.run.recurrent(fast=false, delay=5., fun () -> begin
     send_hello()
     if hello_done() then (-1.) else 5. end
   end)
