@@ -487,10 +487,16 @@ class SchedulerEngine:
             show = result.scalar_one_or_none()
 
         if not show or show.status != LiveShowStatus.LIVE:
-            # Stale reference — clear it
-            config = dict(station.automation_config or {})
-            config.pop("live_show_id", None)
-            station.automation_config = config
+            from app.api.v1.live_shows_ws import live_relay
+            air = live_relay.airs.get(str(station.id))
+            if air is not None and air.show_id == str(live_show_id) and not air.closed:
+                return  # the end of the show is still playing out of the broadcast delay
+            # Stale reference: hand the station back (the queue or engine carries on)
+            from app.services.live_show_service import release_station
+            if not await release_station(db, station.id, live_show_id, now):
+                config = dict(station.automation_config or {})
+                config.pop("live_show_id", None)
+                station.automation_config = config
             # Each pass ends with a rollback (it closes the read transaction), so a
             # change made here must be committed here or it is lost
             await db.commit()
@@ -924,6 +930,13 @@ class SchedulerEngine:
         live_show_id = station.automation_config.get("live_show_id") if station.automation_config else None
         if live_show_id:
             await self._check_live_show_hard_stop(db, station, live_show_id, now)
+            # The time check still airs on time, over the show's broadcast delay
+            try:
+                from app.services import live_inserts
+                await live_inserts.prepare(db, station, now)
+            except Exception:
+                logger.warning("Timed items for the live show on station %s failed", station.id, exc_info=True)
+                await _safe_rollback(db)
             return  # Skip normal scheduler logic
 
         # Check blackout windows — fill silence for active AND upcoming blackouts

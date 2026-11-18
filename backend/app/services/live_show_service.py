@@ -213,24 +213,16 @@ async def start_show(
     if host_user_id:
         show.host_user_id = host_user_id
 
-    # Signal scheduler to pause for this station
+    # Take the station over: its automation pauses under the host. With a broadcast
+    # delay this waits until listeners really hear the host (the delay is full), so
+    # the music keeps playing while it fills: see take_over_when_heard.
     station_result = await db.execute(select(Station).where(Station.id == show.station_id))
     station = station_result.scalar_one_or_none()
     if station:
-        config = dict(station.automation_config or {})
-        config["live_show_id"] = str(show.id)
-        station.automation_config = config
-        await _pause_automation(db, station.id, now)
-        from app.config import settings as _settings
-        if _settings.engine_drives(station.id):
-            # At once, not on the scheduler's next pass: the song must not play on
-            # under the host's first words
-            try:
-                from app.services import playout_engine
-                await playout_engine.engine_flush(station.id)
-                await playout_engine.engine_live(station.id, True)
-            except Exception as e:
-                logger.warning("Could not quiet the engine for the live show: %s", e)
+        from app.services.live_air import settings_for
+        delay, _dump, _rule = settings_for(station.automation_config)
+        if delay <= 0:
+            await take_over_station(db, station, show, now)
 
     # Set icecast mount for WebRTC mode
     if show.broadcast_mode == "webrtc" and not show.icecast_mount:
@@ -251,6 +243,73 @@ async def start_show(
     return show
 
 
+async def take_over_station(db: AsyncSession, station: Station, show: LiveShow, now: datetime) -> None:
+    """The host is heard from now on: the scheduler leaves the station alone, the item
+    playing stops (to carry on after the show) and an engine station's stream goes quiet."""
+    config = dict(station.automation_config or {})
+    if config.get("live_show_id") == str(show.id):
+        return
+    config["live_show_id"] = str(show.id)
+    station.automation_config = config
+    await _pause_automation(db, station.id, now)
+    from app.config import settings as _settings
+    if _settings.engine_drives(station.id):
+        # At once, not on the scheduler's next pass: the song must not play on
+        # under the host's first words
+        try:
+            from app.services import playout_engine
+            await playout_engine.engine_flush(station.id)
+            await playout_engine.engine_live(station.id, True)
+        except Exception as e:
+            logger.warning("Could not quiet the engine for the live show: %s", e)
+
+
+async def take_over_when_heard(station_id: str, show_id: str) -> None:
+    """Listeners just started hearing the show through its delay: take the station over now."""
+    from app.db.session import get_async_session
+
+    async for db in get_async_session():
+        try:
+            show = await get_show(db, uuid.UUID(str(show_id)))
+            station = await db.get(Station, uuid.UUID(str(station_id)))
+            if show is not None and station is not None and show.status == LiveShowStatus.LIVE:
+                await take_over_station(db, station, show, datetime.now(timezone.utc))
+                await db.commit()
+                logger.info("Live show %s is heard on station %s: automation paused", show_id, station_id)
+        except Exception:
+            logger.exception("Could not take station %s over for live show %s", station_id, show_id)
+            await db.rollback()
+        break
+
+
+async def release_station(db: AsyncSession, station_id, show_id, now: datetime) -> bool:
+    """The show is over for listeners: the scheduler and the queue (or the engine) carry on."""
+    station = await db.get(Station, station_id)
+    if station is None:
+        return False
+    config = dict(station.automation_config or {})
+    if config.get("live_show_id") != str(show_id):
+        return False  # never taken over (the delay never filled): the music never stopped
+    config.pop("live_show_id", None)
+    station.automation_config = config
+    await _resume_automation(db, station.id, now)
+    return True
+
+
+async def _release_later(station_id: str, show_id: str) -> None:
+    from app.db.session import get_async_session
+
+    async for db in get_async_session():
+        try:
+            if await release_station(db, uuid.UUID(station_id), show_id, datetime.now(timezone.utc)):
+                await db.commit()
+                logger.info("Live show %s played out of the delay: station %s carries on", show_id, station_id)
+        except Exception:
+            logger.exception("Could not hand station %s back after live show %s", station_id, show_id)
+            await db.rollback()
+        break
+
+
 async def start_if_scheduled(
     db: AsyncSession, show_id: UUID | str, host_user_id: UUID | None = None,
 ) -> bool:
@@ -267,7 +326,15 @@ async def start_if_scheduled(
     return True
 
 
-async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
+def _with_state(relay, station_key: str, then):
+    """After the delay played out: hand the station back."""
+    async def run():
+        relay.airs.pop(station_key, None)  # listeners were told when it stopped airing
+        await then()
+    return run
+
+
+async def end_show(db: AsyncSession, show_id: UUID | str, drain: bool = True) -> LiveShow | None:
     """End a live show — set status, clear scheduler signal, end all calls, stop Icecast."""
     result = await db.execute(select(LiveShow).where(LiveShow.id == show_id))
     show = result.scalar_one_or_none()
@@ -278,19 +345,26 @@ async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
     show.status = LiveShowStatus.ENDED
     show.actual_end = now
 
-    # Clear scheduler signal
-    station_result = await db.execute(select(Station).where(Station.id == show.station_id))
-    station = station_result.scalar_one_or_none()
-    if station and station.automation_config:
-        config = dict(station.automation_config)
-        config.pop("live_show_id", None)
-        station.automation_config = config
-        await _resume_automation(db, station.id, now)
+    # Listeners still have the end of the show waiting in the broadcast delay: it plays
+    # out (wound down quickly) and the station carries on after it. A hard stop does
+    # not wait (the delay winds down by itself before it). Without a delay, at once.
+    from app.api.v1.live_shows_ws import live_relay
+    station_key = str(show.station_id)
+    air = live_relay.airs.get(station_key)
+    if drain and air is not None and air.show_id == str(show.id) and air.listening and air.buffered > 0.3:
+        async def later(_station=station_key, _show=str(show.id)):
+            await _release_later(_station, _show)
+        try:
+            await live_relay.set_on_air(station_key, None, drain=True,
+                                        on_done=_with_state(live_relay, station_key, later))
+        except Exception as e:
+            logger.warning("Could not let show %s play out of the delay: %s", show_id, e)
+    else:
+        await release_station(db, show.station_id, show.id, now)
         # The host is off air from this moment, even if the host's page stays open
         try:
-            from app.api.v1.live_shows_ws import live_relay
-            if live_relay.on_air.get(str(station.id)) == str(show.id):
-                await live_relay.set_on_air(str(station.id), None)
+            if live_relay.on_air.get(station_key) == str(show.id) or station_key in live_relay.airs:
+                await live_relay.set_on_air(station_key, None, drain=False)
         except Exception as e:
             logger.warning("Could not take the host off air for show %s: %s", show_id, e)
 
@@ -330,7 +404,7 @@ async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
 
 async def hard_stop_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
     """Hard stop a live show (triggered by scheduler at scheduled_end) — same as end_show + creates alert."""
-    show = await end_show(db, show_id)
+    show = await end_show(db, show_id, drain=False)
     if not show:
         return None
 

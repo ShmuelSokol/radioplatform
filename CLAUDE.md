@@ -162,7 +162,7 @@ radioplatform/
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
-| live_shows | live_shows.py | /live-shows |
+| live_shows | live_shows.py | /live-shows (`GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay, see `wiki/live-shows.md`) |
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
@@ -205,6 +205,8 @@ radioplatform/
 | alert_service.py | Alert creation, resolution, conflict detection, user notification dispatch |
 | sms_service.py | Twilio SMS and WhatsApp notification delivery |
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
+| live_air.py | A live show's broadcast (profanity) delay: listeners hear the show `live_delay_seconds` late, Dump cuts the newest audio, the delay builds back at the voice's own pitch, winds down before the hard stop and plays out at End show (see `wiki/live-shows.md`) |
+| live_inserts.py | Hard timed items (the time check) that air on time during a live show, over the delay, while the host's words wait |
 | twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
 | liquidsoap_client.py | Old telnet push client for Liquidsoap. Superseded by playout_engine.py; keep `LIQUIDSOAP_ENABLED` off |
 | duration_backfill.py | Measures the length of items that have none (they broke queue reads and restarts); runs once in the background after each start, and on demand via `POST /assets/backfill-durations` |
@@ -256,7 +258,7 @@ radioplatform/
 - BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
-- HostConsole.tsx — Full-screen host broadcasting console with countdown, mic controls, caller queue
+- HostConsole.tsx — Host broadcasting console with countdown, mic controls, caller queue and the broadcast delay panel (Dump, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
 - CallScreener.tsx — Two-column call screener (waiting/approved/on-air management)
 - SongRequests.tsx — Song request management (approve/reject/delete)
 - Archives.tsx — Show archive management (CRUD, publish/unpublish)
