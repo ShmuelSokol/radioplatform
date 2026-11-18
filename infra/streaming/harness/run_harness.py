@@ -2789,7 +2789,62 @@ async def sc_block_with_slow_shiur(h: Harness, delay: float = 15.0) -> None:
     h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"music after Next: {tail}")
 
 
+async def sc_hour_change_slow_backend(h: Harness, seconds: float = 4.0) -> None:
+    """The hour change while every answer the backend gives the engine takes 4 s
+    (Jerusalem 2026-11-18). Judged by what is heard, because the backend learns of a
+    start only when the slow report arrives: the time check within 2 s of its time,
+    then the weather, then music, no silence over 1 s, no emergency music."""
+    name = "hour_change_slow_backend"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song5", {}), ("song6", {}), ("song1", {})])
+    h.stack.slow_backend = seconds
+    try:
+        t1 = at(25)
+        await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
+                       ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+        due = t1.timestamp()
+        await asyncio.sleep(max(0, due - time.time()) + 30)
+    finally:
+        h.stack.slow_backend = 0.0
+    heard = h.heard(due - 5, due + 26)
+    h.print_timeline(heard, due)
+    line = [(t - due, n) for t, n in timeline(heard)]
+    first_time = next((t for t, n in line if n == "time"), None)
+    h.check(name, first_time is not None and -1.0 <= first_time <= 2.0,
+            f"time check heard {'never' if first_time is None else f'{first_time:+.1f} s'} from its time")
+    names = [n for _, n in line if n != "silence"]
+    after = names[names.index("time"):] if "time" in names else []
+    h.check(name, after[:2] == ["time", "weather"] and len(after) > 2 and after[2].startswith("song"),
+            f"time check, weather, then music: {names}")
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+    h.check(name, names.count("time") == 1 and names.count("weather") == 1, "each aired once")
+    gap, gap_at = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s" + (f" at {_fmt(gap_at)}" if gap_at else ""))
+    times = await h.started_times("time", due - 5)
+    rec = times[0][0] - due if times else None
+    log(f"    note: the backend recorded the time check at {'never' if rec is None else f'{rec:+.1f} s'} (the report itself was held {seconds:.0f} s)")
+    await asyncio.sleep(6)
+
+
+def with_slow_backend(scenario, seconds: float = 4.0):
+    """The same scenario while every answer the backend gives the engine takes
+    `seconds` (engine thread, 2026-11-18: slow answers were behind 2.6 to 3.8 s gaps
+    on Jerusalem). Timed items must still start on time and nothing may go silent."""
+    async def run(h: Harness) -> None:
+        h.stack.slow_backend = seconds
+        try:
+            await scenario(h)
+        finally:
+            h.stack.slow_backend = 0.0
+    return run
+
+
 SCENARIOS = {
+    "hour_change_slow_backend": sc_hour_change_slow_backend,
+    "soft_timed_waits_for_song_slow_backend": with_slow_backend(sc_soft_waits_for_song),
+    "live_show_over_hard_item_slow_backend": with_slow_backend(sc_live_show_over_hard_item),
+    "live_show_quiet_slow_backend": with_slow_backend(sc_live_show_quiet),
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
     "block_shiur_spans_hour_cut": lambda h: sc_block_shiur_spans_hour(h, "cut"),
