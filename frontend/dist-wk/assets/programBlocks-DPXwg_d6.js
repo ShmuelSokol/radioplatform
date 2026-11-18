@@ -1,0 +1,1 @@
+import{a as t}from"./index-BHNZfaQS.js";const s="/program-blocks",c=async a=>(await t.get(s,{params:{station_id:a}})).data,e=async(a,o=24)=>(await t.get(`${s}/preview`,{params:{station_id:a,hours:o}})).data,i=async a=>(await t.post(s,a)).data,n=async(a,o)=>(await t.put(`${s}/${a}`,o)).data,p=async a=>{await t.delete(`${s}/${a}`)};export{i as c,p as d,c as l,e as p,n as u};
