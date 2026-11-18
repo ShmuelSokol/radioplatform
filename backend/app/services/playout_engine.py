@@ -116,6 +116,10 @@ class EngineState:
     # we started, so it is told again)
     live_sent: bool | None = None
     live_tried: float = 0.0
+    # The engine said hello and has put nothing on air since: the entry we still show as
+    # playing is not on air any more (it was cut by the restart), so the hold rule must
+    # not wait for its end
+    fresh_start: bool = False
 
 
 HANDED_KEEP = 30
@@ -661,6 +665,7 @@ async def handle_hello(station_id, proto: int | None = None) -> None:
     state = get_state(station_id)
     _note_proto(state, proto)
     _touch(state)
+    state.fresh_start = True
     logger.info("Playout engine connected for station %s", station_id)
 
 
@@ -721,7 +726,10 @@ async def handle_next(
 
     if state.engine_proto >= ENGINE_PROTO_HOLD and await _hold_before_hard_item(
         db, station_id, state.cued_entry_id or (given[0] if given else None),
-        skipping=state.skip_requested,
+        # Right after an engine restart the item we show as playing was cut: a song handed
+        # now starts now. Waiting for that item's end left the engine 20 s on emergency
+        # music when it ended just before a hard item (harness, engine crash 2026-11-18)
+        skipping=state.skip_requested or state.fresh_start,
     ):
         return None
 
@@ -913,6 +921,7 @@ async def handle_started(
             now = datetime.fromtimestamp(float(at), UTC)
     skipped = state.skip_requested
     state.skip_requested = False
+    state.fresh_start = False
     logger.info("Engine started -> entry=%s lane=%s", entry_id or "-", lane)
     if entry_id:
         state.recent_started = (state.recent_started + [str(entry_id)])[-10:]

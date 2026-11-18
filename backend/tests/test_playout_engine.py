@@ -840,6 +840,26 @@ async def test_next_gets_a_song_while_the_engine_is_held_before_a_hard_item(clie
     assert (await client.get(url, headers=HEADERS)).json()["entry_id"] == str(entries[1].id)
 
 
+async def test_a_restarted_engine_gets_a_song_although_the_cut_item_would_end_before_a_hard_item(
+    client, db_session, engine_station
+):
+    # Harness engine_crash_restart 2026-11-18: the engine restarted while a song played
+    # and that song would have ended a second before the hour. The backend kept saying
+    # "it would start 1.1 s before the hard item" about a song no longer on air, so the
+    # restarted engine got nothing for 20 s and played emergency music.
+    station, entries, sent = engine_station
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=59.0)
+    url = f"/api/v1/playout/{station.id}/next?proto=3"
+    assert (await client.post(f"/api/v1/playout/{station.id}/hello", headers=HEADERS)).status_code == 200
+    assert (await client.get(url, headers=HEADERS)).json()["entry_id"] == str(entries[1].id)
+    # Once something is on air again the rule is back in force
+    assert (await client.post(
+        f"/api/v1/playout/{station.id}/started", headers=HEADERS,
+        json={"entry_id": str(entries[1].id), "lane": "main"},
+    )).status_code == 200
+    assert playout_engine.get_state(station.id).fresh_start is False
+
+
 async def test_a_song_is_still_handed_out_when_there_is_room_or_the_hard_item_cuts_in(
     client, db_session, engine_station
 ):

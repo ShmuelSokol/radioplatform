@@ -2941,7 +2941,9 @@ async def sc_engine_crash_restart(h: Harness) -> None:
     first = next((t for t, db, _ in heard if db > -45), None)
     h.check(name, first is not None and first - started <= 5.0,
             f"sound {'never' if first is None else f'{first - started:.1f} s'} after the restart")
-    names = [n for _, n in timeline(h.heard(started + 6, time.time() - 1))]
+    # From the start: it used to open with about 2 s of an emergency song before the
+    # queue's first item (both stations at the 08:23Z rerun, 2026-11-18)
+    names = [n for _, n in timeline(heard) if n != "silence"]
     h.check(name, bool(names) and all(n.startswith("song") for n in names),
             f"station music after the restart, no emergency files: {names}")
     st = await h.on_air()
