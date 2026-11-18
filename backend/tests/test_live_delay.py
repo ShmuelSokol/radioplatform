@@ -1033,6 +1033,79 @@ async def test_a_time_check_cut_by_the_show_does_not_come_back_after_it(db_sessi
     assert [e.asset_id for e in left if e.asset_id == clock_asset.id] == []
 
 
+@pytest.mark.asyncio
+async def test_a_time_check_cut_as_it_started_airs_over_the_delay(db_session, _quiet):
+    """The engine started the time check early just as the delay filled: the take-over
+    cut it after 0.8 s. It waits again, so the delay airs it whole at its time."""
+    from app.services import live_inserts
+
+    station, show, song, clock_asset, weather = await _station(db_session, {"live_delay_seconds": 15})
+    now = datetime.now(UTC)
+    for e in await _playing(db_session, station):
+        e.status = "played"
+    cut = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=clock_asset.id, position=0,
+                     status="playing", source="scheduler", started_at=now - timedelta(seconds=0.8),
+                     preempt_at=now + timedelta(seconds=6), timing_mode="hard")
+    db_session.add(cut)
+    await db_session.commit()
+    live_inserts._preparing.add(str(cut.id))
+    await live_show_service.take_over_station(db_session, station, show, now)
+    await db_session.commit()
+    await db_session.refresh(cut)
+    assert cut.status == "pending" and cut.started_at is None
+    assert str(cut.id) not in live_inserts._preparing
+
+    # Heard more than half: not said twice. And weather is not aired over the delay by default.
+    for asset, heard in ((clock_asset, 5.0), (weather, 0.8)):
+        station.automation_config = {"live_delay_seconds": 15}
+        entry = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=asset.id, position=0,
+                           status="playing", source="scheduler", started_at=now - timedelta(seconds=heard),
+                           preempt_at=now, timing_mode="hard")
+        db_session.add(entry)
+        await db_session.commit()
+        await live_show_service.take_over_station(db_session, station, show, now)
+        await db_session.commit()
+        await db_session.refresh(entry)
+        assert entry.status == "played", asset.title
+
+
+@pytest.mark.asyncio
+async def test_host_gone_is_counted_from_the_last_frame_not_from_the_end_of_the_delay(db_session, _quiet, monkeypatch):
+    """The host's page closes with 8 s in the delay and a limit of 8 s: when the delay
+    has played out the station goes back at once, not 8 s of silence later."""
+    from app.services import bug_report_service
+    from app.services.scheduler_engine import SchedulerEngine
+
+    async def push(message, title, **_):
+        return True
+
+    monkeypatch.setattr(bug_report_service, "send_ntfy", push)
+    station, show, song, *_ = await _station(db_session, {"live_delay_seconds": 8, "live_host_gone_seconds": 8})
+    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.take_over_station(db_session, station, show, datetime.now(UTC))
+    await db_session.commit()
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    await relay.set_on_air(sid, str(show.id), delay=8.0, heard_now=True)
+    air = relay.airs[sid]
+    engine = SchedulerEngine()
+    now = datetime.now(UTC)
+    await relay.audio(sid, speech(0.05).tobytes())
+    assert await engine._host_gone(db_session, station, show, now) is False
+    air.count = max(air.count, 1)            # something is still in the delay
+    air.last_input = air.clock() - 9.0       # the last frame came 9 s ago
+    air.finishing, air.finish_reason = True, "host left"
+    # The words still in the delay play out: not handed back yet, but the count runs
+    assert await engine._host_gone(db_session, station, show, now) is False
+    assert time.monotonic() - engine._host_gone_since[sid] >= 8.9
+    await air.stop()
+    relay.airs.pop(sid, None)
+    assert await engine._host_gone(db_session, station, show, now) is True
+    await db_session.refresh(station)
+    assert "live_show_id" not in station.automation_config
+    assert [e.asset_id for e in await _playing(db_session, station)] == [song.id]
+
+
 # ---------- the stream carries the show (engine proto 5) ----------
 
 @pytest.mark.asyncio

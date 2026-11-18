@@ -550,14 +550,19 @@ class SchedulerEngine:
             air = None
         mono = time.monotonic()
         if air is not None and not air.closed:
-            if air.finishing:
+            left = air.finishing and air.finish_reason == "host left"
+            if air.finishing and not left:
                 self._host_gone_since.pop(sid, None)
-                return False   # the end of what was said is still playing out of the delay
-            if air.clock() - air.last_input < 3.0:
+                return False   # the end of the show is still playing out of the delay
+            if not left and air.clock() - air.last_input < 3.0:
                 self._host_gone_since.pop(sid, None)
                 return False   # the host is sending (a muted microphone sends silence, that counts)
-            # connected but nothing arrives: counted from the last frame
+            # Nothing arrives, or the host's page closed: counted from the last frame.
+            # It used to start again when the delay had played out, so listeners got
+            # the delay and then the whole limit as silence (harness, 2026-11-18)
             self._host_gone_since.setdefault(sid, mono - (air.clock() - air.last_input))
+            if left:
+                return False   # what the host said is still playing out of the delay
         since = self._host_gone_since.setdefault(sid, mono)
         if limit <= 0 or mono - since < limit:
             return False
