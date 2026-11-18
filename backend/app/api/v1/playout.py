@@ -148,6 +148,6 @@ async def started(
 ):
     """The engine reports what just went on air."""
     return await playout_engine.handle_started(
-        db, station_id, body.entry_id, body.lane, at=body.at if body.kept else None,
+        db, station_id, body.entry_id, body.lane, at=body.at, kept=body.kept,
         quiet=body.kept and body.more,
     )

@@ -1585,3 +1585,26 @@ def test_aired_from_adds_the_part_already_played():
     assert aired_from(SimpleNamespace(started_at=at, source="resume@1500")) == at + timedelta(seconds=1500)
     assert aired_from(SimpleNamespace(started_at=at, source="auto")) == at
     assert aired_from(SimpleNamespace(started_at=None, source="resume@5")) is None
+
+
+@pytest.mark.asyncio
+async def test_a_start_is_recorded_when_the_engine_started_it_not_when_the_report_arrived(client, db_session, eng):
+    """With the backend answering in 4 s every start was recorded 4 s late (the time
+    check aired on time and showed +4.1 s). The report's own time is used when it is a
+    little old; a time in the future or far in the past is not believed."""
+    station, entries, _, _ = eng
+    began = time.time() - 4.0
+    r = await client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS,
+                          json={"entry_id": str(entries[0].id), "lane": "main", "at": began})
+    assert r.status_code == 200
+    row = await _fresh(db_session, entries[0].id)
+    started = row.started_at if row.started_at.tzinfo else row.started_at.replace(tzinfo=UTC)
+    assert abs(started.timestamp() - began) < 0.01
+
+    for wrong in (time.time() + 30, time.time() - 600):
+        r = await client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS,
+                              json={"entry_id": str(entries[1].id), "lane": "main", "at": wrong})
+        row = await _fresh(db_session, entries[1].id)
+        started = row.started_at if row.started_at.tzinfo else row.started_at.replace(tzinfo=UTC)
+        assert abs(started.timestamp() - time.time()) < 2
+        playout_engine.reset_state()

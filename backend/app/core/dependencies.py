@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, UnauthorizedError
-from app.core.security import decode_token
+from app.core.security import decode_token, token_is_current
 from app.db.session import get_db
 from app.models.user import User, UserRole
 
@@ -78,6 +78,9 @@ async def get_current_user(
 
     if not user or not user.is_active:
         raise UnauthorizedError("User not found or inactive")
+    if not token_is_current(payload, user):
+        # The password or role changed since this token was made
+        raise UnauthorizedError("Signed out: sign in again")
 
     # Track activity — throttle to avoid DB write on every request (max once per 5s)
     now = datetime.now(timezone.utc)

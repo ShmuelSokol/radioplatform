@@ -31,6 +31,8 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [multi-station-load.md](multi-station-load.md) — load test for many stations and listeners; what it found
 - [station-permissions.md](station-permissions.md) — who may operate which station; the protected (FM) station
 - [client-ip](client-ip.md) — the one helper that says who is calling (rightmost non-internal X-Forwarded-For hop) for rate limits, listeners, activity log
+- [sign-in-sessions](sign-in-sessions.md) — what signs a person out everywhere: the session number in every token, bumped by a new password or a changed role
+- [before-go-live](before-go-live.md) — decisions to look at again before the station depends on the site
 - [activity-log](activity-log.md) — who did what: every staff change with before/after, sign-ins, screens opened, listener sessions; how rows are captured
 - [air-watch](air-watch.md) — on-air self-check: late or missing time checks, dead air, engine drift, skipped timed items; alerts and ntfy
 - [local-fm-box](local-fm-box.md) — Feeding FM from the transmitter room: the engine on a local box with a relay that keeps it on air with no internet (plan + library on disk); stages and gaps

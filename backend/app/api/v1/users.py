@@ -10,7 +10,7 @@ from app.core.exceptions import BadRequestError, NotFoundError
 from app.db.session import get_db
 from app.models.user import User, UserRole
 from app.models.user_preference import UserPreference
-from app.schemas.user_mgmt import UserCreate, UserListResponse, UserOut, UserUpdate
+from app.schemas.user_mgmt import UserCreate, UserListResponse, UserOut, UserUpdate, UserUpdateOut
 from app.schemas.user_preference import UserPreferenceResponse, UserPreferenceUpdate
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -97,7 +97,7 @@ async def create_user(
     return user
 
 
-@router.put("/{user_id}", response_model=UserOut)
+@router.put("/{user_id}", response_model=UserUpdateOut)
 async def update_user(
     user_id: uuid.UUID,
     body: UserUpdate,
@@ -119,12 +119,20 @@ async def update_user(
             raise BadRequestError("You cannot disable your own account")
         if body.role is not None and UserRole(body.role) != UserRole.ADMIN:
             raise BadRequestError("You cannot remove your own admin role")
+    # A new password, or a different role, signs the person out everywhere:
+    # tokens made before this are refused from now on (wiki/sign-in-sessions.md).
+    # Saving the form with the same role again changes nothing.
+    ends_sessions = body.password is not None or (
+        body.role is not None and UserRole(body.role) != user.role
+    )
     if body.email is not None:
         user.email = body.email
     if body.password is not None:
         user.hashed_password = hash_password(body.password)
     if body.role is not None:
         user.role = UserRole(body.role)
+    if ends_sessions:
+        user.session_version = int(user.session_version or 0) + 1
     if body.display_name is not None:
         user.display_name = body.display_name
     if body.is_active is not None:
@@ -149,7 +157,12 @@ async def update_user(
         )
     await db.commit()
     await db.refresh(user)
-    return user
+    out = UserUpdateOut.model_validate(user)
+    if ends_sessions and user.id == _admin.id:
+        # Their other devices are signed out; the one making the change stays in
+        from app.services.auth_service import create_tokens
+        out.new_tokens = create_tokens(user)
+    return out
 
 
 @router.delete("/{user_id}", status_code=204)

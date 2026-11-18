@@ -25,7 +25,7 @@ from app.core import log_buffer
 from app.core.client_ip import client_ip
 from app.core.dependencies import require_admin, require_staff
 from app.core.exceptions import NotFoundError
-from app.core.security import decode_token
+from app.core.security import decode_token, token_is_current
 from app.db.session import get_db
 from app.models.bug_report import BUG_STATUSES, BugReport
 from app.models.user import User
@@ -62,7 +62,8 @@ async def _optional_user(
         payload = decode_token(credentials.credentials)
         if payload.get("type") != "access" or not payload.get("sub"):
             return None
-        return (await db.execute(select(User).where(User.id == uuid.UUID(payload["sub"])))).scalar_one_or_none()
+        user = (await db.execute(select(User).where(User.id == uuid.UUID(payload["sub"])))).scalar_one_or_none()
+        return user if user is not None and token_is_current(payload, user) else None
     except Exception:
         return None
 

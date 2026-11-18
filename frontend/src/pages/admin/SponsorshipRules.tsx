@@ -35,6 +35,8 @@ export default function SponsorshipRules() {
   });
 
   if (isLoading) return <div className="p-8">Loading...</div>;
+  // The version in force is shown above; it is not an "earlier" one
+  const earlier = (history ?? []).filter((h) => h.version !== rules?.version);
   const changed = rules ? text.trim() !== rules.rules_text.trim() : false;
 
   return (
@@ -84,21 +86,21 @@ export default function SponsorshipRules() {
           {save.isError && <span className="text-sm text-red-600">Could not save.</span>}
         </div>
 
-        {!!history?.length && (
+        {!!earlier.length && (
           <div className="pt-2">
             <button
               onClick={() => setShowHistory((v) => !v)}
               className="text-sm text-blue-600 hover:underline"
             >
-              {showHistory ? 'Hide' : 'Show'} earlier versions ({history.length})
+              {showHistory ? 'Hide' : 'Show'} earlier versions ({earlier.length})
             </button>
             {showHistory && (
               <ul className="mt-3 space-y-3">
-                {history.map((h) => (
+                {earlier.map((h) => (
                   <li key={h.version} className="border rounded-lg p-3">
                     <div className="flex items-center justify-between text-sm text-gray-500 mb-1">
                       <span>
-                        Version {h.version}
+                        {h.is_default ? 'Starting rules' : `Version ${h.version}`}
                         {h.updated_at ? `, ${new Date(h.updated_at).toLocaleString()}` : ''}
                       </span>
                       <button

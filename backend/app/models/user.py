@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,5 +40,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Stations this person may operate. None = every station that is not
     # protected. A protected station always needs to be listed here.
     station_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    # Goes up when the password or the role changes. Every token carries the
+    # number it was made with; a token with an older number is refused, which
+    # signs the person out everywhere else (see wiki/sign-in-sessions.md).
+    session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     assets = relationship("Asset", back_populates="created_by_user", lazy="noload")
