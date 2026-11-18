@@ -362,3 +362,4 @@ INGEST 2026-11-18 live-shows.md Cough/Mute send silent frames (host frames are t
 INGEST 2026-11-18 streaming-architecture.md engine proto 5: live lane plays /live.mp3 (input.http start=false, token in ffmpeg headers), quiet on stall/EOF; /playout-status engine_proto + live_on_stream
 INGEST 2026-11-18 live-shows.md a show's pre-roll waits for a timed item on air (hold_until) instead of cutting it at take-over; a live show that never took the station over is hard-stopped too (live_show_id is set only at first air)
 INGEST 2026-11-18 live-shows.md host gone: station back to music after live_host_gone_seconds with alert; engine told live-on 1 s before first air; control room badge NO HOST / FILLING / LIVE with delay; cut timed item not resumed after a show
+INGEST 2026-11-18 streaming-architecture.md One engine per station: engines send X-Playout-Instance; a second engine with the same station id gets 409 and an alert (relay passes the id on); local-fm-box.md updated

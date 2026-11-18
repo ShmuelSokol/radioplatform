@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.db.session import get_db
 from app.services import playout_engine, playout_plan, playout_tunnel
 
@@ -47,6 +47,17 @@ def _require_engine(
         raise ForbiddenError("Invalid playout token")
     if not settings.engine_drives(station_id):
         raise NotFoundError("This station is not driven by the playout engine")
+    return station_id
+
+
+async def _one_engine(
+    station_id: uuid.UUID = Depends(_require_engine),
+    x_playout_instance: str | None = Header(default=None),
+) -> uuid.UUID:
+    """One engine per station: a second engine calling with this station's id is refused
+    (409) and takes nothing from the queue (playout_engine.instance_ok)."""
+    if not await playout_engine.instance_ok(station_id, x_playout_instance):
+        raise ConflictError("Another playout engine plays this station")
     return station_id
 
 
@@ -118,17 +129,18 @@ async def commands_poll(
 
 @router.post("/{station_id}/hello")
 async def hello(
-    station_id: uuid.UUID = Depends(_require_engine),
+    station_id: uuid.UUID = Depends(_one_engine),
     body: HelloReport | None = Body(default=None),
+    x_playout_instance: str | None = Header(default=None),
 ):
     """The engine announces that it (re)started, and what it understands (`proto`)."""
-    await playout_engine.handle_hello(station_id, body.proto if body else None)
+    await playout_engine.handle_hello(station_id, body.proto if body else None, x_playout_instance)
     return {"ok": True}
 
 
 @router.get("/{station_id}/next")
 async def next_track(
-    station_id: uuid.UUID = Depends(_require_engine),
+    station_id: uuid.UUID = Depends(_one_engine),
     given: str | None = None,
     proto: int | None = None,
     live: int | None = None,
@@ -150,7 +162,7 @@ async def next_track(
 @router.post("/{station_id}/started")
 async def started(
     body: StartedReport,
-    station_id: uuid.UUID = Depends(_require_engine),
+    station_id: uuid.UUID = Depends(_one_engine),
     db: AsyncSession = Depends(get_db),
 ):
     """The engine reports what just went on air."""
