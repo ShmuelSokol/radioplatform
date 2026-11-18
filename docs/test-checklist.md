@@ -515,6 +515,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [x] B-SPONSORPOR-3 `GET /sponsor-portal/upcoming-schedule` [require_sponsor] The sponsor's spots that are actually in the station queues, soonest first. | modes: n.a. | covered: tests/test_spot_schedules.py::test_sponsor_portal_shows_only_their_real_plays, tests/test_checklist_pinned_scheduling.py::test_read_routes_follow_their_guard
 - [x] B-SPONSORPOR-4 ↳ only spots in station queues for this sponsor, soonest first | modes: both | covered: tests/test_spot_schedules.py::test_sponsor_portal_shows_only_their_real_plays, tests/test_checklist_pinned_scheduling.py::test_upcoming_schedule_is_only_mine_soonest_first
 - [x] B-SPONSORPOR-5 `GET /sponsor-portal/stats` [require_sponsor] get sponsor stats | modes: n.a. | covered: tests/test_spot_schedules.py::test_sponsor_portal_shows_only_their_real_plays, tests/test_checklist_pinned_scheduling.py::test_read_routes_follow_their_guard
+- [x] B-SPONSORPOR-6 `GET /sponsor-portal/missed-plays` [require_sponsor] promised plays that did not air (14 days) and coming plays with no room or moved | modes: n.a. | covered: tests/test_sponsor_missed_plays.py, frontend/e2e/sponsor-missed-plays.mjs, tests/test_checklist_pinned_scheduling.py::test_read_routes_follow_their_guard
 
 ### sponsors.py (prefix `/sponsors`)
 - [x] B-SPONSORS-1 `GET /sponsors` [require_manager] list sponsors | modes: n.a. | covered: tests/test_sponsors.py::test_list_sponsors, tests/test_role_access.py::test_role_matrix

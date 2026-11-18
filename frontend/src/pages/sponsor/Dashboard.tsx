@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { usePlayHistory, useUpcomingSchedule, useSponsorStats, useMySpots } from '../../hooks/useSponsorPortal';
+import { usePlayHistory, useUpcomingSchedule, useSponsorStats, useMySpots, useMissedPlays } from '../../hooks/useSponsorPortal';
 import Spinner from '../../components/Spinner';
 
 export default function SponsorDashboard() {
@@ -10,6 +10,13 @@ export default function SponsorDashboard() {
   const { data: history, isLoading: historyLoading } = usePlayHistory(page, limit);
   const { data: upcoming, isLoading: upcomingLoading } = useUpcomingSchedule();
   const { data: spots, isLoading: spotsLoading } = useMySpots();
+  const { data: missedPlays, isLoading: missedLoading } = useMissedPlays();
+  const partOfDay: Record<string, string> = {
+    overnight: 'Overnight (12 AM to 6 AM)', morning: 'Morning (6 AM to 12 PM)',
+    afternoon: 'Afternoon (12 PM to 6 PM)', evening: 'Evening (6 PM to 12 AM)',
+  };
+  const day = (iso: string) =>
+    new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   const when = (iso?: string | null) =>
     iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Not yet';
 
@@ -85,6 +92,62 @@ export default function SponsorDashboard() {
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* Missed plays */}
+      <div className="bg-white rounded-xl shadow" data-testid="missed-plays">
+        <div className="px-5 py-4 border-b">
+          <h2 className="text-lg font-semibold text-gray-800">Missed Plays</h2>
+          <p className="text-sm text-gray-500">
+            Plays your sponsorship was promised that did not air in the last {missedPlays?.days ?? 14} days,
+            and plays in the coming week that have no room or were moved. Times are station time.
+          </p>
+        </div>
+        {missedLoading ? (
+          <div className="p-8 text-center"><Spinner /></div>
+        ) : !missedPlays?.rows?.length ? (
+          <div className="p-8 text-center text-gray-400">No missed plays</div>
+        ) : (
+          <>
+            <div className="px-5 py-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+              <span><span className="font-semibold text-red-600">{missedPlays.missed_past}</span> did not air</span>
+              <span><span className="font-semibold text-amber-600">{missedPlays.missed_coming}</span> coming up with no room</span>
+              <span><span className="font-semibold text-gray-700">{missedPlays.moved_coming}</span> moved to a later time</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-500 text-left">
+                  <tr>
+                    <th className="px-5 py-3">Date</th>
+                    <th className="px-5 py-3">Time of day</th>
+                    <th className="px-5 py-3">Station</th>
+                    <th className="px-5 py-3">Spot</th>
+                    <th className="px-5 py-3">Promised</th>
+                    <th className="px-5 py-3">Played</th>
+                    <th className="px-5 py-3">Missed</th>
+                    <th className="px-5 py-3">What happened</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {missedPlays.rows.map((row, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-5 py-3 whitespace-nowrap">{day(row.date)}</td>
+                      <td className="px-5 py-3">{partOfDay[row.daypart] ?? row.daypart}</td>
+                      <td className="px-5 py-3">{row.station_name}</td>
+                      <td className="px-5 py-3">{row.asset_title}</td>
+                      <td className="px-5 py-3">{row.promised}</td>
+                      <td className="px-5 py-3">{row.when === 'past' ? row.played : '-'}</td>
+                      <td className={`px-5 py-3 font-semibold ${row.missed ? (row.when === 'past' ? 'text-red-600' : 'text-amber-600') : 'text-gray-400'}`}>
+                        {row.missed}
+                      </td>
+                      <td className="px-5 py-3">{row.when === 'coming' && row.missed ? `Coming up: ${row.note}` : row.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

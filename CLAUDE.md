@@ -220,6 +220,7 @@ radioplatform/
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
 | queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement; shared by the browser player's song change, the engine's start report and the blackout fill |
 | playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay (see `wiki/local-fm-box.md`) |
+| sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details
@@ -267,7 +268,7 @@ radioplatform/
 
 **Sponsor Portal** (`frontend/src/pages/sponsor/`):
 - Login.tsx — Sponsor login (separate from admin, indigo-themed)
-- Dashboard.tsx — Play history stats + table + upcoming schedule
+- Dashboard.tsx — Play history stats + table + upcoming schedule + Missed Plays (promised plays that did not air, coming plays with no room or moved)
 - Campaigns.tsx — Campaign list with create form
 - CampaignDetail.tsx — Campaign detail with drafts + comments thread
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
