@@ -69,6 +69,9 @@ HOLD_BEFORE_HARD_SECONDS = 8.0
 # after a download (about 5 s on Main, 2026-11-18). An older engine is handed nothing
 # during a show.
 ENGINE_PROTO_LIVE_PRELOAD = 4
+# From this version the engine's live lane plays the show from /live.mp3, so the stream
+# carries it (listener pages switch to the stream for a show; /playout-status says so)
+ENGINE_PROTO_LIVE_AUDIO = 5
 
 
 @dataclass

@@ -73,6 +73,8 @@ TONES = {
     "longshiur": (395, 420, "shiur", None),
 }
 EMERGENCY_FREQ = 5000
+# The host's show as the backend's live.mp3 serves it (the harness stands in for it)
+HOST_FREQ = 1200
 # A shiur whose pitch rises steadily (300 Hz at 0 s to 600 Hz at 150 s): the pitch heard
 # tells the position played, so a resume can be checked to the second
 CHIRP = ("chirp", 300.0, 600.0, 150)
@@ -112,6 +114,9 @@ class Stack:
         self.local_box = False
         # file name -> seconds the audio server waits before sending it (a slow download)
         self.slow_files: dict[str, float] = {}
+        # The host's show is heard: the proxy serves live.mp3 (a 1200 Hz tone in real time)
+        # instead of the backend's 204
+        self.live_audio = False
 
     # audio files
     def make_audio(self) -> None:
@@ -121,6 +126,7 @@ class Stack:
         emerg = self.dir / "emergency"
         emerg.mkdir(exist_ok=True)
         self._tone(emerg / "emergency.mp3", EMERGENCY_FREQ, 20)
+        self._tone(self.dir / "host.mp3", HOST_FREQ, 300)
         # A blackout's silence asset (60 s of nothing)
         silent = self.audio / "silence.mp3"
         if not silent.exists():
@@ -217,7 +223,37 @@ class Stack:
         stack = self
 
         class BackendProxy(SimpleHTTPRequestHandler):
+            def _live_mp3(self):
+                """Stands in for the backend's live.mp3: 204 while no show is heard, else
+                the host tone in real time until the show stops being heard."""
+                if not stack.live_audio or not self.headers.get("X-Playout-Token"):
+                    self.send_response(204)
+                    self.end_headers()
+                    return
+                data = (stack.dir / "host.mp3").read_bytes()
+                rate = 128000 // 8
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                pos, t0, chunk = 0, time.time(), rate // 10
+                try:
+                    # a second ahead, as a real stream's first buffer
+                    self.wfile.write(data[:rate])
+                    pos = rate
+                    while stack.live_audio and pos < len(data):
+                        due = t0 + (pos - rate) / rate
+                        if due > time.time():
+                            time.sleep(due - time.time())
+                        self.wfile.write(data[pos:pos + chunk])
+                        self.wfile.flush()
+                        pos += chunk
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
             def _forward(self, method: str):
+                if method == "GET" and self.path.split("?")[0].endswith("/live.mp3"):
+                    return self._live_mp3()
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method != "GET" else None
                 if stack.backend_down:
                     data = b"backend down (harness)"
@@ -534,6 +570,8 @@ def tone_name(freq: float) -> str:
             best, dist = name, abs(f - freq)
     if abs(EMERGENCY_FREQ - freq) < dist:
         best, dist = "EMERGENCY", abs(EMERGENCY_FREQ - freq)
+    if abs(HOST_FREQ - freq) < dist:
+        best, dist = "HOST", abs(HOST_FREQ - freq)
     return best if dist < max(25, 0.08 * freq) else "mix"
 
 
@@ -2169,6 +2207,54 @@ async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> N
             f"one item after the show, not a fragment of the paused song first: {[n for _, n in after]}")
     cur = await h.on_air()
     h.check(name, bool(cur) and cur.asset.asset_type == "music", f"the site shows music ({cur.asset.title if cur else None})")
+
+
+async def sc_live_show_on_the_stream(h: Harness) -> None:
+    """Engine proto 5: the host's show (the backend's live.mp3, here a 1200 Hz tone) is
+    heard on the stream while the show is on, with no music under it; when the show's
+    audio stalls mid-show the stream is quiet, not music or emergency; after the show
+    the station's music is back within a moment."""
+    name = "live_show_on_the_stream"
+    await wait_music(h)
+    await asyncio.sleep(4)
+    code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show",
+                                               "calls_enabled": False})
+    if code != 201:
+        h.check(name, False, f"could not create the show ({code})")
+        return
+    h.stack.live_audio = True
+    t_start = time.time()
+    code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+    h.check(name, code == 200, f"show started ({code})")
+    await asyncio.sleep(16)
+    t_stall = time.time()
+    h.stack.live_audio = False          # the show's audio stops coming (backend stall)
+    await asyncio.sleep(8)
+    h.stack.live_audio = True           # and comes back
+    await asyncio.sleep(10)
+    t_end = time.time()
+    h.stack.live_audio = False
+    code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
+    h.check(name, code == 200, f"show ended ({code})")
+    await asyncio.sleep(14)
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    first = [w for w in heard if t_start + 4.0 <= w[0] <= t_stall]
+    host = sum(WINDOW for w in first if w[1] >= -45 and tone_name(w[2]) == "HOST")
+    h.check(name, bool(first) and host >= len(first) * WINDOW - 0.5,
+            f"the host is heard on the stream from 4 s after the start ({host:.1f} s of {len(first) * WINDOW:.0f} s)")
+    show_names = [n for t, n in timeline([w for w in heard if t_start + 2.0 <= w[0] <= t_end])]
+    h.check(name, not [n for n in show_names if n not in ("HOST", "silence", "mix")],
+            f"nothing but the host or quiet during the show, also while its audio stalled: {show_names}")
+    back = [w for w in heard if t_stall + 9.0 <= w[0] <= t_end]
+    h.check(name, any(tone_name(w[2]) == "HOST" and w[1] >= -45 for w in back),
+            "the host is heard again after the stall")
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n not in ("silence", "HOST")]
+    gap = after[0][0] - t_end if after else None
+    h.check(name, gap is not None and gap <= 2.0,
+            f"music back {'never' if gap is None else f'{gap:.1f} s'} after the show ended")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
 
 
 async def sc_soft_waits_for_song(h: Harness) -> None:
@@ -3815,7 +3901,9 @@ SCENARIOS = {
     "live_show_delay_controls": sc_live_show_delay_controls,
     "live_show_delay_restart": lambda h: sc_live_show_delay_controls(h, restart=True),
     "live_show_no_host": sc_live_show_no_host,
+    "live_show_host_gone": sc_live_show_host_gone,
     "live_show_delay_engine_preroll_item": lambda h: sc_live_show_delay_engine(h, preroll_item=True),
+    "live_show_on_the_stream": sc_live_show_on_the_stream,
     "speech_never_overlaps": sc_speech_never_overlaps,
     "engine_restart_15s_before_hour": sc_engine_restart_15s_before_hour,
     "engine_restart_song_ends_before_hour": sc_engine_restart_song_ends_before_hour,
