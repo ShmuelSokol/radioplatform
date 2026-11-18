@@ -53,6 +53,7 @@ export default function Users() {
 
   const [editId, setEditId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);   // a refused action on a row of the list
 
   const users = data?.users ?? [];
 
@@ -328,6 +329,12 @@ export default function Users() {
         <div className="text-gray-500 text-center py-8">Loading users...</div>
       ) : (
         <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-x-auto">
+          {rowError && (
+            <div role="alert" data-testid="users-row-error" className="m-2 px-3 py-1.5 bg-red-900/60 border border-red-700 text-red-300 rounded text-[12px] flex justify-between gap-3">
+              <span>{rowError}</span>
+              <button onClick={() => setRowError(null)} aria-label="Close this message" className="text-red-200">✕</button>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">
@@ -391,7 +398,11 @@ export default function Users() {
                     <button onClick={() => { if (confirm('Delete this user?')) deleteMut.mutate(u.id); }}
                       className="text-red-400 hover:text-red-300 text-[11px]">Delete</button>
                     {u.is_active ? (
-                      <button onClick={() => updateMut.mutate({ id: u.id, data: { is_active: false } })}
+                      <button onClick={() => { setRowError(null); updateMut.mutate({ id: u.id, data: { is_active: false } }, { onError: (err: any) => {
+                        // A refused Disable (your own account) used to do nothing on screen
+                        const msg = err?.response?.data?.detail || err?.message || 'Could not disable this account';
+                        setRowError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+                      } }); }}
                         className="text-orange-400 hover:text-orange-300 text-[11px]">Disable</button>
                     ) : (
                       <button onClick={() => updateMut.mutate({ id: u.id, data: { is_active: true } })}

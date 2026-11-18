@@ -57,6 +57,7 @@ PUBLIC_WRITES = {
     ("POST", "/song-requests"),
     ("POST", "/playout/{station_id}/started"),
     ("POST", "/playout/{station_id}/hello"),
+    ("POST", "/playout/{station_id}/commands/poll"),
 }
 
 # Allowed roles are not sent to these: with no input they would really run
@@ -105,6 +106,8 @@ WRITE_POLICY = {
     ("POST", "/assets/{asset_id}/clip"): MANAGERS,
     ("POST", "/assets/{asset_id}/detect-audience"): STAFF,
     ("POST", "/assets/{asset_id}/detect-silence"): STAFF,
+    ("POST", "/assets/{asset_id}/do-not-play"): MANAGERS,
+    ("POST", "/assets/{asset_id}/station-block"): MANAGERS,
     ("POST", "/assets/{asset_id}/enhance"): MANAGERS,
     ("POST", "/assets/{asset_id}/enhance-preview"): STAFF,
     ("PATCH", "/assets/{asset_id}/request-settings"): MANAGERS,

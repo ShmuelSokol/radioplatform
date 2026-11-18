@@ -8,6 +8,8 @@ from difflib import SequenceMatcher
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.station_blocks import blocked_asset_ids
+
 from app.models.asset import Asset, fit_for_random_pick
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
@@ -109,7 +111,11 @@ async def fuzzy_match_asset(
     # score needs are read (the library has ~23,000 songs; loading whole rows took
     # about a second per request), and only the winner is loaded in full.
     result = await db.execute(
-        select(Asset.id, Asset.title, Asset.artist).where(Asset.asset_type == "music", fit_for_random_pick())
+        select(Asset.id, Asset.title, Asset.artist).where(
+            Asset.asset_type == "music", fit_for_random_pick(),
+            # nor a song this station was told not to play
+            Asset.id.notin_(blocked_asset_ids(station_id)),
+        )
     )
     rows = result.all()
     if not rows:
@@ -175,9 +181,12 @@ async def check_auto_approve(
 ) -> bool:
     """Check if a matched asset can be auto-approved.
 
-    Reads auto_approve_requests (bool) and max_requests_per_day (int)
-    from asset.metadata_extra. Counts today's plays + pending/playing queue entries
-    (a queued request is one of those).
+    Reads auto_approve_requests (bool) and max_requests_per_day (int, default 3)
+    from asset.metadata_extra. The song may be queued while it has aired today
+    (PlayLog, written when an item ends) plus is lined up (pending/playing queue
+    entries) fewer than max_requests_per_day times. An approved request always has
+    its queue entry, and later its PlayLog row, so requests are not counted again:
+    counting them too took each request twice and let only 2 of 3 through.
     """
     extra = asset.metadata_extra or {}
     if not extra.get("auto_approve_requests", False):
@@ -196,7 +205,7 @@ async def check_auto_approve(
     )
     play_count = play_count_result.scalar() or 0
 
-    # Count pending/playing queue entries
+    # Count pending/playing queue entries (approved requests are among them)
     queue_count_result = await db.execute(
         select(func.count(QueueEntry.id)).where(
             QueueEntry.station_id == station_id,
@@ -206,11 +215,7 @@ async def check_auto_approve(
     )
     queue_count = queue_count_result.scalar() or 0
 
-    # A request that was queued is already counted above, as its queue entry (and once
-    # played, in the play log): counting the request row as well counted it twice, so a
-    # song allowed 2 a day took only 1 request (B-SONGREQUES-3).
-    total = play_count + queue_count
-    return total < max_per_day
+    return play_count + queue_count < max_per_day
 
 
 async def add_to_queue(

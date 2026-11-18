@@ -120,6 +120,8 @@ def test_public_get_list_is_what_we_reviewed():
         "/api/v1/stations/{station_id}/stream", "/api/v1/stations/{station_id}/now-playing",
         "/api/v1/stations/{station_id}/live-audio", "/api/v1/stations/{station_id}/rds.txt",
         "/api/v1/users/public/hosts", "/api/v1/now-playing/{station_id}",
+        # which stations have something on air (station ids only), for the station list's pill
+        "/api/v1/now-playing",
         "/api/v1/now-playing/{station_id}/active-block", "/api/v1/scheduler/status", "/api/v1/channels",
         "/api/v1/song-requests/station/{station_id}/count", "/api/v1/archives", "/api/v1/archives/{archive_id}",
         "/api/v1/archives/station/{station_id}/rss", "/api/v1/crm/raffles/active", "/api/v1/playout-status",

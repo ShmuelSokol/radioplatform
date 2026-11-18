@@ -1,7 +1,10 @@
-import { useState, useRef } from 'react';
-import { useArchives } from '../../hooks/useArchives';
+import { useState, useRef, useEffect } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { useStations } from '../../hooks/useStations';
+import { getArchives } from '../../api/archives';
 import type { ShowArchive } from '../../api/archives';
+
+const PAGE_SIZE = 50;
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -23,37 +26,64 @@ function formatDate(dateStr: string | null): string {
 export default function Archives() {
   const [stationFilter, setStationFilter] = useState<string>('');
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [failedId, setFailedId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Leaving the page stops the archive: it must never play on over the station
+  useEffect(() => () => {
+    const a = audioRef.current;
+    audioRef.current = null;
+    if (a) { a.pause(); a.removeAttribute('src'); a.load(); }
+  }, []);
+
   const { data: stationsData } = useStations();
-  const { data, isLoading, isError } = useArchives(
-    stationFilter ? { station_id: stationFilter } : undefined
-  );
+  // Pages of 50 (the API's default), newest first; "Load more" fetches the next page
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey: ['archives', 'public', stationFilter],
+    queryFn: ({ pageParam }) => getArchives({
+      ...(stationFilter ? { station_id: stationFilter } : {}), skip: pageParam, limit: PAGE_SIZE,
+    }),
+    initialPageParam: 0,
+    getNextPageParam: (last, all) => {
+      const loaded = all.reduce((n, pg) => n + pg.archives.length, 0);
+      return last.archives.length > 0 && loaded < last.total ? loaded : undefined;
+    },
+  });
 
   const stations = stationsData?.stations ?? [];
-  const archives = data?.archives ?? [];
+  const archives = data?.pages.flatMap(pg => pg.archives) ?? [];
+  const total = data?.pages[data.pages.length - 1]?.total ?? 0;
+
+  const failed = (id: string) => {
+    if (audioRef.current) audioRef.current.pause();
+    setPlayingId(cur => (cur === id ? null : cur));
+    setFailedId(id);
+  };
 
   const handlePlay = (archive: ShowArchive) => {
-    if (playingId === archive.id) {
-      // Toggle pause/play
-      if (audioRef.current) {
-        if (audioRef.current.paused) {
-          audioRef.current.play();
-        } else {
-          audioRef.current.pause();
-        }
-      }
+    const current = audioRef.current;
+    if (playingId === archive.id && current) {
+      // Same card: pause or resume
+      if (current.paused) current.play().catch(() => failed(archive.id));
+      else current.pause();
       return;
     }
-    // Play new track
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
+    // Another card: stop the first, play this one
+    if (current) current.pause();
+    setFailedId(null);
     const audio = new Audio(archive.audio_url);
-    audio.play();
-    audio.addEventListener('ended', () => setPlayingId(null));
+    audio.addEventListener('ended', () => { setPlayingId(null); setPaused(false); });
+    audio.addEventListener('play', () => setPaused(false));
+    audio.addEventListener('pause', () => setPaused(true));
+    audio.addEventListener('error', () => { if (audioRef.current === audio) failed(archive.id); });
     audioRef.current = audio;
     setPlayingId(archive.id);
+    setPaused(false);
+    audio.play().catch((e: unknown) => {
+      // A pause or another card before it started is not a failure
+      if ((e as { name?: string })?.name !== 'AbortError' && audioRef.current === audio) failed(archive.id);
+    });
   };
 
   const stationName = (id: string) => stations.find(s => s.id === id)?.name ?? 'Unknown';
@@ -122,7 +152,10 @@ export default function Archives() {
 
       {!isLoading && !isError && archives.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {archives.map(archive => (
+          {archives.map(archive => {
+            const isPlaying = playingId === archive.id && !paused;
+            const isCurrent = playingId === archive.id;
+            return (
             <div
               key={archive.id}
               className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition group"
@@ -143,13 +176,17 @@ export default function Archives() {
                   </div>
                 )}
                 {/* Play button overlay */}
+                {/* On touch screens and phones (no hover) the button always shows; on
+                    a desktop with a mouse it shows on hover and while this card plays */}
                 <button
                   onClick={() => handlePlay(archive)}
-                  aria-label={playingId === archive.id ? `Pause ${archive.title}` : `Play ${archive.title}`}
+                  aria-label={isPlaying ? `Pause ${archive.title}` : `Play ${archive.title}`}
                   className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition"
                 >
-                  <span className="w-14 h-14 rounded-full bg-white/90 shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transform scale-75 group-hover:scale-100 transition-all">
-                    {playingId === archive.id ? (
+                  <span data-testid="archive-play-icon" className={`w-14 h-14 rounded-full bg-white/90 shadow-lg flex items-center justify-center transform transition-all ${
+                    isCurrent ? 'opacity-100 scale-100' : 'opacity-100 scale-100 [@media(hover:hover)_and_(min-width:768px)]:opacity-0 [@media(hover:hover)_and_(min-width:768px)]:scale-75 [@media(hover:hover)_and_(min-width:768px)]:group-hover:opacity-100 [@media(hover:hover)_and_(min-width:768px)]:group-hover:scale-100'
+                  }`}>
+                    {isPlaying ? (
                       <svg className="w-6 h-6 text-indigo-600" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                       </svg>
@@ -161,7 +198,7 @@ export default function Archives() {
                   </span>
                 </button>
                 {/* Duration badge */}
-                {archive.duration_seconds && (
+                {!!archive.duration_seconds && archive.duration_seconds > 0 && (
                   <span className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-0.5 rounded">
                     {formatDuration(archive.duration_seconds)}
                   </span>
@@ -193,16 +230,29 @@ export default function Archives() {
                 {archive.description && (
                   <p className="text-sm text-gray-500 mt-2 line-clamp-2">{archive.description}</p>
                 )}
+                {failedId === archive.id && (
+                  <p role="alert" className="text-sm text-red-600 mt-2">This recording could not be played.</p>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {data && data.total > archives.length && (
-        <p className="text-center text-gray-400 text-sm mt-6">
-          Showing {archives.length} of {data.total} archives
-        </p>
+      {!isLoading && !isError && total > archives.length && (
+        <div className="text-center mt-6 space-y-2">
+          <p className="text-gray-400 text-sm">Showing {archives.length} of {total} archives</p>
+          {hasNextPage && (
+            <button
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
+              className="h-11 px-5 rounded-lg bg-white border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+            >
+              {isFetchingNextPage ? 'Loading…' : 'Load more'}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

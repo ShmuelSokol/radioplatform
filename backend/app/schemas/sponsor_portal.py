@@ -47,3 +47,25 @@ class SponsorSpot(BaseModel):
     plays_month: int = 0
     plays_alltime: int = 0
     scheduled: bool = False
+
+
+class MissedPlay(BaseModel):
+    """One time of day where the sponsor got fewer plays than promised, or a play was moved."""
+    when: str  # "past" (did not air) or "coming" (will not fit / moved)
+    date: str  # station-local YYYY-MM-DD
+    daypart: str  # morning, afternoon, evening, overnight
+    station_name: str
+    asset_title: str
+    promised: int
+    played: int
+    missed: int
+    moved: int = 0
+    note: str = ""
+
+
+class MissedPlaysResponse(BaseModel):
+    days: int  # how far back the past rows look
+    missed_past: int
+    missed_coming: int
+    moved_coming: int
+    rows: list[MissedPlay]

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useStations, useCreateStation, useUpdateStation, useDeleteStation } from '../../hooks/useStations';
 import apiClient from '../../api/client';
 import Spinner from '../../components/Spinner';
+import PlayoutBadge from '../../components/audio/PlayoutBadge';
 import { useAuth } from '../../hooks/useAuth';
 
 export default function Stations() {
@@ -149,6 +150,7 @@ export default function Stations() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timezone</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plays from</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
@@ -163,6 +165,9 @@ export default function Stations() {
                 <td className="px-6 py-4 whitespace-nowrap font-medium">{station.name}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{station.type}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{station.timezone}</td>
+                <td className="px-6 py-4 whitespace-nowrap" data-testid="station-plays-from">
+                  <PlayoutBadge stationId={station.id} chip />
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                     station.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -197,7 +202,7 @@ export default function Stations() {
               </tr>
               {expandedStation === station.id && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-4 bg-gray-50 space-y-6">
+                  <td colSpan={6} className="px-6 py-4 bg-gray-50 space-y-6">
                     <LocationConfig
                       latitude={station.latitude}
                       longitude={station.longitude}
@@ -221,7 +226,7 @@ export default function Stations() {
             })}
             {data?.stations.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-gray-500">
+                <td colSpan={6} className="px-6 py-10 text-center text-gray-500">
                   No stations yet
                 </td>
               </tr>
@@ -362,11 +367,13 @@ function AutomationConfig({ config, onSave, saving }: {
   const [weatherOn, setWeatherOn] = useState(config.weather_enabled ?? false);
   const [weatherInterval, setWeatherInterval] = useState(config.weather_interval_minutes ?? 30);
   const [longItems, setLongItems] = useState<string>(config.timed_during_long_items ?? 'pause');
+  const [crossfade, setCrossfade] = useState<string>(String(config.crossfade_seconds ?? 1));
 
   const handleSave = () => {
     onSave({
       ...config, // keep settings made elsewhere (program clock, weather region)
       timed_during_long_items: longItems,
+      crossfade_seconds: Math.min(10, Math.max(0, Number.isFinite(parseFloat(crossfade)) ? parseFloat(crossfade) : 1)),
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
       weather_enabled: weatherOn,
@@ -406,6 +413,16 @@ function AutomationConfig({ config, onSave, saving }: {
           <option value="cut">Cut it (the time check takes over)</option>
         </select>
         <span className="block mt-1 text-xs text-gray-500">Songs are always faded for the time check as before.</span>
+      </label>
+      <label className="mt-4 block max-w-lg text-sm">
+        <span className="block font-medium text-gray-700">Song crossfade (seconds)</span>
+        <input type="number" value={crossfade} min={0} max={10} step={0.5}
+          onChange={e => setCrossfade(e.target.value)}
+          className="mt-1 w-24 px-2 py-1 border rounded" data-testid="crossfade-seconds" />
+        <span className="block mt-1 text-xs text-gray-500">
+          How long the end of one song plays over the start of the next. 0 = no overlap: each song ends, then the next starts.
+          Sponsorships, time checks, weather, shiurim and stories never overlap, whatever is set here.
+        </span>
       </label>
       <button onClick={handleSave} disabled={saving}
         className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm disabled:opacity-50">

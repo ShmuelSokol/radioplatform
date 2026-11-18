@@ -7,9 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # ── Registration / Login ──────────────────────────────────────
 
 class RegisterRequest(BaseModel):
-    name: str
-    phone: str | None = None
-    email: str | None = None
+    # Column sizes of crm_members: longer values failed in the database (500)
+    name: str = Field(max_length=255)
+    phone: str | None = Field(default=None, max_length=50)
+    email: str | None = Field(default=None, max_length=255)
 
 
 class RegisterResponse(BaseModel):

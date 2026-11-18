@@ -45,4 +45,26 @@ bolted on top inherits the character-level candidate list and still cannot see
 `B'tzeis Yisroel` for a semantic query. Fix recall first (trigram / embeddings), then
 improve selection, then collapse the duplicate rows.
 
+## Auto-approve limit (2026-11-17)
+
+A matched song is queued without review when its asset has `auto_approve_requests` and
+it has aired today (PlayLog, written when an item ends) plus is lined up (pending/playing
+queue entries) fewer than `max_requests_per_day` times (default 3). Approved requests are
+not counted separately: each one already has its queue entry and later its play, and
+counting both let only 2 of 3 through. Past the limit the request is saved pending, with
+its matched song, for staff (`tests/test_song_request_auto_approve.py`).
+
+## The "requested" category (2026-11-17, Shmuel's decision on V2-114)
+
+A song with 3+ requests (matched to it) in the last 30 days is tagged
+`metadata_extra["requested"] = "yes"` by `refresh_requested_category` (startup and
+`POST /assets/refresh-requested-category`); the tag goes when it drops under 3. It keeps its own
+category, so it stays in that rotation, and every rotation on the "requested" category
+also draws it: all category picks go through `app.models.asset.in_category()`
+(schedule slots, playlist generator, queue top-up rules, program blocks). The refresh
+never writes `Asset.category`, so a staff edit is never overwritten. The tag is a string,
+not `true`: Postgres `->>` gives 'true' for a JSON true but SQLite gives 1.
+The old version replaced the category with "requested" and kept the real one in
+`metadata_extra["original_category"]`; the refresh puts those back.
+
 Daily request caps (auto-approve `max_requests_per_day`) count plays and requests from the station's own local midnight (`song_request_service.station_day_start`), not UTC midnight. Test: `backend/tests/test_song_request_station_day.py`.

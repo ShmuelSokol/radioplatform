@@ -628,3 +628,73 @@ async def test_soft_item_waiting_with_hs_off_is_fine(db_session):
 async def test_soft_item_just_due_is_given_time(db_session):
     st, now = await _soft_behind_shiur(db_session, left=19 * 60, waited=10)
     assert [f for f in await AirWatch().check_station(db_session, st, now) if f.kind == "late_timed"] == []
+
+
+@pytest.mark.asyncio
+async def test_drift_alert_clears_itself_once_in_step(db_session, monkeypatch):
+    """An open "Stream server and site disagree" alert is resolved when the engine and the
+    site agree again (Jerusalem had three left open after a droplet restart, 2026-11-17)."""
+    from sqlalchemy import select
+
+    from app.config import settings
+    from app.models.alert import Alert
+    from app.services import playout_engine
+    from app.services.alert_service import create_alert
+
+    now = datetime.now(UTC)
+    st = await _station(db_session)
+    song = await _asset(db_session, "Song")
+    e = _entry(st, song, status="playing", started_at=now - timedelta(seconds=10))
+    db_session.add(e)
+    await db_session.commit()
+    monkeypatch.setattr(type(settings), "engine_drives", lambda self, sid: str(sid) == str(st.id))
+    other = Station(id=uuid.uuid4(), name="Other", timezone="America/New_York")
+    db_session.add(other)
+    await db_session.flush()
+    for sid in (st.id, other.id):
+        await create_alert(db_session, "playback_gap", "critical",
+                           f"{st.name}: Stream server and site disagree", "x", station_id=sid)
+    await db_session.commit()
+
+    async def status(_sid):
+        return {"ok": True, "entry_id": str(e.id), "title": "Song"}
+
+    monkeypatch.setattr(playout_engine, "engine_status", status)
+    assert await AirWatch().check_station(db_session, st, now, mono=0.0) == []
+    await db_session.commit()
+    rows = (await db_session.execute(select(Alert).execution_options(populate_existing=True))).scalars().all()
+    by_station = {str(a.station_id): a for a in rows}
+    assert by_station[str(st.id)].is_resolved is True
+    assert by_station[str(st.id)].resolved_by is None
+    assert "agree again" in by_station[str(st.id)].context["cleared_by_itself"]
+    assert by_station[str(other.id)].is_resolved is False  # another station's stays open
+
+
+@pytest.mark.asyncio
+async def test_later_items_of_a_hard_block_are_not_late(db_session):
+    """Main 2026-11-18 01:00Z: the 8 PM block is time check (6 s), promo (4 s), Daf Yomi.
+    The shiur starts 10 s after the hour, exactly behind the two before it: not late.
+    The same shiur starting 40 s after them is."""
+    now = datetime.now(UTC)
+    st = await _station(db_session)
+    tc = await _asset(db_session, "Time 20:00", category="time_announcement", kind="jingle", duration=6)
+    promo = await _asset(db_session, "Schedule promo", kind="jingle", duration=4)
+    shiur = await _asset(db_session, "Daf Yomi Bechoros 60", kind="shiur", duration=3000)
+    due = now - timedelta(minutes=3)
+    third = _entry(st, shiur, position=3, status="playing", preempt_at=due, timing_mode="hard",
+                   started_at=due + timedelta(seconds=10.5))
+    db_session.add_all([
+        _entry(st, tc, position=1, status="played", preempt_at=due, timing_mode="hard", started_at=due),
+        _entry(st, promo, position=2, status="played", preempt_at=due, timing_mode="hard",
+               started_at=due + timedelta(seconds=6.3)),
+        third,
+    ])
+    await db_session.commit()
+    found = await AirWatch().check_station(db_session, st, now)
+    assert [f for f in found if f.kind == "late_timed"] == [], found
+
+    third.started_at = due + timedelta(seconds=50)
+    await db_session.commit()
+    found = await AirWatch().check_station(db_session, st, now)
+    late = [f for f in found if f.kind == "late_timed"]
+    assert len(late) == 1 and "Daf Yomi Bechoros 60 aired 40 s late" in late[0].title, found

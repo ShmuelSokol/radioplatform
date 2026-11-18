@@ -10,6 +10,8 @@ const MUTE_KEY = 'radio_muted';
 // Meters: RMS level in dBFS. The bar spans METER_FLOOR_DB to 0 dBFS; the red
 // part (last 6 of 30 segments) starts at -8 dBFS, where only very hot audio goes.
 export const METER_FLOOR_DB = -40;
+// Segments of the control room's level meters; levels are reported in these steps
+export const METER_SEGMENTS = 30;
 const METER_FALL_DB_PER_FRAME = 0.35; // ~20 dB/s at 60 frames a second
 
 function dbfs(samples: Float32Array): number {
@@ -21,7 +23,9 @@ function dbfs(samples: Float32Array): number {
 const SYNC_INTERVAL = 10000;
 const SYNC_THRESHOLD = 5;
 const TRACK_CHANGE_COOLDOWN = 15000;
-const CROSSFADE_DURATION = 3.0; // seconds
+// Song crossfade when the server did not say (asset.overlap_seconds carries the station's
+// own setting, default 1 s since 2026-11-17)
+const CROSSFADE_DURATION = 1.0; // seconds
 // At a song-to-song crossfade the incoming item comes up this fast; only the outgoing one
 // fades over CROSSFADE_DURATION. A 3 s fade-in of the incoming song over the quiet tail of
 // the outgoing one was heard as 2 to 3 s of near silence at every change.
@@ -44,12 +48,39 @@ const LET_FINISH_MAX_SECONDS = 8;
 // On the page, a short item hands over this close to the end of its file, its last
 // moment fading as the next item comes in
 const SHORT_END_HANDOVER_SECONDS = 0.15;
-function handOverPoint(crossStart: number, fileDuration: number): number {
-  const short = isFinite(fileDuration) && fileDuration > 0 && fileDuration < SHORT_ITEM_SECONDS;
+// An overlap shorter than this is no crossfade at all: the item plays to its end
+const NO_OVERLAP_BELOW_SECONDS = 0.5;
+/** Plays to its end with no crossfade: a short item, anything spoken (the server sends
+ *  overlap 0 for every item that is not a song: two sponsorships in a row overlapped by
+ *  3 s) and songs on a station whose crossfade is set to 0. `overlap` undefined = not
+ *  told, a song with the default crossfade. */
+function playsToEnd(fileDuration: number, overlap: number | undefined): boolean {
+  if (!(isFinite(fileDuration) && fileDuration > 0)) return false;
+  return fileDuration < SHORT_ITEM_SECONDS || (overlap != null && overlap < NO_OVERLAP_BELOW_SECONDS);
+}
+// A song followed by a spoken item (asset.end_fade_seconds > 0) is not crossfaded into
+// it: it fades out to its end and the spoken item starts after it (Shmuel, 2026-11-17:
+// "Song ends first, then speech"; the last second of a song played under the first
+// words of a sponsorship). The server hands over SHORT_ITEM_HANDOVER_SECONDS before
+// the song's end, so its end is that long after the hand-over point it sent.
+function songEndPoint(crossStart: number, fileDuration: number): number {
+  const fileEnd = isFinite(fileDuration) && fileDuration > 0 ? fileDuration - 0.1 : 0;
+  const end = crossStart > 0 ? crossStart + SHORT_ITEM_HANDOVER_SECONDS : fileEnd;
+  return fileEnd > 0 ? Math.min(end, fileEnd) : end;
+}
+// The server's change is the song's own end (not a timed item cutting in) when it
+// arrives this close to that end
+const SONG_END_WAIT_MAX_SECONDS = 1.5;
+// The page's own check runs every 100 ms: it brings the spoken item in this close to
+// the song's end, when the fade has left nothing of the song
+const SONG_END_TICK_SECONDS = 0.05;
+function handOverPoint(crossStart: number, fileDuration: number, overlap?: number): number {
+  const short = playsToEnd(fileDuration, overlap);
+  const fade = overlap ?? CROSSFADE_DURATION;
   const fileEnd = short
     ? Math.max(0.1, fileDuration - SHORT_ITEM_HANDOVER_SECONDS)
-    : isFinite(fileDuration) && fileDuration > CROSSFADE_DURATION
-      ? fileDuration - CROSSFADE_DURATION : 0;
+    : isFinite(fileDuration) && fileDuration > fade
+      ? fileDuration - fade : 0;
   if (crossStart > 0 && fileEnd > 0) return Math.min(crossStart, fileEnd);
   return crossStart > 0 ? crossStart : fileEnd;
 }
@@ -62,6 +93,9 @@ const LATE_SHORT_FROM_TOP_SECONDS = 3.0;
 const AFTER_SHORT_FROM_TOP_SECONDS = 8.0;
 // A timed item's lead-in fade ends this long after its due time (see the preempt fade)
 const PREEMPT_FADE_OVERHANG_MS = 400;
+// Where the pre-fade before a hard timed item stops (share of the song's level) until
+// the item really sounds
+const PREEMPT_FLOOR = 0.12;
 // A hard timed item is loaded on the idle deck this long before its time
 const TIMED_PRELOAD_AHEAD_MS = 60_000;
 // The page starts a pre-loaded hard timed item itself at its time (see the pre-arm),
@@ -69,6 +103,21 @@ const TIMED_PRELOAD_AHEAD_MS = 60_000;
 // to the server's message
 const PREARM_FADE_SECONDS = 0.3;
 const PREARM_LATE_MS = 500;
+// A few seconds before a hard item's time the idle deck plays it silently for a moment
+// and goes back to its start, so the browser's start-up (decoder, audio output) is done
+// before the due time. 16:00Z 2026-11-17: play() was called on time but the element
+// only began sounding 1.0 s later, on two stations.
+const PREARM_WARM_AHEAD_MS = 3000;
+// No warm-up starts closer to the time than this (it would still be running then)
+const PREARM_WARM_MIN_LEAD_MS = 1200;
+// The warm-up plays (muted) this far into the item, or for at most WARM_MAX_MS
+const WARM_PLAY_SECONDS = 0.3;
+const WARM_MAX_MS = 1800;
+// The item on air keeps playing until the new one really sounds, at most this long
+const OUT_WAITS_FOR_IN_MAX_MS = 1500;
+// How far past its start a warmed-up deck may stand and still play on from there
+const WARM_POSITION_SLACK_SECONDS = 0.25;
+const DECK_EVENTS = ['loadstart', 'canplay', 'canplaythrough', 'play', 'playing', 'pause', 'waiting', 'seeking', 'seeked', 'stalled', 'ended'];
 
 /** Seek only when it moves the position: even a seek to where the element already
  *  is makes Safari re-decode and can repeat a few hundred milliseconds. */
@@ -86,7 +135,7 @@ const NATURAL_END_WINDOW_SECONDS = 4.0;
 // Crossfade trigger check. A timer, not requestAnimationFrame: rAF stops in background tabs.
 const CROSSFADE_CHECK_MS = 100;
 // 50 ms of silence, played inside the Listen click to unlock both decks
-const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+export const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
 // A deck this close to the server's position for the current play is playing that play
 const REPLAY_TOLERANCE_SECONDS = 4.0;
 
@@ -170,7 +219,38 @@ export function useAudioEngine(
   // passes false: the engine runs silently so the level meters always move, and
   // the speaker button turns the sound on for this computer only.
   monitorDefault: boolean = true,
+  // Whether the page shows level meters. Listener pages pass false: reading the
+  // levels re-drew the whole page many times a second for a meter nobody sees.
+  meter: boolean = true,
+  // How long the item on air, and the one after it, overlap what follows them at
+  // their end (asset.overlap_seconds: the station's song crossfade, 0 for anything
+  // spoken). undefined = not told.
+  currentOverlap?: number,
+  nextOverlap?: number,
+  // How long the song on air fades out at its end because a spoken item follows it
+  // (asset.end_fade_seconds); 0 or undefined = it ends as usual.
+  currentEndFade?: number,
 ): AudioEngineState {
+  // Overlap by item, as the server told it; decks are looked up by the item they hold
+  const overlapByAssetRef = useRef<Map<string, number>>(new Map());
+  const endFadeStartedRef = useRef<string | null>(null);
+  if (nowPlayingAsset?.id && currentOverlap != null) overlapByAssetRef.current.set(nowPlayingAsset.id, currentOverlap);
+  if (nextAssetId && nextOverlap != null) overlapByAssetRef.current.set(nextAssetId, nextOverlap);
+  if (overlapByAssetRef.current.size > 200) {
+    const keep = [...overlapByAssetRef.current].slice(-50);
+    overlapByAssetRef.current = new Map(keep);
+  }
+  const overlapOf = useCallback((id: string | null | undefined): number | undefined =>
+    (id ? overlapByAssetRef.current.get(id) : undefined), []);
+  // The song on air that fades out before a spoken item, and over how long
+  const endFadeRef = useRef<{ id: string; seconds: number } | null>(null);
+  if (nowPlayingAsset?.id && currentOverlap != null) {
+    endFadeRef.current = currentEndFade && currentEndFade > 0
+      ? { id: nowPlayingAsset.id, seconds: currentEndFade }
+      : endFadeRef.current && endFadeRef.current.id !== nowPlayingAsset.id ? endFadeRef.current : null;
+  }
+  const endFadeOf = useCallback((id: string | null | undefined): number =>
+    (id && endFadeRef.current?.id === id ? endFadeRef.current.seconds : 0), []);
   // ── Operator's Next heard at once (control room) ──
   // The item the operator moved to, played here before the server confirms it. While
   // it stands, the player follows it instead of the server's now-playing.
@@ -333,6 +413,18 @@ export function useAudioEngine(
     const audio = new Audio();
     audio.crossOrigin = 'anonymous';
     audio.preload = 'auto';
+    // Every media event of the decks, for live timing checks (window.__kbrDeckEvents,
+    // the last 80): which deck, item, event, server time and position
+    for (const type of DECK_EVENTS) {
+      audio.addEventListener(type, () => {
+        const w = window as unknown as { __kbrDeckEvents?: unknown[] };
+        const label = deckARef.current?.audio === audio ? 'A' : deckBRef.current?.audio === audio ? 'B' : '?';
+        const log = (w.__kbrDeckEvents ??= []);
+        log.push({ deck: label, item: label === '?' ? null : deckAssetRef.current[label as DeckLabel], type,
+          at: new Date(serverNow()).toISOString(), pos: +audio.currentTime.toFixed(3), ready: audio.readyState });
+        if (log.length > 80) log.splice(0, log.length - 80);
+      });
+    }
     const source = ctx.createMediaElementSource(audio);
     const gain = ctx.createGain();
     gain.gain.value = 0; // start silent
@@ -355,6 +447,19 @@ export function useAudioEngine(
           const pos = livePosition(0);
           if (isFinite(deck.audio.duration) && pos < deck.audio.duration - 1 && Math.abs(deck.audio.currentTime - pos) > 1) {
             try { deck.audio.currentTime = pos; } catch { /* not seekable yet */ }
+          } else if (!isFinite(deck.audio.duration)) {
+            // Nothing of the file is here yet (an iPhone loads nothing before the first
+            // tap): it would start from the top and jump to the station's position at
+            // the next sync, 10 or more seconds later. Go there as soon as the length is known.
+            const el = deck.audio;
+            const src = el.src;
+            el.addEventListener('loadedmetadata', () => {
+              if (el.src !== src) return;
+              const at = livePosition(0);
+              if (at < el.duration - 1 && Math.abs(el.currentTime - at) > 1) {
+                try { el.currentTime = at; } catch { /* not seekable */ }
+              }
+            }, { once: true });
           }
           deck.audio.play().catch(() => {});
         } else {
@@ -363,7 +468,8 @@ export function useAudioEngine(
           }).catch(() => {});
         }
       }
-      if (ctxRef.current.state === 'suspended') await ctxRef.current.resume();
+      // (not running: suspended, or "interrupted" after a call or the lock screen on an iPhone)
+      if (ctxRef.current.state !== 'running') await ctxRef.current.resume();
       // Sound switched on mid-item: the browser refused to start the deck before
       // this click, so nothing is playing. Bring the item on air up again now
       // instead of waiting for the next item.
@@ -432,11 +538,13 @@ export function useAudioEngine(
     // element that a click started play again later; the listener page loads the
     // item on air only after this click, and its play() was refused, so one press
     // of Listen gave no sound until the volume slider was touched (2026-11-16).
-    for (const deck of [deckA, deckB]) {
+    // The idle deck is paused too if the pre-loader has meanwhile put the next item on
+    // it: it went on playing that item silently in the background.
+    for (const [label, deck] of [['A', deckA], ['B', deckB]] as [DeckLabel, AudioDeck][]) {
       if (deck.audio.src) continue;
       deck.audio.src = SILENT_WAV;
       deck.audio.play().then(() => {
-        if (deck.audio.src === SILENT_WAV) deck.audio.pause();
+        if (deck.audio.src === SILENT_WAV || (label !== activeDeckRef.current && !crossfadingRef.current)) deck.audio.pause();
       }).catch(() => {});
     }
 
@@ -634,27 +742,33 @@ export function useAudioEngine(
     // manual change (Next / play-now)?
     const outTime = outDeck.audio.currentTime;
     const outDur = outDeck.audio.duration;
-    const outEnd = handOverPoint(outCross, outDur);
+    const outOverlap = overlapOf(deckAssetRef.current[outLabel]);
+    const outEnd = handOverPoint(outCross, outDur, outOverlap);
     const naturalEnd = !outDeck.audio.paused && outEnd > 0 && outTime >= outEnd - NATURAL_END_WINDOW_SECONDS;
     // An operator's Next carries the fade they chose; it wins even near the end of the item
     // (a short looped jingle is nearly always "near the end").
     const asked = changeFadeRef.current;
     const operatorFade = asked != null && isFinite(asked) ? Math.min(10, Math.max(0.03, asked)) : null;
-    const fadeOut = operatorFade ?? (naturalEnd ? CROSSFADE_DURATION : SKIP_FADE_OUT);
+    const fadeOut = operatorFade ?? (naturalEnd ? Math.max(SHORT_END_HANDOVER_SECONDS, outOverlap ?? CROSSFADE_DURATION) : SKIP_FADE_OUT);
     const fadeIn = SKIP_FADE_IN;
     // A short spoken item (time check, weather) that started late on this page is
     // still talking when the server moves on: let it finish, never talk over it.
     // All Day Stories, 10 PM 2026-11-16: the paused story came back 1.8 s into the
     // time check. An operator's Next still cuts at once.
+    // A song before a spoken item is let finish too: to its own end, fading out
+    const outEndFade = endFadeOf(deckAssetRef.current[outLabel]);
+    const outSongEnd = outEndFade > 0 ? songEndPoint(outCross, outDur) : NaN;
+    const outFinishesAt = outEndFade > 0 ? outSongEnd : outDur;
     const letFinish = operatorFade == null && !replay && !outDeck.audio.paused && !outDeck.audio.ended
       && deckAssetRef.current[outLabel] != null
-      && isFinite(outDur) && outDur > 0 && outDur < SHORT_ITEM_SECONDS
-      && outDur - outTime > 0.05 && outDur - outTime < LET_FINISH_MAX_SECONDS;
+      && playsToEnd(outDur, outOverlap)
+      && outFinishesAt - outTime > 0.05
+      && outFinishesAt - outTime < (outEndFade > 0 ? SONG_END_WAIT_MAX_SECONDS : LET_FINISH_MAX_SECONDS);
 
     const outWasPlaying = !outDeck.audio.paused && !outDeck.audio.ended && deckAssetRef.current[outLabel] != null;
     // A short spoken item on air here (or one that has just ended) hands over to this one
     const outWasShort = operatorFade == null && !replay && deckAssetRef.current[outLabel] != null
-      && isFinite(outDur) && outDur > 0 && outDur < SHORT_ITEM_SECONDS
+      && playsToEnd(outDur, outOverlap)
       && (outWasPlaying || (outDeck.audio.ended && outDur - outTime < 0.5));
     let wentLive = false;
     const goLive = () => {
@@ -671,11 +785,44 @@ export function useAudioEngine(
       const now = ctx.currentTime;
       const targetGain = replayGain;
 
-      // Quick fade-out of whatever is on air (no hard cut)
-      outDeck.gain.gain.cancelScheduledValues(now);
-      outDeck.gain.gain.setValueAtTime(outDeck.gain.gain.value, now);
-      outDeck.gain.gain.linearRampToValueAtTime(0, now + fadeOut);
-      fadeBusyUntilRef.current = performance.now() + fadeOut * 1000;
+      // Quick fade-out of whatever is on air (no hard cut), once the new item really
+      // sounds: a paused element can take a moment to start, and fading the old one
+      // out meanwhile left a gap
+      const inWasPaused = inDeck.audio.paused;
+      let outFaded = false;
+      const fadeOutNow = () => {
+        if (outFaded) return;
+        outFaded = true;
+        const t = ctx.currentTime;
+        outDeck.gain.gain.cancelScheduledValues(t);
+        outDeck.gain.gain.setValueAtTime(outDeck.gain.gain.value, t);
+        outDeck.gain.gain.linearRampToValueAtTime(0, t + fadeOut);
+        fadeBusyUntilRef.current = performance.now() + fadeOut * 1000;
+        setTimeout(() => {
+          if (activeDeckRef.current !== outLabel && !crossfadingRef.current) outDeck.audio.pause();
+          setSwapTick(n => n + 1);
+        }, fadeOut * 1000 + 50);
+      };
+      const playCalledAt = performance.now();
+      if (inWasPaused && outWasPlaying) {
+        fadeBusyUntilRef.current = performance.now() + OUT_WAITS_FOR_IN_MAX_MS + fadeOut * 1000;
+        inDeck.audio.addEventListener('playing', fadeOutNow, { once: true });
+        setTimeout(fadeOutNow, OUT_WAITS_FOR_IN_MAX_MS);
+      } else {
+        fadeOutNow();
+      }
+      // How long the element took to really start (live checks: window.__kbrLastStart)
+      inDeck.audio.addEventListener('playing', () => {
+        const info = { id: assetId, playingAfterMs: Math.round(performance.now() - playCalledAt), at: new Date(serverNow()).toISOString() };
+        const w = window as unknown as { __kbrLastStart?: unknown; __kbrStarts?: unknown[] };
+        w.__kbrLastStart = info;
+        // (each start, the last 10: the item after a time check overwrote the time
+        // check's own entry in __kbrLastStart at 17:00Z)
+        const starts = (w.__kbrStarts ??= []);
+        starts.push(info);
+        if (starts.length > 10) starts.shift();
+        console.info('[kbr] item sounding', info);
+      }, { once: true });
 
       // Bring the new track up at its live position
       // A position at or past the end of the new track means the start time we hold still
@@ -690,14 +837,19 @@ export function useAudioEngine(
       // A time check or station ID that comes in a little late here (a slow download)
       // is heard from its first word, not joined in the middle; the item after it then
       // waits for it to finish (letFinish). Not when sound is only now switched on.
-      if (isFinite(inDur) && inDur > 0 && inDur < SHORT_ITEM_SECONDS && outWasPlaying
+      if (playsToEnd(inDur, overlapOf(assetId)) && outWasPlaying
         && startPos - cueIn < LATE_SHORT_FROM_TOP_SECONDS) startPos = cueIn;
       // Likewise whatever follows a time check this page played to its end (the next
       // item of a program block, the Daf Yomi announcement): from its first word.
       // A slow phone may still be fetching it when the time check ends: it then comes
       // in that much late, still from the top (its tail is cut instead, if anything).
       if (outWasShort && startPos - cueIn < AFTER_SHORT_FROM_TOP_SECONDS) startPos = cueIn;
-      seekIfNeeded(inDeck.audio, startPos);
+      // A deck warmed up for this item stands a moment past its start: play on from
+      // there rather than seek back
+      const warmedAt = inDeck.audio.paused ? Math.abs(inDeck.audio.currentTime - cueIn) : NaN;
+      if (!(startPos === cueIn && warmedAt < WARM_POSITION_SLACK_SECONDS)) {
+        seekIfNeeded(inDeck.audio, startPos);
+      }
       inDeck.gain.gain.cancelScheduledValues(now);
       inDeck.gain.gain.setValueAtTime(0, now);
       inDeck.gain.gain.linearRampToValueAtTime(targetGain, now + fadeIn);
@@ -705,19 +857,22 @@ export function useAudioEngine(
 
       activeDeckRef.current = inLabel;
       trackChangeTimeRef.current = Date.now();
-
-      // Once the fade-out is done, stop the old deck and let the pre-loader use it
-      setTimeout(() => {
-        if (activeDeckRef.current !== outLabel && !crossfadingRef.current) outDeck.audio.pause();
-        setSwapTick(t => t + 1);
-      }, fadeOut * 1000 + 50);
     };
 
     // Bring the new item on air, after the short item on air has finished if it should
     const goLiveAfterOut = () => {
       if (!letFinish) { goLive(); return; }
-      const left = outDeck.audio.paused || outDeck.audio.ended ? 0 : outDur - outDeck.audio.currentTime;
+      const left = outDeck.audio.paused || outDeck.audio.ended ? 0 : outFinishesAt - outDeck.audio.currentTime;
       if (left <= 0.05) { goLive(); return; }
+      if (outEndFade > 0) {
+        // The song fades out to its end; the spoken item starts once it is silent
+        const t = ctx.currentTime;
+        outDeck.gain.gain.cancelScheduledValues(t);
+        outDeck.gain.gain.setValueAtTime(outDeck.gain.gain.value, t);
+        outDeck.gain.gain.linearRampToValueAtTime(0, t + left);
+        setTimeout(goLive, left * 1000);
+        return;
+      }
       const onEnded = () => goLive();
       outDeck.audio.addEventListener('ended', onEnded, { once: true });
       setTimeout(() => {
@@ -760,8 +915,19 @@ export function useAudioEngine(
         }
         const onReady = () => goLiveAfterOut();
         inDeck.audio.addEventListener('canplay', onReady, { once: true });
+        // Nothing is heard here yet (sound was just switched on): start the element
+        // now, silently (its gain is 0 until it goes live), and go live as soon as the
+        // length is known instead of waiting for data. An iPhone fetches no audio
+        // until play() is called, so "canplay" never came and the first sound waited
+        // for the 4 s limit below.
+        const joinEarly = !outWasPlaying;
+        if (joinEarly) {
+          inDeck.audio.addEventListener('loadedmetadata', onReady, { once: true });
+          inDeck.audio.play().catch(() => {});
+        }
         setTimeout(() => {
           inDeck.audio.removeEventListener('canplay', onReady);
+          inDeck.audio.removeEventListener('loadedmetadata', onReady);
           goLiveAfterOut();
         }, COLD_LOAD_MAX_WAIT_MS);
       } catch {
@@ -868,7 +1034,9 @@ export function useAudioEngine(
       if (!ctx || ctx.state !== 'running') { note('sound off'); return; }
       const idle = otherDeck(activeDeckRef.current);
       const deck = getDeck(idle);
-      if (!deck || deckAssetRef.current[idle] !== id || deck.audio.readyState < 2) {
+      // (ready state 1 is enough: the warm-up may still be putting it back on its cue-in;
+      // it sounds as soon as that is done, sooner than waiting for the server's message)
+      if (!deck || deckAssetRef.current[idle] !== id || deck.audio.readyState < 1) {
         note(`not loaded (idle deck holds ${deckAssetRef.current[idle] ?? 'nothing'}, ready ${deck?.audio.readyState ?? '-'})`);
         return;
       }
@@ -883,7 +1051,55 @@ export function useAudioEngine(
         at: due,
       });
     }, Math.max(0, wait));
-    return () => clearTimeout(timer);
+    // Warm the idle deck's start-up ahead of time (silently), then leave it paused there.
+    // Checked every 250 ms from 3 s before the time, so a deck that gets the item only
+    // later (announced at short notice, or an operator's Next took the deck it was
+    // warming on and the pre-loader put it on the other one) is warmed too.
+    const warmedSrc: Record<DeckLabel, string | null> = { A: null, B: null };
+    const tryWarm = () => {
+      if (due - serverNow() < PREARM_WARM_MIN_LEAD_MS) return;
+      const ctx = ctxRef.current;
+      const idle = otherDeck(activeDeckRef.current);
+      const deck = getDeck(idle);
+      if (!ctx || ctx.state !== 'running' || !deck || deckAssetRef.current[idle] !== id) return;
+      if (!deck.audio.paused || crossfadingRef.current || deck.audio.readyState < 2) return;
+      if (warmedSrc[idle] === deck.audio.src) return;
+      if (performance.now() < fadeBusyUntilRef.current) return;
+      warmedSrc[idle] = deck.audio.src;
+      const cue = nextAssetIdRef.current === id ? nextCueInRef.current : 0;
+      const a = deck.audio;
+      deck.gain.gain.cancelScheduledValues(ctx.currentTime);
+      deck.gain.gain.setValueAtTime(0, ctx.currentTime);
+      const t0 = performance.now();
+      // Played muted until its position really moves (decoded audio is flowing, not just
+      // the `playing` event, which fired after 1 ms live at 17:00Z while the real start
+      // still took 1 s), then paused and put back on its cue-in well before the time.
+      let done = false;
+      const stillOurs = () => deckAssetRef.current[idle] === id && activeDeckRef.current !== idle && !crossfadingRef.current;
+      const finish = (how: string) => {
+        if (done) return;
+        done = true;
+        a.removeEventListener('timeupdate', onProgress);
+        if (stillOurs()) {
+          a.pause();
+          seekIfNeeded(a, cue);
+        }
+        const info = { id, deck: idle, warmMs: Math.round(performance.now() - t0), how, ready: a.readyState };
+        (window as unknown as { __kbrTimedWarm?: unknown }).__kbrTimedWarm = info;
+        console.info('[kbr] timed warm-up', info);
+      };
+      const onProgress = () => { if (a.currentTime >= cue + WARM_PLAY_SECONDS) finish('played'); };
+      seekIfNeeded(a, cue);
+      a.addEventListener('timeupdate', onProgress);
+      setTimeout(() => finish('timeout'), WARM_MAX_MS);
+      a.play().catch(() => finish('refused'));
+    };
+    let warmPoll: ReturnType<typeof setInterval> | null = null;
+    const warmStart = setTimeout(() => {
+      tryWarm();
+      warmPoll = setInterval(tryWarm, 250);
+    }, Math.max(0, wait - PREARM_WARM_AHEAD_MS));
+    return () => { clearTimeout(timer); clearTimeout(warmStart); if (warmPoll) clearInterval(warmPoll); };
   }, [nextPreemptAt, nextPreemptAssetId, isPlaying, audioReady, getDeck]);
 
   // ── Preempt fade-out: schedule precise fade before hourly announcements ──
@@ -911,9 +1127,19 @@ export function useAudioEngine(
       const ctx = ctxRef.current;
       if (!activeDeck || !ctx) return;
 
-      activeDeck.gain.gain.cancelScheduledValues(ctx.currentTime);
-      activeDeck.gain.gain.setValueAtTime(activeDeck.gain.gain.value, ctx.currentTime);
-      activeDeck.gain.gain.linearRampToValueAtTime(0, ctx.currentTime + actualFadeDuration / 1000);
+      // Down to a low level by the time, not to silence: the timed item takes it out
+      // once it really sounds (goLive waits for its `playing`). Only if nothing comes
+      // does the song go out after OUT_WAITS_FOR_IN_MAX_MS. Fading to silence at the
+      // time left a gap whenever the item took a moment to start.
+      const g = activeDeck.gain.gain;
+      const now = ctx.currentTime;
+      const level = g.value;
+      const reachAt = now + actualFadeDuration / 1000;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(level, now);
+      g.linearRampToValueAtTime(level * PREEMPT_FLOOR, reachAt);
+      g.setValueAtTime(level * PREEMPT_FLOOR, reachAt + OUT_WAITS_FOR_IN_MAX_MS / 1000);
+      g.linearRampToValueAtTime(0, reachAt + OUT_WAITS_FOR_IN_MAX_MS / 1000 + 0.3);
     }, actualDelay);
 
     return () => clearTimeout(fadeTimer);
@@ -973,8 +1199,11 @@ export function useAudioEngine(
     });
   }, [applyOut]);
 
-  // ── VU meter polling (~30fps) + client-driven crossfade check ──
+  // ── Level meters ──
+  // The page is told only when a meter segment changes (METER_SEGMENTS of them),
+  // not on every frame: each change re-draws the whole page that uses this hook.
   useEffect(() => {
+    if (!meter) return;
     const poll = () => {
       // VU metering
       const aL = analyserLRef.current;
@@ -994,16 +1223,16 @@ export function useAudioEngine(
         ) as [number, number];
         meterDbRef.current = next;
         const frac = (db: number) => Math.min(1, Math.max(0, (db - METER_FLOOR_DB) / -METER_FLOOR_DB));
-        const l = frac(next[0]);
-        const r = frac(next[1]);
-        setVuLevels(v => (Math.abs(v[0] - l) < 0.005 && Math.abs(v[1] - r) < 0.005 ? v : [l, r]));
+        const l = Math.round(frac(next[0]) * METER_SEGMENTS) / METER_SEGMENTS;
+        const r = Math.round(frac(next[1]) * METER_SEGMENTS) / METER_SEGMENTS;
+        setVuLevels(v => (v[0] === l && v[1] === r ? v : [l, r]));
       }
 
       rafRef.current = requestAnimationFrame(poll);
     };
     rafRef.current = requestAnimationFrame(poll);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [audioReady]);
+  }, [audioReady, meter]);
 
   // ── Client-driven crossfade check (timer-based so it keeps running in background tabs) ──
   useEffect(() => {
@@ -1019,16 +1248,33 @@ export function useAudioEngine(
       // change is pending (Next was pressed and the new track is not up yet) the active
       // deck still holds the old track, so that point must not be applied to it.
       if (deckAssetRef.current[activeLabel] !== lastAssetId.current) return;
+      const ct = activeDeck.audio.currentTime;
+      const dur = activeDeck.audio.duration;
+      // A song before a spoken item fades out over its last moments, and the spoken
+      // item starts when it is silent (never over it)
+      const endFade = endFadeOf(deckAssetRef.current[activeLabel]);
+      const songEnd = endFade > 0 ? songEndPoint(crossStartRef.current, dur) : 0;
+      if (endFade > 0 && songEnd > 0 && !activeDeck.audio.paused && ct >= songEnd - endFade && ct < songEnd) {
+        const key = `${deckAssetRef.current[activeLabel]}|${startedAtRef.current}`;
+        const ctx = ctxRef.current;
+        if (ctx && endFadeStartedRef.current !== key) {
+          endFadeStartedRef.current = key;
+          const t = ctx.currentTime;
+          activeDeck.gain.gain.cancelScheduledValues(t);
+          activeDeck.gain.gain.setValueAtTime(activeDeck.gain.gain.value, t);
+          activeDeck.gain.gain.linearRampToValueAtTime(0, t + (songEnd - ct));
+        }
+      }
       // Only crossfade when the idle deck really holds the next track
       if (deckAssetRef.current[otherDeck(activeLabel)] !== nextId) return;
 
-      const ct = activeDeck.audio.currentTime;
-      const dur = activeDeck.audio.duration;
       // A short spoken item (time check, station ID) is never crossfaded: the next item
       // comes in when it has really finished. All Day Stories, 03:00Z 2026-11-17: the
       // paused story was faded in over the last seconds of the time check.
-      const short = isFinite(dur) && dur > 0 && dur < SHORT_ITEM_SECONDS;
-      const crossPoint = short ? Math.max(0.1, dur - SHORT_END_HANDOVER_SECONDS) : handOverPoint(crossStartRef.current, dur);
+      const overlap = overlapOf(deckAssetRef.current[activeLabel]);
+      const short = playsToEnd(dur, overlap);
+      const crossPoint = endFade > 0 && songEnd > 0 ? songEnd - SONG_END_TICK_SECONDS
+        : short ? Math.max(0.1, dur - SHORT_END_HANDOVER_SECONDS) : handOverPoint(crossStartRef.current, dur, overlap);
       if (crossPoint > 0 && ct >= crossPoint) {
         // Do not run ahead of the server: wait until it is (nearly) at the crossfade
         // point too. It announces the next track there, which brings it on air anyway.
@@ -1039,7 +1285,7 @@ export function useAudioEngine(
           if (serverPos < crossPoint - MAX_LEAD_SECONDS) return;
         }
         crossfadeTriggeredRef.current = true;
-        executeCrossfade(short ? SHORT_END_HANDOVER_SECONDS : CROSSFADE_DURATION);
+        executeCrossfade(endFade > 0 ? SONG_END_TICK_SECONDS : short ? SHORT_END_HANDOVER_SECONDS : (overlap ?? CROSSFADE_DURATION));
       }
     }, CROSSFADE_CHECK_MS);
     return () => clearInterval(timer);

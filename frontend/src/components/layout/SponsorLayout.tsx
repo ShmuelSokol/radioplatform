@@ -20,7 +20,7 @@ export default function SponsorLayout() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="qn-site min-h-screen flex flex-col bg-gray-50">
       {/* Top nav */}
       <nav className="bg-indigo-700 text-white shadow-md">
         {/* Wraps on a phone: in one row the links ran off the right edge (Billing and Logout unreachable) */}

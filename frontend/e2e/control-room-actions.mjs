@@ -13,6 +13,16 @@ import {
   chromium, devices, checker, sleep, makeStation, adminContext, newPage, watchDecks, timeClick, timeUntil,
 } from './lib/fake-station.mjs';
 import { startStreamServer } from './lib/stream-server.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// What this test provokes on purpose; anything else the screen, console or network shows
+// fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/warning toast: (The time, weather and sponsorships always play to the end|That item just started|Loop is on|Panic: cut what was on air|Sound moved to another control room tab)/, 'amber on purpose: each tells the operator what the press did or why it did nothing');
+allowEverywhere(/No weather announcement is available|preview-weather|Could not load the weather preview/, 'the preview is made to fail once to see the message');
+allowEverywhere(/Panic: The playout engine did not respond/, 'the engine is made unreachable to see what Panic says');
+allowEverywhere(/queue\/move-up|That did not go through/, 'a move is made to fail to see the message and the row going back');
+allowEverywhere(/Category transition conflict|Daypart rule "All Day Stories" expects stories/, 'the fake station answers a move with these reminders; the test checks they show');
+allowEverywhere(/__tone\/m1\.wav|Couldn't load this file|blocked\.wav|:4322\/missing/, 'audio files made to fail for the pre-listen and retry checks');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
 const STREAM_PORT = Number(process.env.STREAM_PORT || 4322);
@@ -356,7 +366,28 @@ async function badges(browser) {
     await page.getByTestId('playout-badge').first().waitFor();
     const t = (await page.getByTestId('playout-badge').first().innerText()).trim();
     check(`${tag}: playout badge "${label}"`, t === label, t);
+    // A solid coloured label, not small grey text (Shmuel: "I want to be able to see if
+    // the station is running on server or not")
+    const look = await page.getByTestId('playout-badge').first().evaluate((el) => {
+      const c = getComputedStyle(el);
+      return { chip: el.dataset.chip, bg: c.backgroundColor, color: c.color, weight: c.fontWeight, shown: el.getBoundingClientRect().width > 0 };
+    });
+    const bg = { 'Browser player': 'rgb(107, 114, 128)', 'Server stream': 'rgb(21, 128, 61)',
+      'Server stream: not answering': 'rgb(185, 28, 28)', 'Server stream: out of step': 'rgb(161, 98, 7)' }[label];
+    check(`${tag}: "${label}" is a coloured label (${bg})`,
+      look.chip === '1' && look.bg === bg && look.color === 'rgb(255, 255, 255)' && Number(look.weight) >= 700 && look.shown,
+      JSON.stringify(look));
   }
+  // Manage Stations: a "Plays from" column with the same label
+  station.playout = { stations: { [station.SID]: { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } };
+  await page.goto(`${BASE}/admin/stations`);
+  const from = page.getByTestId('station-plays-from').first();
+  await from.waitFor({ timeout: 8000 }).catch(() => {});
+  const fromText = (await from.innerText().catch(() => '')).trim();
+  check(`${tag}: Manage Stations shows where the station plays from`, fromText === 'Server stream', fromText);
+  check(`${tag}: Manage Stations has a "Plays from" column`, await page.getByRole('columnheader', { name: 'Plays from' }).count() === 1);
+  await page.goBack();
+  await page.getByTestId('playout-badge').first().waitFor();
   // Fullscreen
   await page.getByRole('button', { name: 'Full screen' }).click();
   await sleep(300);
@@ -434,6 +465,53 @@ async function queueRows(browser) {
   await ctx.close();
 }
 
+// ── A long queue: actions send back the first rows only ─────────────
+async function longQueue(browser) {
+  const tag = 'long queue';
+  const station = makeStation({ queueSize: 400 });
+  // Queue reads can be made slow, as over a phone connection: a list cut to the
+  // action's 150 rows would then stay cut until the next read came back
+  const slow = { reads: 0 };
+  const { ctx, page, errors } = await openRoom(browser, DESKTOP, station, {
+    delay: (path, method) => (method === 'GET' && /\/queue$/.test(path) ? slow.reads : 0),
+  });
+  const head = async () => (await page.locator('section[aria-label=Queue]').locator('div').first().innerText()).replace(/\s+/g, ' ');
+  const next = () => page.getByRole('button', { name: /Go next/ }).first();
+  check(`${tag}: the first 150 rows are loaded`, /\b150 of 400 items/.test(await head()), await head());
+  await sleep(5000); // past the "just changed" window
+  let second = station.pending()[0].id;
+  await next().click();
+  await rowOf(page, second).getByLabel('Playing now').waitFor({ timeout: 3000 }).catch(() => {});
+  check(`${tag}: Next shows the new item on air at once`, await rowOf(page, second).getByLabel('Playing now').count() === 1);
+  check(`${tag}: still the first 150 rows after Next`, /\b150 of 399 items/.test(await head()), await head());
+  const answer = station.calls.filter((c) => /\/queue\/skip/.test(c.path)).length;
+  check(`${tag}: one request for Next`, answer === 1, `${answer}`);
+  // The whole queue loaded (the operator opened the day list): Next must not shrink the list
+  await page.getByLabel('Show day').focus();
+  await timeUntil(page, `() => /\\b399 items/.test(document.querySelector('section[aria-label=Queue]').innerText.replace(/\\s+/g, ' '))`, 4000);
+  check(`${tag}: the whole queue loads on demand`, /\b399 items/.test(await head()) && !/ of 399/.test(await head()), await head());
+  await sleep(5000);
+  second = station.pending()[0].id;
+  slow.reads = 700;
+  const seen = page.evaluate(async () => {
+    const out = [];
+    const until = Date.now() + 2500;
+    while (Date.now() < until) {
+      out.push(document.querySelector('section[aria-label=Queue]').innerText.replace(/\s+/g, ' ').match(/(\d+ of )?\d+ items/)?.[0] ?? '');
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    return [...new Set(out)];
+  });
+  await next().click();
+  const labels = await seen;
+  slow.reads = 0;
+  check(`${tag}: with the whole queue loaded, Next never shrinks the list to 150`, !labels.some((l) => /^150 of/.test(l)), labels.join(' | '));
+  check(`${tag}: the whole queue is shown again after Next`, /\b398 items/.test(await head()) && !/ of 398/.test(await head()), await head());
+  check(`${tag}: and the new item is on air`, await rowOf(page, second).getByLabel('Playing now').count() === 1);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Queue actions: move, remove, drag, insert from a button, optimistic + failure ─────────────
 async function queueActions(browser) {
   const tag = 'queue actions';
@@ -475,6 +553,19 @@ async function queueActions(browser) {
   const dnd = writes(station, /reorder-dnd$/).pop();
   check(`${tag}: drag a row onto another reorders it`, dnd?.body.entry_id === p[6].id && order()[1] === p[6].asset_id, JSON.stringify(dnd?.body));
   check(`${tag}: drag warnings shown as a toast`, (await toastText(page)).includes('Category transition conflict'));
+  // The arrows show the same reminder as a drag (a rule conflict on the Stories station
+  // showed on drag only, 2026-11-18)
+  station.reorderWarnings = ['Daypart rule "All Day Stories" expects stories during 0:00-24:00, but this asset is music'];
+  const r8 = rowOf(page, station.pending()[7].id);
+  await r8.hover();
+  await r8.getByRole('button', { name: 'Move up' }).click();
+  await sleep(SLOW + 400);
+  check(`${tag}: ▲ shows the same warning as a drag`, (await toastText(page)).includes('Daypart rule "All Day Stories"'), await toastText(page));
+  await r8.hover();
+  await r8.getByRole('button', { name: 'Move down' }).click();
+  await sleep(SLOW + 400);
+  check(`${tag}: ▼ shows the same warning as a drag`, (await toastText(page)).includes('Daypart rule "All Day Stories"'), await toastText(page));
+  station.reorderWarnings = [];
   // Insert from an instant button while the marker is armed
   const target = station.pending()[3];
   await rowOf(page, target.id).getByTestId('insert-here').click();
@@ -1015,6 +1106,61 @@ async function timedPreload(browser) {
   await c2.close();
 }
 
+// ── F-CR-SIDE-6: a live show on air: the control room hears the host, not the music ──
+async function liveShow(browser, contextOpts, tag) {
+  const station = makeStation();
+  const { ctx, np } = await adminContext(browser, contextOpts, station);
+  await ctx.routeWebSocket(/\/ws\/(site|listeners)|\/ws\/live\/(?!station)/, () => {});
+  let live = null; // the page's /ws/live/station/<id>/listen socket
+  await ctx.routeWebSocket(/\/ws\/live\/station\/[^/]+\/listen/, (ws) => {
+    live = ws;
+    ws.send(JSON.stringify({ type: 'live_state', live: false, show_id: null, sample_rate: 24000 }));
+  });
+  // Counts the host's frames the page plays (24 kHz buffers; the music decks are media elements)
+  await ctx.addInitScript(() => {
+    window.__liveFrames = 0;
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...a) {
+      if (this.buffer && this.buffer.sampleRate === 24000) window.__liveFrames++;
+      return start.apply(this, a);
+    };
+  });
+  const { page, errors } = await newPage(ctx);
+  await page.goto(`${BASE}/admin/dashboard`);
+  await page.getByTestId('queue-row').first().waitFor();
+  await listenHere(page);
+  check(`${tag}: music heard before the show`, (await page.evaluate(() => window.__audible().length)) === 1);
+  const sid = live && live.url().split('/').slice(-2)[0];
+  check(`${tag}: listens for the station's live show`, sid === station.SID, live ? live.url() : 'no socket');
+
+  // The host goes on air: the music stops here and the host's voice plays
+  const t0 = Date.now();
+  live.send(JSON.stringify({ type: 'live_state', live: true, show_id: 'ls1', sample_rate: 24000 }));
+  const silentAfter = await timeUntil(page, '() => window.__audible().length === 0', 3000);
+  check(`${tag}: the music stops when the host goes on air`, silentAfter >= 0, `${silentAfter >= 0 ? Date.now() - t0 : 'still playing'} ms`);
+  const frame = Buffer.alloc(2040 * 2);
+  for (let i = 0; i < 2040; i++) frame.writeInt16LE(Math.round(6000 * Math.sin(2 * Math.PI * 440 * i / 24000)), i * 2);
+  for (let i = 0; i < 12; i++) { live.send(frame); await sleep(85); }
+  const frames = await page.evaluate(() => window.__liveFrames);
+  check(`${tag}: the host is heard in the control room`, frames >= 10, `${frames} of 12 frames played`);
+  check(`${tag}: no music under the host`, (await page.evaluate(() => window.__audible().length)) === 0, JSON.stringify(await page.evaluate(() => window.__decks())));
+
+  // The show ends: the music comes back once the station sends what it plays now,
+  // not from the stale now-playing held when the show began
+  live.send(JSON.stringify({ type: 'live_state', live: false, show_id: null, sample_rate: 24000 }));
+  await sleep(300);
+  const before = await page.evaluate(() => window.__liveFrames);
+  live.send(frame);
+  await sleep(300);
+  check(`${tag}: nothing of the host is played after the show`, (await page.evaluate(() => window.__liveFrames)) === before);
+  check(`${tag}: the stale song does not resume before the station says what plays`, (await page.evaluate(() => window.__audible().length)) === 0);
+  np.raw({ type: 'now_playing', data: station.nowPlaying() });
+  const back = await timeUntil(page, '() => window.__audible().length === 1', 4000);
+  check(`${tag}: the music returns after the show`, back >= 0, `${back} ms`);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Engine mode: the control room plays the stream, falls back on error ─────────────
 async function engineMode(browser, stream) {
   const tag = 'engine mode';
@@ -1027,7 +1173,7 @@ async function engineMode(browser, stream) {
     await sleep(2500);
     const el = await page.evaluate(() => { const a = document.querySelector('[data-testid=control-room] audio'); return { src: a.src, paused: a.paused, muted: a.muted, t: a.currentTime }; });
     if (!broken) {
-      check(`${tag}: listening plays the server stream`, el.src === stream.url(station.SID) && !el.paused && !el.muted && el.t > 0.3, JSON.stringify(el));
+      check(`${tag}: listening plays the server stream`, !!el.src && !el.paused && !el.muted && el.t > 0.3 && stream.stats.connects > 0, JSON.stringify(el));
       check(`${tag}: the built-in player only measures (not heard)`, (await page.evaluate(() => window.__outLevel())) < 0.01);
       // F-CR-TRANSPORT-25: the meters still move while the station is heard through the server stream
       const lit = () => page.locator('header .bg-cyan-400, header .bg-red-500').count();
@@ -1124,6 +1270,7 @@ try {
   if (run('badges')) await badges(browser);
   if (run('tabs')) await oneSoundingTab(browser);
   if (run('rows')) await queueRows(browser);
+  if (run('long')) await longQueue(browser);
   if (run('actions')) await queueActions(browser);
   if (run('days')) await dayFilter(browser);
   if (run('phone')) await phoneRows(browser);
@@ -1135,7 +1282,10 @@ try {
   if (run('speed')) { await speed(browser, DESKTOP, 'speed desktop'); await speed(browser, PHONE, 'speed iPhone'); }
   if (run('mix')) await mixOver(browser);
   if (run('timed')) await timedPreload(browser);
-  if (run('live')) await liveShowHeard(browser);
+  if (run('live')) {
+    await liveShow(browser, DESKTOP, 'live show desktop'); await liveShow(browser, PHONE, 'live show iPhone');
+    await liveShowHeard(browser);
+  }
   if (run('cut')) {
     await cutCountdown(browser, DESKTOP, 'cut desktop'); await cutCountdown(browser, PHONE, 'cut iPhone');
     await cutCountdown(browser, { ...devices['iPhone 13 landscape'] }, 'cut iPhone sideways');

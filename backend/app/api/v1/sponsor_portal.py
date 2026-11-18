@@ -23,12 +23,15 @@ from app.models.spot_schedule import SpotSchedule
 from app.models.station import Station
 from app.models.user import User
 from app.schemas.sponsor_portal import (
+    MissedPlay,
+    MissedPlaysResponse,
     PlayHistoryEntry,
     PlayHistoryResponse,
     SponsorSpot,
     SponsorStats,
     UpcomingScheduleEntry,
 )
+from app.services.sponsor_delivery import PAST_DAYS, delivery_for_sponsor
 from app.services.spot_schedule_service import as_utc, station_tz
 
 router = APIRouter(prefix="/sponsor-portal", tags=["sponsor-portal"])
@@ -263,4 +266,37 @@ async def get_sponsor_stats(
         next_scheduled=next_label,
         next_scheduled_at=next_at,
         last_played=as_utc(last_played) if last_played else None,
+    )
+
+
+@router.get("/missed-plays", response_model=MissedPlaysResponse)
+async def get_missed_plays(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_sponsor),
+):
+    """Plays the sponsor was promised that did not air in the last two weeks, and
+    plays in the coming week that have no room or were moved to a later time."""
+    sponsor = await _get_sponsor_for_user(db, user)
+    found = await delivery_for_sponsor(db, sponsor) if sponsor else []
+    rows = [
+        MissedPlay(
+            when=r.when,
+            date=r.local_date.isoformat(),
+            daypart=r.daypart,
+            station_name=r.station_name,
+            asset_title=r.asset_title,
+            promised=r.promised,
+            played=r.played,
+            missed=r.missed,
+            moved=r.moved,
+            note=r.note,
+        )
+        for r in found
+    ]
+    return MissedPlaysResponse(
+        days=PAST_DAYS,
+        missed_past=sum(r.missed for r in rows if r.when == "past"),
+        missed_coming=sum(r.missed for r in rows if r.when == "coming"),
+        moved_coming=sum(r.moved for r in rows if r.when == "coming"),
+        rows=rows,
     )

@@ -87,6 +87,29 @@ async def test_find_treats_percent_and_underscore_as_letters(client, auth_header
 
 
 @pytest.mark.asyncio
+async def test_find_track_underscore_count_matches_what_is_typed(client, auth_headers, db_session):
+    """F-DATABANK-57: "track_01" finds the file named track_01 only (not track101 or
+    trackX01), and the View count (total) agrees with the rows, also on jingles."""
+    db_session.add_all([
+        _asset("Opening", file_path="https://x/a/track_01.mp3"),
+        _asset("Second", file_path="https://x/a/track101.mp3"),
+        _asset("Third", file_path="https://x/a/trackX01.mp3"),
+        _asset("Fourth", file_path="https://x/a/track_02.mp3"),
+        _asset("Id one", asset_type="jingle", file_path="https://x/a/id_1.mp3"),
+        _asset("Id two", asset_type="jingle", file_path="https://x/a/idx1.mp3"),
+    ])
+    await db_session.commit()
+    body = await _items(client, auth_headers, search="track_01")
+    assert _titles(body) == ["Opening"] and body["total"] == 1
+    body = await _items(client, auth_headers, search="track_0")
+    assert sorted(_titles(body)) == ["Fourth", "Opening"] and body["total"] == 2
+    body = await _items(client, auth_headers, search="id_1", asset_type="jingle")
+    assert _titles(body) == ["Id one"] and body["total"] == 1
+    body = await _items(client, auth_headers, search="50%")
+    assert body["items"] == [] and body["total"] == 0
+
+
+@pytest.mark.asyncio
 async def test_end_date_without_a_station_is_refused_and_changes_nothing(client, db_session):
     """F-DATABANK-60: with no station_id the API refuses (403 for a manager not on every
     station, 400 "Choose a station first" otherwise) and nothing changes; with the station it

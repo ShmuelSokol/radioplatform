@@ -487,7 +487,7 @@ async def test_each_listed_station_has_its_own_engine(engine_station, monkeypatc
         async def __aexit__(self, *a):
             return False
 
-        async def post(self, url, json=None, headers=None):
+        async def post(self, url, json=None, headers=None, timeout=None):
             calls.append(url)
             return FakeResp()
 
@@ -496,6 +496,40 @@ async def test_each_listed_station_has_its_own_engine(engine_station, monkeypatc
     monkeypatch.setattr(playout_engine, "_command", _real_command)
     assert await playout_engine.engine_flush(other)
     assert calls == [f"https://stream.example.com/control/{other}/flush"]
+
+
+@pytest.mark.asyncio
+async def test_commands_reuse_one_connection_to_the_engine(monkeypatch):
+    """Each command used to open a new client: a TCP + TLS handshake to the engine server
+    before every Next. One client is kept and its connection reused."""
+    import httpx
+
+    made = []
+    real = httpx.AsyncClient
+
+    def handler(request):
+        return httpx.Response(200, json={"ok": True})
+
+    class Counting(real):
+        def __init__(self, **kw):
+            made.append(kw)
+            super().__init__(transport=httpx.MockTransport(handler))
+
+    await playout_engine.close_client()
+    monkeypatch.setattr(httpx, "AsyncClient", Counting)
+    monkeypatch.setattr(playout_engine, "_command", _real_command)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "https://stream.example.com/control")
+    station = uuid.uuid4()
+    assert await playout_engine.engine_flush(station)
+    assert await playout_engine.engine_skip(station, 0.5)
+    assert (await playout_engine.engine_status(station)) == {"ok": True}
+    assert len(made) == 1
+    assert made[0]["limits"].keepalive_expiry == 30.0
+    # A closed client (shutdown, or an error that closed it) is replaced, not reused
+    await playout_engine.close_client()
+    assert await playout_engine.engine_flush(station)
+    assert len(made) == 2
+    await playout_engine.close_client()
 
 
 @pytest.mark.asyncio
@@ -734,3 +768,80 @@ async def test_a_reshuffled_song_keeps_the_cued_one_near_the_end(client, db_sess
     await playout_engine.tick(db_session, station)
 
     assert "/flush" not in [path for path, _ in sent]
+
+
+async def _on_air_ending(db_session, entries, ends_in: float, hard_in: float):
+    """entries[0] on air with `ends_in` s left; entries[3] a hard item due in `hard_in` s."""
+    now = datetime.now(UTC)
+    res = await db_session.execute(select(QueueEntry).where(QueueEntry.id.in_([entries[0].id, entries[3].id])))
+    rows = {r.id: r for r in res.scalars().all()}
+    rows[entries[0].id].status = "playing"
+    rows[entries[0].id].started_at = now - timedelta(seconds=180.0 - ends_in)
+    rows[entries[3].id].preempt_at = now + timedelta(seconds=hard_in)
+    rows[entries[3].id].timing_mode = "hard"
+    await db_session.commit()
+
+
+async def test_no_song_is_handed_out_seconds_before_a_hard_item(client, db_session, engine_station):
+    # Jerusalem 23:00Z 2026-11-17: the song before the hour ended 1.9 s early, a 266 s
+    # song was handed out and chopped after 2.4 s. The engine gets nothing instead and
+    # stays quiet until the time check (its hold lane).
+    station, entries, sent = engine_station
+    # The song on air would change (1 s crossfade) at the hard item itself
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=59.0)
+    url = f"/api/v1/playout/{station.id}/next?proto=3"
+    assert (await client.get(url, headers=HEADERS)).status_code == 204
+    assert await _status(db_session, entries[1]) == "pending"
+    # An engine without the hold lane would play emergency music: it still gets the song
+    old = await client.get(f"/api/v1/playout/{station.id}/next?proto=2", headers=HEADERS)
+    assert old.json()["entry_id"] == str(entries[1].id)
+
+
+async def test_a_song_is_still_handed_out_when_there_is_room_or_the_hard_item_cuts_in(
+    client, db_session, engine_station
+):
+    station, entries, sent = engine_station
+    url = f"/api/v1/playout/{station.id}/next?proto=3"
+    # 18 s of room after the song change: the next song is worth starting
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=77.0)
+    assert (await client.get(url, headers=HEADERS)).json()["entry_id"] == str(entries[1].id)
+    # The hard item is due while the song on air still plays: the song after it is
+    # needed as soon as the timed item ends, so it is handed out as before
+    playout_engine.reset_state()
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=30.0)
+    assert (await client.get(url, headers=HEADERS)).json()["entry_id"] == str(entries[1].id)
+
+
+async def test_the_hold_counts_a_song_whose_start_report_has_not_arrived(client, db_session, engine_station):
+    # The engine asks the moment its pre-loaded song starts, before the start report
+    # for it is in: that song (180 s, hands over at 179 s) is the one that ends before
+    # the hard item, not the one still shown on air.
+    station, entries, sent = engine_station
+    url = f"/api/v1/playout/{station.id}/next?proto=3"
+    await _on_air_ending(db_session, entries, ends_in=3.0, hard_in=183.0)
+    first = await client.get(f"{url}&given=", headers=HEADERS)
+    assert first.json()["entry_id"] == str(entries[1].id)
+    # entries[1] is starting now (still pending for us) and changes 2 s before the item
+    again = await client.get(f"{url}&given={entries[1].id}", headers=HEADERS)
+    assert again.status_code == 204
+    assert await _status(db_session, entries[2]) == "pending"
+
+
+async def test_a_song_the_engine_already_holds_is_taken_back_before_a_hard_item(client, db_session, engine_station):
+    # Around a Next the engine can load its next song before the one on air has even
+    # started, so the rule in /next never saw it: the tick takes it back.
+    station, entries, sent = engine_station
+    state = playout_engine.get_state(station.id)
+    state.engine_proto = 3
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=59.5)
+    state.cued_entry_id = str(entries[1].id)
+    st = await db_session.get(Station, station.id)
+    await playout_engine.tick(db_session, st)
+    assert ("/flush", None) in sent
+    assert state.cued_entry_id is None
+    # With room for the song (20 s before the item) it is left alone
+    sent.clear()
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=80.0)
+    state.cued_entry_id = str(entries[1].id)
+    await playout_engine.tick(db_session, st)
+    assert ("/flush", None) not in sent

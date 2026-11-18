@@ -80,6 +80,7 @@ READS = [
     ("B-SPONSORPOR-2", "/sponsor-portal/play-history", SPONSOR),
     ("B-SPONSORPOR-3", "/sponsor-portal/upcoming-schedule", SPONSOR),
     ("B-SPONSORPOR-5", "/sponsor-portal/stats", SPONSOR),
+    ("B-SPONSORPOR-6", "/sponsor-portal/missed-plays", SPONSOR),
     ("B-SPOTRECORD-1", "/spot-recordings", MANAGERS),
     ("B-SPOTRECORD-6", f"/spot-recordings/{_ID}/audio", MANAGERS),
     ("B-SPOTSCHEDU-1", "/spot-schedules", MANAGERS),
@@ -299,7 +300,11 @@ async def test_block_rotation_starts_with_the_longest_rested(db_session: AsyncSe
                            start_utc=datetime.now(UTC) - timedelta(minutes=10)))
     await db_session.commit()
     psa1_id, psa2_id, station_id = psa1.id, psa2.id, station.id
-    await reconcile_block_entries(db_session, station_id)
+    # Mid-hour on purpose: in the last two minutes of an hour the coming airing is too
+    # close to queue but still takes its turn, so the first queued one would be "PSA one"
+    # (this failed in CI at 22:59:24).
+    midhour = datetime.now(UTC).replace(minute=20, second=0, microsecond=0)
+    await reconcile_block_entries(db_session, station_id, now=midhour)
     await db_session.commit()
     rows = (await db_session.execute(
         select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.source == "block")
@@ -427,9 +432,10 @@ async def test_block_edit_refreshes_queue_keeping_manual_and_timed(
     pending = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.station_id == station_id, QueueEntry.status == "pending"))).scalars().all()
     ids = {e.id for e in pending}
-    assert not ids & set(auto_ids)
+    # all redrawn but the next song, which stays in case it is about to start
+    assert ids & set(auto_ids) == {auto_ids[0]}
     assert manual_id in ids and timed_id in ids
-    fresh = [e for e in pending if e.source == "auto" and e.preempt_at is None]
+    fresh = [e for e in pending if e.source == "auto" and e.preempt_at is None and e.id != auto_ids[0]]
     assert fresh and {category[e.asset_id] for e in fresh} == {"Relax"}
 
 
@@ -449,8 +455,9 @@ async def test_block_playlists_fill_ahead_with_generation_off(db_session: AsyncS
     await db_session.commit()
     pending = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.station_id == station_id, QueueEntry.status == "pending"))).scalars().all()
-    assert not [e for e in pending if category[e.asset_id] == "Old"]
-    assert all(e.block_id is not None for e in pending)
+    # all replaced but the next song (kept in case it is about to start)
+    assert len([e for e in pending if category[e.asset_id] == "Old"]) <= 1
+    assert len([e for e in pending if e.block_id is None]) <= 1
     hours = sum(240 for _ in pending) / 3600
     assert 5.5 <= hours <= 7  # the default six hours ahead, not a week
 

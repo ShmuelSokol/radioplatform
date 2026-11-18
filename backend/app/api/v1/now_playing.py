@@ -15,6 +15,43 @@ from app.services.scheduling import SchedulingService
 
 router = APIRouter(prefix="/now-playing", tags=["now-playing"])
 
+# A "playing" queue item this long past its own end is left over from a player that
+# stopped, not something on air
+_STALE_GRACE_SECONDS = 120
+
+
+@router.get("")
+async def stations_on_air(db: AsyncSession = Depends(get_db)):
+    """Public: which stations have something on air right now, in one call for the
+    station list's "On Air" / "Offline" pills: a queue item playing (and not long past
+    its end) or a live show that is live. {"playing": [station_id, ...]}"""
+    from datetime import UTC, timedelta
+
+    from sqlalchemy import select
+
+    from app.models.asset import Asset
+    from app.models.live_show import LiveShow, LiveShowStatus
+    from app.models.queue_entry import QueueEntry
+
+    now = datetime.now(UTC)
+    on_air: set[str] = set()
+    rows = (await db.execute(
+        select(QueueEntry.station_id, QueueEntry.started_at, Asset.duration)
+        .join(Asset, Asset.id == QueueEntry.asset_id, isouter=True)
+        .where(QueueEntry.status == "playing")
+    )).all()
+    for station_id, started_at, duration in rows:
+        if started_at is not None and duration:
+            start = started_at if started_at.tzinfo else started_at.replace(tzinfo=UTC)
+            if start + timedelta(seconds=float(duration) + _STALE_GRACE_SECONDS) < now:
+                continue
+        on_air.add(str(station_id))
+    live = (await db.execute(
+        select(LiveShow.station_id).where(LiveShow.status == LiveShowStatus.LIVE)
+    )).scalars().all()
+    on_air.update(str(s) for s in live)
+    return {"playing": sorted(on_air)}
+
 
 @router.get("/{station_id}", response_model=Optional[NowPlaying])
 async def get_now_playing(

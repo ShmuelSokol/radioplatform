@@ -154,6 +154,27 @@ cut about 1.8 s early and the resumed story was heard over it (All Day Stories, 
 2026-11-16). Tests: `backend/tests/test_handover_rule.py`, e2e `audio-engine.mjs`
 scenarios `time-check-not-talked-over` and `time-check-hands-over-at-its-end`.
 
+### A song ends before anything spoken (2026-11-18)
+
+Shmuel chose "Song ends first, then speech" (2026-11-17 9:39 PM ET): on Main the last
+second of a song (its crossfade) played under the first words of a sponsorship. A song
+followed by a spoken item (anything that is not a song: `queue.is_song`) is not
+crossfaded into it. Which item follows is only known from the queue, so
+`predict_next_entry()` notes it per entry on air (`_speech_follows`) and the one rule
+reads that: `overlap_seconds` is 0, the hand-over is 0.3 s before the song's analysed
+end (0.7 s later than with the 1 s crossfade) and the now-playing message carries
+`asset.end_fade_seconds` (the station's crossfade, at least 0.3 s). The scheduler asks
+`predict_next_entry` before arming its timer each pass, so a sponsorship put next
+during the song moves the timer too. On the page (`useAudioEngine`): the song's gain
+ramps to 0 at its end (`songEndPoint` = the hand-over point + 0.3 s), and the spoken
+item starts from its first word when the song is silent, whether the server's message
+(`letFinish` to the song's end, only within 1.5 s of it so a hard timed item still cuts
+in at once) or the page's own check brings it in. Browser player only: the engine's
+`kbr_overlap` is unchanged and radio.liq decides for itself. Not covered: a hard timed
+item on the hour still fades the song under its first 0.4 s (`PREEMPT_FADE_OVERHANG_MS`).
+Tests: `backend/tests/test_song_ends_before_speech.py`, e2e `audio-engine.mjs`
+`song-ends-before-a-sponsorship`, `...-late-message`, `time-check-cuts-a-song-that-ends-before-speech`.
+
 Since 2026-11-17 (All Day Stories 03:00Z: the paused story came in 2.9 s over the time
 check): the page's own crossfade check never crossfades a short item; the next item
 comes in 0.15 s before the file's end (also after `ended`, the check runs every 100 ms).
@@ -192,6 +213,36 @@ slow phone still fetching it); its tail is cut instead. Scenarios
 `second-item-of-a-timed-group-from-the-top` and `...-slow-file` (harness `cut` field =
 Listen's `next_asset.cut_at`); test `test_next_item_of_the_group_on_air_has_no_cut_time`.
 
+**Start-up delay inside the element.** Live at 16:00Z 2026-11-17 the pre-arm called
+play() on time, but the element only began sounding 1.0 s later (its `playing` event),
+on two stations; the song had already faded at +0.4 s. A few seconds before a hard
+item's time (`PREARM_WARM_AHEAD_MS = 3000`) the page now plays the pre-loaded item on
+the idle deck silently until `playing`, then pauses it and seeks back to its cue-in, so
+the start-up is done before the due time (`window.__kbrTimedWarm`, console
+`[kbr] timed warm-up`). On any item change the item on air keeps playing until the new
+one fires `playing` (at most `OUT_WAITS_FOR_IN_MAX_MS = 1500`); each start's real
+latency is in `window.__kbrLastStart` (`[kbr] item sounding`). Also fixed: the silent
+unlock play on the decks after Listen left the idle deck playing the pre-loaded item
+silently when the pre-loader got there first. Rig: `coldStartMs` emulates a first
+play that sounds late; scenario `hard-time-check-slow-starting-file-on-time` (1.1 s
+late with 0.6 s silence without the warm-up). The emulation is a model of what was
+seen live, not the cause itself; check `playingAfterMs` live.
+
+Follow-ups (same day). The warm-up is retried every 250 ms from 3 s before the time,
+so a deck that gets the item late (short notice, or an operator's Next took the warming
+deck) is warmed too, if at least 1.2 s remain. The pre-fade before a hard item now
+stops at 12 % of the song's level (`PREEMPT_FLOOR`) instead of silence; the item takes
+it out once it sounds, or it goes out 1.5 s after the time if nothing comes. Live at
+17:00Z the warm-up's `playing` fired after 1 ms and it was paused at once, yet the
+time check still sounded at +1.05 s: a paused, pre-loaded element seems to need its
+pipeline really started (Chrome suspends idle players). The warm-up now plays muted
+until its position has moved 0.3 s (`WARM_PLAY_SECONDS`, at most 1.8 s), then pauses
+and seeks back to the cue-in well before the time. Every deck media event is kept in
+`window.__kbrDeckEvents` (last 80, with server time and position) and each start's
+`playingAfterMs` in `window.__kbrStarts` (last 10). Known bug, recorded as XFAIL:
+an operator Next during the warm-up leaves no deck to warm on in time (1.1 s late, no
+silence); it needs a deck of its own.
+
 ## Server clock, not the device clock (2026-11-17)
 Every position and due time (`started_at`, `preempt_at`, `ends_at`, a push's `at`) is server time, so the player compares them with `serverNow()` from `src/lib/serverClock.ts`, never `Date.now()`. The offset is measured from `server_time` in the release policy (`lib/appUpdate.ts`, on connect and every minute). Before, a PC 20 s fast joined every song 20 s in and faded the song for the hourly time check 20 s early. Used by useAudioEngine (live position, timed fades, crossfade, playNextNow), useNowPlayingWS (overdue check), Listen, Dashboard, `controlroom/timing.ts nextCut` and the transport clock. Checked by `e2e/listen-page.mjs` ONLY=clock (device clock 20 s fast and 30 s slow).
 
@@ -204,7 +255,37 @@ The server counts an item from the top of the file (hand-over at `started_at + c
 - Release resume on a stream station counts the stream element really playing (`playing` event), not "Listen was pressed": Safari refuses a stream started outside a tap and now gets "Tap to keep listening".
 - Listener profile: the registration PIN is shown above the panel until dismissed; auto-login forgets a saved PIN only on 401; the heart never sends a rating the listener did not pick (the API needs a rating with a favourite, so on an unrated song it waits for the first star); stars come from `/crm/my-ratings`; raffle errors show, 409 counts as entered.
 
+## Level meters must not re-draw the page every frame (2026-11-17)
+`useAudioEngine` keeps the meter levels in React state, so each change re-draws the whole page that calls the hook. It used to set them on every animation frame (60 a second) on the control room and on the Listen page, which shows no meter at all. Now the levels are reported in `METER_SEGMENTS` (30) steps and only when a segment changes, and the hook's last argument `meter` (Listen passes false) turns the reading off. Do not put per-frame values in this hook's state; draw them from a ref or a small component of their own.
+
 ## Browser checks
 `e2e/lib/fake-station.mjs` is a fake backend for page.route (queue, actions, live shows, CRM, now-playing socket, site socket, ranged tone files, `skewClock`) with an audio probe (`window.__decks()`, `__audible()`, `__outLevel()`, Media Session handlers). Suites on the built site (`npx vite preview --port 4311 --strictPort`): `control-room-actions.mjs` (every control room button, desktop + iPhone, S-1/S-2 timings), `listen-page.mjs` (Listen page, lock screen, network loss, socket back-off/polling, stream mode with `lib/stream-server.mjs`, time check on the second), `listener-pages.mjs` (a11y basics of the public pages, global player bar), `call-in.mjs`, `release-timing.mjs` (release pickup limits under a fake clock). Each takes `ONLY=<part>`.
 
 Real WebKit (Safari's engine): `e2e/webkit/listener-webkit.py` drives WebKitGTK's MiniBrowser through Selenium (`apt-get install webkit2gtk-driver xvfb gstreamer1.0-plugins-good gstreamer1.0-libav`, `pip install selenium`, `xvfb-run -a python3 e2e/webkit/listener-webkit.py` with the site on `vite preview --port 4183`). `e2e/webkit/fake-server.mjs` serves the same `makeStation()` answers over plain HTTP + WebSocket and proxies the site. WebKitGTK refuses sound without a tap like Safari (`--autoplay-policy=allow` turns that off), has MSE for MP3 and, under WebDriver, ignores `--enable-mediasource=false`, so `?kbr_no_mse=1` removes `window.MediaSource` to get the iPhone's path. No native HLS, so the iPhone's HLS branch is not reachable; narrowest window about 447 px. It does not stand in for iOS (audio session, lock screen, background, CarPlay): a real iPhone is still needed.
+
+## Only songs overlap; the crossfade length is a station setting (2026-11-17)
+
+Shmuel played several sponsorships one after the other and each faded into the next: any
+item of 20 s or more that was not timed got the 3 s song crossfade, speech included.
+Now `queue.overlap_seconds(entry)` is the rule: the station's song crossfade for a song
+(`asset_type == "music"`), 0 for everything else (sponsorship, shiur, story, jingle,
+weather), for short items and for timed ones. `handover_seconds` hands a non-song over
+0.3 s before the end of its file; a song at `audible end - crossfade` (the analysis stores
+`cross_start_seconds` 3 s before the audible end, `ANALYSIS_CROSS_SECONDS`).
+
+- Setting: `automation_config.crossfade_seconds` (0 to 10, default 1 since Shmuel asked
+  for 1 s; 0 = songs do not overlap). Stations page, Automation Config, "Song crossfade
+  (seconds)". `queue._station_crossfade` keeps it per station in memory
+  (`note_station_crossfade`: every scheduler pass and on station save), so the hand-over
+  rule needs no database read.
+- Pages get `asset.overlap_seconds` and `next_asset.overlap_seconds` in now-playing.
+  `useAudioEngine.playsToEnd()` treats overlap < 0.5 s like a short item (never
+  crossfaded, `letFinish`, next item from its first word); otherwise the outgoing song
+  fades over that many seconds.
+- The engine gets `kbr_overlap` on every track. radio.liq overlaps by that much
+  (`liq_cross_duration` tells `cross` how early to prepare; at 0 the held-back 0.2 s
+  plays out and the next item follows, `sequence`). Needs a setup.sh rerun per station.
+- Checks: `tests/test_handover_rule.py`, `test_handover_agreement.py`; e2e
+  `audio-engine.mjs` `sponsorship-after-sponsorship-no-overlap`,
+  `sponsorship-not-talked-over-when-the-server-is-early`, `song-after-sponsorship-no-overlap`,
+  `songs-with-crossfade-zero-do-not-overlap`, `songs-still-crossfade-by-default`.

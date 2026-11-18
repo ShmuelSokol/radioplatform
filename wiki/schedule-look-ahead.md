@@ -10,6 +10,19 @@ Both the playout engine (`SchedulingService.get_active_block_for_station`) and t
 
 Before 2026-11-15 the engine compared block `start_time`/`end_time` against the **UTC** time of day, while sun-relative times were resolved in station time. A "6 to 9 AM" block on a New York station ran 1 to 4 AM. `station_local()` now converts first. If existing blocks were entered in UTC to compensate, they need re-entering.
 
+## Date range on recurring blocks
+
+A daily, weekly or monthly block with `start_date` and/or `end_date` only recurs on
+**station-local** dates inside that range; either end may be empty (open-ended). The one
+check is `block_in_date_range` in `scheduling.py`, called from `_recurs_on`, so playout,
+the public guide (`GET /schedules/epg`), the look-ahead and the queue refresh all agree.
+The recurrence is checked on the day a block starts, so an overnight block that starts on
+its last date still runs past midnight. A start-only block stops once its `end_date` is
+over (`last_start`). Before 2026-11-17 only one-time blocks checked dates, so a "summer
+only" block kept airing and stayed in the guide (B-PUBLIC-5). Tests:
+`test_block_resolution.py` (`test_recurring_block_*`, `test_start_only_block_stops_after_its_end_date`),
+`test_public_listener_endpoints.py::test_epg_honours_recurring_block_dates`.
+
 ## Who wins an overlap (`block_rank`)
 
 Schedule priority, then block priority, then the more specific recurrence (one-time > monthly > weekly > daily), then the shorter block, then the newer one. Before this, equal priorities fell to list order. An overlap settled only by the tie-break is flagged `needs_attention`; `POST /schedules/look-ahead/settle` records a manager's choice by raising the chosen block's priority above the others.
@@ -35,6 +48,7 @@ Saving a block raises a "Schedule conflict" alert only for blocks that air at th
 on a shared day (`blocks_overlap` in `alert_service.py`). Days come from the recurrence
 (weekly names, monthly day numbers, one-time date range; daily or no pattern = every day;
 kinds that cannot be compared are assumed to meet). A block past midnight (22:00-02:00) is
-two parts, the second on the next day. Before 2026-11-17 days were ignored (false alerts
+two parts, the second on the next day. Blocks whose `start_date`..`end_date` ranges never
+meet (moved a day on for the after-midnight part) do not conflict. Before 2026-11-17 days were ignored (false alerts
 for Monday vs Tuesday shows) and overnight blocks never matched. Start-only blocks still
 never conflict. Test: `backend/tests/test_block_conflict_alerts.py`.

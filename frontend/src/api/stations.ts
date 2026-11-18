@@ -19,6 +19,12 @@ export const listAllStations = async (): Promise<StationListResponse> => {
   return { ...first, stations, total: Math.max(first.total, stations.length) };
 };
 
+/** Stations with something on air right now (a queue item playing or a live show), one call for all. */
+export const listStationsOnAir = async (): Promise<string[]> => {
+  const res = await apiClient.get<{ playing?: string[] }>('/now-playing');
+  return Array.isArray(res.data?.playing) ? res.data.playing : [];
+};
+
 export const getStation = async (id: string): Promise<Station> => {
   const res = await apiClient.get<Station>(`/stations/${id}`);
   return res.data;

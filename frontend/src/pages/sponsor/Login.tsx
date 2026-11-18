@@ -32,7 +32,7 @@ export default function SponsorLogin() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50">
+    <div className="qn-site min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50">
       <div className="w-full max-w-md">
         <h1 className="text-3xl font-bold mb-2 text-center text-indigo-700">Sponsor Portal</h1>
         <p className="text-center text-gray-500 mb-6">Sign in to manage your campaigns</p>

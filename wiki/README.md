@@ -9,11 +9,13 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [audio-engine](audio-engine.md) — Client-side dual-deck Web Audio engine, crossfade, pre-loading, gap fixes
 - [hourly-slots](hourly-slots.md) — Station ID, time announcements, weather, ad slots at :00/:15/:30/:45
 - [admin-page-layout](admin-page-layout.md) — Full-width rule for every admin page, the padding the dark pages depend on, phone tables, the layout audit script
+- [qnet-site-theme](qnet-site-theme.md) — The KBR Studio look on every admin and sponsor page: one shared skin (`.qn-site`), the generated colour remap, how to write a page under it
 - [control-room](control-room.md) — Operator screen layout, liveControl.ts seam, insert-by-entry-id, where instant buttons are stored
 - [station-modes](station-modes.md) — HS (hard start) and Spots mode switches, Panic, Errors pane: what they do and their limits
 - [databank](databank.md) — KBR Studio's database window: songs/jingles/spots/blocks tables, spot end dates (on the schedules), day log to the millisecond
 - [dashboard-timing](dashboard-timing.md) — Elapsed timer overflow fix, WS vs REST data sources
 - [skip-latency](skip-latency.md) — Instant skip rule: now-playing changes must WS-broadcast
+- [station-rules](station-rules.md) — Which schedule rules apply to a station (its own, else the global ones) and the one function every check must read them through
 - [lint-workflow](lint-workflow.md) — Wiki housekeeping procedure
 - [release-pickup](release-pickup.md) — open tabs reload themselves onto a new release, never while audio plays
 - [live-listeners](live-listeners.md): when a listener counts as live, instant join/leave push to admin pages
@@ -31,5 +33,8 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [client-ip](client-ip.md) — the one helper that says who is calling (rightmost non-internal X-Forwarded-For hop) for rate limits, listeners, activity log
 - [activity-log](activity-log.md) — who did what: every staff change with before/after, sign-ins, screens opened, listener sessions; how rows are captured
 - [air-watch](air-watch.md) — on-air self-check: late or missing time checks, dead air, engine drift, skipped timed items; alerts and ntfy
+- [local-fm-box](local-fm-box.md) — Feeding FM from the transmitter room: the engine on a local box with a relay that keeps it on air with no internet (plan + library on disk); stages and gaps
+- [look-at-the-screen-tests](look-at-the-screen-tests.md) — the browser guard, the walk of every page and control on three stations, the station isolation sweep
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when
 - [live-shows](live-shows.md) — how a live show goes on air without a broadcast server: mic relay, automation pause/resume, hard stop
+- [deploys](deploys.md) — what a merge to main publishes: website only for frontend changes, backend only for backend changes; how to check and force

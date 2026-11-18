@@ -14,6 +14,12 @@ function isAppShell(pathname: string): boolean {
   return pathname === '/admin/dashboard' || pathname === '/admin/databank';
 }
 
+// The KBR Studio ("qnet") look, shared by every signed-in staff page (styles/qnet-site.css).
+// Listener pages keep their own look.
+export function isQnetPage(pathname: string): boolean {
+  return pathname.startsWith('/admin');
+}
+
 export default function Layout() {
   const { pathname } = useLocation();
 
@@ -34,7 +40,7 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className={`min-h-screen flex flex-col ${isQnetPage(pathname) ? 'qn-site' : ''}`}>
       <Navbar />
       <main className="flex-1 w-full min-w-0 px-4 sm:px-6 lg:px-8 py-6">
         <Outlet />

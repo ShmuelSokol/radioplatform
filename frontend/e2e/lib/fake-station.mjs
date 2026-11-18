@@ -9,7 +9,23 @@
  */
 import { createRequire } from 'node:module';
 
-export const { chromium, webkit, devices } = createRequire(import.meta.url)('playwright');
+import { guardBrowser, guardReport, allowEverywhere } from './guard.mjs';
+
+const pw = createRequire(import.meta.url)('playwright');
+// Every browser a test launches is guarded (e2e/lib/guard.mjs): a warning or error toast,
+// a console error or a failed request that the test did not say it expects fails the test
+// in done(), even when every check passed. GUARD=off switches it off, GUARD=report prints only.
+const guarded = (type) => new Proxy(type, {
+  get(t, k) {
+    if (k === 'launch' && process.env.GUARD !== 'off') return async (...a) => guardBrowser(await t.launch(...a));
+    const v = t[k];
+    return typeof v === 'function' ? v.bind(t) : v;
+  },
+});
+export const chromium = guarded(pw.chromium);
+export const webkit = guarded(pw.webkit);
+export const devices = pw.devices;
+export { allowEverywhere };
 
 /** PASS/FAIL printing. `known` maps a check name to the bug it shows: those are
  *  expected to fail (printed XFAIL) and a pass there is an error (XPASS) so the
@@ -30,6 +46,13 @@ export function checker(known = {}) {
     console.log(`${tag.padEnd(5)}  ${name}${detail ? `  (${detail})` : ''}${bug ? `  [BUG: ${bug}]` : ''}`);
   };
   const done = () => {
+    // Look at the screen, not only at whether the action worked (Shmuel, 2026-11-17)
+    const odd = process.env.GUARD === 'off' ? [] : guardReport();
+    for (const o of odd) console.log(`LOOK   ${o.kind}: ${o.text}${o.count > 1 ? `  (x${o.count})` : ''}  [on ${o.url || o.page}]`);
+    if (odd.length) {
+      console.log(`\n${odd.length} thing(s) the screen, console or network showed that no check expected. Fix them, or say why they are expected with allowEverywhere(pattern, reason).`);
+      if (process.env.GUARD !== 'report') state.failures += odd.length;
+    }
     console.log(`\n${state.passes} passed, ${state.xfail} known bugs (xfail), ${state.failures} failed`);
     return state.failures ? 1 : 0;
   };
@@ -196,6 +219,8 @@ export function makeStation(opts = {}) {
       asset: { id: a.id, title: a.title, artist: a.artist, duration: a.duration, asset_type: a.asset_type, category: a.category, intro_seconds: a.intro_seconds ?? null },
     };
   };
+  // Rows of the queue an action sends back, as the real server (queue.py ACTION_QUEUE_ROWS)
+  const ACTION_QUEUE_ROWS = 150;
   s.view = (limit = Infinity) => {
     const list = [playing(), ...pending()].filter(Boolean);
     let cursor = Date.now();
@@ -323,16 +348,16 @@ export function makeStation(opts = {}) {
       if (cur) cur.status = 'skipped';
       e.status = 'playing'; e.started_at = new Date().toISOString();
       loopId = null;
-      const done = { id: e.id, position: e.position, on_air: true, queue: s.view() };
+      const done = { id: e.id, position: e.position, on_air: true, queue: s.view(ACTION_QUEUE_ROWS) };
       if (body.client_request_id) fired.set(body.client_request_id, done);
       announce();
       return done;
     }
     if (path === `${q}/modes`) {
       s.modes = { hard_start: body?.hard_start ?? s.modes.hard_start, spots: body?.spots ?? s.modes.spots };
-      return { modes: s.modes, queue: s.view() };
+      return { modes: s.modes, queue: s.view(ACTION_QUEUE_ROWS) };
     }
-    if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: s.view() }; }
+    if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: s.view(ACTION_QUEUE_ROWS) }; }
     if (path === `${q}/mix-over`) return { message: 'Playing over', asset_id: body.asset_id, on_air: true };
     if (path === `${q}/insert`) {
       const anchor = body.after_entry_id ? queue.find((x) => x.id === body.after_entry_id && x.status !== 'skipped') : null;
@@ -340,7 +365,7 @@ export function makeStation(opts = {}) {
       const ids = [...(body.asset_id ? [body.asset_id] : []), ...(body.asset_ids || [])];
       pending().forEach((x) => { if (x.position > after) x.position += ids.length; });
       const made = ids.map((asset_id, i) => s.add({ asset_id, position: after + 1 + i }).id);
-      return { ids: made, queue: s.view() };
+      return { ids: made, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/start`) {
       const cur = playing();
@@ -352,17 +377,17 @@ export function makeStation(opts = {}) {
       return { now_playing: next.asset_id };
     }
     if (path === `${q}/panic`) {
-      if (s.panicReply) return { ...s.panicReply, queue: s.view() };
+      if (s.panicReply) return { ...s.panicReply, queue: s.view(ACTION_QUEUE_ROWS) };
       const cur = playing();
       if (cur) cur.status = 'skipped';
       loopId = null;
       const next = pending()[0];
       if (next) { next.status = 'playing'; next.started_at = new Date().toISOString(); }
       announce({ change_fade_seconds: 0 });
-      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view() };
+      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/skip`) {
-      if (s.skipReply) return { message: 'Kept', ...s.skipReply, queue: s.view() };
+      if (s.skipReply) return { message: 'Kept', ...s.skipReply, queue: s.view(ACTION_QUEUE_ROWS) };
       const cur = playing();
       if (cur) cur.status = 'skipped';
       const fade = { hard: 0, fade: 0.5, soft: 3 }[query.fade ?? 'fade'];
@@ -370,14 +395,14 @@ export function makeStation(opts = {}) {
       const next = pending()[0];
       if (next) { next.status = 'playing'; next.started_at = new Date().toISOString(); }
       announce({ change_fade_seconds: fade });
-      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view() };
+      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/move-up` || path === `${q}/move-down`) {
       const list = pending();
       const i = list.findIndex((x) => x.id === body.entry_id);
       const j = path.endsWith('up') ? i - 1 : i + 1;
       if (i >= 0 && j >= 0 && j < list.length) { const p = list[i].position; list[i].position = list[j].position; list[j].position = p; }
-      return { message: 'Moved' };
+      return { message: 'Moved', warnings: s.reorderWarnings || [] };
     }
     if (path === `${q}/reorder-dnd`) {
       const e = queue.find((x) => x.id === body.entry_id);
@@ -568,4 +593,54 @@ export async function timeUntil(page, cond, timeout = 5000) {
     };
     look();
   }), [String(cond), timeout]);
+}
+
+/**
+ * Init script: iPhone Safari's rule for sound, which Chromium does not have.
+ * Sound may start only inside a real tap (touchend that was not a scroll, click,
+ * keydown, mouseup); touchstart and pointerdown do NOT count. Outside one:
+ *   - audio.play() is refused (NotAllowedError), unless that same element was once
+ *     started inside a tap (it may then play again later, with any src)
+ *   - a new AudioContext is suspended and resume() never settles
+ * window.__iosPolicy = { refusedPlays, pendingResumes } counts what was refused.
+ */
+export function IOS_SOUND_POLICY() {
+  const w = window;
+  const stats = (w.__iosPolicy = { refusedPlays: 0, pendingResumes: 0 });
+  let inTap = false;
+  let moved = false;
+  const open = () => { inTap = true; setTimeout(() => { inTap = false; }, 0); };
+  w.addEventListener('touchstart', () => { moved = false; }, true);
+  w.addEventListener('touchmove', () => { moved = true; }, true);
+  w.addEventListener('touchend', () => { if (!moved) open(); }, true);
+  for (const type of ['click', 'keydown', 'mouseup']) w.addEventListener(type, open, true);
+
+  const blessed = new WeakSet();
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function () {
+    if (inTap) blessed.add(this);
+    if (!blessed.has(this)) {
+      stats.refusedPlays++;
+      return Promise.reject(new DOMException('The request is not allowed by the user agent', 'NotAllowedError'));
+    }
+    return play.call(this);
+  };
+
+  const Native = w.AudioContext;
+  if (!Native) return;
+  const locked = new WeakSet();
+  const nativeState = Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'state').get;
+  class Ctx extends Native {
+    constructor(...a) {
+      super(...a);
+      if (!inTap) { locked.add(this); Native.prototype.suspend.call(this).catch(() => {}); }
+    }
+    get state() { return locked.has(this) ? 'suspended' : nativeState.call(this); }
+    resume() {
+      if (locked.has(this) && !inTap) { stats.pendingResumes++; return new Promise(() => {}); }
+      locked.delete(this);
+      return Native.prototype.resume.call(this);
+    }
+  }
+  w.AudioContext = Ctx;
 }

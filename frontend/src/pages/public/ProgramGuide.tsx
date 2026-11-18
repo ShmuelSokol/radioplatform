@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import apiClient from '../../api/client';
+import { listAllStations } from '../../api/stations';
 import type { StationListResponse, Station } from '../../types';
 
 interface EpgBlock {
@@ -60,20 +61,28 @@ function todayStr(timeZone?: string): string {
   return clockIn(timeZone).date;
 }
 
-function isCurrentBlock(block: EpgBlock, selectedDate: string, timeZone?: string): boolean {
-  if (!block.start_time || !block.end_time) return false;
-  const now = clockIn(timeZone);
+function addDays(date: string, days: number): string {
+  const d = new Date(date + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function blockMins(block: EpgBlock): { startMins: number; endMins: number } | null {
+  if (!block.start_time || !block.end_time) return null;
   const [sh, sm] = block.start_time.split(':').map(Number);
   const [eh, em] = block.end_time.split(':').map(Number);
-  const startMins = sh * 60 + sm;
-  const endMins = eh * 60 + em;
+  return { startMins: sh * 60 + sm, endMins: eh * 60 + em };
+}
+
+function isCurrentBlock(block: EpgBlock, selectedDate: string, now: { date: string; mins: number }): boolean {
+  const t = blockMins(block);
+  if (!t) return false;
+  const { startMins, endMins } = t;
   if (endMins <= startMins) {
-    // Overnight (e.g. 22:00-02:00): the evening part on its own date, the early part
-    // on the next date
+    // Ends at or after midnight (the EPG cuts runs at midnight, so usually 22:00-00:00;
+    // the part after midnight is its own 00:00-02:00 run in the next day's guide)
     if (selectedDate === now.date) return now.mins >= startMins;
-    const next = new Date(selectedDate + 'T12:00:00Z');
-    next.setUTCDate(next.getUTCDate() + 1);
-    return next.toISOString().slice(0, 10) === now.date && now.mins < endMins;
+    return addDays(selectedDate, 1) === now.date && now.mins < endMins;
   }
   if (selectedDate !== now.date) return false;
   return now.mins >= startMins && now.mins < endMins;
@@ -83,22 +92,27 @@ export default function ProgramGuide() {
   const [selectedStation, setSelectedStation] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>(todayStr());
 
-  // Fetch stations
+  // Fetch stations (every page: the API sends 50 by default)
   const { data: stationsData, isLoading: stationsLoading } = useQuery<StationListResponse>({
     queryKey: ['stations'],
-    queryFn: async () => {
-      const res = await apiClient.get<StationListResponse>('/stations');
-      return res.data;
-    },
+    queryFn: () => listAllStations(),
   });
 
   const stations: Station[] = stationsData?.stations ?? [];
   const stationTz = stations.find(s => s.id === selectedStation)?.timezone;
-  // Until the person picks a date, "today" follows the chosen station's clock
+  // The station's clock, re-read every 20 s so "Now" and "Today" move on an open page
+  const [now, setNow] = useState(() => clockIn(stationTz));
+  useEffect(() => {
+    setNow(clockIn(stationTz));
+    const t = setInterval(() => setNow(clockIn(stationTz)), 20000);
+    return () => clearInterval(t);
+  }, [stationTz]);
+  // Until the person picks a date, "today" follows the chosen station's clock (also
+  // past midnight on an open page)
   const [datePicked, setDatePicked] = useState(false);
   useEffect(() => {
-    if (!datePicked && stationTz) setSelectedDate(todayStr(stationTz));
-  }, [stationTz, datePicked]);
+    if (!datePicked && stationTz) setSelectedDate(now.date);
+  }, [stationTz, datePicked, now.date]);
 
   // Auto-select first station
   useMemo(() => {
@@ -119,8 +133,10 @@ export default function ProgramGuide() {
     enabled: !!selectedStation,
   });
 
+  const isToday = selectedDate === now.date;
   const blocks = epgData?.blocks ?? [];
-  const dateLabel = selectedDate === todayStr(stationTz) ? 'Today' : new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  // Built at noon UTC and shown in UTC, so viewers west of UTC do not see the day before
+  const dateLabel = isToday ? 'Today' : new Date(selectedDate + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
 
   return (
     <div className="min-h-screen bg-[#0a0a28] text-white">
@@ -155,7 +171,7 @@ export default function ProgramGuide() {
             value={selectedDate}
             onChange={(e) => { setSelectedDate(e.target.value); setDatePicked(true); }}
             aria-label="Date"
-            className="bg-[#12123a] border border-[#2a2a5e] text-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 transition"
+            className="h-11 bg-[#12123a] border border-[#2a2a5e] text-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 transition"
           />
         </div>
 
@@ -198,12 +214,13 @@ export default function ProgramGuide() {
 
             <div className="space-y-1">
               {blocks.map((block) => {
-                const isCurrent = isCurrentBlock(block, selectedDate, stationTz);
+                const isCurrent = isCurrentBlock(block, selectedDate, now);
                 const modeClass = playbackModeColors[block.playback_mode] || 'bg-gray-600/20 text-gray-400 border-gray-500/30';
 
                 return (
                   <div
                     key={`${block.id}-${block.start_time}`}
+                    data-testid="guide-block"
                     className={`relative flex gap-4 group ${
                       isCurrent ? '' : ''
                     }`}

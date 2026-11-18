@@ -6,7 +6,7 @@
  *   npm run build && (npx vite preview --port 4181 &)
  *   BASE_URL=http://localhost:4181 node e2e/databank-ui.mjs      # optional: ONLY=<part,...>
  *
- * Parts: open, songs, edit, pfl, spots, blocks, log, roles, station, phone, speed.
+ * Parts: open, songs, edit, pfl, keys, spots, blocks, log, logstation, roles, station, phone, speed.
  */
 import {
   chromium, devices, checker, makeStation, adminContext, newPage, sleep, timeClick, timeUntil,
@@ -483,6 +483,16 @@ if (run('edit')) {
     const red = page.getByRole('status').filter({ hasText: words });
     check(`F-DATABANK-12 "${value}" refused with a red notice, nothing sent`, db.patches.length === n && await red.isVisible() && (await red.getAttribute('class')).includes('bg-red'));
   }
+  // F-DATABANK-55 V emptied: refused, not saved as 0, and the cell keeps its value
+  {
+    const vBefore = (await cellOf(id, 3).innerText()).trim();
+    const n55 = db.patches.length;
+    await editAndEnter(id, 3, '');
+    await sleep(250);
+    if (await page.getByTestId('db-edit-input').count()) await page.getByTestId('db-edit-input').press('Escape');
+    check('F-DATABANK-55 V emptied + Enter: refused, nothing sent (no V = 0), the cell keeps its value',
+      db.patches.length === n55 && (await cellOf(id, 3).innerText()).trim() === vBefore && vBefore !== '0', `${db.patches.length - n55} sent, "${vBefore}"`);
+  }
   n = db.patches.length;
   await editAndEnter(id, 5, '');
   await sleep(200);
@@ -593,6 +603,62 @@ if (run('pfl')) {
   await page.keyboard.press(' ');
   check('F-DATABANK-32 Space does nothing on Blocks', !(await page.locator('.qn-row-cur').evaluate((el) => el.className.includes('outline-[#2bff4a]'))));
   check('pfl: no script errors', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+/* ── F-DATABANK-54: keys typed in fields and buttons are theirs, not the table's ── */
+if (run('keys')) {
+  const { ctx, page, errors } = await open(browser, DESKTOP);
+  await rows(page).first().waitFor();
+  const pflOn = async () => (await page.getByTestId('pfl-deck').isVisible().catch(() => false))
+    || (await page.locator('[data-testid="db-table"] [class*="outline-[#2bff4a]"]').count()) > 0;
+  await rows(page).nth(2).click();
+  const rec = await page.getByTestId('db-rec').innerText();
+  // A space typed in Find, with a row selected
+  await page.getByTestId('db-find').click();
+  await page.keyboard.type('Mordechai Ben David', { delay: 5 });
+  await sleep(400);
+  check('F-DATABANK-54 a space typed in Find is typed ("Mordechai Ben David"), no pre-listen',
+    await page.getByTestId('db-find').inputValue() === 'Mordechai Ben David' && !(await pflOn()), await page.getByTestId('db-find').inputValue());
+  await page.getByTestId('db-find').fill('');
+  await waitView(page, 450);
+  await rows(page).nth(2).click();
+  // Arrows in the type drop-down move the choice, not the row selection
+  const typeSel = page.getByTestId('db-type');
+  await typeSel.focus();
+  const v0 = await typeSel.inputValue();
+  await page.keyboard.press('ArrowDown');
+  await sleep(300);
+  check('F-DATABANK-54 ↓ in the type drop-down moves the choice, not the row selection',
+    await typeSel.inputValue() !== v0 && (await page.getByTestId('db-rec').innerText()) !== 'Rec 4', `${v0} -> ${await typeSel.inputValue()}, ${await page.getByTestId('db-rec').innerText()}`);
+  await typeSel.selectOption({ index: 0 });
+  await waitView(page, 450);
+  // Space on a focused toolbar button presses that button, it does not pre-listen
+  await rows(page).nth(2).click();
+  await page.getByTestId('db-edit-mode').focus();
+  await page.keyboard.press(' ');
+  await sleep(300);
+  check('F-DATABANK-54 Space on a focused toolbar button presses it (Edit mode on), no pre-listen',
+    (await page.getByTestId('db-edit-mode').innerText()).includes('Editing') && !(await pflOn()));
+  await page.keyboard.press('ArrowDown');
+  check('F-DATABANK-54 ↓ on a focused toolbar button does not move the row selection', (await page.getByTestId('db-rec').innerText()) === rec, await page.getByTestId('db-rec').innerText());
+  await page.keyboard.press(' ');
+  check('F-DATABANK-54 ... and Space again turns Edit mode off', !(await page.getByTestId('db-edit-mode').innerText()).includes('Editing'));
+  // Log tab: arrows and Space do not select or pre-listen hidden song rows
+  await page.getByRole('tab', { name: 'Log' }).click();
+  await page.locator('[data-testid="daylog-lines"] button').first().waitFor({ timeout: 5000 });
+  await page.getByTestId('daylog-lines').evaluate((el) => { el.tabIndex = -1; el.focus(); });
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press(' ');
+  await sleep(500);
+  check('F-DATABANK-54 on the Log tab ↓ and Space pre-listen nothing', !(await page.getByTestId('pfl-deck').isVisible().catch(() => false)));
+  await page.locator('[data-testid="daylog-lines"] button').nth(1).focus();
+  await page.keyboard.press(' ');
+  await sleep(300);
+  check('F-DATABANK-54 Space on a log line highlights that line only (no pre-listen)',
+    (await page.locator('[data-testid="daylog-lines"] button').nth(1).getAttribute('class')).includes('bg-[#000080]') && !(await page.getByTestId('pfl-deck').isVisible().catch(() => false)));
+  check('keys: no script errors', errors.length === 0, errors.join(' | '));
   await ctx.close();
 }
 
@@ -792,6 +858,65 @@ if (run('log')) {
     const nextLabel = new Date(Date.UTC(yy, mm - 1, dd + 1)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
     check('F-DATABANK-45 left open over station midnight: the list moves on to the new today and shows it', after.startsWith(nextLabel) && sel.startsWith(nextLabel), `${after} / ${sel}`);
     await c3.close();
+  }
+}
+
+/* ── F-DATABANK-62: Log tab after a station change ─────────────── */
+if (run('logstation')) {
+  // 20:00 in New York = 03:00 next day in Jerusalem (st-2): the 14 days differ by one
+  const nyNow = new Date();
+  const local = nyDay(nyNow);
+  const offsetH = -(new Date(nyNow.toLocaleString('en-US', { timeZone: 'America/New_York' })).getTime() - new Date(nyNow.toLocaleString('en-US', { timeZone: 'UTC' })).getTime()) / 3600e3;
+  const [yy, mm, dd] = local.split('-').map(Number);
+  const fakeNow = Date.UTC(yy, mm - 1, dd, 20 + offsetH, 0, 0);
+  for (const [name, opts] of [['desktop', DESKTOP], ['iPhone 13', IPHONE13]]) {
+    const db = makeDb();
+    db.today = local;
+    const st = makeStation({ extra: databankExtra(db) });
+    const { ctx } = await adminContext(browser, opts, st, { storage: { radio_last_station: 'st-1' } });
+    await ctx.addInitScript((ms) => {
+      const Real = Date; const shift = ms - Real.now();
+      class Fake extends Real { constructor(...a) { if (a.length === 0) super(Real.now() + shift); else super(...a); } static now() { return Real.now() + shift; } }
+      window.Date = Fake;
+    }, fakeNow);
+    const { page, errors } = await newPage(ctx);
+    await page.goto(`${BASE}/admin/databank?tab=log`);
+    const lines = page.locator('[data-testid="daylog-lines"] button');
+    await lines.first().waitFor({ timeout: 8000 });
+    const oldest = addDays(local, -13);
+    if (name === 'desktop') await page.locator('[data-testid="daylog-days"] button').nth(13).click();
+    else await page.getByTestId('daylog-day').selectOption(oldest);
+    await sleep(500);
+    await lines.nth(2).click();
+    check(`F-DATABANK-62 ${name}: a line highlighted on the oldest day of station 1`, (await lines.nth(2).getAttribute('class')).includes('bg-[#000080]'));
+    await page.getByRole('combobox', { name: 'Station' }).selectOption('st-2');
+    await sleep(600);
+    const jmToday = addDays(local, 1);
+    const asked = db.logReqs.filter((r) => r.station_id === 'st-2');
+    check(`F-DATABANK-62 ${name}: a day outside station 2's list falls back to its today`, asked.length > 0 && asked.every((r) => r.day === jmToday), JSON.stringify(asked.map((r) => r.day)));
+    if (name === 'desktop') {
+      const sel = await page.locator('[data-testid="daylog-days"] li[aria-selected="true"]').count();
+      const first = await page.locator('[data-testid="daylog-days"] li').first().getAttribute('aria-selected');
+      check(`F-DATABANK-62 ${name}: station 2's today is shown as chosen`, sel === 1 && first === 'true');
+    } else {
+      const v = await page.getByTestId('daylog-day').inputValue();
+      check(`F-DATABANK-62 ${name}: the day drop-down is not blank (shows station 2's today)`, v === jmToday, v);
+    }
+    const hl = await lines.evaluateAll((bs) => bs.filter((b) => b.className.includes('bg-[#000080]')).length);
+    check(`F-DATABANK-62 ${name}: no line of the new station is highlighted`, hl === 0, `${hl}`);
+    const n0 = db.logReqs.filter((r) => r.station_id === 'st-2' && r.day === jmToday).length;
+    await sleep(15800);
+    check(`F-DATABANK-62 ${name}: station 2's today keeps refreshing every 15 s`, db.logReqs.filter((r) => r.station_id === 'st-2' && r.day === jmToday).length > n0);
+    // Back to station 1: today, not the old day brought back
+    await page.getByRole('combobox', { name: 'Station' }).selectOption('st-1');
+    await sleep(600);
+    const backDay = name === 'desktop'
+      ? await page.locator('[data-testid="daylog-days"] li[aria-selected="true"]').innerText()
+      : await page.getByTestId('daylog-day').inputValue();
+    const todayLabel = new Date(Date.UTC(yy, mm - 1, dd)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    check(`F-DATABANK-62 ${name}: back on station 1 it shows today (the dropped day does not come back)`, name === 'desktop' ? backDay.startsWith(todayLabel) : backDay === local, backDay);
+    check(`F-DATABANK-62 ${name}: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
   }
 }
 

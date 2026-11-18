@@ -10,6 +10,36 @@ from app.services.silence_service import detect_silence, get_audio_duration
 
 logger = logging.getLogger(__name__)
 
+def replay_gain_for(loudness_lufs: float) -> float:
+    """dB that brings an item to -18 LUFS. Turning down goes to -20 dB (a story mastered
+    at -3 LUFS needs -15); turning up stops at +12 dB (more lifts the noise floor)."""
+    return round(max(-20.0, min(12.0, -18.0 - loudness_lufs)), 2)
+
+
+def measure_loudness(data: bytes) -> tuple[float | None, float | None]:
+    """(integrated LUFS, true peak dBFS) of some audio, from FFmpeg loudnorm's
+    measuring pass. (None, None) when it cannot be measured."""
+    cmd = [
+        settings.FFMPEG_PATH, "-hide_banner", "-i", "pipe:0",
+        "-af", "loudnorm=I=-18:LRA=11:TP=-1.5:print_format=json",
+        "-f", "null", "-",
+    ]
+    result = subprocess.run(cmd, input=data, capture_output=True, timeout=300)
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    json_match = re.search(r"\{[^}]*\"input_i\"[^}]*\}", stderr, re.DOTALL)
+    if not json_match:
+        return None, None
+    try:
+        loudnorm_data = json.loads(json_match.group())
+        lufs, tp = float(loudnorm_data["input_i"]), float(loudnorm_data["input_tp"])
+    except (json.JSONDecodeError, ValueError, TypeError, KeyError):
+        logger.warning("Failed to parse loudnorm JSON output")
+        return None, None
+    if lufs != lufs or lufs in (float("inf"), float("-inf")):
+        return None, None
+    return lufs, tp
+
+
 def analyze_audio_bytes(file_data: bytes) -> dict:
     """Analyze audio bytes and return loudness + cue point data.
 
@@ -17,25 +47,9 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
     cue_out_seconds, cross_start_seconds, replay_gain_db.
     """
     # 1. Measure loudness via FFmpeg loudnorm (first pass / print_format=json)
-    cmd = [
-        settings.FFMPEG_PATH, "-i", "pipe:0",
-        "-af", "loudnorm=I=-18:LRA=11:TP=-1.5:print_format=json",
-        "-f", "null", "-",
-    ]
-    result = subprocess.run(cmd, input=file_data, capture_output=True, timeout=300)
-    stderr = result.stderr.decode("utf-8", errors="replace")
-
-    # Extract the JSON block from stderr (loudnorm prints it at end)
-    loudness_lufs = -18.0
-    true_peak_dbfs = -1.5
-    json_match = re.search(r"\{[^}]*\"input_i\"[^}]*\}", stderr, re.DOTALL)
-    if json_match:
-        try:
-            loudnorm_data = json.loads(json_match.group())
-            loudness_lufs = float(loudnorm_data.get("input_i", -18.0))
-            true_peak_dbfs = float(loudnorm_data.get("input_tp", -1.5))
-        except (json.JSONDecodeError, ValueError, TypeError):
-            logger.warning("Failed to parse loudnorm JSON output")
+    loudness_lufs, true_peak_dbfs = measure_loudness(file_data)
+    if loudness_lufs is None:
+        loudness_lufs, true_peak_dbfs = -18.0, -1.5
 
     # 2. Get total duration
     total_duration = get_audio_duration(file_data)
@@ -63,7 +77,7 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
     cross_start = max(cue_in + 5.0, cue_out - 3.0)
 
     # replay_gain_db: -18.0 - measured_lufs, clamped to ±12 dB
-    replay_gain_db = max(-12.0, min(12.0, -18.0 - loudness_lufs))
+    replay_gain_db = replay_gain_for(loudness_lufs)
 
     return {
         "loudness_lufs": round(loudness_lufs, 2),
@@ -96,15 +110,19 @@ async def analyze_audio(db, asset_id: str, full: bool = False):
     # queued behind it then blocks every other query (froze a deploy once).
     await db.commit()
 
+    analysis = None
     if not full:
-        from app.services.tail_analysis import analyze_by_range, public_audio_url
+        from app.services.tail_analysis import LoudnessNotSampledError, analyze_by_range, public_audio_url
 
         url = public_audio_url(file_path or "")
         if not url:
             raise ValueError(f"No public URL for asset {asset_id}")
         previous = stored_extra.get("audio_analysis") if isinstance(stored_extra, dict) else None
-        analysis = await analyze_by_range(url, previous if isinstance(previous, dict) else None)
-    else:
+        try:
+            analysis = await analyze_by_range(url, previous if isinstance(previous, dict) else None)
+        except LoudnessNotSampledError as e:
+            logger.warning("Asset %s: %s; measuring the whole file", asset_id, e)
+    if analysis is None:
         # Download audio
         if file_path.startswith("http://") or file_path.startswith("https://"):
             import httpx

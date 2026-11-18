@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core import security as _security
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import get_db
@@ -16,6 +17,26 @@ from app.models.user import User, UserRole
 from app.services import upcoming_analysis
 
 upcoming_analysis.ENABLED = False  # no audio to download in tests
+
+# Passwords in tests are hashed with the cheapest bcrypt setting. Production's 12
+# rounds cost a quarter of a second per hash or login, three times per test: about
+# a third of the whole run. Existing hashes of any strength still verify.
+from passlib.context import CryptContext
+
+_security.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=4)
+
+_shared_app = None
+
+
+def _app():
+    """One app for the whole run. Building it registers some 340 routes and took
+    over a second, once per test: half of the run. Nothing in it is per test except
+    the dependency overrides, which the `client` fixture sets and clears. A test
+    that needs an app of its own (extra routes, a lifespan) still calls create_app()."""
+    global _shared_app
+    if _shared_app is None:
+        _shared_app = create_app()
+    return _shared_app
 
 from app.api.v1 import playlists as _playlists
 
@@ -40,6 +61,10 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB, ENUM as PG_EN
 def _set_sqlite_pragma(dbapi_conn, connection_record):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # Every test creates and drops all tables: some 300 statements, each waiting
+    # for the disk to confirm the write. A test database need not survive a crash.
+    cursor.execute("PRAGMA synchronous=OFF")
+    cursor.execute("PRAGMA journal_mode=MEMORY")
     cursor.close()
 
 
@@ -155,12 +180,16 @@ async def db_session() -> AsyncIterator[AsyncSession]:
 
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
-    app = create_app()
+    app = _app()
 
     async def override_get_db():
         yield db_session
 
+    app.dependency_overrides.clear()
     app.dependency_overrides[get_db] = override_get_db
+    limiter = getattr(app.state, "limiter", None)
+    if limiter is not None:
+        limiter.reset()  # counts are per app; a fresh app used to start them at zero
 
     from contextlib import asynccontextmanager
 
@@ -174,6 +203,7 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+    app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture

@@ -637,7 +637,8 @@ async function prearmedTimeCheck(browser, confirm) {
     heardAt === null ? 'never' : `${heardAt.toFixed(2)} s after its time`);
   // 0.3 s fade from the moment it starts (its deck starts playing). The 2 s pre-fade on
   // its own reaches silence only 0.4 s after the time, still above 0.01 0.34 s in.
-  const started = samples.find((s) => deckOf(s, 'tc'));
+  // (its deck coming up: the silent warm-up a few seconds before does not count)
+  const started = samples.find((s) => deckOf(s, 'tc')?.gain > 0.001);
   const t0 = started ? rel(started) : 0;
   const songLate = samples.filter((s) => rel(s) >= t0 + 0.34 && rel(s) <= t0 + 1).map((s) => deckOf(s, songId)?.gain ?? 0);
   check(`${tag}: the song is out 0.3 s after the time check starts`, songLate.length > 0 && songLate.every((g) => g < 0.01),

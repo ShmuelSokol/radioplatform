@@ -44,3 +44,39 @@ A `SpotSchedule` with `fixed_times` ("07:00,13:30", station time) airs at those 
 Every placement carries `timing_mode`, written to `QueueEntry.timing_mode` next to `preempt_at` (the playout engine and web player read it; see `wiki/operator-actions.md`): `hard` = the item on air fades and the spot starts on the second, `soft` = the item on air finishes first. The schedule's own `timing_mode` wins; otherwise the station default applies: `automation_config.spot_timing = {"on_the_hour": "hard", "other": "soft"}` (edit via `GET/PUT /spot-schedules/timing-defaults`, on the Spot Schedule page). Changing either re-stamps entries already queued, in place.
 
 Deleting a library item that a spot schedule or a program block uses is refused with 409 naming them (`asset_service.delete_asset`, 2026-11-17); before, the schedule vanished by CASCADE and the block item pointed at nothing. Queued entries and block playlist lines still go with the item.
+
+## Contracts hold (2026-11-17)
+
+- **Contract audio airs only through its contract.** Any asset a `SpotSchedule` uses is excluded from every rotation, playlist, category or block pool (`models/asset.not_contract_audio()`, part of `fit_for_random_pick()` and added to every `in_category` pick). Before this a rule like "a spot every 3 songs" or a block naming category Spots drew sponsor audio at random, outside its dates and caps. An operator can still queue it by hand.
+- **A waiting slot never airs after the last day.** A soft slot can wait behind a long shiur, or a station can be stopped, and nothing expired overdue `ad_slot` rows: a 23:45 slot of a contract ending today aired at 00:05 the next day. `lapsed_contract_assets()` = contract audio with no active schedule covering *today in station time* on this station. The engine's `pick_next` leaves those out (read-only), the browser path and `reconcile_spot_slots` mark them `skipped`. Lateness within a covered day is still allowed.
+- Tests: `tests/test_sponsorship_contracts.py` (end today/tomorrow in Jerusalem and New York time, start dates, one-day contracts, weekdays, exact caps per daypart, overbooking, Shabbos, edit/cancel/delete on the queue, lapsed slot on both players, operator override, rotations).
+
+## Missed plays in the sponsor portal
+
+Shmuel 2026-11-17: sponsors should see what they missed. `services/sponsor_delivery.py`
+(`GET /sponsor-portal/missed-plays`, Dashboard "Missed Plays"):
+
+- **Past (14 days)**: per active sponsorship, station day and time of day, the plays
+  promised (plays per time of day, or one per exact time) against play-log rows of
+  its recording on that station. A play counts once; one starting up to 15 min after
+  its time of day ended still counts for it (a soft play waited for a song).
+- Not promised, so never "missed": a time of day touched by a blackout (Shabbos,
+  Yom Tov), one still running, one that began before the contract was entered, and
+  anything of a cancelled (inactive) contract.
+- **Coming (7 days)**: the planner's unplaced plays ("No room left") and plays it
+  rolled to a later block the same day (`Placement.moved_from`).
+- Nothing is stored: it is worked out on each read, so editing a contract changes
+  what its past days were "promised". No make-good is planned automatically.
+- Tests: `tests/test_sponsor_missed_plays.py`, `frontend/e2e/sponsor-missed-plays.mjs`.
+
+## A recording that may not air is not planned (2026-11-18)
+
+`plan_for_station` leaves out every schedule whose recording no automatic pick may use
+(`Asset` `not_placeholder()`: category do_not_play, a placeholder title, rejected in
+review), through `airable_schedules`. Before, the planner made its slots and the queue
+refill's `_purge_placeholders` deleted them again on every queue read: "removed 19
+placeholder entries" then "Spot slots reconciled +19 -0 (kept 0)", about 12 queue rows
+a second for ever (review thread's walk-through; do-not-play is one tap in the control
+room since PR 251). Spots mode off alone did not cause it (the plan is empty). The
+sponsor's Missed Plays still lists the plays that did not air. Taking the mark off plans
+it again on the next refill. Test: `backend/tests/test_spot_slot_churn.py`.

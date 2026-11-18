@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.asset import Asset, not_placeholder
+from app.models.asset import Asset, in_category, not_contract_audio, not_placeholder
 from app.models.program_block import ProgramBlock
 from app.models.queue_entry import QueueEntry
 from app.models.station import Station
@@ -104,10 +104,30 @@ async def load_blocks(db: AsyncSession, station_id, active_only: bool = True) ->
     return list((await db.execute(stmt.order_by(ProgramBlock.name))).scalars().all())
 
 
+# Places a "sponsors" item holds when it only says how long it may run
+TIMED_PLACES = 10
+
+
+def item_places(item: dict) -> int:
+    """How many sponsorships a "sponsors" item can hold at most."""
+    if item.get("count"):
+        return max(0, int(item["count"]))
+    return TIMED_PLACES if item.get("max_seconds") else 1
+
+
 def sponsor_places(block: ProgramBlock) -> int:
-    return sum(
-        max(0, int(i.get("count") or 1)) for i in block.items or [] if i.get("kind") == "sponsors"
-    )
+    return sum(item_places(i) for i in block.items or [] if i.get("kind") == "sponsors")
+
+
+def sponsor_seconds(block: ProgramBlock) -> float | None:
+    """The most sponsorship time one airing of the block may hold, or None when no
+    "sponsors" item sets a limit (then only the places count)."""
+    limits = [
+        float(i["max_seconds"])
+        for i in block.items or []
+        if i.get("kind") == "sponsors" and i.get("max_seconds")
+    ]
+    return sum(limits) if limits else None
 
 
 async def load_breaks(db: AsyncSession, station: Station, start: datetime, end: datetime):
@@ -123,6 +143,7 @@ async def load_breaks(db: AsyncSession, station: Station, start: datetime, end: 
             timing_mode=o.block.timing_mode,
             name=o.block.name,
             latest_minutes=o.block.latest_minutes,
+            seconds=sponsor_seconds(o.block),
         )
         for o in occurrences_between(blocks, station_tz(station.timezone), start, end)
     ]
@@ -212,10 +233,13 @@ class _Resolver:
         key = (asset_type, category)
         if key not in self.pools:
             stmt = select(Asset.id, Asset.title, Asset.duration).where(
-                Asset.asset_type == asset_type, not_placeholder()
+                Asset.asset_type == asset_type, not_placeholder(), not_contract_audio()
             )
             if category:
-                stmt = stmt.where(Asset.category == category)
+                stmt = stmt.where(in_category(category))
+            from app.services.station_blocks import blocked_asset_ids
+
+            stmt = stmt.where(Asset.id.notin_(blocked_asset_ids(self.station.id)))
             self.pools[key] = list((await self.db.execute(stmt.order_by(Asset.title))).all())
         pool = self.pools[key]
         if not pool:
@@ -246,10 +270,17 @@ class _Resolver:
                 self.announcements[slot_key] = (None, None)
         return self.announcements[slot_key]
 
-    async def _sponsor_items(self, planned: list, count: int) -> list[ResolvedItem]:
+    async def _sponsor_items(self, planned: list, count: int, timed: bool = False) -> list[ResolvedItem]:
         found = []
         for _ in range(count):
             if not planned:
+                if timed:
+                    # A time limit, not a number of places: one line says there is room
+                    if not found:
+                        found.append(
+                            ResolvedItem(kind="sponsors", label="Open sponsorship time", open_place=True)
+                        )
+                    break
                 found.append(ResolvedItem(kind="sponsors", label="Open sponsor place", open_place=True))
                 continue
             placement = planned.pop(0)
@@ -272,7 +303,7 @@ class _Resolver:
             label = item.get("label") or item_label(item)
             if kind == "sponsors":
                 occurrence.items.extend(
-                    await self._sponsor_items(planned, max(0, int(item.get("count") or 1)))
+                    await self._sponsor_items(planned, item_places(item), timed=bool(item.get("max_seconds")))
                 )
                 continue
             out = ResolvedItem(kind=kind, label=label)
@@ -304,6 +335,16 @@ class _Resolver:
             else:
                 out.problem = f"{label}: unknown kind of item"
             occurrence.items.append(out)
+        # The block's programme (its last recording) has nothing to play: what comes
+        # before it (an announcement of it) is left out too, so listeners never hear
+        # "Daf Yomi" announced and then music (Jerusalem 2026-11-17)
+        recordings = [i for i in occurrence.items if i.kind in ("asset", "category")]
+        if len(recordings) > 1 and recordings[-1].problem:
+            for item in recordings[:-1]:
+                if not item.problem:
+                    item.problem = (f"{item.label}: left out, as {recordings[-1].label} "
+                                    "after it has nothing to play")
+                    item.asset_id, item.duration = None, None
 
 
 async def plan_blocks(

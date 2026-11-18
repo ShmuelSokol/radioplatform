@@ -331,6 +331,11 @@ export default function Listen() {
     useStream ? null : wsNextAsset?.audio_url ?? null,
     wsNowPlaying?.started_at ?? null,
     wsNowPlaying?.change_fade_seconds ?? null,
+    true, true,
+    false, // no level meters on this page
+    wsAsset?.overlap_seconds,
+    useStream ? undefined : wsNextAsset?.overlap_seconds,
+    wsAsset?.end_fade_seconds,
   );
 
   // Fetch active live show status (still uses polling — shows don't change often)
@@ -420,6 +425,12 @@ export default function Listen() {
       streamAudioRef.current.volume = muted ? 0 : volume;
     }
   }, [volume, muted]);
+
+  // The server stream runs a few seconds behind: silence it the moment the host is on
+  // air, or the song is heard under the host's first words
+  useEffect(() => {
+    if (streamAudioRef.current && useStream) streamAudioRef.current.muted = live.onAir;
+  }, [live.onAir, useStream]);
 
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
   if (!station) {

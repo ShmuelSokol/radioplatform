@@ -1,19 +1,23 @@
+import { useState } from 'react';
 import { usePublicHosts } from '../../hooks/useUsers';
 import type { PublicHost } from '../../types';
 
 function HostCard({ host }: { host: PublicHost }) {
+  // A photo URL that does not load shows the placeholder, not a broken image
+  const [photoFailed, setPhotoFailed] = useState(false);
   return (
     <div className="bg-[#12123a] border border-[#2a2a5e] rounded-xl overflow-hidden hover:border-purple-500/50 transition group">
       {/* Photo */}
       <div className="aspect-square bg-[#0a0a28] flex items-center justify-center overflow-hidden">
-        {host.photo_url ? (
+        {host.photo_url && !photoFailed ? (
           <img
             src={host.photo_url}
             alt={host.display_name}
+            onError={() => setPhotoFailed(true)}
             className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-900/40 to-indigo-900/40">
+          <div data-testid="host-photo-placeholder" className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-900/40 to-indigo-900/40">
             <svg className="w-20 h-20 text-purple-400/40" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
             </svg>
@@ -37,13 +41,13 @@ function HostCard({ host }: { host: PublicHost }) {
 
         {/* Social Links */}
         {host.social_links && Object.keys(host.social_links).length > 0 && (
-          <div className="flex gap-3 mt-3 pt-3 border-t border-[#2a2a5e]">
+          <div className="flex gap-1 -ml-3 mt-3 pt-1 border-t border-[#2a2a5e]">
             {host.social_links.twitter && (
               <a
                 href={host.social_links.twitter.startsWith('http') ? host.social_links.twitter : `https://twitter.com/${host.social_links.twitter}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-500 hover:text-sky-400 transition"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-gray-500 hover:text-sky-400 transition"
                 title="Twitter / X"
               >
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -56,7 +60,7 @@ function HostCard({ host }: { host: PublicHost }) {
                 href={host.social_links.instagram.startsWith('http') ? host.social_links.instagram : `https://instagram.com/${host.social_links.instagram}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-500 hover:text-pink-400 transition"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-gray-500 hover:text-pink-400 transition"
                 title="Instagram"
               >
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -69,7 +73,7 @@ function HostCard({ host }: { host: PublicHost }) {
                 href={host.social_links.website.startsWith('http') ? host.social_links.website : `https://${host.social_links.website}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-500 hover:text-cyan-400 transition"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-gray-500 hover:text-cyan-400 transition"
                 title="Website"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

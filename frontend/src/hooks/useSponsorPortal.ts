@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { getPlayHistory, getUpcomingSchedule, getSponsorStats, getMySpots } from '../api/sponsorPortal';
+import { getPlayHistory, getUpcomingSchedule, getSponsorStats, getMySpots, getMissedPlays } from '../api/sponsorPortal';
 
 export function usePlayHistory(page = 1, limit = 25) {
   return useQuery({
@@ -26,5 +26,12 @@ export function useMySpots() {
   return useQuery({
     queryKey: ['sponsor-my-spots'],
     queryFn: getMySpots,
+  });
+}
+
+export function useMissedPlays() {
+  return useQuery({
+    queryKey: ['sponsor-missed-plays'],
+    queryFn: getMissedPlays,
   });
 }

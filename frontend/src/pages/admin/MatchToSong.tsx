@@ -50,7 +50,7 @@ export default function MatchToSong({
         type="button"
         onClick={() => setOpen(true)}
         disabled={busy}
-        className="text-cyan-400 hover:text-cyan-300 text-[11px] disabled:opacity-50"
+        className="text-cyan-400 hover:text-cyan-300 text-[11px] disabled:opacity-50 inline-flex items-center min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0"
         data-testid="match-to-song"
       >
         Match

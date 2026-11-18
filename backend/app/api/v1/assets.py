@@ -792,6 +792,63 @@ async def update_request_settings(
     }
 
 
+@router.post("/{asset_id}/do-not-play")
+async def do_not_play(
+    asset_id: uuid.UUID,
+    body: dict | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Control room quick action: mark a song do-not-play (`{"on": true}`, the default)
+    and take its waiting copies out of every queue, or put it back (`{"on": false}`).
+    Never touches what is on air or already handed to the playout engine."""
+    on = (body or {}).get("on", True)
+    if not isinstance(on, bool):
+        raise HTTPException(status_code=422, detail="on must be true or false")
+    from app.services.asset_service import set_do_not_play
+    return await set_do_not_play(db, asset_id, on)
+
+
+@router.get("/{asset_id}/station-block")
+async def get_station_block(
+    asset_id: uuid.UUID,
+    station_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_staff),
+):
+    """Is this item kept off this one station ("Not on this station")?"""
+    from app.services.station_blocks import is_blocked
+    return {"id": str(asset_id), "station_id": str(station_id), "blocked": await is_blocked(db, station_id, asset_id)}
+
+
+@router.post("/{asset_id}/station-block")
+async def station_block(
+    asset_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_manager),
+):
+    """Control room quick action: keep a song off ONE station (`{"station_id": ...,
+    "on": true}`) and take its waiting copies out of that station's queue, or allow it
+    there again (`"on": false`). Other stations are not touched; never touches what is
+    on air or already handed to the playout engine."""
+    from app.core.dependencies import may_operate_station
+    from app.services.station_blocks import set_blocked
+    from app.services.station_service import get_station
+
+    on = body.get("on", True)
+    if not isinstance(on, bool):
+        raise HTTPException(status_code=422, detail="on must be true or false")
+    try:
+        station_id = uuid.UUID(str(body.get("station_id")))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="station_id is required") from None
+    station = await get_station(db, station_id)
+    if not may_operate_station(user, station):
+        raise HTTPException(status_code=403, detail="You are not assigned to this station")
+    return await set_blocked(db, station_id, asset_id, on)
+
+
 @router.get("/enhance-presets")
 async def get_enhance_presets(
     _user: User = Depends(require_staff),

@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
+import { guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.BASE_URL || 'http://localhost:4330';
@@ -3071,7 +3072,7 @@ section('reviews', async () => {
 // ── Recording studio (fake microphone) ──────────────────────────────────────
 section('studio', async () => {
   // A browser of its own with Chrome's fake microphone (a steady tone) and no permission prompt
-  const fake = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+  const fake = guardBrowser(await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] }));
   try {
     for (const view of ['desktop', 'iphone']) {
       const ctx = await fake.newContext({ ...VIEWS[view], permissions: ['microphone'] });
@@ -3826,12 +3827,12 @@ function a11yScan() {
 // other page must stay clean. Remove a page here once it scans clean.
 const A11Y_GAP_PAGES = new Set([
   '/admin/dashboard', '/admin/assets', '/admin/assets/upload', '/admin/assets/:id', '/admin/reviews/:id',
-  '/admin/users', '/admin/rules', '/admin/schedules', '/admin/holidays', '/admin/sponsors',
+  '/admin/schedules', '/admin/holidays',
   '/admin/spot-schedule', '/admin/spot-recordings', '/admin/schedule-check', '/admin/sponsorship-rules',
-  '/admin/playlists', '/admin/alerts', '/admin/bug-reports', '/admin/site-updates', '/admin/activity',
-  '/admin/analytics', '/admin/live', '/admin/live/:id/host', '/admin/live/:id/screen', '/admin/requests',
-  '/admin/archives', '/admin/audio-enhance/:id', '/admin/studio', '/admin/listeners', '/admin/crm',
-  '/admin/program-clock', '/sponsor/dashboard', '/guide', '/archives', '/listen/:id',
+  '/admin/playlists', '/admin/alerts', '/admin/site-updates',
+  '/admin/analytics', '/admin/live', '/admin/live/:id/host', '/admin/requests',
+  '/admin/archives', '/admin/audio-enhance/:id', '/admin/studio', '/admin/listeners',
+  '/admin/program-clock', '/guide', '/archives', '/listen/:id',
 ]);
 section('a11y', async () => {
   const jobs = [
@@ -3924,7 +3925,7 @@ section('load', async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 async function main() {
   await setup();
-  browser = await chromium.launch();
+  browser = guardBrowser(await chromium.launch());
   for (const s of SECTIONS) {
     if (ONLY.length && !ONLY.includes(s.name)) continue;
     console.log(`\n── ${s.name} ──`);
@@ -3934,6 +3935,6 @@ async function main() {
   const n = (st) => results.filter(r => r.status === st).length;
   console.log(`\n${n('PASS')} passed, ${n('KNOWN-BUG')} known bugs, ${n('FAIL')} failed, ${n('FIXED?')} known bugs now passing (${results.length} checks)`);
   fs.rmSync(TMP, { recursive: true, force: true });
-  process.exit(n('FAIL') || n('FIXED?') ? 1 : 0);
+  process.exit(n('FAIL') || n('FIXED?') || guardVerdict() ? 1 : 0);
 }
 main().catch(e => { console.error(e); process.exit(2); });

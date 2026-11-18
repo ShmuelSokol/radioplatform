@@ -5,13 +5,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import station_guard as sg
 from app.core.dependencies import get_db, require_admin, require_dj_or_manager, require_staff
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import NotFoundError
 from app.models.live_show import LiveShow, LiveShowStatus
 from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.user import User
@@ -341,48 +341,51 @@ async def get_active_show_for_station(
     }
 
 
-# --- Twilio webhooks (no auth — validated by Twilio signature) ---
+# --- Twilio webhooks (no login; signed by Twilio with X-Twilio-Signature) ---
 
-def _twilio_signature_ok(url: str, params: dict, signature: str, token: str) -> bool:
-    try:
-        from twilio.request_validator import RequestValidator
-    except ImportError:  # same check by hand (Twilio: HMAC-SHA1 of URL + sorted key/values, base64)
-        import base64
-        import hashlib
-        import hmac
+def twilio_signature(auth_token: str, url: str, params) -> str:
+    """Twilio's request signature: base64 HMAC-SHA1 of the full URL followed by every
+    POST parameter as name+value, sorted by name, keyed with the account's auth token."""
+    import base64
+    import hashlib
+    import hmac
 
-        data = url + "".join(f"{k}{params[k]}" for k in sorted(params))
-        expected = base64.b64encode(hmac.new(token.encode(), data.encode(), hashlib.sha1).digest()).decode()
-        return hmac.compare_digest(expected, signature)
-    return RequestValidator(token).validate(url, params, signature)
+    data = url + "".join(f"{k}{v}" for k, v in sorted(params, key=lambda kv: kv[0]))
+    digest = hmac.new(auth_token.encode(), data.encode(), hashlib.sha1).digest()
+    return base64.b64encode(digest).decode()
 
 
-async def _twilio_form(request: Request) -> dict:
-    """The webhook's form fields, after checking X-Twilio-Signature. With no
-    TWILIO_AUTH_TOKEN set the check is skipped (local work, tests); with one set,
-    an unsigned or wrongly signed request is refused with 403. Twilio signs the
-    public URL it called, which behind the Railway proxy differs from the one
-    uvicorn sees, so BACKEND_PUBLIC_URL and the forwarded scheme/host are tried too."""
-    form = await request.form()
-    params = {k: v for k, v in form.items() if isinstance(v, str)}
+def _twilio_urls(request: Request) -> list[str]:
+    """The URL Twilio may have signed: behind Railway's proxy the app sees http, and
+    Twilio was given BACKEND_PUBLIC_URL, so try those spellings too."""
+    url = str(request.url)
+    urls = [url]
+    if url.startswith("http://"):
+        urls.append("https://" + url[len("http://"):])
+    if settings.BACKEND_PUBLIC_URL:
+        tail = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        urls.append(settings.BACKEND_PUBLIC_URL.rstrip("/") + tail)
+    return urls
+
+
+async def require_twilio_signature(request: Request) -> None:
+    """Refuse a webhook not signed by Twilio, so nobody can add fake callers to a show's
+    queue or mark real callers as hung up. Checked whenever TWILIO_AUTH_TOKEN is set."""
+    import hmac
+
     token = settings.TWILIO_AUTH_TOKEN
     if not token:
-        return params
-    signature = request.headers.get("X-Twilio-Signature", "")
-    if not signature:
-        raise ForbiddenError("Missing Twilio signature")
-    path_qs = request.url.path + (f"?{request.url.query}" if request.url.query else "")
-    candidates = {str(request.url)}
-    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
-    host = request.headers.get("x-forwarded-host", "").split(",")[0].strip() or request.headers.get("host", "")
-    if host:
-        for scheme in {proto or request.url.scheme, "https"}:
-            candidates.add(f"{scheme}://{host}{path_qs}")
-    if settings.BACKEND_PUBLIC_URL:
-        candidates.add(settings.BACKEND_PUBLIC_URL.rstrip("/") + path_qs)
-    if not any(_twilio_signature_ok(url, params, signature, token) for url in candidates):
-        raise ForbiddenError("Bad Twilio signature")
-    return params
+        return
+    given = request.headers.get("X-Twilio-Signature", "")
+    form = await request.form()
+    params = list(form.multi_items())
+    if given and any(
+        hmac.compare_digest(twilio_signature(token, url, params), given) for url in _twilio_urls(request)
+    ):
+        return
+    logger.warning("Twilio webhook %s refused: bad or missing signature", request.url.path)
+    raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
 
 def _phone_key(number) -> str:
     """A phone number as its numerals only, to compare +1 (555) 000-0002 with +15550000002."""
@@ -405,10 +408,10 @@ async def _station_for_number(db: AsyncSession, number) -> uuid.UUID | None:
     return None
 
 
-@router.post("/twilio/inbound")
+@router.post("/twilio/inbound", dependencies=[Depends(require_twilio_signature)])
 async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     """Twilio inbound call webhook — find active show, create CallInRequest, return hold TwiML."""
-    form = await _twilio_form(request)
+    form = await request.form()
     caller_phone = form.get("From", "unknown")
     call_sid = form.get("CallSid", "")
 
@@ -455,10 +458,10 @@ async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     return Response(content=twiml, media_type="application/xml")
 
 
-@router.post("/twilio/status")
+@router.post("/twilio/status", dependencies=[Depends(require_twilio_signature)])
 async def twilio_status(request: Request, db: AsyncSession = Depends(get_db)):
     """Twilio call status callback — update call status when caller hangs up."""
-    form = await _twilio_form(request)
+    form = await request.form()
     call_sid = form.get("CallSid", "")
     call_status = form.get("CallStatus", "")
 

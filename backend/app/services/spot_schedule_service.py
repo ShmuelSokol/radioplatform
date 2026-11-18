@@ -37,6 +37,8 @@ DAYPARTS: dict[str, tuple[int, int]] = {
     "overnight": (0, 6),
 }
 DEFAULT_SLOT_MINUTES = [15, 30, 45]
+# Length counted for a sponsorship whose recording has no measured length
+DEFAULT_SPOT_SECONDS = 30.0
 HORIZON_DAYS = 7
 # Never add/remove a slot this close to air time — the player may be picking it up.
 SAFETY_MARGIN = timedelta(minutes=2)
@@ -85,6 +87,8 @@ class Placement:
     block: str | None = None  # name of the program block whose sponsor place this is
     seat: int = 0  # which of that block's places (0 = first)
     hard_by: datetime | None = None  # UTC; soft, but fade the song if still waiting then
+    # Its own time of day had no room, so it rolled to a later block the same day
+    moved_from: str | None = None
 
 
 @dataclass
@@ -119,6 +123,8 @@ class Break:
     timing_mode: str
     name: str
     latest_minutes: int | None = None  # soft, but no later than this many minutes
+    # The most sponsorship time one airing may hold (None = only the places count)
+    seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +187,7 @@ def plan_spots(
     blackouts: list[Blackout] | None = None,
     timing_defaults: dict | None = None,
     breaks: list[Break] | None = None,
+    durations: dict[str, float] | None = None,
 ) -> tuple[list[Placement], list[Unplaced]]:
     """Assign each schedule's plays to clock slots, spread evenly through each daypart.
 
@@ -198,6 +205,18 @@ def plan_spots(
     play aims at the break its share of the daypart points to and takes the
     first free place there, or the next break with room. An exact time that
     is a break's start takes a place in that break.
+
+    A break may also limit its sponsorship time (``Break.seconds``); a play then
+    needs a free place and enough time left for its length (``durations``: asset
+    id -> seconds, DEFAULT_SPOT_SECONDS when unknown).
+
+    More plays than a time of day's blocks hold (see ``_fair_order``): everyone
+    gets one play before anyone gets a second, contracts about to end go first,
+    and the rest take turns by day, so the same sponsorship does not lose out
+    every day. Plays still without room roll to a later block the same day that
+    has room left after its own time of day is placed (``Placement.moved_from``).
+    Only when the whole rest of the day is full is a play reported unplaced.
+    With enough room, nothing changes from the simple first-booked order.
     """
     blackouts = blackouts or []
     minutes = sorted({int(m) for m in (slot_minutes or DEFAULT_SLOT_MINUTES) if 0 <= int(m) < 60})
@@ -206,15 +225,28 @@ def plan_spots(
     unplaced: list[Unplaced] = []
 
     room: dict[datetime, int] = {}
+    time_left: dict[datetime, float] = {}
     by_time: dict[datetime, Break] = {}
     for b in breaks or []:
         if b.capacity > 0 and not any(x.covers(b.local) for x in blackouts):
             by_time[b.local] = b
             room[b.local] = b.capacity
+            if b.seconds is not None:
+                time_left[b.local] = float(b.seconds)
+
+    def length(sched) -> float:
+        return float((durations or {}).get(str(sched.asset_id)) or DEFAULT_SPOT_SECONDS)
+
+    def fits(b: Break, sched) -> bool:
+        if room.get(b.local, 0) <= 0:
+            return False
+        return b.local not in time_left or time_left[b.local] + 0.5 >= length(sched)
 
     def seat_in(b: Break, sched) -> Placement:
         seat = b.capacity - room[b.local]
         room[b.local] -= 1
+        if b.local in time_left:
+            time_left[b.local] -= length(sched)
         at = b.local.astimezone(UTC).replace(second=0, microsecond=0)
         return Placement(
             at=at,
@@ -256,7 +288,7 @@ def plan_spots(
                         )
                     )
                     continue
-                if room.get(local):
+                if local in by_time and fits(by_time[local], sched):
                     placements.append(seat_in(by_time[local], sched))
                     continue
                 if local in fixed_at:
@@ -284,6 +316,7 @@ def plan_spots(
                     )
                 )
 
+        waiting: list[Unplaced] = []  # block plays with no room in their time of day
         for daypart, (h_start, h_end) in DAYPARTS.items():
             wanting = [
                 s
@@ -331,22 +364,48 @@ def plan_spots(
                     ),
                     key=lambda b: b.local,
                 )
-                for sched in wanting:
-                    plays = max(1, int(sched.plays_per_daypart or 1))
-                    for k in range(plays):
-                        open_ = [b for b in day_breaks if room[b.local] > 0]
-                        if not open_:
-                            reason = (
-                                "no sponsor place left in this time of day's blocks"
-                                if day_breaks
-                                else "no block with sponsor places in this time of day"
-                            )
-                            unplaced.append(Unplaced(local_date, daypart, sched, reason))
+                def place(order: list[tuple], commit: bool) -> tuple[list, list]:
+                    """Seat the plays in this order; without `commit` the room is put back."""
+                    saved = (dict(room), dict(time_left))
+                    seated, left_out = [], []
+                    for sched, k, plays in order:
+                        if not day_breaks:
+                            left_out.append((sched, "no block with sponsor places in this time of day"))
                             continue
                         idx = int((k + 0.5) * len(day_breaks) / plays) % len(day_breaks)
-                        while room[day_breaks[idx].local] <= 0:
-                            idx = (idx + 1) % len(day_breaks)
-                        placements.append(seat_in(day_breaks[idx], sched))
+                        chosen = next(
+                            (
+                                day_breaks[(idx + step) % len(day_breaks)]
+                                for step in range(len(day_breaks))
+                                if fits(day_breaks[(idx + step) % len(day_breaks)], sched)
+                            ),
+                            None,
+                        )
+                        if chosen is None:
+                            left_out.append((sched, "no sponsor place left in this time of day's blocks"))
+                            continue
+                        seated.append(seat_in(chosen, sched))
+                    if not commit:
+                        room.clear()
+                        room.update(saved[0])
+                        time_left.clear()
+                        time_left.update(saved[1])
+                    return seated, left_out
+
+                booked = [
+                    (sched, k, plays)
+                    for sched in wanting
+                    for plays in [max(1, int(sched.plays_per_daypart or 1))]
+                    for k in range(plays)
+                ]
+                _, left_out = place(booked, commit=False)
+                if left_out and day_breaks:
+                    # Over-booked: share the room fairly instead of first booked, first served
+                    booked = _fair_order(wanting, local_date, list(DAYPARTS).index(daypart))
+                seated, left_out = place(booked, commit=True)
+                placements.extend(seated)
+                for sched, reason in left_out:
+                    waiting.append(Unplaced(local_date, daypart, sched, reason))
                 continue
             slots = [
                 slot
@@ -408,8 +467,60 @@ def plan_spots(
                     )
                 )
 
+        # Roll what found no room to a later block the same day. Every time of day
+        # has placed its own plays by now, so a rolled play never takes their room.
+        for u in waiting:
+            later = sorted(
+                (
+                    b
+                    for b in by_time.values()
+                    if b.local.date() == local_date and b.local.hour >= DAYPARTS[u.daypart][1]
+                ),
+                key=lambda b: b.local,
+            )
+            chosen = next((b for b in later if fits(b, u.schedule)), None)
+            if chosen is None or "no block" in u.reason:
+                unplaced.append(u)
+                continue
+            moved = seat_in(chosen, u.schedule)
+            moved.moved_from = u.daypart
+            placements.append(moved)
+
     placements.sort(key=lambda p: (p.at, p.seat))
     return placements, unplaced
+
+
+# A contract with this many days or fewer left goes first when room is short
+URGENT_DAYS = 3
+
+
+def _fair_order(wanting: list[SpotSchedule], local_date: date, turn: int) -> list[tuple]:
+    """The order plays are seated in when a time of day is over-booked.
+
+    Round by round (everyone's first play before anyone's second). Within a
+    round, contracts ending within URGENT_DAYS go first: they cannot make the
+    play up later. The others take turns: the starting point moves on by one
+    each day and each time of day, so the play that loses out is not always the
+    same sponsor's. Depends only on the date, never on when the plan is made,
+    so repeated runs give the same plan.
+    """
+
+    def urgent(s) -> bool:
+        return bool(s.end_date) and (s.end_date - local_date).days <= URGENT_DAYS
+
+    first = sorted((s for s in wanting if urgent(s)), key=lambda s: (s.end_date, str(s.created_at or ""), str(s.id)))
+    rest = [s for s in wanting if not urgent(s)]
+    if rest:
+        start = (local_date.toordinal() + turn) % len(rest)
+        rest = rest[start:] + rest[:start]
+    rounds = max(max(1, int(s.plays_per_daypart or 1)) for s in wanting)
+    order = []
+    for k in range(rounds):
+        for s in first + rest:
+            plays = max(1, int(s.plays_per_daypart or 1))
+            if k < plays:
+                order.append((s, k, plays))
+    return order
 
 
 async def load_station_schedules(db: AsyncSession, station_id) -> list[SpotSchedule]:
@@ -420,6 +531,83 @@ async def load_station_schedules(db: AsyncSession, station_id) -> list[SpotSched
         )
     )
     return list(result.scalars().all())
+
+
+async def airable_schedules(db: AsyncSession, schedules: list[SpotSchedule]) -> list[SpotSchedule]:
+    """The schedules whose recording an automatic pick may use. One marked do-not-play
+    (one tap in the control room), a placeholder or one rejected in review is not
+    planned: the queue refill removes such entries (_purge_placeholders), so planning
+    them made and deleted every slot on every queue read, about 12 dead queue rows a
+    second (2026-11-18). It is planned again as soon as the mark is taken off."""
+    if not schedules:
+        return schedules
+    from app.models.asset import Asset, not_placeholder
+
+    ok = set((await db.execute(
+        select(Asset.id).where(Asset.id.in_({s.asset_id for s in schedules}), not_placeholder())
+    )).scalars().all())
+    return [s for s in schedules if s.asset_id in ok]
+
+
+async def lapsed_contract_assets(
+    db: AsyncSession, station: Station, now: datetime | None = None
+) -> set[str]:
+    """Sponsorship audio whose contract does not cover today on this station.
+
+    An asset some spot schedule uses is contract audio: it airs only while a
+    schedule for this station (or every station) is active and today, in station
+    time, is inside its dates and days. A queued sponsorship that is still waiting
+    (a soft slot behind a long shiur, a station that was stopped) must not air on
+    a day its contract no longer covers: a contract ending today used to air at
+    00:05 tomorrow from a 23:45 slot. Ids are strings."""
+    now = now or datetime.now(UTC)
+    today = now.astimezone(station_tz(station.timezone)).date()
+    rows = (await db.execute(select(SpotSchedule))).scalars().all()
+    used: set[str] = set()
+    covered: set[str] = set()
+    for s in rows:
+        used.add(str(s.asset_id))
+        if s.station_id is not None and str(s.station_id) != str(station.id):
+            continue
+        if _applies_on(s, today):
+            covered.add(str(s.asset_id))
+    return used - covered
+
+
+async def skip_lapsed_sponsorships(db: AsyncSession, station_id, now: datetime | None = None) -> int:
+    """Mark pending automatic queue entries of lapsed contract audio that are due
+    (or due within the safety margin) as skipped (see lapsed_contract_assets). Later
+    ones are removed by reconcile_spot_slots or the block rebuild. An operator's own
+    pick is left alone."""
+    from sqlalchemy import update
+
+    from app.api.v1.queue import OPERATOR_SOURCES
+
+    station = (
+        await db.execute(select(Station).where(Station.id == station_id))
+    ).scalar_one_or_none()
+    if station is None:
+        return 0
+    now = now or datetime.now(UTC)
+    lapsed = await lapsed_contract_assets(db, station, now)
+    if not lapsed:
+        return 0
+    ids = [uuid.UUID(x) for x in lapsed]
+    result = await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.asset_id.in_(ids),
+            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now + SAFETY_MARGIN),
+            or_(QueueEntry.source.is_(None), QueueEntry.source.notin_(OPERATOR_SOURCES)),
+        )
+        .values(status="skipped")
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount:
+        logger.info("Station %s: %d queued sponsorship(s) skipped, contract over", station_id, result.rowcount)
+    return result.rowcount or 0
 
 
 async def load_blackouts(
@@ -452,7 +640,7 @@ async def plan_for_station(
     if not spots_on(station):
         # Spots mode off (control room): no sponsorship goes in the queue
         return [], []
-    schedules = await load_station_schedules(db, station.id)
+    schedules = await airable_schedules(db, await load_station_schedules(db, station.id))
     tz = station_tz(station.timezone)
     minutes = (station.automation_config or {}).get("ad_slot_minutes") or DEFAULT_SLOT_MINUTES
     blackouts = await load_blackouts(
@@ -463,6 +651,14 @@ async def plan_for_station(
     breaks = await load_breaks(
         db, station, now - timedelta(days=1), now + timedelta(days=days + 1)
     )
+    durations: dict[str, float] = {}
+    if breaks and any(b.seconds is not None for b in breaks) and schedules:
+        from app.models.asset import Asset
+
+        rows = await db.execute(
+            select(Asset.id, Asset.duration).where(Asset.id.in_({s.asset_id for s in schedules}))
+        )
+        durations = {str(r[0]): float(r[1]) for r in rows.all() if r[1]}
     placements, unplaced = plan_spots(
         schedules,
         tz,
@@ -472,6 +668,7 @@ async def plan_for_station(
         blackouts,
         (station.automation_config or {}).get("spot_timing"),
         breaks,
+        durations,
     )
     # A part of the day that is already over cannot be fixed; leave it out.
     unplaced = [u for u in unplaced if not daypart_over(u, tz, now)]
@@ -502,6 +699,9 @@ async def reconcile_spot_slots(
     now = now or datetime.now(UTC)
     earliest = now + SAFETY_MARGIN
     latest = now + timedelta(days=HORIZON_DAYS)
+    # Overdue or about-to-air slots are left alone below; one whose contract no
+    # longer covers today must still never air.
+    await skip_lapsed_sponsorships(db, station_id, now)
 
     placements, unplaced = await plan_for_station(db, station, days=HORIZON_DAYS + 1, now=now)
     # Places inside program blocks are written by the block, in its order.
@@ -522,10 +722,27 @@ async def reconcile_spot_slots(
     )
     kept: set[datetime] = set()
     removed = 0
-    for entry in existing.scalars().all():
+    tz = station_tz(station.timezone)
+
+    def part(at: datetime):
+        local = at.astimezone(tz)
+        return local.date(), daypart_of(local.hour)
+
+    for entry in sorted(existing.scalars().all(), key=lambda e: as_utc(e.preempt_at)):
         at = as_utc(entry.preempt_at).replace(second=0, microsecond=0)
         if at <= earliest:
-            continue  # about to air (or overdue) — leave it alone
+            # About to air (or overdue): left alone. When an edit moved the plan away
+            # from it, it still airs, so it stands in for the contract's next planned
+            # play in that part of the day; the plan added that one on top and the
+            # sponsorship aired once more than its contract says.
+            if at > now.replace(second=0, microsecond=0) and str(desired.get(at)) != str(entry.asset_id):
+                later = sorted(
+                    t for t, wanted in desired.items()
+                    if t > at and str(wanted) == str(entry.asset_id) and part(t) == part(at)
+                )
+                if later:
+                    del desired[later[0]]
+            continue
         if at not in kept and str(desired.get(at)) == str(entry.asset_id):
             kept.add(at)
             if entry.timing_mode != timing[at]:
@@ -593,3 +810,78 @@ async def reconcile_spot_slots(
         "unplaced": len(unplaced),
         "max_pos": max_pos,
     }
+
+
+@dataclass
+class Shortfall:
+    """How one sponsorship fares in a plan: plays promised, missed and moved."""
+
+    schedule: SpotSchedule
+    promised: int = 0
+    missed: int = 0
+    moved: int = 0
+
+    def ends_within(self, today: date, days: int) -> bool:
+        end = self.schedule.end_date
+        return bool(end) and (end - today).days <= days
+
+
+def shortfalls(placements: list[Placement], unplaced: list[Unplaced]) -> dict[str, Shortfall]:
+    """Per sponsorship: its plays in the plan, and how many found no room or were
+    moved. Plays set aside for Shabbos / Yom Tov are not promised plays."""
+    found: dict[str, Shortfall] = {}
+    for p in placements:
+        entry = found.setdefault(str(p.schedule.id), Shortfall(p.schedule))
+        entry.promised += 1
+        entry.moved += 1 if p.moved_from else 0
+    for u in unplaced:
+        if u.blackout is not None:
+            continue
+        entry = found.setdefault(str(u.schedule.id), Shortfall(u.schedule))
+        entry.promised += 1
+        entry.missed += 1
+    return found
+
+
+async def room_warnings(
+    db: AsyncSession, station: Station, schedule_id=None, days: int = HORIZON_DAYS, now: datetime | None = None
+) -> list[str]:
+    """Plain lines for whoever just saved a sponsorship: what does not fit on this
+    station in the coming days. The saved sponsorship (`schedule_id`) comes first;
+    others that now lose plays because of it are named too."""
+    now = now or datetime.now(UTC)
+    placements, unplaced = await plan_for_station(db, station, days=days, now=now)
+    found = shortfalls(placements, unplaced)
+    short = [f for f in found.values() if f.missed]
+    moved = found.get(str(schedule_id)) if schedule_id else None
+    lines: list[str] = []
+    if not short and not (moved and moved.moved):
+        return lines
+    from app.models.sponsor import Sponsor
+
+    rows = await db.execute(
+        select(Sponsor.id, Sponsor.name).where(Sponsor.id.in_({f.schedule.sponsor_id for f in short}))
+    ) if short else None
+    names = {str(r[0]): r[1] for r in rows.all()} if rows is not None else {}
+    today = now.astimezone(station_tz(station.timezone)).date()
+    short.sort(key=lambda f: (str(f.schedule.id) != str(schedule_id), -f.missed))
+    for f in short:
+        mine = str(f.schedule.id) == str(schedule_id)
+        sponsor = names.get(str(f.schedule.sponsor_id))
+        # Two schedules of one sponsor read alike without the schedule's own name
+        named = f"{sponsor} ({f.schedule.name})" if sponsor and f.schedule.name else sponsor or f.schedule.name
+        who = "This sponsorship" if mine else (named or "A sponsorship")
+        line = (
+            f"{station.name}: {who} misses {f.missed} of {f.promised} plays in the next {days} days "
+            "(no room left in the blocks)."
+        )
+        if f.ends_within(today, days):
+            line += f" Its contract ends {f.schedule.end_date:%b} {f.schedule.end_date.day}, so they cannot be made up."
+        lines.append(line)
+    if moved and moved.moved:
+        lines.append(
+            f"{station.name}: {moved.moved} of this sponsorship's plays move to a later block the same day."
+        )
+    if short:
+        lines.append("Add sponsorship room to a block, add a block, or lower the plays. See Schedule Check.")
+    return lines

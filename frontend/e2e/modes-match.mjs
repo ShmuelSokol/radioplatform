@@ -4,7 +4,7 @@
  * F-MATCH-* in docs/test-checklist.md; the real-backend run is e2e/station-modes.mjs.
  *
  *   cd frontend && npm run build && (npx vite preview --port 4182 --strictPort &)
- *   BASE_URL=http://localhost:4182 node e2e/modes-match.mjs        # optional: ONLY=modes,errors,match
+ *   BASE_URL=http://localhost:4182 node e2e/modes-match.mjs        # optional: ONLY=modes,panic,fit,errors,match
  */
 import { chromium, devices, checker, sleep, makeStation, adminContext, newPage } from './lib/fake-station.mjs';
 
@@ -196,6 +196,83 @@ async function viewerAndSideways(browser) {
   }
 }
 
+// ── Panic guards: a double-tap is one tap (F-MODES-44), a station change disarms (F-MODES-43) ──
+async function panicGuards(browser, contextOpts, tag) {
+  const station = modesStation();
+  const { ctx, page, errors } = await openRoom(browser, contextOpts, station);
+  await showModes(page);
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid=panic]')].some((b) => b.offsetParent && !b.disabled), null, { timeout: 5000 }).catch(() => {});
+  const touch = !!contextOpts.hasTouch;
+  const press = (delay = 0) => (touch ? btn(page, 'panic').tap({ delay }) : btn(page, 'panic').click({ delay }));
+  const panics = () => station.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/queue/panic'));
+  const label = async () => (await btn(page, 'panic').innerText()).trim();
+  // Double-click / quick double-tap: the second press under 0.4 s does not count
+  if (touch) { await press(); await sleep(120); await press(); } else await btn(page, 'panic').dblclick();
+  await sleep(600);
+  check(`${tag}: a ${touch ? 'quick double-tap' : 'double-click'} on Panic cuts nothing (F-MODES-44)`, panics().length === 0, `${panics().length} sent`);
+  check(`${tag}: ... and leaves it armed ("Tap again")`, await label() === 'Tap again', await label());
+  // The window runs out after 4 s
+  await sleep(4000);
+  check(`${tag}: after 4 s it disarms by itself`, await label() === 'Panic', await label());
+  // Armed, then another station: disarmed, and the next tap only arms again (F-MODES-43)
+  await press();
+  check(`${tag}: one tap arms`, await label() === 'Tap again');
+  const picker = page.locator('select[aria-label="Station"]:visible').first();
+  await picker.selectOption('st-2');
+  await sleep(400);
+  await showModes(page);
+  check(`${tag}: switching station disarms Panic (F-MODES-43)`, await label() === 'Panic', await label());
+  await press();
+  await sleep(300);
+  check(`${tag}: the tap after the switch only arms, nothing is cut on either station`, panics().length === 0 && await label() === 'Tap again', `${panics().map((c) => c.path)}`);
+  await picker.selectOption(station.SID);
+  await sleep(400);
+  await showModes(page);
+  check(`${tag}: switching back disarms again`, await label() === 'Panic', await label());
+  // Two separate taps on one station: one Panic for that station
+  await press(); await sleep(600); await press();
+  await page.waitForFunction(() => true);
+  await sleep(500);
+  check(`${tag}: two separate taps send one Panic, for the station shown`, panics().length === 1 && panics()[0].path === `/stations/${station.SID}/queue/panic`, panics().map((c) => c.path).join(','));
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// ── Small desktop windows: Panic, Spots mode, HS and DB on screen without scrolling (F-MODES-54) ──
+async function smallDesktops(browser) {
+  for (const [w, h] of [[1024, 768], [1280, 720], [1366, 768]]) {
+    const tag = `desktop ${w}x${h}`;
+    const station = modesStation();
+    const { ctx, page, errors } = await openRoom(browser, { viewport: { width: w, height: h }, deviceScaleFactor: 1 }, station);
+    await sleep(300);
+    const fit = await page.evaluate(() => {
+      const vis = (id) => [...document.querySelectorAll(`[data-testid=${id}]`)].find((b) => b.offsetParent);
+      const out = {};
+      for (const id of ['mode-hs', 'mode-spots', 'panic', 'cr-databank']) {
+        const el = vis(id);
+        if (!el) { out[id] = null; continue; }
+        const r = el.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const top = document.elementFromPoint(cx, cy);
+        out[id] = { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), uncovered: !!top && (top === el || el.contains(top)) };
+      }
+      const t = document.querySelector('[data-testid=control-room] header');
+      out.transportBottom = t ? Math.round(t.getBoundingClientRect().bottom) : null;
+      out.scrollY = window.scrollY;
+      out.docH = document.documentElement.scrollHeight;
+      return out;
+    });
+    for (const id of ['mode-hs', 'mode-spots', 'panic', 'cr-databank']) {
+      const b = fit[id];
+      check(`${tag}: ${id} on screen without scrolling and not covered (F-MODES-54)`, !!b && b.top >= 0 && b.bottom <= h && b.left >= 0 && b.right <= w && b.uncovered, JSON.stringify(b));
+    }
+    if (fit.transportBottom !== null) check(`${tag}: the mode buttons sit under the transport`, fit['mode-hs'] && fit['mode-hs'].top >= fit.transportBottom - 1, `${fit['mode-hs']?.top} vs ${fit.transportBottom}`);
+    check(`${tag}: the page itself does not scroll`, fit.docH <= h + 1 && fit.scrollY === 0, `${fit.docH}`);
+    check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+}
+
 // ── Errors tab (F-MODES-17, -35, -36, -13) ─────────────
 async function openErrors(page) {
   const tab = page.getByRole('tab', { name: 'Errors' });
@@ -212,7 +289,7 @@ async function errorsTab(browser, contextOpts, tag) {
   const mk = (id, title, sev, station_id, at) => ({ id, title, message: `(${id}) details`, severity: sev, station_id, created_at: at, updated_at: at, is_resolved: false, alert_type: 'system' });
   const station = modesStation({
     alerts: [
-      mk('a1', 'Panic pressed in the control room', 'warning', 'st-1', now),
+      { ...mk('a1', 'Panic pressed in the control room', 'warning', 'st-1', now), created_at: new Date(Date.now() - 60e3).toISOString(), context: { repeats: 3, last_message: 'Pressed by Dana' } },
       mk('a2', 'Dead air last week', 'critical', 'st-1', week),
       mk('a3', 'Engine offline', 'info', null, now),
       mk('a4', 'Other station problem', 'critical', 'st-2', now),
@@ -232,9 +309,36 @@ async function errorsTab(browser, contextOpts, tag) {
   const oldDay = new Date(week).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: tz });
   check(`${tag}: an alert from last week shows its date, today's only the time (F-MODES-35)`,
     whens.some((w) => w.startsWith(oldDay)) && whens.some((w) => /^\d{1,2}:\d\d [AP]M$/.test(w)), whens.join(' | '));
+  // F-MODES-56: a Panic folded into the open alert shows how many times, first and last, and its newest wording
+  const rep = await panel.getByTestId('alert-repeats').allInnerTexts();
+  check(`${tag}: a folded alert shows its count, first and last time (F-MODES-56)`,
+    rep.length === 1 && /^3 times, first \d{1,2}:\d\d [AP]M, last \d{1,2}:\d\d [AP]M$/.test(rep[0]), rep.join(' | '));
+  check(`${tag}: a folded alert shows its newest message (F-MODES-56)`, text.includes('Pressed by Dana') && !text.includes('(a1) details'));
   const sevCls = await panel.getByText('Dead air last week', { exact: true }).getAttribute('class');
   check(`${tag}: severity colour (critical red)`, /red/.test(sevCls));
   check(`${tag}: "All alerts" link`, await panel.getByRole('link', { name: 'All alerts' }).getAttribute('href') === '/admin/alerts');
+  // F-MODES-42: the open tab refreshes by itself (every 10 s), on coming back to the window, and after a Panic
+  if (tag.includes('desktop')) {
+    const reads = () => station.calls.filter((c) => c.path === '/alerts' && c.method === 'GET').length;
+    station.state.alerts.push(mk('a5', 'Dead air right now', 'critical', station.SID, new Date().toISOString()));
+    const tPoll = Date.now();
+    const polled = await panel.getByText('Dead air right now', { exact: true }).waitFor({ timeout: 12500 }).then(() => true).catch(() => false);
+    check(`${tag}: a new alarm shows in the open Errors tab within 10 s, no reopening (F-MODES-42)`, polled, `${Date.now() - tPoll} ms`);
+    station.state.alerts.push(mk('a6', 'Engine not answering', 'warning', station.SID, new Date().toISOString()));
+    const r0 = reads();
+    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    const focused = await panel.getByText('Engine not answering', { exact: true }).waitFor({ timeout: 2500 }).then(() => true).catch(() => false);
+    check(`${tag}: coming back to the window reads the alerts again at once (F-MODES-42)`, focused && reads() > r0, `${reads() - r0} reads`);
+    // Panic: the server logs "Panic pressed"; the tab shows it at once, not at the next poll
+    station.state.alerts.push(mk('a7', 'Second Panic pressed', 'warning', station.SID, new Date().toISOString()));
+    await showModes(page);
+    await btn(page, 'panic').click(); await sleep(500); await btn(page, 'panic').click();
+    const p2 = await page.locator('[data-testid=errors-panel]:visible').first().getByText('Second Panic pressed', { exact: true }).waitFor({ timeout: 2500 }).then(() => true).catch(() => false);
+    check(`${tag}: after a Panic its alert shows in the Errors tab within 2.5 s (F-MODES-42)`, p2);
+    for (const id of ['a5', 'a6', 'a7']) station.state.alerts.find((a) => a.id === id).is_resolved = true;
+    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    await panel.getByText('Dead air right now', { exact: true }).waitFor({ state: 'detached', timeout: 4000 }).catch(() => {});
+  }
   // Done: greyed while it runs, then the alert leaves the list (F-MODES-36, -13)
   const doneBtns = panel.getByRole('button', { name: /dealt with/ });
   check(`${tag}: a Done on each alert`, await doneBtns.count() === 3, `${await doneBtns.count()}`);
@@ -287,7 +391,7 @@ function requestsBackend() {
       mk('r4', 'played', 'Old song', null, 's1'),
       mk('r5', 'rejected', 'Nope'),
     ],
-    calls: [], searchDelay: () => 0, failSearch: false, patchDelay: 0,
+    calls: [], searchDelay: () => 0, failSearch: false, patchDelay: 0, patchReply: null,
   };
   s.handle = (method, path, query, body) => {
     s.calls.push({ method, path, query, body, at: Date.now() });
@@ -299,6 +403,7 @@ function requestsBackend() {
     if (path === '/song-requests/analytics/top-requested') return { top_requested: [] };
     const m = /^\/song-requests\/([^/]+)$/.exec(path);
     if (m && method === 'PATCH') {
+      if (s.patchReply) return s.patchReply;
       const r = s.requests.find((x) => x.id === m[1]);
       r.asset_id = body.asset_id;
       r.matched_asset_title = songs.find((x) => x.id === body.asset_id)?.title;
@@ -308,6 +413,7 @@ function requestsBackend() {
     if (path === '/assets') {
       if (s.failSearch) return { __status: 500 };
       const t = (query.search || '').toLowerCase();
+      // Like the real search: the whole text inside the title OR the artist, not split into words
       const list = songs.filter((a) => (!query.asset_type || a.asset_type === query.asset_type) && (a.title.toLowerCase().includes(t) || a.artist.toLowerCase().includes(t)));
       return { assets: list.slice(0, +(query.limit || 50)), total: list.length };
     }
@@ -343,6 +449,11 @@ async function match(browser, contextOpts, tag) {
   await scope.getByText('Listener r1').waitFor({ timeout: 8000 });
   const rowOf = (id) => (tag.includes('desktop') ? scope.locator('tr', { hasText: `Listener ${id}` }) : scope.locator(':scope > div', { hasText: `Listener ${id}` }));
   const has = async (id) => (await rowOf(id).getByTestId('match-to-song').count()) === 1;
+  if (!tag.includes('desktop')) {
+    const m = await rowOf('r1').getByTestId('match-to-song').boundingBox();
+    check(`${tag}: the Match link is a 44 px tap target (F-MATCH-24)`, m && m.width >= 44 && m.height >= 44, JSON.stringify(m));
+    check(`${tag}: no sideways scroll with the bigger Match link`, await noSideScroll(page));
+  }
   check(`${tag}: Match on pending and approved, not on queued, played or rejected (F-MATCH-1)`,
     await has('r1') && await has('r2') && !(await has('r3')) && !(await has('r4')) && !(await has('r5')));
 
@@ -352,6 +463,15 @@ async function match(browser, contextOpts, tag) {
   const input = box.getByRole('textbox');
   const sel = await input.evaluate((el) => [el.value, el.selectionStart, el.selectionEnd]);
   check(`${tag}: the box opens with the request's title, selected (F-MATCH-2)`, sel[0] === 'One Day' && sel[1] === 0 && sel[2] === 7, JSON.stringify(sel));
+  // F-MATCH-21: the request has an artist too, but the box searches the title alone, so it finds the song at once
+  await box.getByRole('button', { name: /One Day — Matisyahu/ }).waitFor({ timeout: 3000 }).catch(() => {});
+  const first = be.calls.filter((c) => c.path === '/assets')[0];
+  check(`${tag}: a request with an artist finds the song at once (searches "One Day", not "One Day Matisyahu") (F-MATCH-21)`,
+    first?.query.search === 'One Day' && await box.getByRole('button', { name: /One Day — Matisyahu/ }).count() === 1 && await box.getByText('No songs found').count() === 0, JSON.stringify(first?.query));
+  if (!tag.includes('desktop')) {
+    const x = (await box.getByRole('button', { name: 'Close search' }).boundingBox());
+    check(`${tag}: the ✕ is a 44 px tap target (F-MATCH-24)`, x && x.width >= 44 && x.height >= 44, JSON.stringify(x));
+  }
   // Search from 2 letters, 200 ms after typing stops; "Searching..." while it looks
   be.searchDelay = () => 400;
   const searches = () => be.calls.filter((c) => c.path === '/assets');
@@ -431,6 +551,31 @@ async function match(browser, contextOpts, tag) {
   await page.getByRole('button', { name: 'Queued', exact: true }).first().click();
   await scope.getByText('Listener r2').waitFor({ timeout: 3000 }).catch(() => {});
   check(`${tag}: it is in the Queued tab`, await scope.getByText('Listener r2').count() >= 1);
+  // F-MATCH-22: a refused match says why in a red notice; it does not seem to do nothing
+  await page.getByRole('button', { name: 'Pending', exact: true }).first().click();
+  await scope.getByText('Listener r1').waitFor({ timeout: 3000 });
+  be.patchDelay = 0;
+  const pickOn = async (id) => {
+    await rowOf(id).getByTestId('match-to-song').click();
+    const bx = page.getByTestId('match-box');
+    await bx.getByRole('textbox').fill('one');
+    await bx.getByRole('button', { name: /One Day — Matisyahu/ }).click();
+  };
+  const notice = page.getByTestId('request-error');
+  be.patchReply = { __status: 404, detail: 'Song not found in the library' };
+  await pickOn('r1');
+  await notice.waitFor({ timeout: 3000 }).catch(() => {});
+  check(`${tag}: a 404 (do_not_play or placeholder) shows "Song not found in the library" in red (F-MATCH-22)`,
+    (await notice.innerText().catch(() => '')).includes('Song not found in the library') && /red/.test(await notice.getAttribute('class').catch(() => '')));
+  check(`${tag}: ... and the request stays unmatched`, be.requests.find((r) => r.id === 'r1').asset_id === null);
+  be.patchReply = { __status: 403, detail: 'You are not assigned to this station' };
+  await pickOn('r1');
+  await page.waitForFunction(() => /not assigned/.test(document.querySelector('[data-testid=request-error]')?.textContent || ''), null, { timeout: 3000 }).catch(() => {});
+  check(`${tag}: a 403 (manager not on the station) shows the server's words (F-MATCH-22)`, (await notice.innerText().catch(() => '')).includes('You are not assigned to this station'));
+  be.patchReply = null;
+  await pickOn('r1');
+  await notice.waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
+  check(`${tag}: a match that goes through clears the notice`, await notice.count() === 0 && be.requests.find((r) => r.id === 'r1').asset_id === 's1');
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 }
@@ -439,6 +584,8 @@ const browser = await chromium.launch();
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 try {
   if (run('modes')) { await modes(browser, DESKTOP, 'modes desktop'); await modes(browser, PHONE, 'modes iPhone'); await viewerAndSideways(browser); }
+  if (run('panic')) { await panicGuards(browser, DESKTOP, 'panic desktop'); await panicGuards(browser, PHONE, 'panic iPhone'); }
+  if (run('fit')) await smallDesktops(browser);
   if (run('errors')) { await errorsTab(browser, DESKTOP, 'errors desktop'); await errorsTab(browser, PHONE, 'errors iPhone'); }
   if (run('match')) { await match(browser, DESKTOP, 'match desktop'); await match(browser, PHONE, 'match iPhone'); }
 } finally {
