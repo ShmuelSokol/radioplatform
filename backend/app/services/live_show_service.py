@@ -133,6 +133,10 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
     current.status = "played"
     if at is None:
         return  # it was nearly over
+    if current.preempt_at is not None:
+        # A time check or other timed item: half of it after the show would be a stale
+        # time (the engine harness heard it come back after End, 2026-11-18)
+        return
     first = (await db.execute(
         select(func.min(QueueEntry.position)).where(
             QueueEntry.station_id == station_id, QueueEntry.status == "pending")
@@ -319,7 +323,10 @@ async def hold_for_timed_items(station_id: str, air) -> None:
                 end = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within)
                 await db.rollback()
                 if end is not None:
-                    until = air.clock() + (end - now).total_seconds() + 0.3
+                    # The stream server is told to go quiet SOON before the show is
+                    # heard, so that word leaves as the item ends, not during it
+                    from app.services.live_air import SOON
+                    until = air.clock() + (end - now).total_seconds() + SOON
                     air.hold_until = min(until, started + air.target + HOLD_LIMIT)
                 break
         except Exception:

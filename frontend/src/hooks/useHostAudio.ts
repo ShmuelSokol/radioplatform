@@ -119,8 +119,11 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
 
       ws.onerror = () => setError('Audio WebSocket connection failed');
       ws.onclose = () => {
-        if (isRecording) {
-          setError('Audio WebSocket disconnected');
+        // Closed by the server or the network, not by Stop Broadcasting: the page must
+        // not go on showing "on air" (the station goes back to music when the host is lost)
+        if (wsRef.current === ws) {
+          stopRef.current();
+          setError('The connection to the station was lost. Press Start Broadcasting to go back on air.');
         }
       };
 
@@ -128,8 +131,9 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to access microphone');
     }
-  }, [showId, connectAudioWS, updateLevel, isRecording]);
+  }, [showId, connectAudioWS, updateLevel]);
 
+  const stopRef = useRef<() => void>(() => {});
   const stopRecording = useCallback(() => {
     if (processorRef.current) {
       processorRef.current.onaudioprocess = null;
@@ -143,8 +147,9 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     }
 
     if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+      const ws = wsRef.current;
+      wsRef.current = null;   // first: its onclose then knows this was meant
+      ws.close();
     }
 
     if (rafRef.current) {
@@ -163,6 +168,8 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     mutedRef.current = false;
     setMutedState(false);
   }, []);
+
+  stopRef.current = stopRecording;
 
   // Cleanup on unmount
   useEffect(() => {

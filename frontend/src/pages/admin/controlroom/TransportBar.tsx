@@ -53,7 +53,7 @@ interface Props {
   loopBusy: boolean;
   audio: TransportAudio;
   stationTz?: string;
-  liveShow: { id: string; title: string } | null;
+  liveShow: { id: string; title: string; label: string; short: string; heard: boolean; hint: string } | null;
   /** Phone held sideways: the compact left column (classic.css "phone landscape"). */
   landscape?: boolean;
   /** Sideways only: HS, Spots and Panic, in the button grid under Go next. */
@@ -317,10 +317,11 @@ export default function TransportBar(p: Props) {
             {soundControl('land')}
             {p.liveShow && (
               <Link to={`/admin/live/${p.liveShow.id}/host`}
-                className="inline-flex items-center gap-1 h-11 px-2 bg-red-700 text-white text-xs font-bold shrink-0 max-w-[110px]"
-                title="A live show is on. Open the host console.">
-                <span className="w-2 h-2 rounded-full bg-white animate-pulse shrink-0" />
-                <span className="truncate">LIVE</span>
+                data-testid="live-badge-small"
+                className={`inline-flex items-center gap-1 h-11 px-2 text-white text-xs font-bold shrink-0 max-w-[110px] ${p.liveShow.heard ? 'bg-red-700' : 'bg-yellow-600'}`}
+                title={p.liveShow.hint}>
+                <span className={`w-2 h-2 rounded-full bg-white shrink-0 ${p.liveShow.heard ? 'animate-pulse' : ''}`} />
+                <span className="truncate">{p.liveShow.short}</span>
               </Link>
             )}
             {p.stations.length > 1 ? (
@@ -374,10 +375,11 @@ export default function TransportBar(p: Props) {
         <div className="flex-1 lg:hidden" />
         {p.liveShow && (
           <Link to={`/admin/live/${p.liveShow.id}/host`}
-            className="hidden md:inline-flex items-center gap-1.5 h-8 px-2 bg-red-700 text-white text-xs font-bold shrink-0 max-w-[180px]"
-            title="A live show is on. Open the host console.">
-            <span className="w-2 h-2 rounded-full bg-white animate-pulse shrink-0" />
-            <span className="truncate">LIVE: {p.liveShow.title}</span>
+            data-testid="live-badge"
+            className={`hidden md:inline-flex items-center gap-1.5 h-8 px-2 text-white text-xs font-bold shrink-0 max-w-[240px] ${p.liveShow.heard ? 'bg-red-700' : 'bg-yellow-600'}`}
+            title={p.liveShow.hint}>
+            <span className={`w-2 h-2 rounded-full bg-white shrink-0 ${p.liveShow.heard ? 'animate-pulse' : ''}`} />
+            <span className="truncate">{p.liveShow.label}: {p.liveShow.title}</span>
           </Link>
         )}
         <div className="leading-none shrink-0 text-right">
