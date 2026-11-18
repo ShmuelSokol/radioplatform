@@ -57,10 +57,15 @@ SAFE_PAST = 5.0
 FROZEN = 30.0
 # Seconds between looks per station (the scheduler passes every second or two)
 EVERY = 10.0
+# The song the stream server has pre-loaded can still be exchanged (the next tick flushes
+# it when the head of the queue changes), but not when it is about to start: the flush is
+# refused in the last 45 s of the song on air and at most one happens per 15 s
+# (playout_engine.KEEP_CUED_LAST_SECONDS, AUTO_FLUSH_MIN_INTERVAL)
+PRELOADED_FROZEN = 75.0
 CONFIG_KEY = "fit_before_hard_items"  # automation_config: false switches it off
 
 _last_look: dict[str, float] = {}
-_said_nothing: dict[str, datetime] = {}
+_said_nothing: dict[str, tuple] = {}
 
 
 @dataclass
@@ -74,9 +79,9 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-# The stream server starts the next song this long before the one on air reaches its
-# end point (radio.liq: cross(duration=3.))
-ENGINE_CROSS = 3.0
+# Used when the engine's own figure cannot be read (it never is 0 there: radio.liq
+# always holds back a moment to make the change in)
+ENGINE_MIN_CROSS = 0.2
 # Songs whose end point is asked for per look (each is one short background job)
 ANALYSE_PER_LOOK = 12
 
@@ -87,9 +92,14 @@ def _seconds(entry, engine: bool = False) -> float | None:
 
     On the stream server a song plays from its analysed start to its analysed end
     point (liq_cue_in / liq_cue_out: leading silence and the trailing fade are
-    dropped) and the next one starts ENGINE_CROSS before that. Live 2026-11-18 02:00Z:
+    dropped) and the next one starts the item's own overlap before that: the very
+    figures the engine is given with the song (playout_engine.build_uri: kbr_overlap,
+    liq_cross_duration), so the two cannot drift apart again. Live 2026-11-18 02:00Z:
     a 523.4 s file held the air for 512.4 s; counted as 520.6 s, the fit planned it
-    to run 8 s past the hour and it ended 0.2 s before."""
+    to run 8 s past the hour and it ended 0.2 s before. 04:00Z on Main: the engine
+    had moved from a fixed 3 s overlap to the station's crossfade (1 s) while this
+    still took off 3 s, so every song aired 2 s longer than counted and the last one
+    started 9.5 s later than planned (said "loses 5 s", lost 17 s)."""
     asset = entry.asset
     value = getattr(asset, "duration", None) if asset is not None else None
     if not value or value <= 0:
@@ -99,6 +109,7 @@ def _seconds(entry, engine: bool = False) -> float | None:
     if engine and entry.preempt_at is None:
         from app.models.asset import stored_analysis
         from app.models.queue_entry import resume_offset
+        from app.services.playout_engine import _overlap
 
         analysis = stored_analysis(getattr(asset, "metadata_extra", None)) or {}
         cue_in = analysis.get("cue_in_seconds")
@@ -106,7 +117,7 @@ def _seconds(entry, engine: bool = False) -> float | None:
         cue_in = max(cue_in, resume_offset(entry))
         cue_out = analysis.get("cue_out_seconds")
         end = float(cue_out) if isinstance(cue_out, (int, float)) and 0 < cue_out <= value else float(value)
-        return max(1.0, end - cue_in - ENGINE_CROSS)
+        return max(1.0, end - cue_in - max(_overlap(entry), ENGINE_MIN_CROSS))
     return max(1.0, float(value) - handover_seconds(entry))
 
 
@@ -277,15 +288,23 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     if loses <= ACCEPTABLE_CUT:
         return False
 
-    from app.services.playout_engine import held_entry_ids
+    from app.services.playout_engine import cued_entry_id, held_entry_ids
 
-    held = held_entry_ids(station.id)
+    # The engine asks for its next song as soon as one starts, so during a long item the
+    # song before the hard item is pre-loaded for many minutes (live 2026-11-18 04:00Z on
+    # KBR Jerusalem: pre-loaded about 12 minutes ahead, never fitted, cut with 140 s left).
+    # It is still exchangeable; only what sits in the engine's timed lane is not.
+    preloaded = cued_entry_id(station.id) if engine else None
+    held = held_entry_ids(station.id) - ({preloaded} if preloaded else set())
 
     def movable(slot_or_entry, start: datetime | None = None) -> bool:
         e = slot_or_entry
         if e.source != "auto" or e.preempt_at is not None or e.id in held:
             return False
-        return start is None or (start - now).total_seconds() >= FROZEN
+        if start is None:
+            return True
+        frozen = PRELOADED_FROZEN if e.id == preloaded else FROZEN
+        return (start - now).total_seconds() >= frozen
 
     if not movable(last.entry, last.start):
         return False
@@ -294,8 +313,11 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     if _analysis_on():
         # A candidate whose end point is not measured yet is asked for and left out
         # of this look; it can be chosen ten seconds later
-        _ask_for_analysis([e for e in spare if not _measured(e)], engine)
+        unmeasured = [e for e in spare if not _measured(e)]
+        _ask_for_analysis(unmeasured, engine)
         spare = [e for e in spare if _measured(e)]
+    else:
+        unmeasured = []
 
     # One song in the last place...
     best_cut, best = loses, None
@@ -323,11 +345,15 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
     if best is None or loses - best_cut < WORTH_IT:
         # Said once per hard item, so a live report can tell "looked and found nothing"
         # from "did not look"
-        if _said_nothing.get(key) != hard_at:
-            _said_nothing[key] = hard_at
+        # (and again when songs to choose from appear: the first look often has none
+        # because their end points are still being measured)
+        said = (hard_at, bool(spare))
+        if _said_nothing.get(key) != said:
+            _said_nothing[key] = said
             logger.info(
-                "Station %s: queue left as it is before the %s hard item (the song on air then loses %.0f s; no swap among %d songs saves %.0f s or more)",
-                station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare), WORTH_IT,
+                "Station %s: queue left as it is before the %s hard item (the song on air then loses %.0f s; "
+                "no swap among %d songs saves %.0f s or more; %d more songs not measured yet)",
+                station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare), WORTH_IT, len(unmeasured),
             )
         return False
 

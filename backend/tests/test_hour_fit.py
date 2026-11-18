@@ -422,19 +422,35 @@ async def test_on_the_stream_server_a_song_is_counted_to_its_analysed_end(db_ses
     assert (await _order(db_session, station_id))[0] == "Really past"
 
 
-def test_the_stream_servers_length_of_a_song():
+def test_the_stream_servers_length_of_a_song(monkeypatch):
+    """F-HOURFIT-12/15: analysed start to analysed end, less the overlap the engine is
+    given with the song: the station's crossfade (1 s unless set), not a fixed 3 s.
+    Live 2026-11-18 04:00Z on Main: counted with 3 s while the engine used 1 s, each
+    song aired 2 s longer than planned; "loses 5 s" became 17 s."""
     from types import SimpleNamespace
 
+    import app.api.v1.queue as queue_module
     from app.services.hour_fit import _seconds
+    from app.services.playout_engine import build_uri
 
     asset = _asset("Medley", 523.4)
+    asset.file_path = "https://cdn.example.com/medley.mp3"
     _analysed(asset, cue_in=0.0, cue_out=515.4)
-    entry = SimpleNamespace(asset=asset, preempt_at=None, source="auto", station_id=None)
-    assert _seconds(entry, engine=True) == pytest.approx(512.4)
+    entry = SimpleNamespace(id=uuid.uuid4(), asset=asset, asset_id=asset.id, preempt_at=None, source="auto",
+                            station_id="st-1", resume_seconds=None)
+    assert _seconds(entry, engine=True) == pytest.approx(514.4)  # the default crossfade, 1 s
+    monkeypatch.setitem(queue_module._station_crossfade, "st-1", 3.0)
+    assert _seconds(entry, engine=True) == pytest.approx(512.4)  # 02:00Z, when the engine used 3 s
+    monkeypatch.setitem(queue_module._station_crossfade, "st-1", 0.0)
+    assert _seconds(entry, engine=True) == pytest.approx(515.2)  # no crossfade: the engine still holds back 0.2 s
+    monkeypatch.setitem(queue_module._station_crossfade, "st-1", 1.0)
+    # The same figure the engine is handed with the song
+    uri = build_uri(entry, "main")
+    assert 'liq_cross_duration="1.00"' in uri and 'liq_cue_out="515.400"' in uri
     _analysed(asset, cue_in=6.0, cue_out=515.4)  # leading silence is skipped too
-    assert _seconds(entry, engine=True) == pytest.approx(506.4)
+    assert _seconds(entry, engine=True) == pytest.approx(508.4)
     asset.metadata_extra = None  # not analysed yet: the file's length less the overlap
-    assert _seconds(entry, engine=True) == pytest.approx(520.4)
+    assert _seconds(entry, engine=True) == pytest.approx(522.4)
 
 
 @pytest.mark.asyncio
@@ -473,3 +489,90 @@ async def test_songs_that_decide_the_fit_are_analysed_first(db_session: AsyncSes
     assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=13), force=True) is True
     await db_session.commit()
     assert (await _order(db_session, station_id))[0] == "To spare"
+
+
+@pytest.mark.asyncio
+async def test_the_song_the_stream_server_has_pre_loaded_can_still_be_exchanged(db_session: AsyncSession, monkeypatch):
+    """F-HOURFIT-14: live, KBR Jerusalem 2026-11-18 04:00Z. The engine asks for its next
+    song as soon as one starts, so during a 12-minute item the song before the hour was
+    pre-loaded all along, counted as untouchable, and cut with 140 s left. A pre-loaded
+    song is exchanged like any other (the next tick flushes the engine's copy) until
+    75 s before it starts; an item in the engine's timed lane is never moved."""
+    from app.config import settings
+    from app.services import playout_engine
+
+    monkeypatch.setattr(type(settings), "engine_drives", lambda self, station_id: True)
+    station = await _station(db_session)
+    station_id = station.id
+    ends = HOUR - timedelta(seconds=187.6)
+    await _queue(db_session, station, ends, [("Chadesh", 328.6), ("A", 250.0), ("Fits", 196.0)])
+    first = (await db_session.execute(
+        select(QueueEntry).join(Asset, QueueEntry.asset_id == Asset.id).where(Asset.title == "Chadesh")
+    )).scalar_one()
+    first_id = first.id
+    state = playout_engine.get_state(station_id)
+    state.cued_entry_id = str(first_id)
+    try:
+        # In the last 75 s before it starts the engine's copy stays
+        assert await fit_before_hard_item(db_session, station_id, ends - timedelta(seconds=60)) is False
+        assert (await _order(db_session, station_id))[0] == "Chadesh"
+        # Twelve minutes ahead it is exchanged: "Fits" hands over 5.4 s past the hour
+        assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=12)) is True
+        await db_session.commit()
+        assert (await _order(db_session, station_id))[0] == "Fits"
+        assert playout_engine.cued_entry_id(station_id) == first_id  # flushed by the next tick, not here
+
+    finally:
+        playout_engine.reset_state(station_id)
+
+    # What sits in the engine's timed lane is never moved
+    other = await _station(db_session)
+    other_id = other.id
+    await _queue(db_session, other, ends, [("Chadesh", 328.6), ("A", 250.0), ("Fits", 196.0)])
+    sent = (await db_session.execute(
+        select(QueueEntry.id).join(Asset, QueueEntry.asset_id == Asset.id)
+        .where(QueueEntry.station_id == other_id, Asset.title == "Chadesh")
+    )).scalar_one()
+    playout_engine.get_state(other_id).timed_sent = {str(sent)}
+    try:
+        assert await fit_before_hard_item(db_session, other_id, ends - timedelta(minutes=12)) is False
+        assert (await _order(db_session, other_id))[0] == "Chadesh"
+    finally:
+        playout_engine.reset_state(other_id)
+
+
+@pytest.mark.asyncio
+async def test_a_changed_head_flushes_the_engines_pre_loaded_song(db_session: AsyncSession, monkeypatch):
+    """F-HOURFIT-14: the other half. After the fit exchanged the pre-loaded song, the
+    engine tick sees another head of the queue and flushes its copy, so it asks again."""
+    from app.services import playout_engine
+
+    station = await _station(db_session)
+    station_id = station.id
+    ends = datetime.now(UTC) + timedelta(minutes=5)
+    await _queue(db_session, station, ends, [("Chadesh", 328.6), ("Fits", 196.0)])
+    entries = {
+        title: entry for entry, title in (await db_session.execute(
+            select(QueueEntry, Asset.title).join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending", QueueEntry.preempt_at.is_(None))
+        )).all()
+    }
+    flushed: list = []
+
+    async def flush(sid):
+        flushed.append(sid)
+        return True
+
+    monkeypatch.setattr(playout_engine, "engine_flush", flush)
+    state = playout_engine.get_state(station_id)
+    try:
+        state.cued_entry_id = str(entries["Chadesh"].id)
+        state.last_auto_flush = 0.0
+        await playout_engine._flush_if_head_changed(db_session, station_id, state, datetime.now(UTC))
+        assert flushed == []  # the head is what the engine holds
+        entries["Chadesh"].position, entries["Fits"].position = entries["Fits"].position, entries["Chadesh"].position
+        await db_session.commit()
+        await playout_engine._flush_if_head_changed(db_session, station_id, state, datetime.now(UTC))
+        assert flushed == [station_id]
+    finally:
+        playout_engine.reset_state(station_id)
