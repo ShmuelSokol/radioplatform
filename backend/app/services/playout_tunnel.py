@@ -11,9 +11,14 @@ Kept in this process's memory, like the rest of the engine state.
 """
 
 import asyncio
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # A relay that has not polled for this long is gone: commands go by HTTPS again
 CONNECTED_SECONDS = 40.0
@@ -26,6 +31,7 @@ class _Tunnel:
     waiting: dict[str, asyncio.Future] = field(default_factory=dict)
     seen_at: float = 0.0
     polling: int = 0
+    routed: bool = False  # last routing reported in the log
 
 
 _tunnels: dict[str, _Tunnel] = {}
@@ -39,9 +45,26 @@ def reset() -> None:
     _tunnels.clear()
 
 
+def allowed(station_id) -> bool:
+    """Only a station named in PLAYOUT_RELAY_STATION_ID may take its commands by relay."""
+    return str(station_id) in settings.relay_station_ids
+
+
 def connected(station_id) -> bool:
+    """True while this station's commands go to a relay INSTEAD of PLAYOUT_ENGINE_URL."""
     t = _tunnels.get(str(station_id))
-    return t is not None and (t.polling > 0 or time.monotonic() - t.seen_at < CONNECTED_SECONDS)
+    if t is None or not allowed(station_id):
+        return False
+    now = t.polling > 0 or time.monotonic() - t.seen_at < CONNECTED_SECONDS
+    if now != t.routed:
+        t.routed = now
+        if now:
+            logger.warning("Station %s: engine commands now go to its local box's relay, "
+                           "none to PLAYOUT_ENGINE_URL", station_id)
+        else:
+            logger.warning("Station %s: its local box's relay stopped polling; engine "
+                           "commands go to PLAYOUT_ENGINE_URL again", station_id)
+    return now
 
 
 async def send(station_id, path: str, payload: dict, timeout: float = 4.0) -> tuple[int, dict | None] | None:
@@ -73,6 +96,7 @@ async def poll(station_id, wait: float) -> list[dict]:
     t = _tunnel(station_id)
     t.seen_at = time.monotonic()
     t.polling += 1
+    connected(station_id)  # logs the switch the moment a relay appears
     try:
         out: list[dict] = []
         deadline = time.monotonic() + max(0.0, min(float(wait), MAX_WAIT_SECONDS))

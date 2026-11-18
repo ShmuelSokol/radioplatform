@@ -95,6 +95,10 @@ async def commands_poll(
     """A local FM box's relay collects the commands for its engine (Next, Play Now,
     timed hand-over) and hands back the engine's answers to the ones before. Held open
     until a command is made, so it arrives at once; no database session is held."""
+    if not playout_tunnel.allowed(station_id):
+        # Not named in PLAYOUT_RELAY_STATION_ID: a box with a wrong station id must not
+        # take another station's commands away from its engine
+        raise ForbiddenError("This station's commands do not go by relay")
     for a in body.answers:
         playout_tunnel.answer(station_id, a.id, a.status, a.body)
     return {"commands": await playout_tunnel.poll(station_id, body.wait)}

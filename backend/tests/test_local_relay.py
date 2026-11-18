@@ -329,6 +329,7 @@ def tunnel_station(monkeypatch):
     monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", str(sid))
     monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
     monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", TOKEN)
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", f" {sid} ")
     playout_engine.reset_state()
     playout_tunnel.reset()
     yield sid
@@ -410,3 +411,43 @@ def test_relay_fetches_commands_gives_them_to_the_engine_and_answers(rig):
         {"id": "c2", "status": 400, "body": None},
     ]
     assert relay.status()["commands_done"] == 2
+
+
+@pytest.mark.asyncio
+async def test_station_not_named_for_the_relay_keeps_its_commands(client, tunnel_station, monkeypatch):
+    """A box set up with the wrong station id (say Main's) cannot take that station's
+    commands away from its engine on the stream server."""
+    from app.services import playout_engine, playout_tunnel
+
+    sid = tunnel_station
+    url = f"/api/v1/playout/{sid}/commands/poll"
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", "")
+    resp = await client.post(url, json={"wait": 0}, headers=HEADERS)
+    assert resp.status_code == 403
+    assert not playout_tunnel.connected(sid)
+    sent = []
+
+    # the command still leaves by PLAYOUT_ENGINE_URL
+    class Resp:
+        status_code = 200
+
+    class Client:
+        async def post(self, u, **kw):
+            sent.append(u)
+            return Resp()
+
+    monkeypatch.setattr(playout_engine, "_client", lambda: Client())
+    assert await playout_engine.engine_flush(sid) is True
+    assert sent == [f"http://engine.invalid/{sid}/flush"]
+
+    # Named: the switch is written to the log, both ways
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", str(sid))
+    lines = []
+    monkeypatch.setattr(playout_tunnel.logger, "warning", lambda msg, *a: lines.append(msg % a))
+    assert (await client.post(url, json={"wait": 0}, headers=HEADERS)).status_code == 200
+    assert playout_tunnel.connected(sid)
+    monkeypatch.setattr(playout_tunnel, "CONNECTED_SECONDS", 0.0)
+    assert not playout_tunnel.connected(sid)
+    text = " ".join(lines)
+    assert len(lines) == 2
+    assert "now go to its local box's relay" in text and "stopped polling" in text

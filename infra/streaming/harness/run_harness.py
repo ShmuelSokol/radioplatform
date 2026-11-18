@@ -300,6 +300,7 @@ class Stack:
             # --local-box: no inbound line to the engine; the backend's commands can only
             # travel through the relay's own outbound call (playout_tunnel)
             "PLAYOUT_ENGINE_URL": "http://127.0.0.1:9" if self.local_box else f"http://127.0.0.1:{PROXY_PORT}",
+            "PLAYOUT_RELAY_STATION_ID": str(STATION_ID) if self.local_box else "",
             "PLAYOUT_ENGINE_TOKEN": TOKEN,
             "LIQUIDSOAP_ENABLED": "false",
         })

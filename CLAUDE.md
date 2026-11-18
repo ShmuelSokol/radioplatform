@@ -420,6 +420,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `PLAYOUT_ENGINE_STATION_ID` | Comma-separated stations the engine plays (one engine each; setup.sh prints the list) | For the engine |
 | `PLAYOUT_ENGINE_URL` | Engine control base (e.g., https://stream.kbrlive.com/control); commands go to `<base>/<station id>/...` | For the engine |
 | `PLAYOUT_ENGINE_TOKEN` | Shared secret sent both ways in `X-Playout-Token` | For the engine |
+| `PLAYOUT_RELAY_STATION_ID` | Comma-separated stations whose engine is a local FM box: its relay fetches their commands and none go to `PLAYOUT_ENGINE_URL` (empty = no station; see `wiki/local-fm-box.md`) | For a local FM box |
 | `BUG_REPORTS_GITHUB_TOKEN` | Fine-grained token for the private bug-report repo (Contents + Issues write); unset = reports stay in the database only | For bug triage |
 | `BUG_REPORTS_REPO` | Private repo for bug reports (default ShmuelSokol/kbr-bug-reports) | No |
 | `NTFY_TOPIC` | Secret ntfy topic for "fix ready" pushes; never commit it | For bug triage |

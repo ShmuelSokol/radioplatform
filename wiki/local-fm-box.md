@@ -69,7 +69,16 @@ once; the relay posts it to the engine's control port and sends the engine's sta
 JSON body with its next poll. `app/services/playout_tunnel.py` keeps this in memory.
 `playout_engine._command` and `engine_status` use it **only while a relay is polling for
 that station** (a poll open, or one within the last 40 s); otherwise HTTPS as before, so
-the stream server's stations are untouched. A command nobody fetched within its timeout
+the stream server's stations are untouched. **One engine per station.** While a relay polls for a station, all of that station's
+commands go to the relay and none to the stream server: the box *replaces* the stream
+server's engine for that station (its audio is sent up to Icecast for web listeners, gap 1
+below); two engines must never pull one station's queue. So the path is closed unless the
+station is named in `PLAYOUT_RELAY_STATION_ID` (empty by default): a box set up with a
+wrong or copied station id gets 403 on the poll and takes nothing, and every switch of
+routing is logged as a warning. Until the box can feed Icecast, try it only under a
+station of its own, never under Main's id. (The same mistake on `/next` would still
+split a queue: `/next` trusts the token alone, as it does for any engine.)
+A command nobody fetched within its timeout
 (4 s) is withdrawn, never delivered late. With the tunnel up the backend does the timed
 hand-over itself as on the stream server; the relay's own hand-over (`KBR_RELAY_TIMED=offline`)
 takes over only when the backend is unreachable.
