@@ -381,22 +381,34 @@ class Relay:
             except (ValueError, AttributeError):
                 commands = []
             for cmd in commands:
-                code, body = self._engine_call(cmd.get("path", ""), cmd.get("payload") or {})
+                code, body = self._engine_call(
+                    cmd.get("path", ""), cmd.get("payload") or {}, wait=cmd.get("wait") or 4.0)
                 answers.append({"id": cmd.get("id", ""), "status": code, "body": body})
                 self.commands_done += 1
 
-    def _engine_call(self, path: str, payload: dict) -> tuple[int, dict | None]:
+    def _engine_call(self, path: str, payload: dict, wait: float = 4.0) -> tuple[int, dict | None]:
+        """`wait`: how long the backend waits for this answer. 202 = the engine took the
+        command and is still working on it (a /timed answers once its file is loaded)."""
         if not path.startswith("/") or ".." in path or "?" in path:
             return 400, None
+        try:
+            wait = min(max(float(wait), 0.5), 30.0)
+        except (TypeError, ValueError):
+            wait = 4.0
         req = urllib.request.Request(
             self.engine_control + path, data=json.dumps(payload).encode(), method="POST",
             headers={"X-Playout-Token": self.token, "Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(req, timeout=4) as resp:
+            with urllib.request.urlopen(req, timeout=wait) as resp:
                 code, raw = resp.status, resp.read()
         except urllib.error.HTTPError as e:
             code, raw = e.code, e.read()
+        except TimeoutError:
+            # Connected and sent; the engine has not answered yet (connection refused or
+            # a failed connect is a URLError, below)
+            log.warning("engine %s: no answer after %.0f s (still working)", path, wait)
+            return 202, None
         except (OSError, ValueError) as e:
             log.warning("engine %s failed: %s", path, e)
             return 502, None

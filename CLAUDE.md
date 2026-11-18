@@ -135,7 +135,7 @@ radioplatform/
 |--------|------|--------|
 | auth | auth.py | /auth |
 | stations | stations.py | /stations |
-| assets | assets.py | /assets |
+| assets | assets.py | /assets (`POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again", see `wiki/control-room.md`) |
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
@@ -228,7 +228,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel. Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, do not play, details). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
@@ -484,8 +484,14 @@ cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/con
 # The control room with a phone held sideways (9 phone sizes, tap targets, every control, turning the phone)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-landscape.mjs
 
+# The control room's Song panel (category, do not play, details) on desktop and phone sizes
+cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
+
 # Sound in the control room on an iPhone: the Listen button and tap-to-sound time, in Chromium made to follow Safari's tap rule
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound.mjs
+
+# A new release published under an open page, then every late-loading screen opened (builds the site twice itself)
+cd frontend && node e2e/stale-release.mjs
 
 # Every control room button, the Listen page, call-in and release-pickup timings, same fake backend (ONLY=<part> for one part; see wiki/audio-engine.md)
 cd frontend && for s in control-room-actions listen-page call-in release-timing; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done

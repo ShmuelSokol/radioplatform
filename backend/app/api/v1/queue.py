@@ -796,6 +796,37 @@ def _remember_fire_request(station_id, request_id: str | None, response: dict) -
         _fire_requests[(str(station_id), request_id)] = (time.monotonic(), response)
 
 
+_operator_locks: dict[str, asyncio.Lock] = {}
+# Longest an operator's action waits for the one before it (a Next that waits for the
+# engine to load a file holds its turn about 3 s). After that it goes ahead anyway.
+OPERATOR_TURN_WAIT = 8.0
+
+
+async def operator_turn(station_id: uuid.UUID):
+    """One operator action at a time per station, in the order they arrived.
+
+    Play next and Next sent 0.1 s apart ran side by side: Next read the queue before
+    Play next's commit, saw the old head and played the song the engine had pre-loaded
+    (Jerusalem 03:23Z 2026-11-18). A route dependency, so the turn is taken before the
+    handler reads anything. Not the advance lock: the handlers take that themselves.
+    """
+    key = str(station_id)
+    lock = _operator_locks.get(key)
+    if lock is None:
+        lock = _operator_locks[key] = asyncio.Lock()
+    held = False
+    try:
+        await asyncio.wait_for(lock.acquire(), OPERATOR_TURN_WAIT)
+        held = True
+    except TimeoutError:
+        logger.warning("Operator action on %s went ahead without its turn (waited %.0f s)", key, OPERATOR_TURN_WAIT)
+    try:
+        yield
+    finally:
+        if held:
+            lock.release()
+
+
 _advance_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -1767,7 +1798,7 @@ async def _engine_takes_queue_change(db: AsyncSession, station_id) -> None:
         logger.warning("Engine could not be told about the queue change", exc_info=True)
 
 
-@router.post("/play-next", status_code=201)
+@router.post("/play-next", status_code=201, dependencies=[Depends(operator_turn)])
 async def play_next(
     station_id: uuid.UUID,
     body: QueueAdd,
@@ -1797,7 +1828,7 @@ async def play_next(
     return {"id": str(entry.id), "position": entry.position, "message": "Queued as next"}
 
 
-@router.post("/fire-now", status_code=201)
+@router.post("/fire-now", status_code=201, dependencies=[Depends(operator_turn)])
 async def fire_now(
     station_id: uuid.UUID,
     body: QueueFireNow,
@@ -1909,7 +1940,7 @@ async def mix_over(
 SKIP_FADE_SECONDS = {"hard": 0.0, "fade": 0.5, "soft": 3.0}
 
 
-@router.post("/skip")
+@router.post("/skip", dependencies=[Depends(operator_turn)])
 async def skip_current(
     station_id: uuid.UUID,
     fade: Literal["hard", "fade", "soft"] = Query("fade"),
@@ -1935,9 +1966,21 @@ async def skip_current(
             await playout_engine.engine_flush(station_id)
         else:
             # The engine may hold a song the queue no longer has next (Play next, a delete
-            # or a move seconds ago): Next must play what the queue shows
+            # or a move seconds ago, a sponsorship that became due): Next must play what
+            # the queue shows. That item is loaded first and then put on air; taking the
+            # song back and skipping at once lost the item while its file was loading.
+            state = playout_engine.get_state(station_id)
+            head = None
+            if on_air is None or str(on_air.id) not in state.timed_sent:
+                head = await playout_engine.head_the_engine_does_not_hold(db, station_id)
+            if head is not None and await playout_engine.next_goes_to(station_id, head):
+                from app.services import activity_log
+                activity_log.note("Sent to the playout engine", [on_air.asset_id if on_air else None])
+                return {"message": "Skipped", "now_playing": None, "fade_seconds": fade_seconds}
+            # A long item, or a hard item close by: the pre-loaded song is taken back
+            # and the engine asks again...
             await playout_engine.take_operator_change(db, station_id, before_next=True)
-            # ...and the engine needs a moment to load an item it was handed just now
+            # ...and needs a moment to load the item it was handed just now
             await playout_engine.settle_before_next(station_id)
         if await playout_engine.engine_skip(station_id, fade_seconds):
             from app.services import activity_log
@@ -2295,7 +2338,7 @@ async def panic(
     return {**done, "queue": await _queue_after_action(db, station_id)}
 
 
-@router.post("/insert", status_code=201)
+@router.post("/insert", status_code=201, dependencies=[Depends(operator_turn)])
 async def insert_into_queue(
     station_id: uuid.UUID,
     body: QueueInsert,
@@ -2358,7 +2401,28 @@ async def insert_into_queue(
     }
 
 
-@router.post("/move-up")
+async def _warnings_where_it_stands(db: AsyncSession, station_id: uuid.UUID, entry: QueueEntry) -> list[str]:
+    """The reminders for an entry at the place it was just moved to (not yet committed).
+    Every way of moving an entry answers with the same ones: arrows, a typed position
+    and drag-and-drop. Never blocks the move."""
+    await db.flush()
+    pending = list(
+        (
+            await db.execute(
+                select(QueueEntry)
+                .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+                .order_by(QueueEntry.position)
+            )
+        ).scalars().all()
+    )
+    try:
+        return await _validate_queue_move(db, station_id, entry, entry.position, pending)
+    except Exception:  # a reminder must never fail the move
+        logger.warning("Move warnings could not be worked out", exc_info=True)
+        return []
+
+
+@router.post("/move-up", dependencies=[Depends(operator_turn)])
 async def move_up(
     station_id: uuid.UUID,
     body: QueueReorder,
@@ -2382,14 +2446,16 @@ async def move_up(
         .order_by(QueueEntry.position.desc()).limit(1)
     )
     above = result.scalar_one_or_none()
+    warnings: list[str] = []
     if above:
         above.position, entry.position = entry.position, above.position
+        warnings = await _warnings_where_it_stands(db, station_id, entry)
         await db.commit()
     await _engine_takes_queue_change(db, station_id)
-    return {"message": "Moved up"}
+    return {"message": "Moved up", "warnings": warnings}
 
 
-@router.post("/move-down")
+@router.post("/move-down", dependencies=[Depends(operator_turn)])
 async def move_down(
     station_id: uuid.UUID,
     body: QueueReorder,
@@ -2412,14 +2478,16 @@ async def move_down(
         .order_by(QueueEntry.position.asc()).limit(1)
     )
     below = result.scalar_one_or_none()
+    warnings: list[str] = []
     if below:
         below.position, entry.position = entry.position, below.position
+        warnings = await _warnings_where_it_stands(db, station_id, entry)
         await db.commit()
     await _engine_takes_queue_change(db, station_id)
-    return {"message": "Moved down"}
+    return {"message": "Moved down", "warnings": warnings}
 
 
-@router.put("/reorder")
+@router.put("/reorder", dependencies=[Depends(operator_turn)])
 async def reorder_queue(
     station_id: uuid.UUID,
     body: QueueReorder,
@@ -2448,9 +2516,10 @@ async def reorder_queue(
         .execution_options(synchronize_session=False)
     )
     entry.position = body.new_position
+    warnings = await _warnings_where_it_stands(db, station_id, entry)
     await db.commit()
     await _engine_takes_queue_change(db, station_id)
-    return {"message": "Reordered"}
+    return {"message": "Reordered", "warnings": warnings}
 
 
 async def _validate_queue_move(
@@ -2560,7 +2629,7 @@ async def _validate_queue_move(
     return warnings
 
 
-@router.post("/reorder-dnd")
+@router.post("/reorder-dnd", dependencies=[Depends(operator_turn)])
 async def reorder_dnd(
     station_id: uuid.UUID,
     body: QueueDndReorder,
@@ -2616,7 +2685,7 @@ async def reorder_dnd(
     return {"message": "Reordered", "warnings": warnings}
 
 
-@router.delete("/{entry_id}", status_code=204)
+@router.delete("/{entry_id}", status_code=204, dependencies=[Depends(operator_turn)])
 async def remove_from_queue(
     station_id: uuid.UUID,
     entry_id: uuid.UUID,

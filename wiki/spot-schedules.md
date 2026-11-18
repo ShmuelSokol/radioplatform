@@ -68,3 +68,15 @@ Shmuel 2026-11-17: sponsors should see what they missed. `services/sponsor_deliv
 - Nothing is stored: it is worked out on each read, so editing a contract changes
   what its past days were "promised". No make-good is planned automatically.
 - Tests: `tests/test_sponsor_missed_plays.py`, `frontend/e2e/sponsor-missed-plays.mjs`.
+
+## A recording that may not air is not planned (2026-11-18)
+
+`plan_for_station` leaves out every schedule whose recording no automatic pick may use
+(`Asset` `not_placeholder()`: category do_not_play, a placeholder title, rejected in
+review), through `airable_schedules`. Before, the planner made its slots and the queue
+refill's `_purge_placeholders` deleted them again on every queue read: "removed 19
+placeholder entries" then "Spot slots reconciled +19 -0 (kept 0)", about 12 queue rows
+a second for ever (review thread's walk-through; do-not-play is one tap in the control
+room since PR 251). Spots mode off alone did not cause it (the plan is empty). The
+sponsor's Missed Plays still lists the plays that did not air. Taking the mark off plans
+it again on the next refill. Test: `backend/tests/test_spot_slot_churn.py`.

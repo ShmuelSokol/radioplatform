@@ -451,3 +451,93 @@ async def test_station_not_named_for_the_relay_keeps_its_commands(client, tunnel
     text = " ".join(lines)
     assert len(lines) == 2
     assert "now go to its local box's relay" in text and "stopped polling" in text
+
+
+@pytest.mark.asyncio
+async def test_slow_command_by_relay_is_taken_only_when_it_was_fetched(client, tunnel_station):
+    """Same rules as a command sent by HTTPS: `wait` is the whole wait, and a /timed whose
+    file is still loading counts as taken (slow_is_ok), not refused. A command the relay
+    never fetched was never given to the engine: that stays a failure."""
+    import asyncio
+
+    from app.services import playout_engine, playout_tunnel
+
+    sid = tunnel_station
+    url = f"/api/v1/playout/{sid}/commands/poll"
+    await client.post(url, json={"wait": 0}, headers=HEADERS)
+    assert playout_tunnel.connected(sid)
+
+    async def timed(**kw):
+        return await playout_engine.engine_timed(sid, "http://x/a.mp3", 0.0, "e1", **kw)
+
+    # Nobody fetched it within the wait: not taken, whatever slow_is_ok says
+    started = asyncio.get_running_loop().time()
+    assert await timed(wait=0.3, slow_is_ok=True) is False
+    assert 0.25 < asyncio.get_running_loop().time() - started < 1.0
+
+    # The relay fetched it and the engine is still loading the file when the wait ends
+    async def fetch_only():
+        return (await client.post(url, json={"wait": 5}, headers=HEADERS)).json()["commands"]
+
+    poller = asyncio.create_task(fetch_only())
+    await asyncio.sleep(0.05)
+    assert await timed(wait=0.3, slow_is_ok=True) is True
+    got = await poller
+    assert got[0]["path"] == "/timed" and 0.2 < got[0]["wait"] <= 0.5  # the relay's wait for its engine
+
+    poller = asyncio.create_task(fetch_only())
+    await asyncio.sleep(0.05)
+    assert await timed(wait=0.3) is False  # a caller that needs the answer does not get a yes
+    await poller
+
+    # The relay's own wait for the engine ran out first: it answers "still working"
+    async def relay_says_working():
+        got = await fetch_only()
+        await client.post(url, json={"wait": 0, "answers": [
+            {"id": got[0]["id"], "status": playout_tunnel.STILL_WORKING}]}, headers=HEADERS)
+
+    poller = asyncio.create_task(relay_says_working())
+    await asyncio.sleep(0.05)
+    assert await timed(wait=2.0, slow_is_ok=True) is True
+    await poller
+    poller = asyncio.create_task(relay_says_working())
+    await asyncio.sleep(0.05)
+    assert await timed(wait=2.0) is False
+    await poller
+
+
+def test_relay_reports_an_engine_still_loading_as_working_not_failed(tmp_path):
+    """The relay waits for its engine as long as the backend waits (the command's `wait`);
+    an engine that took the command and has not answered yet is 202, a dead one 502."""
+    import http.server
+    import threading
+    import time as _time
+
+    class Slow(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            _time.sleep(0.2 if self.path == "/quick" else 1.5)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true}')
+            except OSError:
+                pass
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Slow)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        relay = kbr_relay.Relay(
+            "http://127.0.0.1:9/api/v1", "s", "t", tmp_path,
+            f"http://127.0.0.1:{srv.server_address[1]}",
+        )
+        assert relay._engine_call("/quick", {}, wait=1.0) == (200, {"ok": True})
+        assert relay._engine_call("/timed", {}, wait=0.5) == (202, None)
+        relay.engine_control = "http://127.0.0.1:9"
+        assert relay._engine_call("/timed", {}, wait=0.5)[0] == 502
+    finally:
+        srv.shutdown()

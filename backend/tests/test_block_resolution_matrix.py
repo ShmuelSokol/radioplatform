@@ -21,7 +21,9 @@ from app.services.scheduling import SchedulingService
 NY = ZoneInfo("America/New_York")
 OSLO = ZoneInfo("Europe/Oslo")
 JERUSALEM = ZoneInfo("Asia/Jerusalem")
-LONG_AGO = datetime.now(UTC) - timedelta(days=60)
+# A fixed date, before every date these tests ask about: "60 days before today" made
+# them fail from mid January 2027 on (found by running the suite with the clock moved)
+LONG_AGO = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 async def _station(db, **kw):

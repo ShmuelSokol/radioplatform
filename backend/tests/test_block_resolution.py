@@ -1,7 +1,7 @@
 """Which schedule block is on air: overnight blocks, recurrence, ranking, start-only
 blocks made after their start, and sun-relative times (V1-65..70, V2-102, V2-103)."""
 import uuid
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -12,7 +12,9 @@ from app.models.station import Station
 from app.services.scheduling import SchedulingService
 
 NY = ZoneInfo("America/New_York")
-LONG_AGO = datetime.now(UTC) - timedelta(days=60)
+# A fixed date, before every date these tests ask about: "60 days before today" made
+# them fail from mid January 2027 on (found by running the suite with the clock moved)
+LONG_AGO = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 async def _station(db, **kw):

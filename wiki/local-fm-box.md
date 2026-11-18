@@ -78,8 +78,14 @@ wrong or copied station id gets 403 on the poll and takes nothing, and every swi
 routing is logged as a warning. Until the box can feed Icecast, try it only under a
 station of its own, never under Main's id. (The same mistake on `/next` would still
 split a queue: `/next` trusts the token alone, as it does for any engine.)
-A command nobody fetched within its timeout
-(4 s) is withdrawn, never delivered late. With the tunnel up the backend does the timed
+A command nobody fetched within its wait
+(4 s unless the caller gives `wait=`) is withdrawn, never delivered late. `wait=` and
+`slow_is_ok=` mean the same as by HTTPS: the relay is told how much of the wait is left
+and waits that long for its engine; a command the relay fetched whose answer is not in
+when the wait ends (or the relay's 202, "engine still working") is taken when the caller
+said `slow_is_ok` (a `/timed` answers only once its file is loaded) and a failure
+otherwise. The relay runs commands one after another, so a slow `/timed` (Next waits
+6 s) holds the commands behind it for that long. With the tunnel up the backend does the timed
 hand-over itself as on the stream server; the relay's own hand-over (`KBR_RELAY_TIMED=offline`)
 takes over only when the backend is unreachable.
 

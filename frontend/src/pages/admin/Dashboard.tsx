@@ -22,6 +22,8 @@ import TransportBar, { TransportButtons } from './controlroom/TransportBar';
 import type { TransportProps } from './controlroom/TransportBar';
 import { REPORT_BUG_EVENT } from '../../components/BugReporter';
 import QueuePanel from './controlroom/QueuePanel';
+import SongPanel from './controlroom/SongPanel';
+import type { SongTarget } from './controlroom/SongPanel';
 import type { QueueRow } from './controlroom/QueuePanel';
 import { nextCut } from './controlroom/timing';
 import LibraryPanel from './controlroom/LibraryPanel';
@@ -67,6 +69,10 @@ const SPLIT_MIN = 0.15;
 const SPLIT_MAX = 0.85;
 
 const LISTEN_KEY = 'kbr-cr-listen';
+// How long the header may say "Starting…" for the server stream, and after how long
+// without sound a tap starts the stream afresh
+const STREAM_STARTING_MAX_MS = 8000;
+const STREAM_RESTART_AFTER_MS = 4000;
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -166,6 +172,13 @@ export default function Dashboard() {
   useEffect(() => { if (queueDateFilter) loadWholeQueue(); }, [queueDateFilter, loadWholeQueue]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  // Quick actions panel for one song (the one on air or a queue row)
+  const [songTarget, setSongTarget] = useState<SongTarget | null>(null);
+  const openRowSong = useCallback((row: QueueRow) => {
+    if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing' });
+  }, []);
+  const closeSong = useCallback(() => setSongTarget(null), []);
+  const songToast = useCallback((text: string, type: Toast['type']) => setToast({ text, type }), []);
   const [busyId, setBusyId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const { pins, toggle: togglePin, cart, selectPage, selectSet, addSet, renameSet, deleteSet } = useHotButtons(stationId);
@@ -264,7 +277,14 @@ export default function Dashboard() {
   // It is started inside the tap (takeSound): Safari refuses a stream that an
   // effect starts, and the page then fell back to the built-in player.
   const [streamSounding, setStreamSounding] = useState(false);
-  const streamRef = useRef<{ url: string; stream: LiveStream } | null>(null);
+  const streamRef = useRef<{ url: string; stream: LiveStream; startedAt: number } | null>(null);
+  const streamSoundingRef = useRef(false);
+  streamSoundingRef.current = streamSounding;
+  // "Starting…" is shown for a stream on its way, and only for so long: after that the
+  // button says Listen again and a tap starts the stream afresh (it must never stay
+  // on "Starting…").
+  const [streamStarting, setStreamStarting] = useState(false);
+  const startingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopStream = useCallback(() => {
     streamRef.current?.stream.stop();
     streamRef.current = null;
@@ -273,8 +293,12 @@ export default function Dashboard() {
     const audio = dashStreamAudioRef.current;
     if (!audio) return;
     stopStream();
-    streamRef.current = { url, stream: startLiveStream(audio, url, () => { streamRef.current = null; setStreamFailed(true); }) };
+    streamRef.current = { url, startedAt: Date.now(), stream: startLiveStream(audio, url, () => { streamRef.current = null; setStreamFailed(true); }) };
+    setStreamStarting(true);
+    if (startingTimer.current) clearTimeout(startingTimer.current);
+    startingTimer.current = setTimeout(() => setStreamStarting(false), STREAM_STARTING_MAX_MS);
   }, [stopStream]);
+  useEffect(() => () => { if (startingTimer.current) clearTimeout(startingTimer.current); }, []);
   useEffect(() => {
     const audio = dashStreamAudioRef.current;
     if (!audio || !dashUseStream) return;
@@ -407,7 +431,10 @@ export default function Dashboard() {
     const el = dashStreamAudioRef.current;
     const url = streamUrlRef.current;
     if (url && isPlayingRef.current) {
-      if (streamRef.current?.url !== url || el?.paused) startStream(url);
+      // (again when it was started a while ago and still gives no sound)
+      const cur = streamRef.current;
+      const stuck = !!cur && !streamSoundingRef.current && Date.now() - cur.startedAt > STREAM_RESTART_AFTER_MS;
+      if (cur?.url !== url || el?.paused || stuck) startStream(url);
     } else if (el && !streamRef.current && !el.getAttribute('src')) {
       el.src = SILENT_WAV;
       el.play().then(() => { if (!streamRef.current) el.pause(); }).catch(() => {});
@@ -691,8 +718,12 @@ export default function Dashboard() {
     });
   }, [stationId, initAudio, startMut]);
 
-  const moveUp = useCallback((id: string) => moveUpMut.mutate(id, { onError: onMutError }), [moveUpMut, onMutError]);
-  const moveDown = useCallback((id: string) => moveDownMut.mutate(id, { onError: onMutError }), [moveDownMut, onMutError]);
+  // Arrows show the same reminders as drag-and-drop (rule and category conflicts)
+  const onMoved = useCallback((data: { warnings?: string[] } | undefined) => {
+    if (data?.warnings?.length) setToast({ text: data.warnings.join(' | '), type: 'warn' });
+  }, []);
+  const moveUp = useCallback((id: string) => moveUpMut.mutate(id, { onSuccess: onMoved, onError: onMutError }), [moveUpMut, onMoved, onMutError]);
+  const moveDown = useCallback((id: string) => moveDownMut.mutate(id, { onSuccess: onMoved, onError: onMutError }), [moveDownMut, onMoved, onMutError]);
   const remove = useCallback((id: string) => removeMut.mutate(id, { onError: onMutError }), [removeMut, onMutError]);
   const reorder = useCallback((entryId: string, newPosition: number) => {
     reorderMut.mutate({ entryId, newPosition }, {
@@ -778,6 +809,7 @@ export default function Dashboard() {
     onStation: setSelectedStationId,
     isPlaying: isPlaying,
     nowAsset: nowAsset,
+    onNowSong: nowAsset ? () => setSongTarget({ asset: nowAsset, onAir: true }) : undefined,
     nextAsset: nextAsset,
     elapsed: shownElapsed,
     remaining: remaining,
@@ -792,7 +824,7 @@ export default function Dashboard() {
     looping: looping,
     onLoop: toggleLoop,
     loopBusy: loopBusy,
-    audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
+    audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive && streamStarting, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
     stationTz: stationTz,
     liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
   };
@@ -817,6 +849,7 @@ export default function Dashboard() {
       onRemove={remove}
       onReorder={reorder}
       lastPlayed={lastPlayedMap?.last_played}
+      onSong={openRowSong}
     />
   );
   const hotButtons = (wide: boolean, bar = false) => (
@@ -897,7 +930,7 @@ export default function Dashboard() {
     <div className="qn cr-root h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
       {resume.asking && <ResumePrompt onTap={resume.tap} />}
       <audio ref={dashStreamAudioRef} className="hidden"
-        onPlaying={(e) => setStreamSounding(!!streamRef.current && !e.currentTarget.muted)}
+        onPlaying={() => setStreamSounding(!!streamRef.current)}
         onPause={() => setStreamSounding(false)}
         onEmptied={() => setStreamSounding(false)}
         onEnded={() => setStreamSounding(false)}
@@ -913,6 +946,11 @@ export default function Dashboard() {
           <span className="flex-1">{toast.text}</span>
           <button type="button" onClick={() => setToast(null)} aria-label="Dismiss" className="shrink-0 w-6 h-6 opacity-70 hover:opacity-100">✕</button>
         </div>
+      )}
+
+      {songTarget && (
+        <SongPanel target={songTarget} stationId={stationId ?? null} canEdit={isManager(user?.role)}
+          onClose={closeSong} onToast={songToast} />
       )}
 
       <TransportBar {...transport} landscape={phoneLandscape}

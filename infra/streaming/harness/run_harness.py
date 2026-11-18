@@ -192,7 +192,7 @@ class Stack:
                     "Content-Type": "application/json",
                 })
                 try:
-                    with urllib.request.urlopen(req, timeout=4) as resp:
+                    with urllib.request.urlopen(req, timeout=30) as resp:
                         data, code = resp.read(), resp.status
                 except Exception as e:  # engine down
                     data, code = json.dumps({"ok": False, "error": str(e)}).encode(), 502
@@ -860,6 +860,53 @@ async def sc_operator_next_slow_file(h: Harness) -> None:
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 
+async def sc_operator_next_overtakes_commit(h: Harness) -> None:
+    """KBR Jerusalem 2026-11-18 03:23Z: Play next and Next sent 0.1 s apart. On production
+    a commit takes 50 to 150 ms, so the Next ran before Play next was committed, saw the
+    old queue head and played the automatic song the engine held. Here a database trigger
+    holds every manual queue insert for 250 ms inside its transaction, and Next is sent
+    0.1 s after Play next: the queued item must be what airs."""
+    name = "operator_next_overtakes_commit"
+    from sqlalchemy import text
+
+    from app.db.engine import async_session_factory
+
+    await wait_music(h)
+    await asyncio.sleep(8)
+    base = f"/stations/{STATION_ID}/queue"
+    async with async_session_factory() as db:
+        await db.execute(text(
+            "CREATE OR REPLACE FUNCTION kbr_slow_insert() RETURNS trigger AS $$ "
+            "BEGIN PERFORM pg_sleep(0.25); RETURN NEW; END $$ LANGUAGE plpgsql"))
+        await db.execute(text("DROP TRIGGER IF EXISTS kbr_slow_manual ON queue_entries"))
+        await db.execute(text(
+            "CREATE TRIGGER kbr_slow_manual BEFORE INSERT ON queue_entries FOR EACH ROW "
+            "WHEN (NEW.source = 'manual') EXECUTE FUNCTION kbr_slow_insert()"))
+        await db.commit()
+    t_start = time.time()
+    try:
+        for asset in ("story", "shiur", "song6"):
+            body = {"asset_id": str(h.assets[asset])}
+            queued = asyncio.create_task(asyncio.to_thread(h.api, "POST", f"{base}/play-next", body))
+            await asyncio.sleep(0.1)
+            pressed = asyncio.create_task(asyncio.to_thread(h.api, "POST", f"{base}/skip?fade=hard"))
+            (code, _), (skip_code, _) = await queued, await pressed
+            t = await h.wait_on_air(asset, 6)
+            cur = await h.on_air()
+            h.check(name, code == 201 and skip_code == 200 and t is not None,
+                    f"Play next ({code}) and Next ({skip_code}) 0.1 s apart, commit held 250 ms: "
+                    f"{asset} on air (site shows {cur.asset.title if cur else None})")
+            await asyncio.sleep(6)
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(text("DROP TRIGGER IF EXISTS kbr_slow_manual ON queue_entries"))
+            await db.commit()
+    heard = h.heard(t_start, time.time() - 1)
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
 async def sc_resume_without_old_song(h: Harness) -> None:
     """KBR Jerusalem 2026-11-18 01:00Z: Main's Daf Yomi block cut a song at 00:45; at
     01:00 the shiur paused for the time check, and before it resumed 2.8 s of the song cut
@@ -1080,15 +1127,73 @@ async def sc_fit_before_hour(h: Harness) -> None:
     before = runs[:runs.index(clock)] if clock in runs else runs
     h.check(name, tone_name(TONES["story"][0]) not in before,
             f"the story did not start before the time check: {runs}")
-    h.check(name, bool(before) and before[-1] == tone_name(TONES["song5"][0]),
-            f"the 40 s song was moved up and was on air at the hour: {before}")
-    s5 = await h.started_times("song5", t0)
-    lost = (s5[0][0] + 40 - due.timestamp()) if s5 else None
+    # Any 40 s song will do: since PR 248 the fit may pick one from the refill instead
+    before = [n for n in before if n != "mix"]  # the fade into the time check
+    h.check(name, bool(before) and before[-1].startswith("song"),
+            f"a 40 s song was moved up and was on air at the hour: {before}")
+    marks = timeline(heard)
+    last = None
+    for i, (t, n) in enumerate(marks):
+        if n == clock and i > 0:
+            last = marks[i - 1][0]
+            break
+    lost = (last + 40 - due.timestamp()) if last is not None else None
     h.check(name, lost is not None and lost <= 15.0,
             f"it lost {'?' if lost is None else f'{lost:.0f}'} s to the time check (the story would have lost 112 s)")
     gap, _ = longest_silence(heard)
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
+async def sc_fit_preloaded_before_hour(h: Harness) -> None:
+    """Jerusalem 04:00Z 2026-11-18: during a long item the engine had the next song
+    pre-loaded for minutes, hour-fit would not touch it ("0 songs to choose from") and it
+    was cut with 140 s left. A 150 s item is on air; the 150 s story pre-loaded behind it
+    would start 38 s before a hard time check. It is exchanged for a 40 s song while the
+    item on air still has more than 75 s to go; the engine drops its pre-loaded copy."""
+    name = "fit_preloaded_before_hour"
+    await wait_music(h)
+    await h.clear_pending()
+    auto = {"source": "auto"}
+    await h.queue([("shiur", dict(auto)), ("story", dict(auto)), ("song5", dict(auto)),
+                   ("song4", dict(auto)), ("song3", dict(auto))])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    t0 = await h.wait_on_air("shiur", 30)
+    if t0 is None:
+        h.check(name, False, "the long item never went on air")
+        return
+    # the long item ends at +150; the story would start there, 38 s before the hour
+    due = datetime.fromtimestamp(t0 + 188, UTC)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + 14)
+    starts = await h.started_times("time", due.timestamp() - 5)
+    late = starts[0][0] - due.timestamp() if starts else None
+    h.check(name, late is not None and abs(late) <= 1.0,
+            f"time check {'never' if late is None else f'{late:+.1f} s'}")
+    heard = h.heard(t0 + 2, due.timestamp() + 12)
+    h.print_timeline(heard, due.timestamp())
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    clock = tone_name(TONES["time"][0])
+    before = runs[:runs.index(clock)] if clock in runs else runs
+    h.check(name, tone_name(TONES["story"][0]) not in before,
+            f"the pre-loaded story did not start before the time check: {runs}")
+    h.check(name, bool(before) and before[-1] in [tone_name(TONES[n][0]) for n in ("song3", "song4", "song5")],
+            f"a 40 s song was moved up and was on air at the hour: {before}")
+    # from what was heard: when the last song before the time check began
+    marks = timeline(heard)
+    last = None
+    for i, (t, n) in enumerate(marks):
+        if n == clock and i > 0:
+            last = marks[i - 1][0]
+            break
+    lost = (last + 40 - due.timestamp()) if last is not None else None
+    h.check(name, lost is not None and lost <= 15.0,
+            f"it lost {'?' if lost is None else f'{lost:.0f}'} s to the time check (the story would have lost 112 s)")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+    await asyncio.sleep(5)  # the next scenario's own Next must not land on this one
 
 
 async def _song_ends_before_hard(h: Harness, name: str, gap: float) -> None:
@@ -1573,6 +1678,10 @@ async def sc_local_box_offline(h: Harness) -> None:
         h.check(name, False, f"plan not copied: {e!r} {relay.status()}")
         return
     cut = time.time()
+    # The order the box holds on its disk at the cut. Titles are compared against this,
+    # not against "no title twice": the automatic fill may queue the song that is on air
+    # again as a later entry, which is the queue's order and not a repeat.
+    planned = [str(e.get("title") or "").split(" ")[0] for e in relay.plan.get("entries", []) if not e.get("at")]
     h.stack.backend_down = h.stack.control_down = True
     try:
         await asyncio.sleep(due - time.time() + 6 + 45)
@@ -1591,8 +1700,11 @@ async def sc_local_box_offline(h: Harness) -> None:
             f"time check heard {starts[0] - due:+.2f} s from its second" if starts else "time check never aired")
     h.check(name, runs.count("time") == 1, f"time check aired once: {runs}")
     songs = [n for n in runs if n.startswith("song")]
-    h.check(name, len(songs) == len(set(songs)) and len(songs) >= 3,
-            f"songs carried on in order, none twice: {songs}")
+    def follows_plan(seq: list[str]) -> bool:
+        return any(planned[i:i + len(seq)] == seq for i in range(len(planned)))
+    # The first song heard was already on air (or already with the engine) at the cut
+    in_order = len(songs) >= 3 and (follows_plan(songs) or follows_plan(songs[1:]))
+    h.check(name, in_order, f"songs carried on in the plan's order, none twice: {songs} (plan {planned[:6]})")
     gap, _ = longest_silence(heard)
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s over {back - cut:.0f} s offline")
     after = [n for _, n in timeline(h.heard(due + 7, back - 1))]
@@ -2459,6 +2571,7 @@ SCENARIOS = {
     "blackout_ended_early": sc_blackout_ended_early,
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
+    "fit_preloaded_before_hour": sc_fit_preloaded_before_hour,
     "song_ends_before_hour": sc_song_ends_before_hour,
     "song_ends_6s_before_hour": sc_song_ends_6s_before_hour,
     "live_show_quiet": sc_live_show_quiet,
@@ -2471,6 +2584,7 @@ SCENARIOS = {
     "site_matches_stream": sc_site_matches_stream,
     "operator_queue_then_next": sc_operator_queue_then_next,
     "operator_next_slow_file": sc_operator_next_slow_file,
+    "operator_next_overtakes_commit": sc_operator_next_overtakes_commit,
     "resume_without_old_song": sc_resume_without_old_song,
     "next_twice": sc_next_twice,
     "next_skips_one": sc_next_skips_one,

@@ -23,12 +23,17 @@ logger = logging.getLogger(__name__)
 # A relay that has not polled for this long is gone: commands go by HTTPS again
 CONNECTED_SECONDS = 40.0
 MAX_WAIT_SECONDS = 25.0
+# Status for "the engine has the command and is still working on it" (a /timed answers
+# only once its file is loaded): the relay fetched it and no answer came in time, or the
+# relay's own wait for the engine ran out. Not a refusal.
+STILL_WORKING = 202
 
 
 @dataclass
 class _Tunnel:
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     waiting: dict[str, asyncio.Future] = field(default_factory=dict)
+    fetched: set[str] = field(default_factory=set)  # picked up by the relay, answer not in yet
     seen_at: float = 0.0
     polling: int = 0
     routed: bool = False  # last routing reported in the log
@@ -69,19 +74,23 @@ def connected(station_id) -> bool:
 
 async def send(station_id, path: str, payload: dict, timeout: float = 4.0) -> tuple[int, dict | None] | None:
     """Give the relay a command for its engine and wait for the engine's answer:
-    (HTTP status, JSON body), or None when none came in time. A command not picked up
-    in time is withdrawn: a Next must not arrive half a minute late."""
+    (HTTP status, JSON body). `timeout` is the whole wait, as for a command sent by HTTPS.
+    None when the relay did not pick the command up in time: it is withdrawn, a Next must
+    not arrive half a minute late. (STILL_WORKING, None) when the relay did pick it up and
+    the engine's answer is not in yet: the engine has it."""
     t = _tunnel(station_id)
     cid = uuid.uuid4().hex
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     t.waiting[cid] = fut
-    t.queue.put_nowait({"id": cid, "path": path, "payload": payload, "expires": time.monotonic() + timeout})
+    t.queue.put_nowait({"id": cid, "path": path, "payload": payload, "wait": timeout,
+                        "expires": time.monotonic() + timeout})
     try:
         return await asyncio.wait_for(fut, timeout)
     except TimeoutError:
-        return None
+        return (STILL_WORKING, None) if cid in t.fetched else None
     finally:
         t.waiting.pop(cid, None)
+        t.fetched.discard(cid)
 
 
 def answer(station_id, cid: str, status: int, body: dict | None) -> None:
@@ -105,7 +114,11 @@ async def poll(station_id, wait: float) -> list[dict]:
                 cmd = t.queue.get_nowait()
                 # Withdrawn (its sender gave up) or too old: never delivered late
                 if cmd["id"] in t.waiting and cmd["expires"] > time.monotonic():
-                    out.append({"id": cmd["id"], "path": cmd["path"], "payload": cmd["payload"]})
+                    t.fetched.add(cmd["id"])
+                    # `wait`: how long the relay may wait for its engine (what is left of
+                    # the sender's wait)
+                    out.append({"id": cmd["id"], "path": cmd["path"], "payload": cmd["payload"],
+                                "wait": round(max(0.5, cmd["expires"] - time.monotonic()), 2)})
             left = deadline - time.monotonic()
             if out or left <= 0:
                 return out
