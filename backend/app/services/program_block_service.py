@@ -396,9 +396,8 @@ async def reconcile_block_entries(
     """
     now = as_utc(now or datetime.now(UTC))
     earliest = now + SAFETY_MARGIN
-    station = (
-        await db.execute(select(Station).where(Station.id == station_id))
-    ).scalar_one_or_none()
+    # from the session when it is already there: no round trip per step of a top-up
+    station = await db.get(Station, station_id)
     if station is None:
         return None
     blocks = await load_blocks(db, station_id)

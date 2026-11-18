@@ -258,11 +258,17 @@ async def test_past_due_hard_time_check_is_next(client, db_session, eng):
 
 @pytest.mark.asyncio
 async def test_started_broadcasts_and_tops_up(client, db_session, eng):
-    """B-PLAYOUT-15: a start report is broadcast at once and the queue topped up, but not
-    in a blackout. B-MODE-17: the start report is the play log (>= 1 s)."""
+    """B-PLAYOUT-15: a start report is broadcast at once and the queue topped up (in the
+    background, so the report is answered first), but not in a blackout. B-MODE-17: the start report is the play log (>= 1 s)."""
     station, entries, _, calls = eng
+
+    async def topped_up():
+        # The top-up runs after the answer, in the background (the report must not wait)
+        await asyncio.gather(*list(queue_module._background), return_exceptions=True)
+
     await _on_air(client, station, entries[0].id)
     assert calls["broadcast"] == [str(entries[0].id)]
+    await topped_up()
     assert calls["replenish"] == 1
 
     row = await _fresh(db_session, entries[0].id)
@@ -274,6 +280,7 @@ async def test_started_broadcasts_and_tops_up(client, db_session, eng):
     await db_session.commit()
     await _on_air(client, station, entries[1].id)
     assert calls["broadcast"] == [str(entries[0].id), str(entries[1].id)]
+    await topped_up()
     assert calls["replenish"] == 1  # not during the blackout
     logs = (await db_session.execute(select(PlayLog).where(PlayLog.station_id == station.id))).scalars().all()
     assert [log.asset_id for log in logs] == [entries[0].asset_id]

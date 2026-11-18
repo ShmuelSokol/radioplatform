@@ -239,6 +239,16 @@ async function lookAt(page, guard, st, route, step, expected = []) {
   return shot;
 }
 
+/** Make the page a touch screen (or a mouse again), so `pointer: coarse` rules apply.
+ *  The setting lives only as long as its session, so one session is kept per page. */
+const touchSessions = new WeakMap();
+async function touch(page, on) {
+  let cdp = touchSessions.get(page);
+  if (!cdp) { cdp = await page.context().newCDPSession(page); touchSessions.set(page, cdp); }
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: on }).catch(() => {});
+  await cdp.send('Emulation.setEmitTouchEventsForMouse', on ? { enabled: true, configuration: 'mobile' } : { enabled: false }).catch(() => {});
+}
+
 let current = null;   // the station being walked
 async function open(page, route) {
   await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' });
@@ -247,15 +257,44 @@ async function open(page, route) {
   // one last worked on, then choose ours so the rest of the walk is about this station
   const pick = current && await stationPicker(page);
   if (pick && !pick.chosen.includes(current.name)) {
-    if (pick.chosen) finding(current.tag, route, 'open', 'opens on another station than the one last worked on', `shows "${pick.chosen}"`, await shoot(page, `${current.tag}${route}-other-station`));
+    // listener pages open on Kol B'ramah Main by design (a listener has no "last worked on")
+    if (pick.chosen && route.startsWith('/admin')) finding(current.tag, route, 'open', 'opens on another station than the one last worked on', `shows "${pick.chosen}"`, await shoot(page, `${current.tag}${route}-other-station`));
     await page.locator('[data-walk-station]').first().selectOption({ label: await page.locator('[data-walk-station] option').evaluateAll((os, n) => (os.find((o) => o.textContent.includes(n)) || {}).textContent, current.name) }).catch(() => {});
     await settle(page, 500);
   }
 }
 
+/** Controls smaller than a finger at phone size: the control itself, or its label when
+ *  it sits in one (a checkbox with its words counts as one target). */
+async function tooSmall(page) {
+  return page.evaluate(() => {
+    const out = [];
+    for (const el of document.querySelectorAll('[data-walk]')) {
+      const st = getComputedStyle(el);
+      if (st.opacity === '0' || st.pointerEvents === 'none' || el.disabled) continue;
+      let r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4) continue;
+      const lb = el.closest('label') || (el.labels && el.labels[0]);
+      if (lb) { const lr = lb.getBoundingClientRect(); if (lr.width * lr.height > r.width * r.height) r = lr; }
+      if (r.width < 43.5 || r.height < 43.5) out.push({ label: el.getAttribute('data-walk'), w: Math.round(r.width), h: Math.round(r.height) });
+    }
+    return out.sort((a, b) => Math.min(a.w, a.h) - Math.min(b.w, b.h));
+  });
+}
+
 async function reachAt(page, st, route, sizeName) {
   await controls(page);
   const bad = await unreachable(page);
+  // On a phone a finger needs 44 x 44 px (PC measured Approve at 17x40 on Song Requests,
+  // 2026-11-18). One finding per page, naming the smallest ones.
+  if (sizeName.startsWith('phone')) {
+    const small = await tooSmall(page);
+    if (small.length) {
+      const shotS = await shoot(page, `${st.tag}${route}-small-${sizeName}`);
+      finding(st.tag, route, `look at ${sizeName}`, `${small.length} control(s) under 44 px for a finger`,
+        small.slice(0, 10).map((x) => `${x.label} ${x.w}x${x.h}`).join('; '), shotS);
+    }
+  }
   if (!bad.length) return;
   await page.evaluate(() => window.scrollTo(0, 0));
   const shot = await shoot(page, `${st.tag}${route}-reach-${sizeName}`);
@@ -287,9 +326,11 @@ async function walkPage(page, guard, st, route) {
   await reachAt(page, st, route, `${WALK_SIZE.width}x${WALK_SIZE.height}`);
   for (const size of SIZES) {
     await page.setViewportSize({ width: size.width, height: size.height });
+    await touch(page, true);   // the site's phone rules are for touch screens (pointer: coarse)
     await open(page, route);
     await lookAt(page, guard, st, route, `open at ${size.name}`);
     await reachAt(page, st, route, size.name);
+    await touch(page, false);
   }
   await page.setViewportSize(WALK_SIZE);
   await open(page, route);

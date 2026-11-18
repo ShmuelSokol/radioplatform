@@ -35,6 +35,7 @@ import { allowEverywhere, guardBrowser, guardVerdict } from './lib/guard.mjs';  
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // What this suite provokes on purpose, or what only the local test stack does. Each needs its reason.
+allowEverywhere(/Pick at least one day for a weekly block/, 'the schedule blocks page is asked to save a weekly block with no day');
 allowEverywhere(/alert: Pick the city from the list under Location\./, 'F-STATIONS-2 presses Create Station with no city to see this message');
 allowEverywhere(rec => /\b401\b/.test(`${rec.kind} ${rec.text}`) && /\/api\/v1\/(auth\/me|activity\/page-view)\b/.test(rec.text) && /\/admin\/stations/.test(rec.url || ''),
   'F-GLOBAL-12 plants a bad access token and checks the site renews it without signing out');
@@ -3965,6 +3966,7 @@ async function main() {
   const n = (st) => results.filter(r => r.status === st).length;
   console.log(`\n${n('PASS')} passed, ${n('KNOWN-BUG')} known bugs, ${n('FAIL')} failed, ${n('FIXED?')} known bugs now passing (${results.length} checks)`);
   fs.rmSync(TMP, { recursive: true, force: true });
-  process.exit(n('FAIL') || n('FIXED?') || guardVerdict() ? 1 : 0);
+  const looked = guardVerdict();   // always printed, also when checks failed
+  process.exit(n('FAIL') || n('FIXED?') || looked ? 1 : 0);
 }
 main().catch(e => { console.error(e); process.exit(2); });
