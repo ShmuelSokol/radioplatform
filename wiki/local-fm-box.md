@@ -146,6 +146,54 @@ cd backend && PULSE_SERVER=unix:/tmp/kbr-pulse.sock KBR_HARNESS_ALSA_DEVICE=puls
 `local_box_sound_card` records the sink and the stream side by side: same items in the
 same order through a Next and a hard time check, card within 1.5 s of the stream, no gaps.
 
+## Stage 3b (2026-11-18): power cut, and one command to set a box up
+
+**Power cut.** What the relay keeps is written to disk before it replaces the old file
+(`fsync`, then rename), for the plan, the state and every audio file, so a cut leaves the
+old file or the new one. Unreadable files mean an empty plan (emergency folder), never a
+crash. Found while testing a cut:
+
+- The relay's note "time check already handed to the engine" survived the cut, the
+  engine's timed lane did not: the time check never aired. Now every `/hello` from the
+  engine (it has just started) clears that note and the item is handed again.
+- Soft timed items (sponsorships, weather) had no "too late" rule offline: after three
+  hours without power they would all air in a row. Offline, a soft item more than 60 min
+  late is dropped (`MISSED_SOFT_SECONDS`); hard ones keep the 5 min rule. **The backend
+  has no such rule**: after an engine was away for hours `/next` serves every overdue
+  soft item (told to the engine thread 2026-11-18).
+- Clock: with no internet and a flat clock battery the computer wakes in the past. If the
+  clock is more than 2 min behind the plan's `generated_at` (`clock_ok` in
+  `/relay/status`), nothing timed airs, only music, and blackouts are judged at the
+  plan's time at least. A clock that is wrong but later than the plan cannot be seen.
+- Harness `local_box_power_loss`: engine killed (SIGKILL) and relay dropped 10 s after
+  the hand-over with the line down, a torn `.part` file left, both started again:
+  station music 0.1 s after the engine wrote sound again (about 10 s after "power on"),
+  the song on air at the cut not replayed, time check +0.7 s, once, recorded once.
+- By hand, once per box: BIOS "power on after AC loss".
+
+**`infra/local/setup-box.sh <station id> [sound card] [backend-url]`** (Ubuntu 24.04, as
+root): Liquidsoap, a local Icecast (the engine needs one beside it), alsa-utils, the
+relay; `/etc/kbr-engine/{env,relay.env,stations/<id>.env}`; a drop-in that starts the
+engine after the relay and the sound system. Reruns keep every setting (token, card),
+restart the relay freely (not heard) and the engine only when its script or settings
+changed. A new radio.liq is checked first; if the engine does not answer within 90 s
+with it, the old script goes back and the engine restarts on it. An engine restart is
+still about 10 s of silence on FM: the gapless update is not built.
+
+Tested without systemd: a stand-in `systemctl` on PATH that really starts and stops
+Icecast, the relay and the engine from the files the script wrote
+(`KBR_SETUP_FROM=<checkout>/infra KBR_SETUP_SKIP_APT=1 KBR_PLAYOUT_TOKEN=x`): first run,
+unchanged rerun (nothing restarted), adding a card (`pulse`), a script with a syntax
+error (refused, nothing restarted), a script that hangs at start (old one put back).
+Not yet run on a real machine with real systemd.
+
+## Blocker before FM is fed from the engine: live shows
+
+During a live show the engine's output is silent by design (the host's microphone goes to
+listeners through the site, PR 112; measured 2026-11-18: 89.8 s of silence in a 90 s
+show). FM would be silent for the whole show. The host's audio has to be mixed into the
+engine's output first; the engine thread builds the engine side when this stage is reached.
+
 ## Known gaps (next stages; nothing is installed at BMG yet)
 
 
@@ -158,9 +206,10 @@ same order through a Next and a hard time check, card within 1.5 s of the stream
    delay. Fine while a box has a station of its own; look again before it carries Main.
 3. **Offline brain is simple:** the queue as it stood. No long-item rule (a shiur is cut
    by a hard item, not paused), no `hard_by`, no hour fitting, no refill past the plan.
-4. **Updates without a gap** (second engine started alongside, switch between songs,
-   automatic return to the old one), **power-loss start-up**, **alerts** (FM silent, box
-   offline, disk full), **RDS** (the encoder model is not known yet), **setup script**.
+4. **Updates without a gap** (second engine started alongside, switch between songs;
+   today setup-box.sh restarts the engine and puts a bad script back), **alerts** (FM
+   silent, box offline, disk full, clock wrong), **RDS** (the encoder model is not known
+   yet), a way for us to reach the box for maintenance (it has no inbound line).
 5. Waiting on Shmuel: photos of the room (audio path, RDS encoder), who has access, UPS.
    He believes the room has wired internet.
 
