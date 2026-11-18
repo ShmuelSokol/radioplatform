@@ -221,6 +221,8 @@ async def _add_missing_columns(engine):
         # Schedule block an automatic song was drawn for (playlist place on redraw)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS block_id VARCHAR(36)",
         "ALTER TABLE program_blocks ADD COLUMN IF NOT EXISTS latest_minutes INTEGER",
+        "ALTER TABLE program_blocks ADD COLUMN IF NOT EXISTS season_start VARCHAR(5)",
+        "ALTER TABLE program_blocks ADD COLUMN IF NOT EXISTS season_end VARCHAR(5)",
         # Source tracking: 'request', 'manual', 'auto' (replenish)
         "ALTER TABLE queue_entries ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'auto'",
         # Schedule block columns that may be missing from early table creation

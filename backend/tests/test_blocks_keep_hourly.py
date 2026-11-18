@@ -134,4 +134,4 @@ async def test_block_only_items_are_never_filler(db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_capabilities_say_blocks_can_keep_the_hourly_items(client, auth_headers):
     res = await client.get("/api/v1/program-blocks/capabilities", headers=auth_headers)
-    assert res.status_code == 200 and res.json() == {"keep_hourly": True}
+    assert res.status_code == 200 and res.json() == {"keep_hourly": True, "seasons": True}

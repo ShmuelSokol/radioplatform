@@ -19,7 +19,7 @@ import logging
 import math
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -156,6 +156,18 @@ def hard_by(block: ProgramBlock, at: datetime) -> datetime | None:
     return None
 
 
+def in_season(block: ProgramBlock, day: date) -> bool:
+    """Is this station-local day inside the block's yearly season? No season = all year.
+    "MM-DD" both ends included; a range that wraps the new year works ("09-16" to "05-14")."""
+    start, end = getattr(block, "season_start", None), getattr(block, "season_end", None)
+    if not start or not end:
+        return True
+    today = f"{day.month:02d}-{day.day:02d}"
+    if start <= end:
+        return start <= today <= end
+    return today >= start or today <= end
+
+
 def occurrences_between(
     blocks: list[ProgramBlock], tz, start: datetime, end: datetime, blackouts=None
 ) -> list[Occurrence]:
@@ -167,6 +179,8 @@ def occurrences_between(
         day = first_day + timedelta(days=offset)
         for block in blocks:
             if str(day.weekday()) not in _csv(block.days_of_week):
+                continue
+            if not in_season(block, day):
                 continue
             for hour, minute in parse_fixed_times(block.times):
                 local = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
