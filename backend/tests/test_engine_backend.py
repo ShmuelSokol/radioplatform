@@ -727,6 +727,38 @@ async def test_engine_gets_no_music_during_a_live_show(client, db_session, eng):
 
 
 @pytest.mark.asyncio
+async def test_a_quiet_engine_loads_the_item_after_the_show_during_the_show(client, db_session, eng):
+    """About 5 s of quiet after a show ended on Main (2026-11-18): the engine only asked for
+    its next item then and waited for the download. An engine that loads under its live
+    lane (proto 4, live=1) is handed the item that follows the show, the resume entry
+    first, and the tick leaves it alone. An older one, or one not yet quiet, gets nothing."""
+    from app.services import live_show_service
+
+    station, entries, engine, _ = eng
+    await _next(client, station)
+    await _on_air(client, station, entries[0].id)
+    row = await _fresh(db_session, entries[0].id)
+    row.started_at = datetime.now(UTC) - timedelta(seconds=60)
+    await db_session.commit()
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    base = f"/api/v1/playout/{station.id}/next?given={entries[0].id}"
+    assert (await client.get(f"{base}&proto=3&live=1", headers=HEADERS)).status_code == 204
+    assert (await client.get(f"{base}&proto=4&live=0", headers=HEADERS)).status_code == 204
+    r = await client.get(f"{base}&proto=4&live=1", headers=HEADERS)
+    assert r.status_code == 200
+    resume = await _fresh(db_session, uuid.UUID(r.json()["entry_id"]))
+    assert resume.asset_id == entries[0].asset_id   # the paused item carries on first
+    st = await db_session.get(Station, station.id)
+    await db_session.refresh(st)
+    engine.sent.clear()
+    await playout_engine.tick(db_session, st)
+    assert "/flush" not in engine.paths()
+    assert playout_engine.get_state(station.id).cued_entry_id == r.json()["entry_id"]
+
+
+@pytest.mark.asyncio
 async def test_show_end_on_engine_station_leaves_start_to_the_engine(client, db_session, eng):
     """Reproduction: start then end a live show on the engine station with nothing on air;
     afterwards Song 0 is 'playing' in the database without any start report."""

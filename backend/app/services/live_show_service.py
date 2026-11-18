@@ -258,8 +258,11 @@ async def take_over_station(db: AsyncSession, station: Station, show: LiveShow, 
         # under the host's first words
         try:
             from app.services import playout_engine
-            await playout_engine.engine_flush(station.id)
+            # Quiet first, then the flush: under the live lane the engine loads the
+            # item that follows the show at once (the paused item's resume entry),
+            # so music is back the moment the show ends
             await playout_engine.engine_live(station.id, True)
+            await playout_engine.engine_flush(station.id)
         except Exception as e:
             logger.warning("Could not quiet the engine for the live show: %s", e)
 
@@ -293,6 +296,15 @@ async def release_station(db: AsyncSession, station_id, show_id, now: datetime) 
     config.pop("live_show_id", None)
     station.automation_config = config
     await _resume_automation(db, station.id, now)
+    from app.config import settings as _settings
+    if _settings.engine_drives(station.id):
+        # At once, not on the scheduler's next pass (up to a second or two more of
+        # quiet): the item that follows the show is already loaded
+        try:
+            from app.services import playout_engine
+            await playout_engine.engine_live(station.id, False)
+        except Exception as e:
+            logger.warning("Could not tell the engine the live show is over: %s", e)
     return True
 
 
@@ -582,3 +594,35 @@ async def update_call_info(
     await db.flush()
     await db.refresh(call)
     return call
+
+
+# --- Dump log (models/live_dump.py) ---
+
+def dump_wav(heard, cut) -> bytes:
+    """What listeners heard just before the Dump, half a second of silence, then
+    what was cut, as a WAV file (16-bit mono)."""
+    import io
+    import wave
+
+    import numpy as np
+
+    from app.services.live_air import RATE
+
+    gap = np.zeros(RATE // 2, dtype=np.int16)
+    pcm = np.concatenate((np.asarray(heard, dtype=np.int16), gap, np.asarray(cut, dtype=np.int16)))
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(pcm.astype("<i2").tobytes())
+    return out.getvalue()
+
+
+async def save_dump_audio(key: str, heard, cut) -> None:
+    from app.services.storage_service import upload_file
+
+    try:
+        await upload_file(dump_wav(heard, cut), key, content_type="audio/wav")
+    except Exception:
+        logger.exception("Could not save the dump recording %s", key)

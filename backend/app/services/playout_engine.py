@@ -64,6 +64,11 @@ ENGINE_PROTO_HOLD = 3
 # engine fills up to 3 s with quiet and starts the timed item early for more, as the
 # browser player does (queue.TIMED_EARLY_START_SECONDS, the same 8 s).
 HOLD_BEFORE_HARD_SECONDS = 8.0
+# From this version the engine loads its next item while a host is on air (its live
+# lane keeps it off the stream), so music is back the moment the show ends instead of
+# after a download (about 5 s on Main, 2026-11-18). An older engine is handed nothing
+# during a show.
+ENGINE_PROTO_LIVE_PRELOAD = 4
 
 
 @dataclass
@@ -116,6 +121,9 @@ class EngineState:
     # we started, so it is told again)
     live_sent: bool | None = None
     live_tried: float = 0.0
+    # Entry handed to the engine during a live show, to start when the show ends: the
+    # tick's flush of a track pre-loaded before the show leaves this one alone
+    cued_for_after_show: str | None = None
     # The engine said hello and has put nothing on air since: the entry we still show as
     # playing is not on air any more (it was cut by the restart), so the hold rule must
     # not wait for its end
@@ -715,16 +723,20 @@ async def handle_next(
     # During a live show the engine gets nothing from the queue: music would play on the
     # stream under the host, and the item the show paused (its resume entry, queued
     # first) would be used up. The engine retries by itself once the show is over.
-    if await _live_show_on(db, station_id):
+    during_show = await _live_show_on(db, station_id)
+    if during_show and not (engine_live_on and state.engine_proto >= ENGINE_PROTO_LIVE_PRELOAD):
         return None
-    if engine_live_on:
+    if engine_live_on and not during_show:
         # The engine is still quiet for a show that is over (its end never reached it:
         # we restarted, or the command failed). Told in the background; it asks again.
         task = asyncio.create_task(engine_live(station_id, False))
         _background.add(task)
         task.add_done_callback(_background.discard)
 
-    if state.engine_proto >= ENGINE_PROTO_HOLD and await _hold_before_hard_item(
+    # (During a show nothing of ours is on air and the item starts when the show ends:
+    # the hold rule has nothing to measure; the tick takes the item back if it would
+    # then start just before a hard item.)
+    if not during_show and state.engine_proto >= ENGINE_PROTO_HOLD and await _hold_before_hard_item(
         db, station_id, state.cued_entry_id or (given[0] if given else None),
         # Right after an engine restart the item we show as playing was cut: a song handed
         # now starts now. Waiting for that item's end left the engine 20 s on emergency
@@ -775,6 +787,7 @@ async def handle_next(
             entry_id, asset_id = str(entry.id), str(entry.asset_id)
             state.cued_entry_id = entry_id
             state.cued_at = time.monotonic()
+            state.cued_for_after_show = entry_id if during_show else None
             _note_handed(state, entry)
             await _record_handed(db, station_id, [(entry_id, asset_id)])
             logger.info("Engine next -> %s", entry_id)
@@ -922,6 +935,7 @@ async def handle_started(
     skipped = state.skip_requested
     state.skip_requested = False
     state.fresh_start = False
+    state.cued_for_after_show = None
     logger.info("Engine started -> entry=%s lane=%s", entry_id or "-", lane)
     if entry_id:
         state.recent_started = (state.recent_started + [str(entry_id)])[-10:]
@@ -1717,7 +1731,7 @@ async def tick(db: AsyncSession, station) -> None:
     # track would air during the show and be used up: drop it once (/next hands it
     # nothing while the show is on, so nothing is cued again)
     if (station.automation_config or {}).get("live_show_id"):
-        if state.cued_entry_id:
+        if state.cued_entry_id and state.cued_entry_id != state.cued_for_after_show:
             await engine_flush(station_id)
         # The stream goes quiet under the host. Sent again after an engine or backend
         # restart during the show (the engine would play its emergency music).
