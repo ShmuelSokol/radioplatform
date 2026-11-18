@@ -80,6 +80,9 @@ async def _add_missing_columns(engine):
     # ALTER TYPE ADD VALUE cannot run inside a transaction — use autocommit
     enum_migrations = [
         "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'SPONSOR'",
+        # The model stores a role by its NAME. The DJ role was first added as 'dj', which
+        # the code never writes, so creating a DJ user failed (production, 2026-11-18).
+        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'DJ'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'LIVE_SHOW'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'SILENCE'",
         # Live show enum types (created by create_all, but safe to re-run)
@@ -189,8 +192,6 @@ async def _add_missing_columns(engine):
         # Listener sessions index for fast heartbeat lookups
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_heartbeat ON listener_sessions (last_heartbeat)",
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_started ON listener_sessions (started_at)",
-        # DJ role enum value
-        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'dj'",
         # User activity tracking
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS intro_seconds DOUBLE PRECISION",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
