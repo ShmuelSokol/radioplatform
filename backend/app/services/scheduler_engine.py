@@ -880,6 +880,13 @@ class SchedulerEngine:
             "asset_id": str(asset.id),
             "started_at": entry.started_at.isoformat() if entry.started_at else None,
             "ends_at": (entry.started_at + timedelta(seconds=(asset.duration or 180.0))).isoformat() if entry.started_at else None,
+            # When it really went on air. A paused shiur coming back counts as started
+            # `offset` s ago (started_at), which is before the time check that paused
+            # it: announcements are ordered by this, not by started_at
+            "on_air_at": (
+                (entry.started_at + timedelta(seconds=resume_offset(entry))).isoformat()
+                if entry.started_at else None
+            ),
             "stream_url": settings.public_stream_url(station_id),
             "asset": {
                 "title": asset.title,

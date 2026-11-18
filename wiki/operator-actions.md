@@ -16,6 +16,22 @@ Each button in the control room is one request. The buttons live in the control 
 - `kept_incoming: true` means Next arrived while an automatic change was fading in and the
   incoming song was kept (see [audio-engine](audio-engine.md)).
 
+## A queue change reaches the engine at once (2026-11-18)
+
+On an engine station the engine holds its next song pre-loaded. Play next, delete, move
+up/down and both reorders call `playout_engine.take_operator_change`: if the engine holds
+something other than the queue head, it is flushed so it asks again. Not in the last
+`KEEP_CUED_LAST_SECONDS` (45 s) of the item on air, where a flush would leave nothing
+ready. Next (`/skip`) calls it with `before_next=True` (no 45 s rule: the song ends now
+anyway), then `settle_before_next`: within 4 s of such a flush it waits for the engine to
+ask again and 0.8 s for the file, so the song on air is not ended with nothing loaded. An
+ordinary Next is not delayed. Before this, Play next then Next within a few seconds
+played the automatic song the engine held and the operator's item one Next later (the
+automatic swap `_flush_if_head_changed` runs on the 3 s tick, at most once in 15 s).
+A file slower than the wait still gives emergency music until it arrives (harness
+`operator_next_slow_file`); removing that needs the engine to hold the song on air until
+the next is loaded.
+
 ## Fire now
 
 `POST queue/fire-now {asset_id, mode: "fade" | "after-current", client_request_id?}`.

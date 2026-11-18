@@ -163,7 +163,11 @@ function reloadedRecently(): boolean {
  *  when it opens a screen it had not opened yet ("sometimes the Library gives an error"). */
 export function isStaleCodeError(error: unknown): boolean {
   const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
-  return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError|Loading (CSS )?chunk .* failed|Unable to preload CSS/i.test(text);
+  // The host answers a missing file with the site's own page (200, text/html), and
+  // each browser words that differently. Safari: "'text/html' is not a valid
+  // JavaScript MIME type." (Shmuel's iPhone, 2026-11-17: it was not in this list, so
+  // he got "Something went wrong" and a Reload button instead of the new release.)
+  return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError|Loading (CSS )?chunk .* failed|Unable to preload CSS|is not a valid JavaScript MIME type|MIME type of ["']?text\/html|disallowed MIME type|Expected a JavaScript(-or-Wasm)? module script/i.test(text);
 }
 
 /** A screen's code could not load because a newer release replaced it (the old

@@ -109,6 +109,7 @@ main = amplify(1., override="liq_amplify", main_requests)
 # sponsorship, a time check, a shiur) has overlap 0 and is never talked over: the next
 # item starts when it has ended (Shmuel 2026-11-17: sponsorships played in a row ran
 # into each other). `liq_cross_duration` tells `cross` how early to call transition().
+# A song is not crossfaded into a spoken item either: it fades out, then the item starts.
 # After Next or a timed item the old song must not come back, so that change is a clean cut
 # (the music has already been faded out by then).
 hard_cut = ref(false)
@@ -128,9 +129,17 @@ def transition(ending, starting) =
     # The incoming song is listed first: `add` passes on the titles of its first source
     # only, and the start report to the backend is made from them.
     overlap = float_of_string(default=default_overlap, ending.metadata["kbr_overlap"])
+    # A song before anything spoken (Shmuel 2026-11-17, "Song ends first, then speech":
+    # the last second of a song played under the first words of a sponsorship). Every
+    # item carries its kind; none (the emergency music) counts as a song.
+    kind = starting.metadata["kbr_kind"]
+    speech_next = kind != "" and kind != "music"
     if overlap < 0.05 then
       # No overlap: the last moment of the ending item plays out, then the next starts
       sequence([ending.source, starting.source])
+    elsif speech_next then
+      # The song fades out over its last moment, and only then the spoken item starts
+      sequence([fade.out(duration=overlap, ending.source), starting.source])
     else
       add(normalize=false, [starting.source, fade.out(duration=overlap, ending.source)])
     end
