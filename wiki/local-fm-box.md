@@ -208,8 +208,34 @@ No standby engine for gap-free updates: a second engine sharing the sound card i
 more way for two engines to play on the transmitter at once. A new radio.liq costs
 about 10 s of quiet on FM, so setup-box.sh should apply it only in a quiet window (a
 blackout within the next day, else 3 AM local) unless forced, and restart at a song
-boundary. Not built yet. If Shmuel says 10 s at 3 AM is not acceptable, the engine
+boundary. Built in stage 4b, below. If Shmuel says 10 s at 3 AM is not acceptable, the engine
 thread builds standby (flag, `/takeover`, relay stops the old engine at a song boundary).
+
+## Stage 4b (2026-11-18): the box updates itself in a quiet time
+
+`setup-box.sh` installs `kbr-box-update.timer` (hourly at :35) and its service, which
+fetches `setup-box.sh` of the release in `/etc/kbr-engine/box.env` (`KBR_BOX_REF`,
+default `main`; `KBR_SETUP_REF=<tag>` on a hand run pins it) and runs it with
+`KBR_SETUP_TIMER=1`. That run does nothing at all unless it is a quiet time: the relay
+says `in_blackout`, or it is 3:05 to 3:50 at the station (`KBR_BOX_TZ`, from the
+station's time zone; never across hh:00). So a merge to main reaches the box the next
+night, or sooner inside Shabbos. `KBR_BOX_AUTO_UPDATE=0` switches the timer off.
+
+Run by hand the script does everything at once except restarting an engine that is on
+air: that waits for the quiet time ("a change is waiting") unless `KBR_APPLY=now`. A
+first install, or an engine that is down, starts at once. Before any restart of a
+running engine it waits up to 20 min for `/status` `main_remaining` to fall under 1.5 s,
+so no song is cut; the gap on FM is the engine's start (about 10 s) between two items.
+The check, the 90 s wait and the return of the old script are as before.
+
+Tested with the stand-in `systemctl` (`KBR_FAKE_HHMM=0330` sets the station's clock for
+the test): first install at noon starts at once; a card added by hand at noon waits;
+the hourly look at noon touches nothing; at 3:30 it restarts and the card is in use;
+again at 3:30 nothing; `KBR_APPLY=now` at noon restarts; with a stand-in engine whose
+song had 25 s left the restart came 23 s later. Not tested: the real systemd timer.
+
+Open: the box follows `main` by default, so every merge that touches `infra/` reaches
+the transmitter the next night. Pin a tag before FM is fed from it.
 
 ## Blocker before FM is fed from the engine: live shows
 
@@ -230,8 +256,7 @@ engine's output first; the engine thread builds the engine side when this stage 
    delay. Fine while a box has a station of its own; look again before it carries Main.
 3. **Offline brain is simple:** the queue as it stood. No long-item rule (a shiur is cut
    by a hard item, not paused), no `hard_by`, no hour fitting, no refill past the plan.
-4. **Updates in a quiet window** (see above; today setup-box.sh restarts the engine at
-   once and puts a bad script back), **alert for silence on the card** and the card's
+4. **Alert for silence on the card** and the card's
    state in the health report, **RDS** (the encoder model is not known yet), a way for
    us to reach the box for maintenance (it has no inbound line).
 5. Waiting on Shmuel: photos of the room (audio path, RDS encoder), who has access, UPS.

@@ -301,6 +301,15 @@ def test_box_setup_script_writes_only_settings_the_engine_and_relay_read():
     # The engine is ordered after the relay by the box's drop-in, not by the shared unit
     assert "After=kbr-relay.service sound.target" in text
     assert "kbr-relay" not in (infra / "streaming" / "kbr-engine@.service").read_text()
+    # Updates: an engine on air is restarted only in a quiet time or when told "now", and
+    # then between two songs; the hourly look never runs across the top of the hour
+    assert 'if [ "$BY_TIMER" = 1 ] && [ "$APPLY" != now ] && ! quiet_now; then' in text
+    waits = text.index('[ "$APPLY" != now ] && ! quiet_now; then\n  # On air and not a quiet time')
+    assert waits < text.index("wait_song_end ||") < text.index('systemctl restart "kbr-engine@$STATION"')
+    assert "OnCalendar=*:35" in text and "-ge 305 ]" in text and "-le 350 ]" in text
+    box_env = written('cat > "$BOX_ENV" <<BENV', "\nBENV\n")
+    assert box_env == {"KBR_BOX_STATION", "KBR_BOX_REF", "KBR_BOX_TZ", "KBR_BOX_AUTO_UPDATE"}
+    assert all(f"${name}" in text or f'"{name}"' in text or f"{name} " in text for name in box_env)
 
 
 def _again(fake, relay, clock):
