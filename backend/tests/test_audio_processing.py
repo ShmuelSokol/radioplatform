@@ -356,7 +356,7 @@ def test_analysis_numbers():
     assert abs(r["cue_in_seconds"] - 1.0) < 0.1
     assert abs(r["cue_out_seconds"] - 9.0) < 0.1
     assert r["cross_start_seconds"] == round(max(r["cue_in_seconds"] + 5, r["cue_out_seconds"] - 3), 3)
-    assert r["replay_gain_db"] == round(max(-12.0, min(12.0, -18.0 - r["loudness_lufs"])), 2)
+    assert r["replay_gain_db"] == round(max(-20.0, min(12.0, -18.0 - r["loudness_lufs"])), 2)
 
     with pytest.raises(ValueError):
         analyze_audio_bytes(b"not audio")

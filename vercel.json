@@ -1,9 +1,13 @@
 {
   "installCommand": "cd frontend && npm ci",
   "buildCommand": "cd frontend && npm run build",
+  "ignoreCommand": "bash infra/vercel-ignore.sh",
   "outputDirectory": "frontend/dist",
   "framework": null,
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

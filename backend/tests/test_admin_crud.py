@@ -19,6 +19,7 @@ from app.core.security import create_access_token
 from app.models.asset import Asset
 from app.models.station import Station
 from app.models.user import User, UserRole
+from tests.timing import limit as ci_limit
 
 SAVE = 1.0  # S-6
 READ = 0.3  # S-4
@@ -36,7 +37,8 @@ async def timed(coro, limit=SAVE):
     t = time.perf_counter()
     r = await coro
     took = time.perf_counter() - t
-    assert took < limit, f"{r.request.method} {r.request.url.path} took {took * 1000:.0f} ms"
+    # Shared CI runners are 2-3x slower and noisy: same allowance as every other speed test
+    assert took < ci_limit(limit), f"{r.request.method} {r.request.url.path} took {took * 1000:.0f} ms"
     return r
 
 
@@ -303,14 +305,16 @@ async def test_schedule_playlist_entries_and_prerecorded_block(client: AsyncClie
     db_session.add(block)
     await db_session.commit()
     _, h = await _headers(db_session, UserRole.MANAGER)
+    # Entry changes refresh the queue, which expires this shared session's objects
+    block_id, song_id, show_id = block.id, song.id, show.id
 
-    assert (await client.post("/api/v1/schedules/playlist-entries", json={"block_id": str(block.id)},
+    assert (await client.post("/api/v1/schedules/playlist-entries", json={"block_id": str(block_id)},
                               headers=h)).status_code == 422
     r = await timed(client.post("/api/v1/schedules/playlist-entries",
-                                json={"block_id": str(block.id), "asset_id": str(song.id), "position": 0}, headers=h))
+                                json={"block_id": str(block_id), "asset_id": str(song_id), "position": 0}, headers=h))
     assert r.status_code == 201, r.text
     entry = r.json()
-    got = (await client.get("/api/v1/schedules/playlist-entries", params={"block_id": str(block.id)})).json()
+    got = (await client.get("/api/v1/schedules/playlist-entries", params={"block_id": str(block_id)})).json()
     assert [e["id"] for e in got] == [entry["id"]]
     r = await timed(client.patch(f"/api/v1/schedules/playlist-entries/{entry['id']}", json={"position": 3},
                                  headers=h))
@@ -319,11 +323,11 @@ async def test_schedule_playlist_entries_and_prerecorded_block(client: AsyncClie
                                       headers=h))).status_code == 204
     assert (await client.get(f"/api/v1/schedules/playlist-entries/{entry['id']}")).status_code == 404
 
-    r = await timed(client.post(f"/api/v1/schedules/blocks/{block.id}/set-prerecorded",
-                                json={"asset_id": str(show.id)}, headers=h))
+    r = await timed(client.post(f"/api/v1/schedules/blocks/{block_id}/set-prerecorded",
+                                json={"asset_id": str(show_id)}, headers=h))
     assert r.status_code == 200, r.text
-    got = (await client.get("/api/v1/schedules/playlist-entries", params={"block_id": str(block.id)})).json()
-    assert [e["asset_id"] for e in got] == [str(show.id)]
+    got = (await client.get("/api/v1/schedules/playlist-entries", params={"block_id": str(block_id)})).json()
+    assert [e["asset_id"] for e in got] == [str(show_id)]
 
 
 @pytest.mark.asyncio
@@ -385,13 +389,16 @@ async def test_campaigns_and_billing_keep_sponsors_apart(client: AsyncClient, db
                                ("POST", f"/api/v1/campaigns/{cid}/comments", {"body": "hi"})]:
         r = await client.request(method, path, json=body, headers=b)
         assert r.status_code in (403, 404), (method, path, r.status_code)
-    # managers see everyone's; only managers change status; dj refused altogether
+    # managers see everyone's; only managers change status; a dj may look (the admin
+    # Campaigns screen, view only) but not change anything
     assert cid in [c["id"] for c in (await client.get("/api/v1/campaigns", headers=manager)).json()]
     assert (await client.patch(f"/api/v1/campaigns/{cid}/status", json={"status": "approved"},
                                headers=a)).status_code == 403
     r = await client.patch(f"/api/v1/campaigns/{cid}/status", json={"status": "approved"}, headers=manager)
     assert r.status_code == 200, r.text
-    assert (await client.get("/api/v1/campaigns", headers=dj)).status_code == 403
+    assert (await client.get("/api/v1/campaigns", headers=dj)).status_code == 200
+    assert (await client.post(f"/api/v1/campaigns/{cid}/comments", json={"body": "hi"},
+                              headers=dj)).status_code == 403
     assert (await client.post("/api/v1/sponsorship/copy-review", json={"text": "x"}, headers=dj)).status_code == 403
 
     # billing
@@ -469,13 +476,44 @@ async def test_scheduler_status_is_public_and_start_stop_are_managers(client: As
 
 
 @pytest.mark.asyncio
-async def test_regenerate_refused_while_generation_is_off(client: AsyncClient, db_session: AsyncSession):
-    """V1-153"""
-    st = await _station(db_session)
+async def test_regenerate_works_for_a_station_that_fills_from_its_blocks(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """The switch may be off while the station's blocks have playlists: it fills
+    from them anyway, so its queue can be drawn again (needed after two copies of
+    a song were made one and the queue held it twice)."""
+    from app.models.queue_entry import QueueEntry
+    from tests.test_block_on_time import _station_with_block
+
+    station, _block, songs = await _station_with_block(db_session, dtime(0), "Blocks, switch off")
+    # The queue holds the same song twice, a few songs apart
+    station_id = station.id
+    ids = [s.id for s in songs]
+    for position, asset_id in enumerate([ids[35], ids[40], ids[36], ids[40], ids[37]], start=1):
+        db_session.add(
+            QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=asset_id, position=position, status="pending")
+        )
+    await db_session.commit()
     _, h = await _headers(db_session, UserRole.MANAGER)
-    r = await client.post("/api/v1/playlists/generation/regenerate", params={"station_id": str(st.id)}, headers=h)
-    assert r.status_code == 409, r.text
-    assert "switched off" in r.text
+    r = await client.post(
+        "/api/v1/playlists/generation/regenerate", params={"station_id": str(station_id)}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 4  # the next song stays, the rest are drawn again
+    db_session.expire_all()
+    order = (
+        await db_session.execute(
+            select(QueueEntry.asset_id)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+            .order_by(QueueEntry.position)
+        )
+    ).scalars().all()
+    assert len(order) > 20
+    # 60 songs feed this playlist: none comes back within 10 songs of itself
+    last_at: dict = {}
+    for i, asset_id in enumerate(order):
+        assert i - last_at.get(asset_id, -100) > 10, (i, last_at.get(asset_id))
+        last_at[asset_id] = i
 
 
 @pytest.mark.asyncio

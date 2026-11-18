@@ -65,6 +65,9 @@ class SchedulerEngine:
         # Leadership: only the process holding the lease advances queues.
         self._instance_id = uuid.uuid4().hex
         self._leader_until: Optional[datetime] = None
+        # A pass is running (stop() lets it finish rather than cancel it mid-query)
+        self._in_pass = False
+        self._pass_done = asyncio.Event()
     
     async def start(self):
         """Start the scheduler engine."""
@@ -80,7 +83,16 @@ class SchedulerEngine:
         """Stop the scheduler engine."""
         self.running = False
         if self._task:
-            self._task.cancel()
+            # Let the pass in progress finish (the loop ends after it) before cancelling.
+            # Cancelled in the middle of a database call, a pass could leave its
+            # connection with a write transaction open, and the next schema change or
+            # test teardown then waited on "database is locked".
+            if self._in_pass:
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._pass_done.wait()), timeout=self.STOP_GRACE_SECONDS)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+            self._task.cancel()  # now asleep between passes (or a pass that hung)
             try:
                 await self._task
             except asyncio.CancelledError:
@@ -93,6 +105,7 @@ class SchedulerEngine:
         logger.info("Scheduler engine stopped")
     
     LEASE_SECONDS = 15
+    STOP_GRACE_SECONDS = 5.0
 
     @property
     def is_leader(self) -> bool:
@@ -153,6 +166,8 @@ class SchedulerEngine:
     async def _run_loop(self):
         """Main scheduler loop."""
         while self.running:
+            self._in_pass = True
+            self._pass_done.clear()
             try:
                 # A session of its own per pass, closed (and its transaction ended)
                 # as soon as the pass is done. It used to come from an `async for`
@@ -170,6 +185,9 @@ class SchedulerEngine:
                     await _safe_rollback(db)  # end the read transaction now
             except Exception as e:
                 logger.error(f"Scheduler error: {e}", exc_info=True)
+            finally:
+                self._in_pass = False
+                self._pass_done.set()
 
             await asyncio.sleep(self.check_interval)
     
@@ -392,6 +410,17 @@ class SchedulerEngine:
                         if await soften_hard_items(db, station):
                             await db.commit()
                     station = await db.get(Station, station_id)
+                # Shortly before a hard timed item, put a song that ends near it in the
+                # place of one that would be faded soon after starting (hour_fit.py)
+                from app.services.hour_fit import fit_before_hard_item
+                try:
+                    async with advance_lock(station_id):
+                        if await fit_before_hard_item(db, station):
+                            await db.commit()
+                except Exception:
+                    logger.warning("Fitting songs before the hour failed for station %s", station_id, exc_info=True)
+                    await _safe_rollback(db)
+                station = await db.get(Station, station_id)
                 if settings.engine_drives(station.id):
                     # The playout engine owns the clock for this station: it asks for the
                     # next track and reports real starts. No time-based advance here.
@@ -401,6 +430,8 @@ class SchedulerEngine:
                     # Run queue-based playback advancement (handles silence entries during blackout too)
                     await self._advance_queue(db, station_id)
                 station = await db.get(Station, station_id)  # fresh if the advance rolled back
+                from app.api.v1.queue import note_station_crossfade
+                note_station_crossfade(station)
                 await self._check_station(db, station)
             except Exception as e:
                 logger.error(f"Error checking station {station_id}: {e}", exc_info=True)
@@ -434,13 +465,10 @@ class SchedulerEngine:
         result = await db.execute(stmt)
         windows = result.scalars().all()
 
+        from app.services.station_service import window_covers_station
+
         for window in windows:
-            # Check if this window affects this station
-            if window.affected_stations is None:
-                # Null = affects all stations
-                return True
-            station_ids = window.affected_stations.get("station_ids", [])
-            if str(station.id) in [str(sid) for sid in station_ids]:
+            if window_covers_station(window, station.id):
                 return True
 
         return False
@@ -632,7 +660,11 @@ class SchedulerEngine:
                 duration = (asset.duration if asset else None) or 180.0
                 # Advance where clients start their crossfade: the queue's one
                 # hand-over rule (short and timed items play to their end)
-                from app.api.v1.queue import handover_seconds
+                from app.api.v1.queue import handover_seconds, is_song, predict_next_entry
+                if is_song(entry):
+                    # A song is not crossfaded into a spoken item: what follows it
+                    # decides when it hands over (noted by predict_next_entry)
+                    await predict_next_entry(db, station_id, entry)
                 cross_seconds = handover_seconds(entry)
 
                 # Calculate remaining time from started_at
@@ -781,14 +813,15 @@ class SchedulerEngine:
         cue_out = analysis.get("cue_out_seconds", asset.duration or 180.0)
         # Where pages hand over: the same rule the queue advances by, so a short or
         # timed item is not crossfaded 3 s before its end on the page
-        from app.api.v1.queue import handover_seconds
-        cross_start = (asset.duration or 180.0) - handover_seconds(entry)
+        from app.api.v1.queue import end_fade_seconds, handover_seconds, overlap_seconds
         replay_gain_db = analysis.get("replay_gain_db", 0)
 
         # What follows this item: the queue's own pick at the hand-over, so a soft
-        # sponsorship due by then is pre-loaded instead of the next song
+        # sponsorship due by then is pre-loaded instead of the next song. Asked first:
+        # a song followed by a spoken item hands over later (no crossfade into speech).
         from app.api.v1.queue import predict_next_entry
         next_entry = await predict_next_entry(db, station_id, entry)
+        cross_start = (asset.duration or 180.0) - handover_seconds(entry)
 
         # Items without a usable analysis get one now, before their hand-over
         from app.services import upcoming_analysis
@@ -824,7 +857,8 @@ class SchedulerEngine:
                 # When it cuts in (a hard timed item's time, or a soft one's limit), so
                 # pages start it at that moment themselves instead of a second later
                 # when this message reaches them. None = it follows the item on air.
-                "cut_at": _cut_time(next_entry),
+                "cut_at": _cut_time(next_entry, entry),
+                "overlap_seconds": overlap_seconds(next_entry),
             }
 
             # Pre-queue next track in Liquidsoap for gapless transitions
@@ -846,6 +880,13 @@ class SchedulerEngine:
             "asset_id": str(asset.id),
             "started_at": entry.started_at.isoformat() if entry.started_at else None,
             "ends_at": (entry.started_at + timedelta(seconds=(asset.duration or 180.0))).isoformat() if entry.started_at else None,
+            # When it really went on air. A paused shiur coming back counts as started
+            # `offset` s ago (started_at), which is before the time check that paused
+            # it: announcements are ordered by this, not by started_at
+            "on_air_at": (
+                (entry.started_at + timedelta(seconds=resume_offset(entry))).isoformat()
+                if entry.started_at else None
+            ),
             "stream_url": settings.public_stream_url(station_id),
             "asset": {
                 "title": asset.title,
@@ -857,6 +898,12 @@ class SchedulerEngine:
                 "intro_seconds": asset.intro_seconds,
                 "cue_out": cue_out,
                 "cross_start": cross_start,
+                # How long it overlaps the next item at its end: the station's song
+                # crossfade, 0 for anything spoken (pages never crossfade those)
+                "overlap_seconds": overlap_seconds(entry),
+                # A song before a spoken item: it fades out over this long to its
+                # end and the spoken item starts after it (0 = not that case)
+                "end_fade_seconds": end_fade_seconds(entry),
                 "replay_gain_db": replay_gain_db,
             },
             "next_asset": next_asset_data,
@@ -920,16 +967,27 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _cut_time(entry) -> str | None:
-    """When a queued timed entry cuts into the item on air, or None if it waits for it."""
+def _cut_time(entry, on_air=None) -> str | None:
+    """When a queued timed entry cuts into the item on air, or None if it waits for it.
+
+    Every item of a program block shares one preempt_at, so the item after the time
+    check still carries hh:00 once the time check is on air. A cut time at or before
+    the start of the item on air is that group's own: the entry follows it (Main,
+    15:00Z 2026-11-17: pages faded the time check and joined the Daf Yomi
+    announcement late)."""
     from app.models.queue_entry import is_soft_timed
     if entry is None or entry.preempt_at is None:
         return None
     if is_soft_timed(entry):
         if entry.hard_by is None:
             return None
-        return max(_aware(entry.preempt_at), _aware(entry.hard_by)).isoformat()
-    return _aware(entry.preempt_at).isoformat()
+        cut = max(_aware(entry.preempt_at), _aware(entry.hard_by))
+    else:
+        cut = _aware(entry.preempt_at)
+    started = getattr(on_air, "started_at", None)
+    if started is not None and cut <= _aware(started) + timedelta(seconds=1):
+        return None
+    return cut.isoformat()
 
 
 # Global scheduler instance

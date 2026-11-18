@@ -47,6 +47,11 @@ async def _station(db: AsyncSession, station_id) -> Station:
     return station
 
 
+def like_escape(text: str) -> str:
+    """Find text as typed: % and _ are letters, not LIKE wildcards ("100%" finds "100%" only)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 # KBR Studio's "Mpeg" filter: MPEG audio files
 MPEG_EXTS = ("mp3", "mp2", "mpg", "mpeg")
 
@@ -95,9 +100,7 @@ async def list_items(
         conditions.append(Asset.file_path != "")
         conditions.append(or_(Asset.category.is_(None), func.lower(Asset.category) != "do_not_play"))
     if search:
-        # % and _ are matched as typed (file names like track_01), not as LIKE wildcards
-        typed = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pat = f"%{typed}%"
+        pat = f"%{like_escape(search.strip())}%"
         conditions.append(or_(
             Asset.title.ilike(pat, escape="\\"), Asset.artist.ilike(pat, escape="\\"),
             Asset.category.ilike(pat, escape="\\"), Asset.file_path.ilike(pat, escape="\\"),
@@ -233,14 +236,19 @@ async def set_spot_end_date(
             raise HTTPException(status_code=403, detail="You are not assigned to this station")
         if body.end_date and s.start_date and body.end_date < s.start_date:
             raise HTTPException(status_code=422, detail="The end date is before the schedule starts")
+    if station_id is None and any(s.station_id is not None for s in schedules):
+        # No station chosen (station list still loading, none remembered): moving
+        # every station's schedules at once is not what the row on screen showed.
+        raise HTTPException(status_code=400, detail="Choose a station first, then change the end date.")
     for s in schedules:
         s.end_date = body.end_date
     await db.flush()
 
-    from app.api.v1.spot_schedules import _refresh_queues
+    from app.api.v1.spot_schedules import _refresh_queues, refresh_in_background
 
-    await _refresh_queues(db, {s.station_id for s in schedules})
+    later = await _refresh_queues(db, {s.station_id for s in schedules})
     await db.commit()
+    refresh_in_background(later)
     return {"updated": len(schedules), "end_date": body.end_date.isoformat() if body.end_date else None}
 
 

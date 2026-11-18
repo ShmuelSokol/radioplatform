@@ -716,6 +716,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Scheduler engine stopped")
     except Exception as e:
         logger.warning(f"Scheduler engine failed to stop: {e}")
+    from app.services.playout_engine import close_client
+    await close_client()
 
 
 def create_app() -> FastAPI:

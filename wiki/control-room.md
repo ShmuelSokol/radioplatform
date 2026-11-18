@@ -49,13 +49,13 @@ Operators come from KBR Studio 1.82 (the desktop program the station runs today)
 
 Queue rows show projected air time to the second (`clockTimeSec`), because that is what the old running log shows.
 
-HS, Spots mode, Panic and Errors: see [station-modes](station-modes.md). Still missing: blocks that expand into their items in the log. Its database window is the Databank page ([databank](databank.md)), opened from the DB button.
+HS, Spots mode, Panic and Errors: see [station-modes](station-modes.md). Still missing: blocks that expand into their items in the log. Its database window is the Databank page ([databank](databank.md)), opened from the DB button (right column, straight under Panic, so it stays on screen on a 1280x720 window).
 
 ## PFL (pre-listen) is one shared off-air player
 
 `usePfl` in `controlroom/pfl.ts` is the only off-air player for assets: the ▶ on library rows and the cart's PFL mode both use it, so starting one item stops the other. In PFL mode a cart button calls `pfl.toggle` and never `onSend`, so nothing reaches the station (`e2e/control-room.mjs` asserts no write call is made). It needs no server: it plays the asset's `audio-url` on its own audio element.
 
-The headphones output uses `setSinkId` where the browser has it (Chrome, Edge; not iPhone Safari, where the picker is hidden). Browsers only name the outputs after the microphone has been allowed once, so "Choose the headphones output" asks for the microphone and releases it at once. The choice is kept in localStorage `kbr_pfl_output`; if that device is gone the sound falls back to the default output instead of going silent. The time and weather preview still uses its own audio elements and the default output.
+The headphones output uses `setSinkId` where the browser has it (Chrome, Edge; not iPhone Safari, where the picker is hidden). Browsers only name the outputs after the microphone has been allowed once, so "Choose the headphones output" asks for the microphone and releases it at once. The choice is kept in localStorage `kbr_pfl_output`; if that device is gone the sound falls back to the default output instead of going silent. The time and weather preview plays through the same player: `pfl.playClips(WEATHER_PFL_ID, ...)` treats the time and weather clips as one item on one audio element (so an iPhone that allowed the first clip plays the second), with one timeline across both; seek maps to the clip and offset, and `pfl.position()` / `pfl.clipStarts()` feed the deck (no waveform, a ruler with a mark where each clip starts). It honours the headphones output too.
 
 ### The PFL deck (seek anywhere)
 
@@ -111,7 +111,21 @@ Every `select.qn-field` in the control room is drawn grey with a raised arrow (`
 
 The audio engine always runs silently for the LEFT/RIGHT meters once the page has had any click or key (browsers need one gesture). Decks feed a bus; the bus feeds the meter analysers and an output gain to the speakers. Listen (`listenHere`, `setMonitor`) only opens that output gain on this computer; volume and mute act on it too, and deck gains carry replay gain only. In stream mode the engine still runs silently for the meters while the stream element makes the sound, so the meters lead the heard audio by the stream delay.
 
-Listen is remembered across reloads (`kbr-cr-listen`, like Mute): the header keeps its speaker controls and the first click anywhere turns the sound back on.
+Listen is remembered across reloads (`kbr-cr-listen`, like Mute), and the first click or key anywhere turns the sound back on. Until sound really runs the header shows the Listen button, never Mute: `TransportAudio.audioReady` is "listening and the audio context runs (and, on a server-stream station, the stream element plays)", not just the remembered wish.
+
+## Sound on an iPhone (2026-11-18)
+
+iPhone Safari lets sound start only inside a real tap: `click`, `touchend` that was not a scroll, `keydown`. `touchstart` and `pointerdown` do not count. The Dashboard used to start the engine on the first `pointerdown`/`touchstart` and then stop listening for taps, so on an iPhone with listening remembered the one try was refused and no later tap gave sound (the Mute control showed over silence; Shmuel sat 3 minutes). Rules now:
+
+- The page listens for `click` and `keydown` only, and keeps listening until sound is live (`soundLive`), and again whenever it stops being live (iOS sets the context to "interrupted" after a call or the lock screen; `initAudio` resumes any state that is not `running`).
+- The Listen button (`data-listen-button`) handles its own tap: the window listener skips it, because starting there first re-draws the header before React's handler runs and the button's handler (which also lifts an old Mute) never fired.
+- On a phone the control is `soundControl('phone' | 'land')` in `TransportBar.tsx`: a yellow 44 px "🔊 Listen" button, then "🔊 Sound on" / "🔇 Muted". Never an icon alone.
+- Server stream: `takeSound` starts it inside the tap with `lib/liveStream.startLiveStream` (MSE, or the HLS copy on an iPhone), as the Listen page does. It used to be a plain `<audio src>` started from an effect, which Safari refuses, and the page then fell back to the built-in player without saying so. The stream runs only while this device listens. With no stream known at the tap, the stream element plays a moment of silence so it may start later without another tap.
+- Joining mid-item: the engine gets the file address from the now-playing message (no `/audio-url` round trip), calls `play()` at once on the silent deck and goes live on `loadedmetadata`; an iPhone fetches nothing before `play()`, so waiting for `canplay` cost the 4 s limit. A deck started in the tap before its length is known is moved to the station's position at `loadedmetadata` (it started from the top and jumped at the next 10 s sync).
+
+- "Starting…" (server stream on its way) shows for `STREAM_STARTING_MAX_MS` (8 s) at most, then the button says Listen again; a tap more than 4 s after a start that gave no sound starts the stream afresh. Whether the stream sounds is taken from the element's `playing`/`pause` events only, never from Mute: a `playing` event while muted (after a stall) once counted as "not sounding" and left the header on "Starting…" with no way to unmute.
+
+Check: `e2e/control-room-iphone-sound.mjs`, Chromium with `IOS_SOUND_POLICY` (in `e2e/lib/fake-station.mjs`), which refuses `play()` and holds `resume()` outside a tap like Safari. It does not model "nothing loads before play()" or the HLS branch: a real iPhone is still the last word.
 
 Meter scale: each side is the RMS level of the on-air bus in dBFS over about 46 ms (`getFloatTimeDomainData`, fftSize 2048), with a quick rise and a ~20 dB/s fall. 30 segments span -40 to 0 dBFS; red (last 6) is above -8 dBFS. The old meter averaged FFT bins times 2.5, which sat in the red on normal music. The e2e plays a -5.1 dBFS tone and expects 26 segments a side.
 
@@ -143,3 +157,55 @@ Layout (Shmuel, 2026-11-16 and 11-17: "unusable sideways"):
 Checked by `e2e/control-room-landscape.mjs` (iPhone SE / 14 / Pro Max with and without
 Safari's bars, Pixel 7, Galaxy S21; tap sizes in every pane; every control; turning the
 phone keeps state and sound; keyboard) and `e2e/control-room.mjs` `phoneLandscape`.
+
+## Quick song actions (Song panel)
+
+`controlroom/SongPanel.tsx`, opened from the Song button beside the on air line
+(TransportBar `onNowSong`), a queue row's Song button, or a click on the playing row.
+Shmuel, 2026-11-18: he wants to fix a song where he sees it, not in the Library.
+
+- **Category** saves at once through `PATCH /assets/{id}`; queued copies are left alone.
+- **Do not play** is `POST /assets/{id}/do-not-play` (`asset_service.set_do_not_play`):
+  category `do_not_play` (already refused by every automatic pick, `models/asset.py`),
+  the old category kept in `metadata_extra.category_before_do_not_play` so "Allow again"
+  restores it, and the song's untimed waiting copies deleted on every station. It never
+  deletes the copy on air, a copy in `playout_engine.held_entry_ids` (the engine's
+  pre-loaded song) or a timed copy, so audio is never interrupted; the answer counts
+  them in `still_to_play` and the toast says so. It does not go through the queue's
+  own delete/Next paths and sends the engine nothing.
+- **Not on this station** is `POST /assets/{id}/station-block` with the control room's
+  station (`services/station_blocks.py`, table `station_blocked_assets`). The library is
+  shared, so do-not-play takes a song off all three stations; this takes it off one.
+  Shmuel was unsure which he wants (2026-11-18), so both are offered, this one first,
+  each naming its reach on the button ("Only <station>" / "Every station") and each with
+  its own undo. It removes that station's waiting copies with the same routine as
+  do-not-play (`asset_service.drop_waiting_copies`), so the on air, engine-held and timed
+  copies stay. Enforced where do-not-play is: every draw with a station (playlist
+  generation, refill rule and fill draws, template slots, program block pools, last
+  resort pick, request matching), the refill purge, and the play-time checks of both
+  players (`_skip_placeholders`, `playout_engine.pick_next`, `playout_plan`). An
+  operator's own queue entry still plays. A new pick path must add
+  `Asset.id.notin_(blocked_asset_ids(station_id))` or it will draw blocked songs (they
+  would still be skipped at play time). To drop the choice later: remove the button;
+  rows in the table then only need deleting.
+- Managers and admins change; DJs and viewers get the panel read-only (`isManager`).
+- The transport's Song button spans the on air and next lines so it is a 44 px tap
+  target on phones (the lines are 32 and 28 px); `e2e/control-room-landscape.mjs`
+  fails any control under 44 x 44.
+- The phone row action bar is fixed at 61 px (`ACTIONS_H`) and now holds five buttons;
+  under 360 px "+ Insert before" shows as "+ Insert" (its aria-label stays).
+- Checked by `e2e/control-room-song-actions.mjs`, `backend/tests/test_song_quick_actions.py`
+  and `backend/tests/test_station_block.py`.
+- The right-hand button column fits a 900 px high window (buttons below Soft fade are
+  28 px under 1000 px of height); shorter windows scroll and a sticky "▼ more" strip
+  (`cr-controls-more`) says so until the end is reached.
+- The desktop row strip (Song, ▲, ▼, ✕) shows on hover, on a selected row and always on
+  the playing row (Song only). Hover-only made it unreachable for a live browser check.
+- The right-hand column (`aside[aria-label=Controls]`) is taller than the window at
+  1366x900 and scrolls. Loop, Go next and the fades are `sticky top-0` inside it
+  (`cr-transport-pinned`), so scrolling to the lower tabs no longer hides Loop.
+- Hidden row strips are `pointer-events-none` only on devices without hover
+  (`[@media(hover:hover)]:pointer-events-auto`): with a mouse the row is hovered before any
+  click, so the buttons are there; on a touch screen an invisible ✕ must not take a tap.
+- The desktop Time column is 124 px and never wraps: "12:02:47 AM Thu" wrapped at 92 px
+  and the day name ran into the next 26 px row.

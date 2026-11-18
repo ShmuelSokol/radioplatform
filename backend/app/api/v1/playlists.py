@@ -233,18 +233,12 @@ async def regenerate(
     Keeps what is playing, anything a person queued, requests, sponsor spots and
     timed items (time, weather).
     """
-    from app.services.playlist_generator_service import settings_for
-    from app.services.queue_replenish_service import QueueReplenishService
+    from app.services.schedule_refresh_service import replace_automatic_songs
 
-    station = await _station(db, station_id)
-    if not settings_for(station.automation_config).enabled:
-        raise HTTPException(status_code=409, detail="Playlist generation is switched off")
-    from app.services.schedule_refresh_service import remove_automatic_songs
-
-    removed = await remove_automatic_songs(db, station_id)
-    await db.commit()
-    await QueueReplenishService(db, station_id).replenish()
-    await db.commit()
+    # Any station can be drawn again, whichever way it fills its queue: from
+    # playlist sequences, from its blocks, or from schedule rules.
+    await _station(db, station_id)
+    removed = await replace_automatic_songs(db, station_id)
     return {"removed": removed, "queued_hours": round(await _queued_seconds(db, station_id) / 3600, 1)}
 
 
@@ -272,7 +266,7 @@ async def get_template(
 # each other (a reorder sends one per moved step) share one rebuild per station.
 REFRESH_INLINE = False  # tests set True to see the rebuilt queue in the response
 REFRESH_DELAY = 1.5
-_refresh_waiting: set[str] = set()
+_refresh_waiting: dict[str, bool] = {}  # station -> had block playlists before the edit
 _refresh_tasks: set = set()
 
 
@@ -283,24 +277,29 @@ async def _refresh_later(station_id) -> None:
     from app.db.engine import async_session_factory
     from app.services.schedule_refresh_service import refresh_station
 
+    had = True
     try:
         await asyncio.sleep(REFRESH_DELAY)
     finally:
-        _refresh_waiting.discard(str(station_id))
+        had = _refresh_waiting.pop(str(station_id), True)
     try:
         async with async_session_factory() as db:
-            await refresh_station(db, station_id, had_playlists=True)
+            await refresh_station(db, station_id, had_playlists=had)
     except Exception:
         logging.getLogger(__name__).exception("Queue refresh after playlist change failed")
 
 
-def _schedule_refresh(station_id) -> None:
+def _schedule_refresh(station_id, had_playlists: bool = True) -> None:
+    """Rebuild the station's unplayed songs shortly, in the background. Also used by
+    schedule and block edits (api/v1/schedules.py) so their saves answer at once."""
     import asyncio
 
     key = str(station_id)
     if key in _refresh_waiting:
-        return  # a rebuild is already waiting and will read this edit too
-    _refresh_waiting.add(key)
+        # a rebuild is already waiting and will read this edit too
+        _refresh_waiting[key] = _refresh_waiting[key] or had_playlists
+        return
+    _refresh_waiting[key] = had_playlists
     task = asyncio.get_running_loop().create_task(_refresh_later(station_id))
     _refresh_tasks.add(task)  # keep a reference so the task is not collected mid-run
     task.add_done_callback(_refresh_tasks.discard)

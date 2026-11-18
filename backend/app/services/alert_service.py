@@ -2,7 +2,7 @@
 Alert service — create, resolve, query alerts and dispatch notifications.
 """
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -34,9 +34,8 @@ async def create_alert(
 
     The same problem reported again (same type, title and station) while an
     earlier report of it is still open and recent only updates that report: it
-    counts the repeat in context["repeats"] and notifies nobody, unless the
-    repeat is more severe (warning -> critical): that raises the alert and
-    notifies again as a new alert of that severity would. Before this,
+    counts the repeat in context["repeats"] and notifies nobody, unless it raises
+    the severity (then it notifies once for the new level). Before this,
     every scheduler pass and every restart added a row (20,000 open alerts in
     November 2026, nearly all "Empty block", "Dead air" and "Server restarted").
     """
@@ -64,8 +63,8 @@ async def create_alert(
             existing.message = message
         await db.flush()
         if escalated:
-            # Worse than before (e.g. warning -> critical): people who only want
-            # critical texts have heard nothing yet, so notify as for a new alert.
+            # A worse repeat (warning -> critical) texts and pushes again, once per new
+            # level: the stored severity only rises, so the same level never repeats.
             await _dispatch(db, existing, a_sev, title, message)
         return existing
 
@@ -126,6 +125,28 @@ async def resolve_alert(db: AsyncSession, alert_id: UUID | str, user_id: UUID | 
     await db.flush()
     await db.refresh(alert)
     return alert
+
+
+async def clear_alerts(db: AsyncSession, station_id: UUID | str, title: str, why: str) -> int:
+    """Resolve the open alerts with this title on this station because the problem went
+    away by itself (no user). Returns how many were cleared."""
+    rows = (await db.execute(
+        select(Alert).where(
+            Alert.station_id == station_id,
+            Alert.title == title,
+            Alert.is_resolved == False,  # noqa: E712
+        )
+    )).scalars().all()
+    now = datetime.now(timezone.utc)
+    for alert in rows:
+        alert.is_resolved = True
+        alert.resolved_at = now
+        ctx = dict(alert.context or {})
+        ctx["cleared_by_itself"] = why
+        alert.context = ctx
+    if rows:
+        await db.flush()
+    return len(rows)
 
 
 async def reopen_alert(db: AsyncSession, alert_id: UUID | str) -> Alert:
@@ -269,8 +290,32 @@ def _segments(block) -> list[tuple[int, float, float]]:
     return [(0, start, 24 * 60), (1, 0, end)]
 
 
+def _date_range(block, day_offset: int) -> tuple[date, date]:
+    """The dates a part of a recurring block airs on: its start_date..end_date
+    (empty = open-ended), moved a day on for the part after midnight."""
+    lo = getattr(block, "start_date", None) or date.min
+    hi = getattr(block, "end_date", None) or date.max
+    if day_offset:
+        lo = lo + timedelta(days=day_offset) if lo < date.max else lo
+        hi = hi + timedelta(days=day_offset) if hi < date.max else hi
+    return lo, hi
+
+
 def blocks_overlap(a, b) -> bool:
     """Whether two blocks air at the same time on a shared day."""
+    days_a, days_b = _block_days(a), _block_days(b)
+    for off_a, start_a, end_a in _segments(a):
+        for off_b, start_b, end_b in _segments(b):
+            if not (start_a < end_b and end_a > start_b):
+                continue
+            (lo_a, hi_a), (lo_b, hi_b) = _date_range(a, off_a), _date_range(b, off_b)
+            if not (lo_a <= hi_b and lo_b <= hi_a):
+                continue  # their date ranges never meet
+            da = _next_days(days_a) if off_a else days_a
+            db = _next_days(days_b) if off_b else days_b
+            if _days_meet(da, db):
+                return True
+    return False
     days_a, days_b = _block_days(a), _block_days(b)
     for off_a, start_a, end_a in _segments(a):
         for off_b, start_b, end_b in _segments(b):

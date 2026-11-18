@@ -73,16 +73,26 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
 }) {
   // The station's today, checked every 30 s so a page left open over station
   // midnight moves on to the new day (and keeps refreshing it) without a reload
-  const [today, setToday] = useState(() => localDay(new Date(), stationTz));
+  // (worked out in render, so a station change uses the new station's calendar at once)
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    const check = () => setToday(localDay(new Date(), stationTz));
-    check();
-    const t = setInterval(check, 30_000);
+    const t = setInterval(() => setTick(n => n + 1), 30_000);
     return () => clearInterval(t);
-  }, [stationTz]);
+  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- tick re-reads the clock
+  const today = useMemo(() => localDay(new Date(), stationTz), [stationTz, tick]);
   const days = useMemo(() => recentDays(stationTz, DAYS_BACK, today), [stationTz, today]);
   // null = follow the station's today
   const [picked, setPicked] = useState<string | null>(null);
+  const [sel, setSel] = useState<number | null>(null);
+  // Another station: its lines are not the old station's, so no line stays highlighted, and a
+  // day outside the new station's 14 days is dropped rather than coming back later (F-DATABANK-62)
+  const [shownStation, setShownStation] = useState(stationId);
+  if (shownStation !== stationId) {
+    setShownStation(stationId);
+    setSel(null);
+    if (picked && !days.includes(picked)) setPicked(null);
+  }
   const day = picked && days.includes(picked) && picked !== days[0] ? picked : days[0];
   const setDay = (d: string) => setPicked(d === days[0] ? null : d);
   const { data, isLoading, isError } = useQuery({
@@ -92,13 +102,6 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
     refetchInterval: day === days[0] ? 15_000 : false,
   });
   const lines = useMemo(() => linesOf(data?.logs ?? []), [data]);
-  const [sel, setSel] = useState<number | null>(null);
-  // Another station: no line stays highlighted (the index would point into the other station's log)
-  const [selFor, setSelFor] = useState(stationId);
-  if (selFor !== stationId) {
-    setSelFor(stationId);
-    setSel(null);
-  }
 
   const picker = compact ? (
     <select className="qn-field h-11 w-full px-2 text-sm" value={day} onChange={e => { setDay(e.target.value); setSel(null); }}
@@ -127,7 +130,7 @@ export const DayLog = memo(function DayLog({ stationId, stationTz, compact = fal
         {!isLoading && !isError && lines.length === 0 && <p className="p-2 text-gray-600">Nothing aired on {dayLabel(day)}.</p>}
         {lines.map((l, i) => (
           <button type="button" key={`${l.entry.id}-${l.what}`} onClick={() => setSel(i)}
-            className={`w-full text-left flex gap-3 px-1.5 ${compact ? 'min-h-[36px] items-center' : ''} ${sel === i ? 'bg-[#000080] text-white' : 'text-black hover:bg-[#eef]'}`}>
+            className={`w-full text-left flex gap-3 px-1.5 ${compact ? 'min-h-[44px] items-center' : ''} ${sel === i ? 'bg-[#000080] text-white' : 'text-black hover:bg-[#eef]'}`}>
             <span className="shrink-0 tabular-nums">{clockMs(l.at, data?.timezone ?? stationTz)}</span>
             <span className="min-w-0 flex-1 truncate">
               {nameOf(l.entry)}{' '}

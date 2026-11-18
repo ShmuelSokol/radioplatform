@@ -558,12 +558,15 @@ async def test_match_unknown_song_or_request_is_404(client, auth_headers, db_ses
 
 @pytest.mark.asyncio
 async def test_match_on_a_queued_request_only_changes_its_song(client, auth_headers, db_session):
-    """F-MATCH-13: the old song stays in Up next and the new one is not queued."""
+    """F-MATCH-13: a queued request cannot be matched again; the old song stays in Up next."""
     st, songs, req = await _match_setup(db_session)
     await client.patch(f"{API}/song-requests/{req.id}", json={"asset_id": str(songs[0].id), "status": "approved"}, headers=auth_headers)
     assert await _queued(db_session, st) == [str(songs[0].id)]
     r = await client.patch(f"{API}/song-requests/{req.id}", json={"asset_id": str(songs[2].id)}, headers=auth_headers)
-    assert r.status_code == 200 and r.json()["status"] == "queued" and r.json()["asset_id"] == str(songs[2].id)
+    # refused (409): the request keeps its song and Up next stays as it is
+    assert r.status_code == 409, r.text
+    await db_session.refresh(req)
+    assert str(req.asset_id) == str(songs[0].id)
     assert await _queued(db_session, st) == [str(songs[0].id)]
 
 
@@ -592,7 +595,8 @@ async def test_hand_matched_request_counts_like_an_automatic_one(client, auth_he
     assert top[0]["asset_id"] == str(songs[0].id) and top[0]["request_count"] == 3
     assert await refresh_requested_category(db_session, threshold=3) == 1
     await db_session.refresh(songs[0])
-    assert songs[0].category == "requested"
+    # tagged, and its own category is left alone (wiki/song-request-matching.md)
+    assert (songs[0].metadata_extra or {}).get("requested") == "yes"
 
 
 @pytest.mark.asyncio
@@ -721,10 +725,6 @@ async def test_every_station_end_date_needs_every_station(client, auth_headers, 
     assert r.status_code == 200 and r.json()["updated"] == 1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: an end-date edit of an every-station schedule rebuilds spot slots and block "
-                   "items on every active station one after another inside the request (spot_schedules._refresh_queues); "
-                   "with 80 stations it is well over 1 s (S-6). Same cause as admin-flows KNOWN_BUGS F-SPOTSCHED-1. "
-                   "Owner: may the rebuild run in the background after the save answers?")
 @pytest.mark.asyncio
 async def test_every_station_end_date_is_fast_with_80_stations(client, auth_headers, db_session, monkeypatch):
     """F-DATABANK-61. Each station's rebuild is held at 20 ms, about what one costs on the

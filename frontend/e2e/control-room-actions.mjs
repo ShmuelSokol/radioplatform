@@ -13,12 +13,24 @@ import {
   chromium, devices, checker, sleep, makeStation, adminContext, newPage, watchDecks, timeClick, timeUntil,
 } from './lib/fake-station.mjs';
 import { startStreamServer } from './lib/stream-server.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// What this test provokes on purpose; anything else the screen, console or network shows
+// fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/warning toast: (The time, weather and sponsorships always play to the end|That item just started|Loop is on|Panic: cut what was on air|Sound moved to another control room tab)/, 'amber on purpose: each tells the operator what the press did or why it did nothing');
+allowEverywhere(/No weather announcement is available|preview-weather|Could not load the weather preview/, 'the preview is made to fail once to see the message');
+allowEverywhere(/Panic: The playout engine did not respond/, 'the engine is made unreachable to see what Panic says');
+allowEverywhere(/queue\/move-up|That did not go through/, 'a move is made to fail to see the message and the row going back');
+allowEverywhere(/Category transition conflict|Daypart rule "All Day Stories" expects stories/, 'the fake station answers a move with these reminders; the test checks they show');
+allowEverywhere(/__tone\/m1\.wav|Couldn't load this file|blocked\.wav|:4322\/missing/, 'audio files made to fail for the pre-listen and retry checks');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
 const STREAM_PORT = Number(process.env.STREAM_PORT || 4322);
 const ONLY = process.env.ONLY || '';
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { ...devices['iPhone 13'] };
+// Playwright's descriptor reports the screen upright, which the page reads as typing on an upright phone
+const PHONE_LAND = { ...devices['iPhone 13 landscape'], screen: { width: 844, height: 390 } };
 
 const KNOWN_BUGS = {};
 const { check, done } = checker(KNOWN_BUGS);
@@ -137,7 +149,7 @@ async function transportEnd(browser) {
   // One station only: its name instead of a dropdown
   const st3 = makeStation({ stations: [{ id: 'st-1', name: 'Only Station', timezone: 'America/New_York', is_active: true, channels: [] }] });
   const { ctx: c3, page: p3 } = await openRoom(browser, DESKTOP, st3);
-  check(`${tag}: a single station shows its name, no dropdown`, await p3.getByLabel('Station').count() === 0 && (await headerText(p3)).includes('Only Station'));
+  check(`${tag}: a single station shows its name, no dropdown`, await p3.getByLabel('Station', { exact: true }).count() === 0 && (await headerText(p3)).includes('Only Station'));
   await c3.close();
 }
 
@@ -320,9 +332,10 @@ async function toasts(browser) {
   await sleep(1500);
   const srcs = await page.evaluate(() => window.__audios.map((a) => a.src.split('/').pop()));
   check(`${tag}: time & weather preview plays the time clip, nothing sent to air`, srcs.includes('tc.wav') && writes(station, /\/queue\/(skip|fire-now|insert|play-next)/).length === airWrites, srcs.join());
-  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((b) => b.textContent === 'Preview time & weather' && !b.disabled), null, { timeout: 30000 }).catch(() => {});
-  const srcs2 = await page.evaluate(() => window.__audios.map((a) => a.src.split('/').pop()));
-  check(`${tag}: then the weather clip`, srcs2.includes('wx.wav'), srcs2.join());
+  // Both clips are one item in the pre-listen deck (time, then weather); see the previews part
+  await page.getByTestId('pfl-jumps').getByRole('button', { name: 'Weather', exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
+  check(`${tag}: then the weather clip (deck lists Time and Weather)`, await page.getByTestId('pfl-jumps').getByRole('button', { name: 'Weather', exact: true }).count() === 1);
+  await page.getByTestId('pfl-deck').getByRole('button', { name: 'Close pre-listen' }).click();
   station.weather = { time_url: null, weather_url: null };
   await page.getByRole('button', { name: 'Preview time & weather' }).click();
   await page.getByTestId('toast').waitFor({ timeout: 3000 }).catch(() => {});
@@ -353,7 +366,28 @@ async function badges(browser) {
     await page.getByTestId('playout-badge').first().waitFor();
     const t = (await page.getByTestId('playout-badge').first().innerText()).trim();
     check(`${tag}: playout badge "${label}"`, t === label, t);
+    // A solid coloured label, not small grey text (Shmuel: "I want to be able to see if
+    // the station is running on server or not")
+    const look = await page.getByTestId('playout-badge').first().evaluate((el) => {
+      const c = getComputedStyle(el);
+      return { chip: el.dataset.chip, bg: c.backgroundColor, color: c.color, weight: c.fontWeight, shown: el.getBoundingClientRect().width > 0 };
+    });
+    const bg = { 'Browser player': 'rgb(107, 114, 128)', 'Server stream': 'rgb(21, 128, 61)',
+      'Server stream: not answering': 'rgb(185, 28, 28)', 'Server stream: out of step': 'rgb(161, 98, 7)' }[label];
+    check(`${tag}: "${label}" is a coloured label (${bg})`,
+      look.chip === '1' && look.bg === bg && look.color === 'rgb(255, 255, 255)' && Number(look.weight) >= 700 && look.shown,
+      JSON.stringify(look));
   }
+  // Manage Stations: a "Plays from" column with the same label
+  station.playout = { stations: { [station.SID]: { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } };
+  await page.goto(`${BASE}/admin/stations`);
+  const from = page.getByTestId('station-plays-from').first();
+  await from.waitFor({ timeout: 8000 }).catch(() => {});
+  const fromText = (await from.innerText().catch(() => '')).trim();
+  check(`${tag}: Manage Stations shows where the station plays from`, fromText === 'Server stream', fromText);
+  check(`${tag}: Manage Stations has a "Plays from" column`, await page.getByRole('columnheader', { name: 'Plays from' }).count() === 1);
+  await page.goBack();
+  await page.getByTestId('playout-badge').first().waitFor();
   // Fullscreen
   await page.getByRole('button', { name: 'Full screen' }).click();
   await sleep(300);
@@ -431,6 +465,53 @@ async function queueRows(browser) {
   await ctx.close();
 }
 
+// ── A long queue: actions send back the first rows only ─────────────
+async function longQueue(browser) {
+  const tag = 'long queue';
+  const station = makeStation({ queueSize: 400 });
+  // Queue reads can be made slow, as over a phone connection: a list cut to the
+  // action's 150 rows would then stay cut until the next read came back
+  const slow = { reads: 0 };
+  const { ctx, page, errors } = await openRoom(browser, DESKTOP, station, {
+    delay: (path, method) => (method === 'GET' && /\/queue$/.test(path) ? slow.reads : 0),
+  });
+  const head = async () => (await page.locator('section[aria-label=Queue]').locator('div').first().innerText()).replace(/\s+/g, ' ');
+  const next = () => page.getByRole('button', { name: /Go next/ }).first();
+  check(`${tag}: the first 150 rows are loaded`, /\b150 of 400 items/.test(await head()), await head());
+  await sleep(5000); // past the "just changed" window
+  let second = station.pending()[0].id;
+  await next().click();
+  await rowOf(page, second).getByLabel('Playing now').waitFor({ timeout: 3000 }).catch(() => {});
+  check(`${tag}: Next shows the new item on air at once`, await rowOf(page, second).getByLabel('Playing now').count() === 1);
+  check(`${tag}: still the first 150 rows after Next`, /\b150 of 399 items/.test(await head()), await head());
+  const answer = station.calls.filter((c) => /\/queue\/skip/.test(c.path)).length;
+  check(`${tag}: one request for Next`, answer === 1, `${answer}`);
+  // The whole queue loaded (the operator opened the day list): Next must not shrink the list
+  await page.getByLabel('Show day').focus();
+  await timeUntil(page, `() => /\\b399 items/.test(document.querySelector('section[aria-label=Queue]').innerText.replace(/\\s+/g, ' '))`, 4000);
+  check(`${tag}: the whole queue loads on demand`, /\b399 items/.test(await head()) && !/ of 399/.test(await head()), await head());
+  await sleep(5000);
+  second = station.pending()[0].id;
+  slow.reads = 700;
+  const seen = page.evaluate(async () => {
+    const out = [];
+    const until = Date.now() + 2500;
+    while (Date.now() < until) {
+      out.push(document.querySelector('section[aria-label=Queue]').innerText.replace(/\s+/g, ' ').match(/(\d+ of )?\d+ items/)?.[0] ?? '');
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    return [...new Set(out)];
+  });
+  await next().click();
+  const labels = await seen;
+  slow.reads = 0;
+  check(`${tag}: with the whole queue loaded, Next never shrinks the list to 150`, !labels.some((l) => /^150 of/.test(l)), labels.join(' | '));
+  check(`${tag}: the whole queue is shown again after Next`, /\b398 items/.test(await head()) && !/ of 398/.test(await head()), await head());
+  check(`${tag}: and the new item is on air`, await rowOf(page, second).getByLabel('Playing now').count() === 1);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Queue actions: move, remove, drag, insert from a button, optimistic + failure ─────────────
 async function queueActions(browser) {
   const tag = 'queue actions';
@@ -472,6 +553,19 @@ async function queueActions(browser) {
   const dnd = writes(station, /reorder-dnd$/).pop();
   check(`${tag}: drag a row onto another reorders it`, dnd?.body.entry_id === p[6].id && order()[1] === p[6].asset_id, JSON.stringify(dnd?.body));
   check(`${tag}: drag warnings shown as a toast`, (await toastText(page)).includes('Category transition conflict'));
+  // The arrows show the same reminder as a drag (a rule conflict on the Stories station
+  // showed on drag only, 2026-11-18)
+  station.reorderWarnings = ['Daypart rule "All Day Stories" expects stories during 0:00-24:00, but this asset is music'];
+  const r8 = rowOf(page, station.pending()[7].id);
+  await r8.hover();
+  await r8.getByRole('button', { name: 'Move up' }).click();
+  await sleep(SLOW + 400);
+  check(`${tag}: ▲ shows the same warning as a drag`, (await toastText(page)).includes('Daypart rule "All Day Stories"'), await toastText(page));
+  await r8.hover();
+  await r8.getByRole('button', { name: 'Move down' }).click();
+  await sleep(SLOW + 400);
+  check(`${tag}: ▼ shows the same warning as a drag`, (await toastText(page)).includes('Daypart rule "All Day Stories"'), await toastText(page));
+  station.reorderWarnings = [];
   // Insert from an instant button while the marker is armed
   const target = station.pending()[3];
   await rowOf(page, target.id).getByTestId('insert-here').click();
@@ -490,6 +584,15 @@ async function queueActions(browser) {
   station.goOnAir(tgt2.asset_id);
   await page.waitForFunction(() => !document.querySelector('[data-testid=insert-marker]'), null, { timeout: 4000 }).catch(() => {});
   check(`${tag}: marker disappears when that row starts playing`, await page.getByTestId('insert-marker').count() === 0);
+  // F-CR-QUEUE-12: a marker whose row already started is not used for a stale insert: the
+  // insert banners go, and an instant button goes back to its normal mode (no /insert sent)
+  const insertsBefore = writes(station, /\/insert$/).length;
+  const bannersGone = await page.getByText(/Inserting here|insert at the marked spot|Pick a song to insert/).count() === 0;
+  await page.getByTestId('hot-button').filter({ hasText: 'Station ID 7' }).click();
+  await sleep(SLOW + 400);
+  check(`${tag}: after the marked row started, no stale insert (banner gone, button fires normally)`,
+    bannersGone && writes(station, /\/insert$/).length === insertsBefore && writes(station, /\/(fire-now|next|play-next|mix-over|end)$/).length > 0,
+    writes(station, /./).slice(-2).map((c) => c.path).join(', '));
   const tgt3 = station.pending()[2];
   await rowOf(page, tgt3.id).getByTestId('insert-here').click();
   station.queue = station.queue.filter((e) => e.id !== tgt3.id);
@@ -739,6 +842,131 @@ async function pflDeck(browser, contextOpts, tag) {
   await ctx.close();
 }
 
+// ── Every preview in the deck: time & weather, hot buttons, library; one at a time ─────────────
+async function previews(browser, contextOpts, tag) {
+  const station = makeStation();
+  const { ctx, page, errors } = await openRoom(browser, contextOpts, station);
+  const mobile = !!contextOpts.isMobile;
+  const tab = (name) => page.getByRole('navigation', { name: 'Control room sections' }).getByRole('button', { name: new RegExp(name) });
+  if (mobile) await tab('Buttons').tap();
+  const deck = page.getByTestId('pfl-deck');
+  const weatherBtn = page.getByTestId('weather-preview');
+  // The deck's own audio element: what it plays, whether it is paused
+  const deckAudio = () => page.evaluate(() => {
+    const a = [...window.__audios].reverse().find((x) => x.dataset.pflId);
+    return a ? { id: a.dataset.pflId, src: a.src.split('/').pop(), paused: a.paused, t: +a.currentTime.toFixed(2) } : null;
+  });
+  const sounding = () => page.evaluate(() => window.__audios.filter((a) => a.dataset.pflId && !a.paused).map((a) => a.dataset.pflId));
+  const secs = async () => { const [m, s] = (await page.getByTestId('pfl-elapsed').innerText()).split(':'); return +m * 60 + parseFloat(s); };
+  const left = async () => { const [m, s] = (await page.getByTestId('pfl-remaining').innerText()).replace('-', '').split(':'); return +m * 60 + parseFloat(s); };
+  const press = (loc) => (mobile ? loc.tap() : loc.click());
+  const seekTo = async (frac) => {
+    const scrub = page.getByTestId('pfl-scrub');
+    const b = await scrub.boundingBox();
+    await scrub.click({ position: { x: b.width * frac, y: b.height / 2 } });
+    await sleep(500);
+  };
+
+  // Time & weather: in the deck, and the button is not stuck
+  await press(weatherBtn);
+  await deck.waitFor({ timeout: 4000 }).catch(() => {});
+  await page.waitForFunction(() => { const e = document.querySelector('[data-testid=pfl-elapsed]'); return e && !e.innerText.startsWith('0:00.'); }, null, { timeout: 4000 }).catch(() => {});
+  const a0 = await deckAudio();
+  check(`${tag}: weather preview opens the deck and plays the time clip`, await deck.count() === 1 && /Time & weather/.test(await deck.innerText()) && a0?.src === 'tc.wav' && !a0.paused, JSON.stringify(a0));
+  check(`${tag}: the weather button is not stuck disabled while it plays (it stops it)`, !(await weatherBtn.isDisabled()) && await weatherBtn.getAttribute('aria-pressed') === 'true' && /Stop time & weather/.test(await weatherBtn.innerText()));
+  // The bar covers both clips: 5 s time + 20 s weather
+  await page.waitForFunction(() => {
+    const p = (id) => { const t = document.querySelector(`[data-testid=${id}]`)?.innerText.replace('-', '') || '0:0'; const [m, s] = t.split(':'); return +m * 60 + parseFloat(s); };
+    return Math.abs(p('pfl-elapsed') + p('pfl-remaining') - 25) < 1.5;
+  }, null, { timeout: 5000 }).catch(() => {});
+  check(`${tag}: elapsed + remaining is the length of time + weather`, Math.abs((await secs()) + (await left()) - 25) < 1.5, `${await secs()} + ${await left()}`);
+  // Pause / play
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(300);
+  const p1 = await secs(); await sleep(600);
+  check(`${tag}: weather ❚❚ pauses (audio paused, time stands)`, (await deckAudio()).paused && Math.abs((await secs()) - p1) < 0.05 && await page.getByTestId('pfl-playpause').getAttribute('aria-label') === 'Play pre-listen');
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(600);
+  check(`${tag}: weather ▶ plays on`, !(await deckAudio()).paused && (await secs()) > p1 + 0.2);
+  // Seek into the second clip and back
+  await seekTo(0.9);
+  const w = await deckAudio();
+  const ws = await secs();
+  check(`${tag}: seeking to 90% goes into the weather clip`, w.src === 'wx.wav' && !w.paused && ws > 21.5 && ws < 24.5 && w.t > 16.5 && w.t < 19.5, `${JSON.stringify(w)} at ${ws}`);
+  check(`${tag}: the deck says the weather clip is playing`, /\bWeather\b/.test(await deck.innerText()));
+  await seekTo(0.1);
+  const t = await deckAudio();
+  check(`${tag}: seeking back to 10% returns to the time clip`, t.src === 'tc.wav' && t.t > 1.5 && t.t < 3.8, JSON.stringify(t));
+  // Seeking while paused keeps it paused
+  await press(page.getByTestId('pfl-playpause'));
+  await seekTo(0.8);
+  const pz = await deckAudio();
+  check(`${tag}: seeking while paused stays paused`, pz.src === 'wx.wav' && pz.paused, JSON.stringify(pz));
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(300);
+  // Stop
+  await press(deck.getByRole('button', { name: 'Close pre-listen' }));
+  await sleep(300);
+  check(`${tag}: ✕ stops the weather preview (deck gone, audio stopped)`, await deck.count() === 0 && (await sounding()).length === 0 && /Preview time & weather/.test(await weatherBtn.innerText()));
+  // The button itself stops it too
+  await press(weatherBtn);
+  await deck.waitFor({ timeout: 4000 }).catch(() => {});
+  await sleep(400);
+  await press(weatherBtn);
+  await sleep(300);
+  check(`${tag}: pressing the weather button again stops it`, await deck.count() === 0 && (await sounding()).length === 0);
+
+  // Hot button pre-listen: the same deck and controls
+  await press(page.getByTestId('pfl-toggle'));
+  const hb = page.getByTestId('hot-button').filter({ hasText: 'Station ID 2' });
+  await press(hb);
+  await deck.waitFor({ timeout: 4000 }).catch(() => {});
+  await sleep(700);
+  const h0 = await deckAudio();
+  check(`${tag}: hot button PFL opens the deck and plays`, await deck.count() === 1 && h0?.id === 'j2' && !h0.paused, JSON.stringify(h0));
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(200);
+  const hp = await secs(); await sleep(500);
+  check(`${tag}: hot button ❚❚ pauses`, (await deckAudio()).paused && Math.abs((await secs()) - hp) < 0.05);
+  await press(page.getByTestId('pfl-playpause'));
+  await sleep(400);
+  check(`${tag}: hot button ▶ plays on`, !(await deckAudio()).paused);
+  const hlen = (await secs()) + (await left());
+  await seekTo(0.5);
+  const hs = await secs();
+  check(`${tag}: hot button seek to half way`, Math.abs(hs - hlen / 2) < 1.5, `${hs} of ${hlen}`);
+  // Weather replaces the hot button, and the hot button replaces weather
+  await press(weatherBtn);
+  await page.waitForFunction(() => /Time & weather/.test(document.querySelector('[data-testid=pfl-deck]')?.innerText || ''), null, { timeout: 4000 }).catch(() => {});
+  await sleep(500);
+  check(`${tag}: weather preview replaces the hot button pre-listen`, JSON.stringify(await sounding()) === JSON.stringify(['preview:time-weather']) && await hb.getAttribute('aria-pressed') === 'false', JSON.stringify(await sounding()));
+  await press(hb);
+  await sleep(700);
+  check(`${tag}: a hot button replaces the weather preview`, JSON.stringify(await sounding()) === JSON.stringify(['j2']) && await weatherBtn.getAttribute('aria-pressed') === 'false', JSON.stringify(await sounding()));
+  await press(deck.getByRole('button', { name: 'Close pre-listen' }));
+  await sleep(300);
+  check(`${tag}: ✕ stops the hot button pre-listen`, await deck.count() === 0 && (await sounding()).length === 0);
+
+  // The library pre-listen replaces the weather preview
+  await press(weatherBtn);
+  await deck.waitFor({ timeout: 4000 }).catch(() => {});
+  await sleep(500);
+  if (mobile) await tab('Library').tap();
+  await page.getByRole('searchbox').fill('Song number 1 ');
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid=library-row]').length >= 1);
+  await press(page.getByTestId('library-pfl').first());
+  await sleep(800);
+  const lib = await sounding();
+  check(`${tag}: library PFL replaces the weather preview`, lib.length === 1 && lib[0] !== 'preview:time-weather' && await deck.count() === 1 && !/Time & weather/.test(await deck.innerText()), JSON.stringify(lib));
+  await press(deck.getByRole('button', { name: 'Close pre-listen' }));
+  await sleep(300);
+  // preview-weather only reads the clips (POST because it may make them); nothing goes on air
+  const sent = station.calls.filter((c) => c.method !== 'GET' && !c.path.startsWith('/activity') && !c.path.endsWith('/queue/preview-weather'));
+  check(`${tag}: nothing sent to the station by any preview`, sent.length === 0, sent.map((c) => c.path).join());
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Side panels: go live, end show, schedule, splitter ─────────────
 async function side(browser) {
   const tag = 'side panels';
@@ -878,6 +1106,61 @@ async function timedPreload(browser) {
   await c2.close();
 }
 
+// ── F-CR-SIDE-6: a live show on air: the control room hears the host, not the music ──
+async function liveShow(browser, contextOpts, tag) {
+  const station = makeStation();
+  const { ctx, np } = await adminContext(browser, contextOpts, station);
+  await ctx.routeWebSocket(/\/ws\/(site|listeners)|\/ws\/live\/(?!station)/, () => {});
+  let live = null; // the page's /ws/live/station/<id>/listen socket
+  await ctx.routeWebSocket(/\/ws\/live\/station\/[^/]+\/listen/, (ws) => {
+    live = ws;
+    ws.send(JSON.stringify({ type: 'live_state', live: false, show_id: null, sample_rate: 24000 }));
+  });
+  // Counts the host's frames the page plays (24 kHz buffers; the music decks are media elements)
+  await ctx.addInitScript(() => {
+    window.__liveFrames = 0;
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...a) {
+      if (this.buffer && this.buffer.sampleRate === 24000) window.__liveFrames++;
+      return start.apply(this, a);
+    };
+  });
+  const { page, errors } = await newPage(ctx);
+  await page.goto(`${BASE}/admin/dashboard`);
+  await page.getByTestId('queue-row').first().waitFor();
+  await listenHere(page);
+  check(`${tag}: music heard before the show`, (await page.evaluate(() => window.__audible().length)) === 1);
+  const sid = live && live.url().split('/').slice(-2)[0];
+  check(`${tag}: listens for the station's live show`, sid === station.SID, live ? live.url() : 'no socket');
+
+  // The host goes on air: the music stops here and the host's voice plays
+  const t0 = Date.now();
+  live.send(JSON.stringify({ type: 'live_state', live: true, show_id: 'ls1', sample_rate: 24000 }));
+  const silentAfter = await timeUntil(page, '() => window.__audible().length === 0', 3000);
+  check(`${tag}: the music stops when the host goes on air`, silentAfter >= 0, `${silentAfter >= 0 ? Date.now() - t0 : 'still playing'} ms`);
+  const frame = Buffer.alloc(2040 * 2);
+  for (let i = 0; i < 2040; i++) frame.writeInt16LE(Math.round(6000 * Math.sin(2 * Math.PI * 440 * i / 24000)), i * 2);
+  for (let i = 0; i < 12; i++) { live.send(frame); await sleep(85); }
+  const frames = await page.evaluate(() => window.__liveFrames);
+  check(`${tag}: the host is heard in the control room`, frames >= 10, `${frames} of 12 frames played`);
+  check(`${tag}: no music under the host`, (await page.evaluate(() => window.__audible().length)) === 0, JSON.stringify(await page.evaluate(() => window.__decks())));
+
+  // The show ends: the music comes back once the station sends what it plays now,
+  // not from the stale now-playing held when the show began
+  live.send(JSON.stringify({ type: 'live_state', live: false, show_id: null, sample_rate: 24000 }));
+  await sleep(300);
+  const before = await page.evaluate(() => window.__liveFrames);
+  live.send(frame);
+  await sleep(300);
+  check(`${tag}: nothing of the host is played after the show`, (await page.evaluate(() => window.__liveFrames)) === before);
+  check(`${tag}: the stale song does not resume before the station says what plays`, (await page.evaluate(() => window.__audible().length)) === 0);
+  np.raw({ type: 'now_playing', data: station.nowPlaying() });
+  const back = await timeUntil(page, '() => window.__audible().length === 1', 4000);
+  check(`${tag}: the music returns after the show`, back >= 0, `${back} ms`);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 // ── Engine mode: the control room plays the stream, falls back on error ─────────────
 async function engineMode(browser, stream) {
   const tag = 'engine mode';
@@ -890,14 +1173,56 @@ async function engineMode(browser, stream) {
     await sleep(2500);
     const el = await page.evaluate(() => { const a = document.querySelector('[data-testid=control-room] audio'); return { src: a.src, paused: a.paused, muted: a.muted, t: a.currentTime }; });
     if (!broken) {
-      check(`${tag}: listening plays the server stream`, el.src === stream.url(station.SID) && !el.paused && !el.muted && el.t > 0.3, JSON.stringify(el));
+      check(`${tag}: listening plays the server stream`, !!el.src && !el.paused && !el.muted && el.t > 0.3 && stream.stats.connects > 0, JSON.stringify(el));
       check(`${tag}: the built-in player only measures (not heard)`, (await page.evaluate(() => window.__outLevel())) < 0.01);
+      // F-CR-TRANSPORT-25: the meters still move while the station is heard through the server stream
+      const lit = () => page.locator('header .bg-cyan-400, header .bg-red-500').count();
+      const l1 = await lit(); await sleep(300); const l2 = await lit();
+      check(`${tag}: level meters move while the server stream is heard`, l1 > 0 && l2 > 0, `${l1}, ${l2} lit`);
     } else {
       check(`${tag}: a broken stream falls back to the built-in player`, (await page.evaluate(() => window.__outLevel())) > 0.1 && (await page.evaluate(() => window.__audible().length)) === 1, JSON.stringify(el));
     }
     check(`${tag}${broken ? ' (broken)' : ''}: no script errors`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   }
+}
+
+// ── F-CR-SIDE-6: a live show on air: the host is heard, the music stops, and returns after ─────
+async function liveShowHeard(browser) {
+  const tag = 'live show';
+  const station = makeStation();
+  const { ctx } = await adminContext(browser, DESKTOP, station);
+  await ctx.addInitScript(() => {
+    window.__hostFrames = 0;
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...a) { if (this.buffer && this.buffer.sampleRate === 24000) window.__hostFrames++; return start.apply(this, a); };
+  });
+  await ctx.routeWebSocket(/\/ws\/(site|listeners)/, () => {});
+  await ctx.routeWebSocket(/\/ws\/live\/(?!station)/, () => {});
+  let liveWs = null;
+  await ctx.routeWebSocket(/\/ws\/live\/station\/[^/]+\/listen/, (ws) => { liveWs = ws; ws.send(JSON.stringify({ type: 'live_state', live: false })); });
+  const { page, errors } = await newPage(ctx);
+  await page.goto(`${BASE}/admin/dashboard`);
+  await page.getByTestId('queue-row').first().waitFor();
+  await listenHere(page);
+  check(`${tag}: (set up) music heard before the show`, (await page.evaluate(() => window.__audible().length)) >= 1);
+  // The show goes on air: live_state then the host's 24 kHz PCM frames (a 440 Hz tone)
+  const frame = Buffer.alloc(2400 * 2);
+  for (let i = 0; i < 2400; i++) frame.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 440 * i / 24000)), i * 2);
+  liveWs.send(JSON.stringify({ type: 'live_state', live: true, sample_rate: 24000 }));
+  const feed = setInterval(() => { try { liveWs.send(frame); } catch { /* closed */ } }, 100);
+  await sleep(1500);
+  const during = await page.evaluate(() => ({ music: window.__audible().length, host: window.__hostFrames }));
+  check(`${tag}: during the show the host is heard here`, during.host >= 5, JSON.stringify(during));
+  check(`${tag}: during the show the music is silent`, during.music === 0, JSON.stringify(during));
+  // The show ends: the queue restarts on the server and pushes the item on air
+  clearInterval(feed);
+  liveWs.send(JSON.stringify({ type: 'live_state', live: false }));
+  station.goOnAir(station.pending()[0].asset_id);
+  await page.waitForFunction(() => window.__audible().length >= 1, null, { timeout: 5000 }).catch(() => {});
+  check(`${tag}: after the show the music is heard again`, (await page.evaluate(() => window.__audible().length)) >= 1);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
 }
 
 // A hard timed item due before the song ends: Remaining and the bar count to the cut,
@@ -945,16 +1270,22 @@ try {
   if (run('badges')) await badges(browser);
   if (run('tabs')) await oneSoundingTab(browser);
   if (run('rows')) await queueRows(browser);
+  if (run('long')) await longQueue(browser);
   if (run('actions')) await queueActions(browser);
   if (run('days')) await dayFilter(browser);
   if (run('phone')) await phoneRows(browser);
   if (run('library')) { await library(browser, DESKTOP, 'library desktop'); await library(browser, PHONE, 'library iPhone'); }
   if (run('cart')) await cart(browser);
   if (run('pfl')) { await pflDeck(browser, DESKTOP, 'pfl desktop'); await pflDeck(browser, PHONE, 'pfl iPhone'); }
+  if (run('previews')) { await previews(browser, DESKTOP, 'previews desktop'); await previews(browser, PHONE, 'previews iPhone'); await previews(browser, PHONE_LAND, 'previews iPhone sideways'); }
   if (run('side')) await side(browser);
   if (run('speed')) { await speed(browser, DESKTOP, 'speed desktop'); await speed(browser, PHONE, 'speed iPhone'); }
   if (run('mix')) await mixOver(browser);
   if (run('timed')) await timedPreload(browser);
+  if (run('live')) {
+    await liveShow(browser, DESKTOP, 'live show desktop'); await liveShow(browser, PHONE, 'live show iPhone');
+    await liveShowHeard(browser);
+  }
   if (run('cut')) {
     await cutCountdown(browser, DESKTOP, 'cut desktop'); await cutCountdown(browser, PHONE, 'cut iPhone');
     await cutCountdown(browser, { ...devices['iPhone 13 landscape'] }, 'cut iPhone sideways');

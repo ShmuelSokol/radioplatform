@@ -19,8 +19,17 @@ function listenUrl(stationId: string): string {
   return `${protocol}//${window.location.host}${apiUrl}${path}`;
 }
 
-export function useLiveAudio(stationId: string | null, enabled: boolean) {
+/**
+ * `onlyWhenEnabled`: open the live socket only while `enabled` (the public Listen
+ * page: a visitor who has not pressed Listen downloads no show audio; Stop closes
+ * it). Without it the socket stays open so the page always knows whether a show
+ * is on air (the control room).
+ */
+export function useLiveAudio(stationId: string | null, enabled: boolean, opts: { onlyWhenEnabled?: boolean } = {}) {
   const [onAir, setOnAir] = useState(false);
+  // The server has said whether a show is on air since this socket opened
+  const [known, setKnown] = useState(false);
+  const connectNow = !opts.onlyWhenEnabled || enabled;
   const ctxRef = useRef<AudioContext | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const nextTimeRef = useRef(0);
@@ -28,6 +37,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean) {
   const levelRef = useRef(1);
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
+  const liveRef = useRef(false); // the server said a host is on air
 
   const ensureCtx = useCallback(() => {
     if (!ctxRef.current) {
@@ -54,14 +64,17 @@ export function useLiveAudio(stationId: string | null, enabled: boolean) {
   }, []);
 
   useEffect(() => {
-    if (!stationId) return;
+    if (!stationId || !connectNow) return;
+    setKnown(false);
     let closed = false;
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
 
     const play = (buf: ArrayBuffer) => {
-      if (!enabledRef.current) return;
+      // Only while a show is on air: a frame still in flight after the host left
+      // must not play over the music that comes back
+      if (!enabledRef.current || !liveRef.current) return;
       const ctx = ensureCtx();
       if (ctx.state !== 'running') { ctx.resume().catch(() => {}); return; }
       const pcm = new Int16Array(buf);
@@ -89,7 +102,9 @@ export function useLiveAudio(stationId: string | null, enabled: boolean) {
             const msg = JSON.parse(e.data);
             if (msg.type === 'live_state') {
               if (msg.sample_rate) rateRef.current = msg.sample_rate;
+              liveRef.current = !!msg.live;
               setOnAir(!!msg.live);
+              setKnown(true);
               nextTimeRef.current = 0;
             }
           } catch { /* not ours */ }
@@ -99,6 +114,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean) {
       };
       ws.onclose = () => {
         if (closed) return;
+        liveRef.current = false;
         setOnAir(false);
         retry = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 15000));
       };
@@ -109,10 +125,11 @@ export function useLiveAudio(stationId: string | null, enabled: boolean) {
       if (retry) clearTimeout(retry);
       if (ws) { ws.onclose = null; ws.close(); }
       setOnAir(false);
+      setKnown(false);
     };
-  }, [stationId, ensureCtx]);
+  }, [stationId, connectNow, ensureCtx]);
 
   useEffect(() => () => { ctxRef.current?.close().catch(() => {}); ctxRef.current = null; }, []);
 
-  return { onAir, unlock, setLevel };
+  return { onAir, known, unlock, setLevel };
 }

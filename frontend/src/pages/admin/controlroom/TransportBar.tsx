@@ -10,7 +10,11 @@ import type { CtlAsset } from './shared';
 interface StationOption { id: string; name: string }
 
 export interface TransportAudio {
+  /** Sound really comes out of this device (Listen was pressed and the browser lets it play). */
   audioReady: boolean;
+  /** Listen was pressed and the sound is on its way (the server stream is connecting). */
+  starting?: boolean;
+  /** The Listen button: switch sound on here. Must run inside the tap. */
   initAudio: () => void;
   volume: number;
   setVolume: (v: number) => void;
@@ -26,6 +30,8 @@ interface Props {
   onStation: (id: string) => void;
   isPlaying: boolean;
   nowAsset: CtlAsset | null;
+  /** Open the quick actions for the song on air (category, do not play, details) */
+  onNowSong?: () => void;
   nextAsset: CtlAsset | null;
   elapsed: number;
   remaining: number;
@@ -125,7 +131,7 @@ export function TransportButtons({ p, stacked, grid = false }: { p: Props; stack
   // grid: the phone-sideways button grid (Go next two cells wide first, then Fade,
   // Soft fade, and Loop on the next row); the parent is the 4-column grid.
   const btn = grid ? 'qn-btn h-11 px-1 text-xs min-w-0'
-    : `qn-btn shrink-0 ${stacked ? 'w-full h-9 text-sm' : 'h-11 px-2.5 text-xs'}`;
+    : `qn-btn shrink-0 ${stacked ? 'w-full h-9 [@media(max-height:800px)]:h-8 text-sm' : 'h-11 px-2.5 text-xs'}`;
   return (
     <div className={grid ? 'contents' : stacked ? 'flex flex-col gap-1' : 'flex items-center gap-1 shrink-0'} role="group" aria-label="Go to the next item">
       <button type="button" onClick={p.onLoop} disabled={!p.isPlaying || p.loopBusy}
@@ -136,7 +142,7 @@ export function TransportButtons({ p, stacked, grid = false }: { p: Props; stack
       </button>
       <button type="button" onClick={() => p.onNext('hard')} disabled={!p.isPlaying || p.nextBusy}
         title="Go to the next item now, with no fade (N)" data-testid="go-next"
-        className={`${btn} ${grid ? 'order-1 col-span-2 !text-base' : stacked ? '!h-11 !text-base' : '!px-3 !text-sm'} font-bold`}>
+        className={`${btn} ${grid ? 'order-1 col-span-2 !text-base' : stacked ? '!h-11 [@media(max-height:800px)]:!h-9 !text-base' : '!px-3 !text-sm'} font-bold`}>
         {p.nextBusy ? '…' : <><u>G</u>o next</>}
       </button>
       <button type="button" onClick={() => p.onNext('fade')} disabled={!p.isPlaying || p.nextBusy}
@@ -199,23 +205,49 @@ export default function TransportBar(p: Props) {
     </div>
   );
 
-  const sound = !audio.audioReady ? (
-    <button type="button" onClick={audio.initAudio} title="Hear the station in this browser"
-      className="qn-btn h-8 px-2.5 text-xs shrink-0">
-      🔊<span className="hidden sm:inline"> Listen</span>
-    </button>
-  ) : (
-    <div className="flex items-center gap-1.5 shrink-0">
-      <button type="button" onClick={audio.toggleMute} aria-label={audio.muted ? 'Unmute' : 'Mute'}
-        className="qn-btn h-8 w-8 flex items-center justify-center text-base">
-        {audio.muted ? '🔇' : audio.volume > 0.5 ? '🔊' : '🔉'}
-      </button>
-      <input type="range" min="0" max="1" step="0.01" value={audio.volume} aria-label="Monitor volume"
-        onChange={e => audio.setVolume(parseFloat(e.target.value))}
-        className="hidden 2xl:block w-24 h-1 accent-cyan-400 cursor-pointer" />
-    </div>
-  );
+  // Sound on this device. Off (or remembered but not yet allowed by the browser): one
+  // big button that says Listen, on a phone too. It used to be a 32 px speaker icon
+  // with no word on a phone, and with listening remembered the Mute control showed
+  // over silence (Shmuel, 2026-11-17: "where do I hit play?").
+  const soundControl = (size: 'desk' | 'phone' | 'land') => {
+    const big = size !== 'desk';
+    if (!audio.audioReady) {
+      return (
+        <button type="button" onClick={audio.initAudio} title="Hear the station on this device"
+          data-testid={audio.starting ? 'listen-starting' : 'listen-here'} data-listen-button
+          className={`qn-btn cr-listen shrink-0 font-bold ${big ? 'h-11 min-w-[128px] px-3 text-base' : 'h-8 px-2.5 text-xs'}`}>
+          {audio.starting ? <>🔊 Starting…<span className="sr-only"> Listen</span></> : '🔊 Listen'}
+        </button>
+      );
+    }
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        <button type="button" onClick={audio.toggleMute} aria-label={audio.muted ? 'Unmute' : 'Mute'}
+          data-testid="sound-control"
+          title={audio.muted ? 'Muted on this device. Press to hear the station again.' : 'The station is playing on this device. Press to mute it here.'}
+          className={`qn-btn flex items-center justify-center gap-1 ${big ? 'h-11 px-2.5 text-sm font-bold' : 'h-8 w-8 text-base'} ${audio.muted && big ? 'cr-listen' : ''}`}>
+          <span aria-hidden="true">{audio.muted ? '🔇' : audio.volume > 0.5 ? '🔊' : '🔉'}</span>
+          {big && <span>{audio.muted ? 'Muted' : 'Sound on'}</span>}
+        </button>
+        {!big && (
+          <input type="range" min="0" max="1" step="0.01" value={audio.volume} aria-label="Monitor volume"
+            onChange={e => audio.setVolume(parseFloat(e.target.value))}
+            className="hidden 2xl:block w-24 h-1 accent-cyan-400 cursor-pointer" />
+        )}
+      </div>
+    );
+  };
 
+  // Quick actions for the song on air. A 44 px wide tap target on phones (the row is 32 px tall).
+  const songButton = p.onNowSong && p.nowAsset && p.nowAsset.asset_type !== 'silence' ? (
+    <button type="button" onClick={p.onNowSong} data-testid="now-song"
+      title="Song on air: change category, do not play again, edit details"
+      aria-label="Actions for the song on air"
+      className="qn-btn shrink-0 w-14 lg:w-16 flex flex-col items-center justify-center leading-tight text-sm font-bold">
+      <span>Song</span>
+      <span className="text-[10px] font-normal">on air</span>
+    </button>
+  ) : null;
   const nowType = p.nowAsset?.category || p.nowAsset?.asset_type || '';
   const nextType = p.nextAsset?.category || p.nextAsset?.asset_type || '';
 
@@ -253,17 +285,20 @@ export default function TransportBar(p: Props) {
             <div className="qn-digits text-base"><Clock tz={p.stationTz} /></div>
           </div>
         </div>
-        <div className="px-1 pb-1 pt-0.5 space-y-[3px] bg-[#1c1c1c]">
-          <div className="bg-black qn-sunken px-2 h-8 flex items-center" title={nowType}>
-            <span className="truncate text-base font-bold text-[var(--qn-digit)] leading-none">
-              {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
-            </span>
+        <div className="px-1 pb-1 pt-0.5 flex gap-[3px] bg-[#1c1c1c]">
+          <div className="flex-1 min-w-0 space-y-[3px]">
+            <div className="bg-black qn-sunken px-2 h-8 flex items-center" title={nowType}>
+              <span className="truncate text-base font-bold text-[var(--qn-digit)] leading-none">
+                {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
+              </span>
+            </div>
+            <div className="bg-black qn-sunken px-2 h-7 flex items-center" title={nextType}>
+              <span className="truncate text-sm font-bold text-[var(--qn-yellow)] leading-none">
+                <span className="sr-only">Next: </span>{p.nextAsset ? assetLabel(p.nextAsset) : 'nothing queued'}
+              </span>
+            </div>
           </div>
-          <div className="bg-black qn-sunken px-2 h-7 flex items-center" title={nextType}>
-            <span className="truncate text-sm font-bold text-[var(--qn-yellow)] leading-none">
-              <span className="sr-only">Next: </span>{p.nextAsset ? assetLabel(p.nextAsset) : 'nothing queued'}
-            </span>
-          </div>
+          {songButton}
         </div>
         <div className="h-1 bg-black" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
           <div className={`h-full ${ending ? 'bg-red-500' : 'bg-[var(--qn-digit)]'}`} style={{ width: `${progress}%` }} />
@@ -275,17 +310,7 @@ export default function TransportBar(p: Props) {
           </div>
           {p.pflDeck}
           <div className="flex items-center gap-1">
-            {!audio.audioReady ? (
-              <button type="button" onClick={audio.initAudio} title="Hear the station in this browser"
-                className="qn-btn h-11 px-2.5 text-xs shrink-0">
-                🔊 Listen
-              </button>
-            ) : (
-              <button type="button" onClick={audio.toggleMute} aria-label={audio.muted ? 'Unmute' : 'Mute'}
-                className="qn-btn h-11 w-11 flex items-center justify-center text-base shrink-0">
-                {audio.muted ? '🔇' : audio.volume > 0.5 ? '🔊' : '🔉'}
-              </button>
-            )}
+            {soundControl('land')}
             {p.liveShow && (
               <Link to={`/admin/live/${p.liveShow.id}/host`}
                 className="inline-flex items-center gap-1 h-11 px-2 bg-red-700 text-white text-xs font-bold shrink-0 max-w-[110px]"
@@ -307,7 +332,7 @@ export default function TransportBar(p: Props) {
               <span className="flex-1 min-w-0 truncate text-sm font-bold">{p.stations[0]?.name ?? 'No station'}</span>
             )}
           </div>
-          <PlayoutBadge stationId={p.stationId} className="!text-black" />
+          <PlayoutBadge stationId={p.stationId} chip />
         </div>
       </header>
     );
@@ -320,7 +345,7 @@ export default function TransportBar(p: Props) {
         <div className="flex flex-col items-start gap-1 shrink-0 min-w-[70px]">
           {status}
           <span className="hidden lg:block">{stationSelect}</span>
-          <PlayoutBadge stationId={p.stationId} dark className="hidden lg:inline-flex" />
+          <PlayoutBadge stationId={p.stationId} chip className="hidden lg:inline-flex" />
         </div>
         <div className="leading-none shrink-0"
           title={cutClock ? `This item fades at ${cutClock} for a timed item` : undefined}>
@@ -356,13 +381,14 @@ export default function TransportBar(p: Props) {
           <div className="qn-digits text-xl lg:text-[34px]"><Clock tz={p.stationTz} /></div>
         </div>
         <div className="hidden lg:flex items-center gap-1.5 shrink-0">
-          {sound}
+          {soundControl('desk')}
           <FullscreenButton />
         </div>
       </div>
 
       {/* On air and next, as on the old program */}
-      <div className="px-1 lg:px-2 pb-1 space-y-[3px] bg-[#1c1c1c] pt-1">
+      <div className="px-1 lg:px-2 pb-1 flex gap-[3px] bg-[#1c1c1c] pt-1">
+        <div className="flex-1 min-w-0 space-y-[3px]">
         <div className="flex gap-[3px]">
           <div className="flex-1 min-w-0 bg-black qn-sunken px-2 h-8 lg:h-9 flex items-center">
             <span className="truncate text-lg lg:text-2xl font-bold text-[var(--qn-digit)] leading-none">
@@ -383,6 +409,8 @@ export default function TransportBar(p: Props) {
             <span className="truncate text-sm lg:text-lg font-bold text-[var(--qn-yellow)]">{nextType}</span>
           </div>
         </div>
+        </div>
+        {songButton}
       </div>
 
       {/* Progress */}
@@ -392,8 +420,8 @@ export default function TransportBar(p: Props) {
 
       {/* Phones and tablets: buttons and sound under the titles */}
       <div className="lg:hidden flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#c0c0c0]">
-        {sound}
-        <PlayoutBadge stationId={p.stationId} className="!text-black" />
+        {soundControl('phone')}
+        <PlayoutBadge stationId={p.stationId} chip />
         <div className="flex-1" />
         <TransportButtons p={p} stacked={false} />
       </div>

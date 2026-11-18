@@ -110,3 +110,55 @@ async def test_join_cache_does_not_keep_a_read_that_raced_a_change(monkeypatch):
     monkeypatch.setattr(ws, "_queue_now_playing", slow_read)
     await ws._cached_queue_now_playing(station, db=object())
     assert station not in ws._join_cache
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_item_is_announced_after_the_item_that_paused_it(monkeypatch):
+    """All Day Stories 02:30Z 2026-11-18: a sponsorship paused a story; the story came
+    back counted as started before the sponsorship (started_at = now - offset), so every
+    update for it was dropped as "older" for 25 minutes."""
+    sent = []
+
+    async def fake_broadcast(station_id, message):
+        sent.append(message["data"]["asset_id"])
+
+    monkeypatch.setattr(ws.manager, "broadcast_to_station", fake_broadcast)
+    station = str(uuid.uuid4())
+    story = datetime(2026, 11, 18, 2, 29, 57, tzinfo=timezone.utc)
+    spot = datetime(2026, 11, 18, 2, 30, 0, tzinfo=timezone.utc)
+    back = spot + timedelta(seconds=30)
+    await ws.broadcast_now_playing_update(
+        station, {"asset_id": "story", "started_at": story.isoformat(), "on_air_at": story.isoformat()})
+    await ws.broadcast_now_playing_update(
+        station, {"asset_id": "spot", "started_at": spot.isoformat(), "on_air_at": spot.isoformat()})
+    # the story again, where it stopped: started_at as before, on air after the spot
+    await ws.broadcast_now_playing_update(
+        station, {"asset_id": "story", "started_at": story.isoformat(), "on_air_at": back.isoformat()})
+    assert sent == ["story", "spot", "story"]
+    # a late read of the spot is still dropped
+    await ws.broadcast_now_playing_update(
+        station, {"asset_id": "spot", "started_at": spot.isoformat(), "on_air_at": spot.isoformat()})
+    assert sent == ["story", "spot", "story"]
+
+
+@pytest.mark.asyncio
+async def test_the_payload_says_when_a_resumed_item_really_went_on_air(db_session):
+    from app.models.asset import Asset
+    from app.models.queue_entry import QueueEntry, mark_started, resume_source
+    from app.models.station import Station
+    from app.services.scheduler_engine import get_scheduler
+
+    station = Station(id=uuid.uuid4(), name="S", timezone="UTC")
+    asset = Asset(id=uuid.uuid4(), title="Story", file_path="http://x/story.mp3", duration=1200.0,
+                  asset_type="shiur")
+    entry = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=asset.id, position=1,
+                       status="playing", source=resume_source(600))
+    db_session.add_all([station, asset, entry])
+    now = datetime(2026, 11, 18, 2, 30, 30, tzinfo=timezone.utc)
+    mark_started(entry, now)
+    await db_session.commit()
+    await db_session.refresh(entry, ["asset"])
+    payload = await get_scheduler().queue_entry_payload(db_session, station.id, entry)
+    started = ws._parse_start(payload["started_at"])
+    on_air = ws._parse_start(payload["on_air_at"])
+    assert (on_air - started).total_seconds() == 600

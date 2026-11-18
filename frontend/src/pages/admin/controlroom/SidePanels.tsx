@@ -209,6 +209,27 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
 
 /* ── Errors (KBR Studio's Errors button): open problems on this station ── */
 
+/** When an alert happened, in station time: "3:04 PM" today, "Nov 9 3:04 PM" on another
+ *  day, so an alert from last week does not read like one from today. */
+export function alertWhen(iso: string, tz?: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  const zone = tz ? { timeZone: tz } : {};
+  const day = (x: Date) => x.toLocaleDateString('en-CA', zone);
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', ...zone });
+  return day(d) === day(now) ? time : `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...zone })} ${time}`;
+}
+
+/** How many times the server folded this problem into one alert (context.repeats), and its
+ *  newest wording, so a second Panic visibly changes the row instead of looking like nothing. */
+function repeatsOf(a: { context?: Record<string, unknown> | null }): number {
+  const n = Number(a.context?.repeats);
+  return Number.isFinite(n) ? n : 1;
+}
+function lastMessage(a: { message: string; context?: Record<string, unknown> | null }): string {
+  const m = a.context?.last_message;
+  return typeof m === 'string' && m ? m : a.message;
+}
+
 export const ErrorsPanel = memo(function ErrorsPanel({ stationId, stationTz, canSee }: {
   stationId: string | null; stationTz?: string; canSee: boolean;
 }) {
@@ -226,12 +247,17 @@ export const ErrorsPanel = memo(function ErrorsPanel({ stationId, stationTz, can
       )}
       {rows.map(a => (
         <div key={a.id} className="flex items-start gap-2 px-3 py-2 border-b border-[#15153a]">
-          <span className="w-[68px] shrink-0 tabular-nums text-xs text-gray-400 pt-0.5">
-            {new Date(a.updated_at || a.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', ...(stationTz ? { timeZone: stationTz } : {}) })}
+          <span className="w-[68px] shrink-0 tabular-nums text-xs text-gray-400 pt-0.5" data-testid="alert-when">
+            {alertWhen(a.updated_at || a.created_at, stationTz)}
           </span>
           <span className="flex-1 min-w-0 leading-tight">
             <span className={`block text-sm font-bold ${sev(a.severity)}`}>{a.title}</span>
-            <span className="block text-xs text-gray-300 break-words">{a.message}</span>
+            <span className="block text-xs text-gray-300 break-words">{lastMessage(a)}</span>
+            {repeatsOf(a) > 1 && (
+              <span className="block text-xs text-amber-200" data-testid="alert-repeats">
+                {repeatsOf(a)} times, first {alertWhen(a.created_at, stationTz)}, last {alertWhen(a.updated_at || a.created_at, stationTz)}
+              </span>
+            )}
           </span>
           <button type="button" onClick={() => resolve.mutate(a.id)} disabled={resolve.isPending}
             className="qn-btn shrink-0 h-9 px-2 text-xs" aria-label={`Mark "${a.title}" as dealt with`}>Done</button>

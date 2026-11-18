@@ -54,12 +54,15 @@ function Harness() {
   const [s, set] = useState<any>(null);
   w.__set = set;
   // Timed items in the queue, picked the way the control room picks them
-  const cut = s?.queue ? nextCut(s.queue) : null;
+  // (or the server's next_asset.cut_at, as the Listen page passes it: s.cut)
+  const cut = s?.cut !== undefined ? s.cut : s?.queue ? nextCut(s.queue) : null;
   const engine = useAudioEngine(
     s ? { id: s.id, title: s.id, artist: null, asset_type: 'music', category: null, duration: s.dur } : null,
     0, !!s, cut?.preempt_at ?? null, cut?.asset_id ?? null, 2000, s?.cueIn ?? 0, 0, s?.cross ?? 0, s?.rg ?? 0,
     s?.nextId ?? null, s?.nextCueIn ?? 0, s?.nextRg ?? 0, null, null, s?.startedAt ?? null,
     s?.fade ?? null,
+    true, true, true,
+    s?.overlap, s?.nextOverlap, s?.endFade,
   );
   w.__listen = engine.initAudio;
   w.__nextNow = (id: string, fade: number | null) =>

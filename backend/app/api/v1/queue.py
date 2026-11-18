@@ -55,11 +55,10 @@ async def _is_blacked_out(db: AsyncSession, station_id) -> bool:
     )
     result = await db.execute(stmt)
     windows = result.scalars().all()
+    from app.services.station_service import window_covers_station
+
     for window in windows:
-        if window.affected_stations is None:
-            return True
-        station_ids = window.affected_stations.get("station_ids", [])
-        if str(station_id) in [str(sid) for sid in station_ids]:
+        if window_covers_station(window, station_id):
             return True
     return False
 
@@ -139,19 +138,11 @@ async def fill_blackout_queue(db: AsyncSession, station_id, window: "HolidayWind
 
     # Compact positions after fill to prevent bloat from repeated bump operations
     if total > 0:
-        compact_result = await db.execute(
-            select(QueueEntry)
-            .where(
-                QueueEntry.station_id == station_id,
-                QueueEntry.status.in_(["pending", "playing"]),
-            )
-            .order_by(QueueEntry.position)
-        )
-        compact_entries = compact_result.scalars().all()
-        for i, entry in enumerate(compact_entries):
-            entry.position = i + 1
+        from app.services.queue_positions import compact_positions
+
+        await compact_positions(db, station_id, playing_first=False)
         await db.commit()
-        logger.info("Compacted %d queue positions for station %s", len(compact_entries), station_id)
+        logger.info("Compacted queue positions for station %s", station_id)
 
     return total
 
@@ -305,20 +296,31 @@ async def _fill_single_blackout(db: AsyncSession, station_id, window: "HolidayWi
             ).values(position=QueueEntry.position + num_silence)
         )
 
+    # On a station the playout engine plays, the silence is queued and the engine is told
+    # to move on (below): it reports the silence's start itself. Marking it playing here
+    # left the song on air until it ended while the site showed silence (harness
+    # blackout_ended_early: a blackout that starts now aired 10 s and more of music).
+    engine = settings.engine_drives(station_id)
+    start_now = is_active_now and not engine
     for i in range(num_silence):
         entry = QueueEntry(
             id=uuid.uuid4(),
             station_id=station_id,
             asset_id=silence.id,
             position=insert_at + i + 1,
-            status="playing" if (i == 0 and is_active_now) else "pending",
-            started_at=now if (i == 0 and is_active_now) else None,
+            status="playing" if (i == 0 and start_now) else "pending",
+            started_at=now if (i == 0 and start_now) else None,
             preempt_at=blackout_start if not is_active_now else None,
             source="auto",
         )
         db.add(entry)
 
     await db.commit()
+    if engine and is_active_now:
+        from app.services import playout_engine
+
+        await playout_engine.engine_flush(station_id)
+        await playout_engine.engine_skip(station_id)
     logger.info(
         "Filled blackout queue for station %s: %d silence entries (%.0f min), %s, ends at %s",
         station_id, num_silence, total_seconds / 60,
@@ -334,180 +336,6 @@ router = APIRouter(
     tags=["queue"],
     dependencies=[Depends(require_station_operator)],
 )
-
-
-async def _maybe_insert_hourly_jingle(db: AsyncSession, station_id: uuid.UUID) -> None:
-    """Insert hourly station ID jingle at the top of the hour (within first 5 min)."""
-    now = datetime.now(timezone.utc)
-    if now.minute > 5:
-        return
-
-    current_hour = now.hour
-    # Check if we already played an hourly jingle recently (last 55 min)
-    cutoff = now.replace(minute=0, second=0, microsecond=0)
-    result = await db.execute(
-        select(PlayLog).join(Asset, PlayLog.asset_id == Asset.id)
-        .where(
-            PlayLog.station_id == station_id,
-            Asset.category == "hourly_id",
-            PlayLog.start_utc >= cutoff,
-        )
-        .limit(1)
-    )
-    if result.scalar_one_or_none():
-        return  # Already played this hour
-
-    # Also check if one is already queued
-    result = await db.execute(
-        select(QueueEntry).join(Asset, QueueEntry.asset_id == Asset.id)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            Asset.category == "hourly_id",
-        )
-        .limit(1)
-    )
-    if result.scalar_one_or_none():
-        return  # Already queued
-
-    # Find the jingle for this hour
-    hour_label = f"{'12' if current_hour % 12 == 0 else current_hour % 12}:00 {'AM' if current_hour < 12 else 'PM'}"
-    result = await db.execute(
-        select(Asset).where(
-            Asset.asset_type == "jingle",
-            Asset.category == "hourly_id",
-            Asset.title.contains(hour_label),
-        ).limit(1)
-    )
-    jingle = result.scalar_one_or_none()
-    if not jingle:
-        # Fallback: any hourly jingle
-        result = await db.execute(
-            select(Asset).where(Asset.asset_type == "jingle", Asset.category == "hourly_id").limit(1)
-        )
-        jingle = result.scalar_one_or_none()
-    if not jingle:
-        return
-
-    # Insert as play-next: bump all pending positions and insert at position 1
-    await db.execute(
-        update(QueueEntry)
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
-        .values(position=QueueEntry.position + 1)
-    )
-    # Find current playing position
-    result = await db.execute(
-        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
-        .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
-    )
-    current = result.scalar_one_or_none()
-    next_pos = (current.position + 1) if current else 1
-
-    entry = QueueEntry(
-        id=uuid.uuid4(), station_id=station_id, asset_id=jingle.id,
-        position=next_pos, status="pending",
-    )
-    db.add(entry)
-    await db.flush()
-
-
-async def _maybe_insert_weather_spot(db: AsyncSession, station_id: uuid.UUID) -> None:
-    """Insert time announcement + weather spot at every hour (top of the hour)."""
-    if not settings.elevenlabs_enabled or not settings.supabase_storage_enabled:
-        logger.debug("Weather spot skipped: elevenlabs=%s supabase=%s", settings.elevenlabs_enabled, settings.supabase_storage_enabled)
-        return
-
-    now = datetime.now(timezone.utc)
-    # Check if we're within 5 minutes of the top of the hour (widened from 30s)
-    if now.minute > 5:
-        return
-
-    # Slot key in the station's own time (hourly for time, daily for weather)
-    from app.services.weather_spot_service import slot_key_for, station_announcement_zone
-
-    slot_key = slot_key_for(now, await station_announcement_zone(db, station_id))
-
-    logger.info("Weather spot check for station %s at %s (slot %s)", station_id, now.isoformat(), slot_key)
-
-    # Dedup: check PlayLog for weather already played this slot
-    slot_start = now.replace(minute=0, second=0, microsecond=0)
-    result = await db.execute(
-        select(PlayLog).join(Asset, PlayLog.asset_id == Asset.id)
-        .where(
-            PlayLog.station_id == station_id,
-            Asset.category.in_(["time_announcement", "weather_spot"]),
-            PlayLog.start_utc >= slot_start,
-        )
-        .limit(1)
-    )
-    if result.scalar_one_or_none():
-        logger.info("Weather spot already played this hour for station %s", station_id)
-        return
-
-    # Dedup: check QueueEntry for weather already queued this slot
-    result = await db.execute(
-        select(QueueEntry).join(Asset, QueueEntry.asset_id == Asset.id)
-        .where(
-            QueueEntry.station_id == station_id,
-            QueueEntry.status == "pending",
-            Asset.category.in_(["time_announcement", "weather_spot"]),
-        )
-        .limit(1)
-    )
-    if result.scalar_one_or_none():
-        logger.info("Weather spot already queued for station %s", station_id)
-        return
-
-    # Generate assets (TTS + weather fetch + upload)
-    logger.info("Generating weather/time TTS for station %s slot %s", station_id, slot_key)
-    try:
-        from app.services.weather_spot_service import get_or_create_weather_spot_assets, weather_region_for_station
-
-        time_asset, weather_asset = await get_or_create_weather_spot_assets(
-            db, slot_key, await weather_region_for_station(db, station_id)
-        )
-    except Exception:
-        logger.warning("Failed to create weather spot assets for slot %s", slot_key, exc_info=True)
-        return
-
-    if not time_asset and not weather_asset:
-        logger.warning("No weather/time assets generated for slot %s", slot_key)
-        return
-
-    # Insert as play-next (time first, weather second)
-    # Bump all pending positions
-    assets_to_insert = [a for a in [time_asset, weather_asset] if a is not None]
-    if not assets_to_insert:
-        return
-
-    await db.execute(
-        update(QueueEntry)
-        .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
-        .values(position=QueueEntry.position + len(assets_to_insert))
-    )
-
-    result = await db.execute(
-        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
-        .order_by(QueueEntry.started_at.desc().nullslast()).limit(1)
-    )
-    current = result.scalar_one_or_none()
-    next_pos = (current.position + 1) if current else 1
-
-    # Use the exact 15-min boundary as preempt time so time announcements play on time
-    boundary = now.replace(second=0, microsecond=0)
-    for i, asset in enumerate(assets_to_insert):
-        entry = QueueEntry(
-            id=uuid.uuid4(),
-            station_id=station_id,
-            asset_id=asset.id,
-            position=next_pos + i,
-            status="pending",
-            preempt_at=boundary if i == 0 else None,  # preempt for time announcement only
-        )
-        db.add(entry)
-
-    await db.flush()
-    logger.info("Inserted weather spot for slot %s (%d items, preempt_at=%s)", slot_key, len(assets_to_insert), boundary.isoformat())
 
 
 # Item types that must never be used to keep a station on the air
@@ -529,18 +357,25 @@ async def _skip_placeholders(db: AsyncSession, station_id) -> None:
     them aired on KBR Jerusalem at 18:56 ET on 2026-11-16."""
     from app.models.asset import not_placeholder
 
+    from app.services.station_blocks import blocked_asset_ids
+
     ids = select(Asset.id).where(~not_placeholder()).scalar_subquery()
     await db.execute(
         update(QueueEntry)
         .where(
             QueueEntry.station_id == station_id,
             QueueEntry.status == "pending",
-            QueueEntry.asset_id.in_(ids),
+            # ... or an item this station alone was told not to play
+            or_(QueueEntry.asset_id.in_(ids), QueueEntry.asset_id.in_(blocked_asset_ids(station_id))),
             or_(QueueEntry.source.is_(None), QueueEntry.source.notin_(OPERATOR_SOURCES)),
         )
         .values(status="skipped")
         .execution_options(synchronize_session=False)
     )
+    # A sponsorship still waiting in the queue on a day its contract no longer covers
+    from app.services.spot_schedule_service import skip_lapsed_sponsorships
+
+    await skip_lapsed_sponsorships(db, station_id)
 
 
 async def _pick_next_pending(
@@ -622,26 +457,122 @@ SHORT_ITEM_SECONDS = 20.0
 SHORT_ITEM_HANDOVER_SECONDS = 0.3
 
 
+# Only music is crossfaded. Anything spoken (sponsorship, shiur, story, weather, jingle)
+# plays to its last word and the next item starts after it: two sponsorships played
+# back to back overlapped by 3 s (Shmuel, 2026-11-17).
+CROSSFADE_TYPES = ("music",)
+# Shmuel, 2026-11-17: 1 second unless a station sets its own
+DEFAULT_CROSSFADE_SECONDS = 1.0
+# The audio analysis stores a song's crossfade point this long before its audible end
+ANALYSIS_CROSS_SECONDS = 3.0
+MAX_CROSSFADE_SECONDS = 10.0
+# Station setting automation_config["crossfade_seconds"] (0 = songs do not overlap),
+# kept here per station id so the one hand-over rule needs no database read. The
+# scheduler refreshes it every pass and the station API on save.
+_station_crossfade: dict[str, float] = {}
+
+
+def crossfade_setting(config: dict | None) -> float:
+    value = (config or {}).get("crossfade_seconds")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return DEFAULT_CROSSFADE_SECONDS
+    return min(MAX_CROSSFADE_SECONDS, max(0.0, float(value)))
+
+
+def note_station_crossfade(station) -> None:
+    if station is not None:
+        _station_crossfade[str(station.id)] = crossfade_setting(station.automation_config)
+
+
+def is_crossfaded(asset) -> bool:
+    return asset is not None and (getattr(asset, "asset_type", None) or "music").lower() in CROSSFADE_TYPES
+
+
+# Shmuel, 2026-11-17 (9:39 PM ET): "Song ends first, then speech". A song followed by
+# anything spoken (sponsorship, announcement, weather, jingle, shiur) is not crossfaded
+# into it: it fades out to its end and the spoken item starts after it. On Main the
+# last second of a song played under the first words of a sponsorship.
+# Which item follows is only known from the queue, so predict_next_entry() notes it
+# here per entry on air and the one hand-over rule below reads it without a database
+# read. Not noted yet = a song follows (the station's crossfade).
+_speech_follows: dict[str, bool] = {}
+# The song's last moments fade out over at least this long before the spoken item
+MIN_END_FADE_SECONDS = 0.3
+
+
+def is_song(entry) -> bool:
+    """A song that crossfades at its end: music, not short, not a timed or block item."""
+    asset = entry.asset if entry is not None else None
+    duration = (asset.duration if asset else None) or DEFAULT_DURATION
+    return not (
+        not is_crossfaded(asset)
+        or duration < SHORT_ITEM_SECONDS
+        or getattr(entry, "preempt_at", None) is not None
+        or getattr(entry, "source", None) in ("ad_slot", "block")
+    )
+
+
+def note_speech_follows(entry, next_entry) -> bool:
+    """Record whether the item after `entry` is spoken. Returns True when that changed."""
+    key = str(getattr(entry, "id", "") or "")
+    if not key:
+        return False
+    value = bool(next_entry is not None and is_song(entry) and not is_song(next_entry))
+    if len(_speech_follows) > 2000:
+        _speech_follows.clear()
+    changed = _speech_follows.get(key, False) != value
+    _speech_follows[key] = value
+    return changed
+
+
+def speech_follows(entry) -> bool:
+    return _speech_follows.get(str(getattr(entry, "id", "") or ""), False)
+
+
+def overlap_seconds(entry, speech_next: bool | None = None) -> float:
+    """How long the item on air overlaps the one after it when it ends by itself:
+    the station's song crossfade for a song followed by a song, 0 for everything else
+    (anything spoken, and a song followed by something spoken). `speech_next` None =
+    what predict_next_entry() last noted for this entry."""
+    if not is_song(entry):
+        return 0.0
+    if speech_follows(entry) if speech_next is None else speech_next:
+        return 0.0
+    return _station_crossfade.get(str(getattr(entry, "station_id", "")), DEFAULT_CROSSFADE_SECONDS)
+
+
+def end_fade_seconds(entry) -> float:
+    """How long a song fades out at its end when a spoken item follows it (the spoken
+    item starts once the fade is done); 0 for everything else."""
+    if not (is_song(entry) and speech_follows(entry)):
+        return 0.0
+    crossfade = _station_crossfade.get(str(getattr(entry, "station_id", "")), DEFAULT_CROSSFADE_SECONDS)
+    return max(MIN_END_FADE_SECONDS, crossfade)
+
+
 def handover_seconds(entry) -> float:
     """How long before its end the item on air hands over to the next one. The one rule
     for the scheduler's timer, the now-playing message (cross_start) and the queue's
     look-ahead, so the server and the listeners' pages change at the same moment."""
     asset = entry.asset if entry is not None else None
     duration = (asset.duration if asset else None) or DEFAULT_DURATION
-    cross_seconds = 3.0
     extra = getattr(asset, "metadata_extra", None) if asset else None
     analysis = stored_analysis(extra) if extra else {}
     cross_start = analysis.get("cross_start_seconds")
-    if duration < SHORT_ITEM_SECONDS or (
-        getattr(entry, "preempt_at", None) is not None or getattr(entry, "source", None) in ("ad_slot", "block")
-    ):
+    overlap = overlap_seconds(entry)
+    if not is_song(entry):
         # A time check, weather or sponsorship is not crossfaded: handing over at
         # half its length cut a 5 s time check after 2.5 s and the shiur it had
         # paused started over it (Main, 15:00 ET 2026-11-16; All Day Stories,
         # 22:00 ET: 1.8 s of the time check under the story).
         cross_seconds = SHORT_ITEM_HANDOVER_SECONDS
     elif isinstance(cross_start, (int, float)) and 0 < cross_start < duration:
-        cross_seconds = duration - cross_start
+        # The analysis puts the crossfade point 3 s before the song's audible end;
+        # a shorter or longer station crossfade moves the hand-over with it.
+        audible_end = min(duration, cross_start + ANALYSIS_CROSS_SECONDS)
+        cross_seconds = duration - audible_end + max(overlap, SHORT_ITEM_HANDOVER_SECONDS)
+    else:
+        cross_seconds = max(overlap, SHORT_ITEM_HANDOVER_SECONDS)
     return min(cross_seconds, max(0.0, duration / 2))
 
 
@@ -661,15 +592,23 @@ async def predict_next_entry(db: AsyncSession, station_id, playing_entry) -> Que
     at the hand-over (a soft sponsorship due by then wins over the next song).
     Listeners pre-load this, so it must match the server's choice exactly;
     picking by 'now' sent them the next song while a sponsorship was waiting."""
-    now_utc = datetime.now(timezone.utc)
-    at = switch_time(playing_entry) or now_utc
-    picked = await _pick_next_pending(db, station_id, max(at, now_utc))
-    if picked is None:
-        return None
     from sqlalchemy.orm import joinedload
-    return (await db.execute(
-        select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == picked.id)
-    )).unique().scalar_one_or_none()
+
+    now_utc = datetime.now(timezone.utc)
+    entry = None
+    # A song hands over later when a spoken item follows it (it is not crossfaded into
+    # it), which can bring one more item due: at most one second look.
+    for _ in range(2):
+        at = switch_time(playing_entry) or now_utc
+        picked = await _pick_next_pending(db, station_id, max(at, now_utc))
+        entry = None
+        if picked is not None:
+            entry = (await db.execute(
+                select(QueueEntry).options(joinedload(QueueEntry.asset)).where(QueueEntry.id == picked.id)
+            )).unique().scalar_one_or_none()
+        if not note_speech_follows(playing_entry, entry):
+            break
+    return entry
 
 
 async def _refill_for_next(db: AsyncSession, station_id) -> QueueEntry | None:
@@ -687,8 +626,11 @@ async def _refill_for_next(db: AsyncSession, station_id) -> QueueEntry | None:
         return entry
 
     for only_music in (True, False):
+        from app.services.station_blocks import blocked_asset_ids
+
         query = select(Asset).where(
-            Asset.file_path.isnot(None), Asset.file_path != "", fit_for_random_pick()
+            Asset.file_path.isnot(None), Asset.file_path != "", fit_for_random_pick(),
+            Asset.id.notin_(blocked_asset_ids(station_id)),
         )
         if only_music:
             query = query.where(Asset.asset_type == "music")
@@ -858,6 +800,37 @@ def _recent_fire_request(station_id, request_id: str) -> dict | None:
 def _remember_fire_request(station_id, request_id: str | None, response: dict) -> None:
     if request_id:
         _fire_requests[(str(station_id), request_id)] = (time.monotonic(), response)
+
+
+_operator_locks: dict[str, asyncio.Lock] = {}
+# Longest an operator's action waits for the one before it (a Next that waits for the
+# engine to load a file holds its turn about 3 s). After that it goes ahead anyway.
+OPERATOR_TURN_WAIT = 8.0
+
+
+async def operator_turn(station_id: uuid.UUID):
+    """One operator action at a time per station, in the order they arrived.
+
+    Play next and Next sent 0.1 s apart ran side by side: Next read the queue before
+    Play next's commit, saw the old head and played the song the engine had pre-loaded
+    (Jerusalem 03:23Z 2026-11-18). A route dependency, so the turn is taken before the
+    handler reads anything. Not the advance lock: the handlers take that themselves.
+    """
+    key = str(station_id)
+    lock = _operator_locks.get(key)
+    if lock is None:
+        lock = _operator_locks[key] = asyncio.Lock()
+    held = False
+    try:
+        await asyncio.wait_for(lock.acquire(), OPERATOR_TURN_WAIT)
+        held = True
+    except TimeoutError:
+        logger.warning("Operator action on %s went ahead without its turn (waited %.0f s)", key, OPERATOR_TURN_WAIT)
+    try:
+        yield
+    finally:
+        if held:
+            lock.release()
 
 
 _advance_locks: dict[str, asyncio.Lock] = {}
@@ -1279,21 +1252,11 @@ async def _check_advance_locked(
 
         # Compact positions: ensure playing entry is at position 1
         # and pending entries follow sequentially (prevents stale position drift)
-        compact_result = await db.execute(
-            select(QueueEntry)
-            .where(
-                QueueEntry.station_id == station_id,
-                QueueEntry.status.in_(["pending", "playing"]),
-            )
-            .order_by(
-                # Playing first, then pending by position
-                QueueEntry.status.desc(),  # "playing" > "pending" alphabetically
-                QueueEntry.position,
-            )
-        )
-        for idx, entry in enumerate(compact_result.scalars().all()):
-            entry.position = idx + 1
+        # (one statement: row by row it was hundreds of UPDATEs on a two-day queue,
+        # all before the new item was saved and announced)
+        from app.services.queue_positions import compact_positions
 
+        await compact_positions(db, station_id)
         await db.commit()
         # Top the queue up afterwards, not here: the caller announces the new item
         # first. A refill that took long (one did at the top of an hour) used to
@@ -1304,6 +1267,9 @@ async def _check_advance_locked(
         return next_entry
 
     await db.commit()
+    # The item on air ended and nothing followed it (a blackout with no silence
+    # queued, or a refill that found nothing): tell open pages
+    await _broadcast_nothing_playing(station_id)
     return None
 
 
@@ -1456,6 +1422,39 @@ async def _get_queue_impl(station_id, limit, db):
 
         ri, hi, si = 0, 0, 0
         _safety = len(entries) * 3  # prevent infinite loops
+
+        # A soft item due while a shiur or story has more than 5 minutes left pauses
+        # it (long_items, Shmuel 2026-11-17). The estimate left the sponsorship waiting
+        # behind the whole shiur: an 8:30 PM slot was shown at 9:00:45 behind the Daf Yomi.
+        from app.models.station import Station as _Station
+        from app.services import long_items as _long
+        from app.services.station_modes import hard_start_on as _hs_on
+
+        _st = await db.get(_Station, station_id)
+        _long_policy = _long.policy(_st) if _st is not None and _hs_on(_st) else "wait"
+
+        def _soft_into_long(asset, start, end):
+            """Place the soft items that will pause the long item playing start..end;
+            returns when the air is free again."""
+            nonlocal si
+            if _long_policy not in ("pause", "cut") or not _long.is_long_form(asset):
+                return end
+            while si < len(soft_preempts):
+                due = max(_tz(soft_preempts[si].preempt_at), start)
+                if due >= end or (end - due).total_seconds() <= _long.SOFT_PAUSE_MIN_LEFT_SECONDS:
+                    break
+                _d = (soft_preempts[si].asset.duration if soft_preempts[si].asset else None) or DEFAULT_DURATION
+                _est_map[soft_preempts[si].id] = due
+                # paused: it carries on afterwards; cut: the air is free after the item
+                end = end + timedelta(seconds=_d) if _long_policy == "pause" else due + timedelta(seconds=_d)
+                si += 1
+                if _long_policy == "cut":
+                    break
+            return end
+
+        if now_playing_entry is not None and _np_sa:
+            _cursor = _soft_into_long(now_playing_entry.asset, now_utc_sort, _cursor)
+
         while (ri < len(regulars) or hi < len(hard_preempts) or si < len(soft_preempts)) and _safety > 0:
             _safety -= 1
             # 1. Fire hard preempt if its time has arrived
@@ -1465,7 +1464,9 @@ async def _get_queue_impl(station_id, limit, db):
                     _cursor = hp_pa
                     _est_map[hard_preempts[hi].id] = _cursor
                     _dur = (hard_preempts[hi].asset.duration if hard_preempts[hi].asset else None) or DEFAULT_DURATION
-                    _cursor += timedelta(seconds=_dur or DEFAULT_DURATION)
+                    _cursor = _soft_into_long(
+                        hard_preempts[hi].asset, _cursor, _cursor + timedelta(seconds=_dur or DEFAULT_DURATION)
+                    )
                     hi += 1
                     continue
 
@@ -1496,7 +1497,7 @@ async def _get_queue_impl(station_id, limit, db):
                         continue
 
                 _est_map[song.id] = _cursor
-                _cursor += timedelta(seconds=song_dur)
+                _cursor = _soft_into_long(song.asset, _cursor, _cursor + timedelta(seconds=song_dur))
                 ri += 1
             else:
                 # No regular songs left — process remaining preempts by time
@@ -1791,7 +1792,19 @@ async def bulk_add_to_queue(
     return {"message": f"Added {count} items to queue", "count": count}
 
 
-@router.post("/play-next", status_code=201)
+async def _engine_takes_queue_change(db: AsyncSession, station_id) -> None:
+    """After an operator changed what is next: an engine station drops the song it had
+    pre-loaded if that is no longer the head, so the change is what airs next."""
+    if not settings.engine_drives(station_id):
+        return
+    try:
+        from app.services import playout_engine
+        await playout_engine.take_operator_change(db, station_id)
+    except Exception:
+        logger.warning("Engine could not be told about the queue change", exc_info=True)
+
+
+@router.post("/play-next", status_code=201, dependencies=[Depends(operator_turn)])
 async def play_next(
     station_id: uuid.UUID,
     body: QueueAdd,
@@ -1817,10 +1830,11 @@ async def play_next(
     )
     db.add(entry)
     await db.commit()
+    await _engine_takes_queue_change(db, station_id)
     return {"id": str(entry.id), "position": entry.position, "message": "Queued as next"}
 
 
-@router.post("/fire-now", status_code=201)
+@router.post("/fire-now", status_code=201, dependencies=[Depends(operator_turn)])
 async def fire_now(
     station_id: uuid.UUID,
     body: QueueFireNow,
@@ -1932,7 +1946,7 @@ async def mix_over(
 SKIP_FADE_SECONDS = {"hard": 0.0, "fade": 0.5, "soft": 3.0}
 
 
-@router.post("/skip")
+@router.post("/skip", dependencies=[Depends(operator_turn)])
 async def skip_current(
     station_id: uuid.UUID,
     fade: Literal["hard", "fade", "soft"] = Query("fade"),
@@ -1956,6 +1970,24 @@ async def skip_current(
         if await stop_loop(db, station_id):
             await db.commit()
             await playout_engine.engine_flush(station_id)
+        else:
+            # The engine may hold a song the queue no longer has next (Play next, a delete
+            # or a move seconds ago, a sponsorship that became due): Next must play what
+            # the queue shows. That item is loaded first and then put on air; taking the
+            # song back and skipping at once lost the item while its file was loading.
+            state = playout_engine.get_state(station_id)
+            head = None
+            if on_air is None or str(on_air.id) not in state.timed_sent:
+                head = await playout_engine.head_the_engine_does_not_hold(db, station_id)
+            if head is not None and await playout_engine.next_goes_to(station_id, head):
+                from app.services import activity_log
+                activity_log.note("Sent to the playout engine", [on_air.asset_id if on_air else None])
+                return {"message": "Skipped", "now_playing": None, "fade_seconds": fade_seconds}
+            # A long item, or a hard item close by: the pre-loaded song is taken back
+            # and the engine asks again...
+            await playout_engine.take_operator_change(db, station_id, before_next=True)
+            # ...and needs a moment to load the item it was handed just now
+            await playout_engine.settle_before_next(station_id)
         if await playout_engine.engine_skip(station_id, fade_seconds):
             from app.services import activity_log
             activity_log.note("Sent to the playout engine", [on_air.asset_id if on_air else None])
@@ -2078,6 +2110,8 @@ async def _skip_current_locked(
     if not refilled:
         await _replenish_queue(db, station_id)
     await db.commit()
+    if current is not None:
+        await _broadcast_nothing_playing(station_id)
     return {"message": "Queue empty", "now_playing": None, "queue": await _queue_after_action(db, station_id)}
 
 
@@ -2133,14 +2167,27 @@ def _replenish_soon(station_id, rebroadcast: bool = False) -> None:
     task.add_done_callback(_background.discard)
 
 
+# Rows of the queue sent back with an action: what the control room shows and polls
+# (frontend QUEUE_FIRST_ROWS). It was 2000: on a two-day queue every Next sent ten
+# times what the screen had loaded (790 KB against 79 KB).
+ACTION_QUEUE_ROWS = 150
+
+
 async def _queue_after_action(db: AsyncSession, station_id) -> dict | None:
-    """The same body as GET /queue, returned with an action's response so the
-    client does not need a second request to show the result."""
+    """The same body as GET /queue (its first rows), returned with an action's
+    response so the client does not need a second request to show the result."""
     try:
-        return await _get_queue_impl(station_id, 2000, db)
+        return await _get_queue_impl(station_id, ACTION_QUEUE_ROWS, db)
     except Exception as exc:
         logger.warning("Queue snapshot after action failed: %s", exc)
         return None
+
+
+async def _broadcast_nothing_playing(station_id) -> None:
+    """Nothing is on air any more: open listener pages must stop showing the old item."""
+    from app.api.v1.websocket import broadcast_nothing_playing
+
+    await broadcast_nothing_playing(station_id)
 
 
 async def _broadcast_now_playing_entry(
@@ -2217,6 +2264,15 @@ async def set_station_modes(
     async with advance_lock(station_id):
         result = await set_modes(db, station, body.hard_start, body.spots)
         await db.commit()
+    # Every other open control room shows the new state at once (not on its next 10 s poll)
+    try:
+        from app.api.v1.websocket import manager as ws_manager
+
+        await ws_manager.broadcast_to_station(str(station_id), {
+            "type": "modes", "data": {"station_id": str(station_id), **result},
+        })
+    except Exception:
+        logger.warning("Mode change broadcast failed", exc_info=True)
     if settings.engine_drives(station_id):
         # The engine may hold a timed item or a spot as its next track: make it ask again
         from app.services import playout_engine
@@ -2288,7 +2344,7 @@ async def panic(
     return {**done, "queue": await _queue_after_action(db, station_id)}
 
 
-@router.post("/insert", status_code=201)
+@router.post("/insert", status_code=201, dependencies=[Depends(operator_turn)])
 async def insert_into_queue(
     station_id: uuid.UUID,
     body: QueueInsert,
@@ -2351,7 +2407,28 @@ async def insert_into_queue(
     }
 
 
-@router.post("/move-up")
+async def _warnings_where_it_stands(db: AsyncSession, station_id: uuid.UUID, entry: QueueEntry) -> list[str]:
+    """The reminders for an entry at the place it was just moved to (not yet committed).
+    Every way of moving an entry answers with the same ones: arrows, a typed position
+    and drag-and-drop. Never blocks the move."""
+    await db.flush()
+    pending = list(
+        (
+            await db.execute(
+                select(QueueEntry)
+                .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+                .order_by(QueueEntry.position)
+            )
+        ).scalars().all()
+    )
+    try:
+        return await _validate_queue_move(db, station_id, entry, entry.position, pending)
+    except Exception:  # a reminder must never fail the move
+        logger.warning("Move warnings could not be worked out", exc_info=True)
+        return []
+
+
+@router.post("/move-up", dependencies=[Depends(operator_turn)])
 async def move_up(
     station_id: uuid.UUID,
     body: QueueReorder,
@@ -2375,13 +2452,16 @@ async def move_up(
         .order_by(QueueEntry.position.desc()).limit(1)
     )
     above = result.scalar_one_or_none()
+    warnings: list[str] = []
     if above:
         above.position, entry.position = entry.position, above.position
+        warnings = await _warnings_where_it_stands(db, station_id, entry)
         await db.commit()
-    return {"message": "Moved up"}
+    await _engine_takes_queue_change(db, station_id)
+    return {"message": "Moved up", "warnings": warnings}
 
 
-@router.post("/move-down")
+@router.post("/move-down", dependencies=[Depends(operator_turn)])
 async def move_down(
     station_id: uuid.UUID,
     body: QueueReorder,
@@ -2404,26 +2484,48 @@ async def move_down(
         .order_by(QueueEntry.position.asc()).limit(1)
     )
     below = result.scalar_one_or_none()
+    warnings: list[str] = []
     if below:
         below.position, entry.position = entry.position, below.position
+        warnings = await _warnings_where_it_stands(db, station_id, entry)
         await db.commit()
-    return {"message": "Moved down"}
+    await _engine_takes_queue_change(db, station_id)
+    return {"message": "Moved down", "warnings": warnings}
 
 
-@router.put("/reorder")
+@router.put("/reorder", dependencies=[Depends(operator_turn)])
 async def reorder_queue(
     station_id: uuid.UUID,
     body: QueueReorder,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    result = await db.execute(_station_entry(station_id, body.entry_id))
+    # Only a waiting entry moves (like drag-and-drop): moving the item on air or a played
+    # one changed nothing useful and could put it ahead of the queue (V1-42)
+    result = await db.execute(
+        _station_entry(station_id, body.entry_id).where(QueueEntry.status == "pending")
+    )
     entry = result.scalar_one_or_none()
     if not entry:
         raise NotFoundError("Queue entry not found")
+    # Make room so no two waiting entries share a position: a tie left the order (and
+    # which one plays next) up to the database
+    await db.execute(
+        update(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.id != entry.id,
+            QueueEntry.position >= body.new_position,
+        )
+        .values(position=QueueEntry.position + 1)
+        .execution_options(synchronize_session=False)
+    )
     entry.position = body.new_position
+    warnings = await _warnings_where_it_stands(db, station_id, entry)
     await db.commit()
-    return {"message": "Reordered"}
+    await _engine_takes_queue_change(db, station_id)
+    return {"message": "Reordered", "warnings": warnings}
 
 
 async def _validate_queue_move(
@@ -2438,7 +2540,6 @@ async def _validate_queue_move(
     Returns a list of human-readable warning strings (empty if no conflicts).
     """
     from app.models.category import Category
-    from app.models.schedule_rule import ScheduleRule
 
     warnings: list[str] = []
     moved_asset = moved_entry.asset
@@ -2493,22 +2594,24 @@ async def _validate_queue_move(
         cumulative_duration += dur
 
     estimated_play_time = now + timedelta(seconds=cumulative_duration)
-    est_hour = estimated_play_time.hour
-    est_day = estimated_play_time.weekday()
 
-    # Check active daypart rules
-    result = await db.execute(
-        select(ScheduleRule).where(
-            ScheduleRule.is_active == True,
-            ScheduleRule.rule_type == "daypart",
-            ScheduleRule.hour_start <= est_hour,
-            ScheduleRule.hour_end > est_hour,
-        ).order_by(ScheduleRule.priority.desc())
-    )
-    daypart_rules = result.scalars().all()
+    # This station's rules only (its own, or the global ones when it has none), at
+    # the station's own clock. This used to read every station's rules at UTC hours:
+    # a move on Kol B'ramah Main was warned about by the All Day Stories rule.
+    from zoneinfo import ZoneInfo
+
+    from app.models.station import Station
+    from app.services.queue_replenish_service import rule_covers, rules_for_station
+
+    tz_name = (await db.execute(select(Station.timezone).where(Station.id == station_id))).scalar()
+    try:
+        zone = ZoneInfo(tz_name or "UTC")
+    except Exception:
+        zone = timezone.utc
+    local_play_time = estimated_play_time.astimezone(zone)
     daypart_rules = [
-        r for r in daypart_rules
-        if str(est_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
+        r for r in await rules_for_station(db, station_id)
+        if r.rule_type == "daypart" and rule_covers(r, local_play_time)
     ]
 
     for rule in daypart_rules:
@@ -2532,7 +2635,7 @@ async def _validate_queue_move(
     return warnings
 
 
-@router.post("/reorder-dnd")
+@router.post("/reorder-dnd", dependencies=[Depends(operator_turn)])
 async def reorder_dnd(
     station_id: uuid.UUID,
     body: QueueDndReorder,
@@ -2584,10 +2687,11 @@ async def reorder_dnd(
         entry.position = new_pos
         await db.commit()
 
+    await _engine_takes_queue_change(db, station_id)
     return {"message": "Reordered", "warnings": warnings}
 
 
-@router.delete("/{entry_id}", status_code=204)
+@router.delete("/{entry_id}", status_code=204, dependencies=[Depends(operator_turn)])
 async def remove_from_queue(
     station_id: uuid.UUID,
     entry_id: uuid.UUID,
@@ -2607,6 +2711,7 @@ async def remove_from_queue(
     await db.delete(entry)
     await _replenish_queue(db, station_id)
     await db.commit()
+    await _engine_takes_queue_change(db, station_id)
 
 
 async def _remove_on_air_locked(db: AsyncSession, station_id, entry: QueueEntry) -> None:
@@ -2631,6 +2736,7 @@ async def _remove_on_air_locked(db: AsyncSession, station_id, entry: QueueEntry)
         if not refilled:
             await _replenish_queue(db, station_id)
         await db.commit()
+        await _broadcast_nothing_playing(station_id)
         return
     mark_started(next_entry, datetime.now(timezone.utc))
     await _drop_timed_twins(db, next_entry)

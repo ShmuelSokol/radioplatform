@@ -62,6 +62,8 @@ class Engine:
 
 @pytest_asyncio.fixture
 async def eng(db_session, monkeypatch):
+    # Alerts at once in these tests; the 5 s hold has its own test
+    monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0)
     station = Station(id=uuid.uuid4(), name="Engine FM", timezone="America/New_York")
     db_session.add(station)
     songs = []
@@ -639,7 +641,61 @@ async def test_tick_leaves_the_engine_alone_during_a_live_show(db_session, eng):
     st.automation_config = {"live_show_id": str(uuid.uuid4())}
     await db_session.commit()
     await playout_engine.tick(db_session, st)
-    assert engine.sent == []
+    # Nothing but the word that a show is on: the stream goes quiet under the host
+    assert engine.sent == [("/live", {"on": True})]
+    await playout_engine.tick(db_session, st)
+    assert engine.paths() == ["/live"]  # said once
+
+
+@pytest.mark.asyncio
+async def test_the_engine_goes_quiet_for_a_live_show_and_plays_again_after(client, db_session, eng):
+    """Jerusalem 23:06Z 2026-11-17: the song on the engine played on under the host for
+    the whole show; only new items were held back. The engine is told the moment the
+    show starts, and again when it is over."""
+    from app.services import live_show_service
+
+    station, entries, engine, _ = eng
+    await _next(client, station)
+    await _on_air(client, station, entries[0].id)
+    engine.sent.clear()
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    assert ("/live", {"on": True}) in engine.sent
+    st = await db_session.get(Station, station.id)
+    await db_session.refresh(st)
+    await playout_engine.tick(db_session, st)
+    assert engine.paths().count("/live") == 1
+    await live_show_service.end_show(db_session, show.id)
+    await db_session.commit()
+    await db_session.refresh(st)
+    await playout_engine.tick(db_session, st)
+    assert engine.sent[-1] == ("/live", {"on": False})
+
+
+@pytest.mark.asyncio
+async def test_an_engine_left_quiet_after_a_show_is_released_when_it_asks(client, db_session, eng):
+    # The show ended while the backend was restarting: nothing remembers that the
+    # engine was told "live". Its next ask says so, and it is told the show is over.
+    import asyncio
+
+    station, entries, engine, _ = eng
+    r = await client.get(f"/api/v1/playout/{station.id}/next?live=1", headers=HEADERS)
+    assert r.status_code == 200
+    await asyncio.sleep(0.05)
+    assert ("/live", {"on": False}) in engine.sent
+
+
+@pytest.mark.asyncio
+async def test_an_engine_that_restarts_during_a_show_is_told_again(client, db_session, eng):
+    station, _, engine, _ = eng
+    st = await db_session.get(Station, station.id)
+    st.automation_config = {"live_show_id": str(uuid.uuid4())}
+    await db_session.commit()
+    await playout_engine.tick(db_session, st)
+    await playout_engine.handle_hello(station.id, 3)
+    await playout_engine.tick(db_session, st)
+    assert engine.sent == [("/live", {"on": True})] * 2
 
 
 @pytest.mark.asyncio
@@ -1221,3 +1277,189 @@ async def test_mix_over_while_a_timed_item_is_on_air(client, db_session, auth_he
     assert r.status_code == 200
     assert engine.paths() == ["/overlay"]
     assert (await _fresh(db_session, clock.id)).status == "playing"
+
+
+@pytest.mark.asyncio
+async def test_emergency_alert_clears_itself_on_a_known_start(client, db_session, eng):
+    """The open emergency alert is resolved once the engine plays the station's queue again
+    (Jerusalem kept one open after the droplet reruns, 2026-11-17)."""
+    from sqlalchemy import select
+
+    from app.models.alert import Alert
+
+    station, entries, _, _ = eng
+    await _on_air(client, station, "", lane="emergency")
+    open_ = (await db_session.execute(select(Alert).where(Alert.is_resolved == False))).scalars().all()  # noqa: E712
+    assert [a.title for a in open_] == ["Playout engine is on its emergency playlist"]
+    await _on_air(client, station, entries[0].id)
+    row = (await db_session.execute(select(Alert).execution_options(populate_existing=True))).scalar_one()
+    assert row.is_resolved is True
+    assert "queue" in row.context["cleared_by_itself"]
+
+
+@pytest.mark.asyncio
+async def test_blackout_starting_now_moves_the_engine_on(client, db_session, eng):
+    """H-10 (harness blackout_ended_early): a blackout that is already running when it is
+    filled (made or moved while active) marked its first silence as playing here but left
+    the engine's song on air, so music aired into Shabbos while the site showed silence.
+    Now the silence is queued, the engine is flushed and skipped, and its /next gets the silence."""
+    station, entries, engine, _ = eng
+    await _on_air(client, station, entries[0].id)
+    silence = Asset(id=uuid.uuid4(), title="Silence", duration=300.0, asset_type="silence",
+                    file_path="https://cdn.example.com/audio/silence.mp3")
+    db_session.add(silence)
+    now = datetime.now(UTC)
+    db_session.add(HolidayWindow(id=uuid.uuid4(), name="Shabbos", is_blackout=True,
+                                 start_datetime=now - timedelta(seconds=5),
+                                 end_datetime=now + timedelta(minutes=20)))
+    await db_session.commit()
+    n = await queue_module.fill_blackout_queue(db_session, station.id)
+    assert n >= 4
+    assert engine.paths()[-2:] == ["/flush", "/skip"]
+    rows = (await db_session.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.asset_id == silence.id)
+        .execution_options(populate_existing=True))).scalars().all()
+    assert rows and all(r.status == "pending" for r in rows)  # the engine reports the start
+    r = await _next(client, station)
+    assert r.status_code == 200
+    assert r.json()["entry_id"] in {str(x.id) for x in rows}
+    # Filled once: the next scheduler pass does not skip again
+    sent = len(engine.paths())
+    assert await queue_module.fill_blackout_queue(db_session, station.id) == 0
+    assert len(engine.paths()) == sent
+
+
+@pytest.mark.asyncio
+async def test_item_gets_its_level_before_it_is_handed_over(client, db_session, eng, monkeypatch):
+    """V1-4e. Jerusalem 20:00Z 2026-11-17: items with no analysis were analysed only once
+    the item before them was on air, which is also when the engine asks for them, so
+    they aired without their level (-19.9 to -10.6 LUFS). /next now waits (briefly) for
+    the analysis, and a slow one is not waited for past LEVEL_WAIT_SECONDS."""
+    from app.services import upcoming_analysis
+
+    station, entries, _, _ = eng
+    monkeypatch.setattr(upcoming_analysis, "ENABLED", True)
+    monkeypatch.setattr(playout_engine, "_level_jobs", {})
+    analysed = []
+
+    async def fake_analysis(asset_id):
+        await asyncio.sleep(0.2)
+        asset = await db_session.get(Asset, uuid.UUID(asset_id))
+        asset.metadata_extra = {"audio_analysis": {
+            "version": 99, "loudness_lufs": -10.6, "replay_gain_db": -7.4, "cue_out_seconds": 170.0}}
+        await db_session.commit()
+        analysed.append(asset_id)
+
+    monkeypatch.setattr(playout_engine, "_analyse_alone", fake_analysis)
+    r = await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    assert r.json()["entry_id"] == str(entries[0].id)
+    assert 'liq_amplify="-7.40 dB"' in r.json()["uri"]
+    assert analysed == [str(entries[0].asset_id)]
+
+    # Too slow: handed over without waiting longer than the limit
+    async def slow_analysis(asset_id):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(playout_engine, "_analyse_alone", slow_analysis)
+    monkeypatch.setattr(playout_engine, "LEVEL_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(playout_engine.ensure_level, "__defaults__", (0.2,))
+    t0 = time.perf_counter()
+    r = await client.get(f"/api/v1/playout/{station.id}/next?given={entries[0].id}", headers=HEADERS)
+    assert time.perf_counter() - t0 < 2.0
+    assert r.json()["entry_id"] == str(entries[1].id)
+    assert "liq_amplify" not in r.json()["uri"]
+    for job in playout_engine._level_jobs.values():
+        job.cancel()
+
+
+@pytest.mark.asyncio
+async def test_upcoming_items_are_analysed_ahead(db_session, eng, monkeypatch):
+    """The tick starts the analysis of the next few items and of timed items due soon."""
+    from app.services import upcoming_analysis
+
+    station, entries, _, _ = eng
+    monkeypatch.setattr(upcoming_analysis, "ENABLED", True)
+    monkeypatch.setattr(playout_engine, "_level_jobs", {})
+    started = []
+
+    async def record(asset_id):
+        started.append(asset_id)
+
+    monkeypatch.setattr(playout_engine, "_analyse_alone", record)
+    soon = await _add(db_session, station, title="Daf", duration=3000.0, kind="shiur", position=50,
+                      preempt_at=datetime.now(UTC) + timedelta(minutes=10), timing_mode="hard")
+    await playout_engine._analyse_ahead(db_session, station.id, datetime.now(UTC))
+    await asyncio.sleep(0)
+    assert str(soon.asset_id) in started
+    assert {str(e.asset_id) for e in entries[:playout_engine.LOOK_AHEAD_ITEMS]} <= set(started)
+    assert str(entries[3].asset_id) not in started
+
+
+@pytest.mark.asyncio
+async def test_ending_a_show_takes_the_host_off_air_at_once(db_session, eng):
+    # Jerusalem 2026-11-17: the host's page stayed open after End show and the
+    # microphone kept reaching listeners for a minute.
+    from app.api.v1.live_shows_ws import live_relay
+    from app.services import live_show_service
+
+    station, _, _, _ = eng
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    live_relay.on_air[str(station.id)] = str(show.id)
+    try:
+        await live_show_service.end_show(db_session, show.id)
+        await db_session.commit()
+        assert str(station.id) not in live_relay.on_air
+    finally:
+        live_relay.on_air.pop(str(station.id), None)
+
+
+@pytest.mark.asyncio
+async def test_a_moment_of_emergency_music_raises_no_alert(client, db_session, eng, monkeypatch):
+    """Main 03:46Z 2026-11-18: one second of emergency music while an item loaded after a
+    Next raised a critical alert and a push, cleared half a second later."""
+    import asyncio
+
+    station, entries, _, _ = eng
+    raised = []
+
+    async def record(db, station_id, state):
+        raised.append(str(station_id))
+
+    monkeypatch.setattr(playout_engine, "_emergency_alert", record)
+    monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0.15)
+    # a blip: the queue's item starts before the hold is over
+    await _on_air(client, station, "", lane="emergency")
+    await _on_air(client, station, entries[0].id)
+    await asyncio.sleep(0.3)
+    assert raised == []
+    # emergency music that lasts is reported
+    await _on_air(client, station, "", lane="emergency")
+    await asyncio.sleep(0.3)
+    assert raised == [str(station.id)]
+
+
+@pytest.mark.asyncio
+async def test_a_timed_item_still_loading_counts_as_taken_only_when_asked(monkeypatch):
+    """Next sends its item down the timed lane and the engine answers once the file is
+    loaded. No answer in time means "still loading", not "refused": a skip then would end
+    the song on air with nothing ready (harness operator_next_slow_file, 2026-11-18)."""
+    import httpx
+
+    from app.services import playout_engine as pe
+
+    class Slow:
+        async def post(self, *a, **kw):
+            raise httpx.ReadTimeout("slow")
+
+    class Down:
+        async def post(self, *a, **kw):
+            raise httpx.ConnectError("down")
+
+    sid = "0e0e0e0e-0000-4000-8000-00000000a001"
+    monkeypatch.setattr(pe, "_client", lambda: Slow())
+    assert await pe.engine_timed(sid, "x", 0.0, "e1", wait=0.1, slow_is_ok=True) is True
+    assert await pe.engine_timed(sid, "x", 0.0, "e1") is False
+    monkeypatch.setattr(pe, "_client", lambda: Down())
+    assert await pe.engine_timed(sid, "x", 0.0, "e1", wait=0.1, slow_is_ok=True) is False

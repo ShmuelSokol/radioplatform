@@ -6,11 +6,12 @@ import { useStations } from '../../hooks/useStations';
 import {
   useQueue, useLastPlayed, useSkipCurrent, useRemoveFromQueue, useStartPlayback,
   useMoveUp, useMoveDown, useWeatherPreview, useReorderDnd,
-  QUEUE_ALL_ROWS, QUEUE_FIRST_ROWS,
+  QUEUE_ALL_ROWS, QUEUE_FIRST_ROWS, applyActionQueue,
 } from '../../hooks/useQueue';
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
-import { useAudioEngine } from '../../hooks/useAudioEngine';
+import { useAudioEngine, METER_SEGMENTS, SILENT_WAV } from '../../hooks/useAudioEngine';
+import { startLiveStream, type LiveStream } from '../../lib/liveStream';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { fireNow, insertAt, loopCurrent, mixOver, queueEnd, queueNext } from '../../api/liveControl';
 import type { SkipFade } from '../../api/queue';
@@ -21,11 +22,13 @@ import TransportBar, { TransportButtons } from './controlroom/TransportBar';
 import type { TransportProps } from './controlroom/TransportBar';
 import { REPORT_BUG_EVENT } from '../../components/BugReporter';
 import QueuePanel from './controlroom/QueuePanel';
+import SongPanel from './controlroom/SongPanel';
+import type { SongTarget } from './controlroom/SongPanel';
 import type { QueueRow } from './controlroom/QueuePanel';
 import { nextCut } from './controlroom/timing';
 import LibraryPanel from './controlroom/LibraryPanel';
 import HotButtons from './controlroom/HotButtons';
-import { usePfl } from './controlroom/pfl';
+import { usePfl, WEATHER_PFL_ID, type PflClip } from './controlroom/pfl';
 import { PflDeck } from './controlroom/PflDeck';
 import { ErrorsPanel, LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import ModeButtons from './controlroom/ModeButtons';
@@ -66,6 +69,10 @@ const SPLIT_MIN = 0.15;
 const SPLIT_MAX = 0.85;
 
 const LISTEN_KEY = 'kbr-cr-listen';
+// How long the header may say "Starting…" for the server stream, and after how long
+// without sound a tap starts the stream afresh
+const STREAM_STARTING_MAX_MS = 8000;
+const STREAM_RESTART_AFTER_MS = 4000;
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -159,12 +166,34 @@ export default function Dashboard() {
   // ── UI state ───────────────────────────────────────────────
   const [pane, setPane] = useState<Pane>('queue');
   const [sideTab, setSideTab] = useStored<SideTab>('kbr_ctl_side_tab', 'library');
+  // The right-hand button column: does it hold more than is showing below?
+  const controlsRef = useRef<HTMLElement>(null);
+  const [controlsMore, setControlsMore] = useState(false);
+  const checkControlsMore = useCallback(() => {
+    const el = controlsRef.current;
+    setControlsMore(!!el && el.scrollHeight - el.scrollTop - el.clientHeight > 6);
+  }, []);
+  useEffect(() => {
+    const el = controlsRef.current;
+    if (!el) return;
+    checkControlsMore();
+    const watch = new ResizeObserver(checkControlsMore);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [isDesktop, checkControlsMore]);
   const [fireMode, setFireMode] = useStored<FireMode>('kbr_ctl_fire_mode', 'now');
   const [insertBeforeId, setInsertBeforeId] = useState<string | null>(null);
   const [queueDateFilter, setQueueDateFilter] = useState('');
   useEffect(() => { if (queueDateFilter) loadWholeQueue(); }, [queueDateFilter, loadWholeQueue]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  // Quick actions panel for one song (the one on air or a queue row)
+  const [songTarget, setSongTarget] = useState<SongTarget | null>(null);
+  const openRowSong = useCallback((row: QueueRow) => {
+    if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing' });
+  }, []);
+  const closeSong = useCallback(() => setSongTarget(null), []);
+  const songToast = useCallback((text: string, type: Toast['type']) => setToast({ text, type }), []);
   const [busyId, setBusyId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const { pins, toggle: togglePin, cart, selectPage, selectSet, addSet, renameSet, deleteSet } = useHotButtons(stationId);
@@ -254,15 +283,37 @@ export default function Dashboard() {
 
   const dashStreamUrl = wsNowPlaying?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
+  // A stream that failed is tried again on another station's stream
+  useEffect(() => { setStreamFailed(false); }, [dashStreamUrl]);
   const dashUseStream = !!dashStreamUrl && !streamFailed;
   const dashStreamAudioRef = useRef<HTMLAudioElement>(null);
-  useEffect(() => {
+  // The server stream is played the way the Listen page plays it (lib/liveStream:
+  // a short start, the HLS copy on an iPhone), and only while this device listens.
+  // It is started inside the tap (takeSound): Safari refuses a stream that an
+  // effect starts, and the page then fell back to the built-in player.
+  const [streamSounding, setStreamSounding] = useState(false);
+  const streamRef = useRef<{ url: string; stream: LiveStream; startedAt: number } | null>(null);
+  const streamSoundingRef = useRef(false);
+  streamSoundingRef.current = streamSounding;
+  // "Starting…" is shown for a stream on its way, and only for so long: after that the
+  // button says Listen again and a tap starts the stream afresh (it must never stay
+  // on "Starting…").
+  const [streamStarting, setStreamStarting] = useState(false);
+  const startingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopStream = useCallback(() => {
+    streamRef.current?.stream.stop();
+    streamRef.current = null;
+  }, []);
+  const startStream = useCallback((url: string) => {
     const audio = dashStreamAudioRef.current;
-    if (!audio || !dashUseStream || !isPlaying) return;
-    audio.src = dashStreamUrl!;
-    audio.play().catch(() => setStreamFailed(true));
-    return () => { audio.pause(); audio.src = ''; };
-  }, [dashUseStream, isPlaying, dashStreamUrl]);
+    if (!audio) return;
+    stopStream();
+    streamRef.current = { url, startedAt: Date.now(), stream: startLiveStream(audio, url, () => { streamRef.current = null; setStreamFailed(true); }) };
+    setStreamStarting(true);
+    if (startingTimer.current) clearTimeout(startingTimer.current);
+    startingTimer.current = setTimeout(() => setStreamStarting(false), STREAM_STARTING_MAX_MS);
+  }, [stopStream]);
+  useEffect(() => () => { if (startingTimer.current) clearTimeout(startingTimer.current); }, []);
   useEffect(() => {
     const audio = dashStreamAudioRef.current;
     if (!audio || !dashUseStream) return;
@@ -270,6 +321,11 @@ export default function Dashboard() {
     audio.addEventListener('error', onError);
     return () => audio.removeEventListener('error', onError);
   }, [dashUseStream]);
+  useEffect(() => stopStream, [stopStream]);
+  const streamUrlRef = useRef<string | null>(null);
+  streamUrlRef.current = dashUseStream ? dashStreamUrl : null;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
 
   // The engine always follows the station here, silently unless this computer
   // listens: it drives the level meters. With a stream, the stream is what is heard
@@ -286,42 +342,64 @@ export default function Dashboard() {
     wsNowPlaying?.next_asset?.id ?? null,
     wsNowPlaying?.next_asset?.cue_in ?? 0,
     wsNowPlaying?.next_asset?.replay_gain_db ?? 0,
-    null, null,
+    // Ready-made file addresses from the now-playing message: no round trip before the first sound
+    wsNowPlaying?.asset?.audio_url ?? null,
+    wsNowPlaying?.next_asset?.audio_url ?? null,
     serverStartedAt,
     wsNowPlaying?.change_fade_seconds ?? null,
     false, // started below, on the first click or key anywhere in this tab
     false, // silent until the speaker button: the meters move either way
+    true,
+    wsNowPlaying?.asset?.overlap_seconds,
+    wsNowPlaying?.next_asset?.overlap_seconds,
+    wsNowPlaying?.asset?.end_fade_seconds,
   );
 
-  // ── Level meters always; sound on this computer only after the speaker button ──
-  // Browsers let audio run only after the person has clicked or typed in the page,
-  // so the silent engine starts on the first click or key anywhere here (or at once
-  // where the browser already allows it).
-  // Listening is remembered across reloads (like Mute): the header keeps its
-  // speaker controls, and the first click turns the sound back on.
+  // ── Level meters always; sound on this computer only after the Listen button ──
+  // Browsers let audio run only after a real tap, click or key in the page, so the
+  // silent engine starts on the first one anywhere here (or at once where the
+  // browser already allows it).
+  // Listening is remembered across reloads (like Mute): the first tap anywhere turns
+  // the sound back on, and until it has, the header shows the Listen button, never
+  // the Mute control (it looked switched on over silence).
+  // Only click and keydown: iPhone Safari allows no sound from touchstart or
+  // pointerdown, and the page used to spend its one try there, so with listening
+  // remembered no tap ever gave sound (Shmuel, 2026-11-17: silent for 3 minutes).
+  // The taps are heard until sound really runs, and again after the phone took the
+  // sound away (a call, the lock screen).
   const [listenHere, setListenHere] = useState(() => {
     try { return localStorage.getItem(LISTEN_KEY) === '1'; } catch { return false; }
   });
   const takeSoundRef = useRef<() => Promise<void>>(async () => {});
+  // The stream element really plays, or is not needed right now
+  const streamWanted = listenHere && dashUseStream && isPlaying;
+  const soundLive = soundRunning && (!streamWanted || streamSounding);
   useEffect(() => {
-    let done = false;
-    const start = () => {
-      if (done) return;
-      done = true;
-      remove();
+    if (soundLive) return;
+    const start = (e: Event) => {
+      // The Listen button does this itself (and lifts Mute); starting here first
+      // re-drew the header before the button's own handler ran, which then never did
+      if ((e.target as Element | null)?.closest?.('[data-listen-button]')) return;
       let wanted = false;
       try { wanted = localStorage.getItem(LISTEN_KEY) === '1'; } catch { /* none */ }
       void (wanted ? takeSoundRef.current() : engineInit()).catch(() => {});
     };
-    const events = ['pointerdown', 'keydown', 'touchstart'] as const;
+    const events = ['click', 'keydown'] as const;
     const remove = () => events.forEach(e => window.removeEventListener(e, start, true));
     events.forEach(e => window.addEventListener(e, start, true));
+    return remove;
+  }, [engineInit, soundLive]);
+  useEffect(() => {
+    // Where the browser already allows sound (a desktop that trusts the site): at once
     try {
       const probe = new AudioContext();
-      if (probe.state === 'running') start();
+      if (probe.state === 'running') {
+        let wanted = false;
+        try { wanted = localStorage.getItem(LISTEN_KEY) === '1'; } catch { /* none */ }
+        void (wanted ? takeSoundRef.current() : engineInit()).catch(() => {});
+      }
       void probe.close();
     } catch { /* no Web Audio */ }
-    return remove;
   }, [engineInit]);
   useEffect(() => { setMonitor(listenHere && !dashUseStream); }, [setMonitor, listenHere, dashUseStream]);
 
@@ -363,11 +441,36 @@ export default function Dashboard() {
     setListenHere(true);
     try { localStorage.setItem(LISTEN_KEY, '1'); } catch { /* none */ }
     unlockLive();
+    // Still inside the tap: the server stream starts here, or, with none known yet,
+    // the stream element plays a moment of silence so it may start later by itself
+    const el = dashStreamAudioRef.current;
+    const url = streamUrlRef.current;
+    if (url && isPlayingRef.current) {
+      // (again when it was started a while ago and still gives no sound)
+      const cur = streamRef.current;
+      const stuck = !!cur && !streamSoundingRef.current && Date.now() - cur.startedAt > STREAM_RESTART_AFTER_MS;
+      if (cur?.url !== url || el?.paused || stuck) startStream(url);
+    } else if (el && !streamRef.current && !el.getAttribute('src')) {
+      el.src = SILENT_WAV;
+      el.play().then(() => { if (!streamRef.current) el.pause(); }).catch(() => {});
+    }
     await engineInit();
-  }, [engineInit, unlockLive]);
+  }, [engineInit, unlockLive, startStream]);
   takeSoundRef.current = takeSound;
+  // The Listen button: sound on here, and an old Mute lifted (Listen must give sound)
+  const listenPressed = useCallback(async () => {
+    if (muted) toggleMute();
+    await takeSound();
+  }, [muted, toggleMute, takeSound]);
+  // A stream that becomes known after the tap (the station moved to the server
+  // stream, or another station was picked) starts by itself; one that is no longer
+  // wanted stops, so a phone that only watches downloads nothing.
+  useEffect(() => {
+    if (!streamWanted || !dashStreamUrl) { stopStream(); return; }
+    if (streamRef.current?.url !== dashStreamUrl && soundRunning) startStream(dashStreamUrl);
+  }, [streamWanted, dashStreamUrl, soundRunning, startStream, stopStream]);
   // An admin-pushed release reloaded this control room while it played: sound back on
-  const resume = useResumeAfterRelease(takeSound, dashUseStream ? true : soundRunning && listenHere);
+  const resume = useResumeAfterRelease(takeSound, soundLive && listenHere);
   // Action buttons (Next, Start, play now) count as the click that starts the meters;
   // they never switch sound on by themselves
   const initAudio = useCallback(async () => { await engineInit(); }, [engineInit]);
@@ -380,8 +483,8 @@ export default function Dashboard() {
   const setLiveLevel = live.setLevel;
   useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
   useEffect(() => { setLiveEnabled(audioReady && listenHere); }, [audioReady, listenHere]);
-  const vuL = audioReady && isPlaying ? Math.round(vuLevels[0] * 30) : 0;
-  const vuR = audioReady && isPlaying ? Math.round(vuLevels[1] * 30) : 0;
+  const vuL = audioReady && isPlaying ? Math.round(vuLevels[0] * METER_SEGMENTS) : 0;
+  const vuR = audioReady && isPlaying ? Math.round(vuLevels[1] * METER_SEGMENTS) : 0;
 
   // ── Queue derived data ─────────────────────────────────────
   const queueDates = useMemo(() => {
@@ -535,8 +638,7 @@ export default function Dashboard() {
     setLoopBusy(true);
     try {
       const res = await loopCurrent(sid, !looping);
-      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
-      else refreshQueue();
+      if (!applyActionQueue(qc, sid, res.queue)) refreshQueue();
       setToast(res.loop
         ? { text: 'Loop is on: this item repeats until you switch Loop off or press Next.', type: 'warn' }
         : { text: 'Loop is off. This play finishes, then the queue carries on.', type: 'ok' });
@@ -549,16 +651,29 @@ export default function Dashboard() {
   }, [looping, qc, refreshQueue]);
 
   // HS and Spots mode switches, Panic (KBR Studio's control panel)
-  const modes = (queueData as { modes?: StationModes } | undefined)?.modes ?? { hard_start: true, spots: true };
+  // Until the queue (which carries the modes) has loaded, the real state is unknown:
+  // the buttons stay greyed so nobody presses them on a wrong state
+  const knownModes = (queueData as { modes?: StationModes } | undefined)?.modes;
+  const modes = knownModes ?? { hard_start: true, spots: true };
   const [modesBusy, setModesBusy] = useState(false);
+  // A mode change made in another control room arrives on the now-playing channel
+  useEffect(() => {
+    const onModes = (ev: Event) => {
+      const d = (ev as CustomEvent<{ station_id?: string; hard_start?: boolean; spots?: boolean }>).detail;
+      if (!d?.station_id || typeof d.hard_start !== 'boolean' || typeof d.spots !== 'boolean') return;
+      const next = { hard_start: d.hard_start, spots: d.spots };
+      qc.setQueryData(['queue', d.station_id], (old: unknown) => (old && typeof old === 'object' ? { ...old, modes: next } : old));
+    };
+    window.addEventListener('kbr-modes', onModes);
+    return () => window.removeEventListener('kbr-modes', onModes);
+  }, [qc]);
   const changeModes = useCallback(async (next: Partial<StationModes>) => {
     const sid = latest.current.stationId;
     if (!sid) return;
     setModesBusy(true);
     try {
       const res = await setStationModes(sid, next);
-      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
-      else refreshQueue();
+      if (!applyActionQueue(qc, sid, res.queue)) refreshQueue();
       if (next.hard_start !== undefined) {
         setToast(res.modes.hard_start
           ? { text: 'HS is on: the time check and hard blocks start on the second again.', type: 'ok' }
@@ -582,8 +697,9 @@ export default function Dashboard() {
     setModesBusy(true);
     try {
       const res = await panicRequest(sid);
-      if (res.queue?.entries) qc.setQueryData(['queue', sid], res.queue);
-      else refreshQueue();
+      if (!applyActionQueue(qc, sid, res.queue)) refreshQueue();
+      // The server logs a "Panic pressed" alert: show it in the Errors tab now (F-MODES-42)
+      void qc.invalidateQueries({ queryKey: ['alerts'] });
       setToast(res.message === 'Skipped'
         ? { text: 'Panic: cut what was on air and started the next item.', type: 'warn' }
         : { text: `Panic: ${res.message}`, type: 'error' });
@@ -596,7 +712,7 @@ export default function Dashboard() {
   }, [qc, refreshQueue]);
   const modeProps = {
     stationId: stationId ?? null,
-    hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId,
+    hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId, modesKnown: !!knownModes,
     canChange: !!user && user.role !== 'viewer',
     onHardStart: () => changeModes({ hard_start: !modes.hard_start }),
     onSpots: () => changeModes({ spots: !modes.spots }),
@@ -617,8 +733,12 @@ export default function Dashboard() {
     });
   }, [stationId, initAudio, startMut]);
 
-  const moveUp = useCallback((id: string) => moveUpMut.mutate(id, { onError: onMutError }), [moveUpMut, onMutError]);
-  const moveDown = useCallback((id: string) => moveDownMut.mutate(id, { onError: onMutError }), [moveDownMut, onMutError]);
+  // Arrows show the same reminders as drag-and-drop (rule and category conflicts)
+  const onMoved = useCallback((data: { warnings?: string[] } | undefined) => {
+    if (data?.warnings?.length) setToast({ text: data.warnings.join(' | '), type: 'warn' });
+  }, []);
+  const moveUp = useCallback((id: string) => moveUpMut.mutate(id, { onSuccess: onMoved, onError: onMutError }), [moveUpMut, onMoved, onMutError]);
+  const moveDown = useCallback((id: string) => moveDownMut.mutate(id, { onSuccess: onMoved, onError: onMutError }), [moveDownMut, onMoved, onMutError]);
   const remove = useCallback((id: string) => removeMut.mutate(id, { onError: onMutError }), [removeMut, onMutError]);
   const reorder = useCallback((entryId: string, newPosition: number) => {
     reorderMut.mutate({ entryId, newPosition }, {
@@ -645,33 +765,26 @@ export default function Dashboard() {
   // Pre-listen (PFL): one off-air player shared by the cart and the library
   const pfl = usePfl();
 
-  // Off-air time + weather preview
-  const [weatherState, setWeatherState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  // Off-air time + weather preview: played in the pre-listen deck (time, then
+  // weather, as one item with play/pause, seek and stop), never on air
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const playClips = pfl.playClips;
   const previewWeather = useCallback(async () => {
-    if (weatherState !== 'idle') return;
-    setWeatherState('loading');
+    if (weatherLoading) return;
+    setWeatherLoading(true);
     try {
       const data = await weatherPreviewMut.mutateAsync();
-      const urls = [data.time_url, data.weather_url].filter(Boolean) as string[];
-      if (urls.length === 0) {
-        setToast({ text: 'No weather announcement is available right now.', type: 'warn' });
-        setWeatherState('idle');
-        return;
-      }
-      setWeatherState('playing');
-      for (const url of urls) {
-        await new Promise<void>((resolve) => {
-          const a = new Audio(url);
-          a.onended = () => resolve();
-          a.onerror = () => resolve();
-          a.play().catch(() => resolve());
-        });
-      }
+      const clips: PflClip[] = [];
+      if (data.time_url) clips.push({ url: data.time_url, label: 'Time' });
+      if (data.weather_url) clips.push({ url: data.weather_url, label: 'Weather' });
+      if (clips.length === 0) setToast({ text: 'No weather announcement is available right now.', type: 'warn' });
+      else void playClips(WEATHER_PFL_ID, 'Time & weather', clips);
     } catch {
       setToast({ text: 'Could not load the weather preview.', type: 'error' });
+    } finally {
+      setWeatherLoading(false);
     }
-    setWeatherState('idle');
-  }, [weatherState, weatherPreviewMut]);
+  }, [weatherLoading, weatherPreviewMut, playClips]);
 
   // ── Keyboard shortcuts (desktop) ───────────────────────────
   const keyActions = useRef({ handleNext, cancelInsert, isPlaying });
@@ -711,6 +824,7 @@ export default function Dashboard() {
     onStation: setSelectedStationId,
     isPlaying: isPlaying,
     nowAsset: nowAsset,
+    onNowSong: nowAsset ? () => setSongTarget({ asset: nowAsset, onAir: true }) : undefined,
     nextAsset: nextAsset,
     elapsed: shownElapsed,
     remaining: remaining,
@@ -725,7 +839,7 @@ export default function Dashboard() {
     looping: looping,
     onLoop: toggleLoop,
     loopBusy: loopBusy,
-    audio: { audioReady: listenHere, initAudio: takeSound, volume, setVolume, muted, toggleMute, vuL, vuR },
+    audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive && streamStarting, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
     stationTz: stationTz,
     liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
   };
@@ -750,6 +864,7 @@ export default function Dashboard() {
       onRemove={remove}
       onReorder={reorder}
       lastPlayed={lastPlayedMap?.last_played}
+      onSong={openRowSong}
     />
   );
   const hotButtons = (wide: boolean, bar = false) => (
@@ -772,7 +887,7 @@ export default function Dashboard() {
       onCancelInsert={cancelInsert}
       disabled={noStation}
       onPreviewWeather={previewWeather}
-      weatherState={weatherState}
+      weatherLoading={weatherLoading}
       pfl={pfl}
       wide={wide}
       bar={bar}
@@ -829,7 +944,12 @@ export default function Dashboard() {
   return (
     <div className="qn cr-root h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
       {resume.asking && <ResumePrompt onTap={resume.tap} />}
-      <audio ref={dashStreamAudioRef} className="hidden" />
+      <audio ref={dashStreamAudioRef} className="hidden"
+        onPlaying={() => setStreamSounding(!!streamRef.current)}
+        onPause={() => setStreamSounding(false)}
+        onEmptied={() => setStreamSounding(false)}
+        onEnded={() => setStreamSounding(false)}
+        onError={() => setStreamSounding(false)} />
 
       {toast && (
         <div role="status" data-testid="toast"
@@ -841,6 +961,11 @@ export default function Dashboard() {
           <span className="flex-1">{toast.text}</span>
           <button type="button" onClick={() => setToast(null)} aria-label="Dismiss" className="shrink-0 w-6 h-6 opacity-70 hover:opacity-100">✕</button>
         </div>
+      )}
+
+      {songTarget && (
+        <SongPanel target={songTarget} stationId={stationId ?? null} stationName={station?.name ?? null} canEdit={isManager(user?.role)}
+          onClose={closeSong} onToast={songToast} />
       )}
 
       <TransportBar {...transport} landscape={phoneLandscape}
@@ -873,23 +998,37 @@ export default function Dashboard() {
               />
               <div className="min-h-0" style={{ flex: `${1 - splitShown} 1 0` }}>{sidePanel(sideTab)}</div>
             </div>
-            <aside className="w-28 xl:w-32 shrink-0 min-h-0 overflow-y-auto bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white [&>*]:shrink-0" aria-label="Controls">
-              <TransportButtons p={transport} stacked />
-              <div className="h-2" />
-              {/* HS, Spots mode and Panic right under the transport, so Panic is on screen even on a short window */}
+            {/* The whole column fits a 900 px high window (buttons are a little lower under 1000 px);
+                on a shorter one it scrolls, and "more" at the bottom says so until the end is reached */}
+            <aside ref={controlsRef} onScroll={checkControlsMore}
+              className="w-28 xl:w-32 shrink-0 min-h-0 overflow-y-auto bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white [&>*]:shrink-0" aria-label="Controls">
+              {/* Loop, Go next and the fades stay at the top when a short window makes the column
+                  scroll (a scrolled column hid half of Loop under the transport, 2026-11-18) */}
+              <div className="sticky top-0 z-10 -mt-1.5 pt-1.5 pb-1 bg-[#c0c0c0]" data-testid="cr-transport-pinned">
+                <TransportButtons p={transport} stacked />
+              </div>
+              <div className="h-1 [@media(max-height:1000px)]:hidden" />
+              {/* HS, Spots mode, Panic and DB right under the transport, so they are on screen even on a
+                  1280x720 window (F-MODES-54); the lower-pane tabs come after and may scroll */}
               <ModeButtons p={modeProps} stacked />
-              <div className="h-2" />
+              <Link to="/admin/databank" className="qn-btn h-8 [@media(max-height:1000px)]:h-7 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
+                data-testid="cr-databank">DB</Link>
+              <div className="h-2 [@media(max-height:1000px)]:h-1" />
               <div className="flex flex-col gap-1" role="tablist" aria-label="Lower pane">
                 {SIDE_TABS.map(t => (
                   <button key={t.id} type="button" role="tab" aria-selected={sideTab === t.id} onClick={() => setSideTab(t.id)}
-                    className={`qn-btn h-8 text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
+                    className={`qn-btn h-8 [@media(max-height:1000px)]:h-7 text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
                     {t.id === 'live' && liveShow ? '● Live' : t.label}
                   </button>
                 ))}
               </div>
-              <div className="h-2" />
-              <Link to="/admin/databank" className="qn-btn h-8 text-sm flex items-center justify-center" title="The library as tables: songs, jingles, spots, blocks, log by day"
-                data-testid="cr-databank">DB</Link>
+              {controlsMore && (
+                <button type="button" tabIndex={-1} data-testid="cr-controls-more" title="More buttons below: scroll or press here"
+                  onClick={() => controlsRef.current?.scrollTo({ top: controlsRef.current.scrollHeight, behavior: 'smooth' })}
+                  className="sticky bottom-0 z-10 -mt-6 -mb-1.5 h-5 text-[11px] font-bold leading-none bg-[#000080] text-white border-t border-white">
+                  ▼ more
+                </button>
+              )}
             </aside>
           </div>
           <PflDeck pfl={pfl} />

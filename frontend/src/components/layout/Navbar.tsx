@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { REPORT_BUG_EVENT } from '../BugReporter';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useUnresolvedCount, useAlerts } from '../../hooks/useAlerts';
 import { useAuth } from '../../hooks/useAuth';
@@ -31,6 +31,8 @@ export default function Navbar() {
   const bellRef = useRef<HTMLDivElement>(null);
   const dropdownTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
+  // Staff pages wear the KBR Studio look (styles/qnet-site.css); listener pages keep the dark bar.
+  const qnet = useLocation().pathname.startsWith('/admin');
 
   const { data: unresolvedCount } = useUnresolvedCount(showAlerts);
   const { data: recentAlerts } = useAlerts(showAlerts ? { limit: 5, is_resolved: false } : null);
@@ -118,6 +120,7 @@ export default function Navbar() {
         { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
         { to: '/admin/activity', label: 'Activity', color: 'hover:text-green-300' },
         { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
+        { to: '/admin/campaigns', label: 'Campaigns', color: 'hover:text-yellow-300' },
         { to: '/admin/spot-schedule', label: 'Spot Schedule', color: 'hover:text-yellow-300' },
         { to: '/admin/spot-recordings', label: 'Record Spots', color: 'hover:text-yellow-300' },
         { to: '/admin/sponsorship-rules', label: 'Sponsorship Rules', color: 'hover:text-yellow-300' },
@@ -151,12 +154,12 @@ export default function Navbar() {
   );
 
   return (
-    <nav className="sticky top-0 z-50 bg-[#0a0a28] text-white border-b border-[#2a2a5e]">
+    <nav className={`sticky top-0 z-50 bg-[#0a0a28] text-white border-b border-[#2a2a5e] ${qnet ? 'qn-site' : ''}`}>
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-12">
           {/* Logo + desktop links */}
           <div className="flex items-center gap-4 text-sm">
-            <Link to="/" className="inline-flex items-center min-h-[44px] text-lg font-bold tracking-tight text-cyan-300">
+            <Link to="/" className="qn-brand inline-flex items-center min-h-[44px] text-lg font-bold tracking-tight text-cyan-300">
               KBR Studio
             </Link>
             {/* Desktop nav - hidden on mobile */}
@@ -296,7 +299,7 @@ export default function Navbar() {
             {/* Hamburger button - shown on mobile (also to visitors: the public links are hidden on phones) */}
             {(
               <button onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu"
-                className="md:hidden text-gray-400 hover:text-white p-1">
+                className="md:hidden inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-gray-400 hover:text-white p-1">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {menuOpen ? (
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

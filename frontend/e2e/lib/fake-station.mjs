@@ -9,7 +9,23 @@
  */
 import { createRequire } from 'node:module';
 
-export const { chromium, webkit, devices } = createRequire(import.meta.url)('playwright');
+import { guardBrowser, guardReport, allowEverywhere } from './guard.mjs';
+
+const pw = createRequire(import.meta.url)('playwright');
+// Every browser a test launches is guarded (e2e/lib/guard.mjs): a warning or error toast,
+// a console error or a failed request that the test did not say it expects fails the test
+// in done(), even when every check passed. GUARD=off switches it off, GUARD=report prints only.
+const guarded = (type) => new Proxy(type, {
+  get(t, k) {
+    if (k === 'launch' && process.env.GUARD !== 'off') return async (...a) => guardBrowser(await t.launch(...a));
+    const v = t[k];
+    return typeof v === 'function' ? v.bind(t) : v;
+  },
+});
+export const chromium = guarded(pw.chromium);
+export const webkit = guarded(pw.webkit);
+export const devices = pw.devices;
+export { allowEverywhere };
 
 /** PASS/FAIL printing. `known` maps a check name to the bug it shows: those are
  *  expected to fail (printed XFAIL) and a pass there is an error (XPASS) so the
@@ -30,6 +46,13 @@ export function checker(known = {}) {
     console.log(`${tag.padEnd(5)}  ${name}${detail ? `  (${detail})` : ''}${bug ? `  [BUG: ${bug}]` : ''}`);
   };
   const done = () => {
+    // Look at the screen, not only at whether the action worked (Shmuel, 2026-11-17)
+    const odd = process.env.GUARD === 'off' ? [] : guardReport();
+    for (const o of odd) console.log(`LOOK   ${o.kind}: ${o.text}${o.count > 1 ? `  (x${o.count})` : ''}  [on ${o.url || o.page}]`);
+    if (odd.length) {
+      console.log(`\n${odd.length} thing(s) the screen, console or network showed that no check expected. Fix them, or say why they are expected with allowEverywhere(pattern, reason).`);
+      if (process.env.GUARD !== 'report') state.failures += odd.length;
+    }
     console.log(`\n${state.passes} passed, ${state.xfail} known bugs (xfail), ${state.failures} failed`);
     return state.failures ? 1 : 0;
   };
@@ -175,10 +198,12 @@ export function makeStation(opts = {}) {
     skipReply: null,          // extra fields for the skip answer: { protected: true } ...
     panicReply: null,         // answer for /queue/panic instead of cutting, e.g. { message: 'The playout engine did not respond' }
     failNext: new Set(),      // paths that answer 500 once
+    replyNext: new Map(),     // path -> [{ status, detail } | 'network', ...]: the next answers for that path, one per request
     playout: opts.playout || { stations: {}, default: { mode: 'browser' } },
     weather: opts.weather ?? { time_url: '/__tone/tc.wav', weather_url: '/__tone/wx.wav' },
     nextEntryId: undefined,   // override next_entry_id in the queue answer
     pushOnChange: opts.pushOnChange ?? true,
+    modes: { hard_start: true, spots: true },
   };
   const pending = () => queue.filter((e) => e.status === 'pending').sort((a, b) => a.position - b.position);
   const playing = () => queue.find((e) => e.status === 'playing');
@@ -194,6 +219,8 @@ export function makeStation(opts = {}) {
       asset: { id: a.id, title: a.title, artist: a.artist, duration: a.duration, asset_type: a.asset_type, category: a.category, intro_seconds: a.intro_seconds ?? null },
     };
   };
+  // Rows of the queue an action sends back, as the real server (queue.py ACTION_QUEUE_ROWS)
+  const ACTION_QUEUE_ROWS = 150;
   s.view = (limit = Infinity) => {
     const list = [playing(), ...pending()].filter(Boolean);
     let cursor = Date.now();
@@ -211,6 +238,7 @@ export function makeStation(opts = {}) {
       loop_asset_id: loopId, entries: entries.slice(0, limit), total: Math.min(limit, entries.length), total_all: entries.length,
       now_playing: p ? { ...p, started_at: playing().started_at } : null,
       queue_duration_seconds: total, total_queue_duration_seconds: total, preempt_fade_ms: 2000, next_entry_id: next,
+      modes: s.modes, // like the real queue body: HS and Spots mode
     };
   };
   /** When a queued timed entry cuts into the item on air, as the server's _cut_time:
@@ -222,10 +250,14 @@ export function makeStation(opts = {}) {
     }
     return new Date(e.preempt_at).toISOString();
   };
-  /** What the server pushes on the now-playing channel for the item on air. */
+  /** What the server pushes on the now-playing channel for the item on air.
+   *  Nothing on air: null, as the real server sends ({type:'now_playing', data:null}
+   *  on the socket, null from GET /now-playing). s.legacyStopShape = true sends the
+   *  shape this fake used before ({station_id, started_at:null}); pages handle both. */
+  s.legacyStopShape = !!opts.legacyStopShape;
   s.nowPlaying = (extra = {}) => {
     const cur = playing();
-    if (!cur) return { station_id: SID, started_at: null };
+    if (!cur) return s.legacyStopShape ? { station_id: SID, started_at: null } : null;
     const a = byId[cur.asset_id];
     const nxt = pending()[0];
     const na = nxt && byId[nxt.asset_id];
@@ -238,7 +270,7 @@ export function makeStation(opts = {}) {
     };
   };
   s.onPush = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
-  s.push = (data) => listeners.forEach((fn) => fn(data ?? s.nowPlaying()));
+  s.push = (data) => { const d = data === undefined ? s.nowPlaying() : data; listeners.forEach((fn) => fn(d)); };
   const announce = (extra) => { if (s.pushOnChange) setTimeout(() => s.push(s.nowPlaying(extra)), 0); };
   /** Put `assetId` on air now (as the scheduler would), and announce it. */
   s.goOnAir = (assetId, extra = {}) => {
@@ -290,7 +322,7 @@ export function makeStation(opts = {}) {
       return { assets: list.slice(skip, skip + limit), total: list.length };
     }
     if (/^\/assets\/[^/?]+$/.test(path)) { const a = byId[path.split('/')[2]]; return a ? { ...a, metadata_extra: {} } : { __status: 404 }; }
-    if (/^\/now-playing\/[^/]+$/.test(path) || path === `/stations/${SID}/now-playing`) return s.nowPlaying();
+    if (/^\/now-playing\/[^/]+$/.test(path) || path === `/stations/${SID}/now-playing`) { const np = s.nowPlaying(); return np === null ? { __body: 'null' } : np; }
     if (path.startsWith('/stations/') && path.split('/')[2] !== SID && path.endsWith('/queue')) return { entries: [], total: 0, total_all: 0, now_playing: null, queue_duration_seconds: 0, next_entry_id: null };
     if (path.startsWith('/stations/') && path.split('/')[2] !== SID) return {};
     if (path === q && method === 'GET') return s.view(+(query.limit || Infinity));
@@ -316,12 +348,16 @@ export function makeStation(opts = {}) {
       if (cur) cur.status = 'skipped';
       e.status = 'playing'; e.started_at = new Date().toISOString();
       loopId = null;
-      const done = { id: e.id, position: e.position, on_air: true, queue: s.view() };
+      const done = { id: e.id, position: e.position, on_air: true, queue: s.view(ACTION_QUEUE_ROWS) };
       if (body.client_request_id) fired.set(body.client_request_id, done);
       announce();
       return done;
     }
-    if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: s.view() }; }
+    if (path === `${q}/modes`) {
+      s.modes = { hard_start: body?.hard_start ?? s.modes.hard_start, spots: body?.spots ?? s.modes.spots };
+      return { modes: s.modes, queue: s.view(ACTION_QUEUE_ROWS) };
+    }
+    if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: s.view(ACTION_QUEUE_ROWS) }; }
     if (path === `${q}/mix-over`) return { message: 'Playing over', asset_id: body.asset_id, on_air: true };
     if (path === `${q}/insert`) {
       const anchor = body.after_entry_id ? queue.find((x) => x.id === body.after_entry_id && x.status !== 'skipped') : null;
@@ -329,7 +365,7 @@ export function makeStation(opts = {}) {
       const ids = [...(body.asset_id ? [body.asset_id] : []), ...(body.asset_ids || [])];
       pending().forEach((x) => { if (x.position > after) x.position += ids.length; });
       const made = ids.map((asset_id, i) => s.add({ asset_id, position: after + 1 + i }).id);
-      return { ids: made, queue: s.view() };
+      return { ids: made, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/start`) {
       const cur = playing();
@@ -341,17 +377,17 @@ export function makeStation(opts = {}) {
       return { now_playing: next.asset_id };
     }
     if (path === `${q}/panic`) {
-      if (s.panicReply) return { ...s.panicReply, queue: s.view() };
+      if (s.panicReply) return { ...s.panicReply, queue: s.view(ACTION_QUEUE_ROWS) };
       const cur = playing();
       if (cur) cur.status = 'skipped';
       loopId = null;
       const next = pending()[0];
       if (next) { next.status = 'playing'; next.started_at = new Date().toISOString(); }
       announce({ change_fade_seconds: 0 });
-      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view() };
+      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/skip`) {
-      if (s.skipReply) return { message: 'Kept', ...s.skipReply, queue: s.view() };
+      if (s.skipReply) return { message: 'Kept', ...s.skipReply, queue: s.view(ACTION_QUEUE_ROWS) };
       const cur = playing();
       if (cur) cur.status = 'skipped';
       const fade = { hard: 0, fade: 0.5, soft: 3 }[query.fade ?? 'fade'];
@@ -359,14 +395,14 @@ export function makeStation(opts = {}) {
       const next = pending()[0];
       if (next) { next.status = 'playing'; next.started_at = new Date().toISOString(); }
       announce({ change_fade_seconds: fade });
-      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view() };
+      return { message: 'Skipped', now_playing: next ? next.asset_id : null, queue: s.view(ACTION_QUEUE_ROWS) };
     }
     if (path === `${q}/move-up` || path === `${q}/move-down`) {
       const list = pending();
       const i = list.findIndex((x) => x.id === body.entry_id);
       const j = path.endsWith('up') ? i - 1 : i + 1;
       if (i >= 0 && j >= 0 && j < list.length) { const p = list[i].position; list[i].position = list[j].position; list[j].position = p; }
-      return { message: 'Moved' };
+      return { message: 'Moved', warnings: s.reorderWarnings || [] };
     }
     if (path === `${q}/reorder-dnd`) {
       const e = queue.find((x) => x.id === body.entry_id);
@@ -386,15 +422,28 @@ export function makeStation(opts = {}) {
       return /fail/i.test(body.song_title) ? { __status: 500 } : { id: 'r1', status: 'approved', auto_approved: true, matched_asset_title: 'Song number 12', matched_asset_artist: 'Artist 3', songs_ahead: 2, estimated_wait_minutes: 7 };
     }
     if (path === '/listeners/heartbeat' || path === '/listeners/disconnect' || path === '/listeners/leave') return { ok: true };
-    if (path === '/crm/login') return ['123456', '654321'].includes(body.pin) ? s.crmProfile() : { __status: 401 };
+    if (path === '/crm/login') return ['123456', '654321'].includes(body.pin) ? s.crmProfile() : { __status: 401, detail: 'Invalid PIN or inactive member' };
     if (path === '/crm/register') { if (!body.name) return { __status: 422 }; s.crmName = body.name; return { id: 'cm1', name: body.name, pin: '654321' }; }
-    if (path === '/crm/rate') { s.rated = (s.rated || 0) + 1; if (body.is_favorite) s.favs = 1; else s.favs = 0; return { asset_id: body.asset_id, rating: body.rating, is_favorite: body.is_favorite }; }
-    if (path === '/crm/raffles/active') return [{ id: 'rf1', title: 'Win a Shabbos package', prize: 'Wine and challah', entry_count: 12, status: 'open' }];
-    if (/^\/crm\/raffles\/[^/]+\/enter$/.test(path)) return {};
-    if (path === '/crm/my-ratings') return [];
+    if (path === '/crm/rate') {
+      // As the server: rating 1-5 is required, one row per song (upsert)
+      if (!(body.rating >= 1 && body.rating <= 5)) return { __status: 422, detail: 'rating must be 1-5' };
+      s.ratings.set(body.asset_id, { rating: body.rating, is_favorite: !!body.is_favorite });
+      return { id: `r-${body.asset_id}`, asset_id: body.asset_id, rating: body.rating, is_favorite: !!body.is_favorite, asset_title: byId[body.asset_id]?.title ?? null, asset_artist: null, created_at: null };
+    }
+    if (path === '/crm/raffles/active') return s.raffles;
+    if (/^\/crm\/raffles\/[^/]+\/enter$/.test(path)) {
+      const id = path.split('/')[3];
+      if (s.raffleEntered.has(id)) return { __status: 409, detail: 'Already entered this raffle' };
+      s.raffleEntered.add(id);
+      return { status: 'entered', raffle_id: id };
+    }
+    if (path === '/crm/my-ratings') return [...s.ratings.entries()].map(([asset_id, r]) => ({ id: `r-${asset_id}`, asset_id, ...r, asset_title: byId[asset_id]?.title ?? null, asset_artist: null, created_at: null }));
     return {};
   };
-  s.crmProfile = () => ({ id: 'cm1', name: s.crmName || 'Test Listener', ratings_count: s.rated || 0, favorites_count: s.favs || 0, taste_profile: { label: 'Kumzitz lover', description: 'Slow and soulful', top_category: null, stats: null } });
+  s.ratings = new Map();          // CRM: asset id -> { rating, is_favorite } for the one member
+  s.raffleEntered = new Set();    // CRM: raffles the member entered (a second entry answers 409)
+  s.raffles = [{ id: 'rf1', title: 'Win a Shabbos package', prize: 'Wine and challah', entry_count: 12, status: 'open' }];
+  s.crmProfile = () => ({ id: 'cm1', name: s.crmName || 'Test Listener', ratings_count: s.ratings.size, favorites_count: [...s.ratings.values()].filter((r) => r.is_favorite).length, taste_profile: { label: 'Kumzitz lover', description: 'Slow and soulful', top_category: null, stats: null } });
   return s;
 }
 
@@ -407,6 +456,15 @@ export async function routeApi(target, station, { delay = () => 0, down = [] } =
     if (down.some((d) => path.startsWith(d))) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"down"}' });
     let body = null;
     try { body = req.postDataJSON(); } catch { /* none */ }
+    const queued = station.replyNext.get(path);
+    if (queued && queued.length) {
+      const r = queued.shift();
+      station.calls.push({ method: req.method(), path, query: Object.fromEntries(url.searchParams), body, at: Date.now(), failed: true });
+      const d = delay(path, req.method());
+      if (d) await sleep(d);
+      if (r === 'network') return route.abort('failed').catch(() => {});
+      return route.fulfill({ status: r.status, contentType: 'application/json', body: JSON.stringify({ detail: r.detail ?? 'error' }) }).catch(() => {});
+    }
     if (station.failNext.has(path)) {
       station.failNext.delete(path);
       station.calls.push({ method: req.method(), path, query: Object.fromEntries(url.searchParams), body, at: Date.now(), failed: true });
@@ -417,6 +475,8 @@ export async function routeApi(target, station, { delay = () => 0, down = [] } =
     const data = station.handle(req.method(), path, Object.fromEntries(url.searchParams), body);
     const d = delay(path, req.method());
     if (d) await sleep(d);
+    // { __body: 'null' }: a 200 whose JSON is null (GET /now-playing with nothing on air)
+    if (data && typeof data.__body === 'string') return route.fulfill({ status: 200, contentType: 'application/json', body: data.__body }).catch(() => {});
     const status = data && data.__status ? data.__status : data === null ? 204 : 200;
     await route.fulfill({ status, contentType: 'application/json', body: data === null ? '' : JSON.stringify(data) }).catch(() => {});
   });
@@ -533,4 +593,54 @@ export async function timeUntil(page, cond, timeout = 5000) {
     };
     look();
   }), [String(cond), timeout]);
+}
+
+/**
+ * Init script: iPhone Safari's rule for sound, which Chromium does not have.
+ * Sound may start only inside a real tap (touchend that was not a scroll, click,
+ * keydown, mouseup); touchstart and pointerdown do NOT count. Outside one:
+ *   - audio.play() is refused (NotAllowedError), unless that same element was once
+ *     started inside a tap (it may then play again later, with any src)
+ *   - a new AudioContext is suspended and resume() never settles
+ * window.__iosPolicy = { refusedPlays, pendingResumes } counts what was refused.
+ */
+export function IOS_SOUND_POLICY() {
+  const w = window;
+  const stats = (w.__iosPolicy = { refusedPlays: 0, pendingResumes: 0 });
+  let inTap = false;
+  let moved = false;
+  const open = () => { inTap = true; setTimeout(() => { inTap = false; }, 0); };
+  w.addEventListener('touchstart', () => { moved = false; }, true);
+  w.addEventListener('touchmove', () => { moved = true; }, true);
+  w.addEventListener('touchend', () => { if (!moved) open(); }, true);
+  for (const type of ['click', 'keydown', 'mouseup']) w.addEventListener(type, open, true);
+
+  const blessed = new WeakSet();
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function () {
+    if (inTap) blessed.add(this);
+    if (!blessed.has(this)) {
+      stats.refusedPlays++;
+      return Promise.reject(new DOMException('The request is not allowed by the user agent', 'NotAllowedError'));
+    }
+    return play.call(this);
+  };
+
+  const Native = w.AudioContext;
+  if (!Native) return;
+  const locked = new WeakSet();
+  const nativeState = Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'state').get;
+  class Ctx extends Native {
+    constructor(...a) {
+      super(...a);
+      if (!inTap) { locked.add(this); Native.prototype.suspend.call(this).catch(() => {}); }
+    }
+    get state() { return locked.has(this) ? 'suspended' : nativeState.call(this); }
+    resume() {
+      if (locked.has(this) && !inTap) { stats.pendingResumes++; return new Promise(() => {}); }
+      locked.delete(this);
+      return Native.prototype.resume.call(this);
+    }
+  }
+  w.AudioContext = Ctx;
 }

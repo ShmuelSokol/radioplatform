@@ -50,7 +50,7 @@ export default function MatchToSong({
         type="button"
         onClick={() => setOpen(true)}
         disabled={busy}
-        className="text-cyan-400 hover:text-cyan-300 text-sm sm:text-[11px] min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 px-1 sm:px-0 disabled:opacity-50"
+        className="text-cyan-400 hover:text-cyan-300 text-[11px] disabled:opacity-50 inline-flex items-center min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0"
         data-testid="match-to-song"
       >
         Match
@@ -68,9 +68,9 @@ export default function MatchToSong({
           onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
           placeholder="Search the library"
           aria-label="Search the library for the requested song"
-          className="w-44 bg-[#0a0a28] border border-[#2a2a5e] rounded px-2 py-1 text-base sm:text-[12px] text-white"
+          className="w-44 max-w-[60vw] bg-[#0a0a28] border border-[#2a2a5e] rounded px-2 py-1 text-[16px] sm:text-[12px] text-white"
         />
-        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 text-base sm:text-[11px] min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0" aria-label="Close search">
+        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 text-[11px] min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0" aria-label="Close search">
           ✕
         </button>
       </div>

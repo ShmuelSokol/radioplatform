@@ -78,3 +78,26 @@ async def test_overnight_block_conflict_is_found(client, auth_headers, db_sessio
     await _block(client, auth_headers, sc, "Overnight", "22:00:00", "02:00:00")
     await _block(client, auth_headers, sc, "Late news", "23:00:00", "23:30:00")
     assert await _conflicts(db_session) == ["Schedule conflict: Late news vs Overnight"]
+
+
+def test_recurring_blocks_with_separate_date_ranges_do_not_conflict():
+    """B-PUBLIC-5 follow-on: two daily blocks at the same hour in different seasons
+    never air together; touching or open-ended ranges still do."""
+    from datetime import date, time
+    from types import SimpleNamespace
+
+    from app.services.alert_service import blocks_overlap
+
+    def blk(start=None, end=None, s=time(9), e=time(10)):
+        return SimpleNamespace(recurrence_type="daily", recurrence_pattern=None,
+                               start_time=s, end_time=e, start_date=start, end_date=end)
+
+    summer = blk(date(2026, 6, 1), date(2026, 8, 31))
+    winter = blk(date(2026, 12, 1), date(2027, 2, 28))
+    assert not blocks_overlap(summer, winter)
+    assert blocks_overlap(summer, blk(date(2026, 8, 31)))       # shares the last day
+    assert blocks_overlap(summer, blk())                        # open-ended
+    assert not blocks_overlap(summer, blk(None, date(2026, 5, 31)))
+    # overnight on the last day reaches into the next day's 00:30
+    late = blk(None, date(2026, 5, 31), time(23), time(1))
+    assert blocks_overlap(late, blk(date(2026, 6, 1), None, time(0), time(0, 45)))

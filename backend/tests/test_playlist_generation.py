@@ -256,7 +256,7 @@ async def test_settings_endpoints_and_queue_fill(
         f"{url}/regenerate", params={"station_id": str(station.id)}, headers=auth_headers
     )
     assert r.status_code == 200, r.text
-    assert r.json()["removed"] == 30
+    assert r.json()["removed"] == 29  # the next song stays (it may be about to start)
     kept = (
         (await db_session.execute(select(QueueEntry).where(QueueEntry.source == "manual")))
         .scalars()
@@ -302,3 +302,46 @@ async def test_vote_can_be_set_and_is_listed(
     by_id = {a["id"]: a for a in listed.json()["assets"]}
     assert by_id[str(song.id)]["vote"] == 4
     assert by_id[str(songs[1].id)]["vote"] == 0
+
+
+async def _top_up(db: AsyncSession, station, hours: int, tell_queue: bool) -> list:
+    """Fill an hour at a time, as the live fill does at each song change: every
+    call knows only what is waiting in the queue. Nothing has aired."""
+    at = datetime(2026, 11, 16, 1, 0, tzinfo=NY).astimezone(UTC)
+    order: list = []
+    cursor: dict = {}
+    for _ in range(hours):
+        plan = await generate(
+            db, station, at, 1, artist_distance=0, cursor=cursor,
+            busy_ids=set(order), queued=list(order) if tell_queue else None,
+        )
+        cursor = plan.cursor
+        order += [p.asset_id for p in plan.picks]
+        at += timedelta(hours=1)
+    return order
+
+
+def _closest_repeat(order: list) -> int:
+    last_at: dict = {}
+    closest = len(order)
+    for i, asset_id in enumerate(order):
+        if asset_id in last_at:
+            closest = min(closest, i - last_at[asset_id])
+        last_at[asset_id] = i
+    return closest
+
+
+@pytest.mark.asyncio
+async def test_a_fill_longer_than_the_song_list_keeps_repeats_far_apart(db_session: AsyncSession):
+    """Jerusalem played one song at 6:49 and 7:04 AM (2026-11-18). With 48 hours
+    queued from a list that lasts fewer, every song is waiting in the queue; they
+    were then all treated alike, and one could come back a few songs later. Now
+    the one whose turn is furthest back is drawn."""
+    from tests.test_block_on_time import _station_with_block
+
+    station, _block, _songs = await _station_with_block(db_session, time(0), "Long fill")
+    await db_session.commit()
+    # 60 songs take turns (30 of each kind): 12 hours is about 180 songs
+    order = await _top_up(db_session, station, 12, tell_queue=True)
+    assert len(order) > 150
+    assert _closest_repeat(order) >= 30, _closest_repeat(order)

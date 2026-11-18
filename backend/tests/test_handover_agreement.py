@@ -43,16 +43,17 @@ def _analysis(cross_start):
 
 # (name, stored duration, metadata, asset type, entry fields, expected hand-over seconds before the end)
 CASES = [
-    ("song with analysis", 200.0, _analysis(195.5), "music", {}, 4.5),
-    ("song without analysis", 200.0, None, "music", {}, 3.0),
+    ("song with analysis", 200.0, _analysis(195.5), "music", {}, 2.5),  # audible end 198.5, 1 s crossfade
+    ("song without analysis", 200.0, None, "music", {}, 1.0),
     ("station ID (short)", 6.0, None, "jingle", {}, queue_module.SHORT_ITEM_HANDOVER_SECONDS),
     ("time check (timed)", 8.0, None, "jingle", {"timing_mode": "hard", "preempt_at": True},
      queue_module.SHORT_ITEM_HANDOVER_SECONDS),
     ("block item 30 s", 30.0, None, "jingle", {"source": "block"}, queue_module.SHORT_ITEM_HANDOVER_SECONDS),
-    # F-HANDOVER-15: none stored = 180 s, handed over 3 s before that (not at half)
-    ("no stored length", None, None, "music", {}, 3.0),
-    # F-HANDOVER-10: a 25 s PSA queued as a song crossfades like a song
-    ("PSA as a song", 25.0, None, "spot", {}, 3.0),
+    # F-HANDOVER-15: none stored = 180 s, handed over 1 s (the default crossfade) before that (not at half)
+    ("no stored length", None, None, "music", {}, 1.0),
+    # F-HANDOVER-10: a 25 s PSA queued like a song is still speech: never crossfaded
+    # (Shmuel, 2026-11-17: sponsorships played back to back overlapped by 3 s)
+    ("PSA as a song", 25.0, None, "spot", {}, queue_module.SHORT_ITEM_HANDOVER_SECONDS),
 ]
 
 
@@ -141,26 +142,28 @@ async def _none():
 @pytest.mark.asyncio
 async def test_spoken_item_with_analysis_hands_over_at_its_last_word(db_session):
     """F-HANDOVER-10 (server half): a 25 s PSA queued as a song whose analysis puts the end
-    of speech at 24.6 s hands over there, not 3 s early with words under the fade."""
+    of speech at 24.6 s plays to the end of its file like every spoken item, not 3 s early
+    with words under the fade."""
     station, on_air, _ = await _setup(db_session, 25.0, _analysis(24.6), "spot", {})
     entry = await _fresh(db_session, on_air.id)
-    assert abs(queue_module.handover_seconds(entry) - 0.4) < 1e-9
+    assert queue_module.handover_seconds(entry) == queue_module.SHORT_ITEM_HANDOVER_SECONDS
+    assert queue_module.overlap_seconds(entry) == 0.0
 
 
 @pytest.mark.asyncio
 async def test_wrong_stored_length_still_one_moment_on_the_server(db_session, monkeypatch):
     """F-HANDOVER-9 (server half): a 6 s file stored as 25 s. The server's timer, message and
-    advance all use the stored 25 s (hand-over at 22 s, crossfaded like a song); the page
+    advance all use the stored 25 s (hand-over at 24.7 s, a jingle is not crossfaded); the page
     caps its own hand-over at the real file's end (handOverPoint in useAudioEngine.ts), so
     the page moves on at ~5.7 s and the server 16 s later. Only fixing the stored length
     (duration_backfill measures items with none, not wrong ones) makes them meet."""
     station, on_air, _ = await _setup(db_session, 25.0, None, "jingle", {})
     entry = await _fresh(db_session, on_air.id)
-    assert queue_module.handover_seconds(entry) == 3.0
+    assert queue_module.handover_seconds(entry) == queue_module.SHORT_ITEM_HANDOVER_SECONDS
     engine = SchedulerEngine()
     payload = await engine.queue_entry_payload(db_session, station.id, entry)
-    assert payload["asset"]["cross_start"] == 22.0
-    assert queue_module.switch_time(entry) == queue_module._aware(entry.started_at) + timedelta(seconds=22.0)
+    assert payload["asset"]["cross_start"] == 24.7 and payload["asset"]["overlap_seconds"] == 0.0
+    assert queue_module.switch_time(entry) == queue_module._aware(entry.started_at) + timedelta(seconds=24.7)
 
 
 @pytest.mark.asyncio

@@ -224,6 +224,8 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                         elif getattr(settings, "supabase_storage_enabled", False) and supabase_bucket:
                             audio_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{supabase_bucket}/{file_path}"
 
+                    from app.api.v1.queue import is_crossfaded
+
                     duration = (getattr(asset, "duration", None) if asset else None) or 180.0
 
                     # Peek at next pending queue entry
@@ -283,6 +285,9 @@ async def websocket_now_playing(websocket: WebSocket, station_id: str):
                                 "cue_in": analysis.get("cue_in_seconds", 0),
                                 "cue_out": analysis.get("cue_out_seconds", duration),
                                 "cross_start": analysis.get("cross_start_seconds", duration - 3.0),
+                                # anything spoken is never crossfaded (see queue.overlap_seconds);
+                                # for a song the page keeps its default until the next update
+                                **({} if is_crossfaded(asset) else {"overlap_seconds": 0.0}),
                                 "replay_gain_db": analysis.get("replay_gain_db", 0),
                             } if asset else None,
                             "next_asset": next_asset_data,
@@ -390,7 +395,10 @@ async def broadcast_now_playing_update(station_id: str, now_playing_data: dict):
     Helper function to broadcast now-playing updates to all connected clients.
     Called by the scheduling engine when playback changes.
     """
-    started = _parse_start(now_playing_data.get("started_at"))
+    # Ordered by when the item really went on air: a resumed shiur's started_at lies
+    # before the time check that paused it (Stories 02:30Z 2026-11-18: every update
+    # was dropped for 25 minutes after a sponsorship paused a story)
+    started = _parse_start(now_playing_data.get("on_air_at") or now_playing_data.get("started_at"))
     latest = _latest_start.get(station_id)
     if started is not None and latest is not None and started < latest:
         # Something that started before what listeners already hear: a stale read
@@ -413,6 +421,27 @@ async def broadcast_now_playing_update(station_id: str, now_playing_data: dict):
     _last_now_playing[station_id] = (key, now)
     _join_cache.pop(station_id, None)  # the next listener to join reads the new song
     await manager.broadcast_to_station(station_id, message)
+
+
+async def broadcast_nothing_playing(station_id) -> None:
+    """Tell listeners the station has nothing on air any more (the last item ended
+    or was skipped or removed and nothing followed it, e.g. during a blackout with no
+    silence queued). Without it open pages kept showing the old item "On Air" until
+    their overdue re-read. Sends {"type": "now_playing", "data": null}."""
+    station_id = str(station_id)
+    _np_generation[station_id] = _np_generation.get(station_id, 0) + 1
+    _join_cache.pop(station_id, None)
+    message = {"type": "now_playing", "data": None}
+    key = json.dumps(message)
+    now = time.monotonic()
+    last = _last_now_playing.get(station_id)
+    if last and last[0] == key and now - last[1] < UNCHANGED_RESEND_SECONDS:
+        return
+    _last_now_playing[station_id] = (key, now)
+    try:
+        await manager.broadcast_to_station(station_id, message)
+    except Exception as e:
+        logger.warning("Nothing-playing broadcast failed for station %s: %s", station_id, e)
 
 
 # station_id -> (last message sent, when)

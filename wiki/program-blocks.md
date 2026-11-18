@@ -21,7 +21,9 @@ song at most this long, then fade it; queued as `QueueEntry.hard_by`), `items` (
   weather from `get_or_create_weather_spot_assets`
 
 - `{"kind": "sponsors", "count": N}`: N sponsor places, filled by the spot
-  planner (below)
+  planner (below). `"max_seconds": 180` limits the sponsorship time of one airing
+  instead (or as well); with only a time limit the item holds up to 10
+  (`item_places`).
 
 Items may carry a `label` (the page stores the recording's title there).
 
@@ -76,6 +78,33 @@ of day's blocks", shown on Schedule Check). An exact-time sponsorship whose time
 is a block's start takes a place in that block; other exact times keep their
 own `ad_slot` entry.
 
+### More sponsorships than room (2026-11-17)
+
+Shmuel's case: a block allowed 3 minutes, 7 sponsorships of 30 s wanting it.
+
+- Room is places and, when the item has `max_seconds`, time: a play needs a free
+  place and enough seconds left for its own length (`Asset.duration`, 30 s when
+  unknown). The queue never holds more than the limit for one airing.
+- With enough room nothing changed: first booked, first seated, each play aimed
+  at its share of the daypart (one play a daypart aims at the block nearest the
+  middle, so with blocks at 7 and 8 PM it is the 8 PM one that fills first).
+- Over-booked daypart (`_fair_order`): everyone's first play before anyone's
+  second; contracts ending within 3 days first; the rest take turns, the start
+  moving on one each day and daypart, so a different sponsorship waits each day.
+  A pure function of the date: the plan is the same whenever it is worked out.
+- A play with no room in its own daypart rolls to the first later block the same
+  day with room, after that daypart seated its own plays (`Placement.moved_from`,
+  "moved from afternoon" on the Spot Schedule page). It never rolls to another
+  day and never past the contract's end date.
+- Only then is it unplaced. Said three ways: `warnings` in the answer to saving a
+  spot schedule (red box on the page, naming others that lose plays too), one
+  folded alert "More sponsorships than room on <station>", and Schedule Check
+  ("In the next 7 days it misses 2 of 14 plays. Its contract ends Nov 20, so
+  they cannot be made up.").
+- Not built: telling the sponsor in their portal. That is a business choice.
+
+Tests: `tests/test_sponsorship_room.py`.
+
 Placements in blocks (`Placement.block` set) are not written by
 `reconcile_spot_slots`: the block reconciler asks the spot plan which
 sponsorships fill each airing and queues them in the block's order. So a
@@ -94,3 +123,6 @@ engine has the block's first item pre-loaded, and never cuts into a block alread
 
 `GET /program-blocks/preview?station_id&hours` plans without preparing time or
 weather audio (that can call the voice service), so run lengths leave those out.
+
+## An announcement never airs without its programme (2026-11-17)
+When a block's last recording (its programme) has nothing to play, the recordings before it (the announcement of it) are left out too, with the reason in the preview and Schedule Check (`_Resolver.resolve`). Jerusalem 20:00Z 2026-11-17 was a different case that code cannot catch: the "Hourly schedule announcement" block (every hour) plays a clip titled "KBR schedule: Daf Yomi (Jerusalem)" on its own, while the Daf Yomi block itself was switched off. Put an announcement in the same block as what it announces.

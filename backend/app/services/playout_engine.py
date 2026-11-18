@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -51,12 +51,23 @@ ALERT_REPEAT_SECONDS = 1800.0
 # older engine queues timed items in arrival order and has no /timed_drop, so it gets
 # the serial hand-over and the plain flush + skip at blackout end.
 ENGINE_PROTO_GROUPS = 2
+# From this version the engine stays quiet for the last seconds before a hard timed item
+# when it has no song (its hold lane); an older engine would play emergency music there.
+ENGINE_PROTO_HOLD = 3
+# A song that would start this close before a hard timed item is not handed out. The
+# engine fills up to 3 s with quiet and starts the timed item early for more, as the
+# browser player does (queue.TIMED_EARLY_START_SECONDS, the same 8 s).
+HOLD_BEFORE_HARD_SECONDS = 8.0
 
 
 @dataclass
 class EngineState:
     # Entry handed to the engine as "next" that has not been reported started yet
     cued_entry_id: str | None = None
+    # When the engine was last handed its next track, and when an operator's change last
+    # took one back (monotonic): Next waits a moment for a track handed over just now
+    cued_at: float = 0.0
+    operator_flush_at: float = 0.0
     # Hard-timed entries already handed to the engine's timed lane
     timed_sent: set[str] = field(default_factory=set)
     # A manual skip is in flight: the outgoing entry is logged as skipped
@@ -67,6 +78,10 @@ class EngineState:
     last_contact: float = 0.0
     last_alert: float = 0.0
     on_emergency: bool = False
+    # Counts the spells of emergency music, so a delayed alert knows its spell is over
+    emergency_spell: int = 0
+    # True once open emergency alerts were cleared after a start from the queue
+    emergency_cleared: bool = False
     # Asset of each entry handed to the engine (newest last), so a start report for an
     # entry deleted meanwhile (a schedule redraw) still shows what is on air
     handed: dict[str, str] = field(default_factory=dict)
@@ -91,6 +106,10 @@ class EngineState:
     last_handoff_prune: float = 0.0
     # Protocol version the engine last reported (0 = an engine that reports none)
     engine_proto: int = 0
+    # What the engine was last told about a live show (None: not told since it or
+    # we started, so it is told again)
+    live_sent: bool | None = None
+    live_tried: float = 0.0
 
 
 HANDED_KEEP = 30
@@ -112,6 +131,19 @@ def held_entry_ids(station_id) -> set[uuid.UUID]:
         except ValueError:
             continue
     return out
+
+
+def cued_entry_id(station_id) -> uuid.UUID | None:
+    """The song the engine has pre-loaded as its next one (not yet on air), if any.
+    Unlike an item in its timed lane it can still be exchanged: when the head of the
+    queue changes, the next tick flushes it and the engine asks again."""
+    state = _states.get(str(station_id))
+    if state is None or not state.cued_entry_id:
+        return None
+    try:
+        return uuid.UUID(str(state.cued_entry_id))
+    except ValueError:
+        return None
 
 
 def _note_handed(state: "EngineState", entry) -> None:
@@ -181,17 +213,74 @@ def token_ok(presented: str | None) -> bool:
 # ── Commands to the engine ───────────────────────────────────────────────────
 
 
-async def _command(path: str, payload: dict | None = None, *, station_id) -> bool:
+# One connection to the engine, kept open between commands. A new client per command
+# paid a TCP + TLS handshake to the engine server on every Next, Fade and timed
+# hand-over before the command itself could leave.
+_KEEPALIVE_SECONDS = 30.0  # below the engine's nginx keep-alive (75 s), so we close first
+_shared_client: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
+
+
+def _client() -> httpx.AsyncClient:
+    global _shared_client
+    loop = asyncio.get_running_loop()
+    held = _shared_client
+    if (
+        held is None
+        or held[0] is not loop
+        or type(held[1]) is not httpx.AsyncClient
+        or getattr(held[1], "is_closed", False)
+    ):
+        _shared_client = held = (loop, httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=8, keepalive_expiry=_KEEPALIVE_SECONDS),
+        ))
+    return held[1]
+
+
+async def close_client() -> None:
+    """Close the kept connection (backend shutdown)."""
+    global _shared_client
+    held, _shared_client = _shared_client, None
+    if held is not None and held[0] is asyncio.get_running_loop():
+        try:
+            await held[1].aclose()
+        except Exception:
+            pass
+
+
+async def _command(
+    path: str, payload: dict | None = None, *, station_id, wait: float = 4.0, slow_is_ok: bool = False
+) -> bool:
+    """`slow_is_ok`: the engine got the command and is still working on it when `wait` runs
+    out (a /timed answers only once the file is downloaded). That counts as taken."""
+    from app.services import playout_tunnel
+
+    if playout_tunnel.connected(station_id):
+        # A local FM box: no inbound line, its relay fetches the command (playout_tunnel).
+        # Same rules as by HTTPS: `wait` is how long the answer is waited for, and a
+        # command the relay picked up whose answer is not in yet is "still loading".
+        got = await playout_tunnel.send(station_id, path, payload or {}, timeout=wait)
+        if got is not None and got[0] == 200:
+            return True
+        if got is not None and got[0] == playout_tunnel.STILL_WORKING:
+            logger.warning("Playout engine %s by relay: no answer after %.0f s%s", path, wait,
+                           " (still loading; taken)" if slow_is_ok else "")
+            return slow_is_ok
+        logger.warning("Playout engine %s by relay -> %s", path, "not fetched" if got is None else got[0])
+        return False
     url = settings.engine_control_url(station_id) + path
     try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
-            resp = await client.post(
-                url, json=payload or {}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN}
-            )
+        resp = await _client().post(
+            url, json=payload or {}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN},
+            timeout=wait,
+        )
         if resp.status_code != 200:
             logger.warning("Playout engine %s -> HTTP %s", path, resp.status_code)
             return False
         return True
+    except httpx.ReadTimeout:
+        logger.warning("Playout engine %s: no answer after %.0f s%s", path, wait,
+                       " (still loading; taken)" if slow_is_ok else "")
+        return slow_is_ok
     except Exception as e:
         logger.warning("Playout engine %s failed: %s", path, e)
         return False
@@ -199,10 +288,17 @@ async def _command(path: str, payload: dict | None = None, *, station_id) -> boo
 
 async def engine_status(station_id) -> dict | None:
     """What the engine says is on air (its /status), or None when it does not answer."""
+    from app.services import playout_tunnel
+
+    if playout_tunnel.connected(station_id):
+        got = await playout_tunnel.send(station_id, "/status", {}, timeout=3.0)
+        data = got[1] if got is not None and got[0] == 200 else None
+        return data if isinstance(data, dict) and data.get("ok") else None
     url = settings.engine_control_url(station_id) + "/status"
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.post(url, json={}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN})
+        resp = await _client().post(
+            url, json={}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN}, timeout=3.0,
+        )
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -223,6 +319,18 @@ async def engine_skip(station_id, fade_seconds: float | None = None) -> bool:
     return ok
 
 
+async def engine_live(station_id, on: bool) -> bool:
+    """A live show starts or has ended: the stream goes quiet under the host and the
+    item on air does not come back (it was queued again to carry on), or the music
+    lane starts again. The engine ignores a repeat."""
+    ok = await _command("/live", {"on": bool(on)}, station_id=station_id)
+    state = get_state(station_id)
+    if ok:
+        state.live_sent = bool(on)
+        state.live_tried = 0.0
+    return ok
+
+
 async def engine_flush(station_id) -> bool:
     """Drop the engine's pre-loaded next track so it asks again."""
     get_state(station_id).cued_entry_id = None
@@ -230,7 +338,8 @@ async def engine_flush(station_id) -> bool:
 
 
 async def engine_timed(
-    station_id, uri: str, at_epoch: float, entry_id: str = "", *, seq: int = 0, of: int = 1
+    station_id, uri: str, at_epoch: float, entry_id: str = "", *, seq: int = 0, of: int = 1,
+    wait: float = 4.0, slow_is_ok: bool = False,
 ) -> bool:
     """Load an item now and put it on air at `at_epoch` (music fades under it).
 
@@ -242,7 +351,7 @@ async def engine_timed(
     payload = {"uri": uri, "at": at_epoch, "id": entry_id}
     if of > 1:
         payload.update(seq=seq, of=of)
-    return await _command("/timed", payload, station_id=station_id)
+    return await _command("/timed", payload, station_id=station_id, wait=wait, slow_is_ok=slow_is_ok)
 
 
 async def engine_timed_drop(station_id, entry_ids: list[str]) -> bool:
@@ -286,6 +395,13 @@ def _quote(value) -> str:
     return f'"{text}"'
 
 
+def _overlap(entry) -> float:
+    from app.api.v1.queue import overlap_seconds
+
+    # The engine decides by itself what a song does before a spoken item (radio.liq)
+    return overlap_seconds(entry, speech_next=False)
+
+
 def build_uri(entry: QueueEntry, lane: str) -> str | None:
     """Liquidsoap `annotate:` URI carrying the entry id, titles, cue points and level."""
     asset = entry.asset
@@ -300,6 +416,13 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
         "kbr_lane": lane,
         # The engine keeps copies of music it played as its emergency fallback
         "kbr_kind": (asset.asset_type or "").lower(),
+        # How long this item overlaps the next at its end: the station's song
+        # crossfade, 0 for anything spoken (queue.overlap_seconds)
+        "kbr_overlap": f"{_overlap(entry):.2f}",
+        # How early the engine prepares the change. Never 0: with nothing held back
+        # the engine has no moment to make the change in; 0.2 s plays out in full
+        # when the overlap is 0.
+        "liq_cross_duration": f"{max(_overlap(entry), 0.2):.2f}",
         "title": asset.title or "",
         "artist": asset.artist or "",
     }
@@ -319,6 +442,88 @@ def build_uri(entry: QueueEntry, lane: str) -> str | None:
     return f"annotate:{annotations}:{url}"
 
 
+# ── Every item's own level before it is handed over ─────────────────────────
+# Items were analysed when the item before them went on air, while the engine asked
+# for them at that same moment (it pre-loads one track), so an item with no analysis
+# was handed over without its level and aired as loud or quiet as its file (Jerusalem
+# 2026-11-17 20:00Z: -19.9 to -10.6 LUFS). Now the item is analysed before it is
+# handed over (at most LEVEL_WAIT_SECONDS), and items coming up are analysed ahead.
+LEVEL_WAIT_SECONDS = 6.0
+LOOK_AHEAD_ITEMS = 3
+LOOK_AHEAD_TIMED = timedelta(minutes=15)
+_level_jobs: dict[str, asyncio.Task] = {}
+
+
+async def _analyse_alone(asset_id: str) -> None:
+    from app.db.session import async_session_factory
+    from app.services.audio_analysis_service import analyze_audio
+
+    async with async_session_factory() as own:
+        await analyze_audio(own, asset_id)
+        await own.commit()
+
+
+def _level_job(asset) -> asyncio.Task | None:
+    """The analysis of this item: started now if it needs one, at most once per process."""
+    from app.models.asset import needs_analysis
+    from app.services import upcoming_analysis
+
+    if not upcoming_analysis.ENABLED:  # off in tests
+        return None
+    if asset is None or not asset.file_path or (asset.asset_type or "").lower() == "silence":
+        return None
+    key = str(asset.id)
+    job = _level_jobs.get(key)
+    if job is None:
+        if not needs_analysis(asset):
+            return None
+        if len(_level_jobs) > 2000:
+            for k in [k for k, t in _level_jobs.items() if t.done()][:1000]:
+                _level_jobs.pop(k, None)
+        job = asyncio.get_running_loop().create_task(_analyse_alone(key))
+        _level_jobs[key] = job
+    return job
+
+
+async def ensure_level(db: AsyncSession, entry: QueueEntry, wait: float = LEVEL_WAIT_SECONDS) -> None:
+    """Give `entry`'s item its analysis (level, cue points) before it is handed over.
+    Waits at most `wait` seconds; a slower analysis carries on and serves the next airing."""
+    job = _level_job(entry.asset)
+    if job is None:
+        return
+    if not job.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(job), wait)
+        except asyncio.TimeoutError:
+            logger.warning("Analysis of %s not ready in %.0f s; handed over without its level",
+                           entry.asset_id, wait)
+            return
+        except Exception:
+            pass
+    if job.done() and not job.cancelled() and job.exception() is None:
+        await db.refresh(entry.asset, ["metadata_extra"])
+
+
+async def _analyse_ahead(db: AsyncSession, station_id, now: datetime) -> None:
+    """Start the analysis of the next few items and of timed items due soon."""
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            or_(QueueEntry.preempt_at.is_(None), QueueEntry.preempt_at <= now + LOOK_AHEAD_TIMED),
+        )
+        .order_by(QueueEntry.preempt_at.isnot(None).desc(), QueueEntry.preempt_at, QueueEntry.position)
+        .limit(LOOK_AHEAD_ITEMS + 10)
+    )
+    entries = res.unique().scalars().all()
+    timed = [e for e in entries if e.preempt_at is not None]
+    music = [e for e in entries if e.preempt_at is None][:LOOK_AHEAD_ITEMS]
+    for e in timed + music:
+        _level_job(e.asset)
+
+
 # ── Choosing the next entry (same rules as the time-based engine in queue.py) ──
 
 
@@ -327,6 +532,7 @@ async def pick_next(
 ) -> QueueEntry | None:
     from app.api.v1.queue import OPERATOR_SOURCES
     from app.models.asset import not_placeholder
+    from app.services.station_blocks import blocked_asset_ids
 
     now = datetime.now(UTC)
     exclude = {str(x) for x in (exclude_ids or set())}
@@ -336,8 +542,27 @@ async def pick_next(
     # locks that /next then waited on.
     may_air = or_(
         QueueEntry.source.in_(OPERATOR_SOURCES),
-        QueueEntry.asset_id.notin_(select(Asset.id).where(~not_placeholder())),
+        and_(
+            QueueEntry.asset_id.notin_(select(Asset.id).where(~not_placeholder())),
+            # nor an item this station alone was told not to play
+            QueueEntry.asset_id.notin_(blocked_asset_ids(station_id)),
+        ),
     )
+    # Nor a sponsorship whose contract no longer covers today (it waited past its
+    # last day behind a long item). Read-only here too; the queue refill marks them.
+    from app.models.station import Station
+    from app.services.spot_schedule_service import lapsed_contract_assets
+
+    station = (await db.execute(select(Station).where(Station.id == station_id))).scalar_one_or_none()
+    lapsed = await lapsed_contract_assets(db, station, now) if station is not None else set()
+    if lapsed:
+        may_air = and_(
+            may_air,
+            or_(
+                QueueEntry.source.in_(OPERATOR_SOURCES),
+                QueueEntry.asset_id.notin_([uuid.UUID(x) for x in lapsed]),
+            ),
+        )
 
     def usable(entries):
         for e in entries:
@@ -434,7 +659,8 @@ async def _reconcile_given(db: AsyncSession, station_id, given: list[str]) -> se
 
 
 async def handle_next(
-    db: AsyncSession, station_id, given: list[str] | None = None, proto: int | None = None
+    db: AsyncSession, station_id, given: list[str] | None = None, proto: int | None = None,
+    engine_live_on: bool = False,
 ) -> dict | None:
     """The engine wants its next track: {"uri", "entry_id"}, or None if the queue is empty."""
     state = get_state(station_id)
@@ -449,6 +675,17 @@ async def handle_next(
     # stream under the host, and the item the show paused (its resume entry, queued
     # first) would be used up. The engine retries by itself once the show is over.
     if await _live_show_on(db, station_id):
+        return None
+    if engine_live_on:
+        # The engine is still quiet for a show that is over (its end never reached it:
+        # we restarted, or the command failed). Told in the background; it asks again.
+        task = asyncio.create_task(engine_live(station_id, False))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+
+    if state.engine_proto >= ENGINE_PROTO_HOLD and await _hold_before_hard_item(
+        db, station_id, state.cued_entry_id or (given[0] if given else None)
+    ):
         return None
 
     # The engine only asks when it holds nothing pre-loaded, so an entry we already handed
@@ -481,10 +718,18 @@ async def handle_next(
                 logger.warning("Replenish on empty queue failed: %s", e)
             if entry is None:
                 break
+        await ensure_level(db, entry)
+        if str(entry.id) in state.timed_sent:
+            # A Next sent this very entry down the timed lane while we were choosing
+            # (engine run 2026-11-18: it then went to both lanes, played in the timed
+            # lane and made the time check behind it 20 s late)
+            exclude.add(str(entry.id))
+            continue
         uri = build_uri(entry, "main")
         if uri:
             entry_id, asset_id = str(entry.id), str(entry.asset_id)
             state.cued_entry_id = entry_id
+            state.cued_at = time.monotonic()
             _note_handed(state, entry)
             await _record_handed(db, station_id, [(entry_id, asset_id)])
             logger.info("Engine next -> %s", entry_id)
@@ -509,6 +754,83 @@ async def handle_next(
             ),
         )
     return None
+
+
+async def _hold_before_hard_item(
+    db: AsyncSession, station_id, cued: str | None = None, now: datetime | None = None
+) -> bool:
+    """True when the item on air ends within a few seconds before a hard timed item.
+
+    A song handed out then starts and is cut after a second or two (Jerusalem 23:00Z
+    2026-11-17: a 266 s song aired for 2.4 s before the time check). The engine is given
+    nothing instead: the item on air plays to its end, the engine stays quiet for what
+    is left (its hold lane) and the timed item starts on its second. The engine asks
+    again every 2 s, so the next song is handed out as soon as the timed item is due.
+
+    `cued`: the entry the engine was handed last. The engine asks the moment that entry
+    starts, usually before its start report has arrived, so while it is still pending
+    it counts as the item on air, starting where the one before it hands over.
+    """
+    now = now or datetime.now(UTC)
+    res = await db.execute(
+        select(QueueEntry)
+        .options(joinedload(QueueEntry.asset))
+        .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current = res.unique().scalars().first()
+    end = _airs_until(current) if current is not None else None
+    from app.api.v1.queue import handover_seconds
+
+    # Where the next song would start: the crossfade point of the item on air
+    change = max(now, end - timedelta(seconds=handover_seconds(current))) if end is not None else now
+    held = None
+    if cued and (current is None or str(current.id) != str(cued)):
+        try:
+            held = (
+                await db.execute(
+                    select(QueueEntry)
+                    .options(joinedload(QueueEntry.asset))
+                    .where(QueueEntry.id == uuid.UUID(str(cued)), QueueEntry.status == "pending")
+                )
+            ).unique().scalar_one_or_none()
+        except ValueError:
+            held = None
+    if held is not None and held.asset is not None:
+        cue_out = stored_analysis(held.asset.metadata_extra).get("cue_out_seconds")
+        length = cue_out if isinstance(cue_out, (int, float)) and cue_out > 0 else held.asset.duration
+        if not length:
+            return False
+        change = change + timedelta(seconds=max(0.0, float(length) - handover_seconds(held)))
+    elif end is None:
+        return False
+    due = (
+        await db.execute(
+            select(QueueEntry.preempt_at)
+            .where(
+                QueueEntry.station_id == station_id,
+                QueueEntry.status == "pending",
+                hard_timed(),
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > now,
+                QueueEntry.preempt_at <= now + timedelta(minutes=30),
+            )
+            .order_by(QueueEntry.preempt_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if due is None:
+        return False
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=UTC)
+    room = (due - change).total_seconds()
+    hold = 0 <= room < HOLD_BEFORE_HARD_SECONDS
+    if hold:
+        logger.info(
+            "No song for the engine now: it would start %.1f s before the hard item at %s (on air %s, pre-loaded %s)",
+            room, due.strftime("%H:%M:%S"), getattr(current, "id", None), getattr(held, "id", None),
+        )
+    return hold
 
 
 async def _live_show_on(db: AsyncSession, station_id) -> bool:
@@ -604,19 +926,26 @@ async def handle_started(
         # show that is expected (/next hands it nothing then), so no alert.
         if not state.on_emergency and not await _live_show_on(db, station_id):
             state.on_emergency = True
-            await _alert(
-                db,
-                station_id,
-                state,
-                force=True,
-                title="Playout engine is on its emergency playlist",
-                message=(
-                    "The engine could not get a track from the backend and is playing "
-                    "its local emergency files."
-                ),
-            )
+            state.emergency_spell += 1
+            if EMERGENCY_ALERT_AFTER <= 0:
+                await _emergency_alert(db, station_id, state)
+            else:
+                task = asyncio.create_task(_emergency_alert_later(station_id, state.emergency_spell))
+                _background.add(task)
+                task.add_done_callback(_background.discard)
         return {"ok": True, "known": False}
 
+    if state.on_emergency or not state.emergency_cleared:
+        # Back on the station's own queue: the emergency alert has served its purpose.
+        # Also checked once per process, since a backend restart forgets on_emergency.
+        state.emergency_cleared = True
+        try:
+            from app.services.alert_service import clear_alerts
+
+            await clear_alerts(db, station_id, EMERGENCY_ALERT_TITLE,
+                               "the engine went back to the station's queue")
+        except Exception as e:
+            logger.warning("Could not clear the emergency alert: %s", e)
     state.on_emergency = False
     if state.cued_entry_id == str(entry.id):
         state.cued_entry_id = None
@@ -625,25 +954,10 @@ async def handle_started(
     if entry.status != "playing":
         mark_started(entry, now)
 
-    # Keep positions compact: playing first, then pending in order. One statement: row by
-    # row it was ~690 UPDATEs on Main and made every start report take over 3 s.
-    await db.flush()
-    ranked = (
-        select(
-            QueueEntry.id.label("id"),
-            func.row_number()
-            .over(order_by=(QueueEntry.status.desc(), QueueEntry.position))
-            .label("rn"),
-        )
-        .where(QueueEntry.station_id == station_id, QueueEntry.status.in_(["pending", "playing"]))
-        .subquery()
-    )
-    await db.execute(
-        update(QueueEntry)
-        .where(QueueEntry.id == ranked.c.id, QueueEntry.position != ranked.c.rn)
-        .values(position=ranked.c.rn)
-        .execution_options(synchronize_session=False)
-    )
+    # Keep positions compact: playing first, then pending in order
+    from app.services.queue_positions import compact_positions
+
+    await compact_positions(db, station_id)
     entry_pk = entry.id
     await db.commit()
 
@@ -661,6 +975,41 @@ async def handle_started(
 
 
 # ── Scheduler tick ───────────────────────────────────────────────────────────
+
+
+EMERGENCY_ALERT_TITLE = "Playout engine is on its emergency playlist"
+# A critical alert (and its push) only when the emergency music lasts: a second of it
+# while an item loads after a Next raised one on Main (03:46Z 2026-11-18) and cleared it
+# half a second later.
+EMERGENCY_ALERT_AFTER = 5.0
+
+
+async def _emergency_alert(db, station_id, state: EngineState) -> None:
+    await _alert(
+        db,
+        station_id,
+        state,
+        force=True,
+        title=EMERGENCY_ALERT_TITLE,
+        message=(
+            "The engine could not get a track from the backend and is playing "
+            "its local emergency files."
+        ),
+    )
+
+
+async def _emergency_alert_later(station_id, spell: int) -> None:
+    await asyncio.sleep(EMERGENCY_ALERT_AFTER)
+    state = get_state(station_id)
+    if not state.on_emergency or state.emergency_spell != spell:
+        return  # back on the queue meanwhile
+    try:
+        from app.db.session import async_session_factory
+
+        async with async_session_factory() as own:
+            await _emergency_alert(own, station_id, state)
+    except Exception as e:
+        logger.warning("Could not raise the emergency alert: %s", e)
 
 
 async def _alert(
@@ -923,6 +1272,172 @@ async def _flush_if_head_changed(db: AsyncSession, station_id, state: EngineStat
     await engine_flush(station_id)
 
 
+async def take_operator_change(db: AsyncSession, station_id, *, before_next: bool = False) -> bool:
+    """An operator changed the head of the queue (Play next, delete, reorder) or is
+    pressing Next: if the engine holds a different song as its next, take it back now so
+    it asks again and gets what the queue says. True if it was flushed.
+
+    Without this, Play next followed by Next within a few seconds played the automatic
+    song the engine already held and the operator's item one Next later: the automatic
+    swap runs on the 3 s tick and at most once in 15 s (harness operator_queue_then_next,
+    2026-11-18, 3 runs of 3).
+
+    `before_next`: a Next follows at once, so the item on air ends now anyway and the
+    last-seconds rule does not apply. Otherwise the pre-loaded song is kept when the item
+    on air ends within KEEP_CUED_LAST_SECONDS (a flush then would leave nothing ready)."""
+    state = get_state(station_id)
+    if not state.cued_entry_id:
+        return False
+    exclude = set(state.timed_sent) | (state.given - {state.cued_entry_id})
+    desired = await pick_next(db, station_id, exclude)
+    if desired is not None and str(desired.id) == state.cued_entry_id:
+        return False
+    if desired is None and before_next:
+        return False  # nothing else to give: keep what it holds rather than fall to emergency music
+    if not before_next:
+        res = await db.execute(
+            select(QueueEntry)
+            .options(joinedload(QueueEntry.asset))
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+            .order_by(QueueEntry.started_at.desc().nullslast())
+        )
+        current = res.unique().scalars().first()
+        end = _airs_until(current) if current is not None else None
+        if end is not None and (end - datetime.now(UTC)).total_seconds() < KEEP_CUED_LAST_SECONDS:
+            return False
+    logger.info(
+        "Operator changed the queue head (%s -> %s): flushing the engine's pre-loaded track",
+        state.cued_entry_id, desired.id if desired else None,
+    )
+    state.last_auto_flush = state.operator_flush_at = time.monotonic()
+    await engine_flush(station_id)
+    return True
+
+
+async def head_the_engine_does_not_hold(db: AsyncSession, station_id) -> QueueEntry | None:
+    """The queue's next item, when the engine has pre-loaded a different one; else None.
+
+    For Next. Taking the pre-loaded song back and skipping a moment later lost the item:
+    on Main (03:46Z 2026-11-18) a sponsorship waiting behind the song was handed over,
+    the skip came 0.8 s later while its file was still downloading, the engine's skip
+    ran over it and it was closed as "aired without a start report". Next sends this
+    item through the timed lane instead (loaded first, then on air), as Play now does."""
+    state = get_state(station_id)
+    if not state.cued_entry_id:
+        return None
+    exclude = set(state.timed_sent) | (state.given - {state.cued_entry_id})
+    desired = await pick_next(db, station_id, exclude)
+    if desired is None or str(desired.id) == state.cued_entry_id or desired.asset is None:
+        return None
+    # Short items only (a sponsorship, a jingle). Whatever plays in the timed lane is
+    # followed at once by the next timed item handed over, so a long item there would
+    # pull the hourly time check forward to its own end (engine run 2026-11-18: 37 s
+    # early), and the pause-and-resume rules for long items do not apply in that lane.
+    from app.services.long_items import is_long_form
+
+    length = float(desired.asset.duration or 0)
+    if not 0 < length <= NEXT_TIMED_LANE_MAX or is_long_form(desired.asset):
+        return None
+    if (desired.source or "").startswith("resume@"):
+        return None
+    until = datetime.now(UTC) + timedelta(seconds=length + NEXT_TIMED_LANE_CLEAR)
+    hard_soon = await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+            QueueEntry.preempt_at.is_not(None), QueueEntry.preempt_at <= until, hard_timed(),
+        ).limit(1)
+    )
+    if hard_soon.first() is not None:
+        return None
+    return desired
+
+
+# How long Next waits for the engine to load the item it sends down the timed lane.
+NEXT_LOAD_WAIT = 6.0
+# Next uses the timed lane only for items this short, and only when no hard timed item is
+# due until this long after the item would end.
+NEXT_TIMED_LANE_MAX = 120.0
+NEXT_TIMED_LANE_CLEAR = 60.0
+
+
+async def next_goes_to(station_id, entry: QueueEntry) -> bool:
+    """Next, when the engine holds a different song than the queue's head: the head is
+    loaded and then put on air (the song on air plays until then), and the pre-loaded
+    song is taken back so the engine asks for what follows. False if the engine did not
+    take it (the caller falls back to an ordinary skip)."""
+    uri = build_uri(entry, "timed")
+    if not uri:
+        return False
+    state = get_state(station_id)
+    entry_id = str(entry.id)
+    if state.cued_entry_id == entry_id or entry_id in state.given:
+        # The engine was handed this entry while we were choosing: it holds the right
+        # item now, an ordinary skip plays it
+        return False
+    state.timed_sent.add(entry_id)
+    state.skip_requested = True
+    # The engine answers once the file is loaded. A big or slow file takes longer than the
+    # answer is waited for: the engine has it all the same and airs it when it is loaded,
+    # so that is not a refusal (a skip then would end the song with nothing ready).
+    if not await engine_timed(station_id, uri, time.time(), entry_id, wait=NEXT_LOAD_WAIT, slow_is_ok=True):
+        state.timed_sent.discard(entry_id)
+        state.skip_requested = False
+        return False
+    logger.info("Next: %s goes on air through the timed lane (the engine held %s)", entry_id, state.cued_entry_id)
+    state.last_auto_flush = time.monotonic()
+    await engine_flush(station_id)
+    return True
+
+
+# After an operator's change took back the pre-loaded song, the engine asks again and has
+# to download the new one. A Next in that moment would end the song on air with nothing
+# ready (emergency music until the download is done), so Next waits: for the engine to
+# ask, then this long for the file. Only within OPERATOR_SETTLE_WINDOW of such a change;
+# an ordinary Next is not delayed.
+OPERATOR_SETTLE_WINDOW = 4.0
+OPERATOR_ASK_WAIT = 2.0
+OPERATOR_LOAD_SECONDS = 0.8
+
+
+async def settle_before_next(station_id) -> float:
+    """Called just before a Next. Returns the seconds waited (0 for an ordinary Next)."""
+    state = get_state(station_id)
+    began = time.monotonic()
+    if not state.operator_flush_at or began - state.operator_flush_at > OPERATOR_SETTLE_WINDOW:
+        return 0.0
+    while not state.cued_entry_id and time.monotonic() - began < OPERATOR_ASK_WAIT:
+        await asyncio.sleep(0.05)
+    if state.cued_entry_id:
+        left = OPERATOR_LOAD_SECONDS - (time.monotonic() - state.cued_at)
+        if left > 0:
+            await asyncio.sleep(left)
+    return time.monotonic() - began
+
+
+async def _take_back_before_hard_item(db: AsyncSession, station_id, state: EngineState) -> None:
+    """The engine already holds its next song, and that song would start seconds before
+    a hard timed item: take it back (flush), so the engine asks again and is held.
+
+    The engine does not always ask at the moment a song starts: around a Next it can
+    load a song further ahead, before the rule in handle_next could apply to it (harness
+    song_ends_before_hour, one run in six: the pre-loaded song played 1.5 s and was cut).
+    """
+    if state.engine_proto < ENGINE_PROTO_HOLD or not state.cued_entry_id:
+        return
+    res = await db.execute(
+        select(QueueEntry.id).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current_id = res.scalars().first()
+    if current_id is None or str(current_id) == state.cued_entry_id:
+        return  # the pre-loaded entry is the one starting now
+    # Would the song after the one on air start in the hold window?
+    if await _hold_before_hard_item(db, station_id, None):
+        logger.info("Taking back pre-loaded entry %s: it would start seconds before a hard item",
+                    state.cued_entry_id)
+        await engine_flush(station_id)
+
+
 # Alert when the item on air is still "on air" this long after its known end
 OVERRUN_ALERT_SECONDS = 30.0
 
@@ -1077,6 +1592,22 @@ async def _prune_handoffs(db: AsyncSession, station_id, state: EngineState) -> N
         await db.rollback()
 
 
+_background: set = set()
+
+
+async def _tell_live(station_id, state: EngineState, on: bool) -> None:
+    """Tell the engine once; an engine that does not answer is asked again every 15 s
+    (not on every pass: each try can cost the pass a command timeout)."""
+    if state.live_sent is on or (state.live_sent is None and not on):
+        # (Not known and no show on: an engine still quiet from a show that ended
+        # while we were restarting says so with its next ask, see handle_next)
+        return
+    if time.monotonic() - state.live_tried < 15.0:
+        return
+    state.live_tried = time.monotonic()
+    await engine_live(station_id, on)
+
+
 async def tick(db: AsyncSession, station) -> None:
     """Called by the scheduler loop for the engine-driven station."""
     station_id = station.id
@@ -1089,7 +1620,12 @@ async def tick(db: AsyncSession, station) -> None:
     if (station.automation_config or {}).get("live_show_id"):
         if state.cued_entry_id:
             await engine_flush(station_id)
+        # The stream goes quiet under the host. Sent again after an engine or backend
+        # restart during the show (the engine would play its emergency music).
+        await _tell_live(station_id, state, True)
         return
+    # The show is over (or we do not know what the engine was told): music again
+    await _tell_live(station_id, state, False)
 
     # 1. Hand hard-timed items (hourly ID, time, weather) to the engine ahead of time
     horizon = now + timedelta(seconds=TIMED_LEAD_SECONDS)
@@ -1117,6 +1653,11 @@ async def tick(db: AsyncSession, station) -> None:
         await db.rollback()
         await db.refresh(station)
     await _hand_over_timed(db, station_id, state, now, horizon)
+    try:
+        await _analyse_ahead(db, station_id, now)
+    except Exception as e:
+        logger.warning("Analysing upcoming items for station %s failed: %s", station_id, e)
+        await db.rollback()
 
     # Forget timed entries that no longer exist as pending (played, removed)
     if state.timed_sent:
@@ -1189,6 +1730,11 @@ async def tick(db: AsyncSession, station) -> None:
     # 3. The queue changed after the engine pre-loaded its next track: make it ask again
     if state.cued_entry_id:
         await _flush_if_head_changed(db, station_id, state, now)
+    try:
+        await _take_back_before_hard_item(db, station_id, state)
+    except Exception as e:
+        logger.warning("Take-back before a hard item failed for station %s: %s", station_id, e)
+        await db.rollback()
 
     # 4. "After the song, but no later than hard_by": the song is still on, so fade it
     await _enforce_hard_by(db, station_id, state, now)

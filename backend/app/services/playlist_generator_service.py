@@ -21,7 +21,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.asset import Asset, fit_for_random_pick, not_placeholder, stored_analysis
+from app.models.asset import (
+    Asset,
+    fit_for_random_pick,
+    in_category,
+    not_contract_audio,
+    not_placeholder,
+    stored_analysis,
+)
+from app.models.playlist_entry import PlaybackMode, PlaylistEntry
 from app.models.schedule import Schedule
 from app.models.station import Station
 from app.services.scheduling import SchedulingService
@@ -30,6 +38,8 @@ from app.services.spot_schedule_service import as_utc, load_blackouts
 CONFIG_KEY = "playlist_generation"
 DEFAULT_HOURS = 6
 DEFAULT_ARTIST_DISTANCE = 2
+# A place in the queue is counted as this long when working out when a waiting song airs
+QUEUED_PLACE_SECONDS = 240.0
 DEFAULT_DURATION = 180.0
 SKIP = timedelta(minutes=15)
 MAX_PICKS = 4000
@@ -134,13 +144,19 @@ def _artist_key(artist: str | None) -> str | None:
 class _Library:
     """Songs of each type, with when each last aired on this station."""
 
-    def __init__(self, db: AsyncSession, station_id, busy_ids: set, min_vote: int = 0):
+    def __init__(
+        self, db: AsyncSession, station_id, busy_ids: set, min_vote: int = 0,
+        queued: list | None = None, start: datetime | None = None,
+    ):
         self.db = db
         self.min_vote = min_vote
         # Types where no song reached the minimum vote, so the minimum was ignored.
         self.below_vote: set[tuple] = set()
         self.station_id = station_id
         self.busy = {str(i) for i in busy_ids}
+        # What waits in the queue, in order, and when the new songs start
+        self.queued = [str(i) for i in (queued or [])]
+        self.start = start
         self.pools: dict[tuple, list] = {}
         self.last_used: dict[str, datetime] | None = None
 
@@ -148,6 +164,16 @@ class _Library:
         from app.services.last_played import last_played
 
         self.last_used = await last_played(self.db, self.station_id)
+        # A song waiting in the queue counts as used when it will air (about four
+        # minutes a place, counted back from where the new songs start), not when
+        # it last aired. Otherwise a song queued an hour before the end that has
+        # never aired looks like the most rested one and is drawn again at once.
+        if self.start is not None:
+            n = len(self.queued)
+            for i, sid in enumerate(self.queued):
+                due = self.start - timedelta(seconds=QUEUED_PLACE_SECONDS * (n - i))
+                if due > self.last_used.get(sid, _EPOCH):
+                    self.last_used[sid] = due
 
     async def pool(self, asset_type: str, category: str | None) -> list:
         key = (asset_type, category)
@@ -156,9 +182,13 @@ class _Library:
                 Asset.asset_type == asset_type
             )
             if category:
-                stmt = stmt.where(Asset.category == category, not_placeholder())
+                stmt = stmt.where(in_category(category), not_placeholder(), not_contract_audio())
             else:
                 stmt = stmt.where(fit_for_random_pick())
+            # nor an item this station was told not to play ("Not on this station")
+            from app.services.station_blocks import blocked_asset_ids
+
+            stmt = stmt.where(Asset.id.notin_(blocked_asset_ids(self.station_id)))
             rows = []
             if self.min_vote:
                 rows = list((await self.db.execute(stmt.where(Asset.vote >= self.min_vote))).all())
@@ -185,16 +215,19 @@ class _Library:
         if not rows:
             return None, False
         epoch = datetime(1970, 1, 1, tzinfo=UTC)
-        # Longest-rested first. Songs already waiting in the queue go last.
-        far_future = datetime(9999, 1, 1, tzinfo=UTC)
+        # Longest-rested first. Songs already waiting in the queue go last, and
+        # among those the one drawn longest ago comes first: when a fill runs
+        # longer than the type has songs (48 hours from a few hundred), every
+        # song is waiting, and treating them all alike brought a song back a
+        # few songs after itself.
 
         def rested(row):
-            sid = str(row.id)
-            if sid in self.busy:
-                return far_future
-            return self.last_used.get(sid, epoch)
+            return self.last_used.get(str(row.id), epoch)
 
-        ordered = sorted(rows, key=lambda r: (rested(r), random.random()))
+        def waiting(row):
+            return str(row.id) in self.busy
+
+        ordered = sorted(rows, key=lambda r: (waiting(r), rested(r), random.random()))
         # The artist rule comes first, as in the studio program: when the only
         # songs clear of it are already waiting in the queue, one of those is
         # used again rather than putting an artist back too soon. Songs already
@@ -204,16 +237,105 @@ class _Library:
         candidates = clear or ordered
         # Draw from the most-rested third so the order is not the same every cycle...
         window = candidates[: max(1, math.ceil(len(candidates) / 3))]
-        # ...but only among songs that have rested about as long as the most
+        # ...never a waiting song while one that is not waiting is clear...
+        window = [r for r in window if waiting(r) == waiting(window[0])]
+        # ...and only among songs that have rested about as long as the most
         # rested one. Without this a song that aired an hour ago could be drawn
         # ahead of one that has never aired, just for sitting in the same third.
         longest = at - rested(window[0])
         if longest > timedelta(0):
             window = [r for r in window if at - rested(r) >= longest / 2]
         row = random.choice(window)
+        self.mark(row, at)
+        return row, relaxed
+
+    def mark(self, row, at: datetime) -> None:
+        """A drawn item counts as just used (and waiting in the queue)."""
         self.last_used[str(row.id)] = at
         self.busy.add(str(row.id))
-        return row, relaxed
+
+    def shuffle(self, rows: list, at: datetime):
+        """Random among a block's own songs, leaving out the most recently used
+        half (aired on this station or already drawn), as the old block player did."""
+        epoch = datetime(1970, 1, 1, tzinfo=UTC)
+
+        def used(row):
+            # Waiting in the queue counts as more recent than anything aired
+            sid = str(row.id)
+            return (sid in self.busy, self.last_used.get(sid, epoch))
+
+        unique = list({str(r.id): r for r in rows}.values())
+        by_use = sorted(unique, key=used, reverse=True)
+        recent_ids = {str(r.id) for r in by_use[: len(unique) // 2] if used(r) > (False, epoch)}
+        candidates = [r for r in rows if str(r.id) not in recent_ids] or rows
+        return random.choice(candidates)
+
+
+async def block_songs(db: AsyncSession, schedules) -> dict[str, list]:
+    """Songs added straight to a block ("+ Add song"), by block id, in play order.
+
+    Only enabled entries, and never a placeholder or a do_not_play item: no
+    automatic pick may use those, even when a person listed them on a block."""
+    block_ids = [b.id for s in schedules for b in (s.blocks or [])]
+    if not block_ids:
+        return {}
+    rows = await db.execute(
+        select(
+            PlaylistEntry.block_id,
+            PlaylistEntry.weight,
+            Asset.id,
+            Asset.title,
+            Asset.artist,
+            Asset.duration,
+            Asset.asset_type,
+            Asset.category,
+        )
+        .join(Asset, Asset.id == PlaylistEntry.asset_id)
+        .where(
+            PlaylistEntry.block_id.in_(block_ids),
+            PlaylistEntry.is_enabled.is_(True),
+            not_placeholder(),
+        )
+        .order_by(PlaylistEntry.block_id, PlaylistEntry.position, PlaylistEntry.created_at)
+    )
+    songs: dict[str, list] = {}
+    for row in rows.all():
+        songs.setdefault(str(row.block_id), []).append(row)
+    return songs
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _run_start(svc: SchedulingService, block, at: datetime, station) -> datetime:
+    """When the run of `block` that is on at `at` began (UTC). A start-only block
+    began at its last start; a timed one at the start of the window holding `at`
+    (yesterday's window for the part of an overnight block after midnight)."""
+    local = svc.station_local(at, station)
+    naive = local.replace(tzinfo=None)
+    began = None
+    if getattr(block, "until_next", False):
+        began = svc.last_start(block, local, station)
+    else:
+        for day in (naive.date(), naive.date() - timedelta(days=1)):
+            try:
+                lo, hi = svc._block_window(block, day, station)
+            except Exception:
+                continue
+            if lo <= naive < hi:
+                began = lo
+                break
+    if began is None:
+        began = datetime.combine(naive.date(), datetime.min.time())
+    return began.replace(tzinfo=local.tzinfo).astimezone(UTC)
+
+
+def _mode(block) -> PlaybackMode:
+    mode = getattr(block, "playback_mode", None) or PlaybackMode.SEQUENTIAL
+    try:
+        return PlaybackMode(mode)
+    except ValueError:
+        return PlaybackMode.SEQUENTIAL
 
 
 async def generate(
@@ -227,6 +349,7 @@ async def generate(
     cursor: dict | None = None,
     recent_artists: list[str | None] | None = None,
     busy_ids: set | None = None,
+    queued: list | None = None,
     timed: list[TimedItem] | None = None,
 ) -> Plan:
     """`timed`: items already queued for set times after `start`, so each pick's
@@ -248,8 +371,9 @@ async def generate(
         .all()
     )
     blackouts = await load_blackouts(db, station.id, start, end)
+    songs_by_block = await block_songs(db, schedules)
     svc = SchedulingService(db)
-    library = _Library(db, station.id, busy_ids or set(), min_vote)
+    library = _Library(db, station.id, busy_ids or set(), min_vote, queued, start)
     recent: deque = deque(
         [k for k in (_artist_key(a) for a in (recent_artists or [])) if k],
         maxlen=artist_distance or 1,
@@ -273,6 +397,49 @@ async def generate(
             continue
         ranked = svc.rank_matching_blocks(schedules, at, station)
         block = ranked[0][1] if ranked else None
+        own = songs_by_block.get(str(block.id)) if block is not None else None
+        named = block.playlist_template if block is not None and block.playlist_template_id else None
+        both = bool(own and named is not None and named.is_active and named.slots)
+        if both:
+            # Both: the songs added by hand play first, each once per run of the
+            # block, then the block's playlist fills the rest (Shmuel, 2026-11-17).
+            if library.last_used is None:
+                await library._load_last_used()
+            began = _run_start(svc, block, at, station)
+            own = [
+                r for r in own
+                if library.last_used.get(str(r.id), _EPOCH) < began
+                and not (str(r.id) in library.busy and began <= start)
+            ]
+        if own:
+            # The block's own songs, in the block's playback mode.
+            if library.last_used is None:
+                await library._load_last_used()
+            key = str(block.id)
+            mode = _mode(block)
+            if mode == PlaybackMode.SHUFFLE:
+                row = library.shuffle(own, at)
+            elif mode == PlaybackMode.WEIGHTED:
+                row = random.choices(own, weights=[max(int(r.weight or 1), 1) for r in own], k=1)[0]
+            elif both:
+                row = own[0]  # in the block's order; the playlist's cursor is left alone
+            else:
+                index = int(cursor.get(key, 0)) % len(own)
+                row = own[index]
+                cursor[key] = (index + 1) % len(own)
+            library.mark(row, at)
+            picks.append(
+                Pick(
+                    at=at, block_id=key, block_name=block.name, asset_type=row.asset_type,
+                    category=row.category, asset_id=row.id, title=row.title, artist=row.artist,
+                    duration=float(row.duration or DEFAULT_DURATION),
+                )
+            )
+            artist = _artist_key(row.artist)
+            if artist and artist_distance:
+                recent.append(artist)
+            clock.play(await library.on_air(row))
+            continue
         template = block.playlist_template if block is not None and block.playlist_template_id else None
         slots = list(template.slots) if template and template.is_active else []
         if not slots:

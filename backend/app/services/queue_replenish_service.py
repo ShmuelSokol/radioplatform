@@ -17,7 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date
 
-from app.models.asset import ONE_MOMENT_CATEGORIES, Asset, fit_for_random_pick, not_placeholder
+from app.models.asset import (
+    ONE_MOMENT_CATEGORIES,
+    Asset,
+    fit_for_random_pick,
+    in_category,
+    not_contract_audio,
+    not_placeholder,
+)
 from app.models.play_log import PlayLog
 from app.models.queue_entry import QueueEntry
 from app.models.schedule_rule import ScheduleRule
@@ -54,6 +61,10 @@ class QueueReplenishService:
         self.db = db
         self.station_id = station_id
         self.automation_config: dict = {}
+        # Where each item last stands in the queue (its highest position), and
+        # what aired in the last two hours: used when the list is used up
+        self.last_place: dict = {}
+        self.recent_ids: set = set()
 
     async def _load_automation_config(self) -> None:
         """Load the station's automation_config JSONB."""
@@ -83,6 +94,7 @@ class QueueReplenishService:
 
         from app.services.playlist_generator_service import settings_for
         from app.services.schedule_refresh_service import (
+            KEEP_NEXT,
             automatic_songs,
             drop_dated_clips,
             realign_before_block_change,
@@ -97,6 +109,9 @@ class QueueReplenishService:
         # ahead, whether or not "Generate from sequences" was switched on. A week of
         # ordinary fill left from before is replaced, or the blocks would wait for it.
         generation = settings_for(self.automation_config)
+        # Songs thrown away to be drawn again stay on the air (uncommitted) until the
+        # new ones are written, so the queue never runs out of songs in between
+        redrawing = False
         by_schedule = not generation.enabled and await uses_block_playlists(self.db, self.station_id)
         if by_schedule:
             generation = dataclasses.replace(generation, enabled=True)
@@ -107,13 +122,15 @@ class QueueReplenishService:
                 .where(*automatic_songs(self.station_id))
             )
             if float(queued_auto.scalar() or 0) > 2 * generation.hours * 3600:
-                await remove_automatic_songs(self.db, self.station_id)
+                await remove_automatic_songs(self.db, self.station_id, keep_next=KEEP_NEXT)
+                redrawing = True
                 logger.info("Station %s now fills from its schedule blocks: old fill replaced", self.station_id)
         if by_schedule or (generation.enabled and await uses_block_playlists(self.db, self.station_id)):
             # Shortly before a block's playlist takes over, draw the songs again from
             # the real time on air so the block starts on time, not early
             station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
-            await realign_before_block_change(self.db, station, datetime.now(timezone.utc))
+            if await realign_before_block_change(self.db, station, datetime.now(timezone.utc)):
+                redrawing = True
         await self.db.flush()
 
         result = await self.db.execute(
@@ -146,8 +163,11 @@ class QueueReplenishService:
         # built-in hourly time and weather instead of replacing them. The hour is queued
         # first, so a block due on the hour plays right after the time and weather.
         keep_hourly = blocks_keep_hourly(self.automation_config)
-        if keep_hourly and wants_hourly:
-            await self._schedule_hourly_announcements()
+        # "Hourly Station ID" (automation_config.hourly_station_id): the station ID
+        # jingle airs in the same hh:00 group, after the time check and weather.
+        wants_id = bool(self.automation_config.get("hourly_station_id"))
+        if keep_hourly and (wants_hourly or wants_id):
+            await self._schedule_top_of_hour(wants_hourly, wants_id)
             await self.db.flush()
 
         blocks_result = None
@@ -157,25 +177,29 @@ class QueueReplenishService:
             logger.exception("Program blocks could not be queued for station %s", self.station_id)
         if blocks_result is not None:
             self.max_pos = max(self.max_pos, blocks_result["max_pos"])
-        if blocks_result is None and wants_hourly and not keep_hourly:
-            await self._schedule_hourly_announcements()
+        if blocks_result is None and (wants_hourly or wants_id) and not keep_hourly:
+            await self._schedule_top_of_hour(wants_hourly, wants_id)
 
         await self._schedule_ad_slots()
-        await self.db.commit()
+        if self.automation_config.get("hard_start", True) is False:
+            # HS off: the time checks, block items and ad slots just written (or put
+            # back to their planned timing) must not stay hard until the scheduler's
+            # next pass, or one due meanwhile would cut the song (wiki/station-modes.md)
+            from app.services.station_modes import soften_hard_items
+
+            station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
+            await soften_hard_items(self.db, station)
+        if not redrawing:
+            await self.db.commit()
 
         # Playlist generation: fill a few hours ahead from the schedule blocks'
         # playlist sequences instead of the rule-based 7-day fill.
         if generation.enabled:
-            if await self._fill_from_playlists(generation, total_seconds):
-                return
-            # Nothing could be generated (no block with a sequence): keep the
-            # station on the air with the ordinary fill, but only as far ahead
-            # as generation looks, so sequences take over once they exist.
-            shortfall = generation.hours * 3600 - total_seconds
-            if shortfall > 0:
-                self.queued_ids = set()
-                self.exclude_ids = set()
-                await self._fill_content(shortfall, asset_type="music", category=None)
+            try:
+                await self._generate_or_fill(generation, total_seconds)
+            finally:
+                if redrawing:
+                    await self.db.commit()
             return
 
         if total_seconds >= TARGET_QUEUE_SECONDS:
@@ -192,12 +216,16 @@ class QueueReplenishService:
         self.max_pos = result.scalar() or 0
 
         result = await self.db.execute(
-            select(QueueEntry.asset_id).where(
+            select(QueueEntry.asset_id, QueueEntry.position).where(
                 QueueEntry.station_id == self.station_id,
                 QueueEntry.status.in_(["pending", "playing"]),
             )
         )
-        self.queued_ids = {row[0] for row in result.all()}
+        queued = result.all()
+        self.queued_ids = {row[0] for row in queued}
+        for asset_id, position in queued:
+            if position is not None and position > self.last_place.get(asset_id, -1):
+                self.last_place[asset_id] = position
 
         cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
         result = await self.db.execute(
@@ -208,6 +236,7 @@ class QueueReplenishService:
             )
         )
         recent_ids = {row[0] for row in result.all()}
+        self.recent_ids = recent_ids
         self.exclude_ids = self.queued_ids | recent_ids
 
         rules = await self._load_rules()
@@ -243,6 +272,18 @@ class QueueReplenishService:
 
         await self.db.commit()
         logger.info("Queue replenishment complete")
+
+    async def _generate_or_fill(self, generation, total_seconds: float) -> None:
+        if await self._fill_from_playlists(generation, total_seconds):
+            return
+        # Nothing could be generated (no block with a sequence): keep the
+        # station on the air with the ordinary fill, but only as far ahead
+        # as generation looks, so sequences take over once they exist.
+        shortfall = generation.hours * 3600 - total_seconds
+        if shortfall > 0:
+            self.queued_ids = set()
+            self.exclude_ids = set()
+            await self._fill_content(shortfall, asset_type="music", category=None)
 
     async def _realign_weather_region(self, region: str) -> int:
         """Point queued weather spots at the station's own region.
@@ -442,6 +483,7 @@ class QueueReplenishService:
             cursor=saved.get("cursor") or {},
             recent_artists=[row[1] for row in pending][-20:],
             busy_ids=set(self.queued_ids),
+            queued=[row[0] for row in pending],
             timed=timed,
         )
         if not plan.picks:
@@ -473,41 +515,14 @@ class QueueReplenishService:
         return True
 
     async def _load_rules(self) -> list[ScheduleRule]:
-        """Load ALL active rules for this station across all time windows.
-
-        Station-specific rules take priority. If ANY exist for this station,
-        global rules (station_id IS NULL) are ignored entirely.
+        """Load ALL active rules for this station across all time windows
+        (see rules_for_station).
 
         NOTE: Hour/day filtering is intentionally removed here. When filling a
         7-day queue window we need all daypart rules so _fill_content_time_aware
         can distribute content correctly across morning/afternoon/evening slots.
         """
-        result = await self.db.execute(
-            select(ScheduleRule)
-            .where(
-                ScheduleRule.is_active == True,
-                ScheduleRule.station_id == self.station_id,
-            )
-            .order_by(ScheduleRule.priority.desc())
-        )
-        station_rules = list(result.scalars().all())
-
-        if station_rules:
-            logger.info(
-                "Station %s: using %d station-specific rule(s), ignoring global rules",
-                self.station_id, len(station_rules),
-            )
-            return station_rules
-
-        result = await self.db.execute(
-            select(ScheduleRule)
-            .where(
-                ScheduleRule.is_active == True,
-                ScheduleRule.station_id.is_(None),
-            )
-            .order_by(ScheduleRule.priority.desc())
-        )
-        return list(result.scalars().all())
+        return await rules_for_station(self.db, self.station_id)
 
     def _get_fill_spec(self, rules: list[ScheduleRule]) -> tuple[str, str | None]:
         """Return (asset_type, category) for gap-filling from the top daypart rule."""
@@ -530,15 +545,7 @@ class QueueReplenishService:
 
     @staticmethod
     def _rule_covers(rule: ScheduleRule, local: datetime) -> bool:
-        """Whether a rule's hours and days include this station-local moment."""
-        days = (rule.days_of_week or "0,1,2,3,4,5,6").split(",")
-        if str(local.weekday()) not in days:
-            return False
-        start = rule.hour_start or 0
-        end = 24 if rule.hour_end is None else rule.hour_end
-        if start <= end:
-            return start <= local.hour < end
-        return local.hour >= start or local.hour < end  # range past midnight (22-2)
+        return rule_covers(rule, local)
 
     async def _spread_rule_items(
         self, rules: list[ScheduleRule], fill_start_pos: int, queued_seconds: float,
@@ -642,7 +649,11 @@ class QueueReplenishService:
         logger.debug("Fixed-time rule '%s': skipping (real-time engine)", rule.name)
 
     def _apply_oldies_filter(self, query):
-        """If station has oldies_only config, restrict to old release dates."""
+        """This station's own limits on a draw: never an item it was told not to play
+        ("Not on this station"), and with oldies_only config only old release dates."""
+        from app.services.station_blocks import blocked_asset_ids
+
+        query = query.where(Asset.id.notin_(blocked_asset_ids(self.station_id)))
         if self.automation_config.get("oldies_only"):
             min_years = self.automation_config.get("oldies_min_years", 10)
             cutoff = date.today() - timedelta(days=min_years * 365)
@@ -652,7 +663,7 @@ class QueueReplenishService:
     async def _find_assets_for_rule(self, rule: ScheduleRule) -> Sequence[Asset]:
         query = select(Asset).where(Asset.asset_type == rule.asset_type)
         if rule.category:
-            query = query.where(Asset.category == rule.category, not_placeholder())
+            query = query.where(in_category(rule.category), not_placeholder(), not_contract_audio())
         else:
             query = query.where(fit_for_random_pick())
         if self.exclude_ids:
@@ -672,10 +683,14 @@ class QueueReplenishService:
         )
         self.db.add(entry)
         self.queued_ids.add(asset.id)
+        self.last_place[asset.id] = max(position, self.last_place.get(asset.id, -1))
         self.max_pos = max(self.max_pos, position)
         logger.debug("Enqueued %s '%s' at position %d", asset.asset_type, asset.title, position)
 
     async def _insert_sponsors(self, shortfall: float) -> None:
+        # Spots mode off (control room): no sponsorship goes in the queue
+        if (self.automation_config or {}).get("spots_on", True) is False:
+            return
         now = datetime.now(timezone.utc)
         current_hour = now.hour
         result = await self.db.execute(select(Sponsor).order_by(Sponsor.priority.desc()))
@@ -815,7 +830,7 @@ class QueueReplenishService:
 
             query = select(Asset).where(Asset.asset_type == asset_type)
             if category:
-                query = query.where(Asset.category == category, not_placeholder())
+                query = query.where(in_category(category), not_placeholder(), not_contract_audio())
             else:
                 query = query.where(fit_for_random_pick())
             # Only exclude on first pass; allow repeats on subsequent passes
@@ -837,8 +852,12 @@ class QueueReplenishService:
                 continue  # try next pass with fewer exclusions
 
             batch_count = 0
-            for asset in candidates:
-                if filled >= shortfall:
+            in_turn = passes >= 3
+            # In turn, the rounds left are drawn as one run (a list is used at
+            # most max_passes times a fill, so one song never fills a week)
+            run = len(candidates) * (max_passes - passes + 1)
+            for asset in self._in_turn(candidates) if in_turn else candidates:
+                if filled >= shortfall or (in_turn and batch_count >= run):
                     break
                 dur = asset.duration or DEFAULT_DURATION
                 self.max_pos += 1
@@ -859,10 +878,34 @@ class QueueReplenishService:
 
             logger.info("Pass %d: filled %.1fs from %d candidates (%d used)", passes, filled, len(candidates), batch_count)
 
-            if filled >= shortfall:
+            if filled >= shortfall or in_turn:
                 break
 
         logger.info("Total filled %.1fs of %s content in %d passes", filled, asset_type, passes)
+
+    def _in_turn(self, candidates):
+        """The list has been used up and items come round again: yield the one
+        whose last place in the queue is furthest back, chosen at random among
+        the most rested quarter, for as long as the caller asks.
+
+        A fresh random order for each round put the end of one round next to
+        the start of the next (All Day Stories had one story twice 11 minutes
+        apart on 2026-11-18), and a top-up of one or two items could pick the
+        story queued a moment ago.
+        """
+        import random
+
+        def rest(asset):
+            place = self.last_place.get(asset.id)
+            if place is not None:
+                return (2, place)
+            return (1, 0) if asset.id in self.recent_ids else (0, 0)
+
+        order = sorted(candidates, key=lambda a: (rest(a), random.random()))
+        while order:
+            asset = order.pop(random.randrange(max(1, len(order) // 4)))
+            yield asset
+            order.append(asset)
 
     async def _replenish_requests_only(self) -> None:
         """Fill queue exclusively from song requests (approved/queued) + popular requests."""
@@ -959,6 +1002,75 @@ class QueueReplenishService:
 
         await self.db.flush()
         logger.info("Requests-only replenish: filled %.1fs", filled)
+
+    async def _schedule_top_of_hour(self, time_and_weather: bool, station_id: bool) -> None:
+        if time_and_weather:
+            await self._schedule_hourly_announcements()
+        if station_id:
+            await self._schedule_hourly_station_ids()
+
+    async def _schedule_hourly_station_ids(self) -> None:
+        """Queue the station ID jingle (jingle / hourly_id) at each of the station's own
+        hh:00 for the next 48 hours, in the same timed group as the time check and
+        weather and after them (the time check stays on the second).
+
+        The "Hourly Station ID" switch was read only by the playlist-template path,
+        which nothing calls, so it did nothing (V1-79). A jingle whose title names the
+        hour ("3:00 PM") is used for that hour, otherwise any station ID jingle; with
+        no jingle in the library nothing is queued. None inside Shabbos / Yom Tov."""
+        from app.models.asset import not_placeholder
+        from app.services.spot_schedule_service import load_blackouts
+        from app.services.weather_spot_service import station_announcement_zone
+
+        jingles = list((await self.db.execute(
+            select(Asset)
+            .where(Asset.asset_type == "jingle", func.lower(Asset.category) == "hourly_id", not_placeholder())
+            .order_by(Asset.title)
+        )).scalars().all())
+        if not jingles:
+            return
+        zone = await station_announcement_zone(self.db, self.station_id)
+        now = datetime.now(timezone.utc)
+        queued = await self.db.execute(
+            select(QueueEntry.preempt_at).where(
+                QueueEntry.station_id == self.station_id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.asset_id.in_([j.id for j in jingles]),
+            )
+        )
+        have = {
+            (at if at.tzinfo else at.replace(tzinfo=timezone.utc)).replace(second=0, microsecond=0)
+            for (at,) in queued.all()
+        }
+        blackouts = await load_blackouts(self.db, self.station_id, now, now + timedelta(hours=49))
+
+        def for_hour(hour: int) -> Asset:
+            label = f"{12 if hour % 12 == 0 else hour % 12}:00 {'AM' if hour < 12 else 'PM'}"
+            for j in jingles:
+                title = j.title or ""
+                at = title.find(label)
+                # "1:00 PM" must not match "11:00 PM"
+                if at >= 0 and (at == 0 or not title[at - 1].isdigit()):
+                    return j
+            return jingles[0]
+
+        for mark in local_hour_marks(now, zone, 48):
+            if mark in have or any(b.covers(mark) for b in blackouts):
+                continue
+            self.max_pos += 1
+            self.db.add(QueueEntry(
+                id=uuid.uuid4(),
+                station_id=self.station_id,
+                asset_id=for_hour(mark.astimezone(zone).hour).id,
+                position=self.max_pos,
+                status="pending",
+                preempt_at=mark,
+                # Soft: it follows the time check and weather of the same hh:00 group
+                # (by position) and never cuts anything; hard, it would start ~45 s
+                # after its time and the air watch would report it late.
+                timing_mode="soft",
+            ))
 
     async def _schedule_hourly_announcements(self) -> None:
         """Pre-schedule time announcement + weather at each hour boundary with preempt_at.
@@ -1192,7 +1304,11 @@ class QueueReplenishService:
     async def _purge_placeholders(self, keep_ad_slots: bool) -> None:
         """Take placeholder items (NEVER_AUTO_TITLES) out of the queue wherever an
         automatic pick put them; only entries not yet on air, never an operator's own."""
+        from app.services.station_blocks import blocked_asset_ids
+
         ids = (await self.db.execute(select(Asset.id).where(~not_placeholder()))).scalars().all()
+        # and what this station alone was told not to play ("Not on this station")
+        ids = list(ids) + list((await self.db.execute(blocked_asset_ids(self.station_id))).scalars().all())
         if not ids:
             return
         # What an operator or listener chose stays; everything automatic goes.
@@ -1213,3 +1329,47 @@ class QueueReplenishService:
     # Backwards-compat alias
     async def _fill_random_music(self, shortfall: float) -> None:
         await self._fill_content(shortfall, asset_type="music", category=None)
+
+
+async def rules_for_station(db: AsyncSession, station_id) -> list[ScheduleRule]:
+    """The active rules that apply to one station, highest priority first.
+
+    A station's own rules win: if it has any, the global rules (no station) are
+    ignored entirely. A rule that belongs to another station never applies. Every
+    place that judges a station by its rules reads them here (the fill, the warning
+    on a queue move, the Rules preview): on 2026-11-17 a queue move on Kol B'ramah
+    Main was warned about by the All Day Stories station's rule because that check
+    read every station's rules.
+    """
+    own = list(
+        (
+            await db.execute(
+                select(ScheduleRule)
+                .where(ScheduleRule.is_active == True, ScheduleRule.station_id == station_id)  # noqa: E712
+                .order_by(ScheduleRule.priority.desc())
+            )
+        ).scalars().all()
+    )
+    if own:
+        return own
+    return list(
+        (
+            await db.execute(
+                select(ScheduleRule)
+                .where(ScheduleRule.is_active == True, ScheduleRule.station_id.is_(None))  # noqa: E712
+                .order_by(ScheduleRule.priority.desc())
+            )
+        ).scalars().all()
+    )
+
+
+def rule_covers(rule: ScheduleRule, local: datetime) -> bool:
+    """Whether a rule's hours and days include this station-local moment."""
+    days = (rule.days_of_week or "0,1,2,3,4,5,6").split(",")
+    if str(local.weekday()) not in days:
+        return False
+    start = rule.hour_start or 0
+    end = 24 if rule.hour_end is None else rule.hour_end
+    if start <= end:
+        return start <= local.hour < end
+    return local.hour >= start or local.hour < end  # range past midnight (22-2)

@@ -293,3 +293,42 @@ export const detectAudience = async (
   });
   return res.data;
 };
+
+export interface DoNotPlayResult {
+  id: string;
+  category: string | null;
+  do_not_play: boolean;
+  /** Waiting copies taken out of the queues (all stations) */
+  removed_from_queue: number;
+  /** Copies left: on air, already loaded by the stream server, or timed */
+  still_to_play: number;
+}
+
+export interface StationBlockResult {
+  id: string;
+  station_id: string;
+  station_name: string;
+  blocked: boolean;
+  /** Waiting copies taken out of this one station's queue */
+  removed_from_queue: number;
+  /** Copies left on this station: on air, already loaded by the stream server, or timed */
+  still_to_play: number;
+}
+
+/** Is this song kept off this one station ("Not on this station")? */
+export const getStationBlock = async (id: string, stationId: string): Promise<boolean> => {
+  const res = await apiClient.get<{ blocked: boolean }>(`/assets/${id}/station-block`, { params: { station_id: stationId } });
+  return res.data.blocked;
+};
+
+/** Control room quick action: keep a song off one station only, or allow it there again. */
+export const setStationBlock = async (id: string, stationId: string, on: boolean): Promise<StationBlockResult> => {
+  const res = await apiClient.post<StationBlockResult>(`/assets/${id}/station-block`, { station_id: stationId, on });
+  return res.data;
+};
+
+/** Control room quick action: stop a song from being played again on every station, or allow it again. */
+export const setDoNotPlay = async (id: string, on: boolean): Promise<DoNotPlayResult> => {
+  const res = await apiClient.post<DoNotPlayResult>(`/assets/${id}/do-not-play`, { on });
+  return res.data;
+};

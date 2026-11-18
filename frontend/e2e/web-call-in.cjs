@@ -2,7 +2,8 @@
  * Web call-ins, end to end with two browsers: the host (fake mic, 440 Hz) on the
  * Host Console and a caller (fake mic, 880 Hz) on /call/<station>, plus a socket
  * listening like a listener page. Checks who hears what at each step.
- * Needs the backend on :8000 and the site on :3000 (see wiki/live-shows.md):
+ * Needs a real backend and the site built against it (see wiki/live-shows.md); defaults
+ * :8000 and :3000, or API_URL / BASE_URL:
  *   KBR_ADMIN_EMAIL=admin KBR_ADMIN_PASSWORD=... node e2e/web-call-in.cjs <station id>
  */
 const { chromium } = require('playwright');
@@ -18,7 +19,7 @@ for (const [f, name] of [[440, 'host'], [880, 'caller']]) {
   fs.writeFileSync(path.join(DIR, `${name}.wav`), buf);
 }
 const WebSocket = globalThis.WebSocket;
-const API = 'http://localhost:8000/api/v1', SITE = 'http://localhost:3000';
+const API = process.env.API_URL || 'http://localhost:8000/api/v1', SITE = process.env.BASE_URL || 'http://localhost:3000';
 const STATION = process.argv[2];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let fails = 0;
@@ -58,7 +59,7 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
 
   // Listener socket
   const heard = [];
-  const lws = new WebSocket(`ws://localhost:8000/api/v1/ws/live/station/${STATION}/listen`);
+  const lws = new WebSocket(`${API.replace(/^http/, 'ws')}/ws/live/station/${STATION}/listen`);
   lws.binaryType = 'arraybuffer';
   lws.onmessage = (e) => { if (typeof e.data !== 'string') { heard.push(...new Int16Array(e.data)); if (heard.length > 48000) heard.splice(0, heard.length - 48000); } };
   const lastHeard = () => heard.slice(-12000);
@@ -75,6 +76,18 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
     await sleep(3000);
     let t = tones(lastHeard());
     check('listeners hear the host', t.host > 0.003 && t.caller < 0.001, fmt(t));
+    // F-HOST-1: the VU meter moves with the microphone
+    const vu = await host.evaluate(() => {
+      const bar = [...document.querySelectorAll('div[style*="width"]')].find((d) => d.parentElement?.className.includes('rounded-full'));
+      return bar ? parseFloat(bar.style.width) : -1;
+    });
+    check('host VU meter moves', vu > 0, `${vu.toFixed(1)}%`);
+
+    // F-SCREENER-1: the screener is open before the caller joins and lists them live
+    const screener = await (await hostB.newContext()).newPage();
+    await screener.addInitScript((tk) => localStorage.setItem('access_token', tk), token);
+    await screener.goto(`${SITE}/admin/live/${show.id}/screen`);
+    await screener.getByText('Waiting (0)').waitFor({ timeout: 10000 });
 
     const caller = await (await callerB.newContext({ permissions: ['microphone'] })).newPage();
     await caller.addInitScript(RECORD);
@@ -93,17 +106,22 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
     const calls = (await (await fetch(`${API}/live-shows/${show.id}/calls`, { headers: H })).json()).calls;
     const call = calls.find((c) => c.caller_name === 'Moshe');
     check('screener lists the web caller', !!call && call.status === 'waiting', JSON.stringify(calls.map((c) => [c.caller_name, c.status])));
-    const screener = await (await hostB.newContext()).newPage();
-    await screener.addInitScript((tk) => localStorage.setItem('access_token', tk), token);
-    await screener.goto(`${SITE}/admin/live/${show.id}/screen`);
-    await screener.getByText('Moshe').first().waitFor({ timeout: 10000 });
-    check('Call Screener page shows Moshe', true);
-    await fetch(`${API}/live-shows/${show.id}/calls/${call.id}/approve`, { method: 'POST', headers: H });
+    const t0 = Date.now();
+    await screener.getByText('Waiting (1)').waitFor({ timeout: 3000 });
+    check('Call Screener lists Moshe in Waiting without a reload', await screener.getByText('Moshe').first().isVisible(), `${Date.now() - t0} ms after the API check`);
+    // Approve on the screener; it moves to Approved there and on the host console
+    await screener.getByRole('button', { name: 'Approve' }).first().click();
     await caller.getByText('Approved').waitFor({ timeout: 5000 });
     check('caller page: approved', true);
-    await fetch(`${API}/live-shows/${show.id}/calls/${call.id}/on-air`, { method: 'POST', headers: H });
+    await screener.getByText('Approved (1)').waitFor({ timeout: 3000 });
+    check('screener: Moshe moves to Approved', await screener.getByText('Waiting (0)').isVisible());
+    // F-HOST-3: the host puts the caller on air from the console's queue
+    await host.getByText('Approved Queue (1)').waitFor({ timeout: 5000 });
+    await host.getByRole('button', { name: 'Put On Air' }).click();
     await caller.getByText("You're on the air").waitFor({ timeout: 5000 });
     check('caller page: on the air', true);
+    await host.getByText('No caller on air').waitFor({ state: 'detached', timeout: 5000 });
+    check('host console: Moshe in Caller On Air', await host.getByText('ON AIR', { exact: true }).isVisible());
     await sleep(3000);
     t = tones(lastHeard());
     check('listeners hear host and caller together', t.host > 0.003 && t.caller > 0.003, fmt(t));
@@ -120,6 +138,14 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
     await sleep(16000);
     const after = (await (await fetch(`${API}/live-shows/${show.id}/calls`, { headers: H })).json()).calls.find((c) => c.id === call.id);
     check('the call is closed after the caller leaves', after.status === 'completed', after.status);
+    // F-HOST-1: Stop Broadcasting takes the host off the air (listeners are told)
+    const offAir = new Promise((res) => {
+      const f = (e) => { if (typeof e.data === 'string' && JSON.parse(e.data).live === false) { lws.removeEventListener('message', f); res(true); } };
+      lws.addEventListener('message', f); setTimeout(() => res(false), 5000);
+    });
+    await host.getByText('Stop Broadcasting').click();
+    check('Stop Broadcasting: listeners are told the host is off air', await offAir);
+    check('Start Broadcasting is back', await host.getByText('Start Broadcasting').isVisible());
     await fetch(`${API}/live-shows/${show.id}/end`, { method: 'POST', headers: H });
   } finally {
     lws.close(); await hostB.close(); await callerB.close();

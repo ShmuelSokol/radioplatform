@@ -2,15 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCampaigns, useCreateCampaign } from '../../hooks/useCampaigns';
 import Spinner from '../../components/Spinner';
-
-const statusColors: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-700',
-  in_review: 'bg-yellow-100 text-yellow-700',
-  approved: 'bg-green-100 text-green-700',
-  active: 'bg-blue-100 text-blue-700',
-  paused: 'bg-orange-100 text-orange-700',
-  completed: 'bg-purple-100 text-purple-700',
-};
+import { statusColors } from '../../components/campaigns/CampaignParts';
 
 export default function SponsorCampaigns() {
   const { data: campaigns, isLoading } = useCampaigns();

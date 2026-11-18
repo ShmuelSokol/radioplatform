@@ -119,6 +119,8 @@ class SpotScheduleOut(SpotScheduleBase):
     station_id: UUID | str | None = None
     created_at: datetime
     updated_at: datetime
+    # After a save: plays that do not fit in the coming days (empty = all fit)
+    warnings: list[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -130,6 +132,7 @@ class PlannedSpot(BaseModel):
     timing_mode: str = "soft"
     fixed: bool = False
     block: str | None = None  # the program block whose sponsor place this is
+    moved_from: str | None = None  # its own time of day was full; rolled here
     schedule_id: UUID | str
     sponsor_id: UUID | str
     sponsor_name: str
@@ -162,3 +165,5 @@ class SpotPlanPreview(BaseModel):
     planned: list[PlannedSpot]
     unplaced: list[UnplacedSpot]
     off_air: list[OffAirWindow] = []
+    # Spots mode is off in the control room: nothing is planned until it is on again
+    spots_off: bool = False

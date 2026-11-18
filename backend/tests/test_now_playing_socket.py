@@ -214,3 +214,29 @@ async def test_first_message_is_an_error_when_the_read_fails(monkeypatch):
     assert sent[0]["type"] == "error"
     assert sent[0]["message"]
     _Svc.error = None
+
+
+async def test_socket_stays_open_after_the_read_error(monkeypatch):
+    """V1-124: after {"type":"error"} the listener is still connected: it gets a pong
+    to its next message and stays registered for broadcasts until it leaves."""
+    async def no_queue(station_id):
+        return None
+
+    import app.db.session as session_mod
+    monkeypatch.setattr(ws_mod, "_cached_queue_now_playing", no_queue)
+    monkeypatch.setattr(session_mod, "get_async_session", _one_session)
+    monkeypatch.setattr(ws_mod, "SchedulingService", _Svc)
+    _Svc.result, _Svc.error = None, RuntimeError("db down")
+    try:
+        sock = FakeSocket(incoming=["still here?"], hang=0.3)
+        task = asyncio.create_task(ws_mod.websocket_now_playing(sock, "st"))
+        await asyncio.sleep(0.1)
+        assert sock in ws_mod.manager.active_connections["st"]
+        await ws_mod.manager.broadcast_to_station("st", {"type": "now_playing", "data": {"asset_id": "a2"}})
+        await asyncio.wait_for(task, 2)
+    finally:
+        _Svc.error = None
+    assert sock.sent[0]["type"] == "error"
+    assert sock.sent[1] == {"type": "pong", "data": "still here?"}
+    assert '"a2"' in sock.sent[2]
+    assert "st" not in ws_mod.manager.active_connections

@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
+import { guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const SHOTS = process.env.SHOTS_DIR || '';
@@ -32,7 +33,7 @@ let failures = 0;
 const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`); if (!ok) failures++; };
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
-const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const browser = guardBrowser(await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] }));
 
 /* ── Desktop ── */
 {
@@ -128,4 +129,4 @@ const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gestur
 
 await browser.close();
 console.log(failures ? `${failures} failed` : 'All passed');
-process.exit(failures ? 1 : 0);
+process.exit((failures ? 1 : 0) || (guardVerdict() ? 1 : 0));
