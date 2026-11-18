@@ -128,3 +128,51 @@ async def test_rules_preview_for_a_station_shows_only_its_rules(client, auth_hea
     base = "/api/v1/rules/preview?date=2026-11-17"
     assert names(await client.get(f"{base}&station_id={main.id}", headers=auth_headers)) == {"Main music"}
     assert names(await client.get(f"{base}&station_id={stories.id}", headers=auth_headers)) == {"Stories all day"}
+
+
+@pytest.mark.asyncio
+async def test_every_way_of_moving_gives_the_same_reminder(client, auth_headers, db_session):
+    """Arrows, a typed position and drag-and-drop answer alike (2026-11-18: a drag on the
+    Stories station warned about a music item, the arrows said nothing)."""
+    main, _, _ = await _station_with_queue(db_session, name="Main")
+    stories, _, _ = await _station_with_queue(db_session, name="Stories")
+    db_session.add(_rule("All Day Stories (Stories Station)", stories, asset_type="stories"))
+    await db_session.commit()
+
+    async def answers(station):
+        ids = await _pending_ids(db_session, station.id)
+        out = {}
+        res = await client.post(_url(station, "/move-up"), headers=auth_headers,
+                                json={"entry_id": ids[2], "new_position": 0})
+        assert res.status_code == 200
+        out["up"] = res.json()["warnings"]
+        res = await client.post(_url(station, "/move-down"), headers=auth_headers,
+                                json={"entry_id": ids[2], "new_position": 0})
+        assert res.status_code == 200
+        out["down"] = res.json()["warnings"]
+        res = await client.put(_url(station, "/reorder"), headers=auth_headers,
+                               json={"entry_id": ids[3], "new_position": 1})
+        assert res.status_code == 200
+        out["typed"] = res.json()["warnings"]
+        after = await _pending_ids(db_session, station.id)
+        top = (await db_session.get(QueueEntry, uuid.UUID(after[0]), populate_existing=True)).position
+        res = await client.post(_url(station, "/reorder-dnd"), headers=auth_headers,
+                                json={"entry_id": after[2], "new_position": top})
+        out["drag"] = res.json()["warnings"]
+        # The moves themselves are done: up then down puts it back, then the last goes
+        # first, then the third goes first
+        assert after == [ids[3], ids[0], ids[1], ids[2]]
+        assert await _pending_ids(db_session, station.id) == [after[2], after[0], after[1], after[3]]
+        return out
+
+    on_main = await answers(main)
+    assert on_main == {"up": [], "down": [], "typed": [], "drag": []}
+    on_stories = await answers(stories)
+    assert all(len(w) == 1 and "All Day Stories (Stories Station)" in w[0] for w in on_stories.values())
+    assert len({w[0] for w in on_stories.values()}) == 1  # word for word the same
+
+    # An entry already first: the arrow does nothing and says nothing
+    first = (await _pending_ids(db_session, stories.id))[0]
+    res = await client.post(_url(stories, "/move-up"), headers=auth_headers,
+                            json={"entry_id": first, "new_position": 0})
+    assert res.status_code == 200 and res.json()["warnings"] == []

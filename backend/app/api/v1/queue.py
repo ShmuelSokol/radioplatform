@@ -2398,6 +2398,27 @@ async def insert_into_queue(
     }
 
 
+async def _warnings_where_it_stands(db: AsyncSession, station_id: uuid.UUID, entry: QueueEntry) -> list[str]:
+    """The reminders for an entry at the place it was just moved to (not yet committed).
+    Every way of moving an entry answers with the same ones: arrows, a typed position
+    and drag-and-drop. Never blocks the move."""
+    await db.flush()
+    pending = list(
+        (
+            await db.execute(
+                select(QueueEntry)
+                .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+                .order_by(QueueEntry.position)
+            )
+        ).scalars().all()
+    )
+    try:
+        return await _validate_queue_move(db, station_id, entry, entry.position, pending)
+    except Exception:  # a reminder must never fail the move
+        logger.warning("Move warnings could not be worked out", exc_info=True)
+        return []
+
+
 @router.post("/move-up", dependencies=[Depends(operator_turn)])
 async def move_up(
     station_id: uuid.UUID,
@@ -2422,11 +2443,13 @@ async def move_up(
         .order_by(QueueEntry.position.desc()).limit(1)
     )
     above = result.scalar_one_or_none()
+    warnings: list[str] = []
     if above:
         above.position, entry.position = entry.position, above.position
+        warnings = await _warnings_where_it_stands(db, station_id, entry)
         await db.commit()
     await _engine_takes_queue_change(db, station_id)
-    return {"message": "Moved up"}
+    return {"message": "Moved up", "warnings": warnings}
 
 
 @router.post("/move-down", dependencies=[Depends(operator_turn)])
@@ -2452,11 +2475,13 @@ async def move_down(
         .order_by(QueueEntry.position.asc()).limit(1)
     )
     below = result.scalar_one_or_none()
+    warnings: list[str] = []
     if below:
         below.position, entry.position = entry.position, below.position
+        warnings = await _warnings_where_it_stands(db, station_id, entry)
         await db.commit()
     await _engine_takes_queue_change(db, station_id)
-    return {"message": "Moved down"}
+    return {"message": "Moved down", "warnings": warnings}
 
 
 @router.put("/reorder", dependencies=[Depends(operator_turn)])
@@ -2488,9 +2513,10 @@ async def reorder_queue(
         .execution_options(synchronize_session=False)
     )
     entry.position = body.new_position
+    warnings = await _warnings_where_it_stands(db, station_id, entry)
     await db.commit()
     await _engine_takes_queue_change(db, station_id)
-    return {"message": "Reordered"}
+    return {"message": "Reordered", "warnings": warnings}
 
 
 async def _validate_queue_move(

@@ -14,8 +14,9 @@ such as 22-2 work).
 Who reads them:
 
 - the fill (`QueueReplenishService._load_rules`),
-- the warning shown after a drag-and-drop move in the control room
-  (`queue._validate_queue_move`; a warning never stops the move),
+- the warning shown after any move in the control room: arrows, a typed position and
+  drag-and-drop all answer with `warnings` from `queue._validate_queue_move` (until
+  2026-11-18 only drag-and-drop did); a warning never stops the move,
 - `GET /rules/preview?station_id=` (without a station it still mixes every rule).
 
 ## What went wrong (2026-11-17)
