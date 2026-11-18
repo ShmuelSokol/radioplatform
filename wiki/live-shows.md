@@ -149,3 +149,9 @@ A caller is known by `CallInRequest.caller_key`: `tel:<number>` for a phone call
 - `GET /caller-profiles` and `PUT /caller-profiles/{id}`: the list at the foot of the Call Screener, where a block is lifted when the person is not calling.
 
 A web caller who clears their browser data is a new caller. The block is a convenience for the screener, who still sees every call; it is not a wall. The Host Console shows the history read only. Browser check: `ONLY=history` in `e2e/live-delay.cjs`; tests in `tests/test_caller_history.py`.
+
+## Take-over and host-gone timing on the stream (PC check after PR 340, 2026-11-18)
+
+- `/playout/{station}/live.mp3` is open from the moment the engine is told to go quiet (`told_soon`, a second before first air) and sends silence in real time until the first words. It used to answer 204 until the show was heard, so the engine connected only on its next try: 2.3 s of silence on the stream at every take-over.
+- The wait of `live_host_gone_seconds` is noted the moment the host's socket closes (`scheduler_engine.note_host_left`), not when a scheduler pass first sees it, and forgotten when a host sends again. On Jerusalem with delay 15 and limit 15 the count had begun only when the delay had played out: 17.5 s of silence after the host's last words. (Not reproduced locally, where the passes saw the leaving in time; the count no longer depends on them.)
+- The control room browser checks use a fake backend: a live show there is "on air, 15 s delay" (`station.air` overrides), so the badge reads "LIVE, 15 s delay: <title>".

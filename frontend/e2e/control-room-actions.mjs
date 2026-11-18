@@ -352,7 +352,7 @@ async function badges(browser) {
   const tag = 'badges';
   const station = makeStation({ shows: [{ id: 'ls7', station_id: 'st-1', title: 'Erev Shabbos Live', status: 'live' }] });
   const { ctx, page } = await openRoom(browser, { viewport: { width: 1600, height: 900 } }, station);
-  const live = page.getByRole('link', { name: /LIVE: Erev Shabbos Live/ });
+  const live = page.getByRole('link', { name: /LIVE, 15 s delay: Erev Shabbos Live/ });
   check(`${tag}: LIVE badge links to the host console`, await live.getAttribute('href') === '/admin/live/ls7/host');
   check(`${tag}: Go live tab turns red "● Live"`, await page.getByRole('tab', { name: '● Live' }).count() === 1);
   for (const [status, label] of [

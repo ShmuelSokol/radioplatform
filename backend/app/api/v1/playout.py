@@ -188,7 +188,7 @@ LIVE_MP3_ARGS = ("-f", "mp3", "-codec:a", "libmp3lame", "-b:a", "192k", "-ar", "
 async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
     """The station's live show as listeners hear it (after the broadcast delay, Dumps
     applied, time checks included), for the playout engine's live lane and a local FM
-    box's relay. 204 while no show is heard; otherwise an MP3 stream that ends when the
+    box's relay. 204 while no show is heard or about to be; otherwise an MP3 stream that ends when the
     show's delay has played out. Header token only, so it never lands in an access log."""
     import asyncio
 
@@ -198,7 +198,13 @@ async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
     from app.services.live_air import RATE
 
     air = live_relay.airs.get(str(station_id))
-    if air is None or not air.listening or air.closed:
+    # Open too in the last second before the show is first heard (the engine is told
+    # to go quiet then, `on_soon`): silence is sent until the first words. Answering
+    # 204 until then made the engine come back a second later and connect only after
+    # the show had begun: 2.3 s of silence on the stream at every take-over
+    # (KBR Jerusalem, 2026-11-18).
+    about_to = air is not None and air.told_soon and not air.finishing
+    if air is None or air.closed or not (air.listening or about_to):
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
     tap = air.tap()
 
@@ -213,8 +219,20 @@ async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
 
         async def feed():
             try:
+                started = False
                 while True:
-                    data = await tap.get()
+                    if started:
+                        data = await tap.get()
+                    else:
+                        try:
+                            data = await asyncio.wait_for(tap.get(), 0.1)
+                        except asyncio.TimeoutError:
+                            # Not heard yet: silence in real time keeps the reader connected
+                            # and decoding, so the first words follow without a gap
+                            proc.stdin.write(bytes(int(RATE * 0.1) * 2))
+                            await proc.stdin.drain()
+                            continue
+                        started = True
                     if data is None:
                         break
                     proc.stdin.write(data)
