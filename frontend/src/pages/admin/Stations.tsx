@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStations, useCreateStation, useUpdateStation, useDeleteStation } from '../../hooks/useStations';
 import apiClient from '../../api/client';
+import { listAssets } from '../../api/assets';
+import type { Asset } from '../../types';
 import Spinner from '../../components/Spinner';
 import PlayoutBadge from '../../components/audio/PlayoutBadge';
 import { useAuth } from '../../hooks/useAuth';
@@ -358,6 +360,69 @@ function LocationConfig({ latitude, longitude, onSave, saving }: {
   );
 }
 
+/** The item that plays after a Dump while the delay refills: search the library, pick one. */
+function FillerPick({ value, onChange }: {
+  value: { id: string; title: string } | null;
+  onChange: (v: { id: string; title: string } | null) => void;
+}) {
+  const [text, setText] = useState('');
+  const [found, setFound] = useState<Asset[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const q = text.trim();
+    if (q.length < 2) { setFound(null); setFailed(false); return; }
+    let stale = false;
+    const id = setTimeout(() => {
+      listAssets({ search: q, limit: 8, hide_generated: true })
+        .then(r => { if (!stale) { setFound(r.assets); setFailed(false); } })
+        .catch(() => { if (!stale) { setFound(null); setFailed(true); } });
+    }, 300);
+    return () => { stale = true; clearTimeout(id); };
+  }, [text]);
+  const length = (a: Asset) => {
+    const s = Math.round(Number(a.duration) || 0);
+    return s ? ` (${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')})` : '';
+  };
+  return (
+    <div className="mt-4 max-w-lg text-sm" data-testid="live-filler">
+      <span className="block font-medium text-gray-700">Filler after a Dump</span>
+      {value ? (
+        <div className="mt-1 flex items-center gap-2">
+          <span className="px-2 py-1 border rounded bg-gray-50" data-testid="live-filler-chosen">{value.title}</span>
+          <button type="button" onClick={() => onChange(null)} data-testid="live-filler-clear"
+            className="px-2 py-1 border rounded text-xs hover:bg-gray-100">No filler</button>
+        </div>
+      ) : (
+        <>
+          <input type="search" value={text} onChange={e => setText(e.target.value)}
+            placeholder="Search the library for a jingle" aria-label="Search the library for a filler"
+            className="mt-1 w-full px-2 py-1 border rounded" data-testid="live-filler-search" />
+          {failed && <div className="mt-1 text-xs text-red-600">The library could not be searched. Try again.</div>}
+          {found && found.length === 0 && <div className="mt-1 text-xs text-gray-500">Nothing found.</div>}
+          {found && found.length > 0 && (
+            <ul className="mt-1 border rounded divide-y" data-testid="live-filler-results">
+              {found.map(a => (
+                <li key={a.id}>
+                  <button type="button" className="w-full text-left px-2 py-1 hover:bg-gray-100"
+                    onClick={() => { onChange({ id: String(a.id), title: a.title }); setText(''); setFound(null); }}>
+                    {a.title}{length(a)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      <span className="block mt-1 text-xs text-gray-500">
+        A jingle or station ID that listeners hear right after a Dump, for as long as was cut, so the delay is full
+        again when it ends and a second Dump works at once. Pick one at least as long as the delay; a shorter one
+        plays once and the rest fills back slowly. With no filler the delay fills back slowly while the host talks.
+        Remember to press Save.
+      </span>
+    </div>
+  );
+}
+
 function AutomationConfig({ config, onSave, saving }: {
   config: Record<string, any>;
   onSave: (cfg: Record<string, any>) => void;
@@ -373,6 +438,10 @@ function AutomationConfig({ config, onSave, saving }: {
   const [liveDump, setLiveDump] = useState<string>(String(config.live_dump_seconds ?? 0));
   const [liveTimed, setLiveTimed] = useState<string>(config.live_timed_items ?? 'time');
   const [liveRecord, setLiveRecord] = useState<boolean>(config.live_record_shows !== false);
+  const [filler, setFiller] = useState<{ id: string; title: string } | null>(
+    config.live_dump_filler_asset_id
+      ? { id: String(config.live_dump_filler_asset_id), title: String(config.live_dump_filler_title || 'Chosen item') }
+      : null);
 
   const handleSave = () => {
     onSave({
@@ -383,6 +452,8 @@ function AutomationConfig({ config, onSave, saving }: {
       live_dump_seconds: Math.min(40, Math.max(0, Number.isFinite(parseFloat(liveDump)) ? parseFloat(liveDump) : 0)),
       live_timed_items: liveTimed,
       live_record_shows: liveRecord,
+      live_dump_filler_asset_id: filler?.id ?? null,
+      live_dump_filler_title: filler?.title ?? null,
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
       weather_enabled: weatherOn,
@@ -455,6 +526,7 @@ function AutomationConfig({ config, onSave, saving }: {
           right away, but only cuts what was said in the last 8 seconds.
         </span>
       </label>
+      <FillerPick value={filler} onChange={setFiller} />
       <label className="mt-4 block max-w-lg text-sm">
         <span className="block font-medium text-gray-700">Timed items during a live show</span>
         <select value={liveTimed} onChange={e => setLiveTimed(e.target.value)}

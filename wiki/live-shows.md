@@ -152,7 +152,7 @@ A web caller who clears their browser data is a new caller. The block is a conve
 
 ## Take-over and host-gone timing on the stream (PC check after PR 340, 2026-11-18)
 
-- `/playout/{station}/live.mp3` is open from the moment the engine is told to go quiet (`told_soon`, a second before first air) and sends silence in real time until the first words. It used to answer 204 until the show was heard, so the engine connected only on its next try: 2.3 s of silence on the stream at every take-over.
+- `/playout/{station}/live.mp3` is open from the moment the engine is told of the show (`told_soon`, a second before first air); the answer waits, empty, for the first words. (PR 343 sent silence meanwhile; taken out again, see "The stream goes quiet when the show's audio is here".) It used to answer 204 until the show was heard, so the engine connected only on its next try: 2.3 s of silence on the stream at every take-over.
 - The wait of `live_host_gone_seconds` is noted the moment the host's socket closes (`scheduler_engine.note_host_left`), not when a scheduler pass first sees it, and forgotten when a host sends again. On Jerusalem with delay 15 and limit 15 the count had begun only when the delay had played out: 17.5 s of silence after the host's last words. (Not reproduced locally, where the passes saw the leaving in time; the count no longer depends on them.)
 - The control room browser checks use a fake backend: a live show there is "on air, 15 s delay" (`station.air` overrides), so the badge reads "LIVE, 15 s delay: <title>".
 
@@ -165,6 +165,10 @@ The qnet skin greys every disabled button whatever its colour (`!important` in `
 ## A pass in the second before first air (harness, 2026-11-18)
 
 `playout_engine.tick` used to send "live off" whenever the station was not the show's, and in the second between the early quiet (`on_soon`) and the take-over it is not yet: a pass falling there started a song that the take-over cut 0.6 to 0.9 s later. The tick now leaves the engine alone while `_show_about_to_be_heard`.
+
+## The stream goes quiet when the show's audio is here (engine, 2026-11-18)
+
+On "live on" the engine used to go quiet at once and then open `live.mp3`: until that feed had connected and buffered (2 to 3.5 s) the stream was silent, at every take-over (KBR Jerusalem 17:34Z: quiet 3.5 s before the host's first words). Now `/live` in `radio.liq` only notes the wish (`live_asked`), starts the feed and lets the music play on; `go_live()` runs when `live_feed.is_ready()`, when the song on air has under 2 s left (the item loaded behind it is the one for after the show and must not start), or after 5 s whatever is there. Until then the engine still says `live=1` to the backend (`live_wanted()`), so the item that follows the show is handed out and nothing new is started. A "live off" in that wait just drops the wish: the music never stopped. The show reaches the stream a feed-buffer later than the page players (about 2 to 3 s), with nothing lost. Needs the engines redeployed (`setup.sh`); an engine not yet redeployed behaves as before.
 
 ## Co-host from another place
 
@@ -179,3 +183,14 @@ The qnet skin greys every disabled button whatever its colour (`!important` in `
 ## Timed items on a stream station enter the show early
 
 The stream server plays the show from `live.mp3` about 2 s behind the delay's own output (its input buffer), so a time check put into the show at hh:00:00 reached stream listeners at hh:00:02 (harness 2026-11-18), while a listener page heard it on time. `live_inserts.stream_lead(station)` gives the lead: `STREAM_LAG` (2.0 s, or `automation_config.live_stream_lag_seconds`) when the engine drives the station, `PLAYOUT_STREAM_LIVE` is on and the engine carries the show (proto 5 or later); otherwise 0. `prepare` takes it off the item's `air_at`. If the measured lag changes, set the station's `live_stream_lag_seconds`; do not change the engine's buffer for it.
+
+## Filler after a Dump
+
+A station can name one library item as its filler (`automation_config.live_dump_filler_asset_id`, with `live_dump_filler_title` for display; Stations page, "Filler after a Dump"). It is decoded once when the host starts (`live_inserts.load_filler`, at most 40 s) and kept on the show's `LiveAir` (`filler`). At a Dump, `fill_after` counts what the Dump left in the delay; that airs first with no stretching, then `_start_fill` plays the filler for exactly the seconds the delay is short (`target - count`), as an `Insert` of kind `filler`. The host's words gather meanwhile, so the delay is whole when the filler ends and a second Dump cuts a full delay again. Without a filler the delay builds back by stretching speech, about a minute or two for 15 s.
+
+- A filler shorter than the gap plays once; the rest builds back by stretching. One cut short is faded out over a third of a second.
+- No filler when the delay is being left (Exit delay) or the show is finishing.
+- A second Dump during the filler: the rest of the filler plays, then it starts again for what is still missing.
+- `GET /live-shows/{id}/air` has `filler` (its title once ready); the panel shows FILLER ON AIR and the Host Console says when the host's words will air.
+- A local test backend has no address for uploaded files, so the browser check (`ONLY=filler`) serves the audio itself and points the item's `file_path` at it.
+- Tests `tests/test_live_filler.py`.

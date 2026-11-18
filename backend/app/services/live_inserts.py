@@ -171,3 +171,32 @@ async def prepare(db: AsyncSession, station, now: datetime) -> int:
         asyncio.ensure_future(_load(air, entry.id, station.id, asset.id, asset.title or "Timed item",
                                     "time" if is_time else "timed", url, _aware(entry.preempt_at) - lead))
     return taken
+
+
+async def load_filler(air, asset_id: str) -> None:
+    """Fetch the station's filler (what plays after a Dump while the delay refills) and
+    hand it to the show's delay line. No filler when it cannot be read: the delay then
+    builds back by stretching, as it does on a station with none."""
+    from app.db.session import get_async_session
+    from app.models.asset import Asset
+    from app.services.live_air import MAX_DELAY
+    from app.services.playout_engine import audio_url
+
+    url, title = None, ""
+    async for db in get_async_session():
+        try:
+            asset = await db.get(Asset, uuid.UUID(str(asset_id)))
+            if asset is not None:
+                url, title = audio_url(asset), asset.title or "Filler"
+        except Exception:
+            logger.exception("Could not read the live show filler %s", asset_id)
+        break
+    if not url:
+        logger.warning("Live show filler %s has no audio that can be read", asset_id)
+        return
+    pcm = await decode_clip(url)
+    if pcm is None or air.closed:
+        return
+    air.filler = pcm[: int(MAX_DELAY * RATE)]
+    air.filler_title = title
+    logger.info("Live show on station %s: filler '%s' (%.1f s) ready", air.station_id, title, len(air.filler) / RATE)

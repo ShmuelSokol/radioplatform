@@ -1224,9 +1224,10 @@ async def test_the_wait_for_a_gone_host_counts_from_their_leaving_without_a_sche
 
 
 @pytest.mark.asyncio
-async def test_live_mp3_opens_with_silence_in_the_second_before_the_show_is_heard(client, db_session, _quiet, monkeypatch):
-    """The engine is told to go quiet a second before first air and connects at once:
-    204 then meant it connected only after the show had begun (2.3 s of silence)."""
+async def test_live_mp3_is_open_in_the_second_before_the_show_is_heard(client, db_session, _quiet, monkeypatch):
+    """The engine is told of the show a second before first air and connects at once:
+    204 then meant it connected only after the show had begun. The answer stays open
+    and empty until the first words (the engine plays its music until audio comes)."""
     import shutil
 
     from app.config import settings
@@ -1252,7 +1253,7 @@ async def test_live_mp3_opens_with_silence_in_the_second_before_the_show_is_hear
     r = await asyncio.wait_for(client.get(url, headers=token), 15)
     await ending
     assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg"
-    assert len(r.content) > 8000 and r.content[0] == 0xFF       # about a second of (silent) audio already
+    assert len(r.content) < 2000                                # no silence sent ahead of the show
     assert air.taps == set()
 
 
