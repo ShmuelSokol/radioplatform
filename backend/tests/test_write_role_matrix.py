@@ -211,6 +211,11 @@ WRITE_POLICY = {
     ("POST", "/spot-recordings/{recording_id}/generate"): MANAGERS,
     ("POST", "/spot-recordings/{recording_id}/reject"): MANAGERS,
     ("POST", "/spot-schedules"): MANAGERS,
+    ("POST", "/rds/messages"): MANAGERS,
+    ("PATCH", "/rds/messages/{message_id}"): MANAGERS,
+    ("DELETE", "/rds/messages/{message_id}"): MANAGERS,
+    ("PUT", "/rds/stations/{station_id}/settings"): MANAGERS,
+    ("POST", "/rds/check"): STAFF,  # read-only wording check for the editor
     ("PUT", "/spot-schedules/timing-defaults"): MANAGERS,
     ("DELETE", "/spot-schedules/{schedule_id}"): MANAGERS,
     ("PUT", "/spot-schedules/{schedule_id}"): MANAGERS,

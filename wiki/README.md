@@ -22,7 +22,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [listener-player-bar](listener-player-bar.md) — the station keeps playing on the other listener pages: the Listen page stays mounted, hidden; bar with Stop
 - [live-listeners](live-listeners.md): when a listener counts as live, instant join/leave push to admin pages
 - [playlist-generation](playlist-generation.md) — queue generated ahead from sequences of song types, artist distance, longest-rested first
-- [rds-feed](rds-feed.md) — plain-text now-playing line for the FM RDS encoder (Magic RDS)
+- [rds-feed](rds-feed.md) — RDS manager: PS, RadioText rotation, sponsor lines, encoder feeds and pickup log, Magic RDS setup
 - [song-request-matching.md](song-request-matching.md) — how listener requests map to library assets; known nickname + recall bugs
 - [spot-schedules](spot-schedules.md) — Sponsor spot scheduling by daypart, how clock slots get filled, legacy single-spot fallback, sponsor portal data sources
 - [schedule-look-ahead](schedule-look-ahead.md) — Conflict look-ahead page, shared block resolver, tie-break order, blocks are station-local time (were UTC)

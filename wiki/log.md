@@ -363,3 +363,4 @@ INGEST 2026-11-18 streaming-architecture.md engine proto 5: live lane plays /liv
 INGEST 2026-11-18 live-shows.md a show's pre-roll waits for a timed item on air (hold_until) instead of cutting it at take-over; a live show that never took the station over is hard-stopped too (live_show_id is set only at first air)
 INGEST 2026-11-18 live-shows.md host gone: station back to music after live_host_gone_seconds with alert; engine told live-on 1 s before first air; control room badge NO HOST / FILLING / LIVE with delay; cut timed item not resumed after a show
 INGEST 2026-11-18 live-shows.md caller desk: the caller's topic/notes shown and editable on both screens (was stored, never shown), Hold, Next caller
+INGEST 2026-11-18 rds-feed.md RDS manager: rotation, sponsor lines, PS, Latin-only text, encoder pickup log; Magic RDS reads a URL or file, no TCP
