@@ -60,6 +60,114 @@ function backdrop(): string {
   return '#ffffff';
 }
 
+/** One `box-shadow` layer drawn inside the box with no blur: a qnet bevel line. */
+type EdgeLine = { x: number; y: number; color: string };
+
+/** Split a computed box-shadow list into layers (colours carry commas inside brackets). */
+function insetLines(shadow: string): { lines: EdgeLine[]; rest: string[] } | null {
+  if (!shadow || shadow === 'none' || !shadow.includes('inset')) return null;
+  const lines: EdgeLine[] = [];
+  const rest: string[] = [];
+  for (const layer of shadow.split(/,(?![^(]*\))/)) {
+    const color = layer.match(/(rgba?|hsla?|color|oklch|lab|lch)\([^)]*\)|#[0-9a-f]+/i)?.[0];
+    const nums = layer.replace(color || '', '').match(/-?[\d.]+px/g)?.map(parseFloat) || [];
+    const [x = 0, y = 0, blur = 0, spread = 0] = nums;
+    if (layer.includes('inset') && color && !blur && !spread) lines.push({ x, y, color });
+    else rest.push(layer.trim());
+  }
+  return lines.length ? { lines, rest } : null;
+}
+
+/**
+ * Safari draws inset box-shadows wrongly inside the SVG picture that modern-screenshot makes:
+ * the qnet bevel lines came out shifted off their buttons, and one ran down the middle of the
+ * screen (Shmuel's iPhone, 2026-11-18). While the picture is taken on Safari, each side's
+ * outermost bevel line becomes that side's border (with the padding made smaller by as much,
+ * so nothing moves) and the shadow goes; borders Safari draws right. This is done on the page
+ * itself for the moment of the picture (the copy's own styles are rebuilt by
+ * modern-screenshot, so changes there were lost) and put back right after; the two look
+ * the same. Background stripes were tried first: modern-screenshot redraws every element with
+ * a background picture, 8 s on the control room. Returns the undo.
+ */
+function bevelsAsBorders(): () => void {
+  const undo: Array<() => void> = [];
+  document.body.querySelectorAll<HTMLElement>('*').forEach((el) => {
+    if (el.closest(`[${IGNORE_ATTR}]`)) return;
+    const found = bevelOf(el);
+    if (!found) return;
+    const before = el.getAttribute('style');
+    const st = el.style;
+    st.setProperty('box-shadow', found.rest.length ? found.rest.join(', ') : 'none', 'important');
+    for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+      const line = found.sides[side];
+      if (!line) continue;
+      st.setProperty(`border-${side}`, `${line.width}px solid ${line.color}`, 'important');
+      st.setProperty(`padding-${side}`, `${Math.max(0, found.padding[side] - line.width)}px`, 'important');
+    }
+    undo.push(() => { if (before === null) el.removeAttribute('style'); else el.setAttribute('style', before); });
+  });
+  return () => undo.forEach((f) => f());
+}
+
+type Side = 'top' | 'right' | 'bottom' | 'left';
+type Bevel = { sides: Partial<Record<Side, { width: number; color: string }>>; padding: Record<Side, number>; rest: string[] };
+
+/** The outermost line on each side of an element's inset bevel, if it has one and no border there. */
+function bevelOf(el: Element): Bevel | null {
+  const cs = getComputedStyle(el);
+  const found = insetLines(cs.boxShadow);
+  if (!found) return null;
+  const sides: Bevel['sides'] = {};
+  // Lines are listed top-most first; the outermost one on a side is the one with the smallest offset
+  for (const { x, y, color } of found.lines) {
+    const pick = (side: Side, w: number) => {
+      const cur = sides[side];
+      if (!cur || w < cur.width) sides[side] = { width: w, color };
+    };
+    if (x > 0) pick('left', x); else if (x < 0) pick('right', -x);
+    if (y > 0) pick('top', y); else if (y < 0) pick('bottom', -y);
+  }
+  for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+    if (parseFloat(cs.getPropertyValue(`border-${side}-width`)) > 0) delete sides[side]; // its own border stays
+    else if (sides[side]) sides[side]!.width = 1;
+  }
+  const padding = {
+    top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0,
+    bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0,
+  };
+  return Object.keys(sides).length ? { sides, padding, rest: found.rest } : null;
+}
+
+/** Safari (iPhone, iPad, Mac): the browsers whose picture needs bevelsAsBorders. */
+const IS_SAFARI = typeof navigator !== 'undefined' && /^((?!chrome|chromium|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
+
+/**
+ * Every select's chosen option, for the copy (it showed the first option: "No category" where
+ * the screen said "slow"). Returns the lookup and the unmark.
+ */
+function markSelects(): { chosen: Map<string, number>; unmark: () => void } {
+  const chosen = new Map<string, number>();
+  const marked: Element[] = [];
+  document.querySelectorAll('select').forEach((el) => {
+    const id = String(marked.length);
+    el.setAttribute('data-kbr-shot', id);
+    marked.push(el);
+    chosen.set(id, el.selectedIndex);
+  });
+  return { chosen, unmark: () => marked.forEach((el) => el.removeAttribute('data-kbr-shot')) };
+}
+
+/** The copy of a select shows the option chosen on screen (attributes survive into the copy). */
+function fixCopy(node: Node, chosen: Map<string, number>) {
+  // Not `instanceof`: the copy may be made in another frame, with its own classes
+  if (node.nodeType !== 1 || (node as Element).tagName !== 'SELECT') return;
+  const sel = node as HTMLSelectElement;
+  const at = chosen.get(sel.getAttribute('data-kbr-shot') ?? '');
+  sel.removeAttribute('data-kbr-shot');
+  if (at === undefined) return;
+  Array.from(sel.options).forEach((o, i) => { if (i === at) o.setAttribute('selected', ''); else o.removeAttribute('selected'); });
+}
+
 /**
  * Picture of the screen as it is. Two ways, so one engine's quirk does not leave a report
  * without one: modern-screenshot first (the browser draws the page itself into an SVG
@@ -78,6 +186,10 @@ export async function captureScreen(): Promise<Capture> {
     if (skip.includes('modern-screenshot')) throw new Error('skipped by test');
     const { domToJpeg } = await import('modern-screenshot');
     const bg = backdrop();
+    // Tests: window.__kbrShotBevels = true redraws the bevels as on Safari in any browser
+    const asSafari = IS_SAFARI || (window as unknown as { __kbrShotBevels?: boolean }).__kbrShotBevels === true;
+    const marks = markSelects();
+    const unbevel = asSafari && !skip.includes('bevels') ? bevelsAsBorders() : () => {};
     const url = await withTimeout(domToJpeg(document.documentElement, {
       width: window.innerWidth,
       height: window.innerHeight,
@@ -89,7 +201,8 @@ export async function captureScreen(): Promise<Capture> {
       // Scrolled page: move the page up and left, not with a transform (that would carry the
       // fixed top bar away with it)
       style: { marginTop: `${-window.scrollY}px`, marginLeft: `${-window.scrollX}px` },
-    }), CAPTURE_TIMEOUT_MS, 'modern-screenshot');
+      onCloneEachNode: (n) => fixCopy(n, marks.chosen),
+    }), CAPTURE_TIMEOUT_MS, 'modern-screenshot').finally(() => { marks.unmark(); unbevel(); });
     if (usable(url)) return { shot: url, how: 'modern-screenshot', tries };
     tries.push(`modern-screenshot: the browser gave no picture (${String(url).slice(0, 20)})`);
   } catch (e) {
@@ -155,7 +268,7 @@ function currentStationId(): string | null {
  */
 export function BugTopButton({ className = '' }: { className?: string }) {
   return (
-    <button type="button" data-bug-top="" data-testid="bug-top" title="Report a bug" aria-label="Bug report"
+    <button type="button" data-bug-top="" data-bug-trigger="" data-testid="bug-top" title="Report a bug" aria-label="Bug report"
       onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
       className={`sm:hidden inline-flex items-center justify-center w-11 h-11 shrink-0 text-lg leading-none rounded hover:bg-white/10 ${className}`}>
       <span aria-hidden>🐞</span>
@@ -176,6 +289,7 @@ export default function BugReporter() {
   const [shotDropped, setShotDropped] = useState(false);
   const [picked, setPicked] = useState(false);
   const [pickError, setPickError] = useState(false);
+  const [zoom, setZoom] = useState<false | 'fit' | 'full'>(false);
   const contextRef = useRef<Record<string, unknown> | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -200,6 +314,8 @@ export default function BugReporter() {
     return () => window.clearTimeout(t);
   }, [pathname]);
   const startRef = useRef<(delay?: number) => void>(() => {});
+  const phaseRef = useRef<Phase>('closed');
+  phaseRef.current = phase;
 
   const start = async () => {
     setPhase('capturing');
@@ -232,6 +348,31 @@ export default function BugReporter() {
     return () => window.removeEventListener(REPORT_BUG_EVENT, onEvent);
   }, []);
 
+  // A 🐞 that a dialog's dimmed backdrop lies over (the control room's Song panel covers the
+  // top bar on a phone) still opens the report: a tap on where a 🐞 shows is taken by the
+  // reporter before the backdrop sees it, and the dialog stays open, so it is in the picture.
+  // (Shmuel's iPhone, 2026-11-18.) Any 🐞 carries data-bug-trigger.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (e.button !== 0 || phaseRef.current !== 'closed') return;
+      const target = e.target as Element | null;
+      if (target?.closest?.('[data-bug-trigger]') || target?.closest?.(`[${IGNORE_ATTR}] [role="dialog"]`)) return;
+      for (const el of document.querySelectorAll<HTMLElement>('[data-bug-trigger]')) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height || getComputedStyle(el).visibility === 'hidden') continue;
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          startRef.current(0);
+          return;
+        }
+      }
+    };
+    window.addEventListener('click', onClick, true);
+    return () => window.removeEventListener('click', onClick, true);
+  }, []);
+
   const close = () => {
     setPhase('closed');
     setDescription('');
@@ -253,7 +394,8 @@ export default function BugReporter() {
       contextRef.current = { ...contextRef.current, screenshot: { ...(contextRef.current?.screenshot as object), picked_by_person: true } };
     }
   };
-  useEscape(phase === 'open' || phase === 'sent', close);
+  useEscape((phase === 'open' || phase === 'sent') && !zoom, close);
+  useEscape(!!zoom, () => setZoom(false));
 
   const send = async () => {
     if (!description.trim()) {
@@ -287,6 +429,7 @@ export default function BugReporter() {
         <button
           type="button"
           onClick={start}
+          data-bug-trigger=""
           title="Report a bug"
           aria-label="Report a bug"
           // Phone: right edge, where cards have no text (on the left it covered their labels and the Library checkboxes); 44 px there for a finger
@@ -354,7 +497,13 @@ export default function BugReporter() {
                         <input type="checkbox" checked={includeShot} onChange={(e) => setIncludeShot(e.target.checked)} />
                         {picked ? 'Include this picture' : 'Include this screenshot'}
                       </label>
-                      {includeShot && <img src={shot} alt="Screenshot of the page" className="mt-2 w-full max-h-48 object-cover object-top rounded-lg ring-1 ring-white/10" />}
+                      {includeShot && (
+                        <button type="button" onClick={() => setZoom('fit')} data-testid="bug-shot-open"
+                          className="mt-2 block w-full rounded-lg ring-1 ring-white/10 bg-black/40 overflow-hidden" aria-label="See the screenshot full size">
+                          <img src={shot} alt="Screenshot of the page" className="mx-auto max-h-64 w-auto object-contain" />
+                          <span className="block py-1 text-xs text-gray-400">Tap to see it full size</span>
+                        </button>
+                      )}
                     </>
                   ) : (
                     <p className="text-xs text-amber-400" data-testid="bug-no-shot">
@@ -384,6 +533,18 @@ export default function BugReporter() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+      {zoom && shot && (
+        <div className="fixed inset-0 z-[80] bg-black/95 flex flex-col" role="dialog" aria-label="Screenshot full size" data-testid="bug-shot-viewer">
+          <div className="flex items-center justify-between px-3 py-2 text-sm text-gray-200 shrink-0">
+            <span>{zoom === 'fit' ? 'Tap the picture to zoom in. Pinch works too.' : 'Tap the picture to fit the screen.'}</span>
+            <button type="button" onClick={() => setZoom(false)} className="min-h-11 min-w-11 rounded-lg bg-white/10 px-3 text-base hover:bg-white/20" aria-label="Close the screenshot">Close ×</button>
+          </div>
+          <div className="flex-1 overflow-auto" style={{ touchAction: 'pan-x pan-y pinch-zoom' }}>
+            <img src={shot} alt="Screenshot of the page, full size" onClick={() => setZoom(zoom === 'fit' ? 'full' : 'fit')}
+              className={zoom === 'fit' ? 'mx-auto max-h-full max-w-full object-contain cursor-zoom-in' : 'max-w-none w-[200%] cursor-zoom-out'} />
           </div>
         </div>
       )}

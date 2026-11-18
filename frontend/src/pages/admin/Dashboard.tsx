@@ -572,9 +572,12 @@ export default function Dashboard() {
   useEffect(() => {
     const el = dashStreamAudioRef.current;
     if (!el) return;
-    el.muted = !listenHere || muted;
+    // During a live show the operator hears the host from the live feed (at once);
+    // the stream carries the same show seconds later (stream server proto 5) and
+    // would be the host a second time
+    el.muted = !listenHere || muted || live.onAir;
     el.volume = volume;
-  }, [volume, muted, listenHere]);
+  }, [volume, muted, listenHere, live.onAir]);
   const setLiveLevel = live.setLevel;
   useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
   useEffect(() => { setLiveEnabled(audioReady && listenHere); }, [audioReady, listenHere]);
@@ -1168,7 +1171,7 @@ export default function Dashboard() {
         <footer className="shrink-0 h-5 px-2 flex items-center justify-between gap-4 bg-[#c0c0c0] border-t border-[#808080] text-[11px] text-black">
           <span className="flex items-center gap-3">
             <span>Shortcuts: <b>N</b> next · <b>/</b> search · <b>Esc</b> cancel insert</span>
-            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
+            <button type="button" data-bug-trigger="" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
               className="underline hover:text-red-700">🐞 Report a bug</button>
           </span>
           <span className="truncate">{station?.name ?? ''}{station?.timezone ? ` · ${station.timezone}` : ''}</span>
