@@ -14,24 +14,12 @@ from app.services.live_air import RATE, LiveAir
 from tests.test_live_delay import Clock, _nowhere, _quiet, _station, marked, run, spoken_at, talker  # noqa: F401
 
 
-_WINDS_DOWN_TOO_SLOWLY = pytest.mark.xfail(strict=True, reason=(
-    "found 2026-11-18: the wind-down starts 3 minutes before the hard stop and speeds "
-    "non-stop speech up by at most 12 %, so it can take back only about 21 s; a longer "
-    "delay, or a show shorter than the delay plus 3 minutes, still has audio waiting at "
-    "the stop, which is cut"))
-
-
-@pytest.mark.parametrize("delay,length", [
-    (20, 600),
-    pytest.param(30, 600, marks=_WINDS_DOWN_TOO_SLOWLY),
-    pytest.param(40, 600, marks=_WINDS_DOWN_TOO_SLOWLY),
-    pytest.param(40, 120, marks=_WINDS_DOWN_TOO_SLOWLY),
-    pytest.param(15, 60, marks=_WINDS_DOWN_TOO_SLOWLY),
-])
+@pytest.mark.parametrize("delay,length", [(20, 600), (30, 600), (40, 600), (40, 120), (15, 60)])
 def test_the_delay_is_empty_by_the_hard_stop(delay, length):
     """LD-27: the host talks without a pause until the hard stop. Whatever the delay
     (0 to 40 s) and however short the show, nothing may still be waiting in the delay
-    when the stop cuts it: those would be the host's last words."""
+    when the stop cuts it: those would be the host's last words. Failed for 30 s and more
+    and short shows until PR 320 capped the delay to a tenth of the time left."""
     clock = Clock()
     air = LiveAir("st", "show", _nowhere, delay=delay, clock=clock)
     air.end_at = clock.t + length
