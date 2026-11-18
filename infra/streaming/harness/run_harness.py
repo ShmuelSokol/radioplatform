@@ -567,8 +567,10 @@ class Harness:
         from app.models.user import User, UserRole
 
         async with async_session_factory() as db:
+            # No broadcast delay: no host audio is sent here, and with a delay the show
+            # takes the station over only once listeners hear the host (PR 316)
             db.add(Station(id=STATION_ID, name="Harness", timezone="America/New_York",
-                           automation_config={}))
+                           automation_config={"live_delay_seconds": 0}))
             db.add(User(id=uuid.uuid4(), email=ADMIN_EMAIL, hashed_password=hash_password(ADMIN_PASSWORD),
                         role=UserRole.ADMIN, is_active=True))
             for name, (freq, secs, kind, category) in TONES.items():
@@ -1674,7 +1676,9 @@ async def sc_live_show_quiet(h: Harness) -> None:
     h.check(name, "EMERGENCY" not in names, f"no emergency music during or after the show: {names}")
     after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
     back = after[0][0] - t_end if after else None
-    h.check(name, back is not None and back <= 8.0,
+    # The item after the show is loaded during it (engine proto 4): music back at once,
+    # also with a slow backend (it was 2 s here, about 5 s on Main, 2026-11-18)
+    h.check(name, back is not None and back <= 1.5,
             f"music back {'never' if back is None else f'{back:.1f} s'} after the show ended")
     h.check(name, len({n for _, n in after}) == 1,
             f"one item after the show, not a fragment of the old song first: {[n for _, n in after]}")
@@ -1725,6 +1729,44 @@ async def sc_rapid_next(h: Harness) -> None:
     tl = timeline(h.heard(time.time() - 4, time.time() - 1))
     h.check(name, bool(st) and tl and tone_name(TONES[[k for k, v in h.assets.items() if v == st.asset_id][0]][0])
             == tl[-1][1], f"what the site says is on air ({st.asset.title if st else None}) is what is heard ({tl[-1][1] if tl else None})")
+
+
+async def sc_next_on_a_busy_server(h: Harness) -> None:
+    """Main 13:27:42Z 2026-11-18: Shmuel pressed Next by hand; the next item was
+    "prepared" with nothing decoded yet (the droplet's one CPU was busy), the crossfade
+    had 0.00 s to cross into and the emergency lane played for 1.7 s. Here the engine
+    shares one CPU with a busy process while Next is pressed right after items start
+    (fresh prepares): never any emergency music, and no silence over 3 s."""
+    name = "next_on_a_busy_server"
+    await wait_music(h)
+    t_start = time.time()
+    pids = subprocess.run(["pgrep", "-f", "liquidsoap .*radio"], capture_output=True, text=True).stdout.split()
+    for pid in pids:
+        subprocess.run(["taskset", "-a", "-p", "-c", "0", pid], stdout=subprocess.DEVNULL, check=False)
+    hogs = [subprocess.Popen(["taskset", "-c", "0", sys.executable, "-c", "while True: pass"])
+            for _ in range(2)]
+    try:
+        await h.queue([(f"song{i}", {}) for i in (5, 6, 1, 2, 3, 4, 5, 6)])
+        await asyncio.sleep(3)
+        t_start = time.time()
+        for delay in (0.2, 0.5, 0.1, 1.0, 0.3, 0.7):
+            h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+            await asyncio.sleep(delay)
+            h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+            await asyncio.sleep(3)
+        await asyncio.sleep(6)
+    finally:
+        for p in hogs:
+            p.kill()
+        for pid in pids:
+            subprocess.run(["taskset", "-a", "-p", "-c", f"0-{os.cpu_count() - 1}", pid],
+                           stdout=subprocess.DEVNULL, check=False)
+    heard = h.heard(t_start - 1, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music after any Next: {names}")
+    gap, gap_at = longest_silence(heard)
+    h.check(name, gap <= 3.0, f"longest silence {gap:.1f} s")
 
 
 async def sc_empty_queue(h: Harness) -> None:
@@ -3308,6 +3350,7 @@ SCENARIOS = {
     "next_while_soft_spot_waits_slow": lambda h: sc_next_while_soft_spot_waits(h, 3.0),
     "resume_without_old_song": sc_resume_without_old_song,
     "next_twice": sc_next_twice,
+    "next_on_a_busy_server": sc_next_on_a_busy_server,
     "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,
     # restarts the engine: keep it last
