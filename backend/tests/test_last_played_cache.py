@@ -284,7 +284,7 @@ async def test_a_failed_whole_history_read_is_tried_again_soon(db_session, monke
 async def test_warm_up_tries_a_station_again(db_session, monkeypatch):
     import app.db.engine as db_engine
 
-    monkeypatch.setattr(lp, "WARM_RETRY_SECONDS", 0.0)
+    monkeypatch.setattr(lp, "WARM_RETRY_WAITS", (0.0, 0.0, 0.0))
     station = Station(id=uuid.uuid4(), name="Warm FM", timezone="America/New_York")
     db_session.add(station)
     await db_session.commit()

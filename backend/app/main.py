@@ -457,6 +457,83 @@ async def _build_concurrent_indexes() -> None:
     finally:
         await conn.close()
 
+async def _wait_for_database(limit: float = 90.0) -> None:
+    """Nothing starts until the database answers. A process that came up while
+    the database refused connections ran its whole startup against nothing and
+    then served 500s."""
+    from sqlalchemy import text
+
+    from app.db.engine import engine
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    wait = 0.5
+    while True:
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            if loop.time() - started > 1.0:
+                logger.info("Database answered after %.1f s", loop.time() - started)
+            return
+        except Exception as e:
+            if loop.time() - started > limit:
+                logger.error("Database did not answer within %.0f s (%s); starting anyway", limit, e)
+                return
+            logger.warning("Database not answering yet (%s); trying again in %.1f s", e, wait)
+            await asyncio.sleep(wait)
+            wait = min(wait * 2, 8.0)
+
+
+# Tables read by index-only scans. The database skips the table itself only for
+# pages its visibility map marks clean, and only VACUUM marks them: on
+# 2026-11-18 the last-played read of play_logs fetched 139,992 of 145,557 rows
+# from the table anyway. Inserts alone start autovacuum late (20% of the table).
+VACUUM_TABLES = ("play_logs", "queue_entries")
+VACUUM_EVERY_DAYS = 7
+
+
+async def _vacuum_stale_tables() -> None:
+    """After startup, in the background: VACUUM (ANALYZE) each of VACUUM_TABLES
+    not vacuumed in the last week, and make autovacuum come sooner for them.
+    VACUUM does not block reads or writes."""
+    import asyncpg
+
+    if not settings.DATABASE_URL.startswith("postgresql"):
+        return
+    await asyncio.sleep(120)  # after the startup rush
+    dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    try:
+        conn = await asyncpg.connect(dsn, statement_cache_size=0)
+    except Exception as e:
+        logger.warning("Could not connect to vacuum: %s", e)
+        return
+    try:
+        await conn.execute("SET statement_timeout = '10min'")
+        for table in VACUUM_TABLES:
+            try:
+                row = await conn.fetchrow(
+                    "SELECT greatest(last_vacuum, last_autovacuum) AS last, "
+                    "now() - greatest(last_vacuum, last_autovacuum) > make_interval(days => $2) AS old "
+                    "FROM pg_stat_user_tables WHERE relname = $1", table, VACUUM_EVERY_DAYS,
+                )
+                if row is None or (row["last"] is not None and not row["old"]):
+                    continue
+                await conn.execute(
+                    f"ALTER TABLE {table} SET (autovacuum_vacuum_insert_scale_factor = 0.02, "
+                    "autovacuum_vacuum_scale_factor = 0.02, autovacuum_analyze_scale_factor = 0.02)"
+                )
+                started = asyncio.get_running_loop().time()
+                await conn.execute(f"VACUUM (ANALYZE) {table}")
+                logger.info(
+                    "Vacuumed %s in %.1f s (last vacuum before: %s)",
+                    table, asyncio.get_running_loop().time() - started, row["last"],
+                )
+            except Exception as e:
+                logger.warning("Vacuum of %s failed: %s", table, e)
+    finally:
+        await conn.close()
+
+
 async def _seed_default_categories():
     """Insert default categories if the categories table is empty."""
     try:
@@ -686,7 +763,10 @@ async def _resume_playback_on_startup():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from app.core import loop_watch
+    loop_watch.start()  # logs what holds the event loop when requests stall
     # Startup — create tables and start the scheduler engine
+    await _wait_for_database()
     await ensure_tables()
     await _warm_connection_pool()
     await _seed_default_categories()
@@ -715,6 +795,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # When each item last aired: read before the first refill or redraw needs it
     from app.services.last_played import warm_all
     warm_task = _asyncio.get_running_loop().create_task(warm_all())
+    vacuum_task = _asyncio.get_running_loop().create_task(_vacuum_stale_tables())
     # Bug reports: push "fix ready" to ntfy (see wiki/bug-reports.md)
     from app.services.bug_report_service import notify_loop
     bug_task = _asyncio.get_running_loop().create_task(notify_loop())
@@ -730,6 +811,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backfill_task.cancel()
     index_task.cancel()
     warm_task.cancel()
+    vacuum_task.cancel()
+    loop_watch.stop()
     # Shutdown — stop the scheduler cleanly
     try:
         from app.services.scheduler_engine import stop_scheduler

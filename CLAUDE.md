@@ -446,6 +446,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - **DB migrations in main.py**: When adding columns to models, add corresponding `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` to `_add_missing_columns()` in `main.py`. Each migration runs in its own transaction so one failure doesn't block others.
 - **bcrypt**: Must pin `bcrypt==4.1.3` — passlib breaks with bcrypt 5.x
 - **Supabase pooler**: Must use port 6543 (transaction mode) + `statement_cache_size=0`
+- **Slow requests**: a `SLOW QUERY` line times the app's wait, not the database. Read its "loop held N s" and "pool N in use" parts and look for `EVENT LOOP HELD ... by:` (code that ran without `await`, `app/core/loop_watch.py`) and `SLOW CONNECT` before blaming a query. See "Where the seconds go" in `wiki/playlist-generation.md`.
 - **Vercel IPv6**: Direct Supabase connection fails (IPv6 not supported). Use pooler URL.
 - **Password URL encoding**: `/` → `%2F`, `[` → `%5B`, `]` → `%5D` in DATABASE_URL
 - **Pydantic schemas**: ID fields use `uuid.UUID | str` for cross-DB compatibility (SQLite returns strings)
