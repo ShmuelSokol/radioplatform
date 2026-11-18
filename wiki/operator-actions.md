@@ -168,3 +168,6 @@ Three rules now:
   `EMERGENCY_ALERT_AFTER` (5 s). A one second gap between two items is logged, not alerted.
 
 Needs a `setup.sh` rerun on the droplet for the engine half.
+
+## Next waits for the next file (2026-11-18)
+The engine's `/skip` no longer fades and skips at once when the music lane has nothing loaded (`main_requests.queue()` empty): the item on air plays on until the next file is there, at most `skip_wait` (12 s), then the fade and skip run as before. A second `/skip` while one is waiting is ignored (`skip_waiting`). Before, Next into an item still downloading put the emergency music on air until the file arrived (Jerusalem 05:55:39Z: 0.9 s before a shiur; harness `operator_next_slow_file`: 2 s). The same happened when Next came while the backend was holding back the next song before a hard item (`_hold_before_hard_item`): the engine held nothing. `handle_next` now passes `skipping=state.skip_requested`, so a waiting Next is handed a song (the item on air ends now, not at its length); harness `next_while_held`. Why 12 s: an item with no analysis is read once by the backend (`ensure_level`) and then by the engine. Known and open: a Next while a timed-lane item is on air and a later timed group is already in the engine's timed queue starts that group at once (the lane plays its queue back to back).
