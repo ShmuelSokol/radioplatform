@@ -255,8 +255,8 @@ const Schedules: React.FC = () => {
         )}
         {schedules?.map((schedule) => (
           <div key={schedule.id} className="bg-white p-6 rounded-lg shadow-md">
-            <div className="flex justify-between items-start mb-2">
-              <div>
+            <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
+              <div className="min-w-0">
                 <h3 className="text-xl font-bold">{schedule.name}</h3>
                 <p className="text-sm text-gray-600">
                   Station: {stations?.stations?.find((s: any) => s.id === schedule.station_id)?.name}

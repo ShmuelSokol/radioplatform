@@ -136,10 +136,28 @@ class AirWatch:
                     hard_timed(),
                 )
             )).scalars().all())
+            # Items that share a time air one after another (time check, promo, shiur):
+            # each later one is due when those before it have played, not at the group's
+            # time. Main 2026-11-18 01:00Z: "Daf Yomi aired 10 s late" was the third item
+            # of the 8 PM block, right on time behind the time check and the promo.
+            ahead: dict[uuid.UUID, float] = {}
+            groups: dict[datetime, list[QueueEntry]] = {}
+            for e in rows:
+                if e.id in hard_ids and e.preempt_at is not None:
+                    groups.setdefault(_aware(e.preempt_at), []).append(e)
+            for members in groups.values():
+                total = 0.0
+                def order(m: QueueEntry):
+                    if m.started_at is not None:
+                        return (0, _aware(m.started_at).timestamp())
+                    return (1, float(m.position))
+                for m in sorted(members, key=order):
+                    ahead[m.id] = total
+                    total += float(m.asset.duration or 0.0) if m.asset is not None else 0.0
             for e in rows:
                 if e.id not in hard_ids or e.preempt_at is None:
                     continue
-                due = _aware(e.preempt_at)
+                due = _aware(e.preempt_at) + timedelta(seconds=ahead.get(e.id, 0.0))
                 title = _title(e)
                 if e.started_at is not None:
                     late = (_aware(e.started_at) - due).total_seconds()

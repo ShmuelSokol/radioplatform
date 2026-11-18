@@ -218,6 +218,7 @@ radioplatform/
 | air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship; alerts + ntfy (see `wiki/air-watch.md`) |
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
 | queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement; shared by the browser player's song change, the engine's start report and the blackout fill |
+| sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details
@@ -265,7 +266,7 @@ radioplatform/
 
 **Sponsor Portal** (`frontend/src/pages/sponsor/`):
 - Login.tsx — Sponsor login (separate from admin, indigo-themed)
-- Dashboard.tsx — Play history stats + table + upcoming schedule
+- Dashboard.tsx — Play history stats + table + upcoming schedule + Missed Plays (promised plays that did not air, coming plays with no room or moved)
 - Campaigns.tsx — Campaign list with create form
 - CampaignDetail.tsx — Campaign detail with drafts + comments thread
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
@@ -360,6 +361,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`. `canChange()` there says who may change things on a screen (drives the "View only" marker); any refused action shows an app-wide "not allowed" notice (`components/layout/ViewOnlyNotice.tsx`).
 - **Station permissions**: staff can be limited to named stations (`User.station_ids`), and a protected station (`Station.protected`, the FM feed) needs an explicit assignment. Rule: `may_operate_station`; guard: `require_station_operator`. See `wiki/station-permissions.md`.
 - **Caller address**: rate limits, listener IPs and the activity log take the caller's address from `app/core/client_ip.py` (rightmost non-internal X-Forwarded-For hop); never read the header by hand. See `wiki/client-ip.md`.
+- **Look ("qnet")**: every admin and sponsor page wears the KBR Studio look through one shared skin (`.qn-site`, `frontend/src/styles/qnet-site.css` + generated `qnet-site-colors.css`); write pages with ordinary Tailwind classes and the skin restyles them. Rules and escape hatches in `wiki/qnet-site-theme.md`.
 - **Page layout**: admin and sponsor pages fill the window; no `max-w-* mx-auto` page wrappers. Rules in `wiki/admin-page-layout.md`.
 - **Frontend**: All API calls through `src/api/client.ts` (default export, auto JWT refresh). Zustand for global state, React Query for server state. `StationListResponse` wraps stations in `.stations` array — always use `data?.stations?.map()`.
 - **Models**: Use `UUIDPrimaryKeyMixin` + `TimestampMixin` from `app/db/base.py`.

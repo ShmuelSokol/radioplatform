@@ -3826,12 +3826,12 @@ function a11yScan() {
 // other page must stay clean. Remove a page here once it scans clean.
 const A11Y_GAP_PAGES = new Set([
   '/admin/dashboard', '/admin/assets', '/admin/assets/upload', '/admin/assets/:id', '/admin/reviews/:id',
-  '/admin/users', '/admin/rules', '/admin/schedules', '/admin/holidays', '/admin/sponsors',
+  '/admin/schedules', '/admin/holidays',
   '/admin/spot-schedule', '/admin/spot-recordings', '/admin/schedule-check', '/admin/sponsorship-rules',
-  '/admin/playlists', '/admin/alerts', '/admin/bug-reports', '/admin/site-updates', '/admin/activity',
-  '/admin/analytics', '/admin/live', '/admin/live/:id/host', '/admin/live/:id/screen', '/admin/requests',
-  '/admin/archives', '/admin/audio-enhance/:id', '/admin/studio', '/admin/listeners', '/admin/crm',
-  '/admin/program-clock', '/sponsor/dashboard', '/guide', '/archives', '/listen/:id',
+  '/admin/playlists', '/admin/alerts', '/admin/site-updates',
+  '/admin/analytics', '/admin/live', '/admin/live/:id/host', '/admin/requests',
+  '/admin/archives', '/admin/audio-enhance/:id', '/admin/studio', '/admin/listeners',
+  '/admin/program-clock', '/guide', '/archives', '/listen/:id',
 ]);
 section('a11y', async () => {
   const jobs = [
