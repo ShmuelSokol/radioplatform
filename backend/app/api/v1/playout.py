@@ -90,6 +90,8 @@ class CommandAnswer(BaseModel):
 class CommandPoll(BaseModel):
     wait: float = playout_tunnel.MAX_WAIT_SECONDS
     answers: list[CommandAnswer] = []
+    # How the box is doing (clock, disk, audio still to copy); see playout_tunnel.report_health
+    health: dict | None = None
 
 
 @router.post("/{station_id}/commands/poll")
@@ -106,6 +108,7 @@ async def commands_poll(
         raise ForbiddenError("This station's commands do not go by relay")
     for a in body.answers:
         playout_tunnel.answer(station_id, a.id, a.status, a.body)
+    playout_tunnel.report_health(station_id, body.health)
     return {"commands": await playout_tunnel.poll(station_id, body.wait)}
 
 

@@ -1951,6 +1951,12 @@ async def sc_local_box_commands(h: Harness) -> None:
     h.check(name, now is not None and cur is not None and now.id != cur.id, "the site moved to the next song")
     h.check(name, relay.status()["commands_done"] > before,
             f"the relay carried the command ({before} -> {relay.status()['commands_done']})")
+    # The box tells the site how it is doing with the same call
+    _, shown = h.api("GET", "/playout-status")
+    box = (shown.get("stations", {}).get(str(STATION_ID)) or {}).get("box") or {}
+    h.check(name, box.get("clock_ok") is True and box.get("engine_ok") is True
+            and (box.get("disk_free_gb") or 0) > 0 and box.get("seen_seconds_ago", 99) < 40,
+            f"the site holds the box's own report: {box}")
     # A hard time check handed over by the backend, through the relay
     due_dt = at(55)
     due = due_dt.timestamp()

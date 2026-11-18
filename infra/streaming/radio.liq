@@ -510,10 +510,12 @@ def send_started(m) =
   elsif lane == "main" and main_interrupted() and entry == last_main_entry() then
     # Back from a timed item: leave the interrupted song and start the next one. The
     # interrupted song is not reported again (it already ended for the backend).
-    main_interrupted := false
+    # The lane stays muted until the next item starts (the branch below brings the level
+    # back). It used to come back 0.15 s after the skip whatever was there: when the
+    # next item was not loaded yet (a slow backend), the last second of the interrupted
+    # song played, then silence (after a live show and after a timed group, 2026-11-18).
     hard_cut := true
     main.skip()
-    thread.run(delay=0.15, {main_gain := 1.})
   elsif lane == "hold" then
     # Not reported: nothing from the queue is on air and it is not the emergency music
     left = timed_group_at() - time()
@@ -618,6 +620,13 @@ control("/flush", fun (_) -> begin
   # The pre-loaded entry will not air after all: forget that it was handed to us
   if given() != [] and list.hd(default="", given()) != last_main_entry() then
     given := list.tl(given())
+  end
+  # While another lane is on air the music lane stands still and would only ask again
+  # when it comes back: with a slow backend that left 4 s of emergency music after a
+  # timed group whose shiur had just been paused (harness, 2026-11-18). Ask now, so the
+  # item is loaded by then. On air, the lane asks by itself.
+  if on_air_lane() != "main" and not live_on() then
+    thread.run(fast=false, {ignore(main_requests.fetch())})
   end
   '{"ok":true}'
 end)

@@ -11,6 +11,8 @@ within `artist_distance` songs.
 See wiki/playlist-generation.md.
 """
 
+import asyncio
+import bisect
 import math
 import random
 from collections import deque
@@ -159,6 +161,11 @@ class _Library:
         self.start = start
         self.pools: dict[tuple, list] = {}
         self.last_used: dict[str, datetime] | None = None
+        # Each type's songs in drawing order (see _order), kept in order as
+        # songs are drawn, and how many songs each artist has in the type
+        self.orders: dict[tuple, list[tuple]] = {}
+        self.cards: dict[tuple, dict[str, tuple]] = {}
+        self.artists: dict[tuple, dict] = {}
 
     async def _load_last_used(self) -> None:
         from app.services.last_played import last_played
@@ -178,9 +185,14 @@ class _Library:
     async def pool(self, asset_type: str, category: str | None) -> list:
         key = (asset_type, category)
         if key not in self.pools:
-            stmt = select(Asset.id, Asset.title, Asset.artist, Asset.duration).where(
-                Asset.asset_type == asset_type
-            )
+            # The crossfade point comes with the song: reading it for each drawn
+            # song was one more database round trip per pick (500 for a redraw).
+            analysis = Asset.metadata_extra["audio_analysis"]
+            stmt = select(
+                Asset.id, Asset.title, Asset.artist, Asset.duration,
+                analysis["cross_start_seconds"].astext.label("cross_start"),
+                analysis["version"].astext.label("analysis_version"),
+            ).where(Asset.asset_type == asset_type)
             if category:
                 stmt = stmt.where(in_category(category), not_placeholder(), not_contract_audio())
             else:
@@ -200,12 +212,43 @@ class _Library:
         return self.pools[key]
 
     async def on_air(self, row) -> float:
-        """How long a drawn item holds the air (its crossfade point). The pools
-        leave out the audio analysis, so it is read for the drawn item only."""
+        """How long a drawn item holds the air (its crossfade point). A type's
+        songs carry it; for a block's own songs it is read for the drawn one."""
+        if hasattr(row, "cross_start"):
+            analysis = {}
+            try:
+                if row.cross_start is not None:
+                    analysis["cross_start_seconds"] = float(row.cross_start)
+                if row.analysis_version is not None:
+                    analysis["version"] = int(float(row.analysis_version))
+            except (TypeError, ValueError):
+                analysis = {}
+            return on_air_seconds(row.duration, {"audio_analysis": analysis})
         meta = (
             await self.db.execute(select(Asset.metadata_extra).where(Asset.id == row.id))
         ).scalar_one_or_none()
         return on_air_seconds(row.duration, meta if isinstance(meta, dict) else None)
+
+    def _card(self, row) -> tuple:
+        """A song's place in the drawing order: songs not waiting in the queue
+        first, then the longest rested; equal ones in a random order."""
+        sid = str(row.id)
+        return (sid in self.busy, self.last_used.get(sid, _EPOCH), random.random(), sid, _artist_key(row.artist), row)
+
+    def _order(self, key: tuple, rows: list) -> list[tuple]:
+        """The type's songs in drawing order. Sorted once and then kept in order
+        (mark moves a drawn song), because sorting the whole type again for every
+        pick took most of a redraw: 12 s for 730 picks from 8,000-song types, all
+        of it on the one thread that also answers the players."""
+        if key not in self.orders:
+            cards = sorted(self._card(r) for r in rows)
+            self.orders[key] = cards
+            self.cards[key] = {c[3]: c for c in cards}
+            counts: dict = {}
+            for c in cards:
+                counts[c[4]] = counts.get(c[4], 0) + 1
+            self.artists[key] = counts
+        return self.orders[key]
 
     async def draw(self, asset_type, category, recent_artists, at: datetime):
         """Return (row, relaxed) or (None, False) when the type has no songs."""
@@ -214,45 +257,61 @@ class _Library:
         rows = await self.pool(asset_type, category)
         if not rows:
             return None, False
-        epoch = datetime(1970, 1, 1, tzinfo=UTC)
-        # Longest-rested first. Songs already waiting in the queue go last, and
-        # among those the one drawn longest ago comes first: when a fill runs
-        # longer than the type has songs (48 hours from a few hundred), every
-        # song is waiting, and treating them all alike brought a song back a
-        # few songs after itself.
-
-        def rested(row):
-            return self.last_used.get(str(row.id), epoch)
-
-        def waiting(row):
-            return str(row.id) in self.busy
-
-        ordered = sorted(rows, key=lambda r: (waiting(r), rested(r), random.random()))
+        key = (asset_type, category)
+        order = self._order(key, rows)
         # The artist rule comes first, as in the studio program: when the only
         # songs clear of it are already waiting in the queue, one of those is
         # used again rather than putting an artist back too soon. Songs already
         # waiting sort last, so they are reached only when nothing else is clear.
-        clear = [r for r in ordered if _artist_key(r.artist) not in recent_artists]
-        relaxed = not clear
-        candidates = clear or ordered
+        # Among waiting songs the one drawn longest ago comes first: when a fill
+        # runs longer than the type has songs (48 hours from a few hundred),
+        # every song is waiting, and treating them all alike brought a song back
+        # a few songs after itself.
+        counts = self.artists[key]
+        clear = len(order) - sum(counts.get(a, 0) for a in recent_artists)
+        relaxed = clear <= 0
+        skip = () if relaxed else recent_artists
         # Draw from the most-rested third so the order is not the same every cycle...
-        window = candidates[: max(1, math.ceil(len(candidates) / 3))]
-        # ...never a waiting song while one that is not waiting is clear...
-        window = [r for r in window if waiting(r) == waiting(window[0])]
-        # ...and only among songs that have rested about as long as the most
-        # rested one. Without this a song that aired an hour ago could be drawn
-        # ahead of one that has never aired, just for sitting in the same third.
-        longest = at - rested(window[0])
-        if longest > timedelta(0):
-            window = [r for r in window if at - rested(r) >= longest / 2]
-        row = random.choice(window)
+        limit = max(1, math.ceil((len(order) if relaxed else clear) / 3))
+        window: list[tuple] = []
+        first = None
+        longest = timedelta(0)
+        for card in order:
+            if card[4] in skip:
+                continue
+            if first is None:
+                first = card
+                longest = at - card[1]
+            elif card[0] != first[0]:
+                # ...never a waiting song while one that is not waiting is clear...
+                break
+            elif longest > timedelta(0) and at - card[1] < longest / 2:
+                # ...and only among songs that have rested about as long as the
+                # most rested one. Without this a song that aired an hour ago
+                # could be drawn ahead of one that has never aired, just for
+                # sitting in the same third.
+                break
+            window.append(card)
+            if len(window) >= limit:
+                break
+        row = random.choice(window)[5]
         self.mark(row, at)
         return row, relaxed
 
     def mark(self, row, at: datetime) -> None:
         """A drawn item counts as just used (and waiting in the queue)."""
-        self.last_used[str(row.id)] = at
-        self.busy.add(str(row.id))
+        sid = str(row.id)
+        self.last_used[sid] = at
+        self.busy.add(sid)
+        for key, cards in self.cards.items():
+            old = cards.get(sid)
+            if old is None:
+                continue
+            order = self.orders[key]
+            del order[bisect.bisect_left(order, old)]
+            new = self._card(old[5])
+            bisect.insort(order, new)
+            cards[sid] = new
 
     def shuffle(self, rows: list, at: datetime):
         """Random among a block's own songs, leaving out the most recently used
@@ -389,6 +448,9 @@ async def generate(
     clock = Clock(start, timed)
     misses = 0
     while clock.start() < end and len(picks) < MAX_PICKS:
+        # Let the players' requests in between picks: nothing below waits on
+        # the database any more, and a long fill would hold them all up.
+        await asyncio.sleep(0)
         at = clock.start()
         off = next((b for b in blackouts if b.covers(at)), None)
         if off is not None:
