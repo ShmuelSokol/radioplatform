@@ -175,7 +175,7 @@ async function desktop(browser, sid) {
   const cardText = await card.innerText();
   check(`${tag}: contract shows name, RUNNING, station, days, times of day, plays and dates`,
     /Kesher weekday mornings/.test(cardText) && /RUNNING/.test(cardText) && cardText.includes(name) && /Sun-Thu/.test(cardText)
-      && /2 plays in each: Morning \(6 AM-12 PM\), Afternoon \(12-6 PM\)/.test(cardText) && /From Nov 1, 2026 until Dec 31, 2026/.test(cardText), cardText);
+      && /2 plays in each: Morning \(6 AM to 12 PM\), Afternoon \(12 PM to 6 PM\)/.test(cardText) && /From Nov 1, 2026 until Dec 31, 2026/.test(cardText), cardText);
   check(`${tag}: another station's contract is folded away, not mixed in`, await page.getByTestId('sponsor-contracts').getByTestId('sponsor-contract').count() === 2
     && !(await page.getByTestId('sponsor-elsewhere').getAttribute('open') !== null) && /On other stations \(1\)/.test(await page.getByTestId('sponsor-elsewhere').innerText()));
   const today = page.getByTestId('sponsor-today');

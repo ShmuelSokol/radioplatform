@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useDetectSilence, useTrimAsset, useRestoreOriginal } from '../../hooks/useAssets';
+import { useDetectSilence, useTrimAsset, useRemoveSilence, useRestoreOriginal } from '../../hooks/useAssets';
 import Spinner from '../Spinner';
 import { useEscape } from '../../hooks/useEscape';
 import type { WaveformPlayerHandle } from './WaveformPlayer';
@@ -22,13 +22,14 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
   const [minDuration, setMinDuration] = useState(0.5);
   const [regions, setRegions] = useState<SilenceRegion[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [showConfirm, setShowConfirm] = useState<'auto' | 'region' | null>(null);
+  const [showConfirm, setShowConfirm] = useState<'auto' | 'region' | 'all' | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [trimPending, setTrimPending] = useState(false);
   useEscape(showConfirm !== null && !trimPending, () => setShowConfirm(null));
 
   const detectMutation = useDetectSilence();
   const trimMutation = useTrimAsset();
+  const removeMutation = useRemoveSilence();
   const restoreMutation = useRestoreOriginal();
 
   const handleDetect = () => {
@@ -83,32 +84,11 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
     );
   };
 
-  const handleTrimRegion = () => {
-    if (selectedIndex === null) return;
-    const region = regions[selectedIndex];
-    const duration = waveformRef.current?.getDuration() ?? 0;
-    if (duration <= 0) return;
-
-    // Determine trim boundaries based on region position
-    const isLeading = region.start < 0.1;
-    const isTrailing = Math.abs(region.end - duration) < 0.1;
-
-    let trimStart: number;
-    let trimEnd: number;
-
-    if (isLeading) {
-      trimStart = region.end;
-      trimEnd = duration;
-    } else if (isTrailing) {
-      trimStart = 0;
-      trimEnd = region.start;
-    } else {
-      trimStart = 0;
-      trimEnd = region.start;
-    }
-
-    trimMutation.mutate(
-      { id: assetId, trimStart, trimEnd },
+  // Cut silent regions out and join the rest (the server keeps the original for Undo)
+  const removeRegions = (toRemove: SilenceRegion[]) => {
+    if (toRemove.length === 0) return;
+    removeMutation.mutate(
+      { id: assetId, regions: toRemove },
       {
         onSuccess: () => {
           setRegions([]);
@@ -119,13 +99,23 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
           onTrimComplete?.();
           setTrimPending(true);
         },
-        onError: () => {
-          setStatusMsg('Trim failed — try again');
+        onError: (err) => {
+          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          setStatusMsg(msg ? `Could not remove the silence: ${msg}` : 'Could not remove the silence. Try again.');
           setShowConfirm(null);
         },
       }
     );
   };
+
+  // Only the selected gap goes. (It used to keep only what came before a gap in the
+  // middle, cutting off the rest of the recording.)
+  const handleTrimRegion = () => {
+    if (selectedIndex === null || !regions[selectedIndex]) return;
+    removeRegions([regions[selectedIndex]]);
+  };
+
+  const handleRemoveAll = () => removeRegions(regions);
 
   const handleUndoTrim = () => {
     restoreMutation.mutate(assetId, {
@@ -165,6 +155,7 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
   };
 
   const selectedRegion = selectedIndex !== null ? regions[selectedIndex] : null;
+  const totalSilence = regions.reduce((sum, r) => sum + Math.max(0, r.end - r.start), 0);
 
   // Trim review state — user reviews the trimmed result before confirming
   if (trimPending) {
@@ -257,6 +248,15 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
         </button>
         {canEdit && regions.length > 0 && (
           <button
+            onClick={() => setShowConfirm('all')}
+            data-testid="remove-all-silence"
+            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm transition"
+          >
+            Remove All Found Silence ({regions.length})
+          </button>
+        )}
+        {canEdit && regions.length > 0 && (
+          <button
             onClick={() => setShowConfirm('auto')}
             className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-1.5 rounded text-sm transition"
           >
@@ -338,11 +338,13 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div role="dialog" aria-modal="true" aria-label="Confirm trim" className="bg-white rounded-lg p-6 max-w-md mx-4">
             <h4 className="text-lg font-bold mb-2">
-              {showConfirm === 'auto' ? 'Confirm Auto-Clip' : 'Confirm Region Trim'}
+              {showConfirm === 'auto' ? 'Confirm Auto-Clip' : showConfirm === 'all' ? 'Remove all found silence?' : 'Confirm Region Trim'}
             </h4>
             <p className="text-sm text-gray-600 mb-4">
               {showConfirm === 'auto'
                 ? 'This will remove leading and trailing silence from the audio file. You can review the result and undo if needed.'
+                : showConfirm === 'all'
+                ? `This removes all ${regions.length} silent part${regions.length === 1 ? '' : 's'} it found (${totalSilence.toFixed(1)} s in total), including gaps in the middle, and joins the rest. Listen to the result afterwards: Undo Trim or Restore Original brings back the original file, which is always kept.`
                 : `This will trim out region #${(selectedIndex ?? 0) + 1} (${formatTime(selectedRegion?.start ?? 0)} - ${formatTime(selectedRegion?.end ?? 0)}). You can review the result and undo if needed.`
               }
             </p>
@@ -354,11 +356,13 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
                 Cancel
               </button>
               <button
-                onClick={showConfirm === 'auto' ? handleAutoClip : handleTrimRegion}
-                disabled={trimMutation.isPending}
+                onClick={showConfirm === 'auto' ? handleAutoClip : showConfirm === 'all' ? handleRemoveAll : handleTrimRegion}
+                disabled={trimMutation.isPending || removeMutation.isPending}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-50"
               >
-                {trimMutation.isPending ? <><Spinner className="mr-1" />Processing...</> : 'Trim'}
+                {trimMutation.isPending || removeMutation.isPending
+                  ? <><Spinner className="mr-1" />Processing...</>
+                  : showConfirm === 'all' ? 'Remove All' : 'Trim'}
               </button>
             </div>
           </div>

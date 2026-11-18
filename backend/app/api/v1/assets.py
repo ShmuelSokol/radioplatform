@@ -5,6 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1236,6 +1237,7 @@ async def trim_asset_endpoint(
     trim_entry = {"from": asset.file_path, "to": new_key, "trim_start": trim_start, "trim_end": trim_end}
     extra["trim_history"] = [*(extra.get("trim_history") or []), trim_entry]  # new list: an in-place append is not saved
     extra.pop("silence_regions", None)
+    extra.pop("audio_analysis", None)  # end and crossfade points belong to the old audio
 
     asset.file_path = new_key
     asset.duration = new_duration
@@ -1243,6 +1245,49 @@ async def trim_asset_endpoint(
     await db.flush()
     await db.refresh(asset)
 
+    return asset
+
+
+class RemoveSilenceRequest(BaseModel):
+    regions: list[dict]
+
+
+@router.post("/{asset_id}/remove-silence", response_model=AssetResponse)
+async def remove_silence_endpoint(
+    asset_id: uuid.UUID,
+    body: RemoveSilenceRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Cut the given silent regions out (start, middle and end) and join the rest.
+    Non-destructive like /trim: the original stays, Restore Original brings it back."""
+    from app.services.silence_service import merge_regions, remove_regions
+
+    if not merge_regions(body.regions):
+        raise HTTPException(status_code=400, detail="No silence to remove")
+    asset = await get_asset(db, asset_id)
+    data = await _download_asset_data(asset.file_path)
+    try:
+        new_data, new_duration = await asyncio.to_thread(remove_regions, data, body.regions)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    from app.services.storage_service import generate_asset_key, upload_file as upload_storage
+    new_key = generate_asset_key("trimmed.mp3")
+    await upload_storage(new_data, new_key, "audio/mpeg")
+
+    extra = dict(asset.metadata_extra or {})
+    if "original_file_path" not in extra:
+        extra["original_file_path"] = asset.file_path
+    entry = {"from": asset.file_path, "to": new_key, "removed": [[a, b] for a, b in merge_regions(body.regions)]}
+    extra["trim_history"] = [*(extra.get("trim_history") or []), entry]
+    extra.pop("silence_regions", None)
+    extra.pop("audio_analysis", None)  # end and crossfade points belong to the old audio
+    asset.file_path = new_key
+    asset.duration = new_duration
+    asset.metadata_extra = extra
+    await db.flush()
+    await db.refresh(asset)
     return asset
 
 
@@ -1282,6 +1327,7 @@ async def restore_original(
     extra.pop("original_file_path", None)
     extra.pop("trim_history", None)
     extra.pop("silence_regions", None)
+    extra.pop("audio_analysis", None)  # measured on the trimmed audio
     asset.metadata_extra = extra
 
     await db.flush()

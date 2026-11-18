@@ -40,18 +40,18 @@ def _names(placed, hhmm):
     return [p.schedule.name for p in placed if p.local.strftime("%H:%M") == hhmm]
 
 
-def test_three_minutes_holds_six_and_the_seventh_goes_to_the_other_block():
+def test_seven_sponsorships_over_two_limited_blocks_are_shared_out_evenly():
     breaks = [_break(DAY, 19, seconds=180), _break(DAY, 20, seconds=180)]
     placed, unplaced = plan_spots(SEVEN, NY, DAY, 1, breaks=breaks, durations=LENGTHS)
 
     assert not unplaced  # nothing is lost
     seven_pm, eight_pm = _names(placed, "19:00"), _names(placed, "20:00")
-    # One play each goes to the block nearest the middle of the evening first (8:00);
-    # it holds six, and the seventh goes to the evening's other block.
-    assert len(eight_pm) == 6 and len(seven_pm) == 1
+    # Each play goes to the emptier block (Shmuel 2026-11-18), so 4 and 3, not 6 and 1
+    assert sorted([len(seven_pm), len(eight_pm)]) == [3, 4]
     assert sorted(seven_pm + eight_pm) == sorted(s.name for s in SEVEN)
-    # Never more than three minutes in the limited block
-    assert sum(LENGTHS[f"asset-{n}"] for n in eight_pm) <= 180
+    # Never more than three minutes in a limited block
+    for names in (seven_pm, eight_pm):
+        assert sum(LENGTHS[f"asset-{n}"] for n in names) <= 180
 
 
 def test_the_limit_counts_real_lengths_not_a_number_of_spots():

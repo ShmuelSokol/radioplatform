@@ -41,6 +41,14 @@ Not built yet: jingle groups with counts, seasonal and parsha types switched by 
 
 Test note: the draw is random, so `tests/test_playlist_generation.py` seeds `random`; in its tiny library some orders legitimately reuse a queued song to keep the artist rule.
 
+## Station IDs between songs
+
+Shmuel, 2026-11-18: "a whole bunch of jingles ... you're listening to Kol B'ramah, WMDI 107.9 Lakewood ... sprinkle them around". Setting `automation_config.station_ids = {enabled, min_minutes (12), max_minutes (20), category ("station_id"), clear_minutes (3)}`, off by default, on the Stations page under Automation Config. Only stations that fill from playlists (Main, Jerusalem); the rule-based fill (All Day Stories) does not place them.
+
+`generate` adds one after a song (`maybe_station_id`) once a random `min..max` minutes have passed since the last station ID of that category aired or was queued (`last_used` of the jingle pool, which already counts waiting ones), so a top-up keeps the spacing across the join. Not when the item before is not music (`after_type` for the first pick: the last ordinary queue item), not in a blackout, and not within `clear_minutes` of a timed item on either side (`Clock.clear_of_timed`; `Clock.last_timed_end` and `timed_ended` from `_air_timeline` cover a break just before the fill). If it cannot go it waits for the next song. The draw is the usual longest-rested draw from `jingle / <category>`, so every ID airs before one repeats. Picks have `block_id` "" and `block_name` "Station ID"; the queue rows are ordinary `source="auto"` rows, redrawn with the songs. `hour_fit` never moves a non-music row, so it cannot pull an ID up against the hour. Jingles are not crossfaded (the song ends, then the ID). KBR Jerusalem's IDs use category `station_id_jerusalem`. Scripts and beds: project files `station-ids/`. Tests: `tests/test_station_ids_between_songs.py`.
+
+The older "Hourly Station ID" switch (`hourly_station_id`, category `hourly_id`, in the :00 group) is separate.
+
 ## Items no automatic pick may use
 
 `fit_for_random_pick()` (models/asset.py) skips categories do_not_play/test (any case) and one-moment clips. Placeholders listed by title in `NEVER_AUTO_TITLES` (the old "KOL BRAMAH TEST SPONSOR", category "Spots"; also "Kol bramah sponsor" and "Kol bramah ad", confirmed placeholders by Shmuel 2026-11-16; exact title match, any case) are skipped by **every** automatic pick through `not_placeholder()`, including rotations, rules and program blocks that name the category. Each refill (and each restart) deletes pending copies an automatic pick queued; operator, request and loop entries stay. Test: `tests/test_placeholder_never_auto.py`.

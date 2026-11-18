@@ -30,6 +30,12 @@ class ProgramBlock(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     timing_mode: Mapped[str] = mapped_column(String(10), default="hard", nullable=False)
     # Soft only: wait for the song at most this many minutes, then fade it (None = no limit)
     latest_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Every year from season_start to season_end ("MM-DD", both ends included, station
+    # time); a range that wraps the new year ("09-16" to "05-14") is fine. Both None =
+    # all year. Used for the kids-in-car reminders: a summer version and one for the
+    # rest of the year (2026-11-18).
+    season_start: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    season_end: Mapped[str | None] = mapped_column(String(5), nullable=True)
     # Ordered list of items, each one of:
     #   {"kind": "asset", "asset_id": "..."}                    one particular recording
     #   {"kind": "category", "asset_type": "...", "category": "..."}  the longest-rested of a type

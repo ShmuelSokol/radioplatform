@@ -457,7 +457,10 @@ class QueueReplenishService:
         clock = Clock(start, timed)
         for seconds in waiting:
             clock.play(seconds)
-        return clock.start(), clock.timed
+        fill_start = clock.start()
+        # When the last timed item before the new songs ends (station IDs keep clear of it)
+        self.timed_ended = clock.last_timed_end
+        return fill_start, clock.timed
 
     async def _station(self) -> Station:
         """The station, read once per session. Reading it again for each step
@@ -489,7 +492,7 @@ class QueueReplenishService:
         station = await self._station()
         pending = (
             await self.db.execute(
-                select(QueueEntry.asset_id, Asset.artist)
+                select(QueueEntry.asset_id, Asset.artist, Asset.asset_type, QueueEntry.preempt_at)
                 .join(Asset, QueueEntry.asset_id == Asset.id)
                 .where(
                     QueueEntry.station_id == self.station_id,
@@ -500,6 +503,9 @@ class QueueReplenishService:
             )
         ).all()
         self.queued_ids = {row[0] for row in pending}
+        # The new songs follow the last ordinary item waiting (a station ID only follows a song)
+        ordinary = [row for row in pending if row[3] is None]
+        after_type = (ordinary[-1][2] if ordinary else None) or "music"
         config = dict(station.automation_config or {})
         saved = dict(config.get(CONFIG_KEY) or {})
         cursor = dict(saved.get("cursor") or {})
@@ -520,6 +526,8 @@ class QueueReplenishService:
             busy_ids=set(self.queued_ids),
             queued=[row[0] for row in pending],
             timed=timed,
+            timed_ended=getattr(self, "timed_ended", None),
+            after_type=after_type,
         )
         if not plan.picks:
             logger.info("Playlist generation produced nothing: %s", "; ".join(plan.notes))

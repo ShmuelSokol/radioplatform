@@ -84,6 +84,7 @@ radioplatform/
 ├── docker/                       # Dockerfiles, nginx.conf
 ├── infra/streaming/              # Playout engine server: radio.liq, setup.sh, Icecast, nginx, systemd
 ├── infra/local/                  # Local FM box: kbr_relay.py keeps the engine on air with no internet, setup-box.sh sets a box up (wiki/local-fm-box.md)
+├── infra/daf-yomi/             # Daf Yomi calendar and intro-clip words for the PC job that makes the clips (wiki/daf-yomi-intro.md)
 └── infra/terraform/              # Terraform IaC (Vercel frontend provisioning)
 ```
 
@@ -108,10 +109,10 @@ radioplatform/
 | HolidayWindow | holiday_window.py | Sabbath/holiday blackouts |
 | ChannelStream | channel_stream.py | Stream configuration |
 | Sponsor | sponsor.py | A client: name on air, company, contact, notes; portal login via user_id |
-| SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
+| SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, three-hour time slots (6-9 AM ... 9 PM-12 AM) or broad dayparts (morning/afternoon/evening/overnight), plays per slot, date range |
 | SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
 | BugReport | bug_report.py | Report from the 🐞 button: words, screenshot, browser state, server log slice, GitHub issue and fix link (see `wiki/bug-reports.md`) |
-| ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit |
+| ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit; optionally only part of every year (`season_start`/`season_end`, MM-DD) |
 | AuditLog | audit_log.py | Activity log row: who, what (label, category), station, before/after, status, IP, device, place (see `wiki/activity-log.md`) |
 | HsSoftened | hs_softened.py | A timed queue item that HS off made wait, with its old timing so HS on restores it (see `wiki/station-modes.md`) |
 | StationBlockedAsset | station_blocked_asset.py | An item one station never plays by itself ("Not on this station"); do_not_play is the all-stations version (see `wiki/control-room.md`) |
@@ -141,7 +142,7 @@ radioplatform/
 |--------|------|--------|
 | auth | auth.py | /auth |
 | stations | stations.py | /stations |
-| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
+| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/remove-silence`: cut out every silent region the scan found (middle gaps too; original kept for Restore Original); `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
@@ -200,7 +201,7 @@ radioplatform/
 | schedule_refresh_service.py | After a schedule, block or playlist change, replaces the unplayed automatic songs so the change takes over on time, and redraws them 15 min before a block's playlist takes over so it starts on time, not early; drops dated weather/time queued as songs (see `wiki/playlist-generation.md`) |
 | schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
 | sponsor_item.py | What the control room's Sponsor panel shows for one spot on one station: sponsor, contracts, today's and coming plays, missed plays |
-| spot_schedule_service.py | Plans sponsor spots into clock slots or block places and keeps pending `ad_slot` queue entries in step; when blocks are over-booked it shares the room fairly, rolls plays to a later block and warns (see `wiki/spot-schedules.md`, `wiki/program-blocks.md`) |
+| spot_schedule_service.py | Plans sponsor spots into clock slots or block places, levelling each time slot so the emptiest break gets the next play, and keeps pending `ad_slot` queue entries in step; when blocks are over-booked it shares the room fairly, rolls plays to a later block and warns (see `wiki/spot-schedules.md`, `wiki/program-blocks.md`) |
 | spot_voice_service.py | Makes spot audio from a script; Shprach call is a stub, placeholder tones until wired (see `wiki/spot-recordings.md`) |
 | program_block_service.py | Expands program blocks into timed queue entries (`source="block"`) and replaces the built-in hourly time and weather (see `wiki/program-blocks.md`) |
 | tts_service.py | ElevenLabs TTS generation |
@@ -260,7 +261,7 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsors as a client list: on the air / starting soon / paused / ended / no contract, active dates, contracts, plays; filters and search (see `wiki/sponsor-accounts.md`)
-- SponsorDetail.tsx — One client: spots by stage of the flow, contracts with their settings (pause, end date), play history with CSV, missed plays, details
+- SponsorDetail.tsx — One client: spots by stage of the flow, contracts with their settings (Edit dialog `components/sponsors/ContractEditor.tsx`, also on Spot Schedule; pause, end date), play history with CSV, missed plays, details
 - Campaigns.tsx — Sponsorship campaigns across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
 - CampaignDetail.tsx — One campaign for staff: drafts, comments, Save Status. Drafts and comments panels are shared with the sponsor portal (`components/campaigns/CampaignParts.tsx`)
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
@@ -527,6 +528,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
 
 # The Sponsors client list and client page at desktop and phone sizes (real backend with clients that have a running contract and plays)
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsor-clients.mjs
+
+# Program Blocks page: "Only part of the year" season pickers (fake backend, desktop and iPhone)
+cd frontend && BASE_URL=http://localhost:4173 node e2e/program-block-season.mjs
 
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs

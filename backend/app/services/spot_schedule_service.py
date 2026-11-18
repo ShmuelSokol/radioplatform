@@ -30,11 +30,31 @@ from app.models.station import Station
 logger = logging.getLogger(__name__)
 
 # Station-local hour ranges [start, end)
-DAYPARTS: dict[str, tuple[int, int]] = {
+# The four broad parts of the day (older contracts, reports and daypart_of).
+BROAD_DAYPARTS: dict[str, tuple[int, int]] = {
     "morning": (6, 12),
     "afternoon": (12, 18),
     "evening": (18, 24),
     "overnight": (0, 6),
+}
+# Three-hour time slots a contract is sold into (Shmuel 2026-11-18: "a zone of a
+# couple hours", not an exact minute; the planner levels the breaks inside it).
+TIME_SLOTS: dict[str, tuple[int, int]] = {
+    "early_morning": (6, 9),
+    "late_morning": (9, 12),
+    "early_afternoon": (12, 15),
+    "late_afternoon": (15, 18),
+    "early_evening": (18, 21),
+    "late_evening": (21, 24),
+}
+# Every name a contract may use. Planned narrowest first, so a contract held to
+# 6-9 AM is seated before one that may go anywhere in the morning.
+DAYPARTS: dict[str, tuple[int, int]] = {
+    "overnight": (0, 6),
+    **TIME_SLOTS,
+    "morning": (6, 12),
+    "afternoon": (12, 18),
+    "evening": (18, 24),
 }
 DEFAULT_SLOT_MINUTES = [15, 30, 45]
 # Length counted for a sponsorship whose recording has no measured length
@@ -88,7 +108,8 @@ def parse_fixed_times(value: str | None) -> list[tuple[int, int]]:
 
 
 def daypart_of(hour: int) -> str:
-    return next(name for name, (start, end) in DAYPARTS.items() if start <= hour < end)
+    """The broad part of the day (morning/afternoon/evening/overnight) an hour is in."""
+    return next(name for name, (start, end) in BROAD_DAYPARTS.items() if start <= hour < end)
 
 
 @dataclass
@@ -216,9 +237,11 @@ def plan_spots(
     air is skipped (reported unplaced with ``blackout`` set).
 
     ``breaks`` (not None when the station has program blocks with sponsor
-    places): spread plays go into those places instead of the clock slots. A
-    play aims at the break its share of the daypart points to and takes the
-    first free place there, or the next break with room. An exact time that
+    places): spread plays go into those places instead of the clock slots. Each
+    play goes to the break of its time slot that holds the fewest sponsorships
+    so far (Shmuel 2026-11-18: every break gets 3 before any gets a 4th), never
+    beside its own contract when another break is as empty; ties go to the
+    break its share of the slot points to, so a contract's plays stay apart. An exact time that
     is a break's start takes a place in that break.
 
     A break may also limit its sponsorship time (``Break.seconds``); a play then
@@ -257,7 +280,7 @@ def plan_spots(
             return False
         return b.local not in time_left or time_left[b.local] + 0.5 >= length(sched)
 
-    def seat_in(b: Break, sched) -> Placement:
+    def seat_in(b: Break, sched, daypart: str | None = None) -> Placement:
         seat = b.capacity - room[b.local]
         room[b.local] -= 1
         if b.local in time_left:
@@ -266,7 +289,7 @@ def plan_spots(
         return Placement(
             at=at,
             local=b.local,
-            daypart=daypart_of(b.local.hour),
+            daypart=daypart or daypart_of(b.local.hour),  # the contract's own slot when spread
             schedule=sched,
             timing_mode=b.timing_mode,
             fixed=bool(getattr(sched, "fixed_times", None)),
@@ -332,6 +355,8 @@ def plan_spots(
                 )
 
         waiting: list[Unplaced] = []  # block plays with no room in their time of day
+        holding: dict[datetime, set] = {}  # break -> contracts seated in it today
+        day_taken: dict[datetime, SpotSchedule] = {}  # clock slots taken today
         for daypart, (h_start, h_end) in DAYPARTS.items():
             wanting = [
                 s
@@ -381,30 +406,36 @@ def plan_spots(
                 )
                 def place(order: list[tuple], commit: bool) -> tuple[list, list]:
                     """Seat the plays in this order; without `commit` the room is put back."""
-                    saved = (dict(room), dict(time_left))
+                    saved = (dict(room), dict(time_left), {k: set(v) for k, v in holding.items()})
                     seated, left_out = [], []
                     for sched, k, plays in order:
                         if not day_breaks:
                             left_out.append((sched, "no block with sponsor places in this time of day"))
                             continue
                         idx = int((k + 0.5) * len(day_breaks) / plays) % len(day_breaks)
-                        chosen = next(
-                            (
-                                day_breaks[(idx + step) % len(day_breaks)]
-                                for step in range(len(day_breaks))
-                                if fits(day_breaks[(idx + step) % len(day_breaks)], sched)
+                        n = len(day_breaks)
+                        open_ = [(i, b) for i, b in enumerate(day_breaks) if fits(b, sched)]
+                        chosen = min(
+                            open_,
+                            key=lambda ib: (
+                                ib[1].capacity - room[ib[1].local],  # sponsorships already there
+                                id(sched) in holding.get(ib[1].local, ()),
+                                (ib[0] - idx) % n,  # nearest after its aim
                             ),
-                            None,
-                        )
+                            default=(None, None),
+                        )[1]
                         if chosen is None:
                             left_out.append((sched, "no sponsor place left in this time of day's blocks"))
                             continue
-                        seated.append(seat_in(chosen, sched))
+                        seated.append(seat_in(chosen, sched, daypart))
+                        holding.setdefault(chosen.local, set()).add(id(sched))
                     if not commit:
                         room.clear()
                         room.update(saved[0])
                         time_left.clear()
                         time_left.update(saved[1])
+                        holding.clear()
+                        holding.update({k: set(v) for k, v in saved[2].items()})
                     return seated, left_out
 
                 booked = [
@@ -453,7 +484,11 @@ def plan_spots(
                             )
                         )
                 continue
-            taken: dict[int, SpotSchedule] = {}
+            # A slot taken by a narrower time slot planned earlier today is not free.
+            taken: dict[int, SpotSchedule] = {
+                i: day_taken[x] for i, x in enumerate(slots) if x in day_taken
+            }
+            already = set(taken)
             for sched in wanting:
                 plays = max(1, int(sched.plays_per_daypart or 1))
                 for k in range(plays):
@@ -468,6 +503,9 @@ def plan_spots(
                     while idx in taken:
                         idx = (idx + 1) % len(slots)
                     taken[idx] = sched
+                    day_taken[slots[idx]] = sched
+            for idx in already:
+                del taken[idx]
             for idx in sorted(taken):
                 local = slots[idx]
                 placements.append(

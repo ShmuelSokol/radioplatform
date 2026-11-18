@@ -91,7 +91,7 @@ async def list_program_blocks(
 async def program_block_capabilities(_: User = Depends(require_manager)):
     """What blocks can do on this server, for scripts that set blocks up (the Daf Yomi job
     checks keep_hourly before it makes any block on a station that keeps its hourly items)."""
-    return {"keep_hourly": True}
+    return {"keep_hourly": True, "seasons": True}
 
 
 @router.get("/preview", response_model=BlockPreview)
@@ -150,6 +150,8 @@ async def create_program_block(
         timing_mode=data.timing_mode,
         latest_minutes=data.latest_minutes if data.timing_mode == "soft" else None,
         items=_items(data.items),
+        season_start=data.season_start,
+        season_end=data.season_end,
     )
     db.add(block)
     await db.commit()
@@ -168,7 +170,20 @@ async def update_program_block(
 ):
     block = await _get(db, block_id)
     await _allowed(db, user, block.station_id)
-    changes = data.model_dump(exclude_unset=True, exclude={"items", "latest_minutes"})
+    # Season (None = all year): checked as a pair against what is stored, before any change
+    season = {
+        key: getattr(data, key) if key in data.model_fields_set else getattr(block, key)
+        for key in ("season_start", "season_end")
+    }
+    if bool(season["season_start"]) != bool(season["season_end"]):
+        raise HTTPException(
+            status_code=422,
+            detail="Give both the first and the last day of the season, or neither",
+        )
+    block.season_start, block.season_end = season["season_start"], season["season_end"]
+    changes = data.model_dump(
+        exclude_unset=True, exclude={"items", "latest_minutes", "season_start", "season_end"}
+    )
     for key, value in changes.items():
         if value is not None:
             setattr(block, key, value.strip() if key == "name" else value)

@@ -20,6 +20,9 @@ export interface ProgramBlock {
   timing_mode: BlockTiming;
   latest_minutes: number | null; // soft only: wait at most this long for the song
   items: BlockItem[];
+  // Every year from season_start to season_end ("MM-DD", may wrap the new year); null = all year
+  season_start?: string | null;
+  season_end?: string | null;
 }
 
 export type ProgramBlockInput = Omit<ProgramBlock, 'id'>;

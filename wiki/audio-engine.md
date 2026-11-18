@@ -307,3 +307,15 @@ weather), for short items and for timed ones. `handover_seconds` hands a non-son
   `audio-engine.mjs` `sponsorship-after-sponsorship-no-overlap`,
   `sponsorship-not-talked-over-when-the-server-is-early`, `song-after-sponsorship-no-overlap`,
   `songs-with-crossfade-zero-do-not-overlap`, `songs-still-crossfade-by-default`.
+
+## Removing silence in the Library (item page, Silence Detection)
+
+- Detect Silence lists the quiet parts. "Remove All Found Silence (N)" cuts every one of
+  them out, the gaps in the middle too, and joins the rest (`POST /assets/{id}/remove-silence`,
+  `silence_service.remove_regions`, managers and admins). "Trim Out" on one selected
+  region uses the same call with that region only. Until 2026-11-18 Trim Out on a gap in
+  the middle kept only what came before the gap and cut off the rest of the recording.
+- Like `/trim`, it is non-destructive: `metadata_extra.original_file_path` keeps the first
+  file, Undo Trim / Restore Original bring it back. Any trim or restore drops
+  `audio_analysis`, whose end and crossfade points belong to the old audio; the upcoming
+  analysis measures the item again before it airs.

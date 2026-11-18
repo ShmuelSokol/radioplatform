@@ -1,6 +1,6 @@
 """Pydantic schemas for program blocks (named runs of items at clock times)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -42,6 +42,24 @@ def _clean_block_times(value: str) -> str:
     return ",".join(f"{h:02d}:{m:02d}" for h, m in times)
 
 
+def _clean_season_day(value: str | None) -> str | None:
+    """ "MM-DD" (also "M-D" or "MM/DD"), checked against a leap year so 02-29 is allowed."""
+    if value is None or not str(value).strip():
+        return None
+    raw = str(value).strip().replace("/", "-")
+    try:
+        month, day = (int(x) for x in raw.split("-"))
+        date(2000, month, day)
+    except (ValueError, TypeError):
+        raise ValueError("use month-day, like 05-15") from None
+    return f"{month:02d}-{day:02d}"
+
+
+def _check_season(start: str | None, end: str | None) -> None:
+    if bool(start) != bool(end):
+        raise ValueError("give both the first and the last day of the season, or neither")
+
+
 class ProgramBlockBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     is_active: bool = True
@@ -50,9 +68,18 @@ class ProgramBlockBase(BaseModel):
     timing_mode: Literal["hard", "soft"] = "hard"
     latest_minutes: int | None = Field(None, ge=1, le=60)
     items: list[BlockItem] = Field(..., min_length=1, max_length=20)
+    # Every year from season_start to season_end ("MM-DD"); both empty = all year
+    season_start: str | None = None
+    season_end: str | None = None
 
     _days = field_validator("days_of_week")(_clean_days)
     _times = field_validator("times")(_clean_block_times)
+    _season = field_validator("season_start", "season_end")(_clean_season_day)
+
+    @model_validator(mode="after")
+    def _season_pair(self):
+        _check_season(self.season_start, self.season_end)
+        return self
 
 
 class ProgramBlockCreate(ProgramBlockBase):
@@ -67,6 +94,11 @@ class ProgramBlockUpdate(BaseModel):
     timing_mode: Literal["hard", "soft"] | None = None
     latest_minutes: int | None = Field(None, ge=1, le=60)
     items: list[BlockItem] | None = Field(None, min_length=1, max_length=20)
+    # null clears (all year); the pair is checked against the stored block on save
+    season_start: str | None = None
+    season_end: str | None = None
+
+    _season = field_validator("season_start", "season_end")(_clean_season_day)
 
     @field_validator("days_of_week")
     @classmethod
@@ -91,6 +123,8 @@ class ProgramBlockOut(BaseModel):
     timing_mode: str
     latest_minutes: int | None = None
     items: list[dict]
+    season_start: str | None = None
+    season_end: str | None = None
     created_at: datetime | None = None
 
 

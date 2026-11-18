@@ -1,4 +1,5 @@
 import type { ClientContract, ClientStatus, ContractState } from '../../api/sponsors';
+import { daypartText } from '../../api/spotSchedules';
 import { formatInZone } from '../../lib/stationTime';
 
 /** The station's home clock (Lakewood) for times that belong to a client, not one station. */
@@ -64,12 +65,6 @@ export function seconds(n: number | null | undefined): string {
 }
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const DAYPART: Record<string, string> = {
-  morning: 'morning (6 AM to 12 PM)',
-  afternoon: 'afternoon (12 to 6 PM)',
-  evening: 'evening (6 PM to 12 AM)',
-  overnight: 'overnight (12 to 6 AM)',
-};
 
 function clock(hhmm: string): string {
   const [h, m] = hhmm.split(':').map(Number);
@@ -84,6 +79,6 @@ export function describeContract(c: Pick<ClientContract, 'days_of_week' | 'daypa
     c.timing_mode === 'hard' ? ', on the second (song fades)' : c.timing_mode === 'soft' ? ', after the song ends' : '';
   if (c.fixed_times) return `${dayText} at ${c.fixed_times.split(',').map(clock).join(', ')}${timing}`;
   const times = c.plays_per_daypart === 1 ? 'once' : `${c.plays_per_daypart} times`;
-  const parts = c.dayparts.split(',').map((p) => DAYPART[p] ?? p).join(', ');
+  const parts = c.dayparts.split(',').map((p) => daypartText(p)).join(', ');
   return `${dayText}, ${times} each ${parts}${timing}`;
 }

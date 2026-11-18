@@ -30,6 +30,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [sponsor-accounts](sponsor-accounts.md) — Sponsors page as a client database: status and dates, spots by stage, contracts, as-run log, missed plays
 - [spot-recordings](spot-recordings.md) — Record Spots page: script, wording check, audio (Shprach stub makes placeholder tones), listen, approve into the library
 - [program-blocks](program-blocks.md) — Named blocks ("Weather Sponsors"): one event that queues a run of items at clock times, hard or soft; replaces the built-in hourly time and weather
+- [daf-yomi-intro](daf-yomi-intro.md) — "Up next, today's daf" clip before each Daf Yomi shiur: calendar and words in infra/daf-yomi, clips made and placed by the PC job
 - [operator-actions](operator-actions.md) — Next with a fade choice, fire-now, insert at a point, intro length, hard/soft timed items (`timing_mode`)
 - [multi-station-load.md](multi-station-load.md) — load test for many stations and listeners; what it found
 - [station-permissions.md](station-permissions.md) — who may operate which station; the protected (FM) station

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getSponsorItem, skipSponsorshipPlay, updateSpotSchedule } from '../../../api/spotSchedules';
+import { daypartText, getSponsorItem, skipSponsorshipPlay, updateSpotSchedule } from '../../../api/spotSchedules';
 import type { SponsorItemContract, SponsorItemPlay } from '../../../api/spotSchedules';
 import { assetLabel, fmtDur } from './shared';
 import type { SongTarget } from './SongPanel';
@@ -21,12 +21,6 @@ interface Props {
   onToast: (text: string, type: 'ok' | 'warn' | 'error') => void;
 }
 
-const DAYPART_TEXT: Record<string, string> = {
-  overnight: 'Overnight (12-6 AM)',
-  morning: 'Morning (6 AM-12 PM)',
-  afternoon: 'Afternoon (12-6 PM)',
-  evening: 'Evening (6 PM-12 AM)',
-};
 const STATE_TEXT: Record<SponsorItemContract['state'], { text: string; cls: string }> = {
   running: { text: 'RUNNING', cls: 'bg-green-700 text-white' },
   paused: { text: 'PAUSED', cls: 'bg-amber-500 text-black' },
@@ -47,7 +41,7 @@ function fmtDate(iso: string | null): string {
 
 function playsText(c: SponsorItemContract): string {
   if (c.fixed_times.length) return `At ${c.fixed_times.join(', ')}`;
-  const parts = c.dayparts.map(d => DAYPART_TEXT[d] ?? d).join(', ');
+  const parts = c.dayparts.map(d => daypartText(d, true)).join(', ');
   return `${c.plays_per_daypart} ${c.plays_per_daypart === 1 ? 'play' : 'plays'} in each: ${parts || 'no times of day'}`;
 }
 
@@ -273,7 +267,7 @@ export default function SponsorPanel({ target, stationId, canSkip, canManage, ca
                       <li key={`${m.local_date}-${m.daypart}-${m.local_time ?? ''}`} className="py-0.5" data-testid="sponsor-missed-row">
                         {m.local_time
                           ? <><b>{m.day}</b>, {m.local_time}: did not air</>
-                          : <><b>{m.day}</b>, {(DAYPART_TEXT[m.daypart] ?? m.daypart).split(' (')[0].toLowerCase()}: {m.played} of {m.promised} aired</>}
+                          : <><b>{m.day}</b>, {daypartText(m.daypart).split(' (')[0].toLowerCase()}: {m.played} of {m.promised} aired</>}
                       </li>
                     ))}
                   </ul>
@@ -287,7 +281,7 @@ export default function SponsorPanel({ target, stationId, canSkip, canManage, ca
                   <ul className="text-xs mt-1 text-red-800" data-testid="sponsor-no-room">
                     {missedComing.map(m => (
                       <li key={`c-${m.local_date}-${m.daypart}`} className="py-0.5">
-                        <b>{m.day}</b>, {(DAYPART_TEXT[m.daypart] ?? m.daypart).split(' (')[0].toLowerCase()}: {m.note || `${m.missed} with no room`}
+                        <b>{m.day}</b>, {daypartText(m.daypart).split(' (')[0].toLowerCase()}: {m.note || `${m.missed} with no room`}
                       </li>
                     ))}
                   </ul>

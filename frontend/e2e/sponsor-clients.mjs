@@ -76,6 +76,34 @@ for (const [name, device] of SIZES) {
   await page.getByRole('tab', { name: /Contracts/ }).click();
   await page.getByTestId('contract-table').first().waitFor();
   await noSideways('contracts'); await shot('3-contracts');
+  // every contract has Edit: the whole contract in one dialog, closed with Esc
+  await page.getByTestId('contract-edit').first().click();
+  await page.getByTestId('contract-editor').waitFor();
+  await noSideways('contract editor'); await shot('3b-edit-contract');
+  // A spread contract offers the seven three-hour time slots (PR 373, checklist V3-82)
+  const slots = page.getByTestId('editor-time-slots');
+  if (await slots.count()) {
+    const text = await slots.innerText();
+    for (const label of ['Early morning', 'Late morning', 'Early afternoon', 'Late afternoon', 'Early evening', 'Late evening', 'Overnight']) {
+      if (!text.includes(label)) fail(`${name}: contract editor does not offer the "${label}" time slot`);
+    }
+  }
+  if (name === 'desktop') {
+    // Saving with nothing changed keeps the contract exactly as it was (the dialog opened with its values)
+    const KEYS = ['asset_id', 'station_id', 'dayparts', 'plays_per_daypart', 'fixed_times', 'days_of_week', 'start_date', 'end_date', 'timing_mode', 'is_active'];
+    const contracts = async () => {
+      const rows = await (await fetch(`${API}/spot-schedules?sponsor_id=${busy.id}`, { headers: { Authorization: `Bearer ${login.access_token}` } })).json();
+      return JSON.stringify(rows.map((r) => [r.id, ...KEYS.map((k) => r[k] ?? null)]).sort());
+    };
+    const before = await contracts();
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await page.getByTestId('contract-saved').waitFor();
+    const after = await contracts();
+    if (after !== before) fail(`${name}: saving the contract unchanged changed it:\n  before ${before}\n  after  ${after}`);
+    await shot('3c-edit-saved');
+  }
+  await page.keyboard.press('Escape');
+  await page.getByTestId('contract-editor').waitFor({ state: 'detached' });
 
   await page.getByRole('tab', { name: 'Play history' }).click();
   await page.getByTestId('play-table').waitFor();
