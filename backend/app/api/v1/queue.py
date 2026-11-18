@@ -24,7 +24,7 @@ from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.asset import Asset, fit_for_random_pick, stored_analysis
 from app.models.play_log import PlayLog
-from app.models.queue_entry import QueueEntry, hard_timed, is_soft_timed, mark_started, resume_offset
+from app.models.queue_entry import QueueEntry, aired_from, hard_timed, is_soft_timed, mark_started, resume_offset
 from app.models.user import User
 from app.schemas.queue import (
     QueueAdd,
@@ -1166,7 +1166,7 @@ async def _check_advance_locked(
             if current.started_at:
                 log = PlayLog(
                     id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
-                    start_utc=current.started_at, end_utc=now_utc, source="scheduler",
+                    start_utc=aired_from(current), end_utc=now_utc, source="scheduler",
                 )
                 db.add(log)
             current.status = "played"
@@ -1194,7 +1194,7 @@ async def _check_advance_locked(
         if current.started_at:
             log = PlayLog(
                 id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
-                start_utc=current.started_at, end_utc=now_utc, source="scheduler",
+                start_utc=aired_from(current), end_utc=now_utc, source="scheduler",
             )
             db.add(log)
         current.status = "played"
@@ -1223,7 +1223,7 @@ async def _check_advance_locked(
             id=uuid.uuid4(),
             station_id=station_id,
             asset_id=current.asset_id,
-            start_utc=current.started_at,
+            start_utc=aired_from(current),
             end_utc=datetime.now(timezone.utc),
             source="scheduler",
         )
@@ -2062,7 +2062,7 @@ async def _skip_current_locked(
         if current.started_at:
             log = PlayLog(
                 id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
-                start_utc=current.started_at, end_utc=datetime.now(timezone.utc),
+                start_utc=aired_from(current), end_utc=datetime.now(timezone.utc),
                 source="manual",
             )
             db.add(log)

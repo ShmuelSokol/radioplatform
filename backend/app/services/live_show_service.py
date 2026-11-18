@@ -118,7 +118,7 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
     from sqlalchemy import update
 
     from app.models.play_log import PlayLog
-    from app.models.queue_entry import QueueEntry, resume_source
+    from app.models.queue_entry import QueueEntry, aired_from, resume_source
     from app.services import long_items
 
     current = (await db.execute(
@@ -128,7 +128,7 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
         return
     if current.started_at:
         db.add(PlayLog(id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id,
-                       start_utc=current.started_at, end_utc=now, source="scheduler"))
+                       start_utc=aired_from(current), end_utc=now, source="scheduler"))
     at = long_items.resume_point(current, now)
     current.status = "played"
     if at is None:

@@ -523,7 +523,7 @@ async def _resume_playback_on_startup():
 
     from app.db.engine import async_session_factory
     from app.models.play_log import PlayLog
-    from app.models.queue_entry import QueueEntry
+    from app.models.queue_entry import QueueEntry, aired_from
     from app.models.station import Station
 
     now = datetime.now(timezone.utc)
@@ -590,7 +590,7 @@ async def _resume_playback_on_startup():
                 play_log = PlayLog(
                     station_id=entry.station_id,
                     asset_id=entry.asset_id,
-                    start_utc=entry.started_at or now,
+                    start_utc=aired_from(entry) or now,
                     end_utc=now,
                     source="scheduler",
                 )
