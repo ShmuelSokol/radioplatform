@@ -16,6 +16,7 @@
  * Part L (ONLY=chat): the staff chat between the host and the screener.
  * Part M (ONLY=history): repeat, priority and blocked callers.
  * Part N (ONLY=lock): a locked call is left alone by End Call, Hold and Next.
+ * Part O (ONLY=cohost): a co-host joins from another place.
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
  * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
@@ -1304,6 +1305,98 @@ function hostMic(showId, token) {
         check('N6 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
         await api('POST', `/live-shows/${show.id}/end`);
       } finally {
+        await browser.close();
+      }
+    }
+    // ---------- Part O: a co-host joins from another place ----------
+    if (!ONLY || ONLY === 'cohost') {
+      await setConfig({ live_delay_seconds: 0, live_host_gone_seconds: 0 });
+      const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-'));
+      { const rate = 48000, n = rate * 60, buf = Buffer.alloc(44 + n * 2);
+        buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+        buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+        for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 880 * i / rate)), 44 + i * 2);
+        fs.writeFileSync(path.join(DIR, 'cohost.wav'), buf); }
+      const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.join(DIR, 'cohost.wav')}`, '--autoplay-policy=no-user-gesture-required'] });
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const open = async (url, opts = {}) => {
+        const page = await (await browser.newContext(opts)).newPage();
+        await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409|dynamically imported module|MIME type/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        page.on('dialog', (d) => { problems.push(`${url}: dialog "${d.message()}"`); d.dismiss(); });
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      const P = (l, f, from, to) => power(l.frames.filter((x) => x.at >= from && x.at < to).flatMap((x) => Array.from(x.pcm)), f);
+      let mic;
+      try {
+        const show = await newShow('Delay test O');
+        await api('POST', `/live-shows/${show.id}/start`);
+        const l = listener();
+        mic = hostMic(show.id, token);
+        mic.ws.addEventListener('message', (e) => { if (typeof e.data !== 'string') mic.back.push({ at: Date.now(), pcm: new Int16Array(e.data) }); });
+        await mic.ready;
+        const watcher = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        const co = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await T(co, 'cohost-join').waitFor({ timeout: 15000 });
+        await T(watcher, 'cohost-names').waitFor({ timeout: 15000 });
+        check('O1 the Host Console offers Join as co-host and says nobody is co-hosting', /No co-host on the show/.test(await T(co, 'cohost-names').innerText()) && await T(co, 'cohost-join').isEnabled());
+        await sleep(2000);
+        const t0 = Date.now();
+        await sleep(1500);
+        const before = P(l, 880, t0, Date.now());
+        await T(co, 'cohost-join').click();
+        await T(co, 'cohost-on').waitFor({ timeout: 8000 });
+        await watcher.getByText(/On the show with the host: /).waitFor({ timeout: 5000 });
+        check('O2 joined: the page says so, the host cannot also be started here, and another screen names the co-host', /You are on the show as a co-host\. Listeners hear you/.test(await T(co, 'cohost-on').innerText()) && await co.getByRole('button', { name: 'Start Broadcasting' }).isDisabled() && /On the show with the host: \S+/.test(await T(watcher, 'cohost-names').innerText()), await T(watcher, 'cohost-names').innerText());
+        await sleep(2500);
+        const t1 = Date.now();
+        await sleep(2500);
+        const t2 = Date.now();
+        const withCo = P(l, 880, t1, t2), hostTone = P(l, 440, t1, t2);
+        check('O3 listeners hear the co-host together with the host', before < 0.001 && withCo > 0.004 && hostTone > 0.004, `880 Hz before ${before.toFixed(4)}, with co-host ${withCo.toFixed(4)}; host 440 Hz ${hostTone.toFixed(4)}`);
+        const hostHears = power(mic.back.filter((x) => x.at >= t1 && x.at < t2).flatMap((x) => Array.from(x.pcm)), 880);
+        check('O4 the host hears the co-host', hostHears > 0.004, hostHears.toFixed(4));
+        await shot(co, 'cohost-on');
+        await T(co, 'cohost-mute').click();
+        await sleep(1500);
+        const t3 = Date.now();
+        await sleep(2000);
+        const mutedP = P(l, 880, t3, Date.now());
+        check('O5 Mute takes the co-host off the air while the host goes on', mutedP < 0.001 && P(l, 440, t3, Date.now()) > 0.004 && /muted/.test(await T(co, 'cohost-on').innerText()), `880 Hz ${mutedP.toFixed(4)}`);
+        await T(co, 'cohost-mute').click();
+        await sleep(2000);
+        const t4 = Date.now();
+        await sleep(2000);
+        check('O6 Unmute brings them back', P(l, 880, t4, Date.now()) > 0.004, P(l, 880, t4, Date.now()).toFixed(4));
+        await T(co, 'cohost-leave').click();
+        await watcher.getByText('No co-host on the show.').waitFor({ timeout: 5000 });
+        await sleep(1500);
+        const t5 = Date.now();
+        await sleep(2000);
+        check('O7 Leave the show: off the air, the other screen says no co-host, Join is offered again', P(l, 880, t5, Date.now()) < 0.001 && await T(co, 'cohost-join').isEnabled());
+        // The show ends while a co-host is on: their page says so
+        await T(co, 'cohost-join').click();
+        await T(co, 'cohost-on').waitFor({ timeout: 8000 });
+        const small = await open(`/admin/live/${show.id}/host`, { ...devices['iPhone 13'] });
+        await T(small, 'cohost-panel').waitFor({ timeout: 15000 });
+        const m = await small.evaluate(() => ({ scroll: document.documentElement.scrollWidth - window.innerWidth, h: Math.round(document.querySelector('[data-testid="cohost-join"]').getBoundingClientRect().height) }));
+        check('O8 on a phone the co-host box fits and its button is a full tap target', m.scroll <= 0 && m.h >= 44, JSON.stringify(m));
+        await shot(small, 'cohost-phone');
+        await api('POST', `/live-shows/${show.id}/end`);
+        await co.getByText('SHOW ENDED').waitFor({ timeout: 8000 });
+        await sleep(500);
+        check('O9 the show ends: the co-host\'s page says SHOW ENDED and listeners no longer hear them', (await api('GET', `/live-shows/${show.id}/air`)).json.cohosts.length === 0);
+        const code = await new Promise((res) => { const w = new WebSocket(`${API.replace(/^http/, 'ws')}/ws/live/${show.id}/cohost`); w.onopen = () => w.send(JSON.stringify({ type: 'auth', token })); w.onclose = (e) => res(e.code); setTimeout(() => res('timeout'), 5000); });
+        check('O10 joining a show that is over is refused', code === 4009, String(code));
+        check('O11 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+      } finally {
+        if (mic) mic.close();
         await browser.close();
       }
     }

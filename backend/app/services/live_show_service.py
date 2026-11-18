@@ -498,7 +498,8 @@ async def end_show(db: AsyncSession, show_id: UUID | str, drain: bool = True) ->
     # Web callers: their calls end with the show
     try:
         from app.api.v1.live_shows_ws import live_relay
-        for line in [c for c in live_relay.callers.values() if c.show_id == str(show.id)]:
+        await live_relay.drop_cohosts(str(show.id))
+        for line in [c for c in live_relay.callers.values() if c.show_id == str(show.id) and not c.cohost]:
             call = await get_call(db, line.call_id)
             if call is not None and call.status in (CallStatus.WAITING, CallStatus.SCREENING,
                                                     CallStatus.APPROVED, CallStatus.ON_AIR):

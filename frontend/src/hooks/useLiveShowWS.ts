@@ -12,6 +12,8 @@ interface LiveShowWSState {
   lastDump: { seconds: number; by: string; at: number } | null;
   /** A staff chat line that just arrived (the chat panel adds it to what it loaded) */
   lastChat: ChatMessage | null;
+  /** Co-hosts on the show, from the socket; null until it said so */
+  cohosts: string[] | null;
 }
 
 /**
@@ -27,6 +29,7 @@ export function useLiveShowWS(showId: string | undefined): LiveShowWSState {
   const [air, setAir] = useState<AirStatus | null>(null);
   const [lastDump, setLastDump] = useState<LiveShowWSState['lastDump']>(null);
   const [lastChat, setLastChat] = useState<ChatMessage | null>(null);
+  const [cohosts, setCohosts] = useState<string[] | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempts = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,6 +146,9 @@ export function useLiveShowWS(showId: string | undefined): LiveShowWSState {
               case 'air_dump':
                 setLastDump({ seconds: message.data.seconds, by: message.data.by, at: Date.now() });
                 break;
+              case 'cohosts':
+                setCohosts(Array.isArray(message.data?.names) ? message.data.names : []);
+                break;
               case 'chat':
                 setLastChat(message.data);
                 break;
@@ -204,5 +210,5 @@ export function useLiveShowWS(showId: string | undefined): LiveShowWSState {
     };
   }, [showId]); // Only re-run when showId changes
 
-  return { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat };
+  return { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat, cohosts };
 }

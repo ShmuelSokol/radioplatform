@@ -238,6 +238,8 @@ export interface AirStatus {
   insert?: { title: string; kind: string; remaining: number } | null;
   next_insert?: { title: string; kind: string; in: number } | null;
   host_silent_for?: number;
+  /** Names of the co-hosts on the show now */
+  cohosts?: string[];
 }
 
 export const getAirStatus = async (showId: string): Promise<AirStatus> => {

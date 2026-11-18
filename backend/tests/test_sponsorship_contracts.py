@@ -411,3 +411,36 @@ async def test_a_slot_about_to_air_counts_towards_the_contracts_plays(
                  if (e.preempt_at if e.preempt_at.tzinfo else e.preempt_at.replace(tzinfo=UTC))
                  .astimezone(JLM).date() == day]
         assert len(plays) == 2, [e.preempt_at for e in plays]
+
+
+@pytest.mark.asyncio
+async def test_audio_swapped_out_of_its_contract_is_never_filler(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """2026-11-18: a contract moved from stand-in audio to the real voice; minutes later
+    the music generator drew the stand-ins as plain spots on every station and two aired.
+    Audio once tied to a sponsor stays out of every automatic pick."""
+    from app.models.asset import fit_for_random_pick, in_category, not_contract_audio, not_placeholder
+
+    station, assets, sponsor = await _station_with_contract_audio(db_session, client, auth_headers)
+    sched = await _contract_ending(db_session, client, auth_headers, station, assets[0], sponsor,
+                                   date.today() + timedelta(days=5))
+    # the contract moves to the new recording
+    r = await client.put(f"/api/v1/spot-schedules/{sched}", json={"asset_id": str(assets[1].id)},
+                         headers=auth_headers)
+    assert r.status_code == 200, r.text
+    free_spot = Asset(id=uuid.uuid4(), title="Station promo", file_path="s/promo.mp3",
+                      duration=20.0, asset_type="spot", category="spots")
+    db_session.add(free_spot)
+    await db_session.commit()
+
+    random_pick = (await db_session.execute(
+        select(Asset.id).where(Asset.asset_type == "spot", fit_for_random_pick()))).scalars().all()
+    by_category = (await db_session.execute(
+        select(Asset.id).where(Asset.asset_type == "spot", in_category("spots"), not_placeholder(),
+                               not_contract_audio()))).scalars().all()
+    for ids in (random_pick, by_category):
+        got = {str(i) for i in ids}
+        assert str(assets[0].id) not in got   # the old recording, no contract now
+        assert str(assets[1].id) not in got   # the new one, in the contract
+        assert str(free_spot.id) in got

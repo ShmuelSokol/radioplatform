@@ -169,3 +169,13 @@ The qnet skin greys every disabled button whatever its colour (`!important` in `
 ## The stream goes quiet when the show's audio is here (engine, 2026-11-18)
 
 On "live on" the engine used to go quiet at once and then open `live.mp3`: until that feed had connected and buffered (2 to 3.5 s) the stream was silent, at every take-over (KBR Jerusalem 17:34Z: quiet 3.5 s before the host's first words). Now `/live` in `radio.liq` only notes the wish (`live_asked`), starts the feed and lets the music play on; `go_live()` runs when `live_feed.is_ready()`, when the song on air has under 2 s left (the item loaded behind it is the one for after the show and must not start), or after 5 s whatever is there. Until then the engine still says `live=1` to the backend (`live_wanted()`), so the item that follows the show is handed out and nothing new is started. A "live off" in that wait just drops the wish: the music never stopped. The show reaches the stream a feed-buffer later than the page players (about 2 to 3 s), with nothing lost. Needs the engines redeployed (`setup.sh`); an engine not yet redeployed behaves as before.
+
+## Co-host from another place
+
+**Join as co-host** on the Host Console (`pages/admin/live/CohostPanel.tsx`, `hooks/useCohost.ts`) opens `/ws/live/{show}/cohost` (the same sign-in rule as the host's microphone: admin, manager, or the show's own host). The server gives the co-host a `CallerLine` (`cohost` = their name, key `cohost:<user id>`, always on air, no call behind it), so they are mixed into the show exactly like a caller on air: through the delay (Dump covers them), heard by the host and the callers, and they hear everyone but themselves. Up to three. The lines close with the show (`drop_cohosts`, code 4000); joining a show that is not live closes with 4009.
+
+- The host's microphone carries the show: the mix runs on the host's frames, so a co-host is heard only while a host is broadcasting. A co-host cannot keep the show on air alone.
+- `GET /live-shows/{id}/air` lists `cohosts`; the show's socket sends a `cohosts` event on every change.
+- The co-host's microphone uses echo cancellation (they hear the show from the same page); a steady test tone comes through about ten times quieter than a scripted host's, a voice does not.
+- A page that is co-hosting cannot also start broadcasting as the host, and the other way round.
+- Tests `tests/test_live_cohost.py`, browser check `ONLY=cohost`.

@@ -176,6 +176,11 @@ def _air_of(show) -> "object | None":
     return air if air is not None and air.show_id == str(show.id) and not air.closed else None
 
 
+def _cohosts(show_id) -> list[str]:
+    from app.api.v1.live_shows_ws import live_relay
+    return live_relay.cohosts(str(show_id))
+
+
 async def _show_or_404(db: AsyncSession, show_id: uuid.UUID):
     show = await live_show_service.get_show(db, show_id)
     if not show:
@@ -198,8 +203,9 @@ async def air_status(
         station = await db.get(Station, show.station_id)
         delay, dump, _rule = settings_for(station.automation_config if station else None)
         return {"mode": "off", "on_air": False, "delay": 0.0, "target": delay, "configured": delay,
-                "dump_size": dump, "safe": False, "dumps": 0, "show_id": str(show.id)}
-    return air.status()
+                "dump_size": dump, "safe": False, "dumps": 0, "show_id": str(show.id),
+                "cohosts": _cohosts(show.id)}
+    return {**air.status(), "cohosts": _cohosts(show.id)}
 
 
 @router.post("/{show_id}/dump")
