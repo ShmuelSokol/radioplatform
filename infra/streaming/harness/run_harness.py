@@ -1098,10 +1098,16 @@ async def sc_fit_before_hour(h: Harness) -> None:
     before = runs[:runs.index(clock)] if clock in runs else runs
     h.check(name, tone_name(TONES["story"][0]) not in before,
             f"the story did not start before the time check: {runs}")
-    h.check(name, bool(before) and before[-1] == tone_name(TONES["song5"][0]),
-            f"the 40 s song was moved up and was on air at the hour: {before}")
-    s5 = await h.started_times("song5", t0)
-    lost = (s5[0][0] + 40 - due.timestamp()) if s5 else None
+    # Any 40 s song will do: since PR 248 the fit may pick one from the refill instead
+    h.check(name, bool(before) and before[-1].startswith("song"),
+            f"a 40 s song was moved up and was on air at the hour: {before}")
+    marks = timeline(heard)
+    last = None
+    for i, (t, n) in enumerate(marks):
+        if n == clock and i > 0:
+            last = marks[i - 1][0]
+            break
+    lost = (last + 40 - due.timestamp()) if last is not None else None
     h.check(name, lost is not None and lost <= 15.0,
             f"it lost {'?' if lost is None else f'{lost:.0f}'} s to the time check (the story would have lost 112 s)")
     gap, _ = longest_silence(heard)
@@ -1144,14 +1150,20 @@ async def sc_fit_preloaded_before_hour(h: Harness) -> None:
             f"the pre-loaded story did not start before the time check: {runs}")
     h.check(name, bool(before) and before[-1] in [tone_name(TONES[n][0]) for n in ("song3", "song4", "song5")],
             f"a 40 s song was moved up and was on air at the hour: {before}")
-    began = [t for n in ("song3", "song4", "song5") for t, _ in await h.started_times(n, t0) if t < due.timestamp()]
-    last = max(began) if began else None
-    lost = (last + 40 - due.timestamp()) if last else None
+    # from what was heard: when the last song before the time check began
+    marks = timeline(heard)
+    last = None
+    for i, (t, n) in enumerate(marks):
+        if n == clock and i > 0:
+            last = marks[i - 1][0]
+            break
+    lost = (last + 40 - due.timestamp()) if last is not None else None
     h.check(name, lost is not None and lost <= 15.0,
             f"it lost {'?' if lost is None else f'{lost:.0f}'} s to the time check (the story would have lost 112 s)")
     gap, _ = longest_silence(heard)
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+    await asyncio.sleep(5)  # the next scenario's own Next must not land on this one
 
 
 async def _song_ends_before_hard(h: Harness, name: str, gap: float) -> None:

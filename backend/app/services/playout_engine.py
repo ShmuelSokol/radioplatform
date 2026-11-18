@@ -679,6 +679,12 @@ async def handle_next(
             if entry is None:
                 break
         await ensure_level(db, entry)
+        if str(entry.id) in state.timed_sent:
+            # A Next sent this very entry down the timed lane while we were choosing
+            # (engine run 2026-11-18: it then went to both lanes, played in the timed
+            # lane and made the time check behind it 20 s late)
+            exclude.add(str(entry.id))
+            continue
         uri = build_uri(entry, "main")
         if uri:
             entry_id, asset_id = str(entry.id), str(entry.asset_id)
@@ -1324,6 +1330,10 @@ async def next_goes_to(station_id, entry: QueueEntry) -> bool:
         return False
     state = get_state(station_id)
     entry_id = str(entry.id)
+    if state.cued_entry_id == entry_id or entry_id in state.given:
+        # The engine was handed this entry while we were choosing: it holds the right
+        # item now, an ordinary skip plays it
+        return False
     state.timed_sent.add(entry_id)
     state.skip_requested = True
     # The engine answers once the file is loaded. A big or slow file takes longer than the

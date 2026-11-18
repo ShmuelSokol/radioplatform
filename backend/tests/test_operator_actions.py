@@ -458,3 +458,34 @@ def test_every_operator_queue_action_takes_its_turn():
         if any(d.dependency is q.operator_turn for d in getattr(route, "dependencies", [])):
             have.add(route.path.split("/queue", 1)[-1])
     assert need <= have, need - have
+
+
+@pytest.mark.asyncio
+async def test_an_item_next_sent_down_the_timed_lane_is_not_also_handed_to_the_music_lane(
+    db_session, monkeypatch
+):
+    """Engine run 2026-11-18: the engine asked for its next song while a Next was sending
+    that same entry down the timed lane. It went to both lanes, played in the timed lane,
+    and the time check handed over behind it aired 20 s late."""
+    from app.services import playout_engine
+
+    station, playing, pending, state, commands = await _engine_station(db_session, monkeypatch)
+    state.cued_entry_id = None
+    state.given = set()
+    real = playout_engine.ensure_level
+
+    async def next_arrives_meanwhile(db, entry):
+        state.timed_sent.add(str(entry.id))
+        return await real(db, entry)
+
+    monkeypatch.setattr(playout_engine, "ensure_level", next_arrives_meanwhile)
+    got = await playout_engine.handle_next(db_session, station.id, given=[])
+    assert got is None or got["entry_id"] != str(pending.id)
+    assert state.cued_entry_id != str(pending.id)
+
+    # The other order: the engine was handed the entry first, so Next leaves the timed lane alone
+    monkeypatch.setattr(playout_engine, "ensure_level", real)
+    state.timed_sent.clear()
+    state.cued_entry_id = str(pending.id)
+    assert await playout_engine.next_goes_to(station.id, pending) is False
+    assert commands == [] and str(pending.id) not in state.timed_sent
