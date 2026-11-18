@@ -157,12 +157,18 @@ nav.qn-site [class*="absolute"][class*="top-full"] { border: 0; box-shadow: var(
 nav.qn-site .qn-brand { color: #000080; }
 nav.qn-site .qn-brand:hover { background: transparent; color: #000080; }
 
-/* Phones: fingers need the room, so buttons and boxes keep a tall enough face.
-   A control that sets its own height (min-h-[44px]) keeps it: this rule used to pull a
-   44 px tap target down to 36 px (song request match results). */
+/* Phones: a finger needs 44 x 44 px (measured live 2026-11-18: Approve 17x40, filter tabs
+   36 px on Song Requests). Every button, select and box in a staff page gets that much,
+   also the plain text buttons in a row of actions (Edit, Delete, Approve). Links count
+   when they look like a button or sit in a table's action cell; a link inside a sentence
+   stays a link. Round chips and dots (rounded-full) and `.qn-plain` are left alone. */
 @media (pointer: coarse) and (max-width: 767px) {
-  .qn-site main :is(button, a, label)[class*="bg-"]:not([class~="rounded-full"]):not(.qn-plain):not([class*="min-h-"]), .qn-site main select,
-  .qn-site main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]) { min-height: 36px; }
+  .qn-site main :is(button, summary, [role="button"], a[class*="bg-"], td a, label[class*="bg-"]):not([class~="rounded-full"]):not(.qn-plain),
+  .qn-site main select,
+  .qn-site main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]) { min-height: 44px; min-width: 44px; }
+  .qn-site main :is(button, td a):not([class~="rounded-full"]):not(.qn-plain):not([class*="flex"]):not([class*="block"]):not([class*="grid"]):not([class*="hidden"]):not([class*="absolute"]) {
+    display: inline-flex; align-items: center; justify-content: center;
+  }
 }
 
 /* ── Phone tables: `phone-cards` on a <table> stacks each row as a card under 640 px ──

@@ -504,6 +504,83 @@ async function phone(browser, contextOpts, tag, landscape = false) {
   await ctx.close();
 }
 
+// ── Two control rooms open on the same station (F-CR-SONG-15) ─
+async function twoRooms(browser) {
+  const tag = 'two rooms';
+  const station = songStation();
+  const one = await openRoom(browser, DESKTOP, station);
+  const two = await openRoom(browser, DESKTOP, station);
+  const target = station.pending()[2];
+  const a = station.byId[target.asset_id];
+  const other = station.pending()[5];
+  station.add({ asset_id: other.asset_id, position: 70, source: 'auto' });
+  // room one changes a category
+  await openForRow(one.page, target.id, false);
+  await one.page.getByTestId('song-category').selectOption('kids');
+  await one.page.getByTestId('toast').filter({ hasText: 'Category is now' }).waitFor({ timeout: 4000 });
+  const t0 = Date.now();
+  const shown = await rowOf(two.page, target.id).filter({ hasText: 'kids' }).waitFor({ timeout: 16000 }).then(() => true, () => false);
+  check(`${tag}: a category changed in one room shows in the other's queue row within its next refresh`, shown && a.category === 'kids', `${Date.now() - t0} ms`);
+  // room one says do not play for another song: its waiting copies leave room two's queue
+  await one.page.keyboard.press('Escape');
+  await openForRow(one.page, other.id, false);
+  await one.page.getByTestId('song-dnp').click();
+  await one.page.getByTestId('song-state').filter({ hasText: 'DO NOT PLAY' }).waitFor({ timeout: 4000 });
+  const t1 = Date.now();
+  const gone = await rowOf(two.page, other.id).waitFor({ state: 'detached', timeout: 16000 }).then(() => true, () => false);
+  check(`${tag}: do not play in one room takes the waiting copies out of the other room's queue within its next refresh`, gone, `${Date.now() - t1} ms`);
+  check(`${tag}: the second room shows no message of its own about it`, await two.page.getByTestId('toast').count() === 0);
+  // the second room opens the panel for the changed song and reads the new state
+  await openForRow(two.page, target.id, false);
+  check(`${tag}: the other room's panel opens with the new category selected`, await two.page.getByTestId('song-category').inputValue() === 'kids');
+  check(`${tag}: nothing was sent to the player from either room`, airCalls(station).length === 0);
+  check(`${tag}: no script errors`, one.errors.length + two.errors.length === 0, [...one.errors, ...two.errors].join(' | '));
+  await one.ctx.close();
+  await two.ctx.close();
+}
+
+// ── The song on air changes while its panel is open (F-CR-SONG-16) ─
+async function airChanges(browser) {
+  const tag = 'air changes';
+  const station = songStation();
+  const { ctx, page, errors } = await openRoom(browser, DESKTOP, station);
+  const cur = station.playing();
+  const a = station.byId[cur.asset_id];
+  const next = station.pending()[0];
+  const b = station.byId[next.asset_id];
+  await page.getByTestId('now-song').click();
+  await panel(page).waitFor();
+  check(`${tag}: opens for the song on air`, (await page.getByTestId('song-name').innerText()).includes(a.title) && await page.getByTestId('song-on-air').isVisible());
+  // the song ends by itself: the next one goes on air (the room learns by its refresh)
+  cur.status = 'played';
+  next.status = 'playing';
+  next.started_at = new Date().toISOString();
+  await rowOf(page, next.id).locator('text=/./').first().waitFor({ timeout: 1000 }).catch(() => {});
+  const moved = await page.waitForFunction((t) => document.querySelector('[data-testid=now-song]')?.closest('div')?.parentElement?.innerText.includes(t) || document.body.innerText.split(t).length > 2, b.title, { timeout: 16000 }).then(() => true, () => false);
+  check(`${tag}: the room shows the new song on air`, moved);
+  check(`${tag}: the panel keeps the song it was opened for`, await panel(page).isVisible() && (await page.getByTestId('song-name').innerText()).includes(a.title) && !(await page.getByTestId('song-name').innerText()).includes(b.title));
+  const gone = await page.getByTestId('song-on-air').waitFor({ state: 'detached', timeout: 20000 }).then(() => true, () => false);
+  check(`${tag}: the panel no longer says ON AIR once its song has ended`, gone);
+  await shot(page, 'desktop-song-panel-after-song-ended');
+  // an action still goes to the song the panel names, not the one now on air
+  await page.getByTestId('song-category').selectOption('kids');
+  await page.getByTestId('toast').filter({ hasText: 'Category is now' }).waitFor({ timeout: 4000 });
+  check(`${tag}: a category change goes to the panel's song, not the new song on air`, a.category === 'kids' && b.category !== 'kids');
+  check(`${tag}: nothing was sent to the player`, airCalls(station).length === 0);
+  // and a panel opened on a waiting row gains ON AIR when that song goes on air
+  await page.keyboard.press('Escape');
+  const third = station.pending()[0];
+  await openForRow(page, third.id, false);
+  check(`${tag}: a waiting song's panel does not say ON AIR`, await page.getByTestId('song-on-air').count() === 0);
+  next.status = 'played';
+  third.status = 'playing';
+  third.started_at = new Date().toISOString();
+  const lit = await page.getByTestId('song-on-air').waitFor({ timeout: 16000 }).then(() => true, () => false);
+  check(`${tag}: it says ON AIR once that song is on air`, lit);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 const browser = await chromium.launch();
 const ONLY = process.env.ONLY || '';
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
@@ -514,6 +591,8 @@ try {
   if (run('refusals')) await refusals(browser);
   if (run('reach')) await reach(browser);
   if (run('day')) await dayName(browser);
+  if (run('rooms')) await twoRooms(browser);
+  if (run('changes')) await airChanges(browser);
   if (run('phone')) {
     await phone(browser, PHONE, 'iPhone 13');
     await phone(browser, PHONE_SE, 'iPhone SE');
