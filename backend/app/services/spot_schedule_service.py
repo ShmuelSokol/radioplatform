@@ -280,7 +280,7 @@ def plan_spots(
             return False
         return b.local not in time_left or time_left[b.local] + 0.5 >= length(sched)
 
-    def seat_in(b: Break, sched) -> Placement:
+    def seat_in(b: Break, sched, daypart: str | None = None) -> Placement:
         seat = b.capacity - room[b.local]
         room[b.local] -= 1
         if b.local in time_left:
@@ -289,7 +289,7 @@ def plan_spots(
         return Placement(
             at=at,
             local=b.local,
-            daypart=daypart_of(b.local.hour),
+            daypart=daypart or daypart_of(b.local.hour),  # the contract's own slot when spread
             schedule=sched,
             timing_mode=b.timing_mode,
             fixed=bool(getattr(sched, "fixed_times", None)),
@@ -427,7 +427,7 @@ def plan_spots(
                         if chosen is None:
                             left_out.append((sched, "no sponsor place left in this time of day's blocks"))
                             continue
-                        seated.append(seat_in(chosen, sched))
+                        seated.append(seat_in(chosen, sched, daypart))
                         holding.setdefault(chosen.local, set()).add(id(sched))
                     if not commit:
                         room.clear()
