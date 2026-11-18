@@ -63,6 +63,9 @@ HORIZON_DAYS = 7
 # Two plays of one sponsor closer than this sound like a repeat; the planner keeps
 # them apart whenever an equally empty break further away has room.
 SPONSOR_GAP = timedelta(minutes=60)
+# A soft break this close to a shiur's end waits for it anyway (long_items), so it
+# does not interrupt and stays usable.
+TALK_TAIL = timedelta(minutes=5)
 # Never add/remove a slot this close to air time — the player may be picking it up.
 SAFETY_MARGIN = timedelta(minutes=2)
 
@@ -227,6 +230,7 @@ def plan_spots(
     timing_defaults: dict | None = None,
     breaks: list[Break] | None = None,
     durations: dict[str, float] | None = None,
+    quiet: list[tuple[datetime, datetime]] | None = None,
 ) -> tuple[list[Placement], list[Unplaced]]:
     """Assign each schedule's plays to clock slots, spread evenly through each daypart.
 
@@ -260,6 +264,14 @@ def plan_spots(
     With enough room, nothing changes from the simple first-booked order.
     """
     blackouts = blackouts or []
+
+    def inside_talk(b: Break) -> bool:
+        # A soft break during a shiur or story would pause it just for sponsorships;
+        # a hard one (time check, weather) pauses it anyway, so it stays usable.
+        return b.timing_mode == "soft" and any(
+            start < b.local < end - TALK_TAIL for start, end in (quiet or ())
+        )
+
     minutes = sorted({int(m) for m in (slot_minutes or DEFAULT_SLOT_MINUTES) if 0 <= int(m) < 60})
     ordered = sorted(schedules, key=lambda s: (str(s.created_at or ""), str(s.id)))
     placements: list[Placement] = []
@@ -441,6 +453,8 @@ def plan_spots(
                         idx = int((k + 0.5) * len(day_breaks) / plays) % len(day_breaks)
                         n = len(day_breaks)
                         open_ = [(i, b) for i, b in enumerate(day_breaks) if fits(b, sched)]
+                        # Steer around a shiur: only when the slot has no other room
+                        open_ = [ib for ib in open_ if not inside_talk(ib[1])] or open_
                         chosen = min(
                             open_,
                             key=lambda ib: (
@@ -741,6 +755,7 @@ async def plan_for_station(
             select(Asset.id, Asset.duration).where(Asset.id.in_({s.asset_id for s in schedules}))
         )
         durations = {str(r[0]): float(r[1]) for r in rows.all() if r[1]}
+    quiet = await talk_windows(db, station, tz, now) if breaks else []
     placements, unplaced = plan_spots(
         schedules,
         tz,
@@ -751,13 +766,63 @@ async def plan_for_station(
         (station.automation_config or {}).get("spot_timing"),
         breaks,
         durations,
+        quiet,
     )
     if breaks:
         aired = await aired_today(db, station, tz, now, schedules)
-        placements = settle_today(placements, breaks, blackouts, tz, now, aired)
+        placements = settle_today(placements, breaks, blackouts, tz, now, aired, quiet)
     # A part of the day that is already over cannot be fixed; leave it out.
     unplaced = [u for u in unplaced if not daypart_over(u, tz, now)]
     return placements, unplaced
+
+
+async def talk_windows(
+    db: AsyncSession, station: Station, tz: ZoneInfo, now: datetime
+) -> list[tuple[datetime, datetime]]:
+    """When the shiurim and stories queued for set times will be on air (station-local).
+
+    Items queued together for one time share its preempt_at and play in position
+    order, so a talk starts after the items before it in its group (time check,
+    weather, sponsor places, an intro).
+    """
+    from app.models.asset import Asset
+    from app.services.long_items import is_long_form
+
+    rows = (
+        await db.execute(
+            select(QueueEntry.preempt_at, QueueEntry.position, Asset)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(
+                QueueEntry.station_id == station.id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                QueueEntry.preempt_at > now - timedelta(hours=2),
+            )
+            .order_by(QueueEntry.preempt_at, QueueEntry.position)
+        )
+    ).all()
+    windows: list[tuple[datetime, datetime]] = []
+    playing = (
+        await db.execute(
+            select(QueueEntry.started_at, Asset)
+            .join(Asset, QueueEntry.asset_id == Asset.id)
+            .where(QueueEntry.station_id == station.id, QueueEntry.status == "playing")
+        )
+    ).all()
+    for started, asset in playing:
+        if started is not None and is_long_form(asset) and asset.duration:
+            begun = as_utc(started)
+            end = begun + timedelta(seconds=float(asset.duration))
+            windows.append((begun.astimezone(tz), end.astimezone(tz)))
+    offset: dict[datetime, float] = {}
+    for at, _, asset in rows:
+        at = as_utc(at)
+        length = float(asset.duration or 0)
+        start = at + timedelta(seconds=offset.get(at, 0.0))
+        offset[at] = offset.get(at, 0.0) + length
+        if is_long_form(asset) and length > 0:
+            windows.append((start.astimezone(tz), (start + timedelta(seconds=length)).astimezone(tz)))
+    return windows
 
 
 async def aired_today(
@@ -791,6 +856,7 @@ def settle_today(
     tz: ZoneInfo,
     now: datetime,
     aired: dict[str, list[datetime]],
+    quiet: list[tuple[datetime, datetime]] | None = None,
 ) -> list[Placement]:
     """Fit today's plan to what has already aired.
 
@@ -869,6 +935,14 @@ def settle_today(
                 and h_start <= b.local.hour < h_end
                 and b.local not in own_breaks
             ]
+            pool = [
+                b
+                for b in pool
+                if not (
+                    b.timing_mode == "soft"
+                    and any(s < b.local < e - TALK_TAIL for s, e in (quiet or ()))
+                )
+            ] or pool
             if not pool:
                 continue
             others = [where(q) for q in mine if q is not p and where(q).astimezone(UTC) > cutoff]

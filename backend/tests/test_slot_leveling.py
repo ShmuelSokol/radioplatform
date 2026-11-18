@@ -147,3 +147,41 @@ def test_keeping_apart_never_beats_levelling():
                                   NY, DAY, 1, breaks=_breaks(6, 9))
     assert not unplaced
     assert max(_counts(placed).values()) == 1
+
+
+def _mixed_breaks(h_start, h_end):
+    """:00 and :30 hard (time check, weather), :15 and :45 soft, 3 places each."""
+    return [
+        Break(datetime(DAY.year, DAY.month, DAY.day, h, m, tzinfo=NY), 3,
+              "hard" if m in (0, 30) else "soft", "TEST block", None, None)
+        for h in range(h_start, h_end)
+        for m in (0, 15, 30, 45)
+    ]
+
+
+def test_sponsorships_steer_around_a_shiur_but_keep_its_hard_breaks():
+    """Main 2026-11-18: the 8 PM Daf Yomi (56 min) had sponsorships at 8:15, 8:30 and 8:45."""
+    shiur = (datetime(DAY.year, DAY.month, DAY.day, 20, 1, tzinfo=NY), datetime(DAY.year, DAY.month, DAY.day, 20, 57, tzinfo=NY))
+    spots = [_spot(f"s{i:02d}", "early_evening") for i in range(10)]
+    placed, unplaced = plan_spots(spots, NY, DAY, 1, breaks=_mixed_breaks(18, 21), quiet=[shiur])
+    assert not unplaced
+    during = [p.local.strftime("%H:%M") for p in placed if shiur[0] < p.local < shiur[1]]
+    assert set(during) <= {"20:30"}  # never the soft 8:15 or 8:45
+    # with room elsewhere the rest stays level (10 plays, 10 usable breaks)
+    assert max(_counts(placed).values()) == 1
+
+
+def test_a_shiur_break_is_used_when_the_slot_has_no_other_room():
+    shiur = (datetime(DAY.year, DAY.month, DAY.day, 18, 0, tzinfo=NY), datetime(DAY.year, DAY.month, DAY.day, 21, 0, tzinfo=NY))
+    spots = [_spot(f"s{i:02d}", "early_evening") for i in range(36)]
+    placed, unplaced = plan_spots(spots, NY, DAY, 1, breaks=_mixed_breaks(18, 21), quiet=[shiur])
+    assert not unplaced and len(placed) == 36
+
+
+def test_a_soft_break_in_the_last_minutes_of_a_shiur_is_fine():
+    # 8:45 with the shiur ending 8:48 waits for its end anyway (no pause)
+    shiur = (datetime(DAY.year, DAY.month, DAY.day, 20, 1, tzinfo=NY), datetime(DAY.year, DAY.month, DAY.day, 20, 48, tzinfo=NY))
+    spots = [_spot(f"s{i:02d}", "early_evening") for i in range(11)]
+    placed, _ = plan_spots(spots, NY, DAY, 1, breaks=_mixed_breaks(18, 21), quiet=[shiur])
+    times = {p.local.strftime("%H:%M") for p in placed}
+    assert "20:15" not in times and "20:45" in times

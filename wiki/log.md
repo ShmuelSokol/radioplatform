@@ -409,3 +409,4 @@ UPDATE 2026-11-18 sponsor-accounts.md contracts get an Edit dialog (ContractEdit
 INGEST 2026-11-18 daf-yomi-intro.md intro clip before each Daf Yomi shiur: calendar + words in infra/daf-yomi/daf_intro.py, clip made on the PC and placed in the Shiur: Daf Yomi block right before the shiur (queue order keeps them back to back)
 UPDATE 2026-11-18 spot-schedules.md one sponsor's plays kept an hour apart after levelling; settle_today fits today's plan to the play log after a mid-day edit (no double airs, no plays lost on gone breaks)
 UPDATE 2026-11-18 daf-yomi-intro.md speech check uses whisper_prompt() (all masechta names); Arachin also matches 'arachan'
+UPDATE 2026-11-18 spot-schedules.md spread sponsorships skip soft breaks inside a timed shiur/story (talk_windows); hard :00/:30 breaks stay usable
