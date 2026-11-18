@@ -654,6 +654,21 @@ class Harness:
                 return e
         return None
 
+    async def drop_leftover_timed(self) -> list[str]:
+        """Delete timed entries still pending and say what they were (run between scenarios)."""
+        from sqlalchemy import delete
+
+        from app.db.engine import async_session_factory
+        from app.models.queue_entry import QueueEntry
+
+        left = [e for e in await self.rows() if e.status == "pending" and e.preempt_at is not None]
+        if not left:
+            return []
+        async with async_session_factory() as db:
+            await db.execute(delete(QueueEntry).where(QueueEntry.id.in_([e.id for e in left])))
+            await db.commit()
+        return [f"{e.asset.title if e.asset else e.asset_id} ({e.timing_mode or 'soft'}, due {e.preempt_at:%H:%M:%S})" for e in left]
+
     async def clear_pending(self) -> None:
         from sqlalchemy import delete
 
@@ -2771,8 +2786,16 @@ async def main_async(names: list[str], keep: bool, local_box: bool = False) -> i
             stack.start_relay()
         stack.start_engine()
         log("engine on air")
+        prev = None
         for n in names:
             log(f"=== {n}")
+            # A timed item one scenario leaves waiting airs in the middle of the next one and
+            # reads there as "aired twice" (2026-11-18). Say whose it was, loudly, and remove it.
+            if prev:
+                left = await h.drop_leftover_timed()
+                if left:
+                    h.check(prev, False, f"left timed items waiting in the queue for the next scenario: {left}")
+            prev = n
             try:
                 await SCENARIOS[n](h)
             except Exception as e:
