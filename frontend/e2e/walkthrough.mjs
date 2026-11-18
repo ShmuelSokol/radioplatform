@@ -247,7 +247,8 @@ async function open(page, route) {
   // one last worked on, then choose ours so the rest of the walk is about this station
   const pick = current && await stationPicker(page);
   if (pick && !pick.chosen.includes(current.name)) {
-    if (pick.chosen) finding(current.tag, route, 'open', 'opens on another station than the one last worked on', `shows "${pick.chosen}"`, await shoot(page, `${current.tag}${route}-other-station`));
+    // listener pages open on Kol B'ramah Main by design (a listener has no "last worked on")
+    if (pick.chosen && route.startsWith('/admin')) finding(current.tag, route, 'open', 'opens on another station than the one last worked on', `shows "${pick.chosen}"`, await shoot(page, `${current.tag}${route}-other-station`));
     await page.locator('[data-walk-station]').first().selectOption({ label: await page.locator('[data-walk-station] option').evaluateAll((os, n) => (os.find((o) => o.textContent.includes(n)) || {}).textContent, current.name) }).catch(() => {});
     await settle(page, 500);
   }
