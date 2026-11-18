@@ -29,3 +29,19 @@ Needs a real backend (not the fake one the control-room test uses). Local file s
 ## Admin flows suite (`frontend/e2e/admin-flows.mjs`)
 
 Clicks through every admin, sponsor and public screen as each role against a real backend and Postgres (`E2E_DATABASE_URL`, seeded by `e2e/admin-flows-seed.py` with made-up users; `ONLY=<sections>` runs a part). Site bugs it finds stay as tests listed in `KNOWN_BUGS` at the top (status KNOWN-BUG; FIXED? when one starts passing). Things that surprised: the backend allows 10 sign-ins a minute, so every sign-in takes a `loginSlot()`; local file storage serves a login-protected download URL, so audio needs `proxyAudio`; a release-reload uses the tab's one reload per 2 minutes, so a stale-code check needs its own tab; POSTs to routes declared as `"/"` answer 307 first, so match on `status !== 307`. The a11y pass keeps the pages with known gaps in `A11Y_GAP_PAGES`; every other page must scan clean.
+
+## Row actions on phone cards, and the bug button
+
+Under 640 px the last cell of a `phone-cards` row is a row of real buttons: 44 px each way
+(set in `qnet-site.css`, whatever the desktop link looked like). Put `data-danger` on the
+Delete button: it is drawn last, apart from the others, in red, and every Delete asks first.
+Cards keep 56 px clear on the right, where the bug button floats on phones (it sat on the
+left and covered card labels and Library checkboxes). Check: `e2e/display-findings.mjs` 12, 13.
+
+## Times are the station's clock
+
+A time on a staff page is shown, and typed, on the clock of the station it belongs to, with
+the zone named ("4:12 PM EST"), never the viewer's clock or UTC. Use `lib/stationTime.ts`:
+`formatInZone`, `toZonedInput` and `fromZonedInput` (for `datetime-local` boxes). Blackouts
+used to put the UTC time in the edit box and save it as the viewer's local time, so every
+edit moved the window. Check: `e2e/display-findings.mjs` 14.

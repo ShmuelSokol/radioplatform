@@ -301,10 +301,18 @@ function GeneralRecorder() {
   );
 }
 
+// What the server said when a weather step failed, in words for the screen
+function weatherError(e: unknown, doing: string): string {
+  const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
+  const detail = typeof r?.data?.detail === 'string' ? r.data.detail : '';
+  if (!r) return `Could not ${doing}: the server did not answer. Check your connection and try again.`;
+  return `Could not ${doing}${detail ? `: ${detail}` : r.status === 503 ? ': the weather service is not available right now.' : ` (error ${r.status}).`}`;
+}
+
 // ── Template Config Panel ────────────────────────────────────────────────
 function TemplateConfig({ stationId }: { stationId: string }) {
   const [customTemplate, setCustomTemplate] = useState('');
-  const { data: preview, isLoading } = useWeatherTemplatePreview(
+  const { data: preview, isLoading, error } = useWeatherTemplatePreview(
     stationId,
     customTemplate || undefined,
   );
@@ -320,6 +328,11 @@ function TemplateConfig({ stationId }: { stationId: string }) {
         className="w-full px-3 py-2 bg-[#0a0a28] border border-[#2a2a5e] rounded text-white text-sm font-mono"
       />
       {isLoading && <div className="text-xs text-gray-500">Loading preview...</div>}
+      {error && !isLoading && (
+        <div role="alert" data-testid="weather-template-error" className="p-3 bg-red-950 border border-red-800 rounded text-sm text-red-200">
+          {weatherError(error, 'show the template preview')}
+        </div>
+      )}
       {preview && (
         <div className="p-3 bg-[#0a0a28] border border-[#1a1a4e] rounded text-sm text-gray-200 leading-relaxed">
           {preview.rendered}
@@ -393,6 +406,14 @@ export default function RecordingStudio() {
             </>
           )}
         </div>
+
+        {(createReadout.isError || regenerate.isError || queueReadout.isError) && (
+          <div role="alert" data-testid="weather-readout-error" className="p-3 bg-red-950 border border-red-800 rounded text-sm text-red-200">
+            {createReadout.isError ? weatherError(createReadout.error, 'make the readout')
+              : regenerate.isError ? weatherError(regenerate.error, 'make the readout again')
+              : weatherError(queueReadout.error, 'queue the readout')}
+          </div>
+        )}
 
         {/* Template panel */}
         {showTemplate && selectedStation && (

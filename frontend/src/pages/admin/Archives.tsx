@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useEscape } from '../../hooks/useEscape';
 import { useArchives, useCreateArchive, useUpdateArchive, useDeleteArchive } from '../../hooks/useArchives';
 import { useStations } from '../../hooks/useStations';
+import { fromZonedInput, toZonedInput, validZone } from '../../lib/stationTime';
 import type { ShowArchive } from '../../api/archives';
 
 function formatDuration(seconds: number | null): string {
@@ -66,6 +67,7 @@ export default function AdminArchives() {
   const archives = data?.archives ?? [];
 
   const stationName = (id: string) => stations.find(s => s.id === id)?.name ?? 'Unknown';
+  const zoneOf = (id?: string | null) => stations.find(s => s.id === id)?.timezone;
 
   const openCreate = () => {
     setEditingId(null);
@@ -83,7 +85,7 @@ export default function AdminArchives() {
       audio_url: a.audio_url,
       cover_image_url: a.cover_image_url ?? '',
       duration_seconds: a.duration_seconds?.toString() ?? '',
-      recorded_at: a.recorded_at ? new Date(a.recorded_at).toISOString().slice(0, 16) : '',
+      recorded_at: a.recorded_at ? toZonedInput(a.recorded_at, zoneOf(a.station_id)) : '',
       live_show_id: a.live_show_id ?? '',
     });
     setShowModal(true);
@@ -110,7 +112,7 @@ export default function AdminArchives() {
         host_name: form.host_name || undefined,
         cover_image_url: form.cover_image_url || undefined,
         duration_seconds: form.duration_seconds ? parseInt(form.duration_seconds) : undefined,
-        recorded_at: form.recorded_at || undefined,
+        recorded_at: form.recorded_at ? fromZonedInput(form.recorded_at, zoneOf(form.station_id)) : undefined,
         live_show_id: form.live_show_id || undefined,
       });
     }
@@ -210,7 +212,7 @@ export default function AdminArchives() {
                   <td data-label="Host" className="px-3 py-2 text-gray-400 text-[11px] hidden md:table-cell">{a.host_name ?? '-'}</td>
                   <td data-label="Duration" className="px-3 py-2 text-gray-500 text-[11px] hidden lg:table-cell">{formatDuration(a.duration_seconds)}</td>
                   <td data-label="Recorded" className="px-3 py-2 text-gray-500 text-[11px] hidden lg:table-cell">
-                    {a.recorded_at ? new Date(a.recorded_at).toLocaleDateString() : '-'}
+                    {a.recorded_at ? new Date(a.recorded_at).toLocaleDateString('en-US', validZone(zoneOf(a.station_id)) ? { timeZone: zoneOf(a.station_id) } : {}) : '-'}
                   </td>
                   <td data-label="Published" className="px-3 py-2">
                     <button
@@ -234,6 +236,7 @@ export default function AdminArchives() {
                         Edit
                       </button>
                       <button
+                        data-danger
                         onClick={() => handleDelete(a.id)}
                         className="text-red-400 hover:text-red-300 text-[11px] transition"
                       >
