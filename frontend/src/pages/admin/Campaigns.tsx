@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useCampaigns, useCreateCampaign } from '../../hooks/useCampaigns';
 import { useAuth } from '../../hooks/useAuth';
-import { canChange } from '../../auth/access';
+import { canAccess, canChange } from '../../auth/access';
 import { listSponsors } from '../../api/sponsors';
 import { CAMPAIGN_STATUSES } from '../../api/campaigns';
 import Spinner from '../../components/Spinner';
@@ -19,6 +19,7 @@ const input = 'w-full min-h-[44px] border rounded-lg px-3 py-2 focus:ring-2 focu
 export default function AdminCampaigns() {
   const { user } = useAuth();
   const mayChange = canChange(user?.role, '/admin/campaigns');
+  const mayOpenClients = canAccess(user?.role, '/admin/sponsors');
   const [params, setParams] = useSearchParams();
   const sponsorFilter = params.get('sponsor') || '';
   const statusFilter = params.get('status') || '';
@@ -61,6 +62,18 @@ export default function AdminCampaigns() {
           </button>
         )}
       </div>
+
+      {mayOpenClients && (
+        <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="clients-pointer">
+          <span className="min-w-0">Campaigns are only the sponsor's requests and drafts. Every client with all their spots, contracts and what played is in <b>All Clients</b>.</span>
+          <Link
+            to={sponsorFilter ? `/admin/sponsors/${sponsorFilter}` : '/admin/sponsors'}
+            className="inline-flex items-center min-h-[44px] px-3 rounded-lg bg-yellow-400 text-black font-semibold"
+          >
+            {sponsorFilter ? `Open ${sponsorOptions.find(([id]) => id === sponsorFilter)?.[1] ?? 'this client'}` : 'Open All Clients'}
+          </Link>
+        </div>
+      )}
 
       {mayChange && showForm && (
         <CreateCampaignForm

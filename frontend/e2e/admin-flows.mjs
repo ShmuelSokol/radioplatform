@@ -679,10 +679,11 @@ section('shell', async () => {
 
   // F-GLOBAL-3 dropdown groups: every link navigates; hidden for roles that cannot open it
   const groups = {
+    Sponsors: [['All Clients', '/admin/sponsors'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Campaigns', '/admin/campaigns'], ['Sponsorship Rules', '/admin/sponsorship-rules']],
     Content: [['Library', '/admin/assets'], ['Categories', '/admin/categories'], ['Types', '/admin/asset-types'], ['Playlists', '/admin/playlists'], ['Studio', '/admin/studio'], ['Reviews', '/admin/reviews']],
     Broadcast: [['Schedules', '/admin/schedules'], ['Program Blocks', '/admin/program-blocks'], ['Schedule Check', '/admin/schedule-check'], ['Rules', '/admin/rules'], ['Blackouts', '/admin/holidays'], ['Program Clock', '/admin/program-clock'], ['Live Shows', '/admin/live']],
     Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Public Schedule', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
-    Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Sponsors', '/admin/sponsors'], ['Campaigns', '/admin/campaigns'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Sponsorship Rules', '/admin/sponsorship-rules'], ['Alerts', '/admin/alerts'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
+    Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Alerts', '/admin/alerts'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
   };
   const canOpen = (role, p) => {
     if (!p.startsWith('/admin')) return true;
@@ -790,7 +791,7 @@ section('shell', async () => {
       await waitPath(page, '/admin/dashboard');
       await page.goto(`${BASE}/admin/stations`);
       const burger = page.locator('nav button.md\\:hidden');
-      const entries = [['Dashboard', '/admin/dashboard'], ['Library', '/admin/assets'], ['Schedules', '/admin/schedules'], ['Requests', '/admin/requests'], ['Sponsors', '/admin/sponsors'], ['Manage Stations', '/admin/stations'], ['Stations', '/stations']];
+      const entries = [['Dashboard', '/admin/dashboard'], ['Library', '/admin/assets'], ['Schedules', '/admin/schedules'], ['Requests', '/admin/requests'], ['All Clients', '/admin/sponsors'], ['Manage Stations', '/admin/stations'], ['Stations', '/stations']];
       for (const [label, p] of entries) {
         await burger.click();
         const menu = page.locator('nav div.md\\:hidden.border-t');
