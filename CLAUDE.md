@@ -535,6 +535,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/program-block-season.mjs
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 
+# Stations page: "Station IDs between songs" (on, minutes, category, hours; saves and keeps other settings), desktop and iPhone
+cd frontend && BASE_URL=http://localhost:4313 node e2e/station-ids-setting.mjs
+
 # The control room's Sponsor panel (tapping a sponsorship spot) on three stations, roles, desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-sponsor-panel.mjs
 
