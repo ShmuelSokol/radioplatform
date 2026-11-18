@@ -1,0 +1,32 @@
+[
+ {
+  "n": 51,
+  "business": "Hatzalah",
+  "asset_title": "TEST SPONSOR 51 - Hatzalah",
+  "script": "Kol B'ramah sponsor: Hatzalah, the volunteer emergency medical service. Hatzalah members are trained emergency medical technicians and paramedics from the community, who answer calls around the clock, every day of the year, including Shabbos and Yom Tov. Hatzalah's care is given free of charge, and its volunteers are often on the scene within minutes. Once again, that's Hatzalah, volunteer emergency medical service. Kol B'ramah thanks Hatzalah for its support of the station.",
+  "words": 72,
+  "est_seconds": 31,
+  "script_for_voice": "Kol B'ramah sponsor: Hatzalah, the volunteer emergency medical service. Hatzalah members are trained emergency medical technicians and paramedics from the community, who answer calls around the clock, every day of the year, including Shabbos and Yom Tov. Hatzalah's care is given free of charge, and its volunteers are often on the scene within minutes. Once again, that's Hatzalah, volunteer emergency medical service. Kol B'ramah thanks Hatzalah for its support of the station.",
+  "placement": {
+   "station": "Kol B'ramah Main",
+   "dayparts": "late_morning,late_afternoon",
+   "plays_per_daypart": 1,
+   "fixed_times": null
+  }
+ },
+ {
+  "n": 52,
+  "business": "Kars4Kids",
+  "asset_title": "TEST SPONSOR 52 - Kars4Kids",
+  "script": "Kol B'ramah sponsor: Kars4Kids, a national nonprofit organization based in Lakewood. Kars4Kids accepts donated cars, trucks and other vehicles, running or not, with free pickup. The proceeds support educational and mentoring programs for children and young people. Once again, that's Kars4Kids, a nonprofit organization based in Lakewood, supporting programs for children through vehicle donations. Kol B'ramah thanks Kars4Kids for its support of the station.",
+  "words": 64,
+  "est_seconds": 28,
+  "script_for_voice": "Kol B'ramah sponsor: Kars4Kids, a national nonprofit organization based in Lakewood. Kars4Kids accepts donated cars, trucks and other vehicles, running or not, with free pickup. The proceeds support educational and mentoring programs for children and young people. Once again, that's Kars4Kids, a nonprofit organization based in Lakewood, supporting programs for children through vehicle donations. Kol B'ramah thanks Kars4Kids for its support of the station.",
+  "placement": {
+   "station": "Kol B'ramah Main",
+   "dayparts": "late_morning,late_afternoon",
+   "plays_per_daypart": 1,
+   "fixed_times": null
+  }
+ }
+]
