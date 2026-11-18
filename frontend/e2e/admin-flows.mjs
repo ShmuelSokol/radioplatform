@@ -30,7 +30,9 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
-import { guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
+import { guardBrowser, guardVerdict, allowEverywhere } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
+// Provoked on purpose (anything else shown fails the run)
+allowEverywhere(/Pick at least one day for a weekly block/, 'the schedule blocks page is asked to save a weekly block with no day');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.BASE_URL || 'http://localhost:4330';
@@ -3934,6 +3936,7 @@ async function main() {
   const n = (st) => results.filter(r => r.status === st).length;
   console.log(`\n${n('PASS')} passed, ${n('KNOWN-BUG')} known bugs, ${n('FAIL')} failed, ${n('FIXED?')} known bugs now passing (${results.length} checks)`);
   fs.rmSync(TMP, { recursive: true, force: true });
-  process.exit(n('FAIL') || n('FIXED?') || guardVerdict() ? 1 : 0);
+  const looked = guardVerdict();   // always printed, also when checks failed
+  process.exit(n('FAIL') || n('FIXED?') || looked ? 1 : 0);
 }
 main().catch(e => { console.error(e); process.exit(2); });
