@@ -34,7 +34,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -118,17 +118,20 @@ class AirWatch:
             found.append(Finding(kind=kind, station_id=sid, station_name=station.name,
                                  title=title, detail=detail, key=f"{kind}:{sid}:{key}"))
 
+        # Three narrow lookups, each served by an index, joined in one statement, in
+        # place of one OR over status, started_at and preempt_at: no index serves an OR
+        # like that, so it read the station's whole queue history every 5 s (2.4 to
+        # 3.9 s on production, 2026-11-18).
+        since = now - LOOKBACK
+        here = QueueEntry.station_id == station.id
+        wanted = union(
+            select(QueueEntry.id).where(here, QueueEntry.status == "playing"),
+            select(QueueEntry.id).where(here, QueueEntry.started_at >= since),
+            select(QueueEntry.id).where(here, QueueEntry.preempt_at >= since, QueueEntry.preempt_at <= now),
+        )
         rows = (await db.execute(
             select(QueueEntry).options(joinedload(QueueEntry.asset))
-            .where(
-                QueueEntry.station_id == station.id,
-                or_(
-                    QueueEntry.status == "playing",
-                    QueueEntry.started_at >= now - LOOKBACK,
-                    and_(QueueEntry.preempt_at.isnot(None), QueueEntry.preempt_at >= now - LOOKBACK,
-                         QueueEntry.preempt_at <= now),
-                ),
-            )
+            .where(QueueEntry.id.in_(select(wanted.subquery().c.id)))
         )).unique().scalars().all()
         playing = [e for e in rows if e.status == "playing"]
         current = max(playing, key=lambda e: _aware(e.started_at) if e.started_at else now) if playing else None

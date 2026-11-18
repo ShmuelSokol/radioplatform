@@ -20,6 +20,8 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "queue_entries"
     __table_args__ = (
         Index("ix_queue_entries_station_status_position", "station_id", "status", "position"),
+        Index("ix_queue_entries_station_started", "station_id", "started_at"),
+        Index("ix_queue_entries_station_preempt", "station_id", "preempt_at"),
     )
 
     station_id: Mapped[uuid.UUID] = mapped_column(
