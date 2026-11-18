@@ -40,6 +40,8 @@ interface Props {
   onRemove: (entryId: string) => void;
   onReorder: (entryId: string, newPosition: number) => void;
   lastPlayed?: Record<string, string | null>;
+  /** Open the quick actions for a row's song (category, do not play, details) */
+  onSong?: (row: QueueRow) => void;
 }
 
 // Only the rows on screen (plus a margin) are drawn, so the list scrolls the
@@ -231,7 +233,7 @@ function QueuePanel(p: Props) {
                   setDragId(null);
                 } : undefined}
                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
-                onClick={() => !isCur && setSelectedId(isSel ? null : entry.id)}
+                onClick={() => { if (!isCur) setSelectedId(isSel ? null : entry.id); else if (a && !isSilence) p.onSong?.(entry); }}
                 className={`relative flex items-center gap-2 lg:gap-0 pl-1.5 lg:pl-0.5 pr-2 lg:pr-3 ${landscape ? 'h-[50px]' : 'h-[66px]'} lg:h-[26px] overflow-hidden border-b border-[#222] lg:border-0 cursor-pointer group
                   ${tone}
                   ${isDragOver ? 'border-t-2 border-t-cyan-400' : ''}
@@ -298,6 +300,10 @@ function QueuePanel(p: Props) {
 
                 {/* Desktop quick actions */}
                 <span className="hidden lg:flex absolute right-28 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                  {a && !isSilence && p.onSong && (
+                    <button type="button" onClick={() => p.onSong?.(entry)} title="Song: category, do not play, details"
+                      aria-label={`Song actions for ${title}`} data-testid="row-song" className="qn-btn px-1 h-5 text-[10px]">Song</button>
+                  )}
                   {!isCur && (
                     <>
                       <button type="button" onClick={() => p.onMoveUp(entry.id)} title="Move up" aria-label="Move up" className="qn-btn w-6 h-5 text-[10px]">▲</button>
@@ -310,17 +316,22 @@ function QueuePanel(p: Props) {
 
               {/* Touch-friendly actions for the selected row */}
               {isSel && !isCur && (
-                <div className="flex items-stretch gap-2 px-2 py-2 h-[61px] bg-[#c0c0c0] border-b border-[#808080]" data-testid="row-actions">
+                <div className="flex items-stretch gap-1.5 sm:gap-2 px-2 py-2 h-[61px] bg-[#c0c0c0] border-b border-[#808080]" data-testid="row-actions">
                   <button type="button" onClick={() => { p.onArmInsert(entry.id); setSelectedId(null); }}
-                    className="qn-btn flex-1 h-11 text-sm">
-                    + Insert before
+                    aria-label="+ Insert before"
+                    className="qn-btn flex-1 min-w-0 h-11 text-sm whitespace-nowrap">
+                    + Insert<span className="max-[359px]:hidden"> before</span>
                   </button>
                   <button type="button" onClick={() => p.onMoveUp(entry.id)} aria-label="Move up"
-                    className="qn-btn w-12 h-11 text-base">▲</button>
+                    className="qn-btn w-11 shrink-0 h-11 text-base">▲</button>
                   <button type="button" onClick={() => p.onMoveDown(entry.id)} aria-label="Move down"
-                    className="qn-btn w-12 h-11 text-base">▼</button>
+                    className="qn-btn w-11 shrink-0 h-11 text-base">▼</button>
+                  {a && !isSilence && p.onSong && (
+                    <button type="button" onClick={() => p.onSong?.(entry)} data-testid="row-song-touch"
+                      aria-label={`Song actions for ${title}`} className="qn-btn px-2 sm:px-2.5 shrink-0 h-11 text-sm">Song</button>
+                  )}
                   <button type="button" onClick={() => { p.onRemove(entry.id); setSelectedId(null); }}
-                    className="qn-btn px-3 h-11 text-sm !text-red-700">
+                    className="qn-btn px-2 sm:px-2.5 shrink-0 h-11 text-sm !text-red-700">
                     Remove
                   </button>
                 </div>

@@ -33,6 +33,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [client-ip](client-ip.md) — the one helper that says who is calling (rightmost non-internal X-Forwarded-For hop) for rate limits, listeners, activity log
 - [activity-log](activity-log.md) — who did what: every staff change with before/after, sign-ins, screens opened, listener sessions; how rows are captured
 - [air-watch](air-watch.md) — on-air self-check: late or missing time checks, dead air, engine drift, skipped timed items; alerts and ntfy
+- [local-fm-box](local-fm-box.md) — Feeding FM from the transmitter room: the engine on a local box with a relay that keeps it on air with no internet (plan + library on disk); stages and gaps
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when
 - [live-shows](live-shows.md) — how a live show goes on air without a broadcast server: mic relay, automation pause/resume, hard stop
 - [deploys](deploys.md) — what a merge to main publishes: website only for frontend changes, backend only for backend changes; how to check and force

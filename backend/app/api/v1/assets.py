@@ -792,6 +792,23 @@ async def update_request_settings(
     }
 
 
+@router.post("/{asset_id}/do-not-play")
+async def do_not_play(
+    asset_id: uuid.UUID,
+    body: dict | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    """Control room quick action: mark a song do-not-play (`{"on": true}`, the default)
+    and take its waiting copies out of every queue, or put it back (`{"on": false}`).
+    Never touches what is on air or already handed to the playout engine."""
+    on = (body or {}).get("on", True)
+    if not isinstance(on, bool):
+        raise HTTPException(status_code=422, detail="on must be true or false")
+    from app.services.asset_service import set_do_not_play
+    return await set_do_not_play(db, asset_id, on)
+
+
 @router.get("/enhance-presets")
 async def get_enhance_presets(
     _user: User = Depends(require_staff),

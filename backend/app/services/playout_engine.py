@@ -131,6 +131,19 @@ def held_entry_ids(station_id) -> set[uuid.UUID]:
     return out
 
 
+def cued_entry_id(station_id) -> uuid.UUID | None:
+    """The song the engine has pre-loaded as its next one (not yet on air), if any.
+    Unlike an item in its timed lane it can still be exchanged: when the head of the
+    queue changes, the next tick flushes it and the engine asks again."""
+    state = _states.get(str(station_id))
+    if state is None or not state.cued_entry_id:
+        return None
+    try:
+        return uuid.UUID(str(state.cued_entry_id))
+    except ValueError:
+        return None
+
+
 def _note_handed(state: "EngineState", entry) -> None:
     state.handed[str(entry.id)] = str(entry.asset_id)
     while len(state.handed) > HANDED_KEEP:

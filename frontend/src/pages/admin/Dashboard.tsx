@@ -22,6 +22,8 @@ import TransportBar, { TransportButtons } from './controlroom/TransportBar';
 import type { TransportProps } from './controlroom/TransportBar';
 import { REPORT_BUG_EVENT } from '../../components/BugReporter';
 import QueuePanel from './controlroom/QueuePanel';
+import SongPanel from './controlroom/SongPanel';
+import type { SongTarget } from './controlroom/SongPanel';
 import type { QueueRow } from './controlroom/QueuePanel';
 import { nextCut } from './controlroom/timing';
 import LibraryPanel from './controlroom/LibraryPanel';
@@ -166,6 +168,13 @@ export default function Dashboard() {
   useEffect(() => { if (queueDateFilter) loadWholeQueue(); }, [queueDateFilter, loadWholeQueue]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  // Quick actions panel for one song (the one on air or a queue row)
+  const [songTarget, setSongTarget] = useState<SongTarget | null>(null);
+  const openRowSong = useCallback((row: QueueRow) => {
+    if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing' });
+  }, []);
+  const closeSong = useCallback(() => setSongTarget(null), []);
+  const songToast = useCallback((text: string, type: Toast['type']) => setToast({ text, type }), []);
   const [busyId, setBusyId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const { pins, toggle: togglePin, cart, selectPage, selectSet, addSet, renameSet, deleteSet } = useHotButtons(stationId);
@@ -782,6 +791,7 @@ export default function Dashboard() {
     onStation: setSelectedStationId,
     isPlaying: isPlaying,
     nowAsset: nowAsset,
+    onNowSong: nowAsset ? () => setSongTarget({ asset: nowAsset, onAir: true }) : undefined,
     nextAsset: nextAsset,
     elapsed: shownElapsed,
     remaining: remaining,
@@ -821,6 +831,7 @@ export default function Dashboard() {
       onRemove={remove}
       onReorder={reorder}
       lastPlayed={lastPlayedMap?.last_played}
+      onSong={openRowSong}
     />
   );
   const hotButtons = (wide: boolean, bar = false) => (
@@ -917,6 +928,11 @@ export default function Dashboard() {
           <span className="flex-1">{toast.text}</span>
           <button type="button" onClick={() => setToast(null)} aria-label="Dismiss" className="shrink-0 w-6 h-6 opacity-70 hover:opacity-100">✕</button>
         </div>
+      )}
+
+      {songTarget && (
+        <SongPanel target={songTarget} stationId={stationId ?? null} canEdit={isManager(user?.role)}
+          onClose={closeSong} onToast={songToast} />
       )}
 
       <TransportBar {...transport} landscape={phoneLandscape}

@@ -6,14 +6,14 @@ Authenticated with the shared secret in the `X-Playout-Token` header, not a user
 
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Header, Response
+from fastapi import APIRouter, Body, Depends, Header, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.db.session import get_db
-from app.services import playout_engine
+from app.services import playout_engine, playout_plan
 
 router = APIRouter(prefix="/playout", tags=["playout"])
 
@@ -39,6 +39,41 @@ def _require_engine(
     if not settings.engine_drives(station_id):
         raise NotFoundError("This station is not driven by the playout engine")
     return station_id
+
+
+def _require_token(
+    station_id: uuid.UUID, x_playout_token: str | None = Header(default=None)
+) -> uuid.UUID:
+    """The shared secret alone: a local FM box copies the plan and the library before
+    its station is switched over to it."""
+    if not playout_engine.token_ok(x_playout_token):
+        raise ForbiddenError("Invalid playout token")
+    return station_id
+
+
+@router.get("/{station_id}/plan")
+async def plan(
+    station_id: uuid.UUID = Depends(_require_token),
+    hours: float = Query(default=48.0, gt=0, le=168),
+    db: AsyncSession = Depends(get_db),
+):
+    """The pending queue with each item's engine URI, and the blackout windows: what a
+    local FM box keeps so it can carry on with no internet (`wiki/local-fm-box.md`)."""
+    return await playout_plan.build_plan(db, station_id, hours)
+
+
+@router.get("/{station_id}/library")
+async def library(
+    station_id: uuid.UUID = Depends(_require_token),
+    after: str | None = None,
+    limit: int = Query(default=playout_plan.LIBRARY_PAGE, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+):
+    """One page of every library item's audio address, for the box's full local copy."""
+    try:
+        return await playout_plan.library_page(db, after, limit)
+    except ValueError:
+        raise NotFoundError("Unknown page") from None
 
 
 @router.post("/{station_id}/hello")
