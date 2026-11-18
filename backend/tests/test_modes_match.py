@@ -720,7 +720,7 @@ async def test_a_song_matched_during_shabbos_or_a_live_show_does_not_air(client,
                     scheduled_start=now, scheduled_end=now + timedelta(hours=1))
     db_session.add(show)
     await db_session.commit()
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     await client.patch(f"/api/v1/song-requests/{req2.id}", json={"asset_id": str(song2.id)}, headers=auth_headers)
     await client.post(f"/api/v1/stations/{st2.id}/queue/panic", headers=auth_headers)

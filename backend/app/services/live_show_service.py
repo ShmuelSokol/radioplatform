@@ -300,8 +300,11 @@ async def start_show(
     db: AsyncSession,
     show_id: UUID | str,
     host_user_id: UUID | None = None,
+    heard_now: bool = False,
 ) -> LiveShow | None:
-    """Start a live show — set status to live, signal scheduler, start Icecast mount for WebRTC mode."""
+    """Start a live show: set status to live, start Icecast mount for WebRTC mode.
+    `heard_now`: the host's sound is going out already, so the station is taken over
+    here (otherwise that happens when the first sound is heard, see below)."""
     result = await db.execute(select(LiveShow).where(LiveShow.id == show_id))
     show = result.scalar_one_or_none()
     if not show:
@@ -320,15 +323,15 @@ async def start_show(
     if host_user_id:
         show.host_user_id = host_user_id
 
-    # Take the station over: its automation pauses under the host. With a broadcast
-    # delay this waits until listeners really hear the host (the delay is full), so
-    # the music keeps playing while it fills: see take_over_when_heard.
-    station_result = await db.execute(select(Station).where(Station.id == show.station_id))
-    station = station_result.scalar_one_or_none()
-    if station:
-        from app.services.live_air import settings_for
-        delay, _dump, _rule = settings_for(station.automation_config)
-        if delay <= 0:
+    # The station is NOT taken over here. Its automation pauses when listeners really
+    # hear the host: the host's sound has arrived and, with a broadcast delay, the
+    # delay is full (take_over_when_heard, from the host's audio socket). Starting a
+    # show used to stop the music at once on a station with no delay, before any
+    # microphone was open: dead air until the host found Start Broadcasting (the
+    # first real show test, 2026-11-18).
+    if heard_now:
+        station = await db.get(Station, show.station_id)
+        if station is not None:
             await take_over_station(db, station, show, now)
 
     # Set icecast mount for WebRTC mode

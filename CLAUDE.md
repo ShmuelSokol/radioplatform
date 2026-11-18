@@ -278,8 +278,8 @@ radioplatform/
 - BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
 - EmergencyAlerts.tsx — Emergency alerts (EAS override): what is on air per station with Stop, a spoken test of the override (managers), how the EAS box connects, the log. `components/layout/EmergencyBanner.tsx` shows a red bar on every staff page while an alert is on air
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
-- LiveShows.tsx — Live show management (create, list, start, delete)
-- HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, Talk off air (a private word with a caller, `hooks/useTalkback.ts`), Join as co-host (`pages/admin/live/CohostPanel.tsx`), Start camera (live video for the website, `pages/admin/live/CameraPanel.tsx`), the staff chat, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
+- LiveShows.tsx — Live show management (create, list, Open studio, delete); a show goes on air from the Host Console only
+- HostConsole.tsx — Host broadcasting console: Turn on microphone, then one GO LIVE press, a banner that says whether listeners hear you, level meter (`pages/admin/live/LevelMeter.tsx`), Hear myself and a 5 s Mic check, callers waiting ("Calling now") with Put On Air; countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, Talk off air (a private word with a caller, `hooks/useTalkback.ts`), Join as co-host (`pages/admin/live/CohostPanel.tsx`), Start camera (live video for the website, `pages/admin/live/CameraPanel.tsx`), the staff chat, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
 - CallScreener.tsx — Two-column call screener (waiting/approved/on-air management), each caller's history with Priority and Block (`pages/admin/live/CallerHistory.tsx`), the list of marked callers, with the delay panel and the staff chat (`pages/admin/live/ChatPanel.tsx`, also on the Host Console)
 - SongRequests.tsx — Song request management (approve/reject/delete)
 - Archives.tsx — Show archive management (CRUD, publish/unpublish)
@@ -320,7 +320,7 @@ radioplatform/
 | useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
 | useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
 | useLiveShowWS.ts | Live show WebSocket (real-time callers, countdown, with polling fallback) |
-| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter; plays the callers on air sent back by the server; mixes carts into what is sent |
+| useHostAudio.ts | Browser mic capture as 24 kHz PCM (`openMic`), binary WS streaming from `goLive`, level meter, hear-myself monitor, mic check; plays the callers on air sent back by the server; mixes carts into what is sent |
 | useLiveAudio.ts | Plays a station's live show (host mic relayed by the server) and tells the page to silence the music meanwhile |
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |
@@ -549,6 +549,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound
 
 # A new release published under an open page, then every late-loading screen opened (builds the site twice itself)
 cd frontend && node e2e/stale-release.mjs
+
+# Going on air from the Host Console against a real backend: one GO LIVE press, banner, meter, mic check, a Listen page opened in mid show, waiting callers
+cd frontend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... node e2e/live-go-live.cjs <station id>
 
 # Live video against a real backend (Chromium's fake camera; host page + Listen page, Dump cuts the picture; see wiki/live-shows.md)
 cd frontend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... node e2e/live-video.cjs <station id>

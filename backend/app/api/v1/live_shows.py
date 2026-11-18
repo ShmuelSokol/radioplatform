@@ -726,10 +726,16 @@ async def get_active_show_for_station(
         ).limit(1)
     )
     show = result.scalar_one_or_none()
+    # The station's stream address, for a page opened during the show: it used to
+    # come only with the item on air, and during a show no item is on air, so the
+    # Listen page had no stream to play until the show was over (2026-11-18)
+    from app.config import settings as _settings
+    stream_url = _settings.public_stream_url(station_id)
     if not show:
-        return {"active": False, "show": None}
+        return {"active": False, "show": None, "stream_url": stream_url}
     return {
         "active": True,
+        "stream_url": stream_url,
         "show": {
             "id": str(show.id),
             "title": show.title,

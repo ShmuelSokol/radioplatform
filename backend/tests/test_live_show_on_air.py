@@ -55,7 +55,7 @@ async def _station_playing(db):
 async def test_show_pauses_the_station_and_it_carries_on_after(db_session):
     station, show, song, after, clock = await _station_playing(db_session)
 
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     playing = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.station_id == station.id, QueueEntry.status == "playing"))).scalars().all()
@@ -78,9 +78,11 @@ async def test_show_pauses_the_station_and_it_carries_on_after(db_session):
 
 
 @pytest.mark.asyncio
-async def test_start_broadcasting_puts_a_scheduled_show_on_air(db_session):
-    """The Host Console's Start Broadcasting only opens the mic; it must still pause
-    the station so the story under the show resumes where it stopped."""
+async def test_going_live_starts_a_scheduled_show_and_the_music_plays_on_until_the_host_is_heard(db_session):
+    """Go live opens the host's sound; the show becomes live. The station is taken over
+    by the audio socket when the host is heard (at once with no delay, else when the
+    delay is full), not here: starting a show used to cut the music before any
+    microphone was open (first real show, Main 2026-11-18)."""
     station, show, song, after, clock = await _station_playing(db_session)
 
     assert await live_show_service.start_if_scheduled(db_session, show.id) is True
@@ -89,7 +91,7 @@ async def test_start_broadcasting_puts_a_scheduled_show_on_air(db_session):
     assert show.status == LiveShowStatus.LIVE and show.actual_start is not None
     playing = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.station_id == station.id, QueueEntry.status == "playing"))).scalars().all()
-    assert playing == []
+    assert [e.asset_id for e in playing] == [song.id]
     # Reconnecting the mic during the show does not start it again
     assert await live_show_service.start_if_scheduled(db_session, show.id) is False
 
@@ -98,7 +100,7 @@ async def test_start_broadcasting_puts_a_scheduled_show_on_air(db_session):
     on_air = (await db_session.execute(select(QueueEntry).where(
         QueueEntry.station_id == station.id, QueueEntry.status == "playing"))).scalar_one()
     assert on_air.asset_id == song.id
-    assert 90 <= resume_offset(on_air) <= 100
+    assert resume_offset(on_air) == 0   # never paused: nobody was heard
     # An ended show is not restarted by a stray mic connection
     assert await live_show_service.start_if_scheduled(db_session, show.id) is False
 

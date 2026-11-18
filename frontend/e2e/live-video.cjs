@@ -9,6 +9,12 @@
  */
 const { chromium, devices } = require('playwright');
 const fs = require('fs'), path = require('path');
+
+// The host goes on air: microphone on (nothing goes out yet), then the one GO LIVE press
+async function goLive(page) {
+  await page.getByTestId('mic-on-button').click();
+  await page.getByTestId('go-live-button').click();
+}
 const WebSocket = globalThis.WebSocket;
 const API = process.env.API_URL || 'http://localhost:8000/api/v1', SITE = process.env.BASE_URL || 'http://localhost:3000';
 const STATION = process.argv[2];
@@ -71,7 +77,7 @@ function watcher() {
     const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 1000 } });
     await T(host, 'camera-panel').waitFor({ timeout: 15000 });
     check('V2 the camera cannot start before the microphone is on the show', await T(host, 'camera-start').isDisabled() && /Go on air first/.test(await T(host, 'camera-help').innerText()));
-    await host.getByText('Start Broadcasting').click();
+    await goLive(host);
     await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 12000 });
     await sleep(1500);
     const t0 = Date.now();
@@ -136,7 +142,7 @@ function watcher() {
     await T(host, 'camera-start').click();
     await T(host, 'camera-on').waitFor({ timeout: 8000 });
     await T(page, 'live-video-canvas').waitFor({ timeout: 12000 });
-    await host.getByText('Stop Broadcasting').click();
+    await host.getByTestId('step-off-button').click();
     await T(host, 'camera-on').waitFor({ state: 'detached', timeout: 5000 });
     check('V15 the camera stops with the microphone', await T(host, 'camera-preview').count() === 0);
     await api('POST', `/live-shows/${show.id}/end`);

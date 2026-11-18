@@ -556,7 +556,10 @@ class LiveAir:
         self.taps.discard(queue)
 
     def passed(self, frame: bytes) -> None:
-        """A frame that went straight to listeners (no delay): remembered like the rest."""
+        """A frame that went straight to listeners (no delay): remembered like the rest.
+        It counts as the host sending: with no delay the station was taken from a host
+        in mid sentence after `live_host_gone_seconds` (browser test, 2026-11-18)."""
+        self.last_input = self.clock()
         self._remember(np.frombuffer(frame[: len(frame) // 2 * 2], dtype="<i2"))
 
     def drained(self) -> bool:
