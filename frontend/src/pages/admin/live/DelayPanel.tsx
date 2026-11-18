@@ -22,6 +22,12 @@ const STATE: Record<string, { label: string; tone: string; help: string }> = {
   insert: { label: 'TIME CHECK ON AIR', tone: 'bg-blue-700 text-white', help: 'Keep talking. Listeners hear it, then carry on with you where you were.' },
 };
 
+// After a Dump on a station with a filler: it plays while the delay refills at once
+const FILLING = {
+  label: 'FILLER ON AIR', tone: 'bg-blue-700 text-white',
+  help: 'Listeners hear the filler while the delay fills back up. Keep talking: what you say now airs after it.',
+};
+
 function clock(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -96,7 +102,8 @@ export default function DelayPanel({ showId, air: pushed, lastDump, callerOnAir,
 
   const air = pushed ?? fetched;
   const mode = air?.mode ?? 'off';
-  const state = STATE[mode] ?? STATE.off;
+  const filling = mode === 'insert' && air?.insert?.kind === 'filler';
+  const state = filling ? FILLING : STATE[mode] ?? STATE.off;
   const configured = air?.configured ?? 0;
   const delay = air?.delay ?? 0;
   const onAir = !!air && mode !== 'off';
@@ -191,6 +198,13 @@ export default function DelayPanel({ showId, air: pushed, lastDump, callerOnAir,
       </div>
       <div className="text-[11px] text-gray-400 mt-2" data-testid="delay-help">{state.help}</div>
 
+      {onAir && configured > 0 && !air?.insert && (
+        <div className="text-[11px] text-gray-400 mt-1" data-testid="filler-note">
+          {air?.filler
+            ? `After a Dump listeners hear "${air.filler}" while the delay fills back up.`
+            : 'No filler is set for this station: after a Dump the delay fills back up slowly while you talk.'}
+        </div>
+      )}
       {air?.insert && (
         <div className="mt-2 text-sm bg-blue-900 text-blue-200 rounded px-2 py-1" data-testid="insert-now">
           On air now: {air.insert.title} ({clock(air.insert.remaining)} left)

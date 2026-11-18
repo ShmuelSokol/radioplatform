@@ -175,3 +175,14 @@ The qnet skin greys every disabled button whatever its colour (`!important` in `
 - The co-host's microphone uses echo cancellation (they hear the show from the same page); a steady test tone comes through about ten times quieter than a scripted host's, a voice does not.
 - A page that is co-hosting cannot also start broadcasting as the host, and the other way round.
 - Tests `tests/test_live_cohost.py`, browser check `ONLY=cohost`.
+
+## Filler after a Dump
+
+A station can name one library item as its filler (`automation_config.live_dump_filler_asset_id`, with `live_dump_filler_title` for display; Stations page, "Filler after a Dump"). It is decoded once when the host starts (`live_inserts.load_filler`, at most 40 s) and kept on the show's `LiveAir` (`filler`). At a Dump, `fill_after` counts what the Dump left in the delay; that airs first with no stretching, then `_start_fill` plays the filler for exactly the seconds the delay is short (`target - count`), as an `Insert` of kind `filler`. The host's words gather meanwhile, so the delay is whole when the filler ends and a second Dump cuts a full delay again. Without a filler the delay builds back by stretching speech, about a minute or two for 15 s.
+
+- A filler shorter than the gap plays once; the rest builds back by stretching. One cut short is faded out over a third of a second.
+- No filler when the delay is being left (Exit delay) or the show is finishing.
+- A second Dump during the filler: the rest of the filler plays, then it starts again for what is still missing.
+- `GET /live-shows/{id}/air` has `filler` (its title once ready); the panel shows FILLER ON AIR and the Host Console says when the host's words will air.
+- A local test backend has no address for uploaded files, so the browser check (`ONLY=filler`) serves the audio itself and points the item's `file_path` at it.
+- Tests `tests/test_live_filler.py`.

@@ -283,7 +283,9 @@ export default function HostConsole() {
             )}
             {isRecording && air?.on_air && !muted && (
               <div className="text-red-400 text-sm mt-2 font-bold" data-testid="heard-note">
-                {air.delay > 0.5
+                {air.insert
+                  ? `Listeners hear "${air.insert.title}" now, then you: what you say airs ${(air.delay + air.insert.remaining).toFixed(0)} s later.`
+                  : air.delay > 0.5
                   ? `Listeners hear you ${air.delay.toFixed(0)} s later.`
                   : air.target > 0 ? 'Listeners hear you almost at once: the delay is building back.' : 'Listeners hear you now.'}
               </div>
