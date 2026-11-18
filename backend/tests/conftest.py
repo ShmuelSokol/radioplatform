@@ -44,6 +44,11 @@ _playlists.REFRESH_INLINE = True  # tests read the rebuilt queue right after a p
 from app.services import last_played as _last_played  # noqa: E402
 
 _last_played.BACKGROUND_FULL_READ = False  # tests see every play on the first read
+# Code that opens the app's own engine (no database behind it in the tests) fails
+# at once, as it always did, instead of trying again for 8 s
+import app.db.engine as _db_engine  # noqa: E402
+
+_db_engine.CONNECT_RETRY_WAITS = ()
 
 # Use SQLite for testing (no PostgreSQL needed)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"

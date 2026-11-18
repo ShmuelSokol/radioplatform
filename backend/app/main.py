@@ -114,8 +114,7 @@ async def add_missing_enum_labels(raw_conn) -> list[str]:
                 added.append(f"{name}.{label}")
             except Exception as e:
                 logger.warning(f"Enum label {name}.{label} not added: {e}")
-    if added:
-        logger.info("Enum labels added: %s", ", ".join(added))
+    logger.info("Enum labels added: %s", ", ".join(added) or "none, every label the models send is there")
     return added
 
 
@@ -476,36 +475,209 @@ CONCURRENT_INDEXES = {
 }
 
 
-async def _build_concurrent_indexes() -> None:
+INDEX_BUILD_TRIES = 5
+INDEX_BUILD_WAIT = 30.0  # seconds between tries
+
+
+async def _build_indexes_once(conn, names) -> list[str]:
+    """Builds the named indexes that are missing or unusable. Returns those still missing."""
+    missing = []
+    for name in names:
+        target = CONCURRENT_INDEXES[name]
+        try:
+            valid = await conn.fetchval(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = $1", name,
+            )
+            if valid:
+                continue
+            if valid is False:  # a build that was interrupted leaves an unusable index
+                await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+            started = asyncio.get_running_loop().time()
+            await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
+            logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+        except Exception as e:
+            logger.warning("Index %s not built: %s", name, e)
+            missing.append(name)
+    return missing
+
+
+async def _build_concurrent_indexes(dsn: str | None = None, wait: float = INDEX_BUILD_WAIT) -> list[str]:
+    """Builds CONCURRENT_INDEXES in the background; a failed connection or build is
+    tried again, and the outcome is logged once either way (so the log of any start
+    says which indexes exist). Returns the names still missing."""
+    import asyncpg
+
+    if dsn is None:
+        if not settings.DATABASE_URL.startswith("postgresql"):
+            return []
+        dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    missing = list(CONCURRENT_INDEXES)
+    for attempt in range(1, INDEX_BUILD_TRIES + 1):
+        try:
+            conn = await asyncpg.connect(dsn, statement_cache_size=0)
+        except Exception as e:
+            logger.warning("Could not connect to build indexes (try %d of %d): %s", attempt, INDEX_BUILD_TRIES, e)
+        else:
+            try:
+                await conn.execute("SET statement_timeout = '10min'")
+                missing = await _build_indexes_once(conn, missing)
+            except Exception as e:
+                logger.warning("Index build stopped (try %d of %d): %s", attempt, INDEX_BUILD_TRIES, e)
+            finally:
+                await conn.close()
+            if not missing:
+                break
+        if attempt < INDEX_BUILD_TRIES:
+            await asyncio.sleep(wait)
+    if missing:
+        logger.error("INDEXES MISSING after %d tries: %s", INDEX_BUILD_TRIES, ", ".join(missing))
+    else:
+        logger.info("Indexes in place: %s", ", ".join(CONCURRENT_INDEXES))
+    return missing
+
+
+async def _wait_for_database(limit: float = 90.0) -> None:
+    """Nothing starts until the database answers. A process that came up while
+    the database refused connections ran its whole startup against nothing and
+    then served 500s."""
+    from sqlalchemy import text
+
+    from app.db.engine import engine
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    wait = 0.5
+    while True:
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            if loop.time() - started > 1.0:
+                logger.info("Database answered after %.1f s", loop.time() - started)
+            return
+        except Exception as e:
+            if loop.time() - started > limit:
+                logger.error("Database did not answer within %.0f s (%s); starting anyway", limit, e)
+                return
+            logger.warning("Database not answering yet (%s); trying again in %.1f s", e, wait)
+            await asyncio.sleep(wait)
+            wait = min(wait * 2, 8.0)
+
+
+async def _log_database_link() -> None:
+    """Once after a start: how far away the database is and how big it is.
+
+    On 2026-11-18 single statements took 0.6 to 1 s with an idle event loop and a
+    free pool, and a 48 MB table took 27 s to vacuum. Whether that is distance
+    (this server's region against the database's) or a small database that reads
+    from disk cannot be seen from outside; this line says both."""
+    import os
+    import statistics
+    import time as _time
+
+    from sqlalchemy import text
+    from sqlalchemy.engine import make_url
+
+    from app.db.engine import engine
+
+    if engine.dialect.name != "postgresql":
+        return
+    await asyncio.sleep(45)  # after the startup rush, so the times are the link's own
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+            times = []
+            for _ in range(7):
+                began = _time.monotonic()
+                await conn.execute(text("SELECT 1"))
+                times.append((_time.monotonic() - began) * 1000)
+            facts = (await conn.execute(text(
+                "SELECT current_setting('shared_buffers'), current_setting('effective_cache_size'), "
+                "current_setting('max_connections'), pg_size_pretty(pg_database_size(current_database())), "
+                "current_setting('server_version'), current_setting('track_io_timing')"
+            ))).first()
+        logger.warning(
+            "DATABASE LINK: one statement (SELECT 1) takes %.0f ms at best, %.0f ms typically, %.0f ms at worst. "
+            "This server: region %s. Database host: %s. Database: version %s, shared_buffers %s, "
+            "effective_cache_size %s, max_connections %s, size %s, track_io_timing %s",
+            min(times), statistics.median(times), max(times),
+            os.environ.get("RAILWAY_REPLICA_REGION") or os.environ.get("RAILWAY_REGION") or "unknown",
+            make_url(settings.DATABASE_URL).host,
+            facts[4], facts[0], facts[1], facts[2], facts[3], facts[5],
+        )
+    except Exception as e:
+        logger.warning("Database link facts not read: %s", e)
+
+
+# Tables read by index-only scans. The database skips the table itself only for
+# pages its visibility map marks clean, and only VACUUM marks them: on
+# 2026-11-18 the last-played read of play_logs fetched 139,992 of 145,557 rows
+# from the table anyway. Inserts alone start autovacuum late (20% of the table).
+VACUUM_TABLES = ("play_logs", "queue_entries", "assets", "alerts")
+VACUUM_EVERY_DAYS = 7
+# A table with this share of dead rows is vacuumed whatever its last vacuum.
+# queue_entries has 700 to 900 rows rewritten at every song change.
+VACUUM_DEAD_SHARE = 0.10
+
+
+async def _vacuum_stale_tables() -> None:
+    """After startup, in the background: VACUUM (ANALYZE) each of VACUUM_TABLES
+    that was not vacuumed in the last week or holds many dead rows, and make
+    autovacuum come sooner for them. VACUUM does not block reads or writes.
+    Every table gets a log line either way, with its sizes and dead rows:
+    nobody can look at the live database directly."""
     import asyncpg
 
     if not settings.DATABASE_URL.startswith("postgresql"):
         return
+    await asyncio.sleep(120)  # after the startup rush
     dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
     try:
         conn = await asyncpg.connect(dsn, statement_cache_size=0)
     except Exception as e:
-        logger.warning("Could not connect to build indexes: %s", e)
+        logger.warning("Could not connect to vacuum: %s", e)
         return
     try:
         await conn.execute("SET statement_timeout = '10min'")
-        for name, target in CONCURRENT_INDEXES.items():
+        for table in VACUUM_TABLES:
             try:
-                valid = await conn.fetchval(
-                    "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
-                    "WHERE c.relname = $1", name,
+                row = await conn.fetchrow(
+                    "SELECT greatest(last_vacuum, last_autovacuum) AS last, "
+                    "coalesce(now() - greatest(last_vacuum, last_autovacuum) > make_interval(days => $2), true) AS old, "
+                    "n_live_tup AS live, n_dead_tup AS dead, vacuum_count + autovacuum_count AS runs, "
+                    "pg_size_pretty(pg_table_size(relid)) AS size, pg_size_pretty(pg_indexes_size(relid)) AS indexes "
+                    "FROM pg_stat_user_tables WHERE relname = $1", table, VACUUM_EVERY_DAYS,
                 )
-                if valid:
+                if row is None:
                     continue
-                if valid is False:  # a build that was interrupted leaves an unusable index
-                    await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+                state = (
+                    f"{row['live']} live and {row['dead']} dead rows, table {row['size']}, indexes {row['indexes']}, "
+                    f"last vacuum {row['last'] or 'never'}, {row['runs']} vacuums so far"
+                )
+                many_dead = row["dead"] > 1000 and row["dead"] > VACUUM_DEAD_SHARE * max(row["live"], 1)
+                if not row["old"] and not many_dead:
+                    logger.info("Vacuum not needed for %s: %s", table, state)
+                    continue
+                await conn.execute(
+                    f"ALTER TABLE {table} SET (autovacuum_vacuum_insert_scale_factor = 0.02, "
+                    "autovacuum_vacuum_scale_factor = 0.02, autovacuum_analyze_scale_factor = 0.02)"
+                )
                 started = asyncio.get_running_loop().time()
-                await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
-                logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+                await conn.execute(f"VACUUM (ANALYZE) {table}")
+                after = await conn.fetchrow(
+                    "SELECT pg_size_pretty(pg_table_size(relid)) AS size, "
+                    "pg_size_pretty(pg_indexes_size(relid)) AS indexes "
+                    "FROM pg_stat_user_tables WHERE relname = $1", table,
+                )
+                logger.info(
+                    "Vacuumed %s in %.1f s. Before: %s. After: table %s, indexes %s",
+                    table, asyncio.get_running_loop().time() - started, state, after["size"], after["indexes"],
+                )
             except Exception as e:
-                logger.warning("Index %s not built: %s", name, e)
+                logger.warning("Vacuum of %s failed: %s", table, e)
     finally:
         await conn.close()
+
 
 async def _seed_default_categories():
     """Insert default categories if the categories table is empty."""
@@ -736,7 +908,10 @@ async def _resume_playback_on_startup():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from app.core import loop_watch
+    loop_watch.start()  # logs what holds the event loop when requests stall
     # Startup — create tables and start the scheduler engine
+    await _wait_for_database()
     await ensure_tables()
     await _warm_connection_pool()
     await _seed_default_categories()
@@ -765,6 +940,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # When each item last aired: read before the first refill or redraw needs it
     from app.services.last_played import warm_all
     warm_task = _asyncio.get_running_loop().create_task(warm_all())
+    vacuum_task = _asyncio.get_running_loop().create_task(_vacuum_stale_tables())
+    link_task = _asyncio.get_running_loop().create_task(_log_database_link())
     # Bug reports: push "fix ready" to ntfy (see wiki/bug-reports.md)
     from app.services.bug_report_service import notify_loop
     bug_task = _asyncio.get_running_loop().create_task(notify_loop())
@@ -780,6 +957,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backfill_task.cancel()
     index_task.cancel()
     warm_task.cancel()
+    vacuum_task.cancel()
+    link_task.cancel()
+    loop_watch.stop()
     # Shutdown — stop the scheduler cleanly
     try:
         from app.services.scheduler_engine import stop_scheduler
