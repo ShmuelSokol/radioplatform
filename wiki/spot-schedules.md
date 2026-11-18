@@ -50,3 +50,21 @@ Deleting a library item that a spot schedule or a program block uses is refused 
 - **Contract audio airs only through its contract.** Any asset a `SpotSchedule` uses is excluded from every rotation, playlist, category or block pool (`models/asset.not_contract_audio()`, part of `fit_for_random_pick()` and added to every `in_category` pick). Before this a rule like "a spot every 3 songs" or a block naming category Spots drew sponsor audio at random, outside its dates and caps. An operator can still queue it by hand.
 - **A waiting slot never airs after the last day.** A soft slot can wait behind a long shiur, or a station can be stopped, and nothing expired overdue `ad_slot` rows: a 23:45 slot of a contract ending today aired at 00:05 the next day. `lapsed_contract_assets()` = contract audio with no active schedule covering *today in station time* on this station. The engine's `pick_next` leaves those out (read-only), the browser path and `reconcile_spot_slots` mark them `skipped`. Lateness within a covered day is still allowed.
 - Tests: `tests/test_sponsorship_contracts.py` (end today/tomorrow in Jerusalem and New York time, start dates, one-day contracts, weekdays, exact caps per daypart, overbooking, Shabbos, edit/cancel/delete on the queue, lapsed slot on both players, operator override, rotations).
+
+## Missed plays in the sponsor portal
+
+Shmuel 2026-11-17: sponsors should see what they missed. `services/sponsor_delivery.py`
+(`GET /sponsor-portal/missed-plays`, Dashboard "Missed Plays"):
+
+- **Past (14 days)**: per active sponsorship, station day and time of day, the plays
+  promised (plays per time of day, or one per exact time) against play-log rows of
+  its recording on that station. A play counts once; one starting up to 15 min after
+  its time of day ended still counts for it (a soft play waited for a song).
+- Not promised, so never "missed": a time of day touched by a blackout (Shabbos,
+  Yom Tov), one still running, one that began before the contract was entered, and
+  anything of a cancelled (inactive) contract.
+- **Coming (7 days)**: the planner's unplaced plays ("No room left") and plays it
+  rolled to a later block the same day (`Placement.moved_from`).
+- Nothing is stored: it is worked out on each read, so editing a contract changes
+  what its past days were "promised". No make-good is planned automatically.
+- Tests: `tests/test_sponsor_missed_plays.py`, `frontend/e2e/sponsor-missed-plays.mjs`.
