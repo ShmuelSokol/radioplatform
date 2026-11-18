@@ -6,21 +6,22 @@ import subprocess
 
 from app.config import settings
 from app.models.asset import ANALYSIS_VERSION, replay_gain_for  # noqa: F401 (re-exported)
-from app.services.silence_service import detect_silence, get_audio_duration
+from app.services.silence_service import AudioSource, audio_file, detect_silence, ffmpeg_input, get_audio_duration
 
 logger = logging.getLogger(__name__)
 
 
 
-def measure_loudness(data: bytes) -> tuple[float | None, float | None]:
-    """(integrated LUFS, true peak dBFS) of some audio, from FFmpeg loudnorm's
-    measuring pass. (None, None) when it cannot be measured."""
+def measure_loudness(data: AudioSource) -> tuple[float | None, float | None]:
+    """(integrated LUFS, true peak dBFS) of some audio (bytes or a file path), from
+    FFmpeg loudnorm's measuring pass. (None, None) when it cannot be measured."""
+    args, stdin = ffmpeg_input(data)
     cmd = [
-        settings.FFMPEG_PATH, "-hide_banner", "-i", "pipe:0",
+        settings.FFMPEG_PATH, "-hide_banner", *args,
         "-af", "loudnorm=I=-18:LRA=11:TP=-1.5:print_format=json",
         "-f", "null", "-",
     ]
-    result = subprocess.run(cmd, input=data, capture_output=True, timeout=300)
+    result = subprocess.run(cmd, input=stdin, capture_output=True, timeout=300)
     stderr = result.stderr.decode("utf-8", errors="replace")
     json_match = re.search(r"\{[^}]*\"input_i\"[^}]*\}", stderr, re.DOTALL)
     if not json_match:
@@ -41,7 +42,15 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
 
     Returns dict with: loudness_lufs, true_peak_dbfs, cue_in_seconds,
     cue_out_seconds, cross_start_seconds, replay_gain_db.
+
+    FFmpeg reads the audio from a temporary file, not a pipe: on a pipe it cannot
+    seek and gave up on good files (silence_service.audio_file).
     """
+    with audio_file(file_data) as path:
+        return _analyze_file(path)
+
+
+def _analyze_file(file_data: str) -> dict:
     # 1. Measure loudness via FFmpeg loudnorm (first pass / print_format=json)
     loudness_lufs, true_peak_dbfs = measure_loudness(file_data)
     if loudness_lufs is None:

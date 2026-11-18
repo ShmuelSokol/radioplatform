@@ -979,6 +979,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     import asyncio as _asyncio
     from app.services.duration_backfill import backfill_on_startup
     backfill_task = _asyncio.get_running_loop().create_task(backfill_on_startup())
+    # Items the broken-file check took off the air whose file now measures: back on air
+    from app.services.upcoming_analysis import restore_on_startup
+    restore_task = _asyncio.get_running_loop().create_task(restore_on_startup())
     index_task = _asyncio.get_running_loop().create_task(_build_concurrent_indexes())
     # When each item last aired: read before the first refill or redraw needs it
     from app.services.last_played import warm_all
@@ -998,6 +1001,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     watch_task.cancel()
 
     backfill_task.cancel()
+    restore_task.cancel()
     index_task.cancel()
     warm_task.cancel()
     vacuum_task.cancel()

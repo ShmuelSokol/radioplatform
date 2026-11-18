@@ -122,6 +122,18 @@ The Mac's listener heard 2 to 3 s of near silence at song changes. Causes on our
   again", waiting copies removed, never deleted), `metadata_extra["unplayable"]` says why,
   and an `asset_missing` alert asks a person to look. A network error changes nothing.
   (2026-11-18: two items failed again and again with "Could not measure the length".)
+- Those two were good files, wrongly taken off the air: the whole-file measure fed the
+  audio to FFmpeg on a pipe, and on a pipe FFmpeg cannot seek, so it gives up ("Invalid
+  data found when processing input") on a file whose audio starts after stray bytes
+  past the tags. From a file, or by ffprobe from the URL, the same audio plays and
+  measures. `analyze_audio_bytes` now writes the bytes to a temp file and measures that;
+  `get_audio_duration(bytes)` retries from a temp file, then ffprobe, before saying 0.
+  After each start `restore_measurable_items` re-measures every item that carries
+  `metadata_extra.unplayable`, puts the ones that now measure back in their old category,
+  resolves the alert and logs "Put back on the air" in Activity (by "KBR Live
+  (automatic)"). A person's own "do not play" is never touched.
+  Tests: `tests/test_measure_long_files.py` (44 MB / 35 min MP3, stray bytes; need ffmpeg
+  locally, skipped in CI).
 - The player faded the incoming song in over 3 s. Now it comes up in 0.4 s
   (`CROSSFADE_FADE_IN`); only the outgoing song fades over 3 s.
 - The player hands over at `handOverPoint()`: the crossfade point, but never later than
