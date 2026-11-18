@@ -166,6 +166,7 @@ async def test_rds_line_rules(client, db_session):
     entry.asset_id = song.id
     await db_session.commit()
     assert (await client.get(f"{API}/stations/{st.id}/rds.txt")).text == "Some Singer - A Very Long Song Title Indeed"
-    assert (await client.get(f"{API}/stations/{st.id}/rds.txt", params={"max": 8})).text == "Some Sin"
+    # Cut at a word break, not mid-word (2026-11-18, RDS manager)
+    assert (await client.get(f"{API}/stations/{st.id}/rds.txt", params={"max": 8})).text == "Some"
     assert (await client.get(f"{API}/stations/{st.id}/rds.txt", params={"max": 7})).status_code == 422
     assert (await client.get(f"{API}/stations/{st.id}/rds.txt", params={"max": 129})).status_code == 422

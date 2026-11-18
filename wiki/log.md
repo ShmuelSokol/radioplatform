@@ -367,6 +367,7 @@ INGEST 2026-11-18 streaming-architecture.md One engine per station: engines send
 UPDATE 2026-11-18 local-fm-box.md live shows on a box: the relay passes the engine's live.mp3 through (was 404, so FM would be silent during a show); live-show blocker closed
 INGEST 2026-11-18 hourly-slots.md half hour on the second as a setting: spot_timing.half_hour (falls back to other), half_hour_time_check plays uploaded :30 clips (?minute=30) then the :30 weather, _put_first puts a new time check ahead of a :30 block queued earlier; saving re-times queued time/weather
 INGEST 2026-11-18 live-shows.md caller desk: the caller's topic/notes shown and editable on both screens (was stored, never shown), Hold, Next caller
+INGEST 2026-11-18 rds-feed.md RDS manager: rotation, sponsor lines, PS, Latin-only text, encoder pickup log; Magic RDS reads a URL or file, no TCP
 INGEST 2026-11-18 live-shows.md live_state.on_stream: Listen page plays a live show from the stream on proto 5 stations and declines the socket audio; control room mutes its stream during a show
 INGEST 2026-11-18 live-shows.md carts on the Host Console: instant buttons mixed into the host's outgoing audio in the browser (through the delay); Mute/Cough now close a mic gain instead of zeroing frames
 UPDATE 2026-11-18 live-shows.md host gone is counted from the last frame (was: from the end of the delay, 15 s of silence on top); a time check cut by the take-over in its first half airs whole over the delay
