@@ -964,7 +964,7 @@ export default function Dashboard() {
       )}
 
       {songTarget && (
-        <SongPanel target={songTarget} stationId={stationId ?? null} stationName={station?.name ?? null} canEdit={isManager(user?.role)}
+        <SongPanel target={{ ...songTarget, onAir: !!nowAsset && nowAsset.id === songTarget.asset.id }} stationId={stationId ?? null} stationName={station?.name ?? null} canEdit={isManager(user?.role)}
           onClose={closeSong} onToast={songToast} />
       )}
 
