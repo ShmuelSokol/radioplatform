@@ -67,10 +67,25 @@ export default function Navbar() {
 
   const standaloneLinks: NavLink[] = [
     { to: '/admin/dashboard', label: 'Dashboard', color: 'hover:text-yellow-300' },
-    { to: '/sponsor/dashboard', label: 'Sponsor Portal', color: 'hover:text-indigo-300' },
+    // The portal is the sponsors' own screen; staff never get it (it only sent them back to the Dashboard).
+    ...(role === 'sponsor' ? [{ to: '/sponsor/dashboard', label: 'Sponsor Portal', color: 'hover:text-indigo-300' }] : []),
   ].filter(allowed);
 
   const allNavGroups: NavGroup[] = [
+    {
+      // Its own menu, first after Dashboard: Shmuel looked for the client list
+      // under Settings among 14 other entries and could not find it (2026-11-18).
+      label: 'Sponsors',
+      color: 'text-yellow-400',
+      hoverColor: 'hover:text-yellow-300',
+      links: [
+        { to: '/admin/sponsors', label: 'All Clients', color: 'hover:text-yellow-300' },
+        { to: '/admin/spot-schedule', label: 'Spot Schedule', color: 'hover:text-yellow-300' },
+        { to: '/admin/spot-recordings', label: 'Record Spots', color: 'hover:text-yellow-300' },
+        { to: '/admin/campaigns', label: 'Campaigns', color: 'hover:text-yellow-300' },
+        { to: '/admin/sponsorship-rules', label: 'Sponsorship Rules', color: 'hover:text-yellow-300' },
+      ],
+    },
     {
       label: 'Content',
       color: 'text-cyan-400',
@@ -121,11 +136,6 @@ export default function Navbar() {
       links: [
         { to: '/admin/users', label: 'Users', color: 'hover:text-green-300' },
         { to: '/admin/activity', label: 'Activity', color: 'hover:text-green-300' },
-        { to: '/admin/sponsors', label: 'Sponsors', color: 'hover:text-yellow-300' },
-        { to: '/admin/campaigns', label: 'Campaigns', color: 'hover:text-yellow-300' },
-        { to: '/admin/spot-schedule', label: 'Spot Schedule', color: 'hover:text-yellow-300' },
-        { to: '/admin/spot-recordings', label: 'Record Spots', color: 'hover:text-yellow-300' },
-        { to: '/admin/sponsorship-rules', label: 'Sponsorship Rules', color: 'hover:text-yellow-300' },
         { to: '/admin/alerts', label: 'Alerts', color: 'hover:text-rose-300' },
         { to: '/admin/emergency', label: 'Emergency Alerts', color: 'hover:text-rose-300' },
         { to: '/admin/bug-reports', label: 'Bug Reports', color: 'hover:text-rose-300' },
