@@ -39,6 +39,28 @@ Branch previews stay off (the script skips anything that is not production), as
 they were in the Vercel project's settings before; `vercel.json` now overrides
 that setting.
 
+## No backend restart during a live show (deploy gate, 2026-11-18)
+
+A backend restart takes a live show's host off the air for as long as the backend
+is down (about 20 s of quiet; the host's sound passes through the backend, and the
+Host Console reconnects by itself afterwards). Threads merge all day and cloud
+threads cannot reach the API to look first, so the check is automatic:
+
+- CI's last job on a push to main, `deploy-gate` (`infra/deploy/deploy_gate.py`),
+  waits while any station's `GET /live-shows/station/{id}/active` says a show is on
+  air, and during minutes :55 to :05 and :27 to :33 (the time checks). It looks every
+  30 s and gives up after 4 hours.
+- Railway's service setting **Wait for CI** must be ON: then Railway deploys a commit
+  only when its CI has finished, so the gate holds the restart. With the setting off
+  the job changes nothing. A commit whose CI fails is not deployed at all.
+- So the backend restarts about 8 minutes after a merge (CI's length), not at once.
+  Count from there when a restart must miss a moment.
+- Urgent fix: put `[deploy-now]` in the merge commit's message (the gate passes at
+  once; CI still runs), or press Redeploy in Railway (waits for nothing).
+- The gate passes when the API does not answer: the deploy may be the fix.
+- Pushes to main share one CI concurrency group: while a gate waits, later merges'
+  runs queue behind it and the newest one deploys everything.
+
 ## Checking it
 
 On the merge commit's status list (`gh api repos/ShmuelSokol/radioplatform/commits/<sha>/status`):
