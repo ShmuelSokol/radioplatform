@@ -313,6 +313,7 @@ export default function Dashboard() {
     true,
     wsNowPlaying?.asset?.overlap_seconds,
     wsNowPlaying?.next_asset?.overlap_seconds,
+    wsNowPlaying?.asset?.end_fade_seconds,
   );
 
   // ── Level meters always; sound on this computer only after the Listen button ──

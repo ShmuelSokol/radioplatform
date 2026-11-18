@@ -366,7 +366,8 @@ def _quote(value) -> str:
 def _overlap(entry) -> float:
     from app.api.v1.queue import overlap_seconds
 
-    return overlap_seconds(entry)
+    # The engine decides by itself what a song does before a spoken item (radio.liq)
+    return overlap_seconds(entry, speech_next=False)
 
 
 def build_uri(entry: QueueEntry, lane: str) -> str | None:

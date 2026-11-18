@@ -84,13 +84,14 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     cue_in = analysis.get("cue_in_seconds", 0)
     cue_out = analysis.get("cue_out_seconds", duration)
     # The one hand-over rule (a sponsorship or shiur is never crossfaded)
-    from app.api.v1.queue import handover_seconds, overlap_seconds
-    cross_start = duration - handover_seconds(entry)
+    from app.api.v1.queue import end_fade_seconds, handover_seconds, overlap_seconds
     replay_gain_db = analysis.get("replay_gain_db", 0)
 
-    # What follows this item (the queue's pick at the hand-over), for pre-loading
+    # What follows this item (the queue's pick at the hand-over), for pre-loading.
+    # Asked first: a song followed by a spoken item is not crossfaded into it.
     from app.api.v1.queue import predict_next_entry
     next_entry = await predict_next_entry(db, station_id, entry)
+    cross_start = duration - handover_seconds(entry)
 
     next_asset_data = None
     if next_entry and next_entry.asset:
@@ -129,6 +130,7 @@ async def live_audio(station_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "cue_out": cue_out,
         "cross_start": cross_start,
         "overlap_seconds": overlap_seconds(entry),
+        "end_fade_seconds": end_fade_seconds(entry),
         "replay_gain_db": replay_gain_db,
         "next_asset": next_asset_data,
     }

@@ -87,6 +87,22 @@ async def test_a_play_counts_once_and_only_on_its_station(db_session: AsyncSessi
 
 
 @pytest.mark.asyncio
+async def test_a_slot_the_queue_calls_played_that_never_aired_is_missed(db_session: AsyncSession):
+    """Main, 10:45 PM ET 2026-11-17: a Next while a soft sponsorship waited marked its
+    queue entry "played" with no start time and nothing on air. Only the play log
+    counts: the play is listed as missed."""
+    from app.models.queue_entry import QueueEntry
+
+    station, sponsor, spot, _ = await _contract(db_session, dayparts="morning", plays_per_daypart=1,
+                                                end_date=DAY)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=1,
+                              status="played", source="ad_slot", preempt_at=_at(DAY, 9), started_at=None))
+    await db_session.commit()
+    rows = await delivery_for_sponsor(db_session, sponsor, now=NOW)
+    assert _past(rows) == {(DAY, "morning"): (1, 0, 1)}
+
+
+@pytest.mark.asyncio
 async def test_fixed_times_days_off_air_and_running_time_of_day(db_session: AsyncSession):
     """Exact times are each a promise; Shabbos is not; the time of day still running is not judged yet."""
     station, sponsor, spot, _ = await _contract(
