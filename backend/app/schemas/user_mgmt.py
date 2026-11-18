@@ -56,6 +56,12 @@ class UserOut(BaseModel):
     station_ids: list[str] | None = None
 
 
+class UserUpdateOut(UserOut):
+    """Answer to PUT /users/{id}. When someone changes their own password their
+    other sessions end; `new_tokens` keeps the one they are using signed in."""
+    new_tokens: dict | None = None
+
+
 class UserListResponse(BaseModel):
     users: list[UserOut]
     total: int

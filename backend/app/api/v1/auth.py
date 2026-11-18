@@ -119,6 +119,7 @@ async def seed_reset_admin(
     if existing:
         existing.email = "admin"
         existing.hashed_password = hash_password(_seed_password())
+        existing.session_version = int(existing.session_version or 0) + 1  # new password: old sessions end
         existing.is_active = True
         await db.commit()
         return {"message": "Admin user updated", "email": existing.email}

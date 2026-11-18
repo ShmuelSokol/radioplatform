@@ -202,7 +202,7 @@ export default function Stations() {
               </tr>
               {expandedStation === station.id && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-4 bg-gray-50 space-y-6">
+                  <td colSpan={6} data-testid="station-panel" className="px-6 py-4 bg-gray-50 space-y-6">
                     <LocationConfig
                       latitude={station.latitude}
                       longitude={station.longitude}

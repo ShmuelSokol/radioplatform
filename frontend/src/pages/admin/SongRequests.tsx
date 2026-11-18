@@ -84,15 +84,10 @@ export default function SongRequests() {
             || 'That did not work. Try again.'}
         </p>
       )}
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-cyan-300">
-          Song Requests
-          {total > 0 && (
-            <span className="ml-2 px-2 py-0.5 bg-[#2a2a5e] text-cyan-200 text-[11px] rounded-full">
-              {total} total
-            </span>
-          )}
-        </h1>
+      <div className="flex items-center gap-3 mb-4">
+        <h1 className="text-xl font-bold text-cyan-300">Song Requests</h1>
+        {/* Beside the heading, not inside it: pale chip text on the heading's label could not be read */}
+        {total > 0 && <span className="text-sm text-gray-600">{total} total</span>}
       </div>
 
       {/* Most Requested Analytics Panel */}
