@@ -15,7 +15,7 @@ them (source="ad_slot" + preempt_at), so the player treats them the same way.
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -60,6 +60,9 @@ DEFAULT_SLOT_MINUTES = [15, 30, 45]
 # Length counted for a sponsorship whose recording has no measured length
 DEFAULT_SPOT_SECONDS = 30.0
 HORIZON_DAYS = 7
+# Two plays of one sponsor closer than this sound like a repeat; the planner keeps
+# them apart whenever an equally empty break further away has room.
+SPONSOR_GAP = timedelta(minutes=60)
 # Never add/remove a slot this close to air time — the player may be picking it up.
 SAFETY_MARGIN = timedelta(minutes=2)
 
@@ -305,6 +308,7 @@ def plan_spots(
 
         # Exact times first: they are promises, and the spread plays work around them.
         fixed_at: dict[datetime, SpotSchedule] = {}
+        aired_at: dict[str, list[datetime]] = {}  # sponsor -> times seated today
         for sched in ordered:
             if not getattr(sched, "fixed_times", None) or not _applies_on(sched, local_date):
                 continue
@@ -328,6 +332,7 @@ def plan_spots(
                     continue
                 if local in by_time and fits(by_time[local], sched):
                     placements.append(seat_in(by_time[local], sched))
+                    aired_at.setdefault(str(sched.sponsor_id), []).append(local)
                     continue
                 if local in fixed_at:
                     other = fixed_at[local].name or "another sponsorship"
@@ -341,6 +346,7 @@ def plan_spots(
                     )
                     continue
                 fixed_at[local] = sched
+                aired_at.setdefault(str(sched.sponsor_id), []).append(local)
                 placements.append(
                     Placement(
                         at=local.astimezone(UTC).replace(second=0, microsecond=0),
@@ -404,9 +410,29 @@ def plan_spots(
                     ),
                     key=lambda b: b.local,
                 )
+                window = timedelta(hours=h_end - h_start)
+
+                def near_own(b: Break, sched, plays: int) -> float:
+                    """How much closer than wanted this break is to the sponsor's other plays (0 = far enough).
+
+                    Wanted: an hour, or the slot's even share when the contract has more
+                    plays than hours in it. When every break is too close, the furthest wins.
+                    """
+                    gap = min(SPONSOR_GAP, window / max(1, plays))
+                    times = aired_at.get(str(sched.sponsor_id), ())
+                    if not times:
+                        return 0.0
+                    nearest = min(abs(b.local - t) for t in times)
+                    return max(0.0, (gap - nearest).total_seconds())
+
                 def place(order: list[tuple], commit: bool) -> tuple[list, list]:
                     """Seat the plays in this order; without `commit` the room is put back."""
-                    saved = (dict(room), dict(time_left), {k: set(v) for k, v in holding.items()})
+                    saved = (
+                        dict(room),
+                        dict(time_left),
+                        {k: set(v) for k, v in holding.items()},
+                        {k: list(v) for k, v in aired_at.items()},
+                    )
                     seated, left_out = [], []
                     for sched, k, plays in order:
                         if not day_breaks:
@@ -419,6 +445,7 @@ def plan_spots(
                             open_,
                             key=lambda ib: (
                                 ib[1].capacity - room[ib[1].local],  # sponsorships already there
+                                near_own(ib[1], sched, plays),  # same sponsor too close
                                 id(sched) in holding.get(ib[1].local, ()),
                                 (ib[0] - idx) % n,  # nearest after its aim
                             ),
@@ -429,6 +456,7 @@ def plan_spots(
                             continue
                         seated.append(seat_in(chosen, sched, daypart))
                         holding.setdefault(chosen.local, set()).add(id(sched))
+                        aired_at.setdefault(str(sched.sponsor_id), []).append(chosen.local)
                     if not commit:
                         room.clear()
                         room.update(saved[0])
@@ -436,6 +464,8 @@ def plan_spots(
                         time_left.update(saved[1])
                         holding.clear()
                         holding.update({k: set(v) for k, v in saved[2].items()})
+                        aired_at.clear()
+                        aired_at.update({k: list(v) for k, v in saved[3].items()})
                     return seated, left_out
 
                 booked = [
@@ -722,9 +752,151 @@ async def plan_for_station(
         breaks,
         durations,
     )
+    if breaks:
+        aired = await aired_today(db, station, tz, now, schedules)
+        placements = settle_today(placements, breaks, blackouts, tz, now, aired)
     # A part of the day that is already over cannot be fixed; leave it out.
     unplaced = [u for u in unplaced if not daypart_over(u, tz, now)]
     return placements, unplaced
+
+
+async def aired_today(
+    db: AsyncSession, station: Station, tz: ZoneInfo, now: datetime, schedules: list[SpotSchedule]
+) -> dict[str, list[datetime]]:
+    """Asset id -> station-local start times of today's plays so far (play log)."""
+    from app.models.play_log import PlayLog
+
+    if not schedules:
+        return {}
+    today = now.astimezone(tz).date()
+    midnight = datetime(today.year, today.month, today.day, tzinfo=tz)
+    rows = await db.execute(
+        select(PlayLog.asset_id, PlayLog.start_utc).where(
+            PlayLog.station_id == station.id,
+            PlayLog.asset_id.in_({s.asset_id for s in schedules}),
+            PlayLog.start_utc >= midnight.astimezone(UTC),
+            PlayLog.start_utc <= now,
+        )
+    )
+    aired: dict[str, list[datetime]] = {}
+    for asset_id, start in rows.all():
+        aired.setdefault(str(asset_id), []).append(as_utc(start).astimezone(tz))
+    return aired
+
+
+def settle_today(
+    placements: list[Placement],
+    breaks: list[Break],
+    blackouts: list[Blackout],
+    tz: ZoneInfo,
+    now: datetime,
+    aired: dict[str, list[datetime]],
+) -> list[Placement]:
+    """Fit today's plan to what has already aired.
+
+    The plan is the same whatever the time (so it never reshuffles on its own),
+    but after a contract or block is changed mid-day it no longer matches the
+    breaks that are over. For each contract and slot, today: what it promises,
+    minus what already aired in that slot, is what the breaks still to come
+    carry. Extra coming plays are dropped (a play that aired at 6:30 is not
+    planned again at 7:00), and plays the new plan put on breaks already over
+    move to the emptiest coming break of the same slot (seen on Main 2026-11-18:
+    Hatzalah moved from 5:45 PM to a 3 PM break after places were added at :00
+    and :15). A slot that is over, or plays of a contract made after them, are
+    not pushed into a later slot.
+    """
+    today = now.astimezone(tz).date()
+    cutoff = now + SAFETY_MARGIN
+    spread = [
+        p for p in placements if p.local.date() == today and not p.fixed and p.block is not None
+    ]
+    if not spread:
+        return placements
+    groups: dict[tuple, list[Placement]] = {}
+    for p in spread:
+        groups.setdefault((id(p.schedule), p.daypart), []).append(p)
+
+    held: dict[datetime, int] = {}
+    for p in placements:
+        if p.block is not None:
+            held[p.local] = held.get(p.local, 0) + 1
+    dropped: set[int] = set()
+    short: list[tuple[list[Placement], int, tuple[int, int]]] = []
+    for (_, window), plays in groups.items():
+        h_start, h_end = DAYPARTS.get(window, (0, 24))
+        sched = plays[0].schedule
+        done = sum(
+            1
+            for t in aired.get(str(sched.asset_id), [])
+            if t.date() == today and h_start <= t.hour < h_end and t <= now
+        )
+        coming = sorted((p for p in plays if p.at > cutoff), key=lambda p: p.local)
+        gone = sorted((p for p in plays if p.at <= cutoff), key=lambda p: p.local)
+        needed = max(0, len(plays) - done)
+        if len(coming) > needed:
+            for p in coming[needed:]:
+                dropped.add(id(p))
+                held[p.local] -= 1
+        elif len(coming) < needed and gone:
+            short.append((gone[: needed - len(coming)], len(plays), (h_start, h_end)))
+
+    later = sorted(
+        (
+            b
+            for b in breaks
+            if b.local.date() == today
+            and b.local.astimezone(UTC) > cutoff
+            and not any(x.covers(b.local) for x in blackouts)
+        ),
+        key=lambda b: b.local,
+    )
+    moved: dict[int, Placement] = {}
+
+    def where(q: Placement) -> datetime:
+        return moved.get(id(q), q).local
+
+    kept = [p for p in placements if id(p) not in dropped]
+    for gone, plays, (h_start, h_end) in short:
+        sched = gone[0].schedule
+        gap = min(SPONSOR_GAP, timedelta(hours=h_end - h_start) / max(1, plays))
+        for p in gone:
+            mine = [q for q in kept if str(q.schedule.sponsor_id) == str(sched.sponsor_id)]
+            own_breaks = {where(q) for q in mine if q.schedule is sched and where(q) != p.local}
+            pool = [
+                b
+                for b in later
+                if held.get(b.local, 0) < b.capacity
+                and h_start <= b.local.hour < h_end
+                and b.local not in own_breaks
+            ]
+            if not pool:
+                continue
+            others = [where(q) for q in mine if q is not p and where(q).astimezone(UTC) > cutoff]
+            b = min(
+                pool,
+                key=lambda b: (
+                    held.get(b.local, 0),
+                    min((abs(b.local - t) for t in others), default=gap) < gap,
+                    b.local,
+                ),
+            )
+            at = b.local.astimezone(UTC).replace(second=0, microsecond=0)
+            moved[id(p)] = replace(
+                p,
+                at=at,
+                local=b.local,
+                block=b.name,
+                seat=held.get(b.local, 0),
+                timing_mode=b.timing_mode,
+                hard_by=at + timedelta(minutes=b.latest_minutes)
+                if b.timing_mode == "soft" and b.latest_minutes
+                else None,
+            )
+            held[b.local] = held.get(b.local, 0) + 1
+            held[p.local] = held.get(p.local, 1) - 1
+    out = [moved.get(id(p), p) for p in kept]
+    out.sort(key=lambda p: (p.at, p.seat))
+    return out
 
 
 async def reconcile_spot_slots(
