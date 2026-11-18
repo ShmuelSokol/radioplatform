@@ -43,6 +43,12 @@ log = logging.getLogger("kbr-relay")
 
 TIMED_LEAD_SECONDS = 45.0  # same lead as the backend's own hand-over
 MISSED_HARD_SECONDS = 300.0  # a hard item later than this is dropped, as on the backend
+# A soft timed item (sponsorship, weather) later than this is not aired by the box on its
+# own: after a power cut of hours they would otherwise all air in a row, hours old
+MISSED_SOFT_SECONDS = 3600.0
+# The computer's clock is this far behind the newest plan on disk: it was not set after a
+# power cut (no internet, flat clock battery). Nothing timed is trusted until it is right.
+CLOCK_BEHIND_SECONDS = 120.0
 DONE_KEEP = 5000
 URL_AT_END = re.compile(r'(?:^|(?<=":))(https?://\S+)$')
 
@@ -99,7 +105,12 @@ class Relay:
     def _write_json(self, name: str, data) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         part = self.dir / (name + ".part")
-        part.write_text(json.dumps(data))
+        # On the disk before it takes the old file's place: a power cut must leave the
+        # old file or the new one, never an empty one
+        with open(part, "w") as f:
+            f.write(json.dumps(data))
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(part, self.dir / name)
 
     def _save_state(self) -> None:
@@ -171,7 +182,24 @@ class Relay:
                 self._save_state()
 
     # ── calls from the engine ───────────────────────────────────────────────
+    def clock_ok(self) -> bool:
+        """False when the computer's clock is behind the newest plan on disk: the box came
+        up after a power cut with no internet to set it. Then the time is at least the
+        plan's (used for blackouts) and nothing timed goes on air."""
+        made = self.plan.get("generated_at")
+        return not isinstance(made, (int, float)) or self.clock() >= made - CLOCK_BEHIND_SECONDS
+
+    def now(self) -> float:
+        made = self.plan.get("generated_at")
+        return max(self.clock(), made) if isinstance(made, (int, float)) else self.clock()
+
     def hello(self, body: bytes) -> tuple[int, bytes]:
+        # The engine has just started (a crash, a power cut): its timed lane is empty, so
+        # what was handed to it before must be handed again. It ignores an id it holds.
+        with self.lock:
+            if self.timed_sent:
+                self.timed_sent.clear()
+                self._save_state()
         try:
             return self._call("POST", "/hello", body or b"{}")
         except Offline:
@@ -198,7 +226,8 @@ class Relay:
         return any(b["start"] <= now < b["end"] for b in self.plan.get("blackouts", []))
 
     def offline_next(self) -> tuple[int, bytes]:
-        now = self.clock()
+        now = self.now()
+        clock_ok = self.clock_ok()
         with self.lock:
             if self.in_blackout(now):
                 uri = f'annotate:kbr_entry="",kbr_lane="main",kbr_kind="silence",title="Off air":{self.silence_file()}'
@@ -210,11 +239,14 @@ class Relay:
             ]
             chosen = None
             # Timed items whose time has come go first, by time then position (as /next)
-            due = sorted((e for e in waiting if e.get("at") is not None and e["at"] <= now),
+            due = sorted((e for e in waiting if clock_ok and e.get("at") is not None and e["at"] <= now),
                          key=lambda e: (e["at"], e["position"]))
             for e in due:
-                if e.get("mode") == "hard" and now - e["at"] > MISSED_HARD_SECONDS:
-                    self.mark_done(e["entry_id"])  # a time check minutes late is not aired
+                limit = MISSED_HARD_SECONDS if e.get("mode") == "hard" else MISSED_SOFT_SECONDS
+                if now - e["at"] > limit:
+                    # A time check minutes late, or a sponsorship from before a long
+                    # power cut, is not aired
+                    self.mark_done(e["entry_id"])
                     continue
                 if self.have(e["url"]) and e.get("kind") != "silence":
                     chosen = e
@@ -316,6 +348,8 @@ class Relay:
             with urllib.request.urlopen(url, timeout=60) as resp, open(part, "wb") as f:
                 while chunk := resp.read(1 << 16):
                     f.write(chunk)
+                f.flush()
+                os.fsync(f.fileno())  # a power cut must not leave half a song under its name
             if part.stat().st_size == 0:
                 part.unlink()
                 return False
@@ -458,6 +492,8 @@ class Relay:
         handed over just before the line dropped does not air twice. Returns items sent."""
         if self.timed_mode != "always" and self.online:
             return 0
+        if not self.clock_ok():
+            return 0
         now = self.clock()
         with self.lock:
             done = set(self.done)
@@ -545,7 +581,8 @@ class Relay:
                 "plan_entries": len(entries),
                 "plan_audio_missing": sum(1 for e in entries if not self.have(e["url"])),
                 "reports_kept": sum(1 for _ in open(self.spool_path)) if self.spool_path.is_file() else 0,
-                "in_blackout": self.in_blackout(self.clock()),
+                "in_blackout": self.in_blackout(self.now()),
+                "clock_ok": self.clock_ok(),
                 "commands_done": self.commands_done,
             }
 

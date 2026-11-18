@@ -193,6 +193,7 @@ export default function Stations() {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right">
                   <button
+                    data-danger
                     onClick={(e) => { e.stopPropagation(); if (confirm('Delete this station? This cannot be undone.')) deleteMutation.mutate(station.id); }}
                     className="text-red-600 hover:text-red-800 text-sm"
                   >

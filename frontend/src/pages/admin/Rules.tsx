@@ -268,7 +268,7 @@ export default function Rules() {
                   <td data-label="Priority" className="px-3 py-1.5 text-yellow-300 text-[11px]">{r.priority}</td>
                   <td className={`px-3 py-1.5 flex gap-2 ${canEdit ? '' : 'invisible'}`} aria-hidden={!canEdit}>
                     <button disabled={!canEdit} onClick={() => startEdit(r)} className="text-yellow-400 hover:text-yellow-300 text-[11px]">Edit</button>
-                    <button disabled={!canEdit} onClick={() => { if (confirm('Delete rule?')) deleteMut.mutate(r.id); }}
+                    <button data-danger disabled={!canEdit} onClick={() => { if (confirm('Delete rule?')) deleteMut.mutate(r.id); }}
                       className="text-red-400 hover:text-red-300 text-[11px]">Del</button>
                     <button disabled={!canEdit} onClick={() => updateMut.mutate({ id: r.id, data: { is_active: !r.is_active } })}
                       className={`text-[11px] ${r.is_active ? 'text-orange-400' : 'text-green-400'}`}>

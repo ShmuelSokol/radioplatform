@@ -10,6 +10,7 @@ import {
   useDeleteLiveShow,
   useStartLiveShow,
 } from '../../hooks/useLiveShows';
+import { formatInZone, fromZonedInput, toZonedInput } from '../../lib/stationTime';
 import type { LiveShow } from '../../api/liveShows';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -39,6 +40,7 @@ export default function LiveShows() {
 
   const { data: stationsData } = useStations();
   const stations = stationsData?.stations ?? [];
+  const zoneOf = (id?: string | null) => stations.find(s => s.id === id)?.timezone;
 
   const statusFilter = activeTab === 'all' ? undefined : activeTab;
   const { data, isLoading } = useLiveShows({ status: statusFilter });
@@ -67,8 +69,10 @@ export default function LiveShows() {
     setDescription(show.description || '');
     setStationId(show.station_id);
     setBroadcastMode(show.broadcast_mode);
-    setScheduledStart(show.scheduled_start ? show.scheduled_start.slice(0, 16) : '');
-    setScheduledEnd(show.scheduled_end ? show.scheduled_end.slice(0, 16) : '');
+    // Shown and typed on the show's station's clock (it was UTC in the box and on save,
+    // so a show typed as 8 PM in Lakewood was stored, and listed, as 3 PM)
+    setScheduledStart(show.scheduled_start ? toZonedInput(show.scheduled_start, zoneOf(show.station_id)) : '');
+    setScheduledEnd(show.scheduled_end ? toZonedInput(show.scheduled_end, zoneOf(show.station_id)) : '');
     setCallsEnabled(show.calls_enabled);
     setShowModal(true);
   };
@@ -84,8 +88,8 @@ export default function LiveShows() {
             title,
             description: description || undefined,
             broadcast_mode: broadcastMode as 'webrtc' | 'icecast',
-            scheduled_start: scheduledStart || undefined,
-            scheduled_end: scheduledEnd || undefined,
+            scheduled_start: scheduledStart ? fromZonedInput(scheduledStart, zoneOf(stationId)) : undefined,
+            scheduled_end: scheduledEnd ? fromZonedInput(scheduledEnd, zoneOf(stationId)) : undefined,
             calls_enabled: callsEnabled,
           },
         },
@@ -100,8 +104,8 @@ export default function LiveShows() {
         title,
         description: description || undefined,
         broadcast_mode: broadcastMode,
-        scheduled_start: scheduledStart || undefined,
-        scheduled_end: scheduledEnd || undefined,
+        scheduled_start: scheduledStart ? fromZonedInput(scheduledStart, zoneOf(stationId)) : undefined,
+        scheduled_end: scheduledEnd ? fromZonedInput(scheduledEnd, zoneOf(stationId)) : undefined,
         calls_enabled: callsEnabled,
       },
       {
@@ -110,12 +114,7 @@ export default function LiveShows() {
     );
   };
 
-  const fmt = (iso: string | null) => {
-    if (!iso) return '--';
-    return new Date(iso).toLocaleString([], {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    });
-  };
+  const fmt = (iso: string | null, showStationId?: string) => (iso ? formatInZone(iso, zoneOf(showStationId)) : '--');
 
   return (
     <div className="w-full">
@@ -167,7 +166,7 @@ export default function LiveShows() {
                   <span className="text-[10px] text-gray-500 uppercase">{show.broadcast_mode}</span>
                 </div>
                 <div className="text-[11px] text-gray-500">
-                  {fmt(show.scheduled_start)} &mdash; {fmt(show.scheduled_end)}
+                  {fmt(show.scheduled_start, show.station_id)} &mdash; {fmt(show.scheduled_end, show.station_id)}
                   {' | '}
                   {stations.find(s => s.id === show.station_id)?.name ?? 'Unknown Station'}
                   {show.calls_enabled && ' | Calls ON'}

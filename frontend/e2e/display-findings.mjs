@@ -17,7 +17,7 @@
  *   cd frontend && npm run build && (npx vite preview --port 4333 --strictPort &)
  *   BASE_URL=http://localhost:4333 node e2e/display-findings.mjs      # SHOTS=<dir> for pictures
  */
-import { chromium, devices, checker, sleep, makeStation, adminContext, newPage } from './lib/fake-station.mjs';
+import { allowEverywhere, chromium, devices, checker, sleep, makeStation, adminContext, newPage } from './lib/fake-station.mjs';
 
 const BASE = process.env.BASE_URL || 'http://localhost:4333';
 const SHOTS = process.env.SHOTS || '';
@@ -26,6 +26,7 @@ const SIZES = [
   ['iPhone 13', { ...devices['iPhone 13'] }, true],
 ];
 const { check, done } = checker({});
+allowEverywhere(/alert: Could not (make the readout|show the template preview): No weather key/, 'check 15 makes the weather service fail to see this message');
 const NOW = Date.now();
 const iso = (h) => new Date(NOW + h * 3600e3).toISOString();
 
@@ -47,9 +48,10 @@ const DATA = {
     { category: 'lively', asset_type: 'music', play_count: 40 },
   ] },
   '/analytics/hourly-distribution': { hours: [] },
-  '/holidays': { total: 2, holidays: [
+  '/holidays': { total: 3, holidays: [
     { id: 'h1', name: 'Shabbos Parshas Vayeitzei', start_datetime: iso(48), end_datetime: iso(73), is_blackout: true, affected_stations: null, replacement_content: null, reason: 'Shabbos', created_at: '', updated_at: '' },
     { id: 'h2', name: 'Maintenance', start_datetime: iso(-30), end_datetime: iso(-28), is_blackout: true, affected_stations: null, replacement_content: null, reason: null, created_at: '', updated_at: '' },
+    { id: 'h3', name: 'Jerusalem only window', start_datetime: iso(100), end_datetime: iso(125), is_blackout: true, affected_stations: { station_ids: ['st-2'] }, replacement_content: null, reason: 'Shabbos', created_at: '', updated_at: '' },
   ] },
   '/archives': { total: 1, archives: [
     { id: 'ar1', station_id: 'st-2', title: 'Thursday night show with a long title', description: null, host_name: 'Reb Moshe', recorded_at: iso(-50), duration_seconds: 3600, audio_url: 'https://example.com/a.mp3', cover_image_url: null, is_published: true, download_count: 3, live_show_id: null, created_at: iso(-49), updated_at: iso(-49) },
@@ -177,6 +179,108 @@ try {
       await shot(page, label.replace(/\W+/g, '-').toLowerCase(), size);
     }
 
+    // 12 phone cards: the row actions are thumb-sized buttons, Delete stands apart and asks first
+    if (phone) {
+      for (const [path, rowText, label] of TABLES) {
+        await open(path, rowText);
+        const a = await page.evaluate((t) => {
+          const row = [...document.querySelectorAll('table.phone-cards > tbody > tr')].find((r) => r.textContent.includes(t));
+          const cell = row?.lastElementChild;
+          const btns = [...(cell?.querySelectorAll('button, a') ?? [])].filter((e) => e.getBoundingClientRect().width > 0);
+          const box = (e) => { const r = e.getBoundingClientRect(); return { text: (e.textContent || e.title || '').trim().slice(0, 20), w: Math.round(r.width), h: Math.round(r.height), left: r.left, right: r.right, top: r.top, bottom: r.bottom, danger: e.hasAttribute('data-danger') }; };
+          const all = btns.map(box);
+          const danger = all.find((b) => b.danger);
+          // nearest other button on the same line as Delete
+          const sameLine = danger ? all.filter((b) => !b.danger && b.top < danger.bottom && b.bottom > danger.top) : [];
+          const gap = danger && sameLine.length ? Math.min(...sameLine.map((b) => Math.max(danger.left - b.right, b.left - danger.right))) : null;
+          return { all, danger: !!danger, gap };
+        }, rowText);
+        const small = a.all.filter((b) => b.w < 44 || b.h < 44);
+        check(`${size}: 12 ${label}: every row action is at least 44 px each way`, a.all.length > 0 && small.length === 0, JSON.stringify(small.length ? small : a.all));
+        check(`${size}: 12 ${label}: Delete stands apart from the other actions`, a.danger && (a.gap === null || a.gap >= 24), JSON.stringify({ gap: a.gap, danger: a.danger }));
+        // Delete asks first; saying no deletes nothing
+        const deletes = [];
+        const onReq = (r) => { if (r.method() === 'DELETE') deletes.push(r.url()); };
+        page.on('request', onReq);
+        let asked = '';
+        page.once('dialog', (d) => { asked = d.message(); d.dismiss().catch(() => {}); });
+        const row = page.locator('table.phone-cards > tbody > tr', { hasText: rowText }).first();
+        await row.locator('[data-danger]').first().click();
+        await sleep(300);
+        page.off('request', onReq);
+        check(`${size}: 12 ${label}: Delete asks first, and "Cancel" deletes nothing`, /delete/i.test(asked) && deletes.length === 0, JSON.stringify({ asked, deletes }));
+        // 13 while scrolling, the bug button covers no label, text or control of a card
+        const covered = await page.evaluate(async () => {
+          const bug = document.querySelector('button[aria-label="Report a bug"]');
+          if (!bug || !bug.getBoundingClientRect().width) return ['no bug button'];
+          const hits = new Set();
+          const max = document.documentElement.scrollHeight - window.innerHeight;
+          for (let y = 0; y <= max; y += 60) {
+            window.scrollTo(0, y);
+            await new Promise((r) => requestAnimationFrame(r));
+            const b = bug.getBoundingClientRect();
+            for (const td of document.querySelectorAll('table.phone-cards > tbody > tr > td')) {
+              // the words in the cell, not the cell's empty width
+              const range = document.createRange(); range.selectNodeContents(td);
+              for (const r of [...range.getClientRects(), ...[...td.querySelectorAll('button, a, input, select')].map((e) => e.getBoundingClientRect())]) {
+                if (r.width > 0 && r.left < b.right && r.right > b.left && r.top < b.bottom && r.bottom > b.top) hits.add((td.getAttribute('data-label') || td.textContent || '').trim().slice(0, 24));
+              }
+            }
+          }
+          window.scrollTo(0, 0);
+          return [...hits];
+        });
+        check(`${size}: 13 ${label}: scrolling the cards, the bug button never covers their text or buttons`, covered.length === 0, covered.join(' | '));
+      }
+    }
+
+    // 16 Users: your own row offers neither Disable nor Delete (the server refuses both: no failed request)
+    {
+      await open('/admin/users', 'a.very.long.address');
+      const own = page.locator('table.phone-cards > tbody > tr', { hasText: 'operator@example.com' }).first();
+      const other = page.locator('table.phone-cards > tbody > tr', { hasText: 'a.very.long.address' }).first();
+      const off = async (row, name) => row.getByRole('button', { name, exact: true }).isDisabled();
+      check(`${size}: 16 Users: Disable and Delete are off on your own account, with the reason`,
+        (await off(own, 'Disable')) && (await off(own, 'Delete')) && /cannot disable your own/.test(await own.getByRole('button', { name: 'Disable', exact: true }).getAttribute('title') || ''));
+      check(`${size}: 16 Users: they stay on for other people`, !(await off(other, 'Disable')) && !(await off(other, 'Delete')));
+    }
+
+    // 14 Blackouts: times on the station's clock, shown and typed (not the viewer's, not UTC)
+    {
+      const show = (isoStr, timeZone) => new Date(isoStr).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short', timeZone });
+      const wall = (isoStr, timeZone) => {
+        const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(isoStr)).map((x) => [x.type, x.value]));
+        return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+      };
+      await open('/admin/holidays', 'Shabbos Parshas Vayeitzei');
+      const text = (await bodyText(page)).replace(/ /g, ' ');
+      const [all, jeru] = [DATA['/holidays'].holidays[0], DATA['/holidays'].holidays[2]];
+      const norm = (s) => s.replace(/ /g, ' ');
+      check(`${size}: 14 a blackout for all stations shows the first station's clock (New York), not UTC`,
+        text.includes(norm(show(all.start_datetime, 'America/New_York'))) && text.includes(norm(show(all.end_datetime, 'America/New_York'))), norm(show(all.start_datetime, 'America/New_York')));
+      check(`${size}: 14 a blackout for the Jerusalem station shows Jerusalem's clock`,
+        text.includes(norm(show(jeru.start_datetime, 'Asia/Jerusalem'))) && text.includes(norm(show(jeru.end_datetime, 'Asia/Jerusalem'))), norm(show(jeru.start_datetime, 'Asia/Jerusalem')));
+      check(`${size}: 14 no blackout time is shown as UTC`, !/\bUTC\b/.test(text));
+      // Edit: the boxes hold the station's wall time, and saving unchanged sends the same moment back
+      let sent = null;
+      await ctx.route(/\/api\/v1\/holidays\/h3$/, (route) => {
+        if (route.request().method() === 'GET') return route.fallback();
+        sent = route.request().postDataJSON();
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(jeru) });
+      });
+      const jrow = page.locator('table.phone-cards > tbody > tr', { hasText: 'Jerusalem only window' }).first();
+      await jrow.locator('button[title="Edit"]').click();
+      const boxes = page.locator('input[type="datetime-local"]');
+      await boxes.first().waitFor();
+      check(`${size}: 14 editing shows the start on Jerusalem's clock`, (await boxes.nth(0).inputValue()) === wall(jeru.start_datetime, 'Asia/Jerusalem'), `${await boxes.nth(0).inputValue()} want ${wall(jeru.start_datetime, 'Asia/Jerusalem')}`);
+      check(`${size}: 14 the form says whose clock the times are on`, /Asia\/Jerusalem/.test(await page.getByTestId('blackout-zone').innerText()));
+      await page.getByRole('button', { name: 'Update' }).click();
+      await sleep(400);
+      const minute = (s) => new Date(s).toISOString().slice(0, 16);
+      check(`${size}: 14 saving without a change keeps the same moment (it used to move by the viewer's offset)`,
+        !!sent && minute(sent.start_datetime) === minute(jeru.start_datetime) && minute(sent.end_datetime) === minute(jeru.end_datetime), JSON.stringify(sent));
+    }
+
     // 6 Review Queues heading, 7 one heading style
     const HEADS = ['/admin/reviews', '/admin/assets/upload', '/admin/categories', '/admin/sponsors', '/admin/users', '/admin/holidays'];
     const seen = [];
@@ -207,6 +311,24 @@ try {
     await sel.selectOption({ index: 1 });
     const picked = await sel.inputValue();
     check(`${size}: 8 choosing another station is remembered for the other pages`, (await page.evaluate(() => localStorage.getItem('radio_last_station'))) === picked);
+
+    // 15 Weather Readouts: when the server cannot make a readout or a preview, the page says so
+    {
+      await ctx.route(/\/api\/v1\/weather-readouts$/, (route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'No weather key is set on the server' }) });
+      });
+      await ctx.route(/\/api\/v1\/weather-readouts\/template-preview/, (route) =>
+        route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'No weather key is set on the server' }) }));
+      await page.getByRole('button', { name: 'Generate Readout' }).click();
+      const said = page.getByTestId('weather-readout-error');
+      const shown = await said.waitFor({ timeout: 4000 }).then(() => true, () => false);
+      check(`${size}: 15 a failed Generate Readout says so, with the server's reason`, shown && /Could not make the readout: No weather key/.test(await said.innerText()), shown ? await said.innerText() : 'nothing shown');
+      await page.getByRole('button', { name: 'Template Config' }).click();
+      const said2 = page.getByTestId('weather-template-error');
+      const shown2 = await said2.waitFor({ timeout: 4000 }).then(() => true, () => false);
+      check(`${size}: 15 a failed Template Config preview says so within 4 s`, shown2 && /Could not show the template preview: No weather key/.test(await said2.innerText()), shown2 ? await said2.innerText() : 'nothing shown');
+    }
 
     // 11 the bug button does not cover the last controls of a page
     if (phone) {
