@@ -1282,6 +1282,7 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [x] F-RULES-2 New rule: type, asset type, station, numeric params, days of week buttons, date, active | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-2 desktop: new rule needs a name (validation) (+3 more)
 - [x] F-RULES-3 Schedule preview toggle shows preview | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-3 desktop: Preview Schedule shows generated slots; Hide Preview (+1 more)
 - [x] F-RULES-4 Only admin can change; others view only | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-RULES-4 manager: rules are view only (no New Rule, no Edit/Del) (+2 more)
+- [ ] F-RULES-5 A global rule says which stations follow it: "used by every station", "used by <names> only", or "not used by any station (each has rules of its own)" in amber; inactive rules say nothing | sizes: both | n.a. | covered: NOT COVERED by an automated test (type check and lint only; live look by the PC requested 2026-11-18)
 
 ## Schedules (/admin/schedules)
 

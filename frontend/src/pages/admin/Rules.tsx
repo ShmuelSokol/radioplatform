@@ -38,6 +38,17 @@ export default function Rules() {
   const { data: preview, isLoading: previewLoading } = useSchedulePreview(showPreview ? previewDate : null);
 
   const rules = data?.rules ?? [];
+  // A station with an active rule of its own follows only its own rules; the global
+  // ones then do nothing there (same rule as the server: rules_for_station)
+  const withOwnRules = new Set(rules.filter(r => r.is_active && r.station_id).map(r => r.station_id));
+  const followGlobal = stations.filter(s => !withOwnRules.has(s.id));
+  const globalUse = stations.length === 0
+    ? ''
+    : followGlobal.length === 0
+      ? 'not used by any station (each has rules of its own)'
+      : followGlobal.length === stations.length
+        ? 'used by every station'
+        : `used by ${followGlobal.map(s => s.name).join(', ')} only`;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -182,7 +193,7 @@ export default function Rules() {
               className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700" />
           </div>
           <div>
-            <label className="block text-[11px] text-gray-400 mb-1">Station (blank = global)</label>
+            <label className="block text-[11px] text-gray-400 mb-1">Station (blank = global; a station with its own rules ignores global ones)</label>
             <select value={form.station_id ?? ''} onChange={e => setForm({ ...form, station_id: e.target.value || null })}
               className="w-full bg-[#0a0a28] border border-[#2a2a5e] text-cyan-200 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-700">
               <option value="">Global (all stations)</option>
@@ -235,7 +246,9 @@ export default function Rules() {
                       ? <span className="px-1.5 py-0.5 bg-indigo-900 text-indigo-300 rounded">
                           {stations.find(s => s.id === r.station_id)?.name ?? 'Station'}
                         </span>
-                      : <span className="text-gray-600">global</span>
+                      : <span className="text-gray-600" data-testid="global-rule-use">
+                          global{r.is_active && globalUse ? <span className={followGlobal.length === 0 ? 'text-amber-400' : ''}>, {globalUse}</span> : null}
+                        </span>
                     }
                   </td>
                   <td className="px-3 py-1.5 text-gray-400 text-[11px]">{r.rule_type}</td>
