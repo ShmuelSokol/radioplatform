@@ -85,8 +85,9 @@ async def test_a_redraw_picks_first_and_swaps_in_one_short_transaction(db_sessio
     with Spans() as spans:
         removed = await refresh.replace_automatic_songs(db_session, station_id)
     assert removed == len(before) - refresh.KEEP_NEXT
-    # the picking itself is hundreds of statements; none of them inside a change
-    assert spans.total > 300
+    # Picking no longer asks the database about each song (it read every drawn
+    # song's crossfade point, 360 round trips here and 500 on the live queue)
+    assert spans.total < 80, f"{spans.total} statements for one redraw"
     assert spans.longest <= LIMIT, f"{spans.longest} statements between a change and its commit"
 
     after = await _queue(db_session, station_id)
