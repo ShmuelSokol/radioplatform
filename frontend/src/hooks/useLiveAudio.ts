@@ -33,11 +33,16 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
   // sent here are not played (the host would be heard twice) and the server is asked
   // not to send them
   const [onStream, setOnStream] = useState(false);
+  // The show has a picture (the host's camera): the page can offer to watch it
+  const [video, setVideo] = useState(false);
+  // Watching: the sound must come from here, in step with the picture (the stream
+  // runs seconds behind it)
+  const watchingRef = useRef(false);
   const pageStreamRef = useRef(false);      // the page says it plays the server stream
   const serverStreamRef = useRef(false);    // the server says its stream carries the show
   const wsRef = useRef<WebSocket | null>(null);
   const applyStream = useCallback(() => {
-    const on = pageStreamRef.current && serverStreamRef.current;
+    const on = pageStreamRef.current && serverStreamRef.current && !watchingRef.current;
     setOnStream(on);
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'audio', on: !on }));
@@ -46,6 +51,12 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
   const setUsesStream = useCallback((uses: boolean) => {
     if (pageStreamRef.current === uses) return;
     pageStreamRef.current = uses;
+    applyStream();
+  }, [applyStream]);
+  /** The page shows (or stopped showing) the show's video */
+  const setWatching = useCallback((watching: boolean) => {
+    if (watchingRef.current === watching) return;
+    watchingRef.current = watching;
     applyStream();
   }, [applyStream]);
   const connectNow = !opts.onlyWhenEnabled || enabled;
@@ -94,7 +105,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
       // Only while a show is on air: a frame still in flight after the host left
       // must not play over the music that comes back
       if (!enabledRef.current || !liveRef.current) return;
-      if (pageStreamRef.current && serverStreamRef.current) return;
+      if (pageStreamRef.current && serverStreamRef.current && !watchingRef.current) return;
       const ctx = ensureCtx();
       if (ctx.state !== 'running') { ctx.resume().catch(() => {}); return; }
       const pcm = new Int16Array(buf);
@@ -129,6 +140,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
                 applyStream();
               }
               setOnAir(!!msg.live);
+              setVideo(!!msg.live && !!msg.video);
               setKnown(true);
               nextTimeRef.current = 0;
             }
@@ -141,6 +153,7 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
         if (closed) return;
         liveRef.current = false;
         setOnAir(false);
+        setVideo(false);
         retry = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 15000));
       };
     };
@@ -151,11 +164,12 @@ export function useLiveAudio(stationId: string | null, enabled: boolean, opts: {
       if (ws) { ws.onclose = null; ws.close(); }
       wsRef.current = null;
       setOnAir(false);
+      setVideo(false);
       setKnown(false);
     };
   }, [stationId, connectNow, ensureCtx, applyStream]);
 
   useEffect(() => () => { ctxRef.current?.close().catch(() => {}); ctxRef.current = null; }, []);
 
-  return { onAir, known, unlock, setLevel, onStream, setUsesStream };
+  return { onAir, known, unlock, setLevel, onStream, setUsesStream, video, setWatching };
 }

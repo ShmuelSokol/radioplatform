@@ -178,7 +178,7 @@ async def test_host_audio_reaches_the_station_listeners(ws_app, db_session):
     listener = WS(ws_app, f"/api/v1/ws/live/station/{station.id}/listen")
     await listener.connect()
     assert await listener.receive_json() == {"type": "live_state", "live": False, "show_id": None,
-                                             "sample_rate": 24000, "on_stream": False}
+                                             "sample_rate": 24000, "on_stream": False, "video": False}
     elsewhere = WS(ws_app, f"/api/v1/ws/live/station/{other_show.station_id}/listen")
     await elsewhere.connect()
     await elsewhere.receive_json()

@@ -161,12 +161,89 @@ class StationLiveRelay:
         self.quieted_early: set[str] = set()   # engine stations told to go quiet before first air
         # station_id -> called once when listeners first hear the show (takes the station over)
         self.on_first_air: Dict[str, object] = {}
+        # station_id -> the show's picture on its way through the delay (services/live_video.py)
+        self.videos: Dict[str, Any] = {}
+        self.video_hosts: Dict[str, WebSocket] = {}      # station_id -> the camera's socket
+        # station_id -> pages watching; True once a page has been sent a keyframe
+        self.watchers: Dict[str, Dict[WebSocket, bool]] = {}
 
     def state(self, station_id: str) -> dict:
         air = self.airs.get(station_id)
         live = air is not None and air.listening
         return {"type": "live_state", "live": live, "show_id": air.show_id if live else None,
-                "sample_rate": LIVE_SAMPLE_RATE, "on_stream": self.on_stream(station_id)}
+                "sample_rate": LIVE_SAMPLE_RATE, "on_stream": self.on_stream(station_id),
+                # The show has a picture: the page can offer "Watch"
+                "video": live and station_id in self.videos}
+
+    def video_state(self, station_id: str) -> dict:
+        """What a watching page needs: is there a picture, and how to decode it."""
+        video = self.videos.get(station_id)
+        air = self.airs.get(station_id)
+        on = video is not None and air is not None and air.listening
+        return {"type": "video", "on": on, **(video.config if on else {})}
+
+    async def _tell_watchers(self, station_id: str) -> None:
+        watchers = self.watchers.get(station_id)
+        if not watchers:
+            return
+        message = json.dumps(self.video_state(station_id))
+        for ws in list(watchers):
+            watchers[ws] = False     # a new picture starts from a keyframe
+            await self._send_quiet(ws, message)
+
+    async def start_video(self, station_id: str, show_id: str, config: dict, host: WebSocket) -> None:
+        from app.services.live_video import LiveVideo
+
+        self.videos[station_id] = LiveVideo(show_id, config)
+        self.video_hosts[station_id] = host
+        await self._tell_watchers(station_id)
+        await self.broadcast_state(station_id)
+
+    async def stop_video(self, station_id: str, host: WebSocket | None = None) -> None:
+        """The camera is off (or the show is over): pages are told there is no picture."""
+        if host is not None and self.video_hosts.get(station_id) is not host:
+            return
+        had = self.videos.pop(station_id, None)
+        old = self.video_hosts.pop(station_id, None)
+        if had is None:
+            return
+        if host is None and old is not None:
+            try:
+                await old.close(code=4000)
+            except Exception:
+                pass
+        await self._tell_watchers(station_id)
+        await self.broadcast_state(station_id)
+
+    async def video_cut(self, station_id: str) -> None:
+        """A Dump: the picture of the cut seconds goes too, and the camera sends a keyframe."""
+        video, air = self.videos.get(station_id), self.airs.get(station_id)
+        if video is None or air is None:
+            return
+        video.cut(air)
+        host = self.video_hosts.get(station_id)
+        if host is not None:
+            await self._send_quiet(host, json.dumps({"type": "keyframe"}))
+
+    async def _release_video(self, station_id: str) -> None:
+        video = self.videos.get(station_id)
+        if video is None:
+            return
+        frames = video.due(self.airs.get(station_id))
+        watchers = self.watchers.get(station_id)
+        if not frames or not watchers:
+            return
+        for key, data in frames:
+            packet = (b"\x01" if key else b"\x00") + data
+            for ws in list(watchers):
+                if not watchers.get(ws):
+                    if not key:
+                        continue          # this page joined mid-picture: wait for a keyframe
+                    watchers[ws] = True
+                try:
+                    await asyncio.wait_for(ws.send_bytes(packet), 2.0)
+                except Exception:
+                    watchers.pop(ws, None)
 
     @staticmethod
     def on_stream(station_id: str) -> bool:
@@ -189,6 +266,8 @@ class StationLiveRelay:
                 self.listeners.get(station_id, set()).discard(ws)
 
     async def _send_frame(self, station_id: str, data: bytes) -> None:
+        if station_id in self.videos:
+            await self._release_video(station_id)   # the picture of the sound going out now
         conns = [ws for ws in self.listeners.get(station_id, ()) if ws not in self.no_audio]
         if not conns:
             return
@@ -246,6 +325,11 @@ class StationLiveRelay:
 
         async def listening(on: bool, _station=station_id, _show=show_id) -> None:
             await self.broadcast_state(_station)
+            if _station in self.videos:
+                if on:
+                    await self._tell_watchers(_station)
+                else:
+                    await self.stop_video(_station)
             if on:
                 first = self.on_first_air.pop(_station, None)
                 if first is not None:
@@ -485,6 +569,32 @@ async def websocket_station_live_listen(websocket: WebSocket, station_id: str):
     finally:
         live_relay.listeners.get(station_id, set()).discard(websocket)
         live_relay.no_audio.discard(websocket)
+
+
+@router.websocket("/ws/live/station/{station_id}/watch")
+async def websocket_station_live_watch(websocket: WebSocket, station_id: str):
+    """Public: a page watches the station's live show here. Text `{"type":"video",...}`
+    says whether there is a picture and how to decode it; each binary message is one
+    encoded frame, its first byte 1 for a keyframe. The picture has passed the same
+    delay as the sound on `/listen`."""
+    from app.services.live_video import MAX_WATCHERS
+
+    await websocket.accept()
+    watchers = live_relay.watchers.setdefault(station_id, {})
+    if len(watchers) >= MAX_WATCHERS:
+        await websocket.close(code=4008)
+        return
+    watchers[websocket] = False
+    try:
+        await websocket.send_text(json.dumps(live_relay.video_state(station_id)))
+        while True:
+            await websocket.receive_text()   # how the close is noticed
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Live watch WS for station %s ended: %s", station_id, e)
+    finally:
+        live_relay.watchers.get(station_id, {}).pop(websocket, None)
 
 
 # --- Auth Helper ---
@@ -1020,3 +1130,61 @@ async def broadcast_show_event(show_id: str, event_type: str, data: dict):
         "type": event_type,
         "data": data,
     })
+
+
+@router.websocket("/ws/live/{show_id}/video")
+async def websocket_live_video(websocket: WebSocket, show_id: str):
+    """The host's camera for people watching on the website. After sign-in (as for the
+    microphone) the page sends `{"type":"config","codec","width","height"}`, then one
+    encoded frame per binary message, first byte 1 for a keyframe. `{"type":"keyframe"}`
+    comes back when the next frame must be one (the start, and after a Dump). The show
+    must be on air from a host's microphone: closes 4009 otherwise, 4000 when it ends."""
+    from app.services.live_video import clean_config
+
+    user = await _authenticate_ws(websocket, show_id)
+    if user is None:
+        return
+    station_id = next((st for st, sh in live_relay.on_air.items() if sh == show_id), None)
+    if station_id is None or station_id not in live_relay.airs:
+        await websocket.close(code=4009)
+        return
+    try:
+        config = clean_config(json.loads(await asyncio.wait_for(websocket.receive_text(), 15.0)))
+    except Exception:
+        config = None
+    if config is None:
+        await websocket.close(code=4003)
+        return
+    old = live_relay.video_hosts.get(station_id)
+    await live_relay.start_video(station_id, show_id, config, websocket)
+    if old is not None and old is not websocket:
+        try:
+            await old.close(code=4000)   # the camera moved to this page
+        except Exception:
+            pass
+    logger.info("Live video for show %s by user %s: %s %sx%s", show_id, user.id,
+                config["codec"], config["width"], config["height"])
+    try:
+        await websocket.send_text(json.dumps({"type": "keyframe"}))
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            if not data or len(data) < 2:
+                continue
+            video = live_relay.videos.get(station_id)
+            if video is None or live_relay.video_hosts.get(station_id) is not websocket:
+                break
+            if live_relay.on_air.get(station_id) != show_id:
+                continue    # the microphone is closed: no picture without the sound
+            if not video.push(live_relay.airs.get(station_id), bool(data[0] & 1), data[1:]):
+                await live_relay._send_quiet(websocket, json.dumps({"type": "keyframe"}))
+            if station_id not in live_relay.airs:
+                break
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Live video WS for show %s ended: %s", show_id, e)
+    finally:
+        await live_relay.stop_video(station_id, websocket)

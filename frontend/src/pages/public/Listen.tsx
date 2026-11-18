@@ -15,6 +15,7 @@ import {
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
+import { useLiveVideo } from '../../hooks/useLiveVideo';
 import { holdUpdates } from '../../lib/appUpdate';
 import { serverNow } from '../../lib/serverClock';
 import { usePlayerStore } from '../../stores/playerStore';
@@ -340,6 +341,12 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
   // The live socket opens only once Listen is pressed and closes on Stop: a visitor
   // who never presses Listen downloads no show audio (F-LISTEN-44)
   const live = useLiveAudio(stationId ?? null, userStarted, { onlyWhenEnabled: true });
+  // The show's video (the host's camera), only once the visitor asks to watch
+  const [wantsVideo, setWantsVideo] = useState(false);
+  const watching = wantsVideo && userStarted && live.onAir && live.video;
+  const liveVideo = useLiveVideo(stationId ?? null, watching);
+  const setLiveWatching = live.setWatching;
+  useEffect(() => { setLiveWatching(watching); }, [setLiveWatching, watching]);
   // A show the 15 s poll says is live: right after Listen the music waits (at most
   // 3 s) for the live socket to say so, so it does not play before the host is heard
   const [liveWaitOver, setLiveWaitOver] = useState(false);
@@ -554,6 +561,38 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
                 </p>
               )}
             </div>
+          </div>
+        )}
+
+        {userStarted && live.onAir && live.video && (
+          <div className="mb-6" data-testid="live-video">
+            {watching ? (
+              <>
+                <div className="relative bg-black rounded-lg overflow-hidden max-w-2xl" style={{ aspectRatio: '16 / 9' }}>
+                  <canvas ref={liveVideo.attach} className="w-full h-full object-contain" data-testid="live-video-canvas"
+                    aria-label="Live video of the show" />
+                  {!liveVideo.showing && !liveVideo.failed && (
+                    <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm" data-testid="live-video-wait">
+                      The picture is coming…
+                    </div>
+                  )}
+                  {liveVideo.failed && (
+                    <div className="absolute inset-0 flex items-center justify-center text-gray-200 text-sm text-center px-4" role="status" data-testid="live-video-failed">
+                      {liveVideo.failed}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => setWantsVideo(false)} data-testid="live-video-hide"
+                  className="mt-2 text-sm px-4 py-2 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100">
+                  Hide the video
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setWantsVideo(true)} data-testid="live-video-watch"
+                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full font-medium transition">
+                Watch the show live
+              </button>
+            )}
           </div>
         )}
 
