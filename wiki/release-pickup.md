@@ -45,3 +45,6 @@ Every merge to main restarts the backend. Two rules keep that inaudible:
 Tested locally: second backend started beside the first → nothing on air changed; first stopped → second took the lease and advanced the next song exactly once.
 
 Time limits (2 min reload guard, 5 min playing push, 90 s resume, 30 s idle, 2 min audio grace, 10 min away, push at on the server clock, unnamed push lasts 1 h, offline check retried) are pinned by `frontend/e2e/release-timing.mjs`, which runs the built site under Playwright's fake clock.
+
+## Safari: no check while the page is being left
+A page being left also turns hidden (just after `pagehide`). The hidden-tab check used to start then; WebKit cut it off and logged "Fetch API cannot load .../version.json due to access control checks" on every page change (it is WebKit's wording for a cut-off request, not CORS). `startAppUpdates` now skips the check after `pagehide` (cleared on `pageshow`). Test: `frontend/e2e/webkit/version-check-webkit.py` reads WebKit's own console through MiniBrowser's `--enable-write-console-messages-to-stdout`, which Selenium cannot.
