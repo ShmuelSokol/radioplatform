@@ -47,6 +47,8 @@ class SchedulerEngine:
         self._task: Optional[asyncio.Task] = None
         # When each station was last checked for a live show nobody ever heard (monotonic)
         self._unheard_checked: dict = {}
+        # station id -> when its live show's host was first found silent (monotonic)
+        self._host_gone_since: dict[str, float] = {}
         # Silence detection: station_id → datetime when silence first detected
         self._silence_start: dict[str, datetime] = {}
         # Block transition tracking: station_id → last active block ID
@@ -508,6 +510,8 @@ class SchedulerEngine:
         end = show.scheduled_end
         if end is not None and end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)  # SQLite returns naive datetimes
+        if not (end and end <= now) and await self._host_gone(db, station, show, now):
+            return
         if end and end <= now:
             # Hard stop
             from app.services.live_show_service import hard_stop_show
@@ -525,6 +529,77 @@ class SchedulerEngine:
                 })
             except Exception:
                 logger.warning("Live show hard-stop broadcast failed", exc_info=True)
+
+    async def _host_gone(self, db: AsyncSession, station: Station, show, now: datetime) -> bool:
+        """The station is the show's, but no host audio arrives (the host's page closed,
+        their connection froze, or the show was started and no microphone ever came):
+        after `live_host_gone_seconds` (station setting, default 15, 0 = never) the
+        station goes back to its queue and an alert is raised. The show stays live: a
+        host who comes back is on air again through the delay. Before, listeners got
+        silence until the show's hard stop and air watch said nothing, because a live
+        show owns the air (Jerusalem, 2026-11-18, 38 s of silence). True = handed back."""
+        from app.api.v1.live_shows_ws import live_relay
+
+        sid = str(station.id)
+        try:
+            limit = float((station.automation_config or {}).get("live_host_gone_seconds", 15))
+        except (TypeError, ValueError):
+            limit = 15.0
+        air = live_relay.airs.get(sid)
+        if air is not None and air.show_id != str(show.id):
+            air = None
+        mono = time.monotonic()
+        if air is not None and not air.closed:
+            if air.finishing:
+                self._host_gone_since.pop(sid, None)
+                return False   # the end of what was said is still playing out of the delay
+            if air.clock() - air.last_input < 3.0:
+                self._host_gone_since.pop(sid, None)
+                return False   # the host is sending (a muted microphone sends silence, that counts)
+            # connected but nothing arrives: counted from the last frame
+            self._host_gone_since.setdefault(sid, mono - (air.clock() - air.last_input))
+        since = self._host_gone_since.setdefault(sid, mono)
+        if limit <= 0 or mono - since < limit:
+            return False
+        self._host_gone_since.pop(sid, None)
+        from app.services.live_show_service import release_station
+        if air is not None and not air.closed:
+            await air.stop()
+        live_relay.on_air.pop(sid, None)
+        host = live_relay.hosts.pop(sid, None)
+        if host is not None:
+            try:
+                await host.close(code=4000)   # a frozen page finds out and can start again
+            except Exception:
+                pass
+        await release_station(db, station.id, show.id, now)
+        try:
+            from app.services.alert_service import create_alert
+            await create_alert(
+                db, alert_type="live_show", severity="critical",
+                title=f"Live show lost its host: {show.title}",
+                message=(f"No sound came from the host of '{show.title}' for {limit:.0f} seconds, so the "
+                         "station went back to its music. The show is still open: when the host starts "
+                         "broadcasting again they are back on air."),
+                station_id=station.id,
+            )
+        except Exception:
+            logger.warning("Could not raise the lost-host alert", exc_info=True)
+        await db.commit()
+        logger.warning("Live show %s on station %s lost its host: station handed back", show.id, station.id)
+        await live_relay.broadcast_state(sid)
+        try:
+            from app.api.v1.live_shows_ws import broadcast_show_event
+            await broadcast_show_event(str(show.id), "host_gone", {"show_id": str(show.id)})
+        except Exception:
+            logger.warning("Lost-host broadcast failed", exc_info=True)
+        try:
+            from app.services.bug_report_service import send_ntfy
+            await send_ntfy(f"No sound from the host of '{show.title}' for {limit:.0f} s. The station went back to music.",
+                            title=f"On air: {station.name}")
+        except Exception:
+            logger.warning("Lost-host push failed", exc_info=True)
+        return True
 
     async def _stop_unheard_live_show(self, db: AsyncSession, station: Station, now: datetime):
         """A live show that never took the station over (started, but the host's
