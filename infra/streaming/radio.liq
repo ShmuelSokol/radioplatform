@@ -289,11 +289,13 @@ end
 timed_early = ref(-1.)
 
 # Into the timed lane: the item is queued and its group gets its take-over.
-def timed_admit(r, at) =
-  # Pushed here, not in a thread, so a group keeps the order it was handed over in
+# Into the timed lane: the item counts as pending and its group gets its take-over.
+# `push=false` when its file is still downloading: the download pushes it when done.
+def timed_admit(r, at, ~push=true) =
   # Counted before the push: with prefetch the push itself can wait for the download
   timed_pending := timed_pending() + 1
-  timed_queue.push(r)
+  # Pushed here, not in a thread, so a group keeps the order it was handed over in
+  if push then timed_queue.push(r) end
   # One take-over per group: the rest of the group follows from the queue
   if abs(at - timed_group_at()) > 0.5 then
     timed_group_at := at
@@ -314,34 +316,55 @@ end
 #     "group time", the first group's take-over gave up, and it aired at the second
 #     group's time (harness live_show_over_hard_item: a second of emergency music at
 #     the first time check, 2026-11-18).
-# Now an item due later is downloaded and kept here, and its group enters the lane
+# Now an item due later waits here while it downloads, and its group enters the lane
 # `timed_room_lead` seconds before its time: before the hold lane's 8 s, so everything
 # that looks at the lane (the hold, the early start after a song that ends a few
-# seconds before) finds the group there as before.
+# seconds before) finds the group there as before. An item still downloading when its
+# group enters counts as pending at once (so the lane waits for it, as it did for a
+# slow file in the queue) and is pushed the moment its download ends.
 timed_room = ref([])
 timed_room_lead = 9.
+# Pushed once: the group's entry and the end of the download can meet at the same moment
+timed_room_pushed = ref([])
+def timed_room_push(r) =
+  rid = request.id(r)
+  if not list.mem(rid, timed_room_pushed()) then
+    timed_room_pushed := list.prefix(50, rid :: timed_room_pushed())
+    timed_queue.push(r)
+  end
+end
 def timed_room_admit(at) =
   mine = list.filter(fun (x) -> abs(x.at - at) <= 0.5, timed_room())
   timed_room := list.filter(fun (x) -> abs(x.at - at) > 0.5, timed_room())
   log.important("timed: #{list.length(mine)} item(s) due in #{at - time()} s enter the lane")
-  list.iter(fun (x) -> timed_admit(x.r, x.at), mine)
-  log.important("timed: entered; ready #{timed_queue.is_ready()}")
+  list.iter(fun (x) -> begin
+    x.admitted := true
+    timed_admit(x.r, x.at, push=false)
+    if x.done() then
+      timed_room_push(x.r)
+    else
+      log.important("timed: an item of the group is still downloading; it follows when it is here")
+    end
+  end, mine)
 end
 
 # Load the item now; put it on air at `at` (unix seconds). The music fades under it.
 def schedule_timed(~uri, ~at) =
   r = request.create(uri)
-  if at - time() > timed_room_lead + 0.5 then
-    # Downloaded now (this can take as long as the download, as the queue's push did)
-    ignore(request.resolve(content_type=timed_queue, timeout=90., r))
-  end
-  if at - time() > timed_room_lead + 0.2 and abs(at - timed_group_at()) > 0.5 then
+  if at - time() > timed_room_lead + 0.5 and abs(at - timed_group_at()) > 0.5 then
     first = not list.exists(fun (x) -> abs(x.at - at) <= 0.5, timed_room())
-    timed_room := list.append(timed_room(), [{at=at, r=r}])
-    log.important("timed: item due in #{at - time()} s loaded; it waits outside the lane (first of its group: #{first})")
+    x = {at=at, r=r, done=ref(false), admitted=ref(false)}
+    timed_room := list.append(timed_room(), [x])
     if first then
       thread.run(delay=at - time() - timed_room_lead, {timed_room_admit(at)})
     end
+    # Downloaded now, in this handler (as the queue's push did); the items of a group
+    # are handed in one after another, so they arrive in order
+    ignore(request.resolve(content_type=timed_queue, timeout=90., r))
+    x.done := true
+    log.important("timed: item due in #{at - time()} s loaded (first of its group: #{first}, in the lane already: #{x.admitted()})")
+    # Its group went into the lane while it downloaded: it was counted then, push it now
+    if x.admitted() then timed_room_push(r) end
   else
     # Due now or within seconds (a Play now, a late hand-over), or its group is in the
     # lane already

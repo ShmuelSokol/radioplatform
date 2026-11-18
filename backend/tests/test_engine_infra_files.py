@@ -429,8 +429,15 @@ def test_timed_items_loaded_ahead_wait_outside_the_lane_until_their_own_time():
     sched = liq[liq.index("def schedule_timed(~uri, ~at) ="):]
     sched = sched[:sched.index("\nend\n")]
     assert "request.resolve(" in sched
-    assert "timed_room := list.append(timed_room(), [{at=at, r=r}])" in sched
+    assert "timed_room := list.append(timed_room(), [x])" in sched
     assert "thread.run(delay=at - time() - timed_room_lead, {timed_room_admit(at)})" in sched
+    # the group's entry does not wait for a slow download: the item is counted then and
+    # pushed when it arrives (harness block_with_very_slow_shiur)
+    assert sched.index("timed_room_admit(at)") < sched.index("request.resolve(")
+    assert "if x.admitted() then timed_room_push(r) end" in sched
+    room = liq[liq.index("def timed_room_admit(at) ="):]
+    room = room[:room.index("\nend\n")]
+    assert "timed_admit(x.r, x.at, push=false)" in room and "if x.done() then" in room
     # due now (Play now) or its group already in the lane: straight in, as before
     assert "timed_admit(r, at)" in sched
     assert "timed_queue.push" not in sched
@@ -439,9 +446,10 @@ def test_timed_items_loaded_ahead_wait_outside_the_lane_until_their_own_time():
     hold = hold[:hold.index("\nend\n")]
     assert "left < 8." in hold and lead > 8.
     # one take-over per group, set when the group enters the lane
-    admit = liq[liq.index("def timed_admit(r, at) ="):]
+    admit = liq[liq.index("def timed_admit(r, at, ~push=true) ="):]
     admit = admit[:admit.index("\nend\n")]
     assert "timed_group_at := at" in admit and "timed_go_on_air(180, at)" in admit
+    assert admit.index("timed_pending := timed_pending() + 1") < admit.index("if push then timed_queue.push(r) end")
 
 
 def test_the_skip_back_to_music_is_checked_and_never_leaves_the_lane_muted():

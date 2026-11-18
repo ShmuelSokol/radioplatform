@@ -1451,8 +1451,14 @@ async def _song_ends_before_hard(h: Harness, name: str, gap: float) -> None:
                        ("song2", {"source": "auto"}), ("song4", {"source": "auto"})])
         # Time for the backend to take back the song the engine already held
         await asyncio.sleep(8)
-        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
-        t0 = await h.wait_on_air("song6", 12)
+        cur = await h.on_air()
+        if cur and cur.asset_id == h.assets["song6"] and cur.started_at:
+            # song6 already followed the song on air by itself meanwhile: skipping now
+            # would skip song6 and throw the timings off (harness run 2026-11-18)
+            t0 = cur.started_at.timestamp()
+        else:
+            h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+            t0 = await h.wait_on_air("song6", 12)
         if t0 is None:
             # Right after the engine starts it can still hold an older song: once more
             h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
