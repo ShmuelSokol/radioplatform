@@ -65,6 +65,13 @@ class QueueReplenishService:
         # what aired in the last two hours: used when the list is used up
         self.last_place: dict = {}
         self.recent_ids: set = set()
+        # A redraw (playlist fill): the automatic songs to be replaced are only
+        # left out of every count while the new ones are picked, then old and
+        # new are swapped in one short transaction (_fill_from_playlists)
+        self.replace_all = False  # set by the caller: redraw everything
+        self.replacing: list = []
+        self.cursor_back: dict = {}
+        self.replaced = 0
 
     async def _load_automation_config(self) -> None:
         """Load the station's automation_config JSONB."""
@@ -98,7 +105,7 @@ class QueueReplenishService:
             automatic_songs,
             drop_dated_clips,
             realign_before_block_change,
-            remove_automatic_songs,
+            songs_to_replace,
             uses_block_playlists,
         )
 
@@ -109,9 +116,10 @@ class QueueReplenishService:
         # ahead, whether or not "Generate from sequences" was switched on. A week of
         # ordinary fill left from before is replaced, or the blocks would wait for it.
         generation = settings_for(self.automation_config)
-        # Songs thrown away to be drawn again stay on the air (uncommitted) until the
-        # new ones are written, so the queue never runs out of songs in between
-        redrawing = False
+        # Songs to be drawn again stay in the queue until the new ones are picked
+        # (see `replacing`), so it never runs out of songs in between and nothing
+        # is locked while picking
+        redraw = self.replace_all
         by_schedule = not generation.enabled and await uses_block_playlists(self.db, self.station_id)
         if by_schedule:
             generation = dataclasses.replace(generation, enabled=True)
@@ -122,15 +130,18 @@ class QueueReplenishService:
                 .where(*automatic_songs(self.station_id))
             )
             if float(queued_auto.scalar() or 0) > 2 * generation.hours * 3600:
-                await remove_automatic_songs(self.db, self.station_id, keep_next=KEEP_NEXT)
-                redrawing = True
+                redraw = True
                 logger.info("Station %s now fills from its schedule blocks: old fill replaced", self.station_id)
         if by_schedule or (generation.enabled and await uses_block_playlists(self.db, self.station_id)):
             # Shortly before a block's playlist takes over, draw the songs again from
             # the real time on air so the block starts on time, not early
             station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
-            if await realign_before_block_change(self.db, station, datetime.now(timezone.utc)):
-                redrawing = True
+            if await realign_before_block_change(self.db, station, datetime.now(timezone.utc), remove=False):
+                redraw = True
+        if redraw and generation.enabled:
+            self.replacing, self.cursor_back = await songs_to_replace(
+                self.db, self.station_id, keep_next=KEEP_NEXT
+            )
         await self.db.flush()
 
         result = await self.db.execute(
@@ -189,17 +200,12 @@ class QueueReplenishService:
 
             station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
             await soften_hard_items(self.db, station)
-        if not redrawing:
-            await self.db.commit()
+        await self.db.commit()
 
         # Playlist generation: fill a few hours ahead from the schedule blocks'
         # playlist sequences instead of the rule-based 7-day fill.
         if generation.enabled:
-            try:
-                await self._generate_or_fill(generation, total_seconds)
-            finally:
-                if redrawing:
-                    await self.db.commit()
+            await self._generate_or_fill(generation, total_seconds)
             return
 
         if total_seconds >= TARGET_QUEUE_SECONDS:
@@ -279,6 +285,9 @@ class QueueReplenishService:
         # Nothing could be generated (no block with a sequence): keep the
         # station on the air with the ordinary fill, but only as far ahead
         # as generation looks, so sequences take over once they exist.
+        if self.replacing:
+            # A redraw with nothing to draw from: the old songs go, the ordinary fill follows
+            total_seconds -= await self._delete_replaced()
         shortfall = generation.hours * 3600 - total_seconds
         if shortfall > 0:
             self.queued_ids = set()
@@ -418,6 +427,7 @@ class QueueReplenishService:
                 .where(
                     QueueEntry.station_id == self.station_id,
                     QueueEntry.status.in_(["pending", "playing"]),
+                    *self._not_replaced(),
                 )
                 .order_by(QueueEntry.position)
             )
@@ -466,6 +476,7 @@ class QueueReplenishService:
                 .where(
                     QueueEntry.station_id == self.station_id,
                     QueueEntry.status.in_(["pending", "playing"]),
+                    *self._not_replaced(),
                 )
                 .order_by(QueueEntry.position)
             )
@@ -473,6 +484,12 @@ class QueueReplenishService:
         self.queued_ids = {row[0] for row in pending}
         config = dict(station.automation_config or {})
         saved = dict(config.get(CONFIG_KEY) or {})
+        cursor = dict(saved.get("cursor") or {})
+        # Songs being replaced were drawn from their blocks' playlists: each
+        # block's place goes back by them, so the redraw carries on from the same step
+        for block_id, n in self.cursor_back.items():
+            if block_id in cursor:
+                cursor[block_id] = int(cursor[block_id]) - n
         plan = await generate(
             self.db,
             station,
@@ -480,7 +497,7 @@ class QueueReplenishService:
             (target - queued_seconds) / 3600,
             artist_distance=generation.artist_distance,
             min_vote=generation.min_vote,
-            cursor=saved.get("cursor") or {},
+            cursor=cursor,
             recent_artists=[row[1] for row in pending][-20:],
             busy_ids=set(self.queued_ids),
             queued=[row[0] for row in pending],
@@ -489,6 +506,15 @@ class QueueReplenishService:
         if not plan.picks:
             logger.info("Playlist generation produced nothing: %s", "; ".join(plan.notes))
             return False
+        # Everything above only read. End that transaction, so the swap below
+        # (old songs out, new ones in) is one short transaction of its own.
+        await self.db.commit()
+        station = (
+            await self.db.execute(select(Station).where(Station.id == self.station_id))
+        ).scalar_one()
+        config = dict(station.automation_config or {})
+        saved = dict(config.get(CONFIG_KEY) or {})
+        await self._delete_replaced()
         result = await self.db.execute(
             select(func.coalesce(func.max(QueueEntry.position), 0)).where(
                 QueueEntry.station_id == self.station_id, QueueEntry.status.in_(["pending", "playing"])
@@ -513,6 +539,38 @@ class QueueReplenishService:
         await self.db.commit()
         logger.info("Playlist generation queued %d items", len(plan.picks))
         return True
+
+    def _not_replaced(self) -> tuple:
+        """Leaves the songs a redraw is replacing out of a queue read."""
+        return (QueueEntry.id.notin_(self.replacing),) if self.replacing else ()
+
+    async def _delete_replaced(self) -> float:
+        """Remove the songs a redraw replaces. One that started meanwhile, or
+        that the playout engine now holds as its next track, stays. Returns the
+        seconds removed. Does not commit."""
+        if not self.replacing:
+            return 0.0
+        from app.services.playout_engine import held_entry_ids
+
+        conditions = [QueueEntry.id.in_(self.replacing), QueueEntry.status == "pending"]
+        held = held_entry_ids(self.station_id)
+        if held:
+            conditions.append(QueueEntry.id.notin_(held))
+        seconds = (
+            await self.db.execute(
+                select(func.coalesce(func.sum(func.coalesce(Asset.duration, DEFAULT_DURATION)), 0))
+                .select_from(QueueEntry)
+                .join(Asset, QueueEntry.asset_id == Asset.id)
+                .where(*conditions)
+            )
+        ).scalar() or 0
+        result = await self.db.execute(
+            delete(QueueEntry).where(*conditions).execution_options(synchronize_session=False)
+        )
+        self.replaced = result.rowcount or 0
+        self.replacing = []
+        self.cursor_back = {}
+        return float(seconds)
 
     async def _load_rules(self) -> list[ScheduleRule]:
         """Load ALL active rules for this station across all time windows
