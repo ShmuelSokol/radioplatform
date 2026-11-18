@@ -1,7 +1,7 @@
 [Unit]
 Description=KBR Live local relay (keeps the FM box on air without internet)
+# setup-box.sh orders the engine after this (kbr-engine@.service.d/box.conf)
 After=network.target
-Before=kbr-engine@.service
 
 [Service]
 EnvironmentFile=/etc/kbr-engine/relay.env
