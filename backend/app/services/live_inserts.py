@@ -30,6 +30,12 @@ LATE_LIMIT = timedelta(seconds=20)   # an item this far past its time is not sta
 TIME_CATEGORY = "time_announcement"
 MAX_CLIP_SECONDS = 180
 
+# A stream server plays the show from live.mp3 about this far behind the delay's own
+# output (its input buffer; harness 2026-11-18: the time check reached the stream 2.1 s
+# after its second while a listener page heard it on time). On a station whose
+# listeners hear the stream, timed items go into the show this much early.
+STREAM_LAG = 2.0
+
 _preparing: set[str] = set()         # entry ids being loaded or already handed to the delay
 
 
@@ -98,6 +104,25 @@ async def _load(air, entry_id, station_id, asset_id, title: str, kind: str, url:
                 station_id, title, seconds, at.strftime("%H:%M:%S"))
 
 
+def stream_lead(station) -> float:
+    """Seconds a timed item must enter the show early to reach listeners on time: the
+    stream server's lag where listeners hear the stream (`live_stream_lag_seconds` in
+    the station's automation_config, default STREAM_LAG), else 0 (listener pages hear
+    the delay's output directly)."""
+    from app.config import settings
+    from app.services import playout_engine
+
+    if not (settings.engine_drives(station.id) and settings.PLAYOUT_STREAM_LIVE):
+        return 0.0
+    if playout_engine.get_state(str(station.id)).engine_proto < playout_engine.ENGINE_PROTO_LIVE_AUDIO:
+        return 0.0
+    try:
+        lag = float((station.automation_config or {}).get("live_stream_lag_seconds", STREAM_LAG))
+    except (TypeError, ValueError):
+        lag = STREAM_LAG
+    return max(0.0, min(10.0, lag))
+
+
 async def prepare(db: AsyncSession, station, now: datetime) -> int:
     """Called each scheduler pass while the station has a live show: hand the timed
     items due soon to the station's delay line. Returns how many were taken up."""
@@ -126,6 +151,7 @@ async def prepare(db: AsyncSession, station, now: datetime) -> int:
         .order_by(QueueEntry.preempt_at, QueueEntry.position)
         .limit(12)
     )).all()
+    lead = timedelta(seconds=stream_lead(station))
     taken = 0
     for entry, asset in rows:
         key = str(entry.id)
@@ -143,5 +169,5 @@ async def prepare(db: AsyncSession, station, now: datetime) -> int:
             _preparing.add(key)
         taken += 1
         asyncio.ensure_future(_load(air, entry.id, station.id, asset.id, asset.title or "Timed item",
-                                    "time" if is_time else "timed", url, _aware(entry.preempt_at)))
+                                    "time" if is_time else "timed", url, _aware(entry.preempt_at) - lead))
     return taken

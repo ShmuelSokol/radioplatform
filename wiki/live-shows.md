@@ -175,3 +175,7 @@ The qnet skin greys every disabled button whatever its colour (`!important` in `
 - The co-host's microphone uses echo cancellation (they hear the show from the same page); a steady test tone comes through about ten times quieter than a scripted host's, a voice does not.
 - A page that is co-hosting cannot also start broadcasting as the host, and the other way round.
 - Tests `tests/test_live_cohost.py`, browser check `ONLY=cohost`.
+
+## Timed items on a stream station enter the show early
+
+The stream server plays the show from `live.mp3` about 2 s behind the delay's own output (its input buffer), so a time check put into the show at hh:00:00 reached stream listeners at hh:00:02 (harness 2026-11-18), while a listener page heard it on time. `live_inserts.stream_lead(station)` gives the lead: `STREAM_LAG` (2.0 s, or `automation_config.live_stream_lag_seconds`) when the engine drives the station, `PLAYOUT_STREAM_LIVE` is on and the engine carries the show (proto 5 or later); otherwise 0. `prepare` takes it off the item's `air_at`. If the measured lag changes, set the station's `live_stream_lag_seconds`; do not change the engine's buffer for it.
