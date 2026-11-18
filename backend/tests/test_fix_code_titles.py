@@ -3,7 +3,7 @@ import io
 
 from mutagen.id3 import ID3, TIT2, TPE1
 
-from scripts.fix_code_titles import choose, id3v2_size, is_code_title, tags_from_id3v1, tags_from_id3v2
+from scripts.fix_code_titles import album_label, choose, interim_titles, id3v2_size, is_code_title, tags_from_id3v1, tags_from_id3v2
 
 
 def _id3v2(title: str, artist: str | None = None) -> bytes:
@@ -52,3 +52,20 @@ def test_garbled_hebrew_in_tags_is_put_right():
     # Windows-1255 Hebrew read as Latin-1 ("אליהו הנביא")
     got = choose({"title": "f1086112"}, {"title": "àìéäå äðáéà"}, {})
     assert got["change"]["title"] == "אליהו הנביא"
+
+
+def test_interim_titles_number_each_album_in_code_order():
+    rows = [
+        {"id": "b", "title": "f7749968", "album": "24/2/72 Tzavta, Tel Aviv"},
+        {"id": "a", "title": "f7574096", "album": "24/2/72 Tzavta, Tel Aviv"},
+        {"id": "c", "title": "f7600000", "album": "24/2/72 Tzavta, Tel Aviv"},
+        {"id": "s", "title": "0a0b0c0d", "album": "Rare Stories"},
+        {"id": "x", "title": "00002720", "album": None, "artist": "Shlomo Carlebach", "duration": 1646},
+    ]
+    got = interim_titles(rows)
+    assert got["a"]["title"] == "Tzavta, Tel Aviv 1972 – Track 1"
+    assert got["c"]["title"] == "Tzavta, Tel Aviv 1972 – Track 2"
+    assert got["b"]["title"] == "Tzavta, Tel Aviv 1972 – Track 3"
+    assert got["s"]["title"] == "Rare Stories – Track 1"
+    assert got["x"]["title"] == "Shlomo Carlebach – Untitled recording (27 min)"
+    assert album_label("Rare Nusach") == "Rare Nusach"

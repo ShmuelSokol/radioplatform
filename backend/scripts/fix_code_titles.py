@@ -12,6 +12,14 @@ Talks to production through Supabase REST with the service key (no direct SQL ne
     SUPABASE_URL=... SUPABASE_SERVICE_KEY=... uv run python scripts/fix_code_titles.py            # dry run
     SUPABASE_URL=... SUPABASE_SERVICE_KEY=... uv run python scripts/fix_code_titles.py --apply    # writes
 
+With --interim, items whose tags hold no title get a readable stand-in instead,
+"<album> – Track N" numbered by file code within the album (codes follow rip order),
+until the real names are found (coordinator decision 2026-11-18: the 32 found were
+ripped with Windows Media Player and their title tags are empty):
+
+    ... scripts/fix_code_titles.py --interim            # dry run
+    ... scripts/fix_code_titles.py --interim --apply
+
 Both runs write code-titles-backup-<time>.json (every matching row as it was) and
 code-titles-plan-<time>.json (old title, new title and artist, where it came from, or
 why it was left). --apply changes only rows with a real title found; the rest are listed
@@ -94,6 +102,37 @@ def choose(row: dict, v2: dict, v1: dict) -> dict:
     return {"source": None, "change": None, "why": "no usable title in the file's tags"}
 
 
+def album_label(album: str | None) -> str:
+    """'24/2/72 Tzavta, Tel Aviv' -> 'Tzavta, Tel Aviv 1972'; other names as they are."""
+    text = tidy_text(album or "") or ""
+    m = re.match(r"^\d{1,2}/\d{1,2}/(\d{2})\s+(.+)$", text)
+    if m:
+        yy = int(m.group(1))
+        return f"{m.group(2)} {1900 + yy if yy > 30 else 2000 + yy}"
+    return text
+
+
+def interim_titles(rows: list[dict]) -> dict[str, dict]:
+    """Stand-in titles for rows with no usable tag: per album, in file-code order."""
+    by_album: dict[str, list[dict]] = {}
+    for row in rows:
+        by_album.setdefault(album_label(row.get("album")), []).append(row)
+    out: dict[str, dict] = {}
+    for album, group in by_album.items():
+        group.sort(key=lambda r: int(r["title"].strip(), 16))
+        for n, row in enumerate(group, 1):
+            if album:
+                title = f"{album} – Track {n}"
+            else:
+                who = tidy_text(row.get("artist") or "") or "Untitled"
+                minutes = round((row.get("duration") or 0) / 60)
+                title = f"{who} – Untitled recording" + (f" ({minutes} min)" if minutes else "")
+                if len(group) > 1:
+                    title += f" {n}"
+            out[row["id"]] = {"title": title}
+    return out
+
+
 class Supabase:
     def __init__(self, url: str, key: str):
         self.url = url.rstrip("/")
@@ -108,7 +147,7 @@ class Supabase:
 
     def code_title_rows(self) -> list[dict]:
         q = urllib.parse.urlencode({
-            "select": "id,title,artist,album,file_path,asset_type,category",
+            "select": "id,title,artist,album,duration,file_path,asset_type,category",
             "title": "match.^[0-9a-fA-F]{8}$",
         })
         _, data = self._req("GET", f"{self.url}/rest/v1/assets?{q}")
@@ -152,6 +191,7 @@ def read_tags(sb: Supabase, row: dict) -> tuple[dict, dict, str | None]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--apply", action="store_true", help="write the changes (default: dry run)")
+    ap.add_argument("--interim", action="store_true", help='no title in the tags: "<album> – Track N" instead')
     args = ap.parse_args()
     url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
     if not url or not key:
@@ -171,10 +211,16 @@ def main() -> int:
         else:
             entry.update(choose(row, v2, v1))
         plan.append(entry)
+    if args.interim:
+        left = [p for p in plan if not p["change"]]
+        stand_in = interim_titles([r for r in rows if r["id"] in {p["id"] for p in left}])
+        for p in left:
+            p.update(source="interim", change=stand_in[p["id"]], why=p.get("why"))
     with open(f"code-titles-plan-{stamp}.json", "w", encoding="utf-8") as f:
         json.dump(plan, f, ensure_ascii=False, indent=1)
     fixable = [p for p in plan if p["change"]]
-    print(f"{len(rows)} items with a code title; {len(fixable)} have a real title in their tags; "
+    print(f"{len(rows)} items with a code title; {len(fixable)} to change "
+          f"({sum(1 for p in fixable if p['source'] == 'interim')} with a stand-in title); "
           f"{len(rows) - len(fixable)} left for a person (see the plan file)")
     for p in plan:
         print(f"  {p['old_title']} -> {p['change']['title'] if p['change'] else '(left: ' + p['why'] + ')'}")
