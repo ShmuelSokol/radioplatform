@@ -177,3 +177,13 @@ export function guardContext(context, name = 'context', opts = {}) {
     format: () => guards.map((g) => g.format()).filter(Boolean).join('\n'),
   };
 }
+
+/** For a test with its own verdict: print what nothing expected and return how many
+ *  (0 with GUARD=report or GUARD=off). `process.exit(failures || guardVerdict() ? 1 : 0)`. */
+export function guardVerdict() {
+  if (process.env.GUARD === 'off') return 0;
+  const odd = guardReport();
+  for (const o of odd) console.log(`LOOK   ${o.kind}: ${o.text}${o.count > 1 ? `  (x${o.count})` : ''}  [on ${o.url || o.page}]`);
+  if (odd.length) console.log(`\n${odd.length} thing(s) the screen, console or network showed that no check expected. Fix them, or say why they are expected with allowEverywhere(pattern, reason).`);
+  return process.env.GUARD === 'report' ? 0 : odd.length;
+}

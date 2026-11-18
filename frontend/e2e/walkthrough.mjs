@@ -203,6 +203,8 @@ async function stationPicker(page) {
       const texts = [...sel.options].map((o) => o.textContent.trim());
       if (names.every((n) => texts.some((t) => t.includes(n)))) {
         sel.setAttribute('data-walk-station', '1');
+        // a filter that starts on "all stations" is not a station picker
+        if ([...sel.options].some((o) => o.value === '')) continue;
         return { chosen: (sel.selectedOptions[0]?.textContent || '').trim() };
       }
     }
@@ -299,6 +301,7 @@ async function walkPage(page, guard, st, route) {
     const el = page.locator(`[data-walk="${next.key.replace(/"/g, '\\"')}"]`).first();
     if (await el.getAttribute('data-walk-station').catch(() => null)) continue;   // stay on this station
     const handle = await el.elementHandle().catch(() => null);
+    const lookBefore = handle ? await handle.evaluate((e) => e.className + '|' + (e.getAttribute('aria-pressed') || '')).catch(() => '') : '';
     const t0 = Date.now();
     let was = null;
     try {
@@ -332,8 +335,10 @@ async function walkPage(page, guard, st, route) {
     try {
       if (next.tag === 'SELECT') {
         if (await el.count()) { await el.selectOption(was, { timeout: 1500 }); await settle(page, 300); await guard.expectOnly('put back'); }
-      } else if (handle && await handle.evaluate((e) => e.isConnected && (e.matches('input[type="checkbox"], [role="switch"], [aria-pressed], [aria-checked]')
-          || /\b(on|off)\b|pause|resume|activate|deactivate|enable|disable|publish|unpublish|mute|hide|show/i.test(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText || '')))) {
+      } else if (handle && await handle.evaluate((e, before) => e.isConnected && (e.matches('input[type="checkbox"], [role="switch"], [aria-pressed], [aria-checked]')
+          // a chip that changed its own look when pressed (a station chosen in a form) is a switch too
+          || (e.className + '|' + (e.getAttribute('aria-pressed') || '')) !== before
+          || /\b(on|off)\b|pause|resume|activate|deactivate|enable|disable|publish|unpublish|mute|hide|show/i.test(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText || '')), lookBefore)) {
         await handle.click({ timeout: 1500 });
         await settle(page, 300);
         await lookAt(page, guard, st, route, `${step} again`);

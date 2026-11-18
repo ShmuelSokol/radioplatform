@@ -3,6 +3,7 @@
 import { createRequire } from 'node:module';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
+import { guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
 
 const BASE = process.env.BASE_URL || 'http://localhost:4173';
 const SHOTS = process.env.SHOTS_DIR || '';
@@ -27,7 +28,7 @@ const answers = (rows) => (path) => {
 let failed = 0;
 const check = (ok, name, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`); if (!ok) failed += 1; };
 
-const browser = await chromium.launch();
+const browser = guardBrowser(await chromium.launch());
 for (const [label, viewport, rows] of [
   ['desktop', { width: 1280, height: 900 }, missed],
   ['phone', { width: 390, height: 844 }, missed],
@@ -60,4 +61,4 @@ for (const [label, viewport, rows] of [
 }
 await browser.close();
 console.log(failed ? `${failed} failed` : 'all passed');
-process.exit(failed ? 1 : 0);
+process.exit((failed ? 1 : 0) || (guardVerdict() ? 1 : 0));
