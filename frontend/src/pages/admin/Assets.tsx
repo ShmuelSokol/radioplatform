@@ -590,8 +590,8 @@ export default function Assets() {
               <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase md:w-[22%]">Title</th>
               <th className="hidden md:table-cell px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase md:w-[14%]">Artist</th>
               <th className="hidden lg:table-cell px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase lg:w-[12%]">Album</th>
-              <th className="hidden md:table-cell w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-              <th className="hidden md:table-cell w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+              <th className="hidden md:table-cell w-20 lg:w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+              <th className="hidden md:table-cell w-16 lg:w-24 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="w-14 md:w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase"><span className="md:hidden">Len</span><span className="hidden md:inline">Duration</span></th>
               <th className="hidden lg:table-cell w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Format</th>
               <th className="hidden lg:table-cell w-12 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" title="Staff vote. Playlist generation can ask for a minimum.">Vote</th>
@@ -612,7 +612,7 @@ export default function Assets() {
               <th className="hidden lg:table-cell px-2 py-1 lg:w-[12%]">
                 <ColumnFilter value={albumSearch} onChange={setAlbumSearch} options={albumOptions} placeholder="Search album..." />
               </th>
-              <th className="hidden md:table-cell w-20 px-2 py-1">
+              <th className="hidden md:table-cell w-20 lg:w-28 px-2 py-1">
                 <select
                   value={categoryFilter}
                   onChange={(e) => setCategoryFilter(e.target.value)}
@@ -624,7 +624,7 @@ export default function Assets() {
                   ))}
                 </select>
               </th>
-              <th className="hidden md:table-cell w-16 px-2 py-1">
+              <th className="hidden md:table-cell w-16 lg:w-24 px-2 py-1">
                 <select
                   value={typeFilter}
                   onChange={(e) => setTypeFilter(e.target.value)}
@@ -680,13 +680,13 @@ export default function Assets() {
                 </td>
                 <td className="hidden md:table-cell px-2 py-2 text-sm text-gray-500 truncate" title={asset.artist ?? ''}>{asset.artist ?? '--'}</td>
                 <td className="hidden lg:table-cell px-2 py-2 text-sm text-gray-500 truncate" title={asset.album ?? ''}>{asset.album ?? '--'}</td>
-                <td className="hidden md:table-cell px-2 py-2 text-sm truncate">
+                <td className="hidden md:table-cell px-2 py-2 text-sm">
                   <AssetCategoryBadge assetId={asset.id} category={asset.category} />
                 </td>
-                <td className="hidden md:table-cell px-2 py-2 text-xs text-gray-500 truncate">
-                  {asset.asset_type}
+                <td className="hidden md:table-cell px-2 py-2 text-xs text-gray-500">
+                  <span className="block truncate" title={asset.asset_type}>{asset.asset_type}</span>
                   {asset.asset_type === 'spot' && (
-                    <span className="ml-1">
+                    <span className="block mt-0.5">
                       <AssetSponsorBadge assetId={asset.id} sponsorId={asset.sponsor_id} sponsorName={asset.sponsor_name} />
                     </span>
                   )}

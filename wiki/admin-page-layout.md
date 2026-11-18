@@ -10,6 +10,10 @@ Every admin and sponsor page fills the window. The rule lives in one place: `fro
 - Toolbars and page headers are `flex flex-wrap` with a gap, and a `flex-1` text box next to a button needs `min-w-0`. These were what still scrolled sideways on phones after the tables were fixed.
 - Phones get 16px text in every text box and select (rule in `index.css`, `pointer: coarse` and under 768px). iPhone Safari zooms the page on tapping a smaller one and does not zoom back. Do not undo it with a smaller `text-*` on an input.
 
+## Menus inside table cells
+
+Table cells cut their content (`truncate`), so a drop-down drawn inside a cell is cut too (the Library sponsor search box was). Draw cell menus with `components/FloatingMenu.tsx`: it puts the menu on `document.body` at the button's place, keeps it inside the window and closes on scroll. A chip in a cell gets `block max-w-full truncate` and a `title` with the full name. Check: `frontend/e2e/library-display.mjs`.
+
 ## Checking it
 
 `frontend/e2e/admin-layout-audit.mjs` logs in to a running site and backend, opens every admin page at 1920x1080 and iPhone size, and fails on: sideways page scroll, content using under 90% of a desktop window, nav not staying at the top, script errors, failed API calls. It runs at 1920, iPhone 13 (390) and iPhone SE (320). A phone browser widens its layout viewport to fit content that sticks out, so `innerWidth` hides the overflow: the script compares against the device width. (The first version compared against `innerWidth` and passed pages that real Safari showed scrolling sideways.) `SHOTS_DIR=...` saves screenshots; look at them, the checks do not catch ugly.

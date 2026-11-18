@@ -61,7 +61,6 @@ const VIEWS = {
 const KNOWN_BUGS = {
   'F-STUDIO-1 dj': 'a DJ may open the recording studio and record, but Save is refused (POST /assets/upload is manager-only: 403 "Manager access required"); the take is lost',
   'V2-101 a11y-gaps': 'basic accessibility gaps (fields without labels, grey-on-dark text under 4.5:1, see the detail per page); totals printed after the a11y section',
-  'V2-101 Esc': 'Esc does not close the New Archive, New Show or bug report dialogs',
 };
 
 // ── Result bookkeeping ──────────────────────────────────────────────────────

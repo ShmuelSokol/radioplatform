@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useEscape } from '../../hooks/useEscape';
 import { Link } from 'react-router-dom';
 import { useStations } from '../../hooks/useStations';
 import { useAuthStore } from '../../stores/authStore';
@@ -58,6 +59,7 @@ export default function LiveShows() {
     setCallsEnabled(true);
     setEditingShow(null);
   };
+  useEscape(showModal, () => { setShowModal(false); resetForm(); });
 
   const openEditModal = (show: LiveShow) => {
     setEditingShow(show);
@@ -224,7 +226,8 @@ export default function LiveShows() {
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div role="dialog" aria-modal="true" aria-label={editingShow ? 'Edit Live Show' : 'Create Live Show'}
+            className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-bold text-cyan-300 mb-4">
               {editingShow ? 'Edit Live Show' : 'Create Live Show'}
             </h2>
