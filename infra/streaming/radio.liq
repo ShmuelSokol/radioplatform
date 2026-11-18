@@ -73,6 +73,12 @@ def send_hello() =
   end
 end
 send_hello()
+# The output starts before the backend has handed over the first item: every restart
+# opened with about 2 s of an emergency song, then cut to the queue (both stations at
+# the 08:23Z rerun, 2026-11-18; on the FM box it would be every power-up). With the
+# backend answering, the stream stays quiet (hold lane) until the first item is loaded,
+# at most 8 s. With no backend the emergency music starts at once, as before.
+start_quiet_until = ref(if hello_done() then time() + 8. else 0. end)
 if not hello_done() then
   thread.run.recurrent(fast=false, delay=5., fun () -> begin
     send_hello()
@@ -387,7 +393,7 @@ emergency = mksafe(emergency)
 live_release = ref(0.)
 def hold_open() =
   left = timed_group_at() - time()
-  (timed_pending() > 0 and left < 8. and left > -2.) or time() < live_release()
+  (timed_pending() > 0 and left < 8. and left > -2.) or time() < live_release() or time() < start_quiet_until()
 end
 hold = switch(id="hold_gate", track_sensitive=false, [(hold_open, blank(id="hold"))])
 
@@ -625,7 +631,11 @@ def send_started(m) =
       timed_armed := true
       thread.run(delay=1.5, {timed_armed := false})
     else
-      log.important("hold: quiet until the timed item due in #{left} s")
+      if time() < live_release() or time() < start_quiet_until() then
+        log.important("hold: quiet while the first item loads (engine start or end of a live show)")
+      else
+        log.important("hold: quiet until the timed item due in #{left} s")
+      end
     end
   elsif lane == "live" then
     log.important("live: a host is on air; the stream is quiet")
@@ -641,6 +651,7 @@ def send_started(m) =
     if lane == "main" then
       last_main_entry := entry
       live_release := 0.
+      start_quiet_until := 0.
     end
     report_to_backend(entry, lane, m["title"])
     if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end

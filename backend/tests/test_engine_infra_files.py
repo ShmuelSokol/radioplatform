@@ -465,3 +465,19 @@ def test_the_skip_back_to_music_is_checked_and_never_leaves_the_lane_muted():
     assert "if main_fetched_at() < asked then" in back
     give_up = back[back.index("would not go"):]
     assert "main_gain := 1." in give_up and "main_interrupted := false" in give_up
+
+
+def test_the_engine_starts_quiet_until_its_first_item_instead_of_an_emergency_song():
+    """Every engine restart opened with about 2 s of an emergency song before the queue's
+    first item (08:23Z rerun, 2026-11-18). With the backend answering hello the hold lane
+    keeps the stream quiet until the first item is loaded (at most 8 s); with no backend
+    the emergency music starts at once."""
+    liq = _liq()
+    assert "start_quiet_until = ref(if hello_done() then time() + 8. else 0. end)" in liq
+    assert liq.index("send_hello()\n") < liq.index("start_quiet_until = ref(")
+    hold = liq[liq.index("def hold_open() ="):]
+    hold = hold[:hold.index("\nend\n")]
+    assert "time() < start_quiet_until()" in hold
+    started = liq[liq.index("def send_started"):]
+    first_main = started[started.index('if lane == "main" then\n      last_main_entry := entry'):]
+    assert "start_quiet_until := 0." in first_main[:200]
