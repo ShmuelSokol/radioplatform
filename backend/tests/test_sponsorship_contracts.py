@@ -379,3 +379,35 @@ async def test_reconcile_keeps_every_queued_slot_inside_the_contract(
     for (asset_id, _, _), n in seen.items():
         assert n <= made[asset_id]["plays_per_daypart"]
     assert len({e.preempt_at for e in queued}) == len(queued)
+
+
+@pytest.mark.asyncio
+async def test_a_slot_about_to_air_counts_towards_the_contracts_plays(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """A slot inside the 2-minute margin is left alone. When a schedule edit had moved
+    the plan away from it, the plan's own plays were added on top: three plays where
+    the contract allows two (seen in CI at 23:29:45Z, 15 s before a :30 slot)."""
+    station, assets, sponsor = await _station_with_contract_audio(db_session, client, auth_headers)
+    asset_id, station_id = assets[0].id, station.id
+    body = {"sponsor_id": sponsor, "asset_id": str(asset_id), "station_id": str(station_id),
+            "dayparts": "afternoon", "plays_per_daypart": 2}
+    r = await client.post("/api/v1/spot-schedules", json=body, headers=auth_headers)
+    assert r.status_code == 201, r.text
+    for e in await _pending(db_session, station_id):
+        await db_session.delete(e)
+    await db_session.commit()
+    day = datetime.now(UTC).astimezone(JLM).date() + timedelta(days=1)
+    now = datetime(day.year, day.month, day.day, 12, 28, 30, tzinfo=JLM).astimezone(UTC)
+    # left from an earlier plan: this sponsorship, due in 90 s, at a minute the plan no longer uses
+    stray_at = now.replace(second=0) + timedelta(minutes=2)
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=asset_id, position=1,
+                              status="pending", source="ad_slot", preempt_at=stray_at, timing_mode="soft"))
+    await db_session.commit()
+    for _ in range(2):  # and it stays right when reconciled again
+        await reconcile_spot_slots(db_session, station_id, now=now)
+        await db_session.commit()
+        plays = [e for e in await _pending(db_session, station_id, asset_id)
+                 if (e.preempt_at if e.preempt_at.tzinfo else e.preempt_at.replace(tzinfo=UTC))
+                 .astimezone(JLM).date() == day]
+        assert len(plays) == 2, [e.preempt_at for e in plays]

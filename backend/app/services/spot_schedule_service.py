@@ -706,10 +706,27 @@ async def reconcile_spot_slots(
     )
     kept: set[datetime] = set()
     removed = 0
-    for entry in existing.scalars().all():
+    tz = station_tz(station.timezone)
+
+    def part(at: datetime):
+        local = at.astimezone(tz)
+        return local.date(), daypart_of(local.hour)
+
+    for entry in sorted(existing.scalars().all(), key=lambda e: as_utc(e.preempt_at)):
         at = as_utc(entry.preempt_at).replace(second=0, microsecond=0)
         if at <= earliest:
-            continue  # about to air (or overdue) — leave it alone
+            # About to air (or overdue): left alone. When an edit moved the plan away
+            # from it, it still airs, so it stands in for the contract's next planned
+            # play in that part of the day; the plan added that one on top and the
+            # sponsorship aired once more than its contract says.
+            if at > now.replace(second=0, microsecond=0) and str(desired.get(at)) != str(entry.asset_id):
+                later = sorted(
+                    t for t, wanted in desired.items()
+                    if t > at and str(wanted) == str(entry.asset_id) and part(t) == part(at)
+                )
+                if later:
+                    del desired[later[0]]
+            continue
         if at not in kept and str(desired.get(at)) == str(entry.asset_id):
             kept.add(at)
             if entry.timing_mode != timing[at]:
