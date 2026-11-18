@@ -53,13 +53,9 @@ ALLOW = ['--autoplay-policy=allow']
 _PLAIN = ('plain <audio> fallback for browsers without MSE: WebKitGTK (GStreamer) starts a 128 kbps MP3 stream '
           'only after about 2.1 s, every run. iPhone Safari takes the HLS copy instead (liveStream.ts hlsStream), '
           'which WebKitGTK cannot play (no native HLS), so this is the fallback path only, not the iPhone default')
-_RELEASE = ('a screen whose code file is gone after a release throws into RouteErrorBoundary (App.tsx), which '
-            'wraps the whole layout: the error screen replaces the menu and the player, the sound stops, and '
-            'reloadForStaleCode reloads the page; an iPhone cannot play again without a new tap (Shmuel, 2026-11-18)')
 KNOWN_BUGS = {
     'no MSE (iPhone path): stream heard within 2 s': _PLAIN,
     'no MSE (iPhone path): Listen again plays within 2 s': _PLAIN,
-    'after a new release,': _RELEASE,
 }
 state = {'passed': 0, 'failed': 0, 'xfail': 0}
 
@@ -167,7 +163,7 @@ def sideways(d):
 # The built-in player is heard: a deck plays with its gain up, and its AudioContext runs
 AUDIBLE = "window.__audible().length > 0 && [...window.__deckGain.values()][0].context.state === 'running'"
 # The stream element plays and its clock moves
-STREAM_PLAYING = "(() => { const a = document.querySelector('audio'); return a && !a.paused && a.currentTime > 0.05; })()"
+STREAM_PLAYING = "(() => { const a = (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')); return a && !a.paused && a.currentTime > 0.05; })()"
 
 
 def set_volume(d, v):
@@ -234,14 +230,14 @@ def listen_stream(tag, args, expect_mode, no_mse=False):
     d = browser(args, no_mse)
     try:
         open_page(d, f'/listen/{np["sid"]}')
-        wait_for(d, "document.body.innerText.includes('Server stream')", 8)
-        check(f'{tag}: badge says Server stream', 'Server stream' in body_text(d))
+        wait_for(d, "document.body.innerText.includes('Live stream')", 8)
+        check(f'{tag}: badge says Live stream (listeners see no engine detail)', 'Live stream' in body_text(d))
         mse = js(d, "return !!window.MediaSource && MediaSource.isTypeSupported('audio/mpeg')")
         hls = js(d, "return document.createElement('audio').canPlayType('application/vnd.apple.mpegurl')")
         info(f'{tag}: MediaSource for audio/mpeg: {mse}; native HLS canPlayType: {hls!r}')
         connects = ctl('state')['streamConnects']
         ms = press(d, STREAM_PLAYING, button(d, 'Listen Live'), 8)
-        src = js(d, "return document.querySelector('audio').src")
+        src = js(d, "return (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')).src")
         mode = 'mse' if src.startswith('blob:') else 'plain' if src == ctl('state')['streamUrl'] else f'other ({src})'
         info(f'{tag}: liveStream.ts picked {mode}; first sound after {ms} ms')
         check(f'{tag}: plays through the {expect_mode} path', mode == expect_mode, mode)
@@ -251,7 +247,7 @@ def listen_stream(tag, args, expect_mode, no_mse=False):
         # Never silent for 10 s: sample the clock for 10 s, it must keep moving
         samples = d.execute_async_script("""
           const done = arguments[arguments.length - 1];
-          const a = document.querySelector('audio'); const out = [];
+          const a = (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')); const out = [];
           const t0 = performance.now();
           const tick = () => { out.push([Math.round(performance.now() - t0), +a.currentTime.toFixed(2), a.paused]);
             if (performance.now() - t0 >= 10000) done(out); else setTimeout(tick, 250); };
@@ -265,20 +261,20 @@ def listen_stream(tag, args, expect_mode, no_mse=False):
         advanced = samples[-1][1] - samples[0][1]
         check(f'{tag}: keeps playing for 10 s, no stall (S-11)', advanced >= 8.5 and worst < 1.0 and not samples[-1][2],
               f'clock moved {advanced:.1f} s in 10 s, longest still {worst:.2f} s')
-        lag = js(d, "const a = document.querySelector('audio'); const b = a.buffered; return b.length ? +(b.end(b.length - 1) - a.currentTime).toFixed(2) : null;")
+        lag = js(d, "const a = (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')); const b = a.buffered; return b.length ? +(b.end(b.length - 1) - a.currentTime).toFixed(2) : null;")
         info(f'{tag}: {lag} s behind the newest audio received')
         set_volume(d, 0.3)
         time.sleep(0.3)
-        vol = js(d, "return document.querySelector('audio').volume")
+        vol = js(d, "return (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')).volume")
         check(f'{tag}: volume slider sets the stream level', abs(vol - 0.3) < 0.02, vol)
         button(d, 'Mute').click()
         time.sleep(0.3)
-        vol = js(d, "return document.querySelector('audio').volume")
+        vol = js(d, "return (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')).volume")
         check(f'{tag}: Mute silences the stream', vol == 0, vol)
         button(d, 'Unmute').click()
         button(d, 'Stop').click()
         time.sleep(0.4)
-        st = js(d, "const a = document.querySelector('audio'); return [a.paused, a.getAttribute('src')];")
+        st = js(d, "const a = (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')); return [a.paused, a.getAttribute('src')];")
         check(f'{tag}: Stop stops the stream', st[0] and not st[1], st)
         ms = press(d, STREAM_PLAYING, button(d, 'Listen Live'), 8)
         check(f'{tag}: Listen again plays within 2 s', 0 <= ms <= 2000, f'{ms} ms')
@@ -300,16 +296,17 @@ def bar(tag, args, mode, no_mse=False, hls=False):
     np = ctl('reset', {'mode': mode, 'show': False, **({'stream': 'hls'} if hls else {})})
     d = browser(args, no_mse, native_hls=hls)
     stream = mode == 'server'
-    clock = ("return document.querySelector('audio') ? +document.querySelector('audio').currentTime.toFixed(2) : null"
+    clock = ("return (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')) ? +(document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')).currentTime.toFixed(2) : null"
              if stream else 'return window.__audible()[0]?.t ?? null')
     try:
         open_page(d, f'/listen/{np["sid"]}')
         if stream:
-            wait_for(d, "document.body.innerText.includes('Server stream')", 8)
+            wait_for(d, "document.body.innerText.includes('Live stream')", 8)
+        wait_for(d, "[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Listen Live')", 8)
         ms = press(d, STREAM_PLAYING if stream else AUDIBLE, button(d, 'Listen Live'), 8)
         check(f'{tag}: Listen Live heard on the station page', ms >= 0, f'{ms} ms')
         if hls:
-            src = js(d, "return document.querySelector('audio') && document.querySelector('audio').src")
+            src = js(d, "return (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')) && (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')).src")
             check(f'{tag}: plays the HLS copy, as an iPhone does', bool(src) and src.endswith('/mp3.m3u8'), src)
         # every other move by the router; the last walk below by real clicks on the menu
         for path, ready in (('/guide', 'Program Guide'), ('/hosts', 'DJs'), ('/stations', 'Stations')):
@@ -397,7 +394,7 @@ def bar(tag, args, mode, no_mse=False, hls=False):
         js(d, "document.querySelector('[data-testid=\"player-bar\"] button').click()")
         time.sleep(0.8)
         if stream:
-            st = js(d, "const a = document.querySelector('audio'); return !a || a.paused;")
+            st = js(d, "const a = (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')); return !a || a.paused;")
         else:
             st = js(d, 'return window.__audible().length === 0')
         check(f'{tag}: Stop in the bar stops the sound and the bar goes',
@@ -440,12 +437,12 @@ def stale_release(tag, args, mode, no_mse=False, hls=False):
     np = ctl('reset', {'mode': mode, 'show': False, **({'stream': 'hls'} if hls else {})})
     d = browser(args, no_mse, native_hls=hls)
     stream = mode == 'server'
-    clock = ("return document.querySelector('audio') && !document.querySelector('audio').paused ? +document.querySelector('audio').currentTime.toFixed(2) : null"
+    clock = ("return (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')) && !(document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')).paused ? +(document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')).currentTime.toFixed(2) : null"
              if stream else 'return window.__audible ? (window.__audible()[0]?.t ?? null) : null')
     try:
         open_page(d, f'/listen/{np["sid"]}')
         if stream:
-            wait_for(d, "document.body.innerText.includes('Server stream')", 8)
+            wait_for(d, "document.body.innerText.includes('Live stream')", 8)
         wait_for(d, "[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Listen Live')", 8)
         ms = press(d, STREAM_PLAYING if stream else AUDIBLE, button(d, 'Listen Live'), 8)
         check(f'{tag}: Listen Live heard', ms >= 0, f'{ms} ms')
@@ -490,7 +487,7 @@ def stream_missing(tag, args, no_mse=False):
     d = browser(args, no_mse)
     try:
         open_page(d, f'/listen/{np["sid"]}')
-        wait_for(d, "document.body.innerText.includes('Server stream')", 8)
+        wait_for(d, "document.body.innerText.includes('Live stream')", 8)
         ms = press(d, AUDIBLE, button(d, 'Listen Live'), 8)
         check(f'{tag}: a broken stream falls back to the built-in player', ms >= 0, f'{ms} ms')
         check(f'{tag}: no script errors (broken stream)', not errors(d), ' | '.join(errors(d)))
