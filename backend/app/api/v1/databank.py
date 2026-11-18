@@ -115,11 +115,17 @@ async def list_items(
         # The times live in memory, so the order is worked out here: ids and titles of
         # every match (two small columns), sorted, then only the page's rows are read.
         ids = (await db.execute(select(Asset.id, Asset.title).where(*conditions))).all()
-        never = [(t or "", str(i), i) for i, t in ids if str(i) not in last]
-        played = [(last[str(i)], t or "", str(i), i) for i, t in ids if str(i) in last]
+        never, played = [], []
+        for i, t in ids:
+            key = str(i)                      # once per row: this loop runs over the whole library
+            when = last.get(key)
+            if when is None:
+                never.append((t or "", key, i))
+            else:
+                played.append((when, t or "", key, i))
         played.sort(key=lambda r: (r[1], r[2]))
         played.sort(key=lambda r: r[0], reverse=desc)   # stable: ties keep title order
-        never.sort()
+        never.sort(key=lambda r: (r[0], r[1]))
         page_ids = ([r[3] for r in played] + [r[2] for r in never])[skip:skip + limit]
         found = {r.id: r for r in (await db.execute(select(*cols).where(Asset.id.in_(page_ids)))).all()} if page_ids else {}
         rows = [found[i] for i in page_ids if i in found]

@@ -608,8 +608,12 @@ async def test_items_page_speed_with_a_long_play_log(client, auth_headers, db_se
     for params in ({}, {"sort": "last_played", "desc": "true", "station_id": str(station.id)},
                    {"search": "artist 12"}, {"sort": "vote", "skip": 2800}):
         await _items(client, auth_headers, **params)  # warm
-        t0 = _time.perf_counter()
-        body = await _items(client, auth_headers, **params)
-        took = _time.perf_counter() - t0
-        assert body["items"], params
+        # the best of three: the limit is on what the code costs (about 45 ms here), and one
+        # stalled call on a shared test machine (337 ms seen once in CI) is not that
+        took = 9.0
+        for _ in range(3):
+            t0 = _time.perf_counter()
+            body = await _items(client, auth_headers, **params)
+            took = min(took, _time.perf_counter() - t0)
+            assert body["items"], params
         assert took < 0.3, f"{params}: {took * 1000:.0f} ms"
