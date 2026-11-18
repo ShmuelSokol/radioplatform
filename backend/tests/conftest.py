@@ -285,7 +285,7 @@ def app_log_reaches_caplog(caplog):
 
 @pytest.fixture
 def clock_off_the_slots(monkeypatch):
-    """Pins "now" to minute 5 of the current hour (today's date, so date logic is
+    """Pins "now" to 5 minutes past the last quarter hour (today's date, so date logic is
     unchanged) for tests that count sponsorship slots. Slots sit on quarter hours, and
     one due within the 2-minute safety margin is left alone by design (it may already
     be with the player), so a test run at hh:13 to hh:15 counted one slot too many.
@@ -293,7 +293,14 @@ def clock_off_the_slots(monkeypatch):
     import sys
     from datetime import UTC, datetime as real
 
-    pinned = real.now(UTC).replace(minute=5, second=0, microsecond=0)
+    # The latest hh:05, hh:20, hh:35 or hh:50 not after now: 10 minutes from the nearest slot,
+    # and never in the future, so sign-in tokens made at the pinned time (30 minutes) have
+    # not expired against the real clock. Pinning to hh:05 failed every test from hh:35 on.
+    from datetime import timedelta
+    t = real.now(UTC).replace(second=0, microsecond=0)
+    pinned = t.replace(minute=(t.minute // 15) * 15 + 5)
+    if pinned > t:
+        pinned -= timedelta(minutes=15)
 
     class Pinned(real):
         @classmethod
