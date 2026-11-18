@@ -476,13 +476,44 @@ async def test_scheduler_status_is_public_and_start_stop_are_managers(client: As
 
 
 @pytest.mark.asyncio
-async def test_regenerate_refused_while_generation_is_off(client: AsyncClient, db_session: AsyncSession):
-    """V1-153"""
-    st = await _station(db_session)
+async def test_regenerate_works_for_a_station_that_fills_from_its_blocks(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """The switch may be off while the station's blocks have playlists: it fills
+    from them anyway, so its queue can be drawn again (needed after two copies of
+    a song were made one and the queue held it twice)."""
+    from app.models.queue_entry import QueueEntry
+    from tests.test_block_on_time import _station_with_block
+
+    station, _block, songs = await _station_with_block(db_session, dtime(0), "Blocks, switch off")
+    # The queue holds the same song twice, a few songs apart
+    station_id = station.id
+    ids = [s.id for s in songs]
+    for position, asset_id in enumerate([ids[35], ids[40], ids[36], ids[40], ids[37]], start=1):
+        db_session.add(
+            QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=asset_id, position=position, status="pending")
+        )
+    await db_session.commit()
     _, h = await _headers(db_session, UserRole.MANAGER)
-    r = await client.post("/api/v1/playlists/generation/regenerate", params={"station_id": str(st.id)}, headers=h)
-    assert r.status_code == 409, r.text
-    assert "switched off" in r.text
+    r = await client.post(
+        "/api/v1/playlists/generation/regenerate", params={"station_id": str(station_id)}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 4  # the next song stays, the rest are drawn again
+    db_session.expire_all()
+    order = (
+        await db_session.execute(
+            select(QueueEntry.asset_id)
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+            .order_by(QueueEntry.position)
+        )
+    ).scalars().all()
+    assert len(order) > 20
+    # 60 songs feed this playlist: none comes back within 10 songs of itself
+    last_at: dict = {}
+    for i, asset_id in enumerate(order):
+        assert i - last_at.get(asset_id, -100) > 10, (i, last_at.get(asset_id))
+        last_at[asset_id] = i
 
 
 @pytest.mark.asyncio
