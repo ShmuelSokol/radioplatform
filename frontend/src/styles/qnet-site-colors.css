@@ -4,6 +4,7 @@
 .qn-site [class~="bg-[#0a0a1a]"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-[#0a0a28]"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-[#0c0c30]"]{background-color:var(--qn-face)}
+.qn-site [class~="bg-[#0d0d2b]"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-[#12123a]"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-[#16163e]"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-[#1a1a3e]"]{background-color:var(--qn-face)}
@@ -39,6 +40,7 @@
 .qn-site [class~="bg-red-900"]{background-color:#fee2e2}
 .qn-site [class~="bg-red-900/60"]{background-color:#fee2e2}
 .qn-site [class~="bg-red-900/70"]{background-color:#fee2e2}
+.qn-site [class~="bg-red-900/80"]{background-color:#fee2e2}
 .qn-site [class~="bg-red-950"]{background-color:#fee2e2}
 .qn-site [class~="bg-sky-900/70"]{background-color:#e0f2fe}
 .qn-site [class~="bg-yellow-900"]{background-color:#fef9c3}
@@ -46,8 +48,10 @@
 .qn-site [class~="border-[#12122e]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-[#1a1a3e]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-[#1a1a4e]"]{border-color:var(--qn-shadow)}
+.qn-site [class~="border-[#1d1d48]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-[#1e1e4a]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-[#2a2a5e]"]{border-color:var(--qn-shadow)}
+.qn-site [class~="border-[#2a2a60]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-[#3a3a7e]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-amber-200"]{border-color:#d97706}
 .qn-site [class~="border-amber-300"]{border-color:#d97706}
@@ -116,6 +120,7 @@
 .qn-site [class~="hover:text-teal-300"]:hover{color:#000080}
 .qn-site [class~="hover:text-white"]:hover{color:#000}
 .qn-site [class~="hover:text-yellow-300"]:hover{color:#713f12}
+.qn-site [class~="text-amber-100"]{color:#78350f}
 .qn-site [class~="text-amber-200"]{color:#78350f}
 .qn-site [class~="text-amber-300"]{color:#78350f}
 .qn-site [class~="text-amber-400"]{color:#78350f}

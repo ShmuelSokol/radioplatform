@@ -99,6 +99,9 @@ class Relay:
         self.last_plan_at = 0.0
         self.hello_owed = False
         self.spool_path = self.dir / "spool.jsonl"
+        # Emergency alert reports (engine proto 6) made while the line was down, sent when
+        # it is back: the alert itself never waits on us, the log on the site catches up
+        self.alert_spool_path = self.dir / "alert-spool.jsonl"
         self.answers: list[dict] = []  # engine answers not yet handed to the backend
         self.commands_done = 0
         self.started_at = time.monotonic()
@@ -330,6 +333,46 @@ class Relay:
                     f.write(json.dumps(report) + "\n")
             return 200, b'{"ok":true,"relay":"kept"}'
 
+    def alert(self, body: bytes) -> tuple[int, bytes]:
+        """An emergency alert went on air or came off (its own alert line works with no
+        internet). Passed on, or kept on disk and sent in order when the line is back."""
+        try:
+            if self.alert_spool_path.is_file() and self.alert_spool_path.stat().st_size:
+                raise Offline("earlier alert reports still wait; keep the order")
+            return self._call("POST", "/alert", body, timeout=4.0)
+        except Offline:
+            try:
+                report = json.loads(body or b"{}")
+            except ValueError:
+                report = {}
+            with self.lock, open(self.alert_spool_path, "a") as f:
+                f.write(json.dumps(report) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            log.warning("alert report kept until the line is back: %s", report.get("phase"))
+            return 200, b'{"ok":true,"relay":"kept"}'
+
+    def send_kept_alerts(self) -> int:
+        if not self.alert_spool_path.is_file():
+            return 0
+        with self.lock:
+            lines = [ln for ln in self.alert_spool_path.read_text().splitlines() if ln.strip()]
+        sent = 0
+        for line in lines:
+            try:
+                self._call("POST", "/alert", line.encode(), timeout=6.0)
+            except Offline:
+                break
+            sent += 1
+        if sent:
+            with self.lock:
+                now_lines = [ln for ln in self.alert_spool_path.read_text().splitlines() if ln.strip()]
+                part = self.dir / "alert-spool.jsonl.part"
+                part.write_text("".join(ln + "\n" for ln in now_lines[sent:]))
+                os.replace(part, self.alert_spool_path)
+            log.info("sent %d kept alert reports", sent)
+        return sent
+
     # ── background work ─────────────────────────────────────────────────────
     def sync_plan(self) -> bool:
         try:
@@ -361,6 +404,7 @@ class Relay:
                 self.hello_owed = False
             except Offline:
                 return
+        self.send_kept_alerts()
         if not self.spool_path.is_file():
             return
         with self.lock:
@@ -655,6 +699,7 @@ class Relay:
                 "plan_entries": len(entries),
                 "plan_audio_missing": sum(1 for e in entries if not self.have(e["url"])),
                 "reports_kept": sum(1 for _ in open(self.spool_path)) if self.spool_path.is_file() else 0,
+                "alert_reports_kept": sum(1 for _ in open(self.alert_spool_path)) if self.alert_spool_path.is_file() else 0,
                 "in_blackout": self.in_blackout(self.now()),
                 "clock_ok": self.clock_ok(),
                 "commands_done": self.commands_done,
@@ -693,6 +738,8 @@ def make_handler(relay: Relay):
                 return self._send(*relay.started(body))
             if tail == "/hello" and method == "POST":
                 return self._send(*relay.hello(body))
+            if tail == "/alert" and method == "POST":
+                return self._send(*relay.alert(body))
             if tail == "/live.mp3" and method == "GET":
                 return relay.pass_live(self)
             return self._send(404, b'{"ok":false}')

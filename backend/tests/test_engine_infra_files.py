@@ -260,7 +260,7 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     assert "[on_air_quiet, timed, main, hold, emergency]" in liq
     assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
     assert 'elsif hold_open() then "hold" else "emergency"' in liq
-    assert "engine_proto = 5" in liq
+    assert "engine_proto = 6" in liq
 
 
 def test_speech_is_never_overlapped_and_the_song_crossfade_comes_from_the_backend():
@@ -499,7 +499,7 @@ def test_the_item_after_a_live_show_loads_during_the_show():
     once the show was over. /flush now asks under the live lane too (proto 4), and the
     backend quiets the engine before it flushes, so the flush loads that item."""
     liq = _liq()
-    assert "engine_proto = 5" in liq
+    assert "engine_proto = 6" in liq
     flush = liq[liq.index('control("/flush"'):]
     flush = flush[:flush.index("end)")]
     assert 'on_air_lane() != "main" or live_wanted()' in flush
@@ -517,7 +517,7 @@ def test_the_live_lane_plays_the_show_from_live_mp3_with_the_token_in_a_header()
     """Engine proto 5: the host's show (after the broadcast delay) is on the stream. The
     feed opens on live on, closes on live off, and the lane is quiet without it."""
     liq = _liq()
-    assert "engine_proto = 5" in liq
+    assert "engine_proto = 6" in liq
     feed = liq[liq.index("live_feed = input.http("):]
     feed = feed[:feed.index("\n)\n")]
     assert "start=false" in feed
@@ -534,8 +534,13 @@ def test_the_live_lane_plays_the_show_from_live_mp3_with_the_token_in_a_header()
     # quiet at once was 2 to 3.5 s of dead air at every take-over (2026-11-18)
     assert on.index("live_feed.start()") < on.index("live_feed.is_ready()") < on.index("go_live()")
     assert "time() - live_asked() > 5." in on           # never music under a show with no sound
+    # A song ending in the wait takes over at once: the item loaded behind it is the
+    # one for after the show and must not start (engine thread's review of PR 347)
+    assert 'ending = on_air_lane() == "main" and left >= 0. and left < 2.' in on
+    assert "live_feed.is_ready() or ending or" in on
     assert "live_release" not in early                  # the music never stopped: nothing to hold
-    assert "&live=#{if live_wanted() then 1 else 0 end}" in liq and "live=live_wanted()" in liq
+    assert "&live=#{if live_wanted() then 1 else 0 end}" in liq
+    assert "live=live_on(), instance=engine_instance" in liq   # /status says what is on the stream now
 
 
 def test_every_engine_call_carries_its_own_instance_id_for_the_one_engine_rule():
