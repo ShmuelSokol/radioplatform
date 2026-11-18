@@ -83,7 +83,11 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
         onReady?.(dur);
       });
 
+      // Leaving the screen (or changing the file) while it loads aborts the load: not a failure.
+      const aborted = (err: unknown) => (err as { name?: string } | null)?.name === 'AbortError';
+
       ws.on('error', (err) => {
+        if (aborted(err)) return;
         console.error('WaveSurfer error:', err);
         setLoading(false);
         setError(typeof err === 'string' ? err : 'Failed to load audio — the file may be in an unsupported format');
@@ -103,6 +107,7 @@ const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
       });
 
       ws.load(url).catch((err: unknown) => {
+        if (aborted(err)) return;
         console.error('WaveSurfer load failed:', err);
         setLoading(false);
         setError('Failed to load audio — the file may not exist or is in an unsupported format');
