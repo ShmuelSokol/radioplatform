@@ -34,6 +34,11 @@ def wanted(config: dict | None) -> bool:
 
 def start(station_id: str, show_id: str, air) -> None:
     """Record this show's air until it closes. Called when the delay line is created."""
+    import shutil
+
+    if shutil.which("ffmpeg") is None:
+        logger.warning("Live show %s is not recorded: ffmpeg is not installed", show_id)
+        return
     task = asyncio.ensure_future(_record(station_id, show_id, air))
     _running.add(task)
     task.add_done_callback(_running.discard)

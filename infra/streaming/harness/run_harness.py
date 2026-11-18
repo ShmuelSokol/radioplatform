@@ -1988,6 +1988,10 @@ async def sc_live_show_delay_controls(h: Harness, restart: bool = False) -> None
         old_tone = tone_name(TONES[old[0]][0]) if old else None
         h.check(name, bool(after_next) and after_next[-1] not in ("silence", old_tone, "EMERGENCY"),
                 f"Next in the pre-roll moved the music on: {after_next} (was {old_tone})")
+    # no new song may start in the moment before the take-over (it would be cut after a
+    # fraction of a second: a blip on the stream, 2026-11-18 16:57Z after Next in the pre-roll)
+    blips = [(round(t - first, 1), n) for t, n in timeline(heard) if first - 2.5 <= t <= first + 1.0 and n not in ("silence", "HOST")]
+    h.check(name, not blips, f"no song starts just before the host is heard on the stream ({blips} s from first air)")
     quiet_from = first + 2.0
     during = [w for w in heard if quiet_from <= w[0] <= t_end - 0.3]
     loud = sum(WINDOW for w in during if w[1] >= -45)
@@ -2125,7 +2129,8 @@ async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> N
         await asyncio.sleep(4)
         due = at(14 if preroll_item else 26)
         ids = await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
-        start_at = due.timestamp() - (3 if preroll_item else 14)
+        # 18 s: due 12 s after the delay fills, past the 8 s the pre-roll waits for (PR 336)
+        start_at = due.timestamp() - (3 if preroll_item else 18)
         now = datetime.now(UTC)
         code, show = h.api("POST", "/live-shows", {
             "station_id": str(STATION_ID), "title": "Harness delay show", "calls_enabled": False,

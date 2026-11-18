@@ -96,6 +96,7 @@ export default function Navbar() {
         { to: '/admin/rules', label: 'Rules', color: 'hover:text-purple-300' },
         { to: '/admin/holidays', label: 'Blackouts', color: 'hover:text-red-300' },
         { to: '/admin/program-clock', label: 'Program Clock', color: 'hover:text-cyan-300' },
+        { to: '/admin/rds', label: 'RDS', color: 'hover:text-green-300' },
         { to: '/admin/live', label: 'Live Shows', color: 'hover:text-red-400' },
       ],
     },

@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, Set
 
 import numpy as np
@@ -117,6 +117,9 @@ class CallerLine:
         self.on_air = False
         self.buf = np.zeros(0, dtype=np.int16)
         self.primed = False
+        # Talkback: the screener or host talking to this caller off the air. While
+        # set, the caller hears that person (not the show) and they hear the caller
+        self.talk: WebSocket | None = None
 
     def add(self, frame: bytes) -> None:
         if not self.on_air or len(frame) < 2:
@@ -271,6 +274,15 @@ class StationLiveRelay:
                     # over, so nothing else would give the stream its sound back
                     from app.services import playout_engine
                     await playout_engine.engine_live(_station, False)
+            from app.services import scheduler_engine as _sched
+            if _air.finish_reason == "host left" and _air.ever_heard \
+                    and _sched._scheduler_instance is not None and _sched._scheduler_instance.running:
+                # The last words of a host who left have played out: look now whether
+                # the station goes back to music, not on the scheduler's next pass
+                # (up to 3 s more silence; harness measured 3.6 to 3.9 s)
+                task = asyncio.ensure_future(_host_gone_now(_station, _air.show_id))
+                _holds.add(task)
+                task.add_done_callback(_holds.discard)
 
         new.on_closed = closed
 
@@ -324,8 +336,39 @@ class StationLiveRelay:
         if host_ws is not None and any(c.on_air for c in lines):
             sends.append(self._send_quiet(host_ws, _pcm(callers_sum)))
         for c in lines:
-            sends.append(self._send_quiet(c.ws, _pcm(host + callers_sum - parts[c.call_id])))
+            if c.talk is None:   # in a talkback the caller hears the screener, not the show
+                sends.append(self._send_quiet(c.ws, _pcm(host + callers_sum - parts[c.call_id])))
         await asyncio.gather(*sends)
+
+    async def talk_start(self, call_id: str, ws: WebSocket) -> bool:
+        """A screener or the host starts talking to a caller off the air. False when
+        the caller's page is not connected or the caller is on air."""
+        line = self.callers.get(call_id)
+        if line is None or line.on_air:
+            return False
+        old = line.talk
+        line.talk = ws
+        if old is not None and old is not ws:
+            try:
+                await old.close(code=4000)   # someone else took the caller over
+            except Exception:
+                pass
+        await self._send_quiet(line.ws, json.dumps({"type": "talk", "on": True}))
+        return True
+
+    async def talk_end(self, call_id: str, ws: WebSocket | None = None, close: bool = False) -> None:
+        """The talkback is over (`ws` given: only if it is still that person's)."""
+        line = self.callers.get(call_id)
+        if line is None or line.talk is None or (ws is not None and line.talk is not ws):
+            return
+        staff = line.talk
+        line.talk = None
+        await self._send_quiet(line.ws, json.dumps({"type": "talk", "on": False}))
+        if close:
+            try:
+                await staff.close(code=4000)
+            except Exception:
+                pass
 
     async def _to_listeners(self, station_id: str, data: bytes) -> None:
         """Listeners get the show through the station's delay (straight away when it has none)."""
@@ -353,6 +396,10 @@ class StationLiveRelay:
         if line is None:
             return
         line.on_air = status == "on_air"
+        if status in ("on_air", "rejected", "completed", "abandoned"):
+            # On air (or gone): a private word with them ends here, so nothing said
+            # off the air can follow the caller onto it
+            await self.talk_end(call_id, close=True)
         if not line.on_air:
             line.buf = np.zeros(0, dtype=np.int16)
             line.primed = False
@@ -362,6 +409,24 @@ class StationLiveRelay:
                 await line.ws.close(code=1000)
             except Exception:
                 pass
+
+
+async def _host_gone_now(station_id: str, show_id: str) -> None:
+    from app.models.live_show import LiveShow, LiveShowStatus
+    from app.models.station import Station
+    from app.services.scheduler_engine import get_scheduler
+
+    try:
+        async for db in get_async_session():
+            station = await db.get(Station, uuid.UUID(station_id))
+            show = await db.get(LiveShow, uuid.UUID(show_id))
+            if station is not None and show is not None and show.status == LiveShowStatus.LIVE \
+                    and (station.automation_config or {}).get("live_show_id") == show_id:
+                await get_scheduler()._host_gone(db, station, show, datetime.now(timezone.utc))
+            await db.rollback()
+            break
+    except Exception:
+        logger.warning("Could not look for a gone host on station %s", station_id, exc_info=True)
 
 
 _holds: set = set()  # watchers that keep a show from cutting a timed item (kept from collection)
@@ -703,16 +768,65 @@ async def websocket_web_caller(websocket: WebSocket, call_id: str):
                 break
             data = message.get("bytes")
             if data:
-                line.add(data)
+                if line.talk is not None and not line.on_air:
+                    await live_relay._send_quiet(line.talk, data)   # off the air, to whoever talks to them
+                else:
+                    line.add(data)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.debug("Caller WS %s ended: %s", call_id, e)
     finally:
+        if line.talk is not None:
+            staff, line.talk = line.talk, None
+            try:
+                await staff.close(code=4004)   # the caller is gone
+            except Exception:
+                pass
         if live_relay.callers.get(call_id) is line:
             live_relay.callers.pop(call_id, None)
             # Shielded: the grace timer must start even if this handler is cancelled
             await asyncio.shield(caller_left(call_id, line.show_id))
+
+
+@router.websocket("/ws/live/{show_id}/talk/{call_id}")
+async def websocket_talkback(websocket: WebSocket, show_id: str, call_id: str):
+    """Talkback: the screener or the host talks to a web caller off the air. First
+    message {"type":"auth","token":...} (same rule as the host's microphone), then
+    their microphone as PCM frames, which go to that caller only; the caller's
+    microphone comes back here. Nothing on this socket reaches listeners. Closes
+    with 4004 when the caller is not connected or leaves, 4009 when the caller is on
+    air, 4000 when the caller goes on air or someone else takes the talkback."""
+    user = await _authenticate_ws(websocket, show_id)
+    if user is None:
+        return
+    line = live_relay.callers.get(call_id)
+    if line is None or line.show_id != show_id:
+        await websocket.close(code=4004)
+        return
+    if line.on_air:
+        await websocket.close(code=4009)
+        return
+    await live_relay.talk_start(call_id, websocket)
+    logger.info("Talkback: user %s talks to caller %s (show %s)", user.id, call_id, show_id)
+    try:
+        await websocket.send_text(json.dumps({"type": "talk", "on": True, "sample_rate": LIVE_SAMPLE_RATE}))
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            current = live_relay.callers.get(call_id)
+            if current is None or current.talk is not websocket:
+                break
+            if data:
+                await live_relay._send_quiet(current.ws, data)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Talkback WS for call %s ended: %s", call_id, e)
+    finally:
+        await asyncio.shield(live_relay.talk_end(call_id, websocket))
 
 
 # --- Broadcast helpers ---

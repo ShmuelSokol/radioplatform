@@ -97,3 +97,40 @@ A listener calls from `/call/<station id>` (linked from the Listen page's live b
 - Off until the microphone is open (the audio context exists only then).
 - Buttons are edited in the control room, not here.
 - Check: `ONLY=carts node e2e/live-delay.cjs <station id>` (recordings are served by the test; listeners must get the cart's tone 3 s later, also with the mic muted).
+
+## Talkback (talking to a caller off the air)
+
+The screener (Call Screener) or the host (Host Console) presses **Talk off air** on a waiting or approved web caller. `hooks/useTalkback.ts` opens a second microphone capture and its own socket, `/ws/live/{show}/talk/{call}` (same sign-in rule as the host's microphone). The server sets `CallerLine.talk`:
+
+- what the staff member says goes to that caller's socket only; the caller's microphone frames go back to the staff socket instead of the mix. Nothing passes `StationLiveRelay.audio`, so nothing can reach listeners or the delay.
+- while it is set the caller does not get the show (two streams in one player would stutter); the caller's page is told `{"type":"talk","on":true}` and shows "You are not on the air".
+- it ends when the staff member presses End talk, the caller goes **on air** (`caller_status` ends it first, staff socket closed with 4000), the caller leaves (4004), or someone else starts talking to the same caller (the first is closed with 4000 and goes back silently). A caller on air cannot be taken into a talk (4009): Hold first.
+- on the Host Console the host's on-air microphone is muted for the length of the talk (`setMuted(micOff || coughing || talking)`), the screen says TALKING OFF AIR, and a mute set before the talk stays.
+- Phone (Twilio) callers have no page socket, so they get the "not connected from the website" message.
+- Checks: `tests/test_live_talkback.py`, `ONLY=talk node e2e/live-delay.cjs <station id>` (listeners must receive nothing of the screener's 1000 Hz or the caller's 700 Hz).
+
+The show also waits (`hold_for_timed_items`) for a hard timed item due up to 8 s after its delay fills, not only 2 s: the player may start such an item early, and a take-over at that moment left 0.8 s of the time check on the stream.
+
+Without ffmpeg on the machine `live_recording.start` records nothing and says so in the log (the GitHub runner has none).
+
+## A server restart during a show
+
+A deploy restarts the backend: every socket drops and the delay line (in memory) is gone. What keeps the show on air:
+
+- `useHostAudio` keeps the microphone and its audio graph and opens the socket again every second for up to 60 s (`reconnecting`, the Host Console says "Reconnecting… keep talking"). Not after a close the server explained: 4000 (handed back, host gone), 4001/4003 (sign-in), 4004 (no show). Frames are sent only on a socket that has sent its auth message.
+- The station still has `live_show_id`, so the new socket is "the host came back on a station already theirs": heard at once, the delay builds back while they talk, no second pre-roll.
+- `_host_gone` counts from the new process's first look, so the default 15 s is the time the host has to be back.
+- Lost: what was in the delay at that moment (up to the delay length of speech), the dump count, and the recording so far (the part after the restart is recorded as a second archive draft when it is 20 s or longer).
+- Listener pages and caller pages reconnect by themselves (they did before).
+- Check: `ONLY=restart BACKEND_RESTART=<command> node e2e/live-delay.cjs <station id>` (local; measured 0.8 s from the server answering to the host being connected again).
+
+## Several callers on air
+
+Up to four callers can be on air together (`live_show_service.MAX_CALLERS_ON_AIR`; it was one, refused with 409). The mix in `StationLiveRelay.audio` always carried any number: listeners get host + all callers, the host hears the callers, each caller hears the host and the others but not themselves. Both screens list one card per caller on air, each with Hold and End Call. Put On Air stays enabled until four are on. **Next caller ends everyone on air** and brings on the approved caller who waited longest. Checks: `tests/test_live_caller_desk.py`, `ONLY=multi node e2e/live-delay.cjs <station id>`.
+
+## The second before the host is heard (engine stations)
+
+`on_soon` quiets the stream 1 s before first air (`quieted_early`). The engine then asks `/next` with `live=1` while the station is not the show's yet. `handle_next` used to answer that with "the show is over", which brought the song back for about 2 s where the show should start; now it hands out nothing while `_show_about_to_be_heard`. `hold_for_timed_items` no longer lengthens the hold once the stream was quieted.
+
+When the last words of a host who left have played out, `_host_gone_now` runs the host-gone check at once (from the air's `on_closed`) instead of waiting for the scheduler's 3 s pass.
+

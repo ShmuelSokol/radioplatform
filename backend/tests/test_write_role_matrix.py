@@ -58,6 +58,9 @@ PUBLIC_WRITES = {
     ("POST", "/playout/{station_id}/started"),
     ("POST", "/playout/{station_id}/hello"),
     ("POST", "/playout/{station_id}/commands/poll"),
+    ("POST", "/playout/{station_id}/alert"),  # playout token
+    ("POST", "/emergency/device/activate"),  # EMERGENCY_API_TOKEN (the EAS box)
+    ("POST", "/emergency/device/{alert_id}/stop"),  # EMERGENCY_API_TOKEN
 }
 
 # Allowed roles are not sent to these: with no input they would really run
@@ -82,6 +85,8 @@ WRITE_POLICY = {
     ("POST", "/ai-emails/draft"): MANAGERS,
     ("POST", "/ai-emails/send"): MANAGERS,
     ("POST", "/alerts/resolve-all"): MANAGERS,
+    ("POST", "/emergency/activate"): MANAGERS,
+    ("POST", "/emergency/{alert_id}/stop"): MANAGERS,
     ("DELETE", "/alerts/{alert_id}"): ADMIN,
     ("PATCH", "/alerts/{alert_id}/reopen"): MANAGERS,
     ("PATCH", "/alerts/{alert_id}/resolve"): MANAGERS,
@@ -211,6 +216,11 @@ WRITE_POLICY = {
     ("POST", "/spot-recordings/{recording_id}/generate"): MANAGERS,
     ("POST", "/spot-recordings/{recording_id}/reject"): MANAGERS,
     ("POST", "/spot-schedules"): MANAGERS,
+    ("POST", "/rds/messages"): MANAGERS,
+    ("PATCH", "/rds/messages/{message_id}"): MANAGERS,
+    ("DELETE", "/rds/messages/{message_id}"): MANAGERS,
+    ("PUT", "/rds/stations/{station_id}/settings"): MANAGERS,
+    ("POST", "/rds/check"): STAFF,  # read-only wording check for the editor
     ("PUT", "/spot-schedules/timing-defaults"): MANAGERS,
     ("DELETE", "/spot-schedules/{schedule_id}"): MANAGERS,
     ("PUT", "/spot-schedules/{schedule_id}"): MANAGERS,

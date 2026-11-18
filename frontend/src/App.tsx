@@ -35,6 +35,7 @@ const SpotSchedules = lazy(() => import('./pages/admin/SpotSchedules'));
 const SpotRecordings = lazy(() => import('./pages/admin/SpotRecordings'));
 const ProgramBlocks = lazy(() => import('./pages/admin/ProgramBlocks'));
 const Databank = lazy(() => import('./pages/admin/Databank'));
+const Rds = lazy(() => import('./pages/admin/Rds'));
 const ScheduleCheck = lazy(() => import('./pages/admin/ScheduleCheck'));
 const SponsorshipRules = lazy(() => import('./pages/admin/SponsorshipRules'));
 const Analytics = lazy(() => import('./pages/admin/Analytics'));
@@ -182,6 +183,7 @@ export default function App() {
               <Route path="/admin/spot-schedule" element={<ProtectedRoute><SpotSchedules /></ProtectedRoute>} />
               <Route path="/admin/spot-recordings" element={<ProtectedRoute><SpotRecordings /></ProtectedRoute>} />
               <Route path="/admin/databank" element={<ProtectedRoute><Databank /></ProtectedRoute>} />
+              <Route path="/admin/rds" element={<ProtectedRoute><Rds /></ProtectedRoute>} />
               <Route path="/admin/program-blocks" element={<ProtectedRoute><ProgramBlocks /></ProtectedRoute>} />
               <Route path="/admin/schedule-check" element={<ProtectedRoute><ScheduleCheck /></ProtectedRoute>} />
               <Route path="/admin/sponsorship-rules" element={<ProtectedRoute><SponsorshipRules /></ProtectedRoute>} />

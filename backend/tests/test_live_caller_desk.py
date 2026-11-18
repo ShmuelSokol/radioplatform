@@ -121,3 +121,47 @@ async def test_the_callers_topic_is_listed_and_the_note_can_be_changed(client, d
                            json={"notes": "Parsha question. Calls every week, speaks well."})
     assert r.status_code == 200 and r.json()["notes"].endswith("speaks well.")
     assert r.json()["caller_name"] == "Avi"   # the name is untouched
+
+
+@pytest.mark.asyncio
+async def test_several_callers_on_air_together_up_to_four(client, db_session):
+    names = [(n, CallStatus.APPROVED) for n in ("Avi", "Berel", "Chaim", "Dovid", "Eli", "Fishel")]
+    _s, show, calls = await _show_with_callers(db_session, names)
+    headers = await _admin_headers(db_session)
+    for c in calls[:4]:
+        r = await client.post(f"/api/v1/live-shows/{show.id}/calls/{c.id}/on-air", headers=headers)
+        assert r.status_code == 200, r.text
+    assert await _statuses(db_session, calls) == ["on_air"] * 4 + ["approved"] * 2
+    # A fifth is refused, and the answer says what to do
+    r = await client.post(f"/api/v1/live-shows/{show.id}/calls/{calls[4].id}/on-air", headers=headers)
+    assert r.status_code == 409 and "4 callers are on air already" in r.text
+    # Hold one: there is room again
+    assert (await client.post(f"/api/v1/live-shows/{show.id}/calls/{calls[0].id}/hold", headers=headers)).status_code == 200
+    assert (await client.post(f"/api/v1/live-shows/{show.id}/calls/{calls[4].id}/on-air", headers=headers)).status_code == 200
+    assert await _statuses(db_session, calls) == ["approved", "on_air", "on_air", "on_air", "on_air", "approved"]
+    # Next caller ends everyone on air and brings on who waited longest
+    r = await client.post(f"/api/v1/live-shows/{show.id}/calls/next", headers=headers)
+    assert r.status_code == 200 and r.json()["on_air"] == str(calls[0].id)
+    assert await _statuses(db_session, calls) == ["on_air", "completed", "completed", "completed", "completed", "approved"]
+
+
+@pytest.mark.asyncio
+async def test_callers_on_air_together_hear_each_other_and_not_themselves():
+    import numpy as np
+
+    from app.api.v1.live_shows_ws import CallerLine, StationLiveRelay
+    from tests.test_live_talkback import FakeWS, pcm, samples
+
+    relay = StationLiveRelay()
+    listener, host = FakeWS(), FakeWS()
+    relay.listeners["st"] = {listener}
+    relay.hosts["st"] = host
+    lines = [CallerLine(FakeWS(), f"c{i}", "show", "st") for i in range(3)]
+    relay.callers = {c.call_id: c for c in lines}
+    for c, level in zip(lines, (100, 20, 3)):
+        c.on_air = True
+        c.add(pcm(level, 4000))
+    await relay.audio("st", pcm(1000, 2048))
+    assert set(samples(listener.bytes[-1])) == {1123}                    # host + all three
+    assert set(samples(host.bytes[-1])) == {123}                         # the host hears the three callers
+    assert [int(np.unique(samples(c.ws.bytes[-1]))[0]) for c in lines] == [1023, 1103, 1120]   # everyone but themselves

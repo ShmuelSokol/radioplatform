@@ -33,7 +33,7 @@ Things the code alone will not tell you:
 
 ## Queue list is windowed
 
-`QueuePanel` draws only the rows on screen plus a margin, with spacer divs above and below, so scrolling costs the same at 50 items or 15,000. This depends on fixed heights: row 40px desktop / 66px phone, insert marker 40px, action bar 61px. The constants at the top of `QueuePanel.tsx` must match the height classes on those elements; change one, change the other. `e2e/control-room.mjs` runs a 5,000-item queue and checks the scroll height to the pixel, so a mismatch fails there.
+`QueuePanel` draws only the rows on screen plus a margin, with spacer divs above and below, so scrolling costs the same at 50 items or 15,000. This depends on fixed heights: row 26px desktop / 40px on touch screens (phones, tablets, car screens; one line, title cut with an ellipsis, since 2026-11-18), insert marker 40px, action bar 61px. The constants at the top of `QueuePanel.tsx` must match the height classes on those elements; change one, change the other. `e2e/control-room.mjs` runs a 5,000-item queue and checks the scroll height to the pixel, so a mismatch fails there.
 
 Consequences: a row far from the screen is not in the DOM (tests must scroll to it, and wait a beat after setting `scrollTop`). Date formatting goes through the cached formatters in `shared.ts` (`dayKey`, `clockTime`, `weekdayShort`); building an `Intl.DateTimeFormat` per row per render was a large part of the Safari stutter.
 
@@ -85,6 +85,8 @@ Until the queue has loaded, the bar says "Loading the queue…", and if the requ
 
 ## The KBR Studio look (classic.css)
 
+**Sideways layout on car screens (2026-11-18).** `PHONE_LANDSCAPE` covers landscape windows up to 720 px tall and under 1024 px wide (it was 500 px): a car screen or small tablet held wide gets the transport column with the queue at full height beside it (11 rows at 960x540, was 2). On a phone held upright, Listen and the station picker share one row and the server/browser chip sits under PLAYING in short words (`PlayoutBadge short`). `e2e/control-room-compact.mjs` counts whole rows on screen, one-line titles, tap targets and moving meters at car, iPhone and desktop sizes on three stations.
+
 The control room copies the station's old program (KBR Studio 1.82): grey bevelled buttons, a black LCD strip with green italic digits (Remaining, Intro, On air, Clock) and LEFT/RIGHT meters, a green "now" and yellow "next" title box, and the running log in bold yellow on black (current row blue with magenta text, timed rows orange). Desktop layout: log over the lower pane (Songs / other tabs), Go next / Fade / Soft fade and the pane tabs in a grey column on the right, cart pages 1 to 10 along the bottom. The styles are scoped under `.qn` in `controlroom/classic.css`; the virtualized log's row heights (`ROW_*` in QueuePanel) must match the CSS row heights or the scrollbar drifts.
 
 The jingle wall and the Library's Jingle tab ask `/assets` for `hide_generated=true`, which leaves out the time and weather service's own recordings ("Time Announcement - …", "Weather Report - …"). Fired from the cart they would air the wrong hour or day.
@@ -108,6 +110,8 @@ On a computer, a drag bar (`data-testid="split-handle"`) sits between Up next an
 Every `select.qn-field` in the control room is drawn grey with a raised arrow (`appearance: none`; Safari shows its own white or blue control otherwise). The floating 🐞 button is hidden on the control room because it covered the cart's buttons; Report a bug sits in the status bar (computer) and the menu (phone).
 
 ## Meters move without Listen
+
+Since 2026-11-18 the meters show on every size, not only from 1024 px: phones, tablets and car screens get a small pair (`SmallMeters` in TransportBar: one-letter labels, no scale) in the LCD strip, and sideways in the transport column. Shmuel's Tesla browser is under 1024 px wide, so it never drew them; nothing was wrong with the audio. A 320 px phone (first iPhone SE) has no room beside the clock and shows none. Tests select the meters by `[data-testid=vu-meters]:visible [data-lit]`, since both sizes are in the DOM.
 
 The audio engine always runs silently for the LEFT/RIGHT meters once the page has had any click or key (browsers need one gesture). Decks feed a bus; the bus feeds the meter analysers and an output gain to the speakers. Listen (`listenHere`, `setMonitor`) only opens that output gain on this computer; volume and mute act on it too, and deck gains carry replay gain only. In stream mode the engine still runs silently for the meters while the stream element makes the sound, so the meters lead the heard audio by the stream delay.
 
