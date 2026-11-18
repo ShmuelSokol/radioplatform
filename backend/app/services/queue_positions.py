@@ -37,3 +37,24 @@ async def compact_positions(db: AsyncSession, station_id, *, playing_first: bool
         .values(position=ranked.c.rn)
         .execution_options(synchronize_session=False)
     )
+
+
+async def put_playing_first(db: AsyncSession, station_id, entry) -> None:
+    """Give the item that just went on air the place just before the first waiting one.
+
+    What compact_positions does for the item on air, without rewriting every waiting
+    row. With a 48 h queue that renumber rewrote some 900 rows on every song change:
+    0.9 to 1.1 s of each engine start report on production (2026-11-18 12:07Z to
+    12:24Z). The waiting rows keep their positions, so they stay in order; numbers
+    simply move up by one per item played. Readers only compare positions (order by,
+    max + 1, insert before or after a row), none expects the queue to start at 1.
+    """
+    first_waiting = (await db.execute(
+        select(func.min(QueueEntry.position)).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.id != entry.id,
+        )
+    )).scalar()
+    if first_waiting is not None and entry.position != first_waiting - 1:
+        entry.position = first_waiting - 1
