@@ -239,6 +239,14 @@ async function lookAt(page, guard, st, route, step, expected = []) {
   return shot;
 }
 
+/** Make the page a touch screen (or a mouse again), so `pointer: coarse` rules apply. */
+async function touch(page, on) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: on }).catch(() => {});
+  await cdp.send('Emulation.setEmitTouchEventsForMouse', on ? { enabled: true, configuration: 'mobile' } : { enabled: false }).catch(() => {});
+  await cdp.detach().catch(() => {});
+}
+
 let current = null;   // the station being walked
 async function open(page, route) {
   await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' });
@@ -254,9 +262,37 @@ async function open(page, route) {
   }
 }
 
+/** Controls smaller than a finger at phone size: the control itself, or its label when
+ *  it sits in one (a checkbox with its words counts as one target). */
+async function tooSmall(page) {
+  return page.evaluate(() => {
+    const out = [];
+    for (const el of document.querySelectorAll('[data-walk]')) {
+      const st = getComputedStyle(el);
+      if (st.opacity === '0' || st.pointerEvents === 'none' || el.disabled) continue;
+      let r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4) continue;
+      const lb = el.closest('label') || (el.labels && el.labels[0]);
+      if (lb) { const lr = lb.getBoundingClientRect(); if (lr.width * lr.height > r.width * r.height) r = lr; }
+      if (r.width < 43.5 || r.height < 43.5) out.push({ label: el.getAttribute('data-walk'), w: Math.round(r.width), h: Math.round(r.height) });
+    }
+    return out.sort((a, b) => Math.min(a.w, a.h) - Math.min(b.w, b.h));
+  });
+}
+
 async function reachAt(page, st, route, sizeName) {
   await controls(page);
   const bad = await unreachable(page);
+  // On a phone a finger needs 44 x 44 px (PC measured Approve at 17x40 on Song Requests,
+  // 2026-11-18). One finding per page, naming the smallest ones.
+  if (sizeName.startsWith('phone')) {
+    const small = await tooSmall(page);
+    if (small.length) {
+      const shotS = await shoot(page, `${st.tag}${route}-small-${sizeName}`);
+      finding(st.tag, route, `look at ${sizeName}`, `${small.length} control(s) under 44 px for a finger`,
+        small.slice(0, 10).map((x) => `${x.label} ${x.w}x${x.h}`).join('; '), shotS);
+    }
+  }
   if (!bad.length) return;
   await page.evaluate(() => window.scrollTo(0, 0));
   const shot = await shoot(page, `${st.tag}${route}-reach-${sizeName}`);
@@ -288,9 +324,11 @@ async function walkPage(page, guard, st, route) {
   await reachAt(page, st, route, `${WALK_SIZE.width}x${WALK_SIZE.height}`);
   for (const size of SIZES) {
     await page.setViewportSize({ width: size.width, height: size.height });
+    await touch(page, true);   // the site's phone rules are for touch screens (pointer: coarse)
     await open(page, route);
     await lookAt(page, guard, st, route, `open at ${size.name}`);
     await reachAt(page, st, route, size.name);
+    await touch(page, false);
   }
   await page.setViewportSize(WALK_SIZE);
   await open(page, route);

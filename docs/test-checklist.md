@@ -2374,8 +2374,11 @@ Seeds were the surprises of 2026-11-17: a song chopped when the previous one end
 - [x] V3-52e ↳ slow backend: a soft item still starts when its song ends; a live show over a hard item stays quiet and the late item is closed | modes: engine | covered: harness soft_timed_waits_for_song_slow_backend, live_show_over_hard_item_slow_backend
 - [ ] V3-52f ↳ slow backend, after a live show ends: no fragment of the old song and no silence over 1 s (found 2026-11-18: about 1 s of the old song, then 3 s of silence) | modes: engine | covered: harness live_show_quiet_slow_backend FAILS (engine thread told)
 - [ ] V3-52g ↳ slow backend, after a timed group: no emergency music before the next song (found 2026-11-18: 3.9 s) | modes: engine | covered: NOT COVERED (seen in three_item_timed_group with stack.slow_backend = 4; engine thread told)
-- [ ] V3-52h ↳ slow backend: the recorded start of an item (play log, site, sponsor proof of play) is when it was heard, not when the report arrived (found 2026-11-18: 4 s late) | modes: engine | covered: NOT COVERED (engine thread told)
+- [x] V3-52h ↳ slow backend: the recorded start of an item (play log, site, sponsor proof of play) is when it was heard, not when the report arrived (found 2026-11-18: 4 s late) | modes: engine | covered: fixed in PR 272 (/started carries the engine's own time); harness hour_change_slow_backend notes the recorded start
 - [ ] V3-52i After a shiur is paused for a time check and resumed, the play log has three rows in order with no overlap: first part, time check, the rest (PR 263, `aired_from`) | modes: both | covered: NOT COVERED in the harness (backend tests in PR 263)
+- [x] V3-52j Next into an item whose file is slow: the item on air plays on, no emergency music, no silence (PR 272, `skip_wait`) | modes: engine | covered: harness operator_next_slow_file, next_while_held
+- [ ] V3-52k ↳ Next pressed twice while the first is still waiting for the file: one skip, not two | modes: engine | covered: NOT COVERED
+- [ ] V3-52l Next while a Play now (timed-lane item) is on air and a hard group is already loaded in the engine (handed over 45 s ahead): the group must not start early (engine thread found 2026-11-18: it starts at once, up to 45 s early) | modes: engine | covered: NOT COVERED (known bug, engine thread)
 - [ ] V3-53 Two people start a show on one station; a caller is on air when the show ends; Panic during a show | modes: both | covered: NOT COVERED (T, J)
 
 ## V3g. Keeping watch
