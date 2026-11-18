@@ -158,7 +158,7 @@ radioplatform/
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists (the list is readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
-| spot_schedules | spot_schedules.py | /spot-schedules (`GET /for-asset/{asset_id}?station_id=`: the control room's Sponsor panel, any staff role) |
+| spot_schedules | spot_schedules.py | /spot-schedules (`GET /for-asset/{asset_id}?station_id=`: the control room's Sponsor panel, any staff role; `GET /station-day?station_id=`: today's sponsorship plays on one station, the control room's Sponsors tab) |
 | spot_recordings | spot_recordings.py | /spot-recordings |
 | program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
 | databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, every type of a table, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
@@ -248,7 +248,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), Sponsors tab (today's sponsorships on the station; rows carry a SPONSOR tag) and a Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload

@@ -74,6 +74,22 @@ function sponsorStation(sid, opts = {}) {
         missed: [{ when: 'past', local_date: '2026-11-17', day: 'Tue Nov 17', daypart: 'morning', promised: 2, played: 1, missed: 1, moved: 0, note: 'Did not air' }],
       };
     }
+    if (path === '/spot-schedules/station-day' && method === 'GET') {
+      if (opts.failDay) return { __status: 500 };
+      const midnight = new Date(); midnight.setHours(24, 0, 0, 0);
+      const plays = station.queue.filter((e) => e.source === 'ad_slot' && e.preempt_at && new Date(e.preempt_at) < midnight)
+        .sort((x, y) => x.preempt_at.localeCompare(y.preempt_at))
+        .map((e) => {
+          const a = station.byId[e.asset_id];
+          return {
+            entry_id: e.id, status: e.status, status_text: { pending: 'Waiting', played: 'Aired', playing: 'On air', cancelled: 'Skipped by staff' }[e.status],
+            source: e.source, at: e.preempt_at, local_time: fmt(e.preempt_at, st.timezone),
+            asset: { id: a.id, title: a.title, artist: a.artist, asset_type: 'spot', category: 'Spots', duration: a.duration },
+            sponsor_name: SPONSOR.name,
+          };
+        });
+      return { station: { id: sid, name: st.name, timezone: st.timezone }, date: '2026-11-18', plays: opts.noDay ? [] : plays };
+    }
     const sk = /^\/stations\/[^/]+\/queue\/([^/]+)\/skip-sponsorship$/.exec(path);
     if (sk && method === 'POST') {
       const e = station.queue.find((x) => x.id === sk[1]);
@@ -124,7 +140,7 @@ const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: `$
 
 async function openForRow(page, id, touch) {
   if (touch) {
-    await rowOf(page, id).locator('[draggable=true]').tap();
+    await rowOf(page, id).locator('[draggable=true]').tap({ position: { x: 80, y: 12 } }); // the time, not the SPONSOR tag
     await page.getByTestId('row-song-touch').tap();
   } else {
     await rowOf(page, id).hover({ position: { x: 300, y: 8 } });
@@ -340,6 +356,81 @@ async function phone(browser, contextOpts, tag, landscape = false) {
   await ctx.close();
 }
 
+// ── Finding the panel: the SPONSOR tag on queue rows, and the Sponsors list (Shmuel: "How do I navigate to the sponsorship panel?") ──
+async function finding(browser, sid) {
+  const name = STATIONS.find((s) => s.id === sid).name;
+  const tag = `find ${name}`;
+  const station = sponsorStation(sid);
+  const { ctx, page, errors } = await openRoom(browser, DESKTOP, station);
+  const chip = rowOf(page, station.ad.later.id).getByTestId('row-sponsor');
+  check(`${tag}: a sponsorship row shows a SPONSOR tag without hovering`, await chip.isVisible() && /SPONSOR/.test(await chip.innerText()));
+  const music = station.pending().find((e) => !e.source || e.source === 'auto');
+  check(`${tag}: a song row has no SPONSOR tag`, await rowOf(page, music.id).getByTestId('row-sponsor').count() === 0);
+  const order = station.pending().map((e) => e.id).join();
+  await chip.click();
+  await panel(page).waitFor();
+  check(`${tag}: one click on the tag opens the Sponsor panel`, await page.getByTestId('song-panel').count() === 0);
+  check(`${tag}: and does not select or move the row`, station.pending().map((e) => e.id).join() === order && airCalls(station).length === 0);
+  await page.keyboard.press('Escape');
+  await page.getByRole('tab', { name: 'Sponsors' }).or(page.getByRole('button', { name: 'Sponsors', exact: true })).first().click();
+  await page.getByTestId('sponsors-today-row').first().waitFor();
+  const rows = page.getByTestId('sponsors-today-row');
+  check(`${tag}: the Sponsors tab lists today's two plays, not tomorrow's`, await rows.count() === 2, String(await rows.count()));
+  const summary = await page.getByTestId('sponsors-today-summary').innerText();
+  check(`${tag}: it names the station and counts what waits`, summary.includes(name) && /2 waiting/.test(summary), summary);
+  const later = fmt(station.ad.later.preempt_at, STATIONS.find((s) => s.id === sid).timezone);
+  check(`${tag}: each row shows time, sponsor, recording and status`, (await rows.nth(1).innerText()).includes(later) && /TEST SPONSOR 27/.test(await rows.nth(1).innerText()) && /Waiting/.test(await rows.nth(1).innerText()), await rows.nth(1).innerText());
+  await shot(page, `${tag.replace(/\W+/g, '-')}-sponsors-tab`);
+  await rows.nth(1).click();
+  await panel(page).waitFor();
+  await page.getByTestId('sponsor-contract').first().waitFor();
+  check(`${tag}: tapping a row opens its Sponsor panel`, (await page.getByTestId('sponsor-spot-name').innerText()).includes('TEST SPONSOR 27'));
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+async function findingPhone(browser, contextOpts, tag) {
+  const station = sponsorStation('st-main');
+  const { ctx, page, errors } = await openRoom(browser, contextOpts, station);
+  const vp = page.viewportSize();
+  const chip = rowOf(page, station.ad.later.id).getByTestId('row-sponsor');
+  await chip.scrollIntoViewIfNeeded();
+  const b = await chip.boundingBox();
+  check(`${tag}: the SPONSOR tag shows on the row, inside the screen`, b && b.width > 20 && b.x >= 0 && b.x + b.width <= vp.width, JSON.stringify(b));
+  await chip.tap();
+  await panel(page).waitFor();
+  check(`${tag}: tapping the tag opens the Sponsor panel`, await page.getByTestId('song-panel').count() === 0);
+  await page.getByRole('button', { name: 'Close' }).tap();
+  await page.getByRole('button', { name: /^More/ }).first().tap();
+  await page.getByRole('button', { name: 'Sponsors', exact: true }).tap();
+  await page.getByTestId('sponsors-today-row').first().waitFor();
+  const r = await page.getByTestId('sponsors-today-row').first().boundingBox();
+  check(`${tag}: More → Sponsors lists today's plays, rows at least 44 px tall and full width`, r.height >= 43.5 && r.x + r.width <= vp.width + 0.5, JSON.stringify(r));
+  check(`${tag}: page does not scroll sideways`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  await shot(page, `${tag.replace(/\W+/g, '-')}-sponsors-list`);
+  await page.getByTestId('sponsors-today-row').nth(1).tap();
+  await panel(page).waitFor();
+  check(`${tag}: tapping a play opens its Sponsor panel`, await panel(page).isVisible());
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+async function findingEdges(browser) {
+  let station = sponsorStation('st-stories', { noDay: true });
+  let r = await openRoom(browser, DESKTOP, station);
+  await r.page.getByRole('button', { name: 'Sponsors', exact: true }).or(r.page.getByRole('tab', { name: 'Sponsors' })).first().click();
+  await r.page.getByTestId('sponsors-today-empty').waitFor();
+  check('no sponsorships today: the list says so', /No sponsorships on this station today/.test(await r.page.getByTestId('sponsors-today-empty').innerText()));
+  check('no sponsorships today: no script errors', r.errors.length === 0, r.errors.join(' | '));
+  await r.ctx.close();
+  station = sponsorStation('st-main', { failDay: true });
+  r = await openRoom(browser, DESKTOP, station);
+  await r.page.getByRole('button', { name: 'Sponsors', exact: true }).or(r.page.getByRole('tab', { name: 'Sponsors' })).first().click();
+  await r.page.getByText('Could not load today').waitFor({ timeout: 15000 });
+  check('failed list: says it could not load and offers Try again', await r.page.getByRole('button', { name: 'Try again' }).isVisible());
+  await r.ctx.close();
+}
+
 const browser = await chromium.launch();
 const ONLY = process.env.ONLY || '';
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
@@ -348,6 +439,12 @@ try {
   if (run('air')) await onAir(browser);
   if (run('roles')) await roles(browser);
   if (run('edges')) await edges(browser);
+  if (run('find')) {
+    for (const s of STATIONS) await finding(browser, s.id);
+    await findingPhone(browser, PHONE, 'find iPhone 13');
+    await findingPhone(browser, PHONE_SE, 'find iPhone SE');
+    await findingEdges(browser);
+  }
   if (run('phone')) {
     await phone(browser, PHONE, 'iPhone 13');
     await phone(browser, PHONE_SE, 'iPhone SE');
