@@ -438,10 +438,21 @@ async function main() {
     // on a live station by a test script, 2026-11-18)
     const settingsAfter = await stationSettings(tokens);
     for (const id of Object.keys(settingsBefore)) {
-      if (settingsBefore[id] !== settingsAfter[id]) {
+      // A setting that had a value and now has another (or none). A key that only appeared
+      // is a form writing out its defaults on Save, which changes nothing on air; the seed
+      // gives every mode an explicit value so a switch left off always shows here.
+      const b = JSON.parse(settingsBefore[id]); const c = JSON.parse(settingsAfter[id] || '{}');
+      const changed = [];
+      if (b.active !== c.active) changed.push(`active ${b.active} -> ${c.active}`);
+      if (b.protected !== c.protected) changed.push(`protected ${b.protected} -> ${c.protected}`);
+      for (const k of Object.keys(b.config || {})) {
+        const was = JSON.stringify(b.config[k]); const is = JSON.stringify((c.config || {})[k]);
+        if (was !== is) changed.push(`${k} ${was} -> ${is}`);
+      }
+      if (changed.length) {
         const who = STATIONS.find((s) => s.id === id)?.tag || id;
         finding(st.tag, '(whole walk)', 'end', who === st.tag ? 'the walk left this station changed' : 'walking one station changed another',
-          `${who}: ${settingsBefore[id]} -> ${settingsAfter[id]}`, '');
+          `${who}: ${changed.join('; ')}`, '');
       }
     }
   }
