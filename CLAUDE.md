@@ -502,6 +502,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-landscape.mj
 # The RDS page against a real backend (Postgres + seeded admin; see wiki/rds-feed.md)
 cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/rds-page.mjs
 
+# Queue rows and level meters on car screens, tablets, phones and desktop (rows on screen, one-line titles, meters move)
+cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
+
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 
