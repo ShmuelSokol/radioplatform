@@ -120,6 +120,9 @@ class CallerLine:
         # Talkback: the screener or host talking to this caller off the air. While
         # set, the caller hears that person (not the show) and they hear the caller
         self.talk: WebSocket | None = None
+        # A co-host (staff, from another place) uses a line too: always on air, no
+        # call behind it. Their name, for the screens.
+        self.cohost: str | None = None
 
     def add(self, frame: bytes) -> None:
         if not self.on_air or len(frame) < 2:
@@ -321,6 +324,22 @@ class StationLiveRelay:
         if air.drained() or not air.listening:
             await air.stop()
 
+    def cohosts(self, show_id: str) -> list[str]:
+        """Names of the co-hosts on air in a show."""
+        return sorted(c.cohost for c in self.callers.values() if c.cohost and c.show_id == show_id)
+
+    async def cohosts_changed(self, show_id: str) -> None:
+        await live_show_manager.broadcast_to_show(show_id, {"type": "cohosts", "data": {"names": self.cohosts(show_id)}})
+
+    async def drop_cohosts(self, show_id: str) -> None:
+        """The show is over: its co-hosts' lines close (their pages say so)."""
+        for key, line in [(k, c) for k, c in self.callers.items() if c.cohost and c.show_id == show_id]:
+            self.callers.pop(key, None)
+            try:
+                await line.ws.close(code=4000)
+            except Exception:
+                pass
+
     def station_callers(self, station_id: str) -> list[CallerLine]:
         return [c for c in self.callers.values() if c.station_id == station_id]
 
@@ -494,7 +513,10 @@ async def _authenticate_ws(websocket: WebSocket, show_id: str) -> User | None:
         msg = json.loads(raw)
     except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as e:
         logger.warning("WS auth: failed to read first message for show %s: %s", show_id, e)
-        await websocket.close(code=4001)
+        try:
+            await websocket.close(code=4001)
+        except RuntimeError:
+            pass   # the page went away first: closing a closed socket was an error in the log
         return None
 
     if msg.get("type") != "auth":
@@ -790,6 +812,70 @@ async def websocket_web_caller(websocket: WebSocket, call_id: str):
             live_relay.callers.pop(call_id, None)
             # Shielded: the grace timer must start even if this handler is cancelled
             await asyncio.shield(caller_left(call_id, line.show_id))
+
+
+MAX_COHOSTS = 3
+
+
+@router.websocket("/ws/live/{show_id}/cohost")
+async def websocket_cohost(websocket: WebSocket, show_id: str):
+    """A co-host joins the show from another place. First message
+    {"type":"auth","token":...} (same rule as the host's microphone), then their
+    microphone as PCM frames. They are mixed into the show like a caller on air
+    (through the delay, so Dump covers them) and hear the host, the callers and the
+    other co-hosts here, never themselves. The host's microphone carries the show: a
+    co-host is heard only while a host is sending. Closes with 4009 when the show is
+    not live, 4008 when three co-hosts are on already, 4000 when the show ends or the
+    same person joins from another page."""
+    user = await _authenticate_ws(websocket, show_id)
+    if user is None:
+        return
+    from app.models.live_show import LiveShow, LiveShowStatus
+    station_id = None
+    try:
+        async for db in get_async_session():
+            show = await db.get(LiveShow, uuid.UUID(show_id))
+            if show is not None and show.status == LiveShowStatus.LIVE:
+                station_id = str(show.station_id)
+            break
+    except Exception as e:
+        logger.error("Co-host WS: could not load show %s: %s", show_id, e)
+    if station_id is None:
+        await websocket.close(code=4009)
+        return
+    key = f"cohost:{user.id}"
+    if key not in live_relay.callers and len(live_relay.cohosts(show_id)) >= MAX_COHOSTS:
+        await websocket.close(code=4008)
+        return
+    line = CallerLine(websocket, key, show_id, station_id)
+    line.on_air = True
+    line.cohost = user.display_name or user.email
+    old = live_relay.callers.get(key)
+    live_relay.callers[key] = line
+    if old is not None:
+        try:
+            await old.ws.close(code=4000)
+        except Exception:
+            pass
+    logger.info("Co-host %s joined show %s", user.id, show_id)
+    try:
+        await websocket.send_text(json.dumps({"type": "cohost", "on": True, "sample_rate": LIVE_SAMPLE_RATE}))
+        await live_relay.cohosts_changed(show_id)
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            if data:
+                line.add(data)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Co-host WS for show %s ended: %s", show_id, e)
+    finally:
+        if live_relay.callers.get(key) is line:
+            live_relay.callers.pop(key, None)
+        await asyncio.shield(live_relay.cohosts_changed(show_id))
 
 
 @router.websocket("/ws/live/{show_id}/talk/{call_id}")
