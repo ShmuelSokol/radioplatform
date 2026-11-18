@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
-import subprocess
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -34,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.emergency_alert import EmergencyAlert
 from app.models.station import Station
+from app.services import eas_tones
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +69,7 @@ def duration_of(data: bytes) -> float | None:
     """Length in seconds, from the decoded audio (ffprobe on a pipe cannot tell an MP3's
     length), or None when it cannot be read."""
     try:
-        proc = subprocess.run(
-            ["ffmpeg", "-v", "error", "-i", "pipe:0", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1"],
-            input=data, capture_output=True, timeout=60,
-        )
-        seconds = len(proc.stdout) / 16000.0
+        seconds = len(eas_tones.decode(data)) / eas_tones.RATE
         return seconds if seconds > 0.05 else None
     except Exception:
         return None

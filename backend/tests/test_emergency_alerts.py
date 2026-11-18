@@ -3,7 +3,6 @@ the log (wiki/emergency-alerts.md). The engine itself is tested in the harness
 (scenario emergency_alert_*)."""
 
 import base64
-import subprocess
 import uuid
 
 import pytest
@@ -18,34 +17,14 @@ TOKEN = "emergency-test-token"
 PLAYOUT = "playout-test-token"
 
 
-def _mp3(expr: str, seconds: float = 3.0) -> bytes:
-    return subprocess.run(
-        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"aevalsrc={expr}:s=8000:d={seconds}",
-         "-f", "mp3", "pipe:1"], capture_output=True, check=True).stdout
-
-
-def speech_like() -> bytes:
-    # A voice-like sound: a 140 Hz buzz with harmonics, shaped by syllables
-    return _mp3("0.3*sin(2*PI*140*t)*(0.6+0.4*sin(2*PI*4*t))+0.15*sin(2*PI*420*t)+0.1*sin(2*PI*1100*t)")
-
-
-def attention_signal() -> bytes:
-    return _mp3("0.4*sin(2*PI*853*t)+0.4*sin(2*PI*960*t)")
-
-
-def same_burst() -> bytes:
-    """AFSK at 520.83 baud, mark 2083.3 Hz and space 1562.5 Hz, random bits: a SAME burst."""
+def _wav(samples, rate: int) -> bytes:
+    """16-bit mono WAV, made without ffmpeg (the CI runner has none)."""
     import io
     import wave
 
     import numpy as np
 
-    rate, baud = 22050, 520.83
-    bits = np.random.default_rng(7).integers(0, 2, 520)
-    per = rate / baud
-    freqs = np.repeat(np.where(bits == 1, 2083.3, 1562.5), int(per) + 1)[: int(len(bits) * per)]
-    phase = 2 * np.pi * np.cumsum(freqs) / rate
-    pcm = (0.6 * np.sin(phase) * 32767).astype(np.int16)
+    pcm = (np.clip(samples, -1, 1) * 32767).astype(np.int16)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
@@ -53,6 +32,41 @@ def same_burst() -> bytes:
         w.setframerate(rate)
         w.writeframes(pcm.tobytes())
     return buf.getvalue()
+
+
+def _t(seconds: float = 3.0, rate: int = 16000):
+    import numpy as np
+
+    return np.arange(int(seconds * rate)) / rate
+
+
+def speech_like() -> bytes:
+    # A voice-like sound: a 140 Hz buzz with harmonics, shaped by syllables
+    import numpy as np
+
+    t = _t()
+    pi2 = 2 * np.pi
+    return _wav(0.3 * np.sin(pi2 * 140 * t) * (0.6 + 0.4 * np.sin(pi2 * 4 * t))
+                + 0.15 * np.sin(pi2 * 420 * t) + 0.1 * np.sin(pi2 * 1100 * t), 16000)
+
+
+def attention_signal() -> bytes:
+    import numpy as np
+
+    t = _t()
+    return _wav(0.4 * np.sin(2 * np.pi * 853 * t) + 0.4 * np.sin(2 * np.pi * 960 * t), 16000)
+
+
+def same_burst() -> bytes:
+    """AFSK at 520.83 baud, mark 2083.3 Hz and space 1562.5 Hz, random bits: a SAME burst."""
+    import numpy as np
+
+    rate, baud = 22050, 520.83
+    bits = np.random.default_rng(7).integers(0, 2, 520)
+    per = rate / baud
+    freqs = np.repeat(np.where(bits == 1, 2083.3, 1562.5), int(per) + 1)[: int(len(bits) * per)]
+    phase = 2 * np.pi * np.cumsum(freqs) / rate
+    return _wav(0.6 * np.sin(phase), rate)
 
 
 @pytest.fixture(autouse=True)
@@ -103,7 +117,7 @@ def test_tone_check_finds_eas_signals_and_passes_speech():
 @pytest.mark.asyncio
 async def test_device_needs_the_emergency_token(client, db_session):
     await _station(db_session)
-    files = {"file": ("a.mp3", speech_like(), "audio/mpeg")}
+    files = {"file": ("a.wav", speech_like(), "audio/wav")}
     r = await client.post("/api/v1/emergency/device/activate", files=files)
     assert r.status_code == 403
     r = await client.post("/api/v1/emergency/device/activate", files=files, headers={"X-Emergency-Token": "wrong"})
@@ -115,7 +129,7 @@ async def test_device_api_off_when_no_token_is_set(client, db_session, monkeypat
     monkeypatch.setattr(settings, "EMERGENCY_API_TOKEN", "")
     await _station(db_session)
     r = await client.post("/api/v1/emergency/device/activate", headers={"X-Emergency-Token": ""},
-                          files={"file": ("a.mp3", speech_like(), "audio/mpeg")})
+                          files={"file": ("a.wav", speech_like(), "audio/wav")})
     assert r.status_code == 403
 
 
@@ -127,7 +141,7 @@ async def test_device_alert_goes_to_every_engine_station_with_tones(client, db_s
     basic = base64.b64encode(f"eas:{TOKEN}".encode()).decode()
     r = await client.post(
         "/api/v1/emergency/device/activate", headers={"Authorization": f"Basic {basic}"},
-        files={"file": ("rmt.mp3", attention_signal(), "audio/mpeg")}, data={"kind": "rmt"},
+        files={"file": ("rmt.wav", attention_signal(), "audio/wav")}, data={"kind": "rmt"},
     )
     assert r.status_code == 201, r.text
     body = r.json()
@@ -148,7 +162,7 @@ async def test_staff_test_refuses_eas_tones(client, db_session, auth_headers, _s
     s = await _station(db_session)
     for clip in (attention_signal(), same_burst()):
         r = await client.post("/api/v1/emergency/activate", headers=auth_headers,
-                              files={"file": ("x.mp3", clip, "audio/mpeg")}, data={"station_ids": str(s.id)})
+                              files={"file": ("x.wav", clip, "audio/wav")}, data={"station_ids": str(s.id)})
         assert r.status_code == 422
         assert "11.45" in r.json()["detail"]
     assert _setup["sent"] == []
@@ -160,9 +174,9 @@ async def test_staff_test_refuses_eas_tones(client, db_session, auth_headers, _s
 async def test_staff_must_name_stations_and_be_a_manager(client, db_session, auth_headers):
     await _station(db_session)
     r = await client.post("/api/v1/emergency/activate", headers=auth_headers,
-                          files={"file": ("x.mp3", speech_like(), "audio/mpeg")})
+                          files={"file": ("x.wav", speech_like(), "audio/wav")})
     assert r.status_code == 422
-    r = await client.post("/api/v1/emergency/activate", files={"file": ("x.mp3", speech_like(), "audio/mpeg")},
+    r = await client.post("/api/v1/emergency/activate", files={"file": ("x.wav", speech_like(), "audio/wav")},
                           data={"station_ids": "all"})
     assert r.status_code in (401, 403)
 
@@ -182,7 +196,7 @@ async def test_engine_reports_make_the_log_and_notify(client, db_session, auth_h
     s = await _station(db_session)
     _engine(monkeypatch, s)
     r = await client.post("/api/v1/emergency/activate", headers=auth_headers,
-                          files={"file": ("t.mp3", speech_like(), "audio/mpeg")},
+                          files={"file": ("t.wav", speech_like(), "audio/wav")},
                           data={"station_ids": str(s.id), "title": "Test of the override"})
     assert r.status_code == 201, r.text
     alert_id = r.json()["alerts"][0]["id"]
@@ -233,7 +247,7 @@ async def test_stop_tells_the_engine(client, db_session, auth_headers, monkeypat
     s = await _station(db_session)
     _engine(monkeypatch, s)
     r = await client.post("/api/v1/emergency/activate", headers=auth_headers,
-                          files={"file": ("t.mp3", speech_like(), "audio/mpeg")}, data={"station_ids": str(s.id)})
+                          files={"file": ("t.wav", speech_like(), "audio/wav")}, data={"station_ids": str(s.id)})
     alert_id = r.json()["alerts"][0]["id"]
     r = await client.post(f"/api/v1/emergency/{alert_id}/stop", headers=auth_headers)
     assert r.status_code == 200 and r.json()["status"] == "cancelled"
@@ -250,7 +264,7 @@ async def test_engine_not_answering_is_a_failure_and_pushes(client, db_session, 
         return False
     monkeypatch.setattr(playout_engine, "_command", dead)
     r = await client.post("/api/v1/emergency/activate", headers=auth_headers,
-                          files={"file": ("t.mp3", speech_like(), "audio/mpeg")}, data={"station_ids": str(s.id)})
+                          files={"file": ("t.wav", speech_like(), "audio/wav")}, data={"station_ids": str(s.id)})
     assert r.status_code == 201
     assert r.json()["failed"] == 1 and r.json()["alerts"][0]["status"] == "failed"
     assert any("FAILED" in t for t, _, _ in _setup["pushes"])
@@ -266,7 +280,7 @@ async def test_browser_station_gets_the_alert_over_its_socket(client, db_session
         got.append((station_id, message))
     monkeypatch.setattr(manager, "broadcast_to_station", capture)
     r = await client.post("/api/v1/emergency/activate", headers=auth_headers,
-                          files={"file": ("t.mp3", speech_like(), "audio/mpeg")}, data={"station_ids": str(s.id)})
+                          files={"file": ("t.wav", speech_like(), "audio/wav")}, data={"station_ids": str(s.id)})
     assert r.status_code == 201
     assert got and got[0][1]["type"] == "emergency_alert" and got[0][1]["data"]["url"]
     # Its audio is served for the players

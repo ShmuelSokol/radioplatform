@@ -23,7 +23,35 @@ import numpy as np
 RATE = 8000
 
 
-def _decode(data: bytes) -> np.ndarray:
+def _decode_wav(data: bytes) -> np.ndarray | None:
+    """Plain 16-bit PCM WAV read without ffmpeg (None for anything else)."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return None
+    import io
+    import wave
+
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            if w.getsampwidth() != 2:
+                return None
+            rate, channels = w.getframerate(), w.getnchannels()
+            pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0
+    except (wave.Error, EOFError):
+        return None
+    if channels > 1:
+        pcm = pcm[: len(pcm) - len(pcm) % channels].reshape(-1, channels).mean(axis=1)
+    if rate != RATE and len(pcm):
+        # Linear resampling: plenty for a band check (the bands sit far below 4 kHz)
+        n = int(len(pcm) * RATE / rate)
+        pcm = np.interp(np.arange(n) * rate / RATE, np.arange(len(pcm)), pcm)
+    return pcm
+
+
+def decode(data: bytes) -> np.ndarray:
+    """Mono samples at RATE. WAV is read directly; anything else goes through ffmpeg."""
+    pcm = _decode_wav(data)
+    if pcm is not None:
+        return pcm
     proc = subprocess.run(
         ["ffmpeg", "-v", "error", "-i", "pipe:0", "-ac", "1", "-ar", str(RATE), "-f", "s16le", "pipe:1"],
         input=data, capture_output=True, timeout=60,
@@ -72,7 +100,7 @@ def find_in_samples(x: np.ndarray, rate: int = RATE) -> dict:
 
 
 def find(data: bytes) -> dict:
-    found = find_in_samples(_decode(data))
+    found = find_in_samples(decode(data))
     found["has_tones"] = bool(found["attention_at"] or found["same_at"])
     return found
 
