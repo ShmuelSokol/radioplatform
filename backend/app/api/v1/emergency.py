@@ -181,6 +181,10 @@ async def staff_activate(
 async def _stop(db: AsyncSession, alert_id: uuid.UUID, by: str) -> dict:
     alert = await db.get(EmergencyAlert, alert_id)
     if alert is None:
+        # Shown on air before its row is saved (the send is still waiting for the engine):
+        # Stop works then too
+        if await emergency_alerts.stop_unsaved(str(alert_id), by):
+            return {"ok": True, "status": "cancelled"}
         raise NotFoundError("Alert not found")
     ok = await emergency_alerts.stop(db, alert, by)
     await db.commit()

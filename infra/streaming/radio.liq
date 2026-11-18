@@ -108,11 +108,17 @@ given = ref([])
 # A host is on air and the stream is quiet (see the live lane below). Sent with every
 # ask, so a backend that restarted while the show ended still learns of it.
 live_on = ref(false)
+# "Live on" has come but the stream is not quiet yet: the music plays on until the
+# show's audio is here (see /live). 0 = not waiting, otherwise when it was asked.
+live_asked = ref(0.)
+def live_wanted() =
+  live_on() or live_asked() > 0.
+end
 def next_request() =
   try
     handed = string.concat(separator=",", given())
     resp = http.get(headers=auth_headers, timeout=8.,
-                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}&live=#{if live_on() then 1 else 0 end}")
+                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}&live=#{if live_wanted() then 1 else 0 end}")
     if resp.status_code == 200 then
       let json.parse (data : {uri : string, entry_id : string}) = resp
       log.important("next: backend gave entry #{data.entry_id}")
@@ -865,14 +871,41 @@ end)
 # until that item is loaded, so no emergency music fills in.
 control("/live", fun (req) -> begin
   let json.parse (body : {on : bool}) = req.body()
-  if body.on and not live_on() then
-    log.important("live: show starts")
-    go_live()
+  if body.on and not live_wanted() then
+    log.important("live: show starts; the music plays on until its audio is here")
+    live_asked := time()
     live_feed.start()
+    # Going quiet at once left the stream silent until the feed had connected and
+    # buffered: 2 to 3.5 s of dead air at every take-over (KBR Jerusalem 17:34Z
+    # 2026-11-18). So: quiet when the feed is ready, or after 5 s whatever is there
+    # (a show with no sound must still not have music under it).
+    def rec wait() =
+      if live_asked() > 0. then
+        # Also when the song on air is about to end: the item loaded meanwhile is the
+        # one meant for after the show, and its change (crossfade) would put it on
+        # air, to be cut a moment later and counted as aired. A song's end is a fine
+        # moment to take over; a second or two of quiet then is the lesser fault.
+        left = main.remaining()
+        ending = on_air_lane() == "main" and left >= 0. and left < 2.
+        if live_feed.is_ready() or ending or time() - live_asked() > 5. then
+          log.important("live: the stream is the show's after #{time() - live_asked()} s (audio ready: #{live_feed.is_ready()}, song ending: #{ending})")
+          live_asked := 0.
+          go_live()
+        else
+          thread.run(delay=0.05, wait)
+        end
+      end
+    end
+    wait()
     # The item that follows the show loads during it: the backend sends /flush right
     # after this (it takes back a track pre-loaded before the show), and /flush asks
     # again under the live lane. (A second ask from here crossed that one with a slow
     # backend: two items loaded, and the backend flushed both at the show's end.)
+  elsif not body.on and live_asked() > 0. then
+    # Over before the stream ever went quiet for it: the music never stopped
+    log.important("live: show ended before it was heard")
+    live_asked := 0.
+    live_feed.stop()
   elsif not body.on and live_on() then
     log.important("live: show ended")
     live_release := time() + 12.
@@ -894,7 +927,7 @@ control("/flush", fun (_) -> begin
   # timed group whose shiur had just been paused (harness, 2026-11-18). Ask now, so the
   # item is loaded by then. On air, the lane asks by itself.
   # During a live show too: the item that follows the show loads under the live lane.
-  if on_air_lane() != "main" or live_on() then
+  if on_air_lane() != "main" or live_wanted() then
     thread.run(fast=false, {ignore(main_requests.fetch())})
   end
   '{"ok":true}'
