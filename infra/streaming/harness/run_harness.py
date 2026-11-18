@@ -1186,6 +1186,22 @@ async def sc_speech_never_overlaps(h: Harness) -> None:
     both = both_audible(h, t_song2 - 4, t_song2 + 4, freq["song5"], freq["song2"])
     h.check(name, 0.4 <= both <= 1.6, f"song into song overlaps {both:.1f} s (setting: 1 s)")
 
+    # Shmuel 2026-11-17, "Song ends first, then speech": a song is not crossfaded into
+    # a spoken item; it fades out and the item starts after it, with no gap
+    await h.clear_pending()
+    await h.queue([("song1", dict(auto)), ("weather", dict(auto)), ("song3", dict(auto))])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    t1 = await h.wait_on_air("song1", 30)
+    tw = await h.wait_on_air("weather", 40 + 30) if t1 is not None else None
+    if tw is None:
+        h.check(name, False, "the spoken item after the song never went on air")
+    else:
+        await asyncio.sleep(4)
+        both = both_audible(h, tw - 4, tw + 3, freq["song1"], freq["weather"])
+        h.check(name, both <= 0.1, f"a song and the spoken item after it heard together for {both:.1f} s")
+        gap, _ = longest_silence([w for w in h.heard(tw - 4, tw + 3)])
+        h.check(name, gap <= 1.0, f"longest gap between the song and the spoken item {gap:.1f} s")
+
     # The station's song crossfade at 0: no overlap between songs either
     await h.set_config(crossfade_seconds=0)
     try:
