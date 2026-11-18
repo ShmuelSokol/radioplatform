@@ -315,3 +315,4 @@ UPDATE 2026-11-18 hourly-slots.md play log: a resumed item's row starts when it 
 INGEST 2026-11-18 operator-actions.md Next waits in the engine for the next file (skip_wait 12 s, skip_waiting), and a waiting Next is handed a song even inside the hold-before-hard-item window; harness next_while_held, operator_next_slow_file without emergency music
 UPDATE 2026-11-18 streaming-architecture.md start reports: an ordinary /started is recorded at the engine's own time (`at`, believed up to 60 s old), not when the report got through
 INGEST 2026-11-18 streaming-architecture.md music lane stays muted until the next item starts after a timed group or live show; /flush makes an idle lane ask again at once (slow backend: old-song fragment, emergency music)
+UPDATE 2026-11-18 streaming-architecture.md start report: the queue top-up after an engine start runs in the background (_replenish_soon), not inside /started (it took 3 to 9 s on 15 of 36 reports)
