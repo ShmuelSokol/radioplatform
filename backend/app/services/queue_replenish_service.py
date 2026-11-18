@@ -343,7 +343,7 @@ class QueueReplenishService:
         Time checks queued before the region's clip was uploaded (or before the
         station had a region) are moved to the clip it should play now.
         """
-        from app.services.weather_spot_service import find_time_clip_asset
+        from app.services.weather_spot_service import clip_minute, find_time_clip_asset
 
         rows = await self.db.execute(
             select(QueueEntry, Asset)
@@ -355,15 +355,16 @@ class QueueReplenishService:
             )
         )
         changed = 0
-        best: dict[str, Asset | None] = {}
+        best: dict[tuple[str, int], Asset | None] = {}
         for entry, asset in rows.all():
             meta = asset.metadata_extra if isinstance(asset.metadata_extra, dict) else {}
             hour = meta.get("time_of_day")
             if not hour:
                 continue  # a generated per-slot clip, not an uploaded set
-            if hour not in best:
-                best[hour] = await find_time_clip_asset(self.db, int(hour), region)
-            clip = best[hour]
+            key = (hour, clip_minute(asset))
+            if key not in best:
+                best[key] = await find_time_clip_asset(self.db, int(hour), region, key[1])
+            clip = best[key]
             if clip is not None and clip.id != asset.id:
                 entry.asset_id = clip.id
                 changed += 1
@@ -379,7 +380,7 @@ class QueueReplenishService:
         hour everywhere. The time check and the weather queued with it (same
         time) are removed, and the hourly pass queues the right ones again.
         """
-        from app.services.weather_spot_service import clip_hour
+        from app.services.weather_spot_service import clip_hour, clip_minute
 
         rows = await self.db.execute(
             select(QueueEntry.preempt_at, Asset)
@@ -396,7 +397,8 @@ class QueueReplenishService:
         for at, asset in rows.all():
             at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
             hour = clip_hour(asset)
-            if hour is not None and hour != at.astimezone(zone).hour:
+            local = at.astimezone(zone)
+            if hour is not None and (hour != local.hour or clip_minute(asset) != local.minute):
                 wrong.add(at)
         if not wrong:
             return 0
@@ -1210,7 +1212,8 @@ class QueueReplenishService:
         # hour, so once ads were scheduled days ahead, every hour looked "already
         # scheduled" and time/weather announcements silently stopped being created.
         result = await self.db.execute(
-            select(QueueEntry.preempt_at)
+            select(QueueEntry.preempt_at, Asset.category)
+            .join(Asset, Asset.id == QueueEntry.asset_id)
             .where(
                 QueueEntry.station_id == self.station_id,
                 QueueEntry.status == "pending",
@@ -1226,7 +1229,15 @@ class QueueReplenishService:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.replace(second=0, microsecond=0)
 
-        existing_preempts = {_norm(row[0]) for row in result.all() if row[0]}
+        existing_rows = [(_norm(at), category) for at, category in result.all() if at]
+        existing_preempts = {at for at, _ in existing_rows}
+        # A half hour that already has its weather can still lack its time check
+        # (switched on later, or the clip recorded later)
+        timed_checks = {at for at, category in existing_rows if category == "time_announcement"}
+        from app.services.weather_spot_service import find_time_clip_asset, half_hour_time_check
+
+        half_time_on = half_hour_time_check(self.automation_config)
+        half_clips: dict[int, Asset | None] = {}
 
         weather_interval = int(self.automation_config.get("weather_interval_minutes", 30) or 0)
         half_hour_weather = self.automation_config.get("weather_enabled") and weather_interval == 30
@@ -1246,13 +1257,29 @@ class QueueReplenishService:
         for hour_boundary in local_hour_marks(now, zone, 48):
             half_boundary = hour_boundary + timedelta(minutes=30)
             need_hour = hour_boundary not in existing_preempts and not off_air(hour_boundary)
-            need_half = (
-                half_hour_weather
-                and half_boundary > now
+            half_ok = (
+                half_boundary > now
                 and half_boundary.astimezone(zone).minute == 30
-                and half_boundary not in existing_preempts
                 and not off_air(half_boundary)
             )
+            need_half = half_ok and half_hour_weather and half_boundary not in existing_preempts
+            # The half-hour time check ("The time is 10:30 ..."), uploaded clips only
+            half_clip = None
+            if half_ok and half_time_on and half_boundary not in timed_checks:
+                local_hour = half_boundary.astimezone(zone).hour
+                if local_hour not in half_clips:
+                    half_clips[local_hour] = await find_time_clip_asset(self.db, local_hour, region, 30)
+                half_clip = half_clips[local_hour]
+            if half_clip is not None:
+                added = [self._timed_entry(half_clip, half_boundary, timing_for(half_boundary))]
+                if need_half:
+                    # its weather comes with it, right behind
+                    need_half = False
+                    weather = await self._half_hour_weather(slot_key_for(hour_boundary, zone), region)
+                    if weather is not None:
+                        added.append(self._timed_entry(weather, half_boundary, timing_for(half_boundary)))
+                await self._put_first(half_boundary, added)
+                logger.info("Scheduled :30 time check for %s", half_boundary.isoformat())
             if not need_hour and not need_half:
                 continue
 
@@ -1266,36 +1293,81 @@ class QueueReplenishService:
 
             if need_hour:
                 assets_to_insert = [a for a in [time_asset, weather_asset] if a is not None]
-                for asset in assets_to_insert:
-                    self.max_pos += 1
-                    self.db.add(QueueEntry(
-                        id=uuid.uuid4(),
-                        station_id=self.station_id,
-                        asset_id=asset.id,
-                        position=self.max_pos,
-                        status="pending",
-                        preempt_at=hour_boundary,  # ALL entries get preempt_at so weather follows time
-                        timing_mode=timing_for(hour_boundary),
-                    ))
+                # ALL entries get preempt_at so weather follows time
+                added_hour = [
+                    self._timed_entry(asset, hour_boundary, timing_for(hour_boundary))
+                    for asset in assets_to_insert
+                ]
                 if assets_to_insert:
+                    await self._put_first(hour_boundary, added_hour)
                     hours_scheduled += 1
                     logger.info("Scheduled time+weather for %s (slot %s)", hour_boundary.isoformat(), slot_key)
 
             # Half-hour weather refresh (weather_interval_minutes == 30)
             if need_half and weather_asset is not None:
-                self.max_pos += 1
-                self.db.add(QueueEntry(
-                    id=uuid.uuid4(),
-                    station_id=self.station_id,
-                    asset_id=weather_asset.id,
-                    position=self.max_pos,
-                    status="pending",
-                    preempt_at=half_boundary,
-                    timing_mode=timing_for(half_boundary),
-                ))
+                await self._put_first(
+                    half_boundary, [self._timed_entry(weather_asset, half_boundary, timing_for(half_boundary))]
+                )
                 logger.info("Scheduled :30 weather for %s", half_boundary.isoformat())
 
         logger.info("Scheduled hourly announcements for %d hours", hours_scheduled)
+
+    def _timed_entry(self, asset: Asset, at: datetime, timing_mode: str) -> QueueEntry:
+        """A new automatic time or weather entry due at `at`, at the end of the queue."""
+        self.max_pos += 1
+        entry = QueueEntry(
+            id=uuid.uuid4(),
+            station_id=self.station_id,
+            asset_id=asset.id,
+            position=self.max_pos,
+            status="pending",
+            preempt_at=at,
+            timing_mode=timing_mode,
+        )
+        self.db.add(entry)
+        return entry
+
+    async def _half_hour_weather(self, slot_key: str, region: str) -> Asset | None:
+        from app.services.weather_spot_service import get_or_create_weather_spot_assets
+
+        try:
+            _, weather = await get_or_create_weather_spot_assets(self.db, slot_key, region)
+        except Exception:
+            logger.warning("Failed to get weather for slot %s", slot_key, exc_info=True)
+            return None
+        return weather
+
+    async def _put_first(self, at: datetime, added: list[QueueEntry]) -> None:
+        """Make the new time check (and weather) play first in the group due at `at`.
+
+        Entries due at the same minute play in position order. A block or sponsorship
+        queued earlier for that minute has a lower position than a time check added
+        now, so it would air before "The time is 10:30". The group's positions are
+        handed out again: the new entries take the lowest, the others follow in
+        their old order. Positions outside the group are not touched.
+        """
+        if not added:
+            return
+        await self.db.flush()
+        ids = {e.id for e in added}
+        group = (
+            await self.db.execute(
+                select(QueueEntry)
+                .where(
+                    QueueEntry.station_id == self.station_id,
+                    QueueEntry.status == "pending",
+                    QueueEntry.preempt_at == at,
+                )
+                .order_by(QueueEntry.position)
+            )
+        ).scalars().all()
+        others = [e for e in group if e.id not in ids]
+        if not others:
+            return
+        slots = sorted(e.position for e in group)
+        for entry, position in zip(added + others, slots):
+            entry.position = position
+        await self.db.flush()
 
     async def _schedule_ad_slots(self) -> None:
         """Schedule sponsor ad at :15, :30, :45 of every hour (soft preempt).

@@ -7,6 +7,7 @@
  * the screen says, on a desktop and a phone size. Part C is the station's settings.
  * Part D (ONLY=desk): Cough and Mute, the dump log and its recording, Put On Air while
  * the delay is not safe, and with PLAYOUT_TOKEN the engine's copy of the show (live.mp3).
+ * Part G (ONLY=record): the show is recorded and appears in Archives as a draft.
  * Part F (ONLY=callers): the caller desk (the caller's topic and notes, Hold, Next caller).
  * Part H (ONLY=carts): carts on the Host Console (jingles played into the show).
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
@@ -712,6 +713,60 @@ function hostMic(showId, token) {
       } finally {
         await browser.close();
       }
+    }
+    // ---------- Part G: the show is recorded and lands in Archives as a draft ----------
+    if (!ONLY || ONLY === 'record') {
+      await setConfig({ live_delay_seconds: 3, live_dump_seconds: 0, live_host_gone_seconds: 0, live_record_shows: true });
+      const title = `Delay test G ${Date.now() % 100000}`;
+      const show = await newShow(title);
+      await api('POST', `/live-shows/${show.id}/start`);
+      const h = hostMic(show.id, token);
+      await h.ready;
+      await sleep(12000);
+      h.say(1000);                       // the "curse"
+      await sleep(1500);
+      const d = await api('POST', `/live-shows/${show.id}/dump`, {});
+      h.say(440);
+      await sleep(16000);
+      await api('POST', `/live-shows/${show.id}/end`);
+      h.close();
+      let found = null;
+      for (let i = 0; i < 30 && !found; i++) {
+        await sleep(1000);
+        const list = (await api('GET', `/archives?drafts=true&limit=100&station_id=${STATION}`)).json;
+        found = (list.archives || list.items || []).find((a) => a.title === title) || null;
+      }
+      check('G1 a recording of the show is in Archives after it ends', !!found, found ? `${found.duration_seconds} s` : 'none after 30 s');
+      if (found) {
+        check('G2 it is a draft (not public) with the show\'s length as listeners heard it', found.is_published === false && found.duration_seconds >= 22 && found.duration_seconds <= 30 && found.live_show_id === show.id, JSON.stringify({ p: found.is_published, d: found.duration_seconds }));
+        const pub = (await (await fetch(`${API}/archives?limit=100&station_id=${STATION}`)).json());
+        check('G3 listeners do not see the draft', !(pub.archives || pub.items || []).some((a) => a.title === title));
+        check('G4 the Dump during the show worked (so the recording has no curse: unit test checks the audio)', d.status === 200 && d.json.dumped_seconds > 1, JSON.stringify(d.json && d.json.dumped_seconds));
+        const browser = await chromium.launch();
+        try {
+          const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+          await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+          await page.goto(`${SITE}/admin/archives`);
+          const row = page.locator('tr').filter({ hasText: title }).last();
+          const seen = await page.getByText(title).first().waitFor({ timeout: 15000 }).then(() => true, () => false);
+          check('G5 the Archives page lists it as Draft', seen && /Draft/.test(await row.innerText().catch(() => '')), seen ? (await row.innerText()).replace(/\n/g, ' | ').slice(0, 120) : 'not listed');
+          if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'archives-draft.png'), fullPage: true }); }
+        } finally { await browser.close(); }
+        await api('DELETE', `/archives/${found.id}`);
+      }
+      // Switched off for the station: no recording
+      await setConfig({ live_delay_seconds: 0, live_host_gone_seconds: 0, live_record_shows: false });
+      const title2 = `Delay test G off ${Date.now() % 100000}`;
+      const show2 = await newShow(title2);
+      await api('POST', `/live-shows/${show2.id}/start`);
+      const h2 = hostMic(show2.id, token);
+      await h2.ready;
+      await sleep(23000);
+      await api('POST', `/live-shows/${show2.id}/end`);
+      h2.close();
+      await sleep(5000);
+      const list2 = (await api('GET', `/archives?drafts=true&limit=100&station_id=${STATION}`)).json;
+      check('G6 "Record every live show" off: nothing is recorded', !(list2.archives || list2.items || []).some((a) => a.title === title2));
     }
   } finally {
     await endAll();

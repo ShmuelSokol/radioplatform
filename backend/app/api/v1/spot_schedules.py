@@ -34,11 +34,12 @@ from app.schemas.spot_schedule import (
     UnplacedSpot,
 )
 from app.services.spot_schedule_service import (
-    DEFAULT_TIMING,
     plan_for_station,
     reconcile_spot_slots,
     room_warnings,
+    timing_choices,
 )
+from app.services.weather_spot_service import half_hour_time_check
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,17 @@ class TimingDefaults(BaseModel):
     station_id: UUID
     on_the_hour: Literal["hard", "soft"]
     other: Literal["hard", "soft"]
+    # Left out (an older page): the station keeps what it has
+    half_hour: Literal["hard", "soft"] | None = None
+    half_hour_time_check: bool | None = None
+
+
+def _timing_out(config: dict | None) -> dict:
+    config = config or {}
+    return {
+        **timing_choices(config.get("spot_timing")),
+        "half_hour_time_check": half_hour_time_check(config),
+    }
 
 
 @router.get("/timing-defaults")
@@ -260,8 +272,7 @@ async def get_timing_defaults(
     _=Depends(require_manager),
 ):
     station = await _get_or_404(db, Station, station_id, "Station")
-    saved = (station.automation_config or {}).get("spot_timing") or {}
-    return {**DEFAULT_TIMING, **{k: v for k, v in saved.items() if k in DEFAULT_TIMING}}
+    return _timing_out(station.automation_config)
 
 
 @router.put("/timing-defaults")
@@ -270,16 +281,59 @@ async def set_timing_defaults(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_manager),
 ):
-    """How a sponsor spot honours its time when its own schedule does not say."""
+    """How a sponsor spot (and the automatic time and weather) honours its time when
+    its own schedule does not say: on the hour, on the half hour, and the rest."""
     station = await _get_or_404(db, Station, data.station_id, "Station")
     config = dict(station.automation_config or {})
-    config["spot_timing"] = {"on_the_hour": data.on_the_hour, "other": data.other}
+    saved = dict(config.get("spot_timing") or {})
+    saved.update({"on_the_hour": data.on_the_hour, "other": data.other})
+    if data.half_hour is not None:
+        saved["half_hour"] = data.half_hour
+    config["spot_timing"] = saved
+    if data.half_hour_time_check is not None:
+        config["half_hour_time_check"] = data.half_hour_time_check
     station.automation_config = config
     await db.flush()
+    await _retime_announcements(db, station)
     later = await _refresh_queues(db, {station.id})
     await db.commit()
     refresh_in_background(later)
-    return config["spot_timing"]
+    return _timing_out(config)
+
+
+async def _retime_announcements(db: AsyncSession, station: Station) -> None:
+    """Give the time checks and weather already queued the station's new choice, so
+    switching the half hour to "on the second" counts from the next half hour, not
+    from 48 hours on. With HS off they stay soft (HS on hands out the timing again)."""
+    from app.models.queue_entry import QueueEntry
+    from app.services.spot_schedule_service import default_timing
+    from app.services.station_modes import hard_start_on
+    from app.services.weather_spot_service import station_announcement_zone
+
+    if not hard_start_on(station):
+        return
+    zone = await station_announcement_zone(db, station.id)
+    choices = (station.automation_config or {}).get("spot_timing")
+    rows = (
+        await db.execute(
+            select(QueueEntry)
+            .join(Asset, Asset.id == QueueEntry.asset_id)
+            .where(
+                QueueEntry.station_id == station.id,
+                QueueEntry.status == "pending",
+                QueueEntry.preempt_at.isnot(None),
+                (QueueEntry.source.is_(None)) | (QueueEntry.source == "auto"),
+                Asset.category.in_(("time_announcement", "weather_spot")),
+            )
+        )
+    ).scalars().all()
+    for entry in rows:
+        at = entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=UTC)
+        mode = default_timing(at.astimezone(zone).minute, choices)
+        if entry.timing_mode != mode:
+            entry.timing_mode = mode
+            entry.hard_by = None
+    await db.flush()
 
 
 @router.post("", response_model=SpotScheduleOut, status_code=201)

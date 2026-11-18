@@ -24,8 +24,19 @@ Same pattern as his supplier-item-database project (`wiki/bug-autofix.md` there)
   report carries `client_context.screenshot` = {how, failed: [reason per way],
   picked_by_person}, and the issue body says "None came with this report. Why: ..." when
   there is no picture. A scrolled page is moved with margins, not a transform (a transform
-  carried the fixed top bar away). Tests: `frontend/e2e/webkit/bug-screenshot-webkit.py`
-  (`window.__kbrShotSkip = ['html2canvas']` switches one way off), `e2e/admin-misc.mjs` V2-99.
+  carried the fixed top bar away).
+  Follow-ups from Shmuel's iPhone (2026-11-18): Safari drew the qnet inset box-shadow bevels
+  shifted in the copy, so on Safari (`IS_SAFARI`, or `window.__kbrShotBevels = true` in tests)
+  each side's outermost bevel line is set on the page as a border (padding reduced to match)
+  for the moment of the picture and put back after; changing the copy's styles in
+  `onCloneEachNode` has no effect (modern-screenshot rebuilds them), background stripes made it
+  take 8 s. Selects are copied with their chosen option (attributes do survive). Tap the
+  preview to see it full screen (tap again to zoom; pinch; Close). Every 🐞 carries
+  `data-bug-trigger`; a click where a 🐞 shows is taken by the reporter in the capture phase
+  even when a dialog's backdrop lies over it, and the dialog stays open, so it is in the
+  picture. Known small differences of the copy: placeholder text dark, a two-line clamp
+  without "...", Chromium draws scroll bars into it. Tests: `frontend/e2e/webkit/bug-screenshot-webkit.py`
+  (`window.__kbrShotSkip = ['html2canvas']` switches one way off; compares each picture with WebKit's own screenshot), `e2e/bug-screenshot-faithful.mjs` (Chromium, capture vs real screenshot), `e2e/bug-over-dialogs.mjs` (🐞 over each kind of dialog, full-screen view), `e2e/admin-misc.mjs` V2-99.
 - **Server** (`backend/app/core/log_buffer.py`): the app keeps its last 3000 log lines
   and 2000 requests in memory; each line carries the request id. A report stores the
   last 15 minutes of both (`server_log`). Requests that fail (5xx) or take > 3 s are

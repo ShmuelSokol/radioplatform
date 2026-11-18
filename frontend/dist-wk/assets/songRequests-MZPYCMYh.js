@@ -1,0 +1,1 @@
+import{a as s}from"./index-BHNZfaQS.js";const o=e=>s.post("/song-requests",e).then(t=>t.data),g=e=>s.get("/song-requests",{params:e}).then(t=>t.data),u=(e,t)=>s.patch(`/song-requests/${e}`,t).then(a=>a.data),q=e=>s.delete(`/song-requests/${e}`),d=e=>s.get("/song-requests/analytics/top-requested",{params:e}).then(t=>t.data);export{d as a,q as d,g,o as s,u};
