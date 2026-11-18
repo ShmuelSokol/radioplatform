@@ -127,6 +127,9 @@ class EngineState:
     # Entry handed to the engine during a live show, to start when the show ends: the
     # tick's flush of a track pre-loaded before the show leaves this one alone
     cued_for_after_show: str | None = None
+    # Soft timed items that came due during the show and for which the engine was
+    # already asked to choose the after-show item again
+    after_show_recued: set[str] = field(default_factory=set)
     # The engine said hello and has put nothing on air since: the entry we still show as
     # playing is not on air any more (it was cut by the restart), so the hold rule must
     # not wait for its end
@@ -389,6 +392,42 @@ async def engine_timed_drop(station_id, entry_ids: list[str]) -> bool:
     """Drop these entries from the engine's timed lane: any of them that is still waiting
     there is skipped the moment it would start (silence left over after a blackout)."""
     return await _command("/timed_drop", {"ids": list(entry_ids)}, station_id=station_id)
+
+
+async def take_back_timed(station_id, entry_ids: list[str]) -> None:
+    """These entries are soft again (they wait for a live show to end): forget that the
+    timed lane has them and tell the engine to skip them there. They air from the queue."""
+    state = get_state(station_id)
+    for key in entry_ids:
+        state.timed_sent.discard(key)
+    await engine_timed_drop(station_id, list(entry_ids))
+
+
+async def _soft_items_during_show(db: AsyncSession, station, state: EngineState, now: datetime) -> None:
+    """Each pass while a live show has the station: sponsorships that come due go back
+    to waiting (live_show_service.soft_items_wait_for_show), and the first soft item
+    whose time has come becomes the item that follows the show. The engine pre-loaded
+    that item when the show began (the song or shiur the show paused); left alone, a
+    sponsorship due under the host waited behind the whole rest of a shiur."""
+    from app.models.queue_entry import soft_timed
+    from app.services.live_show_service import soft_items_wait_for_show
+
+    waiting = await soft_items_wait_for_show(db, station.id, now)
+    if waiting:
+        await db.commit()
+        await take_back_timed(station.id, waiting)
+    due = [str(i) for i in (await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station.id, QueueEntry.status == "pending",
+            QueueEntry.preempt_at.isnot(None), QueueEntry.preempt_at <= now, soft_timed(),
+        ).order_by(QueueEntry.preempt_at, QueueEntry.position).limit(20)
+    )).scalars().all()]
+    if not due or state.cued_for_after_show in due or set(due) <= state.after_show_recued:
+        return
+    # Once for each item: one that may not air (a lapsed contract) is never handed
+    # out, and the engine must not be flushed for it on every pass
+    state.after_show_recued.update(due)
+    state.cued_for_after_show = None
 
 
 async def close_timed_lost_to_live_show(db: AsyncSession, station_id, now: datetime) -> list[str]:
@@ -1819,6 +1858,10 @@ async def tick(db: AsyncSession, station) -> None:
     # track would air during the show and be used up: drop it once (/next hands it
     # nothing while the show is on, so nothing is cued again)
     if (station.automation_config or {}).get("live_show_id"):
+        try:
+            await _soft_items_during_show(db, station, state, now)
+        except Exception:
+            logger.exception("Station %s: soft timed items during the live show", station_id)
         if state.cued_entry_id and state.cued_entry_id != state.cued_for_after_show:
             await engine_flush(station_id)
         # The stream goes quiet under the host. Sent again after an engine or backend
@@ -1831,6 +1874,7 @@ async def tick(db: AsyncSession, station) -> None:
         # was cut 0.9 s later (harness live_show_host_gone, 2026-11-18)
         return
     # The show is over (or we do not know what the engine was told): music again
+    state.after_show_recued.clear()
     await _tell_live(station_id, state, False)
 
     # 1. Hand hard-timed items (hourly ID, time, weather) to the engine ahead of time

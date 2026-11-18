@@ -111,6 +111,50 @@ def _aware(t):
 STALE_TIMED_AFTER = timedelta(minutes=2)
 
 
+async def soft_items_wait_for_show(db: AsyncSession, station_id, now: datetime) -> list[str]:
+    """Timed items that must not be lost to a live show go back to waiting (soft), so
+    they play when the show is over. Two kinds:
+
+    - a soft item that was made hard only to pause a shiur or story (`was_soft`): the
+      show took the air instead, and a hard item that comes due under the host is
+      closed when the show ends (Jerusalem 2026-11-18: a contracted sponsorship due at
+      19:15:00 turned hard at 19:14, the show took over at 19:14:49, and it never aired);
+    - a sponsorship that is hard by the station's timing choice, once its time has
+      come during the show.
+
+    Not an item the show itself is about to air over the delay (live_inserts). Returns
+    the ids changed; on an engine station the caller takes them out of the timed lane."""
+    from sqlalchemy import and_, or_
+
+    from app.models.queue_entry import QueueEntry
+    from app.services import live_inserts
+
+    rows = (await db.execute(
+        select(QueueEntry).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "pending",
+            QueueEntry.preempt_at.isnot(None),
+            QueueEntry.timing_mode == "hard",
+            or_(
+                QueueEntry.was_soft.is_(True),
+                and_(QueueEntry.source == "ad_slot", QueueEntry.preempt_at <= now),
+            ),
+        )
+    )).scalars().all()
+    changed = []
+    for entry in rows:
+        if str(entry.id) in live_inserts._preparing:
+            continue
+        entry.timing_mode = "soft"
+        entry.hard_by = None
+        changed.append(str(entry.id))
+    if changed:
+        await db.flush()
+        logger.info("Station %s: %d timed item(s) wait for the end of the live show: %s",
+                    station_id, len(changed), ", ".join(changed))
+    return changed
+
+
 async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None:
     """The host is on air: stop the item playing and queue it again first, to carry
     on from where it stopped when the show ends. Nothing plays meanwhile (dead-air
@@ -118,9 +162,18 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
     from sqlalchemy import update
 
     from app.models.play_log import PlayLog
-    from app.models.queue_entry import QueueEntry, aired_from, resume_source
+    from app.models.queue_entry import RESUME_PREFIX, QueueEntry, aired_from, resume_source
     from app.services import long_items
 
+    waiting = await soft_items_wait_for_show(db, station_id, now)
+    if waiting:
+        from app.config import settings
+        if settings.engine_drives(station_id):
+            try:
+                from app.services import playout_engine
+                await playout_engine.take_back_timed(station_id, waiting)
+            except Exception as e:
+                logger.warning("Station %s: could not take timed items back from the engine: %s", station_id, e)
     current = (await db.execute(
         select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
     )).scalars().first()
@@ -136,6 +189,20 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
         # time (the engine harness heard it come back after End, 2026-11-18)
         await _air_cut_item_over_the_delay(db, station_id, current, now)
         return
+    # An earlier plan to carry this item on is void: a timed group was about to pause
+    # it (long_items queued its second part), or an earlier show paused it and the part
+    # after that show was itself cut by this one. Left in the queue, each of them played
+    # after the show: a story's same minutes aired three times (Jerusalem, 2026-11-18)
+    from sqlalchemy import delete
+    await db.execute(
+        delete(QueueEntry)
+        .where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+            QueueEntry.asset_id == current.asset_id,
+            QueueEntry.source.like(f"{RESUME_PREFIX}%"),
+        )
+        .execution_options(synchronize_session=False)
+    )
     if at is None:
         return  # it was nearly over
     first = (await db.execute(
@@ -193,6 +260,8 @@ async def _resume_automation(db: AsyncSession, station_id, now: datetime) -> Non
 
     from app.models.queue_entry import QueueEntry, hard_timed
 
+    # Sponsorships whose time came during the show are not lost with the time checks
+    await soft_items_wait_for_show(db, station_id, now)
     await db.execute(
         update(QueueEntry)
         .where(

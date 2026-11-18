@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, and_, or_, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, and_, or_, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,6 +52,9 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Soft entries only: if the item on air is still playing at this time, fade it
     # and start (a soft start with a limit). None = wait for the item to finish.
     hard_by: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A soft entry made hard so it could pause a shiur or story on air (long_items).
+    # If a live show takes the station first, it goes back to waiting (live_show_service)
+    was_soft: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Automatic songs drawn from a schedule block's playlist: that block's id. When
     # unplayed songs are drawn again, the block's place in its playlist goes back
     # by as many, so the playlist carries on from the right step.

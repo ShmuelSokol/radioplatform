@@ -1725,3 +1725,93 @@ async def test_a_start_is_recorded_when_the_engine_started_it_not_when_the_repor
         started = row.started_at if row.started_at.tzinfo else row.started_at.replace(tzinfo=UTC)
         assert abs(started.timestamp() - time.time()) < 2
         playout_engine.reset_state()
+
+
+# ── Soft timed items and a live show (Jerusalem 19:15Z 2026-11-18) ───────────
+
+
+@pytest.mark.asyncio
+async def test_a_sponsorship_made_hard_for_a_story_waits_for_the_show_and_plays_first_after(client, db_session, eng):
+    """A soft sponsorship due 19:15:00 was made hard at 19:14:16 to pause the story on
+    air and handed to the engine's timed lane. A live show took the station at 19:14:43;
+    when it ended the sponsorship was closed as "came due during the show" and never
+    aired, and the story's second part was in the queue twice."""
+    from app.services import live_show_service
+
+    station, entries, engine, _ = eng
+    await _next(client, station)
+    await _on_air(client, station, entries[0].id)
+    row = await _fresh(db_session, entries[0].id)
+    row.started_at = datetime.now(UTC) - timedelta(seconds=60)
+    await db_session.commit()
+    spot = await _add(db_session, station, title="Sponsor", duration=30.0, kind="spot", position=50,
+                      source="ad_slot", timing_mode="hard", was_soft=True,
+                      preempt_at=datetime.now(UTC) + timedelta(seconds=17))
+    # What the long-item rule queued for after the sponsorship
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=entries[0].asset_id,
+                              position=2, status="pending", source="resume@77"))
+    await db_session.commit()
+    state = playout_engine.get_state(station.id)
+    state.timed_sent.add(str(spot.id))
+    engine.sent.clear()
+
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    row = await _fresh(db_session, spot.id)
+    assert (row.status, row.timing_mode) == ("pending", "soft")
+    assert str(spot.id) not in state.timed_sent
+    assert any(p == "/timed_drop" and str(spot.id) in str(body) for p, body in engine.sent)
+    resumes = (await db_session.execute(select(QueueEntry).where(
+        QueueEntry.station_id == station.id, QueueEntry.status == "pending",
+        QueueEntry.source.like("resume@%")))).scalars().all()
+    assert len(resumes) == 1 and resumes[0].source != "resume@77"
+
+    # The quiet engine pre-loads what follows the show: the story's second part
+    base = f"/api/v1/playout/{station.id}/next?given={entries[0].id}&proto=4&live=1"
+    first = (await client.get(base, headers=HEADERS)).json()["entry_id"]
+    assert first == str(resumes[0].id)
+    # The sponsorship's time comes during the show: it is what follows the show
+    row = await _fresh(db_session, spot.id)
+    row.preempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+    st = await db_session.get(Station, station.id)
+    await db_session.refresh(st)
+    engine.sent.clear()
+    await playout_engine.tick(db_session, st)
+    assert "/flush" in engine.paths()
+    r = await client.get(base, headers=HEADERS)
+    assert r.status_code == 200 and r.json()["entry_id"] == str(spot.id)
+    engine.sent.clear()
+    await playout_engine.tick(db_session, st)
+    assert "/flush" not in engine.paths()   # chosen once, then left alone
+
+    await live_show_service.end_show(db_session, show.id)
+    await db_session.commit()
+    assert (await _fresh(db_session, spot.id)).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_a_hard_sponsorship_due_during_a_show_is_kept_and_the_time_check_is_not(client, db_session, eng):
+    from app.services import live_show_service
+
+    station, entries, engine, _ = eng
+    await _next(client, station)
+    await _on_air(client, station, entries[0].id)
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    due = datetime.now(UTC) - timedelta(seconds=200)
+    spot = await _add(db_session, station, title="Sponsor", duration=30.0, kind="spot", position=50,
+                      source="ad_slot", timing_mode="hard", preempt_at=due)
+    clock = await _add(db_session, station, title="Time", duration=8.0, kind="time", position=51,
+                       source="scheduler", timing_mode="hard", preempt_at=due)
+    later = await _add(db_session, station, title="Sponsor 2", duration=30.0, kind="spot", position=52,
+                       source="ad_slot", timing_mode="hard", preempt_at=datetime.now(UTC) + timedelta(hours=1))
+    await live_show_service.end_show(db_session, show.id)
+    await db_session.commit()
+    row = await _fresh(db_session, spot.id)
+    assert (row.status, row.timing_mode) == ("pending", "soft")
+    assert (await _fresh(db_session, clock.id)).status in ("skipped", "played")
+    row = await _fresh(db_session, later.id)
+    assert (row.status, row.timing_mode) == ("pending", "hard")   # its time has not come: untouched
