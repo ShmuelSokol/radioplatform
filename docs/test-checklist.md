@@ -2487,3 +2487,42 @@ Seeds were the surprises of 2026-11-17: a song chopped when the previous one end
 - [ ] V3-55 The watchdog itself stops (backend down, lease lost): someone is told (a heartbeat from outside) | modes: n.a. | covered: NOT COVERED
 - [ ] V3-56 Public forms cannot be flooded: song requests, call-in, bug reports, member sign-up each have a limit that holds from many addresses | modes: n.a. | covered: partial (bug reports rate-limited; B-PUBLIC-13 open)
 
+
+## V3h. Features added 2026-11-18 evening (PRs 368 to 375)
+Round 1 of the test list for each. Covered rows name the test; the rest are the gaps to close. (H) harness, (T) backend test, (J) browser test, (PC) live check on the site.
+
+### Program blocks for part of the year, kids-in-car reminders (PR 374)
+- [x] V3-60 A block marked "Only part of the year" airs only inside its season; summer and rest-of-year blocks are never both and never neither on any day | modes: both | covered: test_block_seasons.py test_in_season, test_summer_and_rest_of_year_never_both_and_never_neither, test_only_the_season_of_today_is_queued
+- [x] V3-61 The season follows the station's local day (Jerusalem and Lakewood differ around midnight UTC) | modes: both | covered: test_season_uses_station_local_day
+- [x] V3-62 Season dates are validated (start after end across the new year, missing one end) and the page shows the season | modes: both | covered: test_season_validation; frontend/e2e/program-block-season.mjs
+- [x] V3-63 The reminders (siren then voice) never show up as filler in a rotation | modes: both | covered: test_reminders_are_never_drawn_as_filler
+- [ ] V3-64 The day the season changes: blocks already queued for tomorrow before midnight follow the new season (no last-day summer reminder on the first rest-of-year day) | modes: both | covered: test_occurrences_follow_the_season_change covers the plan; the queue filled 48 h ahead across the change: NOT COVERED (T)
+- [ ] V3-65 On air the siren and the voice play back to back, siren first, once per block, on all three stations, no gap over 1 s between them and no crossfade cutting the siren | modes: both | covered: NOT COVERED (H for the engine; PC listening check on Main, Jerusalem, Stories)
+
+### Station IDs between songs (PR 372)
+- [x] V3-66 Off by default; when on, an ID airs only after a song, every 12 to 20 min, the IDs rotate | modes: both | covered: test_station_ids_between_songs.py test_off_by_default_no_ids, test_ids_are_spaced_rotated_and_only_after_songs, test_settings_defaults_and_limits
+- [x] V3-67 Never within 3 min of a timed break, never right after a spoken item or a break | modes: both | covered: test_ids_keep_clear_of_timed_breaks, test_no_id_right_after_a_spoken_item_or_a_break_before_the_fill, test_clock_clear_of_timed
+- [x] V3-68 A top-up of the queue keeps the spacing from the last ID already queued; on with no jingles says so | modes: both | covered: test_spacing_counts_from_the_last_id_already_queued, test_queue_fill_puts_ids_between_songs_and_a_top_up_keeps_the_spacing, test_on_with_no_jingles_says_so
+- [ ] V3-69 After Next, a reshuffle, a schedule change or a live show the spacing still holds (no two IDs within 12 min, none in front of the :00 time check) | modes: both | covered: NOT COVERED (T, H)
+- [ ] V3-70 On an engine station the ID is heard on the stream once, from its start, between two songs (crossfade into and out of it like a song, no silence) | modes: engine | covered: NOT COVERED (H)
+- [ ] V3-71 Turning IDs on for one station adds none to the other two; the setting shows only on that station | modes: both | covered: NOT COVERED (T, PC)
+
+### Daf Yomi intro clip (PR 371)
+- [x] V3-72 The calendar names the right daf, numbers are said as words, the clip words match | modes: n.a. | covered: test_daf_intro.py
+- [x] V3-73 The intro airs right before the shiur | modes: both | covered: test_the_intro_airs_right_before_the_shiur
+- [ ] V3-74 Still right before it after a reshuffle, a Move in the control room, a schedule refresh, or a hard time check falling between them (the time check goes before the intro, never between intro and shiur) | modes: both | covered: NOT COVERED (T, H)
+- [ ] V3-75 No clip for today (the PC job did not run): the shiur airs without an intro and nothing stale (yesterday's daf) airs | modes: both | covered: NOT COVERED (T)
+- [ ] V3-76 Listening check on Main: the clip names today's daf and the shiur follows with no gap | modes: both | covered: PC (pending, noted in memory)
+
+### Sponsorship three-hour time slots and levelling (PRs 370, 373, 375)
+- [x] V3-77 Time slots cover the day with no gaps; every break gets three before any gets a fourth; the next play goes to the break with the fewest | modes: both | covered: test_slot_leveling.py
+- [x] V3-78 One contract's own plays stay apart; exact times still work and count toward the level; no blocks means spread over clock slots, never doubled | modes: both | covered: test_a_contracts_own_plays_stay_apart, test_exact_times_still_work_and_count_toward_the_level, test_without_blocks_a_slot_spreads_over_its_clock_slots_and_never_doubles_up
+- [ ] V3-79 A contract edited mid-day (slot changed, plays raised or lowered): plays already aired count, the rest move, levelling holds and no break is overfilled | modes: both | covered: test_edit_cancel_and_delete_take_effect_on_the_queue covers the queue; levelling after a mid-day edit: NOT COVERED (T)
+- [ ] V3-80 What the sponsor's portal and the client page show per slot equals what aired | modes: both | covered: NOT COVERED (T, PC)
+
+### Contract Edit dialog (PRs 369, 373)
+- [x] V3-81 Edit, cancel and delete take effect on the queue; a slot still waiting after the last day never airs | modes: both | covered: test_sponsorship_contracts.py
+- [ ] V3-82 The Edit dialog on the client page and on Spot Schedule opens with the contract's values, offers the three-hour slots, saves, and shows no unexpected toast or console error, at desktop and iPhone size | modes: both | covered: NOT COVERED (J)
+
+### Sponsors top menu (PR 368)
+- [ ] V3-83 Sponsors is its own top menu with All Clients first; Campaigns opens the client page; each role sees only what it may (sponsor and viewer cannot open it; dj per access.ts) | modes: n.a. | covered: test_role_access.py for the routes; the menu per role on the page: NOT COVERED (J)
