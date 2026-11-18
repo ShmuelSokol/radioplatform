@@ -339,6 +339,42 @@ async def engine_timed_drop(station_id, entry_ids: list[str]) -> bool:
     return await _command("/timed_drop", {"ids": list(entry_ids)}, station_id=station_id)
 
 
+async def close_timed_lost_to_live_show(db: AsyncSession, station_id, now: datetime) -> list[str]:
+    """A live show has ended. Hard items the engine was handed before or during the show
+    and whose time passed while the host was on air never aired (the stream was the
+    host's) and no start report will come, so they stayed "pending" for good: they could
+    sit in the queue and air at some later moment (review run 2026-11-18, V3-52). They are
+    closed here and the engine is told to drop them. Returns their ids."""
+    state = get_state(station_id)
+    if not state.timed_sent:
+        return []
+    ids = []
+    for key in state.timed_sent:
+        try:
+            ids.append(uuid.UUID(key))
+        except ValueError:
+            continue
+    rows = (await db.execute(
+        select(QueueEntry).where(
+            QueueEntry.station_id == station_id, QueueEntry.id.in_(ids),
+            QueueEntry.status == "pending", QueueEntry.preempt_at.isnot(None),
+            QueueEntry.preempt_at <= now, hard_timed(),
+        )
+    )).scalars().all()
+    lost = []
+    for entry in rows:
+        entry.status = "skipped"
+        lost.append(str(entry.id))
+    if lost:
+        await db.flush()
+        for key in lost:
+            state.timed_sent.discard(key)
+        logger.info("Station %s: %d timed item(s) came due during the live show and are closed: %s",
+                    station_id, len(lost), ", ".join(lost))
+        await engine_timed_drop(station_id, lost)
+    return lost
+
+
 async def engine_overlay(station_id, asset) -> bool:
     """Play an asset on top of what is on air (Mix over). The item on air carries on."""
     url = audio_url(asset)
