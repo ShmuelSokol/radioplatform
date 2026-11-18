@@ -186,9 +186,32 @@ def stored_analysis(metadata_extra) -> dict:
     analysis = (metadata_extra or {}).get("audio_analysis") if isinstance(metadata_extra, dict) else None
     if not isinstance(analysis, dict):
         return {}
-    if analysis.get("version", 1) >= ANALYSIS_VERSION:
-        return analysis
-    return {k: analysis[k] for k in ("cue_in_seconds", "replay_gain_db", "loudness_lufs") if k in analysis}
+    if analysis.get("version", 1) < ANALYSIS_VERSION:
+        analysis = {k: analysis[k] for k in ("cue_in_seconds", "replay_gain_db", "loudness_lufs") if k in analysis}
+    # The level always follows today's rule, not the one in force when the item was
+    # analysed: items stored under the old -12 dB limit (a Carlebach story at -2.5 LUFS)
+    # kept playing 3.5 LU louder than the rest after the limit went to -20.
+    lufs = analysis.get("loudness_lufs")
+    if isinstance(lufs, (int, float)) and not isinstance(lufs, bool) and _loudness_measured(analysis):
+        gain = replay_gain_for(lufs)
+        if analysis.get("replay_gain_db") != gain:
+            analysis = {**analysis, "replay_gain_db": gain}
+    return analysis
+
+
+def replay_gain_for(loudness_lufs: float) -> float:
+    """dB that brings an item to -18 LUFS. Turning down goes to -20 dB (a story mastered
+    at -3 LUFS needs -15); turning up stops at +12 dB (more lifts the noise floor)."""
+    return round(max(-20.0, min(12.0, -18.0 - loudness_lufs)), 2)
+
+
+def _loudness_measured(analysis: dict) -> bool:
+    """False where the stored loudness is a default or a reading nobody believes."""
+    if analysis.get("loudness_method") == "sampled" and (analysis.get("loudness_lufs") or 0) > -5.0:
+        return False
+    if analysis.get("method") == "range" and not analysis.get("loudness_method"):
+        return not (analysis.get("loudness_lufs", -18.0) == -18.0 and analysis.get("replay_gain_db", 0.0) == 0.0)
+    return True
 
 
 def has_real_loudness(analysis) -> bool:

@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
+import { BugTopButton } from '../BugReporter';
 import { useAuth } from '../../hooks/useAuth';
 
 const navItems = [
@@ -46,6 +47,7 @@ export default function SponsorLayout() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <BugTopButton className="text-indigo-100" />
             <span className="hidden sm:inline text-sm text-indigo-200">{user?.display_name || user?.email}</span>
             <button
               onClick={handleLogout}

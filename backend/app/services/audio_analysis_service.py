@@ -5,15 +5,11 @@ import re
 import subprocess
 
 from app.config import settings
-from app.models.asset import ANALYSIS_VERSION
+from app.models.asset import ANALYSIS_VERSION, replay_gain_for  # noqa: F401 (re-exported)
 from app.services.silence_service import detect_silence, get_audio_duration
 
 logger = logging.getLogger(__name__)
 
-def replay_gain_for(loudness_lufs: float) -> float:
-    """dB that brings an item to -18 LUFS. Turning down goes to -20 dB (a story mastered
-    at -3 LUFS needs -15); turning up stops at +12 dB (more lifts the noise floor)."""
-    return round(max(-20.0, min(12.0, -18.0 - loudness_lufs)), 2)
 
 
 def measure_loudness(data: bytes) -> tuple[float | None, float | None]:
@@ -76,7 +72,7 @@ def analyze_audio_bytes(file_data: bytes) -> dict:
     # cross_start: cue_out - 3.0, clamped to at least cue_in + 5
     cross_start = max(cue_in + 5.0, cue_out - 3.0)
 
-    # replay_gain_db: -18.0 - measured_lufs, clamped to ±12 dB
+    # replay_gain_db: -18.0 - measured_lufs, limited to -20..+12 dB (models/asset.py)
     replay_gain_db = replay_gain_for(loudness_lufs)
 
     return {

@@ -4,6 +4,7 @@ import { usePlayLog } from '../../../hooks/useQueue';
 import { useTimelinePreview } from '../../../hooks/useSchedules';
 import { useCreateLiveShow, useEndLiveShow, useLiveShows, useStartLiveShow } from '../../../hooks/useLiveShows';
 import { typeStyle } from './shared';
+import { useMayChange } from '../../../hooks/useMayChange';
 import { useAlerts, useResolveAlert } from '../../../hooks/useAlerts';
 
 /* ── Play log ─────────────────────────────────────────────── */
@@ -103,6 +104,8 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
   const [title, setTitle] = useState('');
   const [confirmEnd, setConfirmEnd] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Going live is for admins, managers and DJs (the Live screens' rule); a viewer sees what is on
+  const mayGoLive = useMayChange('/admin/live');
 
   const shows = (data?.shows ?? []).filter(s => !stationId || s.station_id === stationId);
   const live = shows.filter(s => s.status === 'live');
@@ -146,11 +149,11 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
             <span className="text-xs font-extrabold tracking-wider text-red-200">LIVE NOW</span>
           </div>
           <div className="text-base font-bold text-white">{show.title}</div>
-          <div className="grid grid-cols-2 gap-2">
+          {mayGoLive && <div className="grid grid-cols-2 gap-2">
             <Link to={`/admin/live/${show.id}/host`} className="h-11 flex items-center justify-center rounded-md bg-white text-black text-sm font-bold">Host console</Link>
             <Link to={`/admin/live/${show.id}/screen`} className="h-11 flex items-center justify-center rounded-md bg-white/10 hover:bg-white/20 text-white text-sm font-bold">Call screener</Link>
-          </div>
-          {confirmEnd === show.id ? (
+          </div>}
+          {!mayGoLive ? null : confirmEnd === show.id ? (
             <div className="grid grid-cols-2 gap-2">
               <button type="button" disabled={endMut.isPending}
                 onClick={() => endMut.mutate(show.id, { onSettled: () => setConfirmEnd(null), onError: fail })}
@@ -169,7 +172,8 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
         </div>
       ))}
 
-      {live.length === 0 && (
+      {live.length === 0 && !mayGoLive && <p className="px-1 text-sm text-gray-400" data-testid="live-view-only">No live show is on. Your login can watch this screen but not go live.</p>}
+      {live.length === 0 && mayGoLive && (
         <div className="rounded-lg border border-[#3a3a7e] bg-[#14143c] p-3 space-y-2">
           <div className="text-sm font-bold text-white">Go live now</div>
           <p className="text-xs text-gray-400">Starts a live show on this station and opens the host console with your microphone and caller queue.</p>
@@ -193,11 +197,11 @@ export const LivePanel = memo(function LivePanel({ stationId, stationTz }: { sta
                 <div className="truncate text-sm font-semibold text-white">{show.title}</div>
                 <div className="text-xs text-gray-400">{when(show.scheduled_start)}</div>
               </div>
-              <button type="button" onClick={() => startShow(show.id)} disabled={busy || live.length > 0}
+              {mayGoLive && <button type="button" onClick={() => startShow(show.id)} disabled={busy || live.length > 0}
                 title={live.length > 0 ? 'End the current live show first' : 'Start this show now'}
                 className="cr-tap h-10 px-3 shrink-0 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-bold disabled:opacity-40">
                 Start
-              </button>
+              </button>}
             </div>
           ))}
         </div>

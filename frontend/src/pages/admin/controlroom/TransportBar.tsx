@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { assetLabel, fmtDur } from './shared';
 import { serverNow } from '../../../lib/serverClock';
 import './classic.css';
+import { useMayChange } from '../../../hooks/useMayChange';
 import type { CtlAsset } from './shared';
 
 interface StationOption { id: string; name: string }
@@ -132,24 +133,26 @@ export function TransportButtons({ p, stacked, grid = false }: { p: Props; stack
   // Soft fade, and Loop on the next row); the parent is the 4-column grid.
   const btn = grid ? 'qn-btn h-11 px-1 text-xs min-w-0'
     : `qn-btn shrink-0 ${stacked ? 'w-full h-9 [@media(max-height:800px)]:h-8 text-sm' : 'h-11 px-2.5 text-xs'}`;
+  // A viewer sees the buttons switched off (the server refuses a viewer's Next and Loop)
+  const readOnly = !useMayChange();
   return (
     <div className={grid ? 'contents' : stacked ? 'flex flex-col gap-1' : 'flex items-center gap-1 shrink-0'} role="group" aria-label="Go to the next item">
-      <button type="button" onClick={p.onLoop} disabled={!p.isPlaying || p.loopBusy}
+      <button type="button" onClick={p.onLoop} disabled={readOnly || !p.isPlaying || p.loopBusy}
         data-testid="loop" aria-pressed={p.looping}
         title={p.looping ? 'Loop is on: this item repeats. Press to switch it off.' : 'Repeat this item until you switch Loop off or press Next'}
         className={`${btn} ${grid ? 'order-4' : ''} ${p.looping ? '!bg-fuchsia-300' : ''}`}>
         Loop
       </button>
-      <button type="button" onClick={() => p.onNext('hard')} disabled={!p.isPlaying || p.nextBusy}
+      <button type="button" onClick={() => p.onNext('hard')} disabled={readOnly || !p.isPlaying || p.nextBusy}
         title="Go to the next item now, with no fade (N)" data-testid="go-next"
         className={`${btn} ${grid ? 'order-1 col-span-2 !text-base' : stacked ? '!h-11 [@media(max-height:800px)]:!h-9 !text-base' : '!px-3 !text-sm'} font-bold`}>
         {p.nextBusy ? '…' : <><u>G</u>o next</>}
       </button>
-      <button type="button" onClick={() => p.onNext('fade')} disabled={!p.isPlaying || p.nextBusy}
+      <button type="button" onClick={() => p.onNext('fade')} disabled={readOnly || !p.isPlaying || p.nextBusy}
         data-testid="next-fade" title="Fade this item out quickly, then go to the next" className={`${btn} ${grid ? 'order-2' : ''}`}>
         Fade
       </button>
-      <button type="button" onClick={() => p.onNext('soft')} disabled={!p.isPlaying || p.nextBusy}
+      <button type="button" onClick={() => p.onNext('soft')} disabled={readOnly || !p.isPlaying || p.nextBusy}
         data-testid="next-soft" title="Fade this item out slowly (3 seconds), then go to the next" className={`${btn} ${grid ? 'order-3' : ''}`}>
         Soft fade
       </button>
@@ -166,11 +169,12 @@ export default function TransportBar(p: Props) {
   }) : null;
   const ending = p.isPlaying && p.remaining > 0 && p.remaining <= 10;
   const { audio } = p;
+  const readOnly = !useMayChange();
 
   const status = p.isPlaying ? (
     <span className="text-red-500 font-bold text-xs tracking-wide">PLAYING</span>
   ) : (
-    <button type="button" onClick={p.onStart} disabled={p.starting || !p.stationId}
+    <button type="button" onClick={p.onStart} disabled={readOnly || p.starting || !p.stationId}
       className="qn-btn h-8 px-3 text-sm font-bold shrink-0">
       {p.starting ? 'Starting…' : '▶ Start'}
     </button>
@@ -260,7 +264,7 @@ export default function TransportBar(p: Props) {
         <div className="flex items-center gap-1.5 px-1.5 py-1 bg-black min-w-0">
           <div className="flex flex-col items-start gap-0.5 shrink-0 leading-none">
             {p.isPlaying ? status : (
-              <button type="button" onClick={p.onStart} disabled={p.starting || !p.stationId}
+              <button type="button" onClick={p.onStart} disabled={readOnly || p.starting || !p.stationId}
                 className="qn-btn h-11 px-3 text-sm font-bold shrink-0">
                 {p.starting ? 'Starting…' : '▶ Start'}
               </button>

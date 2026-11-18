@@ -3,6 +3,7 @@ import { rememberStation, stationToShow } from '../../lib/lastStation';
 import { useStations, useUpdateStation } from '../../hooks/useStations';
 import { useStationRules, useCreateRule, useUpdateRule, useDeleteRule } from '../../hooks/useRules';
 import type { ScheduleRule, Station } from '../../types';
+import { useMayChange } from '../../hooks/useMayChange';
 import { useAuth } from '../../hooks/useAuth';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -85,6 +86,9 @@ export default function ProgramClock() {
   // The rules API lets only admins change rules (as on the Rules screen); others were offered
   // New Rule / Update / Delete that the server always refused
   const canEditRules = user?.role === 'admin';
+  // The automation settings are the station's: managers and admins (this screen's rule)
+  const mayChangeStation = useMayChange();
+  const [configError, setConfigError] = useState('');
   const { data: stationData } = useStations();
   const stations = stationData?.stations ?? [];
   const [stationId, setStationId] = useState<string | null>(null);
@@ -182,8 +186,16 @@ export default function ProgramClock() {
 
   const handleSaveAutoConfig = async (patch: Record<string, unknown>) => {
     if (!stationId) return;
+    if (!mayChangeStation) return;
     const merged = { ...autoConfig, ...patch };
-    await updateStation.mutateAsync({ id: stationId, data: { automation_config: merged } });
+    setConfigError('');
+    try {
+      await updateStation.mutateAsync({ id: stationId, data: { automation_config: merged } });
+    } catch (e: any) {
+      // was an uncaught "Request failed with status code 403" for a DJ or viewer
+      const d = e?.response?.data?.detail;
+      setConfigError(e?.response?.status === 403 ? 'Your login may not change these settings.' : typeof d === 'string' ? d : 'The setting was not saved. Try again.');
+    }
   };
 
   const toggleAdMinute = (m: number) => {
@@ -328,8 +340,9 @@ export default function ProgramClock() {
 
             {/* Automation Config Panel */}
             {panelMode === 'config' && (
-              <div className="space-y-4">
+              <fieldset disabled={!mayChangeStation} className="space-y-4 min-w-0 disabled:opacity-70" data-testid="automation-config">
                 <h3 className="text-sm font-bold text-purple-300">Automation Config</h3>
+                {configError && <p role="alert" className="text-sm text-red-300">{configError}</p>}
 
                 {/* Toggles */}
                 <div className="space-y-2">
@@ -394,7 +407,7 @@ export default function ProgramClock() {
                     placeholder="Title of the sponsorship item (none chosen)"
                   />
                 </div>
-              </div>
+              </fieldset>
             )}
 
             {/* Rule Editor Panel */}

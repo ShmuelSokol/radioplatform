@@ -13,7 +13,7 @@ Blocks tab reads `/program-blocks` (managers) and shows one row per clock time. 
 
 Dates on this page are day-first (14/12/2026), as the old program writes them; the rest of the site is US style.
 
-Edit mode (managers): click or tap Artist, Title, Type, V or Intro on a song, Category or End date on a spot; Enter saves (`PATCH /assets/{id}`), Esc cancels, leaving the box saves when changed, turning Edit mode off closes the box without saving. The edit box is 16 px on a phone (smaller makes iPhone Safari zoom). Rows still on screen while a new sort or page loads are dimmed and cannot be edited. A refused save shows the server's words (422 answers carry a list; `errText()` turns it into a sentence).
+Edit mode (managers): click or tap Artist, Title, Type, V or Intro on a song, Title, Category or End date on a spot; Enter saves (`PATCH /assets/{id}`), Esc cancels, leaving the box saves when changed, turning Edit mode off closes the box without saving. The edit box is 16 px on a phone (smaller makes iPhone Safari zoom). Rows still on screen while a new sort or page loads are dimmed and cannot be edited. A refused save shows the server's words (422 answers carry a list; `errText()` turns it into a sentence).
 
 Mpeg / Prsnt filters and 123 (go to record): see [station-modes](station-modes.md). Not copied: BLK PRE SPOT, "blank" jingles of a set length.
 

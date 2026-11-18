@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useUpdateAsset } from '../hooks/useAssets';
 import { listSponsors } from '../api/sponsors';
+import { useAuth } from '../hooks/useAuth';
+import { isManager } from '../auth/access';
 import FloatingMenu from './FloatingMenu';
 
 interface Props {
@@ -18,6 +20,8 @@ export default function AssetSponsorBadge({ assetId, sponsorId, sponsorName }: P
   const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setOpen(false), []);
   const updateAsset = useUpdateAsset();
+  const { user } = useAuth();
+  const readOnly = !isManager(user?.role); // others see the sponsor's name, not a menu the API refuses
 
   const { data: sponsors } = useQuery({
     queryKey: ['sponsors'],
@@ -48,6 +52,12 @@ export default function AssetSponsorBadge({ assetId, sponsorId, sponsorName }: P
     setOpen(false);
     setSearch('');
   };
+
+  if (readOnly) {
+    return sponsorName
+      ? <span className="block max-w-full truncate text-xs px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700" title={sponsorName} data-testid="sponsor-text">{sponsorName}</span>
+      : null;
+  }
 
   return (
     <div ref={ref} className="relative inline-block max-w-full align-middle">

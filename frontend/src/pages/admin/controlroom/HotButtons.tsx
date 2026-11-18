@@ -2,6 +2,7 @@ import { memo, useState } from 'react';
 import { useAssets } from '../../../hooks/useAssets';
 import { CART_PAGES, fmtDur } from './shared';
 import type { CartSet, CtlAsset, FireMode, SendFn } from './shared';
+import { useMayChange } from '../../../hooks/useMayChange';
 import { WEATHER_PFL_ID, type Pfl } from './pfl';
 
 interface Props {
@@ -34,6 +35,7 @@ interface Props {
 }
 
 function Wall({ title, items, p, editing, pflOn, emptyHint }: { title: string; items: CtlAsset[]; p: Props; editing: boolean; pflOn: boolean; emptyHint?: string }) {
+  const readOnly = !useMayChange(); // a viewer may pre-listen to a button, not fire it
   if (items.length === 0) {
     return emptyHint ? (
       <div>
@@ -58,7 +60,7 @@ function Wall({ title, items, p, editing, pflOn, emptyHint }: { title: string; i
               <button
                 type="button"
                 data-testid="hot-button"
-                disabled={busy || editing || (p.disabled && !pflOn)}
+                disabled={busy || editing || ((p.disabled || readOnly) && !pflOn)}
                 aria-pressed={pflOn ? listening : undefined}
                 onClick={() => (pflOn ? p.pfl.toggle(item.id) : p.onSend(item, how))}
                 className={`qn-btn w-full text-left flex items-center gap-2 ${p.bar ? 'h-9 px-2' : 'min-h-[56px] px-2.5 py-1.5'}
@@ -83,6 +85,9 @@ function Wall({ title, items, p, editing, pflOn, emptyHint }: { title: string; i
 }
 
 function HotButtons(p: Props) {
+  // A viewer keeps the pages, pre-listen and the weather preview; firing, the fire mode,
+  // Edit and the set tools are for people who may run the station
+  const readOnly = !useMayChange();
   const [editing, setEditing] = useState(false);
   const [pflOn, setPflOn] = useState(false);
   const pfl = p.pfl;
@@ -212,7 +217,7 @@ function HotButtons(p: Props) {
     <>
       <Wall title={`${set.name} · page ${p.pageIndex + 1}`} items={p.pins} p={p} editing={editing} pflOn={pflOn} />
       {p.pins.length === 0 && (
-        <p className="px-0.5 text-[11px] text-black">Page {p.pageIndex + 1} is empty. Tap the ☆ next to anything in the library to put a button here.</p>
+        <p className="px-0.5 text-[11px] text-black">Page {p.pageIndex + 1} is empty.{readOnly ? '' : ' Tap the ☆ next to anything in the library to put a button here.'}</p>
       )}
       <Wall title="Jingles" items={jingles} p={p} editing={false} pflOn={pflOn}
         emptyHint="No station IDs or sweepers yet. Upload them in Assets with the type Jingle and they appear here." />
@@ -232,13 +237,13 @@ function HotButtons(p: Props) {
           <div className="flex gap-0.5" role="tablist" aria-label="Button page, 6 to 10">
             {Array.from({ length: 5 }, (_, i) => pageButton(i + 5))}
           </div>
-          {editButton}
+          {!readOnly && editButton}
           <span className="w-2" />
-          {mode}
+          {!readOnly && mode}
           {pflButton}
           {weather}
           {outputPicker}
-          {setTools}
+          {!readOnly && setTools}
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-1.5 pb-1.5 space-y-1.5">{walls}</div>
       </section>
@@ -248,14 +253,14 @@ function HotButtons(p: Props) {
   return (
     <section className="flex flex-col min-h-0 h-full bg-[#c0c0c0] text-black" aria-label="Instant buttons">
       <div className="shrink-0 p-1.5 border-b border-[#808080] space-y-1.5">
-        {mode}
-        <p className="px-0.5 text-[11px] leading-snug">{modeHelp}</p>
+        {!readOnly && mode}
+        {!readOnly && <p className="px-0.5 text-[11px] leading-snug">{modeHelp}</p>}
         {outputPicker}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-1.5 space-y-3">
         <div className="space-y-1.5" data-testid="cart">
-          <div className="flex items-center gap-1">{setSelect}{editButton}{pflButton}</div>
-          {setTools}
+          <div className="flex items-center gap-1">{setSelect}{!readOnly && editButton}{pflButton}</div>
+          {!readOnly && setTools}
           <div className="grid grid-cols-10 gap-0.5" role="tablist" aria-label="Button page">
             {Array.from({ length: CART_PAGES }, (_, i) => pageButton(i))}
           </div>

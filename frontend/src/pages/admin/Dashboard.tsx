@@ -40,6 +40,7 @@ import { isManager } from '../../auth/access';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, usePhoneLandscape, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
+import { useMayChange } from '../../hooks/useMayChange';
 import { serverNow } from '../../lib/serverClock';
 
 type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule' | 'errors';
@@ -79,6 +80,9 @@ const STREAM_RESTART_AFTER_MS = 4000;
 
 export default function Dashboard() {
   const { user } = useAuth();
+  // The one rule for who may run the station from this screen (admin, manager, DJ); a
+  // viewer watches. Every panel asks the same hook.
+  const mayOperate = useMayChange();
   const qc = useQueryClient();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   // Phone held sideways: the page scrolls so the control room fills the screen with the
@@ -787,7 +791,7 @@ export default function Dashboard() {
   const modeProps = {
     stationId: stationId ?? null,
     hardStart: modes.hard_start, spots: modes.spots, busy: modesBusy || !stationId, modesKnown: !!knownModes,
-    canChange: !!user && user.role !== 'viewer',
+    canChange: mayOperate,
     onHardStart: () => changeModes({ hard_start: !modes.hard_start }),
     onSpots: () => changeModes({ spots: !modes.spots }),
     onPanic: doPanic,
@@ -861,8 +865,8 @@ export default function Dashboard() {
   }, [weatherLoading, weatherPreviewMut, playClips]);
 
   // ── Keyboard shortcuts (desktop) ───────────────────────────
-  const keyActions = useRef({ handleNext, cancelInsert, isPlaying });
-  keyActions.current = { handleNext, cancelInsert, isPlaying };
+  const keyActions = useRef({ handleNext, cancelInsert, isPlaying, mayOperate });
+  keyActions.current = { handleNext, cancelInsert, isPlaying, mayOperate };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -883,7 +887,7 @@ export default function Dashboard() {
         // Focus at once when the box is already on screen, so fast typing is not lost.
         if (searchRef.current) searchRef.current.focus();
         else setTimeout(() => searchRef.current?.focus(), 0);
-      } else if ((e.key === 'n' || e.key === 'N') && !e.repeat && keyActions.current.isPlaying) {
+      } else if ((e.key === 'n' || e.key === 'N') && !e.repeat && keyActions.current.isPlaying && keyActions.current.mayOperate) {
         keyActions.current.handleNext('hard');
       }
     };

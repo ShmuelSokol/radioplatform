@@ -42,6 +42,9 @@ const ASSETS = [
   asset('a5', 'Announcement', 'announcement', 'lively', null),
   asset('a6', 'Last row spot', 'spot', 'do_not_play', SPONSORS[1]),
 ];
+// an old tape transfer: so quiet that the largest boost (+12 dB) leaves it 7.8 LU under the rest
+ASSETS[4].metadata_extra = { audio_analysis: { loudness_lufs: -37.8, replay_gain_db: 12, version: 2 } };
+ASSETS[2].metadata_extra = { audio_analysis: { loudness_lufs: -29.5, replay_gain_db: 11.5, version: 2 } };
 
 async function wire(ctx, patches) {
   const json = (route, body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -214,7 +217,18 @@ try {
       await page.touchscreen.tap(lab.x + 4, lab.y + 4);   // the corner of the tap area, not the 13 px box
       check(`${name}: a tap on the corner of that area ticks the row`, await first.locator('input[type=checkbox]').isChecked());
       await first.locator('input[type=checkbox]').uncheck();
+      {
+        const marks = await page.getByTestId('very-quiet').count();
+        const onRow = await page.locator('tbody tr', { hasText: 'Announcement' }).getByTestId('very-quiet').first();
+        const tip = await onRow.getAttribute('title').catch(() => '');
+        check(`${name}: only the item measured under -30 LUFS carries "very quiet recording", and says by how much`,
+          marks === 1 && /about 7\.8 LU quieter/.test(tip || ''), JSON.stringify({ marks, tip }));
+      }
       check(`${name}: no floating bug button over the Library rows`, !(await page.locator('button[aria-label="Report a bug"]').isVisible().catch(() => false)));
+      {
+        const top = await page.getByTestId('bug-top').boundingBox();
+        check(`${name}: the bug button is in the top bar at 44 px`, !!top && top.width >= 44 && top.height >= 44, JSON.stringify(top));
+      }
       await page.locator('nav').getByRole('button', { name: 'Menu' }).click();
       await page.locator('nav').getByRole('button', { name: /Report a bug/ }).click();
       const dlg = page.getByRole('dialog', { name: 'Report a bug' });
@@ -223,7 +237,7 @@ try {
     }
     await page.goto(`${BASE}/admin/archives`);
     await escCloses('the New Archive dialog', () => page.getByRole('button', { name: '+ New Archive' }).click(), page.getByRole('dialog', { name: 'New Archive' }));
-    await escCloses('the bug report dialog', () => page.locator('button[aria-label="Report a bug"]').click(), page.getByRole('dialog', { name: 'Report a bug' }));
+    await escCloses('the bug report dialog', () => page.locator('button[aria-label="Report a bug"]:visible, [data-testid="bug-top"]:visible').first().click(), page.getByRole('dialog', { name: 'Report a bug' }));
 
     // ── 3. Live Shows: Esc closes the New Show dialog ─────────────────────────
     await page.goto(`${BASE}/admin/live`);
