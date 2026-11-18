@@ -13,6 +13,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [control-room](control-room.md) — Operator screen layout, liveControl.ts seam, insert-by-entry-id, where instant buttons are stored
 - [station-modes](station-modes.md) — HS (hard start) and Spots mode switches, Panic, Errors pane: what they do and their limits
 - [databank](databank.md) — KBR Studio's database window: songs/jingles/spots/blocks tables, spot end dates (on the schedules), day log to the millisecond
+- [garbled-hebrew](garbled-hebrew.md) — Hebrew tags read as Latin-1 ("àìéäå äðáéà"): put right on every save of a title, artist or album; the rule that never touches real Latin text
 - [dashboard-timing](dashboard-timing.md) — Elapsed timer overflow fix, WS vs REST data sources
 - [skip-latency](skip-latency.md) — Instant skip rule: now-playing changes must WS-broadcast
 - [station-rules](station-rules.md) — Which schedule rules apply to a station (its own, else the global ones) and the one function every check must read them through

@@ -258,6 +258,30 @@ async function globalPlayer(browser) {
     await sleep(400);
     check(`${tag}: and the first station does not come back on the next page`, (await bar.count()) === 0 && (await audible()).length === 0);
 
+    // The same walk by real taps on the site's own menu (the burger menu on a phone), not the router
+    await page.goto(`${BASE}/listen/${station.SID}`);
+    await page.getByRole('button', { name: 'Listen Live' }).click();
+    await page.waitForFunction(() => window.__audible().length > 0, null, { timeout: 5000 }).catch(() => {});
+    const nav = page.locator('nav').first();
+    const tapMenu = async (label) => {
+      const burger = nav.getByRole('button', { name: 'Menu' });
+      if (await burger.isVisible().catch(() => false)) await burger.click();
+      await nav.getByRole('link', { name: label, exact: true }).locator('visible=true').first().click();
+    };
+    for (const [label, path, ready] of [['Program Guide', '/guide', 'Program Guide'], ['DJs', '/hosts', 'Reb Moshe'], ['Archives', '/archives', 'Thursday Night Live'], ['Stations', '/stations', "Kol B'ramah"]]) {
+      const heard = await listenWhile(1500, async () => { await tapMenu(label); await page.locator('main').getByText(ready).locator('visible=true').first().waitFor({ timeout: 5000 }); });
+      check(`${tag}: tapping "${label}" in the menu keeps the station on, no gap, no restart, bar shown`,
+        new URL(page.url()).pathname === path && heard.silent === 0 && heard.restarts === 0 && heard.n > 20 && (await bar.count()) === 1, JSON.stringify(heard));
+    }
+    check(`${tag}: after the menu taps the phone menu is closed and does not cover the bar`, await page.evaluate(() => {
+      const b = document.querySelector('[data-testid="player-bar"]').getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return !!top && !!top.closest('[data-testid="player-bar"]');
+    }));
+    await bar.getByRole('button', { name: 'Stop' }).click();
+    await sleep(500);
+    check(`${tag}: Stop after the menu walk silences it`, (await audible()).length === 0);
+
     // Staff pages and the call-in page have their own sound: the station stops there
     await page.goto(`${BASE}/listen/${station.SID}`);
     await page.getByRole('button', { name: 'Listen Live' }).click();
