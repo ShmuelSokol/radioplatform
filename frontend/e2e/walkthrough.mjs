@@ -399,12 +399,13 @@ async function dragInQueue(page, guard, st) {
 async function main() {
   if (!STATIONS.length) throw new Error('STATIONS_JSON is empty: run e2e/walkthrough-seed.py first');
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
-  const tokens = await loginApi();
+  let tokens = await loginApi();
   const browser = await chromium.launch();
   const summary = [];
   for (const st of STATIONS) {
     if (ONLY_ST.length && !ONLY_ST.includes(st.tag)) continue;
     current = st;
+    tokens = await loginApi();   // a fresh login per station: a walk outlasts one access token
     const settingsBefore = await stationSettings(tokens);
     const ctx = await browser.newContext({ viewport: WALK_SIZE });
     await ctx.addInitScript(([a, r, sid]) => {
