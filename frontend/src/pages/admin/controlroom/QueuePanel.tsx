@@ -299,7 +299,7 @@ function QueuePanel(p: Props) {
                 <span className="lg:hidden w-11 shrink-0 text-right tabular-nums text-sm">{fmtDur(a?.duration)}</span>
 
                 {/* Desktop quick actions */}
-                <span className="hidden lg:flex absolute right-28 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                <span className={`hidden lg:flex absolute right-28 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg ${isSel || isCur ? '' : 'opacity-0 pointer-events-none'} group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto`} data-testid="row-quick" onClick={(e) => e.stopPropagation()}>
                   {a && !isSilence && p.onSong && (
                     <button type="button" onClick={() => p.onSong?.(entry)} title="Song: category, do not play, details"
                       aria-label={`Song actions for ${title}`} data-testid="row-song" className="qn-btn px-1 h-5 text-[10px]">Song</button>

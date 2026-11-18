@@ -966,8 +966,12 @@ export default function Dashboard() {
               <div className="min-h-0" style={{ flex: `${1 - splitShown} 1 0` }}>{sidePanel(sideTab)}</div>
             </div>
             <aside className="w-28 xl:w-32 shrink-0 min-h-0 overflow-y-auto bg-[#c0c0c0] p-1.5 flex flex-col gap-1 border-l-2 border-white [&>*]:shrink-0" aria-label="Controls">
-              <TransportButtons p={transport} stacked />
-              <div className="h-2" />
+              {/* Loop, Go next and the fades stay at the top when a short window makes the column
+                  scroll (a scrolled column hid half of Loop under the transport, 2026-11-18) */}
+              <div className="sticky top-0 z-10 -mt-1.5 pt-1.5 pb-1 bg-[#c0c0c0]" data-testid="cr-transport-pinned">
+                <TransportButtons p={transport} stacked />
+              </div>
+              <div className="h-1" />
               {/* HS, Spots mode, Panic and DB right under the transport, so they are on screen even on a
                   1280x720 window (F-MODES-54); the lower-pane tabs come after and may scroll */}
               <ModeButtons p={modeProps} stacked />

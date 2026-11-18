@@ -227,6 +227,64 @@ async function refusals(browser) {
   await ctx.close();
 }
 
+// ── Findings from the live walk-through (2026-11-18): buttons a mouse could not reach ──
+async function reach(browser) {
+  for (const [w, h] of [[1366, 900], [1366, 768], [1280, 720]]) {
+    const tag = `reach ${w}x${h}`;
+    const station = songStation();
+    const { ctx, page, errors } = await openRoom(browser, { viewport: { width: w, height: h } }, station);
+    const p = station.pending();
+    // A click selects the row; its Song / Move up / Move down are then pressable without hovering first
+    const row = rowOf(page, p[3].id);
+    await row.locator('[draggable=true]').click({ position: { x: 300, y: 8 } });
+    await page.mouse.move(5, 5);
+    const quick = row.getByTestId('row-quick');
+    check(`${tag}: a selected row shows Song, Move up, Move down, Remove without hover`, await quick.getByRole('button').count() === 4 && await quick.isVisible() && (await quick.evaluate((el) => getComputedStyle(el).pointerEvents)) !== 'none');
+    await quick.getByRole('button', { name: 'Move up' }).click({ timeout: 3000 });
+    await sleep(400);
+    check(`${tag}: Move up on the selected row works by plain click`, station.pending()[2].id === p[3].id);
+    await rowOf(page, p[3].id).getByTestId('row-quick').getByRole('button', { name: 'Move down' }).click({ timeout: 3000 });
+    await sleep(400);
+    check(`${tag}: Move down on the selected row works by plain click`, station.pending()[3].id === p[3].id);
+    await rowOf(page, p[3].id).getByTestId('row-song').click({ timeout: 3000 });
+    await panel(page).waitFor();
+    check(`${tag}: Song on the selected row opens its panel by plain click`, (await page.getByTestId('song-name').innerText()).includes(station.byId[p[3].asset_id].title));
+    await page.keyboard.press('Escape');
+    // the playing row always shows its Song button
+    await page.mouse.move(5, 5);
+    const curSong = rowOf(page, station.playing().id).getByTestId('row-song');
+    check(`${tag}: the row on air shows Song without hover`, await curSong.isVisible());
+    await curSong.click({ timeout: 3000 });
+    await panel(page).waitFor();
+    check(`${tag}: Song on the row on air opens the ON AIR panel`, await page.getByTestId('song-on-air').isVisible());
+    await page.keyboard.press('Escape');
+    // an unselected row still keeps them out of the way
+    check(`${tag}: an unselected, unhovered row hides its buttons`, (await rowOf(page, p[5].id).getByTestId('row-quick').evaluate((el) => getComputedStyle(el).opacity)) === '0');
+    // Right-hand column: scrolling to its last tab never moves Loop
+    const aside = page.locator('aside[aria-label=Controls]');
+    const loop = aside.getByTestId('loop');
+    const before = await loop.boundingBox();
+    await aside.getByRole('tab').last().scrollIntoViewIfNeeded();
+    await aside.getByRole('tab').last().click();
+    const after = await loop.boundingBox();
+    const ab = await aside.boundingBox();
+    const hit = await loop.evaluate((el) => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + 2); return top === el || el.contains(top); });
+    check(`${tag}: Loop is fully visible at the top of the column after going to the last tab`, !!after && after.y === before.y && after.y >= ab.y && hit, JSON.stringify({ before, after, ab }));
+    for (const id of ['go-next', 'next-fade', 'next-soft']) {
+      const el = aside.getByTestId(id);
+      const b = await el.boundingBox();
+      const onTop = await el.evaluate((n) => { const r = n.getBoundingClientRect(); const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return t === n || n.contains(t); });
+      check(`${tag}: ${id} stays in place and uncovered`, !!b && b.y >= ab.y && b.y + b.height <= ab.y + ab.height + 0.5 && onTop, JSON.stringify(b));
+    }
+    await aside.evaluate((el) => { el.scrollTop = 0; });
+    const hs = await aside.getByRole('button', { name: /^HS/ }).boundingBox();
+    check(`${tag}: HS is below the pinned buttons, not under them, at the top of the scroll`, !!hs && hs.y >= after.y + 4 * 32, JSON.stringify(hs));
+    check(`${tag}: the last tab (Errors) can still be reached and pressed`, await aside.getByRole('tab').last().getAttribute('aria-selected') === 'true');
+    check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+}
+
 // ── Phones ───────────────────────────────────────────────────
 async function phone(browser, contextOpts, tag, landscape = false) {
   const station = songStation();
@@ -283,6 +341,7 @@ try {
   if (run('air')) await onAir(browser);
   if (run('row')) await queueRow(browser);
   if (run('refusals')) await refusals(browser);
+  if (run('reach')) await reach(browser);
   if (run('phone')) {
     await phone(browser, PHONE, 'iPhone 13');
     await phone(browser, PHONE_SE, 'iPhone SE');
