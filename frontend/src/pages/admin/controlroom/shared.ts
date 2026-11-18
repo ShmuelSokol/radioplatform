@@ -7,6 +7,8 @@ export interface CtlAsset {
   duration?: number | null;
   asset_type?: string;
   category?: string | null;
+  /** The sponsor this recording belongs to, when one is linked */
+  sponsor_id?: string | null;
 }
 
 /** How an asset is sent to air. */
@@ -253,8 +255,18 @@ export function weekdayShort(d: Date | string | number, tz?: string): string {
 
 /** A sponsorship spot: a planned sponsor play, or an item of type spot that is not the
  *  weather or a time check. Tapping one opens the Sponsor panel, not the song options. */
-export function isSponsorSpot(source: string | null | undefined, asset: { asset_type?: string | null; category?: string | null } | null | undefined): boolean {
+const NOT_SPONSOR = /\b(weather|forecast|time check|time announcement|zmanim)\b/i;
+/**
+ * A sponsorship play: a planned sponsorship row, or a spot linked to a sponsor (or filed under
+ * spots/sponsorships). The weather report, time checks and zmanim are type spot too, and are
+ * never sponsorships unless a sponsor is linked (live check 2026-11-18: "Weather Report" carried
+ * the SPONSOR tag). Same rule as sponsor_item.is_sponsorship on the server.
+ */
+export function isSponsorSpot(source: string | null | undefined, asset: { asset_type?: string | null; category?: string | null; title?: string | null; sponsor_id?: string | null } | null | undefined): boolean {
   if (source === 'ad_slot') return true;
   if ((asset?.asset_type ?? '').toLowerCase() !== 'spot') return false;
-  return !['weather', 'time', 'zmanim'].includes((asset?.category ?? '').trim().toLowerCase());
+  if (asset?.sponsor_id) return true;
+  const cat = (asset?.category ?? '').trim().toLowerCase();
+  if (['weather', 'time', 'zmanim'].includes(cat) || NOT_SPONSOR.test(asset?.title ?? '') || NOT_SPONSOR.test(cat)) return false;
+  return /spot|sponsor/.test(cat);
 }

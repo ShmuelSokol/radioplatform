@@ -8,7 +8,7 @@ skipped and put back), and the missed plays of the last days.
 
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset
@@ -21,6 +21,7 @@ from app.services.spot_schedule_service import (
     SAFETY_MARGIN,
     as_utc,
     clock_12,
+    daypart_of,
     parse_fixed_times,
     station_tz,
 )
@@ -244,6 +245,30 @@ async def sponsor_item(
                     "note": r.note,
                 })
 
+    # Today's plays that did not air (closed during a live show, dropped by the player): the
+    # report above counts a time of day only once it is over, so a miss at 9:15 PM showed nowhere
+    # until midnight (live check 2026-11-18). Show each one now, unless the report already has
+    # that time of day.
+    reported = {(m["local_date"], m["daypart"]) for m in missed if m["when"] == "past"}
+    for e in rows:
+        if e.status != "skipped" or not e.preempt_at:
+            continue
+        local = as_utc(e.preempt_at).astimezone(tz)
+        if local.date() != today or (today.isoformat(), daypart_of(local.hour)) in reported:
+            continue
+        missed.append({
+            "when": "past",
+            "local_date": today.isoformat(),
+            "day": "Today",
+            "daypart": daypart_of(local.hour),
+            "promised": 1,
+            "played": 0,
+            "missed": 1,
+            "moved": 0,
+            "note": "Did not air",
+            "local_time": _local(as_utc(e.preempt_at), tz),
+        })
+
     return {
         "asset": {
             "id": str(asset.id),
@@ -264,6 +289,22 @@ async def sponsor_item(
 
 
 NOT_SPONSOR_CATEGORIES = ("weather", "time", "zmanim")
+NOT_SPONSOR_WORDS = ("%weather%", "%forecast%", "%time check%", "%time announcement%", "%zmanim%")
+
+
+def is_sponsorship_clause():
+    """A queue row that is a sponsorship play: a planned sponsorship (``ad_slot``), or a spot linked
+    to a sponsor, or a spot filed under spots/sponsorships that is not the weather, a time check or
+    zmanim (they are type spot too). Same rule as ``isSponsorSpot`` in the control room."""
+    title = func.lower(func.coalesce(Asset.title, ""))
+    cat = func.lower(func.coalesce(Asset.category, ""))
+    not_service = and_(cat.notin_(NOT_SPONSOR_CATEGORIES), *[title.notlike(w) for w in NOT_SPONSOR_WORDS],
+                       *[cat.notlike(w) for w in NOT_SPONSOR_WORDS])
+    return or_(
+        QueueEntry.source == "ad_slot",
+        and_(func.lower(Asset.asset_type) == "spot",
+             or_(Asset.sponsor_id.isnot(None), and_(not_service, or_(cat.like("%spot%"), cat.like("%sponsor%"))))),
+    )
 
 
 async def station_day(db: AsyncSession, station: Station, now: datetime | None = None) -> dict:
@@ -281,13 +322,15 @@ async def station_day(db: AsyncSession, station: Station, now: datetime | None =
             .join(Asset, Asset.id == QueueEntry.asset_id)
             .where(
                 QueueEntry.station_id == station.id,
+                # two plain ranges, so the (station, preempt_at) and (station, started_at) indexes
+                # are used; a range on coalesce(...) read every row the station ever queued (1-4 s live)
+                or_(
+                    and_(QueueEntry.preempt_at >= midnight, QueueEntry.preempt_at < tomorrow),
+                    and_(QueueEntry.started_at >= midnight, QueueEntry.started_at < tomorrow),
+                ),
                 when >= midnight,
                 when < tomorrow,
-                or_(
-                    QueueEntry.source == "ad_slot",
-                    (func.lower(Asset.asset_type) == "spot")
-                    & func.lower(func.coalesce(Asset.category, "")).notin_(NOT_SPONSOR_CATEGORIES),
-                ),
+                is_sponsorship_clause(),
             )
         )
     ).all()
