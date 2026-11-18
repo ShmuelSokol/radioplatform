@@ -423,6 +423,12 @@ function FillerPick({ value, onChange }: {
   );
 }
 
+const HOURS = Array.from({ length: 25 }, (_, h) => h);
+function hourLabel(h: number): string {
+  const x = h % 24;
+  return `${x % 12 === 0 ? 12 : x % 12} ${x < 12 ? 'AM' : 'PM'}`;
+}
+
 function AutomationConfig({ config, onSave, saving }: {
   config: Record<string, any>;
   onSave: (cfg: Record<string, any>) => void;
@@ -439,6 +445,8 @@ function AutomationConfig({ config, onSave, saving }: {
   const [idsMin, setIdsMin] = useState<string>(String(ids.min_minutes ?? 12));
   const [idsMax, setIdsMax] = useState<string>(String(ids.max_minutes ?? 20));
   const [idsCategory, setIdsCategory] = useState<string>(String(ids.category ?? 'station_id'));
+  const [idsFrom, setIdsFrom] = useState<number>(Number(ids.start_hour ?? 0));
+  const [idsTo, setIdsTo] = useState<number>(Number(ids.end_hour ?? 24));
   const [liveDelay, setLiveDelay] = useState<string>(String(config.live_delay_seconds ?? 15));
   const [liveDump, setLiveDump] = useState<string>(String(config.live_dump_seconds ?? 0));
   const [liveTimed, setLiveTimed] = useState<string>(config.live_timed_items ?? 'time');
@@ -467,6 +475,8 @@ function AutomationConfig({ config, onSave, saving }: {
         min_minutes: idsLow,
         max_minutes: Math.max(idsLow, minutes(idsMax, 20)),
         category: idsCategory.trim() || 'station_id',
+        start_hour: idsFrom,
+        end_hour: idsTo,
       },
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
@@ -525,9 +535,9 @@ function AutomationConfig({ config, onSave, saving }: {
           <span>
             <span className="block font-medium text-gray-700">Station IDs between songs</span>
             <span className="block mt-1 text-xs text-gray-500">
-              A station ID jingle plays after a song now and then, taking turns so each one is used before any repeats.
-              Never within 3 minutes of a time check, weather or sponsorship break, never right after anything spoken,
-              never on Shabbos or Yom Tov. Applies to stations that fill from playlists.
+              A station ID jingle plays after a song (or a story) now and then, taking turns so each one is used before any repeats.
+              Never within 3 minutes of a time check, weather or sponsorship break, never right after another short item (a sponsorship, a jingle),
+              never on Shabbos or Yom Tov. On a stories station they go between stories.
             </span>
           </span>
         </label>
@@ -544,6 +554,19 @@ function AutomationConfig({ config, onSave, saving }: {
           <input type="text" value={idsCategory} disabled={!idsOn}
             onChange={e => setIdsCategory(e.target.value)} aria-label="Category of the station ID jingles"
             className="w-44 px-2 py-1 border rounded" data-testid="station-ids-category" />
+        </div>
+        <div className="mt-2 ml-6 flex flex-wrap items-center gap-2">
+          <span>Play them from</span>
+          <select value={idsFrom} disabled={!idsOn} onChange={e => setIdsFrom(Number(e.target.value))}
+            aria-label="Station IDs start at" className="px-2 py-1 border rounded" data-testid="station-ids-from">
+            {HOURS.slice(0, 24).map(h => <option key={h} value={h}>{hourLabel(h)}</option>)}
+          </select>
+          <span>until</span>
+          <select value={idsTo} disabled={!idsOn} onChange={e => setIdsTo(Number(e.target.value))}
+            aria-label="Station IDs stop at" className="px-2 py-1 border rounded" data-testid="station-ids-to">
+            {HOURS.slice(1).map(h => <option key={h} value={h}>{hourLabel(h)}</option>)}
+          </select>
+          <span className="text-xs text-gray-500">(12 AM until 12 AM = all day; the station's own time)</span>
         </div>
       </div>
       <h4 className="text-sm font-bold text-gray-700 uppercase mt-6 mb-2">Live shows</h4>

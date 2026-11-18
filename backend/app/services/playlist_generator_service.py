@@ -71,6 +71,17 @@ class IdSettings:
     max_minutes: float = 20.0
     # Not within this long of a timed item, before or after it
     clear_minutes: float = 3.0
+    # Station's local hours when they play: from start_hour up to end_hour
+    # (0-24; equal = all day; start after end runs past midnight)
+    start_hour: int = 0
+    end_hour: int = 24
+
+    def in_hours(self, local_hour: int) -> bool:
+        if self.start_hour == self.end_hour or (self.start_hour, self.end_hour) == (0, 24):
+            return True
+        if self.start_hour < self.end_hour:
+            return self.start_hour <= local_hour < self.end_hour
+        return local_hour >= self.start_hour or local_hour < self.end_hour
 
 
 def id_settings_for(automation_config: dict | None) -> IdSettings:
@@ -92,7 +103,79 @@ def id_settings_for(automation_config: dict | None) -> IdSettings:
         min_minutes=low,
         max_minutes=high,
         clear_minutes=num("clear_minutes", 3.0, 0.0, 15.0),
+        start_hour=int(num("start_hour", 0, 0, 24)),
+        end_hour=int(num("end_hour", 24, 0, 24)),
     )
+
+
+# A station ID never follows one of these (two short or spoken breaks back to back)
+NOT_BEFORE_AN_ID = {
+    "jingle", "spot", "sweeper", "station_id", "time", "weather", "silence",
+    "time_announcement", "weather_spot", "zmanim", "announcement", "psa",
+}
+
+
+class StationIdSprinkler:
+    """Puts a station ID after a programme item (a song, a story, a shiur) every
+    min..max minutes. Used by the playlist fill (`generate`) and the rule fill
+    (All Day Stories), both of which walk a `Clock` while they pick."""
+
+    def __init__(self, ids: IdSettings, library: "_Library", blackouts, zone, end: datetime | None = None):
+        self.ids = ids
+        self.library = library
+        self.blackouts = blackouts
+        self.zone = zone
+        self.end = end
+        self.due: datetime | None = None
+        self.rows: list = []
+
+    async def prepare(self, start: datetime, queue_starts: list | None = None) -> str | None:
+        """Work out when the first ID is due. `queue_starts`: (asset id, expected
+        start) of the items already waiting, so an ID waiting in the queue counts
+        at its real time. Returns a note when none can play."""
+        if not self.ids.enabled:
+            return None
+        self.rows = await self.library.pool("jingle", self.ids.category)
+        if not self.rows:
+            return f'Station IDs between songs are on, but no jingle has the category "{self.ids.category}".'
+        if self.library.last_used is None:
+            await self.library._load_last_used()
+        last = max((self.library.last_used.get(str(r.id), _EPOCH) for r in self.rows), default=_EPOCH)
+        ids = {str(r.id) for r in self.rows}
+        for asset_id, at in queue_starts or ():
+            if str(asset_id) in ids:
+                last = max(last, as_utc(at))
+        # The next one comes a random min..max after the last one aired or was
+        # queued; never aired: within the first stretch of the fill
+        gap = self._gap()
+        self.due = last + gap if last > _EPOCH else start + gap / 2
+        return None
+
+    def _gap(self) -> timedelta:
+        return timedelta(minutes=random.uniform(self.ids.min_minutes, self.ids.max_minutes))
+
+    async def after(self, clock: "Clock", previous_type: str | None):
+        """Called after each programme item. Returns (row, start) of the drawn ID
+        (already played on `clock`) or None."""
+        if self.due is None or (previous_type or "music").lower() in NOT_BEFORE_AN_ID:
+            return None
+        at = clock.start()
+        if at < self.due or (self.end is not None and at >= self.end):
+            return None
+        if any(b.covers(at) for b in self.blackouts):
+            return None
+        if not self.ids.in_hours(at.astimezone(self.zone).hour):
+            return None
+        longest = max((float(r.duration or 10.0) for r in self.rows), default=10.0)
+        if not clock.clear_of_timed(at, longest, timedelta(minutes=self.ids.clear_minutes)):
+            return None  # tried again after the next item
+        row, _ = await self.library.draw("jingle", self.ids.category, set(), at)
+        if row is None:
+            self.due = None
+            return None
+        clock.play(await self.library.on_air(row))
+        self.due = at + self._gap()
+        return row, at
 
 
 def settings_for(automation_config: dict | None) -> Settings:
@@ -469,6 +552,7 @@ async def generate(
     timed: list[TimedItem] | None = None,
     timed_ended: datetime | None = None,
     after_type: str | None = "music",
+    queue_starts: list | None = None,
 ) -> Plan:
     """`timed`: items already queued for set times after `start`, so each pick's
     expected start (and so its block) allows for them. `timed_ended`: when the
@@ -511,48 +595,33 @@ async def generate(
         clock.last_timed_end = as_utc(timed_ended)
     misses = 0
 
+    from app.services.weather_spot_service import station_announcement_zone
+
     ids = id_settings_for(station.automation_config)
-    id_due: datetime | None = None
-    if ids.enabled:
-        id_rows = await library.pool("jingle", ids.category)
-        if not id_rows:
-            note(f'Station IDs between songs are on, but no jingle has the category "{ids.category}".')
-        else:
-            if library.last_used is None:
-                await library._load_last_used()
-            last_id = max((library.last_used.get(str(r.id), _EPOCH) for r in id_rows), default=_EPOCH)
-            # The next one comes a random min..max after the last one aired or
-            # was queued; never aired: within the first stretch of the fill
-            gap = timedelta(minutes=random.uniform(ids.min_minutes, ids.max_minutes))
-            id_due = last_id + gap if last_id > _EPOCH else start + gap / 2
+    sprinkler = StationIdSprinkler(
+        ids, library, blackouts, await station_announcement_zone(db, station.id) if ids.enabled else UTC, end
+    )
+    id_note = await sprinkler.prepare(start, queue_starts)
+    if id_note:
+        note(id_note)
     previous_type = (after_type or "music").lower()
 
     async def maybe_station_id() -> None:
-        """After a song: a station ID when one is due and the air is clear of timed items."""
-        nonlocal id_due, previous_type
-        if id_due is None or previous_type != "music":
+        """After a programme item: a station ID when one is due and the air is clear."""
+        nonlocal previous_type
+        got = await sprinkler.after(clock, previous_type)
+        if got is None:
             return
-        at = clock.start()
-        if at < id_due or at >= end or any(b.covers(at) for b in blackouts):
-            return
-        rows = library.pools.get(("jingle", ids.category)) or []
-        longest = max((float(r.duration or 10.0) for r in rows), default=10.0)
-        if not clock.clear_of_timed(at, longest, timedelta(minutes=ids.clear_minutes)):
-            return  # tried again after the next song
-        row, _ = await library.draw("jingle", ids.category, set(), at)
-        if row is None:
-            id_due = None
-            return
+        row, at = got
         picks.append(
             Pick(
-                at=at, block_id="", block_name="Station ID", asset_type="jingle", category=ids.category,
-                asset_id=row.id, title=row.title, artist=row.artist,
-                duration=float(row.duration or 10.0),
+                at=at, block_id="", block_name="Station ID",
+                asset_type="jingle", category=ids.category, asset_id=row.id, title=row.title,
+                artist=row.artist, duration=float(row.duration or 10.0),
             )
         )
         previous_type = "jingle"
-        clock.play(await library.on_air(row))
-        id_due = at + timedelta(minutes=random.uniform(ids.min_minutes, ids.max_minutes))
+
     while clock.start() < end and len(picks) < MAX_PICKS:
         # Let the players' requests in between picks: nothing below waits on
         # the database any more, and a long fill would hold them all up.

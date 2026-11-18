@@ -182,3 +182,96 @@ async def test_queue_fill_puts_ids_between_songs_and_a_top_up_keeps_the_spacing(
     entries = await queue()
     marks = [i for i, e in enumerate(entries) if e.asset_id in jingle_ids]
     assert all(b - a >= 3 for a, b in zip(marks, marks[1:])), marks
+
+
+async def _stories_with_ids(db: AsyncSession, ids: dict):
+    from app.models.schedule_rule import ScheduleRule
+    from app.models.station import Station
+
+    station = Station(id=uuid.uuid4(), name=f"Stories {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      is_active=True, automation_config={"station_ids": ids})
+    db.add(station)
+    await db.flush()
+    db.add(ScheduleRule(
+        id=uuid.uuid4(), name="All day stories", rule_type="daypart", asset_type="story_ids",
+        hour_start=0, hour_end=24, days_of_week="0,1,2,3,4,5,6", is_active=True, priority=10,
+        station_id=station.id,
+    ))
+    for n in range(12):
+        db.add(Asset(id=uuid.uuid4(), title=f"Story {n}", duration=600.0 + 60 * n,
+                     file_path=f"{uuid.uuid4().hex}.mp3", asset_type="story_ids"))
+    jingles = [_jingle(n) for n in range(4)]
+    db.add_all(jingles)
+    await db.commit()
+    return station, {j.id for j in jingles}
+
+
+async def _pending(db: AsyncSession, station_id):
+    from sqlalchemy import select
+
+    from app.models.queue_entry import QueueEntry
+
+    return (await db.execute(
+        select(QueueEntry).where(QueueEntry.station_id == station_id, QueueEntry.status == "pending")
+        .order_by(QueueEntry.position)
+    )).scalars().all()
+
+
+def _gaps_ok(entries, jingle_ids, durations, low_minutes):
+    """IDs never together, never first, and at least low_minutes apart by running time."""
+    t = 0.0
+    last = None
+    for i, e in enumerate(entries):
+        if e.asset_id in jingle_ids:
+            assert i > 0 and entries[i - 1].asset_id not in jingle_ids
+            if last is not None:
+                assert t - last >= low_minutes * 60 - 1, (t - last) / 60
+            last = t
+        t += durations[e.asset_id]
+
+
+@pytest.mark.asyncio
+async def test_rule_filled_station_gets_ids_between_stories(db_session: AsyncSession):
+    from sqlalchemy import select
+
+    from app.services.queue_replenish_service import QueueReplenishService
+
+    random.seed(13)
+    station, jingle_ids = await _stories_with_ids(db_session, {"enabled": True, "min_minutes": 25, "max_minutes": 35})
+    await QueueReplenishService(db_session, station.id).replenish()
+    entries = await _pending(db_session, station.id)
+    durations = dict((await db_session.execute(select(Asset.id, Asset.duration))).all())
+    n_ids = sum(e.asset_id in jingle_ids for e in entries)
+    stories = len(entries) - n_ids
+    assert stories > 100 and n_ids > stories // 4, (stories, n_ids)
+    _gaps_ok(entries, jingle_ids, durations, 25 - 1)  # the clock counts each item a few seconds short of its length
+    # every ID gets its turn
+    used = [e.asset_id for e in entries if e.asset_id in jingle_ids]
+    assert set(used[:4]) == jingle_ids
+
+
+@pytest.mark.asyncio
+async def test_rule_fill_off_by_default_and_hours_window(db_session: AsyncSession):
+    from app.services.queue_replenish_service import QueueReplenishService
+
+    station, jingle_ids = await _stories_with_ids(db_session, {"enabled": False})
+    await QueueReplenishService(db_session, station.id).replenish()
+    assert not any(e.asset_id in jingle_ids for e in await _pending(db_session, station.id))
+
+    s = id_settings_for({"station_ids": {"enabled": True, "start_hour": 6, "end_hour": 22}})
+    assert s.in_hours(6) and s.in_hours(21) and not s.in_hours(22) and not s.in_hours(3)
+    night = id_settings_for({"station_ids": {"start_hour": 22, "end_hour": 6}})
+    assert night.in_hours(23) and night.in_hours(2) and not night.in_hours(12)
+    assert id_settings_for({"station_ids": {"start_hour": 5, "end_hour": 5}}).in_hours(13)
+
+
+@pytest.mark.asyncio
+async def test_playlist_fill_keeps_ids_inside_the_hours(db_session: AsyncSession):
+    from zoneinfo import ZoneInfo
+
+    random.seed(17)
+    station, _ = await _station_with_ids(db_session, {**IDS, "min_minutes": 5, "max_minutes": 6,
+                                                       "start_hour": 8, "end_hour": 10})
+    plan = await generate(db_session, station, MONDAY_7AM, 4, artist_distance=0)
+    hours = {p.at.astimezone(ZoneInfo("America/New_York")).hour for p in plan.picks if p.asset_type == "jingle"}
+    assert hours and hours <= {8, 9}, hours

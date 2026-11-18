@@ -76,6 +76,8 @@ class QueueReplenishService:
         self.replacing: list = []
         self.cursor_back: dict = {}
         self.replaced = 0
+        # Station IDs between items in the rule fill (set up on first use)
+        self._sprinkle = None
 
     async def _load_automation_config(self) -> None:
         """Load the station's automation_config JSONB."""
@@ -444,7 +446,7 @@ class QueueReplenishService:
 
         start = now
         timed: list = []
-        waiting: list[float] = []
+        waiting: list[tuple] = []
         for entry, duration, meta in rows:
             seconds = on_air_seconds(duration, meta if isinstance(meta, dict) else None)
             if entry.status == "playing":
@@ -453,9 +455,12 @@ class QueueReplenishService:
             elif entry.preempt_at is not None:
                 timed.append(TimedItem(max(aware(entry.preempt_at), now), seconds, not is_soft_timed(entry)))
             else:
-                waiting.append(seconds)
+                waiting.append((entry.asset_id, seconds))
         clock = Clock(start, timed)
-        for seconds in waiting:
+        # When each waiting item is expected to start (station IDs count from the last one)
+        self.queue_starts = []
+        for asset_id, seconds in waiting:
+            self.queue_starts.append((asset_id, clock.start()))
             clock.play(seconds)
         fill_start = clock.start()
         # When the last timed item before the new songs ends (station IDs keep clear of it)
@@ -528,6 +533,7 @@ class QueueReplenishService:
             timed=timed,
             timed_ended=getattr(self, "timed_ended", None),
             after_type=after_type,
+            queue_starts=getattr(self, "queue_starts", None),
         )
         if not plan.picks:
             logger.info("Playlist generation produced nothing: %s", "; ".join(plan.notes))
@@ -948,6 +954,7 @@ class QueueReplenishService:
                 await self._enqueue_asset(asset, self.max_pos)
                 filled += dur
                 batch_count += 1
+                filled += await self._station_id_after(asset)
 
                 # Commit in batches to avoid huge single-transaction flushes
                 if batch_count % BATCH_SIZE == 0:
@@ -966,6 +973,55 @@ class QueueReplenishService:
                 break
 
         logger.info("Total filled %.1fs of %s content in %d passes", filled, asset_type, passes)
+
+    async def _station_id_after(self, asset: Asset) -> float:
+        """Rule fill (All Day Stories): after each item, a station ID when one is
+        due (automation_config.station_ids, the same rule as the playlist fill).
+        Returns the seconds added."""
+        from app.services.playlist_generator_service import (
+            Clock,
+            StationIdSprinkler,
+            _Library,
+            id_settings_for,
+            on_air_seconds,
+        )
+
+        if self._sprinkle is None:
+            ids = id_settings_for(self.automation_config)
+            self._sprinkle = False
+            if not ids.enabled:
+                return 0.0
+            from app.services.spot_schedule_service import load_blackouts
+            from app.services.weather_spot_service import station_announcement_zone
+
+            now = datetime.now(timezone.utc)
+            # The queue as it stands before this item: its end and the timed items after it
+            start, timed = await self._air_timeline(now)
+            clock = Clock(start, timed)
+            clock.last_timed_end = getattr(self, "timed_ended", None)
+            library = _Library(self.db, self.station_id, set(), queued=None, start=start)
+            blackouts = await load_blackouts(self.db, self.station_id, now, now + timedelta(days=8))
+            zone = await station_announcement_zone(self.db, self.station_id)
+            sprinkler = StationIdSprinkler(ids, library, blackouts, zone)
+            # The item just queued is already part of the walk above (autoflush)
+            await sprinkler.prepare(start, getattr(self, "queue_starts", []))
+            self._sprinkle = (sprinkler, clock)
+            got = await sprinkler.after(clock, asset.asset_type)
+        elif self._sprinkle is False:
+            return 0.0
+        else:
+            sprinkler, clock = self._sprinkle
+            clock.play(on_air_seconds(asset.duration, asset.metadata_extra if isinstance(asset.metadata_extra, dict) else None))
+            got = await sprinkler.after(clock, asset.asset_type)
+        if got is None:
+            return 0.0
+        row, _ = got
+        jingle = await self.db.get(Asset, row.id)
+        if jingle is None:
+            return 0.0
+        self.max_pos += 1
+        await self._enqueue_asset(jingle, self.max_pos)
+        return float(jingle.duration or 10.0)
 
     def _in_turn(self, candidates):
         """The list has been used up and items come round again: yield the one
