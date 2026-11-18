@@ -137,3 +137,34 @@ block). The response carries `protected: true` and the control room says it play
 the end; on an engine station the engine is not asked to skip. Play-now (fire-now) still puts
 something else on air. Songs stay skippable one per press. Test:
 `backend/tests/test_rapid_next.py`.
+
+## Operator actions take turns (2026-11-18)
+Play next, fire-now, Next, insert, move, reorder and delete on one station run one at a time, in arrival order (`operator_turn`, a route dependency in `queue.py`, its own lock per station, not the advance lock). Found live on Jerusalem at 03:23Z: Play next and Next sent 0.1 s apart ran side by side, Next read the queue before Play next's commit (50 to 150 ms on Supabase), saw the old head and played the song the engine had pre-loaded. Local Postgres commits in a millisecond, so the harness needs a trigger that delays the insert to show it (`operator_next_overtakes_commit`). A turn is waited for at most 8 s (`OPERATOR_TURN_WAIT`), then the action goes ahead anyway, so one stuck request cannot freeze the control room. A new operator endpoint that changes what is next must add `dependencies=[Depends(operator_turn)]` (`test_every_operator_queue_action_takes_its_turn`).
+
+## Next goes to what the queue says, and the retry skip spares a fresh item (2026-11-18)
+
+Found on Main ten minutes after it moved to the server: Next was pressed while a soft
+sponsorship waited as the next item. The engine had a song loaded; it skipped, loaded the
+sponsorship, and its own "skip again if nothing changed in 0.3 s" retry (the droplet was busy,
+so the change was slow) threw the sponsorship away. One second of emergency music aired, the
+backend closed the sponsorship as "aired without a start report", and a critical alert fired.
+
+Three rules now:
+
+- **Engine (`radio.liq`, `skip_main`)**: the retry skips again only if the main lane has neither
+  changed nor fetched a new item since Next was asked (`main_fetched_at`, set by
+  `main_requests.on_track`), and the timed lane is not on air.
+- **Backend (`/skip`)**: when the queue's next item is not the one the engine holds loaded
+  (`head_the_engine_does_not_hold`), Next sends that item down the timed lane to start now
+  (`next_goes_to`: `/timed` then `/flush`) instead of asking the engine to drop and reload.
+  The held song stays held and plays after it. If the engine refuses, Next falls back to a plain skip.
+  Short items only (120 s or less, not a shiur or story, not a resumed item) and only when no
+  hard timed item is due until a minute after the item would end: whatever plays in the timed
+  lane is followed at once by the next timed item handed over, so a 150 s item sent there pulled
+  the time check 37 s early in the engine run. Everything else takes the earlier path (take the
+  held song back, wait for the engine to ask and load, then skip). A `/timed` that gets no answer
+  within 6 s counts as taken: the engine answers only once the file is loaded.
+- **Emergency alert**: emergency music raises the critical alert only if it is still on after
+  `EMERGENCY_ALERT_AFTER` (5 s). A one second gap between two items is logged, not alerted.
+
+Needs a `setup.sh` rerun on the droplet for the engine half.

@@ -101,6 +101,11 @@ end
 # A long song is a big download: give it time to arrive (it is fetched while the song
 # before it plays)
 main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=120., next_request)
+# When the music lane last began reading a new item (before `cross` has buffered its
+# start and called transition()). skip_main() uses it to tell a skip that took (the next
+# item is on its way) from one that only ended a transition.
+main_fetched_at = ref(0.)
+main_requests.on_track(fun (_) -> main_fetched_at := time())
 # Per-track level from the library's audio analysis (backend sends liq_amplify)
 main = amplify(1., override="liq_amplify", main_requests)
 # Song-to-song: the outgoing song fades out under the incoming one, which starts at full
@@ -338,7 +343,10 @@ def skip_main() =
   main.skip()
   thread.run(delay=0.1, {if main_changed_at() >= asked then master_gain := 1. end})
   thread.run(delay=0.3, {
-    if main_changed_at() < asked and on_air_lane() != "timed" then
+    # Not when the next item is already being read: on the busy server its start took
+    # longer than 0.3 s to buffer, and the second skip ran over it (Main 03:46Z
+    # 2026-11-18: a sponsorship never aired and a second of emergency music played)
+    if main_changed_at() < asked and main_fetched_at() < asked and on_air_lane() != "timed" then
       log.important("skip: no song change after the skip (transition still playing); skipping again")
       hard_cut := true
       main.skip()

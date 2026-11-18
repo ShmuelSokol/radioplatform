@@ -62,6 +62,8 @@ class Engine:
 
 @pytest_asyncio.fixture
 async def eng(db_session, monkeypatch):
+    # Alerts at once in these tests; the 5 s hold has its own test
+    monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0)
     station = Station(id=uuid.uuid4(), name="Engine FM", timezone="America/New_York")
     db_session.add(station)
     songs = []
@@ -1411,3 +1413,53 @@ async def test_ending_a_show_takes_the_host_off_air_at_once(db_session, eng):
         assert str(station.id) not in live_relay.on_air
     finally:
         live_relay.on_air.pop(str(station.id), None)
+
+
+@pytest.mark.asyncio
+async def test_a_moment_of_emergency_music_raises_no_alert(client, db_session, eng, monkeypatch):
+    """Main 03:46Z 2026-11-18: one second of emergency music while an item loaded after a
+    Next raised a critical alert and a push, cleared half a second later."""
+    import asyncio
+
+    station, entries, _, _ = eng
+    raised = []
+
+    async def record(db, station_id, state):
+        raised.append(str(station_id))
+
+    monkeypatch.setattr(playout_engine, "_emergency_alert", record)
+    monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0.15)
+    # a blip: the queue's item starts before the hold is over
+    await _on_air(client, station, "", lane="emergency")
+    await _on_air(client, station, entries[0].id)
+    await asyncio.sleep(0.3)
+    assert raised == []
+    # emergency music that lasts is reported
+    await _on_air(client, station, "", lane="emergency")
+    await asyncio.sleep(0.3)
+    assert raised == [str(station.id)]
+
+
+@pytest.mark.asyncio
+async def test_a_timed_item_still_loading_counts_as_taken_only_when_asked(monkeypatch):
+    """Next sends its item down the timed lane and the engine answers once the file is
+    loaded. No answer in time means "still loading", not "refused": a skip then would end
+    the song on air with nothing ready (harness operator_next_slow_file, 2026-11-18)."""
+    import httpx
+
+    from app.services import playout_engine as pe
+
+    class Slow:
+        async def post(self, *a, **kw):
+            raise httpx.ReadTimeout("slow")
+
+    class Down:
+        async def post(self, *a, **kw):
+            raise httpx.ConnectError("down")
+
+    sid = "0e0e0e0e-0000-4000-8000-00000000a001"
+    monkeypatch.setattr(pe, "_client", lambda: Slow())
+    assert await pe.engine_timed(sid, "x", 0.0, "e1", wait=0.1, slow_is_ok=True) is True
+    assert await pe.engine_timed(sid, "x", 0.0, "e1") is False
+    monkeypatch.setattr(pe, "_client", lambda: Down())
+    assert await pe.engine_timed(sid, "x", 0.0, "e1", wait=0.1, slow_is_ok=True) is False

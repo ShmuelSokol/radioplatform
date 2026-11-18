@@ -213,6 +213,10 @@ def test_a_skip_is_checked_and_repeated_once():
     assert "main_changed_at := time()" in liq[liq.index("def transition(ending, starting) ="):liq.index("main = cross(")]
     body = liq[liq.index("def skip_main() ="):liq.index("def skip_on_air(")]
     assert body.count("main.skip()") == 2 and "main_changed_at() < asked" in body
+    # The retry must not run over an item the engine fetched after the skip
+    # (Main 2026-11-18 03:46Z: a waiting sponsorship was thrown away).
+    assert "main_fetched_at() < asked" in body
+    assert "main_requests.on_track" in liq and "main_fetched_at := time()" in liq
     assert "skip_main()" in liq[liq.index("def skip_on_air("):liq.index('control("/skip"') if 'control("/skip"' in liq else len(liq)]
 
 

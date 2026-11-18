@@ -4,7 +4,7 @@ nothing, and the silence item blackouts play.
 Rows: B-HOLIDAYS-5, B-HOLIDAYS-7, B-HOLIDAYS-8, B-HOLIDAYS-9."""
 import shutil
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
@@ -151,7 +151,16 @@ async def test_moving_a_station_moves_its_shabbos(client, auth_headers, db_sessi
                          headers=auth_headers)
     assert r.status_code == 200 and r.json()["timezone"] == "Asia/Jerusalem"
     rows = (await db_session.execute(select(HolidayWindow).execution_options(populate_existing=True))).scalars().all()
-    left = [w.name for w in rows if w.id in old and str(st.id) in (w.affected_stations or {}).get("station_ids", [])]
+    # A window in progress is left to end at its own time (by design), so on a Shabbos
+    # this test must not count it (found by running the suite with the clock on a Saturday)
+    now = datetime.now(UTC)
+
+    def in_progress(w):
+        start, end = (t if t.tzinfo else t.replace(tzinfo=UTC) for t in (w.start_datetime, w.end_datetime))
+        return start <= now < end
+
+    left = [w.name for w in rows if w.id in old and not in_progress(w)
+            and str(st.id) in (w.affected_stations or {}).get("station_ids", [])]
     assert left == []
     assert keep_ids <= {w.id for w in rows}
     assert any(w.id not in old for w in rows)                       # the new town's windows are there

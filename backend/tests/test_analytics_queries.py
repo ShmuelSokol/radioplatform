@@ -81,11 +81,12 @@ async def test_airtime_counts_what_aired(client, auth_headers, db_session):
 @pytest.mark.asyncio
 async def test_hours_are_station_local(client, auth_headers, db_session):
     a, _, song, _, _ = await _setup(db_session)
-    # 20:30 New York (EST, UTC-5) = 01:30 UTC next day
-    now = datetime.now(UTC)
-    when = (now - timedelta(days=1)).replace(hour=1, minute=30, second=0, microsecond=0)
-    if when.month in (3, 4, 5, 6, 7, 8, 9, 10):
-        when = when.replace(hour=0)  # EDT: 20:30 local = 00:30 UTC
+    # 20:30 New York the day before yesterday, whatever the season (the old month-based
+    # guess was wrong in the weeks around the clock changes)
+    from zoneinfo import ZoneInfo
+    ny = ZoneInfo("America/New_York")
+    day = (datetime.now(ny) - timedelta(days=2)).date()
+    when = datetime(day.year, day.month, day.day, 20, 30, tzinfo=ny).astimezone(UTC)
     db_session.add(PlayLog(station_id=a.id, asset_id=song.id, start_utc=when, source=PlaySource.SCHEDULER))
     await db_session.commit()
     hours = (await client.get(f"{API}/hourly-distribution", params={"station_id": str(a.id)}, headers=auth_headers)).json()["hours"]
