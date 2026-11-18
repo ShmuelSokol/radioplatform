@@ -142,7 +142,7 @@ radioplatform/
 |--------|------|--------|
 | auth | auth.py | /auth |
 | stations | stations.py | /stations |
-| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
+| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/remove-silence`: cut out every silent region the scan found (middle gaps too; original kept for Restore Original); `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |

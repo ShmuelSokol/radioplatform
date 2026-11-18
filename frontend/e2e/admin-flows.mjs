@@ -2639,6 +2639,13 @@ function makeSilenceTone(file) {
     '-ac', '2', '-b:a', '128k', file]);
   return file;
 }
+function makeGapTone(file) {
+  // 3 s silence, 4 s tone, 2 s silence, 4 s tone, 3 s silence (16 s): a gap in the middle
+  // as well as at both ends, for Trim Out on one gap and Remove All Found Silence
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i',
+    "aevalsrc='if(between(t,3,7)+between(t,9,13),0.5*sin(440*2*PI*t),0)':s=44100:d=16", '-ac', '2', '-b:a', '128k', file]);
+  return file;
+}
 async function uploadFixture(title, { type = 'music', file } = {}) {
   const f = file || makeSilenceTone(path.join(TMP, `${title.replace(/\W+/g, '_')}.mp3`));
   const form = new FormData();
@@ -2904,7 +2911,7 @@ section('upload', async () => {
 });
 
 section('asset-detail', async () => {
-  const asset = await uploadFixture(`E2E Detail ${RUN}`);
+  const asset = await uploadFixture(`E2E Detail ${RUN}`, { file: makeGapTone(path.join(TMP, `detail_${RUN}.mp3`)) });
   for (const view of ['desktop', 'iphone']) {
     const page = await newPage('manager', view);
     await proxyAudio(page, 'manager');
@@ -2944,10 +2951,11 @@ section('asset-detail', async () => {
       await timedSave(page, 'save preview default', (m, p) => m !== 'GET', () => page.getByRole('button', { name: 'Save as Default' }).click());
     }, page);
     if (view === 'desktop') {
-      await step('F-ASSETDETAIL-4 silence: Detect finds regions; Play / Deselect; Trim Out (confirm) then Undo Trim; Auto-Clip then Restore Original', async () => {
+      await step('F-ASSETDETAIL-4 silence: Detect finds regions; Play / Deselect; Trim Out on a middle gap removes only that gap, then Undo Trim; Auto-Clip then Restore Original', async () => {
+        const lengthNow = async () => (await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token })).duration;
         await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/detect-silence'), () => page.getByRole('button', { name: 'Detect Silence' }).click());
-        const region = page.locator('button', { hasText: /^#1/ }).first();
-        await region.waitFor({ timeout: 10000 });
+        await page.getByText('3 silence region(s) found').waitFor({ timeout: 10000 });
+        const region = page.locator('button', { hasText: /^#2/ }).first();
         await region.click();
         await page.getByRole('button', { name: 'Play Region' }).click();
         await page.getByRole('button', { name: 'Deselect' }).click();
@@ -2955,10 +2963,15 @@ section('asset-detail', async () => {
         await region.click();
         await page.getByRole('button', { name: 'Trim Out' }).click();
         await page.getByText('Confirm Region Trim').waitFor();
-        const r = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/trim'), () => page.getByRole('button', { name: 'Trim', exact: true }).click());
-        assert(r.status < 300, `trim ${r.status}`);
+        const r = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/remove-silence'), () => page.getByRole('button', { name: 'Trim', exact: true }).click());
+        assert(r.status < 300, `trim out ${r.status}`);
+        await page.getByText('Trim applied — review the result').waitFor();
+        const cut = await lengthNow();
+        // The 2 s gap goes and nothing else (it used to cut off everything after the gap: 7 s left)
+        assert(Math.abs(cut - 14) < 0.5, `Trim Out on the middle gap left ${cut} s of 16 s (expected about 14)`);
         await page.getByRole('button', { name: 'Undo Trim' }).click();
         await page.getByRole('button', { name: 'Undo Trim' }).waitFor({ state: 'detached', timeout: 10000 });
+        await until(async () => (await lengthNow()) > 15, 'Undo Trim brought back the 16 s original');
         await page.getByRole('button', { name: 'Detect Silence' }).click(); // auto-clip is offered after a detection
         await page.getByRole('button', { name: 'Auto-Clip Start & End' }).click();
         await page.getByText('Confirm Auto-Clip').waitFor();
@@ -2966,11 +2979,52 @@ section('asset-detail', async () => {
         await page.getByRole('button', { name: 'Save', exact: true }).first().waitFor({ timeout: 15000 });
         await page.getByRole('button', { name: 'Save', exact: true }).first().click();
         await page.getByText('Trim saved.').waitFor();
-        const after = await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token });
-        assert(after.duration < 14, `auto-clip left ${after.duration} s of a 16 s file with 6 s of silence`);
+        const after = await lengthNow();
+        assert(after < 14, `auto-clip left ${after} s of a 16 s file with 6 s of silence at the ends`);
         await page.getByRole('button', { name: 'Restore Original' }).click();
-        await until(async () => (await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token })).duration > 15, 'original restored');
-        return `auto-clip → ${after.duration.toFixed(1)} s, restored`;
+        await until(async () => (await lengthNow()) > 15, 'original restored');
+        return `trim out middle gap → ${cut.toFixed(1)} s; auto-clip → ${after.toFixed(1)} s, restored`;
+      }, page);
+      await step('F-ASSETDETAIL-4b Remove All Found Silence: count on the button, confirm says how much and that the original is kept; Cancel changes nothing; Remove All takes out all 3 gaps; Save; Restore Original', async () => {
+        const lengthNow = async () => (await api('GET', `/assets/${asset.id}`, { token: USERS.admin.token })).duration;
+        await page.getByText('Original restored!').waitFor({ timeout: 10000 }).catch(() => {});
+        await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/detect-silence'), () => page.getByRole('button', { name: 'Detect Silence' }).click());
+        const all = page.getByRole('button', { name: 'Remove All Found Silence (3)' });
+        await all.waitFor({ timeout: 10000 });
+        await all.click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByText('Remove all found silence?').waitFor();
+        if (process.env.SHOT_DIR) {                                              // for a person to look at
+          await page.screenshot({ path: `${process.env.SHOT_DIR}/remove-all-desktop.png` });
+          const size = page.viewportSize();
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.screenshot({ path: `${process.env.SHOT_DIR}/remove-all-iphone.png` });
+          await page.setViewportSize(size);
+        }
+        const words = await dialog.innerText();
+        assert(/all 3 silent parts/.test(words) && /8\.0 s in total/.test(words) && /middle/.test(words) && /original/i.test(words),
+          `the confirm does not say what goes and that the original is kept: ${words}`);
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await dialog.waitFor({ state: 'detached' });
+        assert(Math.abs((await lengthNow()) - 16) < 0.5, 'Cancel changed the item');
+        await all.click();
+        await page.keyboard.press('Escape');                                   // Esc closes it too
+        await page.getByRole('dialog').waitFor({ state: 'detached' });
+        await all.click();
+        const r = await timedResponse(page, (m, p) => m === 'POST' && p.endsWith('/remove-silence'),
+          () => page.getByRole('dialog').getByRole('button', { name: 'Remove All', exact: true }).click());
+        assert(r.status < 300, `remove all ${r.status}`);
+        await page.getByText('Trim applied — review the result').waitFor({ timeout: 15000 });
+        const left = await lengthNow();
+        assert(Math.abs(left - 8) < 0.5, `Remove All left ${left} s (expected the 8 s of tone)`);
+        await page.getByRole('button', { name: 'Save', exact: true }).first().click();
+        await page.getByText('Trim saved.').waitFor();
+        await page.getByRole('button', { name: 'Detect Silence' }).click();     // nothing left to find
+        await until(async () => (await page.getByRole('button', { name: /Remove All Found Silence/ }).count()) === 0
+          && (await page.getByText(/silence region\(s\) found/).count()) === 0, 'a new scan finds no silence', 10000);
+        await page.getByRole('button', { name: 'Restore Original' }).click();
+        await until(async () => (await lengthNow()) > 15, 'Restore Original brought back the 16 s file');
+        return `16 s → ${left.toFixed(1)} s, restored`;
       }, page);
       await step('F-ASSETDETAIL-5 enhance panel: preset, Preview, Apply, Undo Enhancement; full editor link', async () => {
         await page.getByRole('button', { name: 'Broadcast Polish' }).first().click();
@@ -3038,6 +3092,10 @@ section('asset-detail', async () => {
       // (the pre-listen lengths are the person's own setting and stay)
       assert(await main.locator('[data-testid=asset-title], [data-testid=asset-artist], [data-testid=asset-album], input[type=date], input[title*="vote"]').count() === 0, 'an editable field of the item is shown');
       for (const name of ['AI Auto-Enhance', 'Restore Original', 'Apply', 'Trim Out', 'Auto-Clip Start & End'])
+        assert(await main.getByRole('button', { name, exact: true }).count() === 0, `"${name}" is offered`);
+      await main.getByRole('button', { name: 'Detect Silence' }).click();
+      await main.getByText(/silence region\(s\) found/).waitFor({ timeout: 10000 });
+      for (const name of [/Remove All Found Silence/, /^Auto-Clip/, /^Trim Out$/])
         assert(await main.getByRole('button', { name, exact: true }).count() === 0, `"${name}" is offered`);
       assert(await main.getByRole('link', { name: /Full Editor/ }).count() === 0, '"Full Editor" is offered');
       await main.getByRole('button', { name: 'Detect Silence' }).waitFor();   // looking is still allowed

@@ -119,6 +119,7 @@ WRITE_POLICY = {
     ("POST", "/assets/{asset_id}/restore-original"): MANAGERS,
     ("POST", "/assets/{asset_id}/transcode"): MANAGERS,
     ("POST", "/assets/{asset_id}/trim"): MANAGERS,
+    ("POST", "/assets/{asset_id}/remove-silence"): MANAGERS,
     ("POST", "/auth/seed-all"): ADMIN,
     ("POST", "/auth/seed-assets"): ADMIN,
     ("POST", "/auth/seed-reset"): ADMIN,
