@@ -177,9 +177,10 @@ async function desktop(browser, sid) {
   check(`${tag}: the play due in a minute has no Skip, the later one has`, await today.getByTestId('sponsor-play').nth(0).getByTestId('sponsor-skip').count() === 0 && await today.getByTestId('sponsor-play').nth(1).getByTestId('sponsor-skip').count() === 1);
   check(`${tag}: coming days lists tomorrow's play`, /Tomorrow/.test(await page.getByTestId('sponsor-coming').innerText()));
   check(`${tag}: missed plays show day, time of day, and how many aired`, /Tue Nov 17, morning: 1 of 2 aired/.test(await page.getByTestId('sponsor-missed').innerText()));
-  check(`${tag}: links go to Spot Schedule (this station), Sponsors, Campaigns (this sponsor), Schedule Check`,
+  check(`${tag}: links go to Spot Schedule (this station), the sponsor's own page (contracts), Campaigns (this sponsor), Schedule Check`,
     await page.getByTestId('link-spot-schedule').getAttribute('href') === `/admin/spot-schedule?station=${sid}`
-      && await page.getByTestId('link-sponsors').getAttribute('href') === '/admin/sponsors'
+      && await page.getByTestId('link-sponsors').getAttribute('href') === '/admin/sponsors/sp27?tab=contracts'
+      && await page.getByTestId('link-sponsor-missed').getAttribute('href') === '/admin/sponsors/sp27?tab=missed'
       && await page.getByTestId('link-campaigns').getAttribute('href') === '/admin/campaigns?sponsor=sp27'
       && await page.getByTestId('link-schedule-check').getAttribute('href') === '/admin/schedule-check');
   check(`${tag}: opening the panel moved nothing in the queue`, station.pending().map((e) => e.id).join() === order && airCalls(station).length === 0);
@@ -372,9 +373,14 @@ async function finding(browser, sid) {
   check(`${tag}: one click on the tag opens the Sponsor panel`, await page.getByTestId('song-panel').count() === 0);
   check(`${tag}: and does not select or move the row`, station.pending().map((e) => e.id).join() === order && airCalls(station).length === 0);
   await page.keyboard.press('Escape');
+  for (let i = 0; i < 40 && !station.calls.some((c) => c.path === '/spot-schedules/station-day'); i++) await sleep(250);
+  check(`${tag}: the room reads today's sponsorships in the background before the tab is opened`, station.calls.some((c) => c.path === '/spot-schedules/station-day'));
+  await sleep(500);
+  const tOpen = Date.now();
   await page.getByRole('tab', { name: 'Sponsors' }).or(page.getByRole('button', { name: 'Sponsors', exact: true })).first().click();
   await page.getByTestId('sponsors-today-row').first().waitFor();
   const rows = page.getByTestId('sponsors-today-row');
+  check(`${tag}: the list shows at once, no Loading`, Date.now() - tOpen < 700, `${Date.now() - tOpen} ms`);
   check(`${tag}: the Sponsors tab lists today's two plays, not tomorrow's`, await rows.count() === 2, String(await rows.count()));
   const summary = await page.getByTestId('sponsors-today-summary').innerText();
   check(`${tag}: it names the station and counts what waits`, summary.includes(name) && /2 waiting/.test(summary), summary);

@@ -39,6 +39,7 @@ import { usePfl, WEATHER_PFL_ID, type PflClip } from './controlroom/pfl';
 import { PflDeck } from './controlroom/PflDeck';
 import { ErrorsPanel, LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import { SponsorsToday } from './controlroom/SponsorsToday';
+import { getStationDay } from '../../api/spotSchedules';
 import type { StationDayPlay } from '../../api/spotSchedules';
 import ModeButtons from './controlroom/ModeButtons';
 import { panicRequest, setStationModes, type StationModes } from '../../api/queue';
@@ -225,6 +226,15 @@ export default function Dashboard() {
     if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing', source: row.source ?? null });
   }, []);
   const closeSong = useCallback(() => setSongTarget(null), []);
+  // Read the Sponsors list quietly a few seconds after the room opens (and every minute), so the
+  // tab shows at once instead of "Loading…" for 1-3 s (live check 2026-11-18)
+  useEffect(() => {
+    if (!stationId) return;
+    const read = () => qc.prefetchQuery({ queryKey: ['sponsors-today', stationId], queryFn: () => getStationDay(stationId), staleTime: 30_000 });
+    const first = setTimeout(read, 4000);
+    const every = setInterval(read, 60_000);
+    return () => { clearTimeout(first); clearInterval(every); };
+  }, [qc, stationId]);
   // The Sponsors list: one tap opens that play's Sponsorship panel
   const openSponsorPlay = useCallback((play: StationDayPlay) => {
     setSongTarget({ asset: play.asset, onAir: play.status === 'playing', source: play.source || 'ad_slot' });

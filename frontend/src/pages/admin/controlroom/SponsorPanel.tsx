@@ -278,6 +278,9 @@ export default function SponsorPanel({ target, stationId, canSkip, canManage, ca
                 ) : (
                   <p className="text-xs" data-testid="sponsor-missed-none">{contractsHere.length ? 'None. Every promised play aired.' : 'No contract here, so nothing is promised.'}</p>
                 )}
+                {sponsor && canOpen('/admin/sponsors') && (missedPast.length > 0 || missedComing.length > 0) && (
+                  <Link to={`/admin/sponsors/${sponsor.id}?tab=missed`} className="text-xs underline text-blue-800" data-testid="link-sponsor-missed">All of this sponsor's missed plays →</Link>
+                )}
                 {missedComing.length > 0 && (
                   <ul className="text-xs mt-1 text-red-800" data-testid="sponsor-no-room">
                     {missedComing.map(m => (
@@ -296,7 +299,7 @@ export default function SponsorPanel({ target, stationId, canSkip, canManage, ca
               <Link to={`/admin/spot-schedule?station=${stationId}`} className={linkCls} data-testid="link-spot-schedule">Spot Schedule</Link>
             )}
             {canOpen('/admin/sponsors') && (
-              <Link to="/admin/sponsors" className={linkCls} data-testid="link-sponsors">Sponsors</Link>
+              <Link to={sponsor ? `/admin/sponsors/${sponsor.id}?tab=contracts` : '/admin/sponsors'} className={linkCls} data-testid="link-sponsors">{sponsor ? 'Sponsor page' : 'Sponsors'}</Link>
             )}
             {canOpen('/admin/campaigns') && (
               <Link to={sponsor ? `/admin/campaigns?sponsor=${sponsor.id}` : '/admin/campaigns'} className={linkCls} data-testid="link-campaigns">Campaigns</Link>
