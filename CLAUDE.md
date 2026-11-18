@@ -260,7 +260,7 @@ radioplatform/
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
 - Sponsors.tsx — Sponsors as a client list: on the air / starting soon / paused / ended / no contract, active dates, contracts, plays; filters and search (see `wiki/sponsor-accounts.md`)
-- SponsorDetail.tsx — One client: spots by stage of the flow, contracts with their settings (pause, end date), play history with CSV, missed plays, details
+- SponsorDetail.tsx — One client: spots by stage of the flow, contracts with their settings (Edit dialog `components/sponsors/ContractEditor.tsx`, also on Spot Schedule; pause, end date), play history with CSV, missed plays, details
 - Campaigns.tsx — Sponsorship campaigns across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
 - CampaignDetail.tsx — One campaign for staff: drafts, comments, Save Status. Drafts and comments panels are shared with the sponsor portal (`components/campaigns/CampaignParts.tsx`)
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice

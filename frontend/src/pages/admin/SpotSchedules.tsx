@@ -24,6 +24,7 @@ import {
 } from '../../api/spotSchedules';
 import { useStations } from '../../hooks/useStations';
 import Spinner from '../../components/Spinner';
+import ContractEditor from '../../components/sponsors/ContractEditor';
 import type { Asset } from '../../types';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -125,6 +126,7 @@ export default function SpotSchedules() {
   const linkedContract = params.get('contract') || '';
   const [previewStation, setPreviewStation] = useState(params.get('station') || '');
   const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
+  const [editing, setEditing] = useState<SpotSchedule | null>(null);
 
   // The look-ahead opens on a station that has sponsorships: opening on the first
   // station (Main) showed "none planned" while 180 plays were queued on two others.
@@ -509,6 +511,7 @@ export default function SpotSchedules() {
       )}
 
       {playing && <audio src={playing.url} autoPlay onEnded={() => setPlaying(null)} />}
+      {editing && <ContractEditor contract={editing} sponsorId={editing.sponsor_id} onClose={() => setEditing(null)} />}
 
       <div className="bg-white rounded-xl shadow">
         <div className="px-6 py-4 border-b">
@@ -543,6 +546,13 @@ export default function SpotSchedules() {
                 </div>
                 <button onClick={() => listen(s.asset_id)} className="text-blue-600 text-sm">
                   {playing?.id === s.asset_id ? 'Stop' : 'Listen'}
+                </button>
+                <button
+                  onClick={() => setEditing(s)}
+                  data-testid="contract-edit"
+                  className="text-sm px-3 py-1 rounded-lg bg-blue-600 text-white font-semibold"
+                >
+                  Edit
                 </button>
                 <button
                   onClick={() => updateMut.mutate({ id: s.id, data: { is_active: !s.is_active } })}
