@@ -553,3 +553,17 @@ def test_every_engine_call_carries_its_own_instance_id_for_the_one_engine_rule()
     # Every backend call uses the shared headers
     assert liq.count("headers=auth_headers") >= 3
     assert "status_code == 409" in liq
+
+
+def test_the_same_item_back_within_a_moment_is_not_reported_as_a_new_start():
+    """Two start reports for one sponsorship at Main's 20:30Z break (2026-11-18) wrote two
+    play log rows. The engine reports an item seen again within 3 s (after a blip of
+    another source) only once, and an emergency file (no entry id) on every change."""
+    liq = _liq()
+    assert "last_started_entry" in liq
+    assert 'entry != "" and entry == last_started_entry() and time() - last_started_at() < 3.' in liq
+    assert "not a new start" in liq
+    # A crossfade showing the outgoing item's tags once more is not a start either (same
+    # lane, within 1.5 s); a song coming back after a dropped timed item still counts
+    assert 'entry == previous_reported()' in liq
+    assert 'm["kbr_lane"] == on_air_lane() and time() - reported_at() < 1.5' in liq

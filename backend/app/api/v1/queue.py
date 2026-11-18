@@ -1337,7 +1337,7 @@ async def _get_queue_impl(station_id, limit, db):
     )
     asset_cols = (
         Asset.id, Asset.title, Asset.artist, Asset.duration, Asset.intro_seconds,
-        Asset.asset_type, Asset.category,
+        Asset.asset_type, Asset.category, Asset.sponsor_id,
     )
     result = await db.execute(
         select(*entry_cols, *asset_cols)
@@ -1656,6 +1656,7 @@ async def _get_queue_impl(station_id, limit, db):
                 "intro_seconds": e.asset.intro_seconds,
                 "asset_type": e.asset.asset_type,
                 "category": e.asset.category,
+                "sponsor_id": str(e.asset.sponsor_id) if getattr(e.asset, "sponsor_id", None) else None,
             } if e.asset else None,
         }
         if is_silence and current_blackout_name:

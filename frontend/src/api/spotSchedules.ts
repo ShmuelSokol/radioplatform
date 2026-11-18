@@ -154,6 +154,8 @@ export interface SponsorItemMissed {
   missed: number;
   moved: number;
   note: string;
+  /** Set for a single play today that did not air (its time of day is not over yet) */
+  local_time?: string;
 }
 export interface SponsorItem {
   asset: { id: string; title: string; artist: string | null; asset_type: string; category: string | null; duration: number | null };

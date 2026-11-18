@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { getAirStatus } from '../../api/liveShows';
 import type { AirStatus } from '../../api/liveShows';
 import { liveShowBadge } from './controlroom/liveBadge';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useStations } from '../../hooks/useStations';
@@ -226,15 +226,16 @@ export default function Dashboard() {
     if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing', source: row.source ?? null });
   }, []);
   const closeSong = useCallback(() => setSongTarget(null), []);
-  // Read the Sponsors list quietly a few seconds after the room opens (and every minute), so the
-  // tab shows at once instead of "Loading…" for 1-3 s (live check 2026-11-18)
-  useEffect(() => {
-    if (!stationId) return;
-    const read = () => qc.prefetchQuery({ queryKey: ['sponsors-today', stationId], queryFn: () => getStationDay(stationId), staleTime: 30_000 });
-    const first = setTimeout(read, 4000);
-    const every = setInterval(read, 60_000);
-    return () => { clearTimeout(first); clearInterval(every); };
-  }, [qc, stationId]);
+  // Keep today's Sponsors list read the whole time the room is open (every minute), so the tab
+  // paints its rows at once: a one-off background read was not used on the first paint live
+  // (2026-11-18, "Loading…" still flashed). Same query key as SponsorsToday.
+  useQuery({
+    queryKey: ['sponsors-today', stationId],
+    queryFn: () => getStationDay(stationId as string),
+    enabled: !!stationId,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
   // The Sponsors list: one tap opens that play's Sponsorship panel
   const openSponsorPlay = useCallback((play: StationDayPlay) => {
     setSongTarget({ asset: play.asset, onAir: play.status === 'playing', source: play.source || 'ad_slot' });

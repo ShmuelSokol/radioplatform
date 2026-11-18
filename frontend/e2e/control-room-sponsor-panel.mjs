@@ -71,7 +71,10 @@ function sponsorStation(sid, opts = {}) {
         aired_today: 2,
         today: rows.filter((e) => new Date(e.preempt_at) < midnight).map(out),
         upcoming: rows.filter((e) => new Date(e.preempt_at) >= midnight).map(out),
-        missed: [{ when: 'past', local_date: '2026-11-17', day: 'Tue Nov 17', daypart: 'morning', promised: 2, played: 1, missed: 1, moved: 0, note: 'Did not air' }],
+        missed: [
+          { when: 'past', local_date: '2026-11-18', day: 'Today', daypart: 'evening', promised: 1, played: 0, missed: 1, moved: 0, note: 'Did not air', local_time: '9:15 PM' },
+          { when: 'past', local_date: '2026-11-17', day: 'Tue Nov 17', daypart: 'morning', promised: 2, played: 1, missed: 1, moved: 0, note: 'Did not air' },
+        ],
       };
     }
     if (path === '/spot-schedules/station-day' && method === 'GET') {
@@ -114,6 +117,11 @@ function sponsorStation(sid, opts = {}) {
   station.contractOn = true;
   station.byId.s1.title = 'TEST SPONSOR 27 - Kesher Moving and Storage';
   station.byId.s1.artist = "Kol B'ramah";
+  station.byId.s1.sponsor_id = SPONSOR.id; // linked to its sponsor
+  station.byId.s2.category = 'Spots';      // filed as a spot, no sponsor linked
+  // live 2026-11-18: the daily weather report is type spot with no category; never a sponsorship
+  const report = { id: 'wxr', title: 'Weather Report - 2026-11-18', artist: null, album: null, duration: 40, asset_type: 'spot', category: null };
+  station.assets.push(report); station.byId.wxr = report;
   const soon = (min) => new Date(Date.now() + min * 60e3).toISOString();
   station.ad = {
     near: station.add({ asset_id: 's1', position: 3, source: 'ad_slot', preempt_at: soon(1), hard_timed: false }),
@@ -177,6 +185,7 @@ async function desktop(browser, sid) {
   check(`${tag}: the play due in a minute has no Skip, the later one has`, await today.getByTestId('sponsor-play').nth(0).getByTestId('sponsor-skip').count() === 0 && await today.getByTestId('sponsor-play').nth(1).getByTestId('sponsor-skip').count() === 1);
   check(`${tag}: coming days lists tomorrow's play`, /Tomorrow/.test(await page.getByTestId('sponsor-coming').innerText()));
   check(`${tag}: missed plays show day, time of day, and how many aired`, /Tue Nov 17, morning: 1 of 2 aired/.test(await page.getByTestId('sponsor-missed').innerText()));
+  check(`${tag}: a play today that did not air shows at once with its time`, /Today, 9:15 PM: did not air/.test(await page.getByTestId('sponsor-missed').innerText()));
   check(`${tag}: links go to Spot Schedule (this station), the sponsor's own page (contracts), Campaigns (this sponsor), Schedule Check`,
     await page.getByTestId('link-spot-schedule').getAttribute('href') === `/admin/spot-schedule?station=${sid}`
       && await page.getByTestId('link-sponsors').getAttribute('href') === '/admin/sponsors/sp27?tab=contracts'
@@ -365,6 +374,11 @@ async function finding(browser, sid) {
   const { ctx, page, errors } = await openRoom(browser, DESKTOP, station);
   const chip = rowOf(page, station.ad.later.id).getByTestId('row-sponsor');
   check(`${tag}: a sponsorship row shows a SPONSOR tag without hovering`, await chip.isVisible() && /SPONSOR/.test(await chip.innerText()));
+  const wxr = station.add({ asset_id: 'wxr', position: 5, source: 'block', preempt_at: new Date(Date.now() + 20 * 60e3).toISOString(), hard_timed: false });
+  const s3 = station.add({ asset_id: 's3', position: 7, source: 'manual' });
+  await rowOf(page, wxr.id).waitFor();
+  check(`${tag}: the weather report (type spot, no sponsor) has no SPONSOR tag`, await rowOf(page, wxr.id).getByTestId('row-sponsor').count() === 0);
+  check(`${tag}: a spot with no sponsor and no spots category has no SPONSOR tag`, await rowOf(page, s3.id).getByTestId('row-sponsor').count() === 0);
   const music = station.pending().find((e) => !e.source || e.source === 'auto');
   check(`${tag}: a song row has no SPONSOR tag`, await rowOf(page, music.id).getByTestId('row-sponsor').count() === 0);
   const order = station.pending().map((e) => e.id).join();
@@ -376,11 +390,16 @@ async function finding(browser, sid) {
   for (let i = 0; i < 40 && !station.calls.some((c) => c.path === '/spot-schedules/station-day'); i++) await sleep(250);
   check(`${tag}: the room reads today's sponsorships in the background before the tab is opened`, station.calls.some((c) => c.path === '/spot-schedules/station-day'));
   await sleep(500);
+  await page.evaluate(() => {
+    window.__sawLoading = false;
+    new MutationObserver(() => { if (/Loading…/.test(document.querySelector('[data-testid=sponsors-today-summary]')?.textContent || '')) window.__sawLoading = true; })
+      .observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
   const tOpen = Date.now();
   await page.getByRole('tab', { name: 'Sponsors' }).or(page.getByRole('button', { name: 'Sponsors', exact: true })).first().click();
   await page.getByTestId('sponsors-today-row').first().waitFor();
   const rows = page.getByTestId('sponsors-today-row');
-  check(`${tag}: the list shows at once, no Loading`, Date.now() - tOpen < 700, `${Date.now() - tOpen} ms`);
+  check(`${tag}: the list shows at once, no Loading`, Date.now() - tOpen < 700 && !(await page.evaluate(() => window.__sawLoading)), `${Date.now() - tOpen} ms`);
   check(`${tag}: the Sponsors tab lists today's two plays, not tomorrow's`, await rows.count() === 2, String(await rows.count()));
   const summary = await page.getByTestId('sponsors-today-summary').innerText();
   check(`${tag}: it names the station and counts what waits`, summary.includes(name) && /2 waiting/.test(summary), summary);
