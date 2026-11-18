@@ -2,6 +2,7 @@
 the log (wiki/emergency-alerts.md). The engine itself is tested in the harness
 (scenario emergency_alert_*)."""
 
+import asyncio
 import base64
 import uuid
 
@@ -84,11 +85,18 @@ def _setup(monkeypatch):
         pushes.append((title, message, priority))
         return True
 
+    nudges = []
+
+    async def fake_nudge(kind):
+        nudges.append(kind)
+
+    from app.api.v1 import site_release
     from app.services import bug_report_service, playout_engine
+    monkeypatch.setattr(site_release, "broadcast_event", fake_nudge)
     monkeypatch.setattr(playout_engine, "_command", fake_command)
     monkeypatch.setattr(bug_report_service, "send_ntfy", fake_ntfy)
     emergency_alerts.reset()
-    yield {"sent": sent, "pushes": pushes}
+    yield {"sent": sent, "pushes": pushes, "nudges": nudges}
     emergency_alerts.reset()
 
 
@@ -155,6 +163,10 @@ async def test_device_alert_goes_to_every_engine_station_with_tones(client, db_s
         assert "/api/v1/emergency/audio/" in payload["uri"]
     # Sent, not on air until the engine says so
     assert {a["status"] for a in body["alerts"]} == {"sent"}
+    # ...but shown at once (banner, Stop), and every open tab is told to look again
+    assert set(emergency_alerts.all_active()) == {str(jlm.id), str(main.id)}
+    await asyncio.sleep(0.4)
+    assert "emergency" in _setup["nudges"]
 
 
 @pytest.mark.asyncio

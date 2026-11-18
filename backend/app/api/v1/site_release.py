@@ -87,8 +87,15 @@ async def _row_for_update(db: AsyncSession) -> SiteRelease:
 
 
 async def _broadcast(state: dict) -> None:
-    message = json.dumps({"type": "release", "data": state})
+    await _send_all(json.dumps({"type": "release", "data": state}))
 
+
+async def broadcast_event(kind: str) -> None:
+    """A bare nudge to every open tab ({"type": kind}), e.g. "emergency": staff screens refetch."""
+    await _send_all(json.dumps({"type": kind}))
+
+
+async def _send_all(message: str) -> None:
     async def send(tab: Tab):
         try:
             await asyncio.wait_for(tab.ws.send_text(message), timeout=SEND_TIMEOUT)

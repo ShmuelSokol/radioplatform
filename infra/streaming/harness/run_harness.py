@@ -231,7 +231,9 @@ class Stack:
             def _live_mp3(self):
                 """Stands in for the backend's live.mp3: 204 while no show is heard, else
                 the host tone in real time until the show stops being heard."""
-                if not stack.live_audio or not self.headers.get("X-Playout-Token"):
+                if not stack.live_audio:
+                    return self._live_from_backend()
+                if not self.headers.get("X-Playout-Token"):
                     self.send_response(204)
                     self.end_headers()
                     return
@@ -255,6 +257,38 @@ class Stack:
                         pos += chunk
                 except (BrokenPipeError, ConnectionResetError):
                     pass
+
+            def _live_from_backend(self):
+                """The backend's real live.mp3 (the show after the delay), passed through
+                as it streams: what an engine on proto 5 plays during a show."""
+                headers = {k: v for k, v in self.headers.items() if k.lower() in ("x-playout-token", "accept")}
+                req = urllib.request.Request(f"http://127.0.0.1:{BACKEND_PORT}{self.path}", headers=headers)
+                try:
+                    resp = urllib.request.urlopen(req, timeout=30)
+                except urllib.error.HTTPError as e:
+                    self.send_response(e.code)
+                    self.end_headers()
+                    return
+                except Exception:
+                    self.send_response(502)
+                    self.end_headers()
+                    return
+                with resp:
+                    self.send_response(resp.status)
+                    self.send_header("Content-Type", resp.headers.get("Content-Type", "audio/mpeg"))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    if resp.status == 204:
+                        return
+                    try:
+                        while True:
+                            chunk = resp.read1(4096)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
 
             def _forward(self, method: str):
                 if method == "GET" and self.path.split("?")[0].endswith("/live.mp3"):
@@ -1830,7 +1864,7 @@ class LiveListener:
 class HostMic:
     """The host's microphone: a steady tone sent in real time over the audio socket."""
 
-    def __init__(self, show_id: str, token: str, freq: float = 440.0):
+    def __init__(self, show_id: str, token: str, freq: float = HOST_FREQ):
         self.show_id, self.token, self.freq = show_id, token, freq
         self.stop = False
         self.task = None
@@ -1986,15 +2020,18 @@ async def sc_live_show_delay_controls(h: Harness, restart: bool = False) -> None
         after_next = [n for t, n in timeline([w for w in heard if t_next + 0.5 <= w[0] <= first])]
         old = [k for k, v in h.assets.items() if before_song and v == before_song.asset_id and k in TONES]
         old_tone = tone_name(TONES[old[0]][0]) if old else None
-        h.check(name, bool(after_next) and after_next[-1] not in ("silence", old_tone, "EMERGENCY"),
+        # a new segment starting soon after Next (the next song may have the same tone)
+        started = [n for t, n in timeline([w for w in heard if t_next - 1.0 <= w[0] <= first])
+                   if t_next + 0.3 <= t <= t_next + 4.0 and n not in ("silence", "EMERGENCY", "HOST")]
+        h.check(name, bool(started),
                 f"Next in the pre-roll moved the music on: {after_next} (was {old_tone})")
     # no new song may start in the moment before the take-over (it would be cut after a
     # fraction of a second: a blip on the stream, 2026-11-18 16:57Z after Next in the pre-roll)
-    blips = [(round(t - first, 1), n) for t, n in timeline(heard) if first - 2.5 <= t <= first + 1.0 and n not in ("silence", "HOST")]
+    blips = [(round(t - first, 1), n) for t, n in timeline(heard) if first - 2.5 <= t <= first + 2.5 and n not in ("silence", "HOST")]
     h.check(name, not blips, f"no song starts just before the host is heard on the stream ({blips} s from first air)")
-    quiet_from = first + 2.0
+    quiet_from = first + 3.0   # the stream runs about 2 s behind the page (live.mp3)
     during = [w for w in heard if quiet_from <= w[0] <= t_end - 0.3]
-    loud = sum(WINDOW for w in during if w[1] >= -45)
+    loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) != "HOST")
     what = "through the backend restart" if restart else "after Next and Panic"
     h.check(name, bool(during) and loud <= 0.3,
             f"the engine stream stays quiet under the host {what} (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
@@ -2066,7 +2103,7 @@ async def sc_live_show_host_gone(h: Harness) -> None:
         _, cur = h.api("GET", f"/live-shows/{show['id']}")
         show_live = (cur or {}).get("status") in ("live", "LIVE")
         t_back = time.time()                # the host's page comes back
-        mic2 = HostMic(show["id"], h.token, freq=440.0)
+        mic2 = HostMic(show["id"], h.token)
         mic2.task = asyncio.ensure_future(mic2.run())
         await asyncio.sleep(delay + 10)
         _, st = h.api("GET", f"/stations/{STATION_ID}")
@@ -2089,7 +2126,11 @@ async def sc_live_show_host_gone(h: Harness) -> None:
             f"the station is handed back {gone_after:.0f} s after the host's last audio "
             f"({'never' if wait is None else f'{wait:.1f} s'})")
     last_host = max((t for t, _ in listener.frames if t < t_back), default=None)
-    music = [(t, n) for t, n in timeline([w for w in heard if t_gone <= w[0] <= t_back]) if n != "silence"]
+    # on proto 5 the stream carries the host too: the gap there runs from its last host audio
+    stream_host = [w[0] for w in heard if t_gone <= w[0] <= t_back and w[1] >= -45 and tone_name(w[2]) == "HOST"]
+    if stream_host:
+        last_host = max(last_host or 0, max(stream_host) + WINDOW)
+    music = [(t, n) for t, n in timeline([w for w in heard if t_gone <= w[0] <= t_back]) if n not in ("silence", "HOST")]
     if last_host is not None and music:
         gap = music[0][0] - last_host
         h.check(name, gap <= 1.5,
@@ -2105,7 +2146,7 @@ async def sc_live_show_host_gone(h: Harness) -> None:
     h.check(name, retaken, "the station is the show's again once the host is back")
     if again is not None:
         during = [w for w in heard if again + 2.0 <= w[0] <= t_end - 0.3]
-        loud = sum(WINDOW for w in during if w[1] >= -45)
+        loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) != "HOST")
         h.check(name, bool(during) and loud <= 0.3,
                 f"the engine is quiet under the host again (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
     after = [n for _, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
@@ -2177,15 +2218,27 @@ async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> N
             f"({'never' if live_on is None else f'{live_on - t_start:.1f} s after Start'})")
     heard = h.heard(t_start - 3, time.time() - 1)
     h.print_timeline(heard, t_start)
+    clock = tone_name(TONES["time"][0])
     pre = [w for w in heard if t_start + 0.5 <= w[0] <= t_start + delay - 1.0]
     pre_loud = sum(WINDOW for w in pre if w[1] >= -45)
     h.check(name, bool(pre) and pre_loud >= (len(pre) * WINDOW) - 0.6,
             f"the engine keeps the music through the pre-roll ({pre_loud:.1f} s of {len(pre) * WINDOW:.1f} s)")
     if first is not None:
         during = [w for w in heard if first + 2.0 <= w[0] <= t_end - 0.3]
-        loud = sum(WINDOW for w in during if w[1] >= -45)
+        loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) not in ("HOST", clock))
         h.check(name, bool(during) and loud <= 0.3,
-                f"the engine stream is quiet once listeners hear the host (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+                f"no music on the engine stream once listeners hear the host (music for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+        host_secs = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) == "HOST")
+        # LD-33, engine proto 5: the stream carries the show from the backend's live.mp3
+        h.check(name, host_secs >= 0.6 * len(during) * WINDOW,
+                f"the stream carries the host's show (host for {host_secs:.1f} s of {len(during) * WINDOW:.0f} s)")
+        host_on = next((w[0] for w in heard if w[0] >= first - 1.0 and w[1] >= -45 and tone_name(w[2]) == "HOST"), None)
+        music_end = max((w[0] + WINDOW for w in heard if (host_on or 0) - 10 <= w[0] < (host_on or 0)
+                         and w[1] >= -45 and tone_name(w[2]) != "HOST"), default=None)
+        gap = None if host_on is None or music_end is None else host_on - music_end
+        h.check(name, gap is not None and gap <= 1.0,
+                f"no silence on the stream between the music and the host (gap {'?' if gap is None else f'{gap:.1f} s'}; "
+                f"host on the stream {'never' if host_on is None else f'{host_on - first:+.1f} s'} after the page)")
     clock = tone_name(TONES["time"][0])
     engine_clock = [t for t, n in timeline(heard) if n == clock]
     page_clock = listener.tone_segments(TONES["time"][0], t_start, time.time())
@@ -2206,9 +2259,12 @@ async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> N
         late = page_clock[0] - due.timestamp() if page_clock else None
         h.check(name, late is not None and -1.0 <= late <= 1.5,
                 f"the time check is heard on the listener page on its second over the delay ({'never' if late is None else f'{late:+.1f} s'})")
-        h.check(name, not [t for t in engine_clock if t_start <= t <= t_end + delay + 5],
-                f"and never also on the engine stream ({[round(t - due.timestamp(), 1) for t in engine_clock]})")
-        host_after = listener.tone_at(440, due.timestamp() + TONES["time"][1] + 0.5, due.timestamp() + TONES["time"][1] + 2.5)
+        # On proto 5 the stream carries the show, time check included: once, and on time
+        on_stream = [t for t in engine_clock if t_start <= t <= t_end + delay + 5]
+        h.check(name, len(on_stream) == 1 and -1.0 <= on_stream[0] - due.timestamp() <= 1.5,
+                f"on the engine stream once and on its second, inside the show "
+                f"({[round(t - due.timestamp(), 1) for t in on_stream]} s)")
+        host_after = listener.tone_at(HOST_FREQ, due.timestamp() + TONES["time"][1] + 0.5, due.timestamp() + TONES["time"][1] + 2.5)
         h.check(name, host_after > 0.02, f"the host is heard again after the time check ({host_after:.3f})")
     rows = {e.id: e for e in await h.rows()}
     st = rows[ids[0]].status if ids[0] in rows else "gone"
@@ -2217,7 +2273,7 @@ async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> N
     h.check(name, tail is not None and waiting - 1.5 <= tail <= waiting + 2.0,
             f"after End what was waiting in the delay ({waiting:.1f} s) plays out to listeners "
             f"({'nothing' if tail is None else f'{tail:.1f} s'} after End)")
-    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n not in ("silence", "HOST")]
     back = after[0][0] - (last or t_end) if after else None
     h.check(name, back is not None and -1.0 <= back <= 6.0,
             f"the engine's music is back after the delay played out ({'never' if back is None else f'{back:+.1f} s after the last delayed audio'})")
