@@ -317,7 +317,7 @@ export default function TransportBar(p: Props) {
               <span className="flex-1 min-w-0 truncate text-sm font-bold">{p.stations[0]?.name ?? 'No station'}</span>
             )}
           </div>
-          <PlayoutBadge stationId={p.stationId} className="!text-black" />
+          <PlayoutBadge stationId={p.stationId} chip />
         </div>
       </header>
     );
@@ -330,7 +330,7 @@ export default function TransportBar(p: Props) {
         <div className="flex flex-col items-start gap-1 shrink-0 min-w-[70px]">
           {status}
           <span className="hidden lg:block">{stationSelect}</span>
-          <PlayoutBadge stationId={p.stationId} dark className="hidden lg:inline-flex" />
+          <PlayoutBadge stationId={p.stationId} chip className="hidden lg:inline-flex" />
         </div>
         <div className="leading-none shrink-0"
           title={cutClock ? `This item fades at ${cutClock} for a timed item` : undefined}>
@@ -403,7 +403,7 @@ export default function TransportBar(p: Props) {
       {/* Phones and tablets: buttons and sound under the titles */}
       <div className="lg:hidden flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#c0c0c0]">
         {soundControl('phone')}
-        <PlayoutBadge stationId={p.stationId} className="!text-black" />
+        <PlayoutBadge stationId={p.stationId} chip />
         <div className="flex-1" />
         <TransportButtons p={p} stacked={false} />
       </div>

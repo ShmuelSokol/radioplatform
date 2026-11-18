@@ -267,3 +267,4 @@ INGEST 2026-11-18 docs/test-checklist.md third pass (V3-1 to V3-56): untested id
 INGEST 2026-11-18 hourly-slots.md a resumed (paused) item's now-playing updates were all dropped as older than the item that paused it; payload on_air_at fixes the ordering
 INGEST 2026-11-18 engine-harness.md resume_without_old_song; backend.log kept across restarts; direct queue writes at a song change are a test artifact
 INGEST 2026-11-18 operator-actions.md engine station: Play next/delete/move/reorder take back the engine's pre-loaded song at once (take_operator_change), Next takes it back first and waits up to ~1 s for the new file (settle_before_next); before, Play next then Next played the held automatic song
+INGEST 2026-11-18 control-room.md the server/browser indicator (PlayoutBadge chip) is a solid coloured label in the control room and a Plays from column on Manage Stations; colours inline because the qnet skin restyles Tailwind colour classes
