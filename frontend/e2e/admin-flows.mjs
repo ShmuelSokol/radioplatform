@@ -638,10 +638,10 @@ section('shell', async () => {
   // F-GLOBAL-1 public nav (desktop and phone)
   for (const view of ['desktop', 'iphone']) {
     const page = await newPage(null, view);
-    await step(`F-GLOBAL-1 ${view}: public nav links Stations / Program Guide / DJs / Archives navigate`, async () => {
+    await step(`F-GLOBAL-1 ${view}: public nav links Stations / Schedule / DJs / Archives navigate`, async () => {
       await page.goto(`${BASE}/stations`);
       await page.locator("nav a", { hasText: "KBR Studio" }).waitFor();
-      for (const [label, p] of [['Program Guide', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives'], ['Stations', '/stations']]) {
+      for (const [label, p] of [['Schedule', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives'], ['Stations', '/stations']]) {
         const link = page.locator('nav').getByRole('link', { name: label, exact: true });
         if (view === 'iphone' && !(await link.first().isVisible())) {
           // Phones: the links must be reachable through a menu button.
@@ -681,7 +681,7 @@ section('shell', async () => {
   const groups = {
     Content: [['Library', '/admin/assets'], ['Categories', '/admin/categories'], ['Types', '/admin/asset-types'], ['Playlists', '/admin/playlists'], ['Studio', '/admin/studio'], ['Reviews', '/admin/reviews']],
     Broadcast: [['Schedules', '/admin/schedules'], ['Program Blocks', '/admin/program-blocks'], ['Schedule Check', '/admin/schedule-check'], ['Rules', '/admin/rules'], ['Blackouts', '/admin/holidays'], ['Program Clock', '/admin/program-clock'], ['Live Shows', '/admin/live']],
-    Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Program Guide', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
+    Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Public Schedule', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
     Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Sponsors', '/admin/sponsors'], ['Campaigns', '/admin/campaigns'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Sponsorship Rules', '/admin/sponsorship-rules'], ['Alerts', '/admin/alerts'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
   };
   const canOpen = (role, p) => {
@@ -3624,7 +3624,7 @@ section('release', async () => {
       // (a key press counts as input; a bare mouse move does not)
       for (let i = 0; i < 14; i++) { await page.keyboard.press('Shift'); await page.clock.runFor(5_000); }
       assert(loads() === before, 'reloaded while in use');
-      await page.getByRole('link', { name: /Program Guide/ }).first().click();
+      await page.getByRole('link', { name: /Schedule$/ }).first().click();
       await until(async () => loads() > before, 'reload on navigation', 10000);
     }, page);
     await ctx.close();

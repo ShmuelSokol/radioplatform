@@ -264,7 +264,7 @@ radioplatform/
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
 - Listen.tsx — Listen to a station (server stream or built-in player, song requests); keeps playing, with a bar, on every other page except call-in and the live host screens, and takes over sound the control room was giving
-- ProgramGuide.tsx — Public EPG with station/date picker and timeline
+- ProgramGuide.tsx — Public EPG ("Schedule" in the menu; "Public Schedule" in the staff menu) with station/date picker and timeline
 - Hosts.tsx — Public DJ/host profile cards
 - Archives.tsx — Public show archive browser with playback
 - CallIn.tsx — Call the live show from the browser: name and topic, mic, hear the show while waiting, on-air status, Hang up

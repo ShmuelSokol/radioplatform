@@ -57,7 +57,7 @@ export default function Navbar() {
 
   const publicLinks: NavLink[] = [
     { to: '/stations', label: 'Stations', color: 'hover:text-white' },
-    { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
+    { to: '/guide', label: 'Schedule', color: 'hover:text-orange-300' },
     { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
     { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
   ];
@@ -107,7 +107,8 @@ export default function Navbar() {
         { to: '/admin/listeners', label: 'Listeners', color: 'hover:text-green-300' },
         { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
         { to: '/admin/requests', label: 'Requests', color: 'hover:text-lime-300' },
-        { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
+        // "Public Schedule": beside Broadcast's Schedules, a plain "Schedule" would be mistaken for it
+        { to: '/guide', label: 'Public Schedule', color: 'hover:text-orange-300' },
         { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
         { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
       ],
