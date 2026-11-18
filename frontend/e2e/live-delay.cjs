@@ -7,6 +7,8 @@
  * the screen says, on a desktop and a phone size. Part C is the station's settings.
  * Part D (ONLY=desk): Cough and Mute, the dump log and its recording, Put On Air while
  * the delay is not safe, and with PLAYOUT_TOKEN the engine's copy of the show (live.mp3).
+ * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
+ * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
  *   KBR_ADMIN_EMAIL=admin KBR_ADMIN_PASSWORD=... node e2e/live-delay.cjs <station id>
  * API_URL / BASE_URL default to :8000 and :3000; SHOTS_DIR keeps screenshots.
@@ -168,7 +170,7 @@ function hostMic(showId, token) {
       const open = async (url, opts = {}) => {
         const page = await (await browser.newContext({ permissions: ['microphone'], ...opts })).newPage();
         await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
-        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|dynamically imported module|MIME type/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
         page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
         await page.goto(`${SITE}${url}`);
         return page;
@@ -441,6 +443,63 @@ function hostMic(showId, token) {
         }
         check('D23 no errors on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
         l.ws.close();
+      } finally {
+        await browser.close();
+      }
+    }
+    // ---------- Part E: the host is gone; the control room's badge ----------
+    if (!ONLY || ONLY === 'gone') {
+      await setConfig({ live_delay_seconds: 6, live_dump_seconds: 0, live_host_gone_seconds: 5 });
+      const show = await newShow('Delay test E');
+      const browser = await chromium.launch();
+      try {
+        const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+        await page.addInitScript(([t, st]) => { localStorage.setItem('access_token', t); localStorage.setItem('radio_last_station', st); }, [token, STATION]);
+        await api('POST', `/live-shows/${show.id}/start`);
+        await page.goto(`${SITE}/admin/dashboard`);
+        const badge = page.getByTestId('live-badge');
+        await badge.waitFor({ timeout: 20000 });
+        await page.getByText(/SHOW OPEN, NO HOST/).waitFor({ timeout: 6000 }).catch(() => {});
+        const noHost = await badge.innerText();
+        check('E1 control room, show started but no microphone: not LIVE', /SHOW OPEN, NO HOST: Delay test E/.test(noHost), noHost);
+        const l = listener();
+        const h = hostMic(show.id, token);
+        await h.ready;
+        const filling = await page.getByText(/FILLING DELAY, \d s: Delay test E/).waitFor({ timeout: 5000 }).then(() => true, () => false);
+        check('E2 while the delay fills the badge says FILLING DELAY, and listeners hear nothing', filling && !l.live(), await badge.innerText());
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'control-room-filling.png') });
+        const heard = await page.getByText(/LIVE, [56] s delay: Delay test E/).waitFor({ timeout: 12000 }).then(() => true, () => false);
+        await sleep(300);
+        check('E3 LIVE with the delay only once listeners hear the host', heard && l.live(), `${await badge.innerText()} / listeners live ${l.live()}`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'control-room-live.png') });
+
+        // The host's page closes without End Show
+        h.close();
+        const gone = Date.now();
+        let back = null;
+        while (Date.now() - gone < 30000 && back === null) {
+          await sleep(500);
+          const st = (await api('GET', `/stations/${STATION}`)).json;
+          if (!(st.automation_config || {}).live_show_id) back = (Date.now() - gone) / 1000;
+        }
+        // 6 s of delay play out, then 5 s without a host
+        check('E4 host gone: the station is handed back to its music by itself', back !== null && back > 8 && back < 20, `${back} s after the page closed`);
+        const s2 = (await api('GET', `/live-shows/${show.id}`)).json;
+        check('E5 the show stays open for the host to come back', s2.status === 'live' && !l.live(), s2.status);
+        const alerts = (await api('GET', '/alerts?limit=20')).json;
+        const list = alerts.alerts || alerts.items || alerts;
+        check('E6 an alert says the show lost its host', Array.isArray(list) && list.some((a) => /Live show lost its host: Delay test E/.test(a.title)), JSON.stringify((list[0] || {}).title));
+        const after = await page.getByText(/SHOW OPEN, NO HOST: Delay test E/).waitFor({ timeout: 6000 }).then(() => true, () => false);
+        check('E7 the control room badge goes back to NO HOST', after, await badge.innerText());
+
+        // The host comes back: on air again through the delay
+        const h2 = hostMic(show.id, token);
+        await h2.ready;
+        const again = await page.getByText(/LIVE, [56] s delay: Delay test E/).waitFor({ timeout: 14000 }).then(() => true, () => false);
+        check('E8 the host comes back and is on air again', again && l.live(), await badge.innerText());
+        h2.close();
+        l.ws.close();
+        await api('POST', `/live-shows/${show.id}/end`);
       } finally {
         await browser.close();
       }

@@ -53,6 +53,7 @@ EDGE = int(RATE * 0.01)     # 10 ms fades where a Dump cut the audio
 # (It was a fixed 3 minutes at up to 12 %: that takes back 21 s, so a 30 or 40 s delay,
 # or any show shorter than its delay plus 3 minutes, was cut with words still waiting.)
 WIND_RATE = 0.10
+SOON = 1.0                  # seconds before first air that `on_soon` is called
 WIND_MARGIN = 5.0
 CUSHION = int(RATE * 0.3)   # least audio waiting before it plays out (smooth, no stutter)
 STATUS_EVERY = 0.5
@@ -180,6 +181,7 @@ class LiveAir:
         delay: float = 0.0,
         dump: float = 0.0,
         on_listening: Callable[[bool], Awaitable[None]] | None = None,
+        on_soon: Callable[[], Awaitable[None]] | None = None,
         on_status: Callable[[dict], Awaitable[None]] | None = None,
         on_done: Callable[[], Awaitable[None]] | None = None,
         clock: Callable[[], float] = time.time,
@@ -191,6 +193,12 @@ class LiveAir:
         self.target = self.configured     # what the delay is steering to now (0 = exiting)
         self.dump_size = max(0.0, dump)
         self.on_listening = on_listening
+        # Called once, SOON seconds before listeners first hear the show: a stream server
+        # needs that long to go quiet (it lagged the host by 2.5 s on Jerusalem)
+        self.on_soon = on_soon
+        self.told_soon = False
+        self.on_closed: Callable[[], Awaitable[None]] | None = None   # always runs at the end
+        self.ever_heard = False
         self.on_status = on_status
         self.on_done = on_done
         self.clock = clock
@@ -436,10 +444,16 @@ class LiveAir:
             if self.count >= int(self.target * RATE) and (self.count > 0 or self.target == 0) \
                     and self.clock() >= self.hold_until:
                 self.listening = True
+                self.ever_heard = True
                 self.mode = "steady" if self.target > 0 else "no delay"
                 self._notify_listening(True)
             else:
                 self.mode = "pre-roll"
+                if not self.told_soon and self.on_soon is not None and self.count > 0 \
+                        and self.count >= int((self.target - SOON) * RATE) \
+                        and self.clock() >= self.hold_until - SOON:
+                    self.told_soon = True
+                    asyncio.ensure_future(self._safe(self.on_soon()))
                 return None
         out = np.zeros(0, dtype=np.int16)
         while len(out) < n:
@@ -547,6 +561,8 @@ class LiveAir:
             if self.on_listening is not None:
                 await self._safe(self.on_listening(False))
         await self._maybe_status(force=True)
+        if self.on_closed is not None:
+            await self._safe(self.on_closed())
         if self.on_done is not None:
             await self._safe(self.on_done())
 

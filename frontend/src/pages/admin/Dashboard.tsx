@@ -1,4 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { getAirStatus } from '../../api/liveShows';
+import type { AirStatus } from '../../api/liveShows';
+import { liveShowBadge } from './controlroom/liveBadge';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
@@ -173,6 +176,20 @@ export default function Dashboard() {
     ? queueEntries.find(e => e.id === skipIdRaw)?.asset ?? null
     : nextAsset;
   const liveShow = (liveData?.shows ?? []).find(s => s.status === 'live' && (!stationId || s.station_id === stationId)) ?? null;
+  // A show that is "live" is not heard yet while its delay fills (or with no host):
+  // the badge says which (PC live check 2026-11-18: LIVE showed 5 s before the host was heard)
+  const [liveAir, setLiveAir] = useState<AirStatus | null>(null);
+  const liveShowId = liveShow?.id;
+  useEffect(() => {
+    setLiveAir(null);
+    if (!liveShowId) return;
+    let stop = false;
+    const ask = () => getAirStatus(liveShowId).then(a => { if (!stop) setLiveAir(a); }).catch(() => {});
+    ask();
+    const id = setInterval(ask, 2000);
+    return () => { stop = true; clearInterval(id); };
+  }, [liveShowId]);
+  const liveBadge = liveShowBadge(liveAir);
 
   // ── UI state ───────────────────────────────────────────────
   const [pane, setPane] = useState<Pane>('queue');
@@ -919,7 +936,7 @@ export default function Dashboard() {
     loopBusy: loopBusy,
     audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive && streamStarting, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
     stationTz: stationTz,
-    liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
+    liveShow: liveShow ? { id: liveShow.id, title: liveShow.title, ...liveBadge } : null,
   };
   const noStation = !stationId;
   const queuePanel = (

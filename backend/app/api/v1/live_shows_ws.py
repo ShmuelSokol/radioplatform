@@ -150,6 +150,7 @@ class StationLiveRelay:
         self.callers: Dict[str, CallerLine] = {}  # call_id -> caller line
         # station_id -> the broadcast delay listeners hear the show through (services/live_air.py)
         self.airs: Dict[str, Any] = {}
+        self.quieted_early: set[str] = set()   # engine stations told to go quiet before first air
         # station_id -> called once when listeners first hear the show (takes the station over)
         self.on_first_air: Dict[str, object] = {}
 
@@ -224,13 +225,33 @@ class StationLiveRelay:
         async def status(data: dict, _show=show_id) -> None:
             await live_show_manager.broadcast_to_show(_show, {"type": "air_status", "data": data})
 
+        async def soon(_station=station_id) -> None:
+            # The stream server goes quiet a moment before the host is heard: told only
+            # at first air it played music under the host's first 2.5 s
+            from app.config import settings as _settings
+            if _settings.engine_drives(_station):
+                from app.services import playout_engine
+                self.quieted_early.add(_station)
+                await playout_engine.engine_live(_station, True)
+
         new = LiveAir(station_id, show_id, send, delay=delay, dump=dump,
-                      on_listening=listening, on_status=status)
+                      on_listening=listening, on_status=status, on_soon=soon)
         new.end_at = end_at
 
         async def done(_station=station_id, _air=new) -> None:
             if self.airs.get(_station) is _air:
                 self.airs.pop(_station, None)  # listeners were told when it stopped airing
+
+        async def closed(_station=station_id, _air=new) -> None:
+            if _station in self.quieted_early:
+                self.quieted_early.discard(_station)
+                if not _air.ever_heard:
+                    # Ended in the last second of its pre-roll: nothing took the station
+                    # over, so nothing else would give the stream its sound back
+                    from app.services import playout_engine
+                    await playout_engine.engine_live(_station, False)
+
+        new.on_closed = closed
 
         new.on_done = done
         self.airs[station_id] = new
@@ -239,6 +260,7 @@ class StationLiveRelay:
             # already the show's (the host came back after a drop): on air at once and
             # the delay builds back while they talk, with no second pre-roll of silence
             new.listening = True
+            new.ever_heard = True
             new.mode = "no delay" if new.target == 0 else "building"
             await listening(True)
         new.start()
