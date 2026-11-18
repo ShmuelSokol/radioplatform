@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { usePlayHistory, useUpcomingSchedule, useSponsorStats, useMySpots, useMissedPlays } from '../../hooks/useSponsorPortal';
 import Spinner from '../../components/Spinner';
+import { daypartText } from '../../api/spotSchedules';
 
 export default function SponsorDashboard() {
   const [page, setPage] = useState(1);
@@ -11,10 +12,6 @@ export default function SponsorDashboard() {
   const { data: upcoming, isLoading: upcomingLoading } = useUpcomingSchedule();
   const { data: spots, isLoading: spotsLoading } = useMySpots();
   const { data: missedPlays, isLoading: missedLoading } = useMissedPlays();
-  const partOfDay: Record<string, string> = {
-    overnight: 'Overnight (12 AM to 6 AM)', morning: 'Morning (6 AM to 12 PM)',
-    afternoon: 'Afternoon (12 PM to 6 PM)', evening: 'Evening (6 PM to 12 AM)',
-  };
   const day = (iso: string) =>
     new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   const when = (iso?: string | null) =>
@@ -133,7 +130,7 @@ export default function SponsorDashboard() {
                   {missedPlays.rows.map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-5 py-3 whitespace-nowrap">{day(row.date)}</td>
-                      <td className="px-5 py-3">{partOfDay[row.daypart] ?? row.daypart}</td>
+                      <td className="px-5 py-3">{daypartText(row.daypart, true)}</td>
                       <td className="px-5 py-3">{row.station_name}</td>
                       <td className="px-5 py-3">{row.asset_title}</td>
                       <td className="px-5 py-3">{row.promised}</td>

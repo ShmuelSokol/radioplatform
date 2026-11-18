@@ -108,7 +108,7 @@ radioplatform/
 | HolidayWindow | holiday_window.py | Sabbath/holiday blackouts |
 | ChannelStream | channel_stream.py | Stream configuration |
 | Sponsor | sponsor.py | A client: name on air, company, contact, notes; portal login via user_id |
-| SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
+| SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, three-hour time slots (6-9 AM ... 9 PM-12 AM) or broad dayparts (morning/afternoon/evening/overnight), plays per slot, date range |
 | SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
 | BugReport | bug_report.py | Report from the 🐞 button: words, screenshot, browser state, server log slice, GitHub issue and fix link (see `wiki/bug-reports.md`) |
 | ProgramBlock | program_block.py | A named run of items (station ID, weather, PSA, sponsor places, programme) that airs as one event at set clock times: hard, soft, or soft with a limit |
@@ -200,7 +200,7 @@ radioplatform/
 | schedule_refresh_service.py | After a schedule, block or playlist change, replaces the unplayed automatic songs so the change takes over on time, and redraws them 15 min before a block's playlist takes over so it starts on time, not early; drops dated weather/time queued as songs (see `wiki/playlist-generation.md`) |
 | schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
 | sponsor_item.py | What the control room's Sponsor panel shows for one spot on one station: sponsor, contracts, today's and coming plays, missed plays |
-| spot_schedule_service.py | Plans sponsor spots into clock slots or block places and keeps pending `ad_slot` queue entries in step; when blocks are over-booked it shares the room fairly, rolls plays to a later block and warns (see `wiki/spot-schedules.md`, `wiki/program-blocks.md`) |
+| spot_schedule_service.py | Plans sponsor spots into clock slots or block places, levelling each time slot so the emptiest break gets the next play, and keeps pending `ad_slot` queue entries in step; when blocks are over-booked it shares the room fairly, rolls plays to a later block and warns (see `wiki/spot-schedules.md`, `wiki/program-blocks.md`) |
 | spot_voice_service.py | Makes spot audio from a script; Shprach call is a stub, placeholder tones until wired (see `wiki/spot-recordings.md`) |
 | program_block_service.py | Expands program blocks into timed queue entries (`source="block"`) and replaces the built-in hourly time and weather (see `wiki/program-blocks.md`) |
 | tts_service.py | ElevenLabs TTS generation |

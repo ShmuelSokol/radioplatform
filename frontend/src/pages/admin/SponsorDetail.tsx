@@ -12,7 +12,7 @@ import {
   type ClientSpot,
   type PlayFilters,
 } from '../../api/sponsors';
-import { updateSpotSchedule } from '../../api/spotSchedules';
+import { daypartText, updateSpotSchedule } from '../../api/spotSchedules';
 import { getAssetAudioUrl } from '../../api/assets';
 import { fetchSpotAudioUrl } from '../../api/spotRecordings';
 import Spinner from '../../components/Spinner';
@@ -534,7 +534,6 @@ function PlaysTab({ account }: { account: ClientAccount }) {
 
 // ── missed plays ────────────────────────────────────────────────────
 
-const DAYPART_LABEL: Record<string, string> = { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening', overnight: 'Overnight' };
 
 function MissedTab({ loading, data }: { loading: boolean; data?: Awaited<ReturnType<typeof getClientMissedPlays>> }) {
   if (loading) return <div className="p-6"><Spinner /> Checking what was promised against what played...</div>;
@@ -562,7 +561,7 @@ function MissedTab({ loading, data }: { loading: boolean; data?: Awaited<ReturnT
             {data.rows.map((r, i) => (
               <tr key={i}>
                 <td className="px-3 py-2">{day(r.date)}{r.when === 'coming' && ' (coming)'}</td>
-                <td className="px-3 py-2" data-label="Time of day">{DAYPART_LABEL[r.daypart] ?? r.daypart}</td>
+                <td className="px-3 py-2" data-label="Time of day">{daypartText(r.daypart, true)}</td>
                 <td className="px-3 py-2" data-label="Station">{r.station_name}</td>
                 <td className="px-3 py-2 hidden md:table-cell" data-label="Spot">{r.asset_title}</td>
                 <td className="px-3 py-2" data-label="Promised / aired">{r.promised} / {r.when === 'past' ? r.played : '-'}</td>
