@@ -364,6 +364,7 @@ INGEST 2026-11-18 streaming-architecture.md engine proto 5: live lane plays /liv
 INGEST 2026-11-18 live-shows.md a show's pre-roll waits for a timed item on air (hold_until) instead of cutting it at take-over; a live show that never took the station over is hard-stopped too (live_show_id is set only at first air)
 INGEST 2026-11-18 live-shows.md host gone: station back to music after live_host_gone_seconds with alert; engine told live-on 1 s before first air; control room badge NO HOST / FILLING / LIVE with delay; cut timed item not resumed after a show
 INGEST 2026-11-18 streaming-architecture.md One engine per station: engines send X-Playout-Instance; a second engine with the same station id gets 409 and an alert (relay passes the id on); local-fm-box.md updated
+UPDATE 2026-11-18 local-fm-box.md live shows on a box: the relay passes the engine's live.mp3 through (was 404, so FM would be silent during a show); live-show blocker closed
 INGEST 2026-11-18 hourly-slots.md half hour on the second as a setting: spot_timing.half_hour (falls back to other), half_hour_time_check plays uploaded :30 clips (?minute=30) then the :30 weather, _put_first puts a new time check ahead of a :30 block queued earlier; saving re-times queued time/weather
 INGEST 2026-11-18 live-shows.md caller desk: the caller's topic/notes shown and editable on both screens (was stored, never shown), Hold, Next caller
 INGEST 2026-11-18 rds-feed.md RDS manager: rotation, sponsor lines, PS, Latin-only text, encoder pickup log; Magic RDS reads a URL or file, no TCP
@@ -374,3 +375,4 @@ INGEST 2026-11-18 live-shows.md live shows are recorded from the delay line's ou
 UPDATE 2026-11-18 air-watch.md hour_missing also checks hh:30 when the station plays a half-hour time check on the second and one was queued for that minute
 INGEST 2026-11-18 live-shows.md talkback: staff talk to a web caller off the air on /ws/live/{show}/talk/{call}; ends when the caller goes on air; host mic to listeners muted meanwhile. Show waits for a hard item due within fill + 10 s. No recorder without ffmpeg
 INGEST 2026-11-18 control-room.md touch queue rows one line 40 px (were 66, two lines); meters on every size (were lg-only, why the Tesla showed none); PHONE_LANDSCAPE up to 720 px tall so car screens get the side-by-side layout; e2e/control-room-compact.mjs
+INGEST 2026-11-18 live-shows.md a backend restart during a show: the host page reconnects by itself for 60 s and is heard at once (was: stopped with an error, silence until the host pressed Start again)

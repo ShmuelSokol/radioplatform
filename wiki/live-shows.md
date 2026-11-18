@@ -113,3 +113,14 @@ The show also waits (`hold_for_timed_items`) for a hard timed item due up to 8 s
 
 Without ffmpeg on the machine `live_recording.start` records nothing and says so in the log (the GitHub runner has none).
 
+## A server restart during a show
+
+A deploy restarts the backend: every socket drops and the delay line (in memory) is gone. What keeps the show on air:
+
+- `useHostAudio` keeps the microphone and its audio graph and opens the socket again every second for up to 60 s (`reconnecting`, the Host Console says "Reconnecting… keep talking"). Not after a close the server explained: 4000 (handed back, host gone), 4001/4003 (sign-in), 4004 (no show). Frames are sent only on a socket that has sent its auth message.
+- The station still has `live_show_id`, so the new socket is "the host came back on a station already theirs": heard at once, the delay builds back while they talk, no second pre-roll.
+- `_host_gone` counts from the new process's first look, so the default 15 s is the time the host has to be back.
+- Lost: what was in the delay at that moment (up to the delay length of speech), the dump count, and the recording so far (the part after the restart is recorded as a second archive draft when it is 20 s or longer).
+- Listener pages and caller pages reconnect by themselves (they did before).
+- Check: `ONLY=restart BACKEND_RESTART=<command> node e2e/live-delay.cjs <station id>` (local; measured 0.8 s from the server answering to the host being connected again).
+
