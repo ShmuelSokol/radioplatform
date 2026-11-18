@@ -288,9 +288,8 @@ end
 # group's first item).
 timed_early = ref(-1.)
 
-# Load the item now; put it on air at `at` (unix seconds). The music fades under it.
-def schedule_timed(~uri, ~at) =
-  r = request.create(uri)
+# Into the timed lane: the item is queued and its group gets its take-over.
+def timed_admit(r, at) =
   # Pushed here, not in a thread, so a group keeps the order it was handed over in
   # Counted before the push: with prefetch the push itself can wait for the download
   timed_pending := timed_pending() + 1
@@ -302,6 +301,48 @@ def schedule_timed(~uri, ~at) =
     # (unless the group already went on air early: see the hold lane)
     thread.run(delay=(if wait > 0. then wait else 0. end),
                {if timed_early() != at then timed_go_on_air(180, at) end})
+  end
+end
+
+# ── Waiting room: timed items loaded ahead of their time ─────────────────────
+# The backend hands a hard item over up to 45 s ahead, so its file is here in time. It
+# used to go straight into the timed lane's queue, and that queue knows no times: it
+# plays whatever is next. So with a time check loaded for the hour,
+#   - a Play now (or a Next that went through this lane) in those 45 s was followed at
+#     once by the time check, early;
+#   - a second group handed over before the first had started took over the lane's one
+#     "group time", the first group's take-over gave up, and it aired at the second
+#     group's time (harness live_show_over_hard_item: a second of emergency music at
+#     the first time check, 2026-11-18).
+# Now an item due later is downloaded and kept here, and its group enters the lane
+# `timed_room_lead` seconds before its time: before the hold lane's 8 s, so everything
+# that looks at the lane (the hold, the early start after a song that ends a few
+# seconds before) finds the group there as before.
+timed_room = ref([])
+timed_room_lead = 9.
+def timed_room_admit(at) =
+  mine = list.filter(fun (x) -> abs(x.at - at) <= 0.5, timed_room())
+  timed_room := list.filter(fun (x) -> abs(x.at - at) > 0.5, timed_room())
+  list.iter(fun (x) -> timed_admit(x.r, x.at), mine)
+end
+
+# Load the item now; put it on air at `at` (unix seconds). The music fades under it.
+def schedule_timed(~uri, ~at) =
+  r = request.create(uri)
+  if at - time() > timed_room_lead + 0.5 then
+    # Downloaded now (this can take as long as the download, as the queue's push did)
+    ignore(request.resolve(content_type=timed_queue, timeout=90., r))
+  end
+  if at - time() > timed_room_lead + 0.2 and abs(at - timed_group_at()) > 0.5 then
+    first = not list.exists(fun (x) -> abs(x.at - at) <= 0.5, timed_room())
+    timed_room := list.append(timed_room(), [{at=at, r=r}])
+    if first then
+      thread.run(delay=at - time() - timed_room_lead, {timed_room_admit(at)})
+    end
+  else
+    # Due now or within seconds (a Play now, a late hand-over), or its group is in the
+    # lane already
+    timed_admit(r, at)
   end
 end
 
@@ -696,7 +737,7 @@ control("/status", fun (_) -> begin
   left = main.remaining()
   left = if left >= 0. and left < 1000000. then left else -1. end
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
-                  main_remaining=left, timed_waiting=timed_queue.length(),
+                  main_remaining=left, timed_waiting=timed_queue.length() + list.length(timed_room()),
                   live=live_on()})
 end)
 
