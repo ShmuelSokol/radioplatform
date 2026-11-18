@@ -270,6 +270,17 @@ def test_speech_is_never_overlapped_and_the_song_crossfade_comes_from_the_backen
     assert "duration=3." not in liq
 
 
+def test_a_song_ends_before_a_spoken_item_on_the_engine():
+    """Shmuel 2026-11-17 chose "Song ends first, then speech": the song fades out over
+    its overlap and the spoken item starts after it, decided by the starting item's kind."""
+    liq = _liq()
+    assert 'kind = starting.metadata["kbr_kind"]' in liq
+    assert 'speech_next = kind != "" and kind != "music"' in liq
+    assert "sequence([fade.out(duration=overlap, ending.source), starting.source])" in liq
+    # song into song still overlaps
+    assert "add(normalize=false, [starting.source, fade.out(duration=overlap, ending.source)])" in liq
+
+
 def test_engine_items_carry_their_overlap():
     from types import SimpleNamespace
 
