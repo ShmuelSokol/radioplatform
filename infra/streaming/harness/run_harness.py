@@ -106,6 +106,7 @@ class Stack:
         self.control_down = False
         # the local FM box's relay (infra/local/kbr_relay.py) when run with --local-box
         self.relay = None
+        self.local_box = False
         # file name -> seconds the audio server waits before sending it (a slow download)
         self.slow_files: dict[str, float] = {}
 
@@ -296,7 +297,10 @@ class Stack:
             "NTFY_TOPIC": "",
             "PLAYOUT_ENGINE_ENABLED": "true",
             "PLAYOUT_ENGINE_STATION_ID": str(STATION_ID),
-            "PLAYOUT_ENGINE_URL": f"http://127.0.0.1:{PROXY_PORT}",
+            # --local-box: no inbound line to the engine; the backend's commands can only
+            # travel through the relay's own outbound call (playout_tunnel)
+            "PLAYOUT_ENGINE_URL": "http://127.0.0.1:9" if self.local_box else f"http://127.0.0.1:{PROXY_PORT}",
+            "PLAYOUT_RELAY_STATION_ID": str(STATION_ID) if self.local_box else "",
             "PLAYOUT_ENGINE_TOKEN": TOKEN,
             "LIQUIDSOAP_ENABLED": "false",
         })
@@ -1821,6 +1825,50 @@ async def sc_backend_unreachable(h: Harness) -> None:
             f"the site shows what started after the return ({st.asset.title if st else None})")
 
 
+async def sc_local_box_commands(h: Harness) -> None:
+    """The local FM box has no inbound line (needs --local-box; the backend's engine
+    address leads nowhere): Next and Play Now from the site still act at once, carried
+    by the relay's own outbound call, and the hourly hand-over arrives the same way."""
+    name = "local_box_commands"
+    relay = h.stack.relay
+    if relay is None:
+        h.check(name, False, "run with --local-box")
+        return
+    await wait_music(h)
+    await h.queue([("song5", {}), ("song6", {})])
+    await asyncio.sleep(4)
+    before = relay.status()["commands_done"]
+    cur = await h.on_air()
+    pressed = time.time()
+    code = h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")[0]
+    answered = time.time() - pressed
+    await asyncio.sleep(5)
+    line = timeline(h.heard(pressed - 2, time.time() - 1))
+    h.print_timeline(h.heard(pressed - 2, time.time() - 1), pressed)
+    changes = [t for t, n in line[1:] if n.startswith("song")]
+    h.check(name, code == 200 and answered < 1.5, f"Next answered {code} in {answered:.2f} s")
+    h.check(name, bool(changes) and changes[0] - pressed <= 2.0,
+            f"song changed {changes[0] - pressed:+.2f} s after Next" if changes else f"no song change heard: {line}")
+    now = await h.on_air()
+    h.check(name, now is not None and cur is not None and now.id != cur.id, "the site moved to the next song")
+    h.check(name, relay.status()["commands_done"] > before,
+            f"the relay carried the command ({before} -> {relay.status()['commands_done']})")
+    # A hard time check handed over by the backend, through the relay
+    due_dt = at(55)
+    due = due_dt.timestamp()
+    ids = await h.queue([("time", {"preempt_at": due_dt, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(55 + 6 + 6)
+    line = timeline(h.heard(due - 5, time.time() - 1))
+    starts = [t for t, n in line if n == "time"]
+    h.check(name, bool(starts) and abs(starts[0] - due) <= 1.0,
+            f"time check heard {starts[0] - due:+.2f} s from its second" if starts else f"time check never aired: {line}")
+    rows = [e for e in await h.rows() if e.id == ids[0]]
+    h.check(name, bool(rows) and rows[0].started_at is not None
+            and abs(rows[0].started_at.timestamp() - due) <= 2.0, "the site recorded it at its time")
+    gap, _ = longest_silence(h.heard(pressed - 2, time.time() - 1))
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+
+
 async def sc_local_box_offline(h: Harness) -> None:
     """The local FM box with its line cut both ways (needs --local-box): the queue plays
     on in order from the box's own disk, a hard time check airs on the second, nothing
@@ -1846,6 +1894,10 @@ async def sc_local_box_offline(h: Harness) -> None:
         h.check(name, False, f"plan not copied: {e!r} {relay.status()}")
         return
     cut = time.time()
+    # The order the box holds on its disk at the cut. Titles are compared against this,
+    # not against "no title twice": the automatic fill may queue the song that is on air
+    # again as a later entry, which is the queue's order and not a repeat.
+    planned = [str(e.get("title") or "").split(" ")[0] for e in relay.plan.get("entries", []) if not e.get("at")]
     h.stack.backend_down = h.stack.control_down = True
     try:
         await asyncio.sleep(due - time.time() + 6 + 45)
@@ -1864,8 +1916,11 @@ async def sc_local_box_offline(h: Harness) -> None:
             f"time check heard {starts[0] - due:+.2f} s from its second" if starts else "time check never aired")
     h.check(name, runs.count("time") == 1, f"time check aired once: {runs}")
     songs = [n for n in runs if n.startswith("song")]
-    h.check(name, len(songs) == len(set(songs)) and len(songs) >= 3,
-            f"songs carried on in order, none twice: {songs}")
+    def follows_plan(seq: list[str]) -> bool:
+        return any(planned[i:i + len(seq)] == seq for i in range(len(planned)))
+    # The first song heard was already on air (or already with the engine) at the cut
+    in_order = len(songs) >= 3 and (follows_plan(songs) or follows_plan(songs[1:]))
+    h.check(name, in_order, f"songs carried on in the plan's order, none twice: {songs} (plan {planned[:6]})")
     gap, _ = longest_silence(heard)
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s over {back - cut:.0f} s offline")
     after = [n for _, n in timeline(h.heard(due + 7, back - 1))]
@@ -2714,6 +2769,7 @@ SCENARIOS = {
     "two_groups_0.3s_apart": lambda h: sc_two_groups(h, 0.3),
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
     "backend_unreachable": sc_backend_unreachable,
+    "local_box_commands": sc_local_box_commands,
     "local_box_offline": sc_local_box_offline,
     "control_endpoints": sc_control_endpoints,
     "slow_timed_file": sc_slow_timed_file,
@@ -2769,6 +2825,7 @@ async def main_async(names: list[str], keep: bool, local_box: bool = False) -> i
     workdir = Path(tempfile.mkdtemp(prefix="kbr-harness-"))
     log(f"work dir {workdir}")
     stack = Stack(workdir)
+    stack.local_box = local_box
     stack.make_audio()
     stack.serve_audio()
     stack.serve_proxy()
@@ -2820,7 +2877,7 @@ def main() -> None:
     ap.add_argument("--local-box", action="store_true",
                     help="run the engine behind the local FM box relay (infra/local/kbr_relay.py)")
     args = ap.parse_args()
-    names = args.scenarios or [n for n in SCENARIOS if args.local_box or n != "local_box_offline"]
+    names = args.scenarios or [n for n in SCENARIOS if args.local_box or not n.startswith("local_box_")]
     for n in names:
         if n not in SCENARIOS:
             sys.exit(f"unknown scenario {n}")

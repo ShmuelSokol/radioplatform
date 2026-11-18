@@ -522,6 +522,10 @@ class SchedulingService:
         else:
             # never do-not-play, a dated weather report or an hour's time check
             stmt = stmt.where(fit_for_random_pick())
+        if station_id is not None:
+            from app.services.station_blocks import blocked_asset_ids
+
+            stmt = stmt.where(Asset.id.notin_(blocked_asset_ids(station_id)))
         result = await self.db.execute(stmt)
         candidates = list(result.scalars().all())
 

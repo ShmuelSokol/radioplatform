@@ -1,7 +1,8 @@
 /**
  * Browser check of the control room's quick song actions (the "Song" panel on the
  * song on air and on every queue row) against a fake backend: change category, do
- * not play / allow again, edit details, open in the Library, view only for a DJ.
+ * not play / allow again (every station), not on this station / allow here again
+ * (this station only), edit details, open in the Library, view only for a DJ.
  * Desktop and iPhone sizes, upright and sideways.
  *
  *   cd frontend && npm run build && (npx vite preview --port 4311 --strictPort &)
@@ -13,7 +14,7 @@ import { chromium, devices, checker, sleep, makeStation, adminContext, newPage }
 import { allowEverywhere } from './lib/guard.mjs';
 
 // Provoked on purpose (anything else shown fails the run, e2e/lib/guard.mjs)
-allowEverywhere(/do-not-play|That did not go through/, 'do not play is made to fail once to see the message');
+allowEverywhere(/do-not-play|station-block|That did not go through/, 'do not play is made to fail once to see the message');
 allowEverywhere(/PATCH .*\/assets\/|status of 403|Only managers can change the library|is not allowed to do that/, 'a login without library rights tries a change to see the refusal');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
@@ -32,10 +33,27 @@ function songStation(opts = {}) {
   const extra = (method, path, _query, body) => {
     if (path === '/auth/me' && opts.role) return { id: 'u1', email: 'dj@example.com', role: opts.role, is_active: true };
     if (path === '/categories') return CATEGORIES.map((name, i) => ({ id: `c${i}`, name, created_at: null }));
-    const m = /^\/assets\/([^/]+)(\/do-not-play)?$/.exec(path);
+    const m = /^\/assets\/([^/]+)(\/do-not-play|\/station-block)?$/.exec(path);
     if (!m || m[1] === 'upload') return undefined;
     const a = station.byId[m[1]];
     if (!a) return { __status: 404, detail: 'Not found' };
+    if (m[2] === '/station-block') {
+      // "Not on this station": a list per station; the song's category is never touched
+      const sid = method === 'GET' ? _query.station_id : body.station_id;
+      const list = (station.offHere[sid] ??= new Set());
+      if (method === 'GET') return { id: a.id, station_id: sid, blocked: list.has(a.id) };
+      if (opts.failDnp) return { __status: 500 };
+      let removed = 0, kept = 0;
+      if (body.on) {
+        list.add(a.id);
+        station.queue = station.queue.filter((e) => {
+          if (e.asset_id !== a.id || e.status === 'played') return true;
+          if (e.status === 'playing' || e.preempt_at) { kept++; return true; }
+          removed++; return false;
+        });
+      } else list.delete(a.id);
+      return { id: a.id, station_id: sid, station_name: 'Kol Berama', blocked: !!body.on, removed_from_queue: removed, still_to_play: kept };
+    }
     const full = () => ({ album: null, file_path: 'x.mp3', album_art_path: null, metadata_extra: null, created_by: null, created_at: null, last_played_at: null, vote: 0, release_date: null, sponsor_id: null, sponsor_name: null, ...a });
     if (m[2] && method === 'POST') {
       if (opts.failDnp) return { __status: 500 };
@@ -59,6 +77,7 @@ function songStation(opts = {}) {
     return undefined;
   };
   station = makeStation({ queueSize: 12, ...opts, extra });
+  station.offHere = {};
   return station;
 }
 
@@ -73,6 +92,8 @@ async function openRoom(browser, contextOpts, station) {
 const rowOf = (page, entryId) => page.locator(`[data-testid=queue-row][data-entry-id="${entryId}"]`);
 const panel = (page) => page.getByTestId('song-panel');
 const toastText = (page) => page.getByTestId('toast').innerText().catch(() => '');
+/** The station the control room is open on (the one the panel asked about). */
+const hereId = (st) => Object.keys(st.offHere)[0];
 const writes = (st, re) => st.calls.filter((c) => c.method !== 'GET' && re.test(c.path));
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png` }); };
 /** Calls that would change what is on air or the queue order: the panel must make none. */
@@ -196,6 +217,87 @@ async function queueRow(browser) {
   await ctx.close();
 }
 
+// ── Desktop: "Not on this station" beside "Do not play this song again" ──
+async function notHere(browser) {
+  const tag = 'not here';
+  const station = songStation();
+  const { ctx, page, errors } = await openRoom(browser, DESKTOP, station);
+  const target = station.pending()[3];
+  const a = station.byId[target.asset_id];
+  const was = a.category;
+  station.add({ asset_id: a.id, position: 60, source: 'auto' });
+  station.add({ asset_id: a.id, position: 61, source: 'block', preempt_at: new Date(Date.now() + 3600e3).toISOString() });
+  const cur = station.playing();
+  const before = cur.started_at;
+  await openForRow(page, target.id, false);
+  const here = page.getByTestId('song-here');
+  await here.waitFor();
+  await page.waitForFunction(() => !document.querySelector('[data-testid=song-here]').disabled);
+  const hb = await here.boundingBox();
+  const db = await page.getByTestId('song-dnp').boundingBox();
+  check(`${tag}: both choices show, this station first, not overlapping`, hb.y + hb.height <= db.y, JSON.stringify({ hb, db }));
+  check(`${tag}: the station choice names the station`, /Not on this station/.test(await here.innerText()) && /Only Kol Berama/.test(await page.getByTestId('song-here-scope').innerText()));
+  check(`${tag}: the other choice says every station`, /Do not play this song again/.test(await page.getByTestId('song-dnp').innerText()) && /Every station/.test(await page.getByTestId('song-dnp-scope').innerText()));
+  check(`${tag}: help text says the other stations keep playing it`, /other stations keep playing it/.test(await page.getByTestId('song-here-help').innerText()) && /every station/.test(await page.getByTestId('song-dnp-help').innerText()));
+  await shot(page, 'desktop-song-panel-two-choices');
+  const t0 = Date.now();
+  await here.click();
+  await page.getByTestId('song-state-here').waitFor({ timeout: 4000 });
+  check(`${tag}: shows in the panel within 1 s`, Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  const sent = writes(station, /station-block$/);
+  check(`${tag}: one call, for this station, on:true`, sent.length === 1 && sent[0].body.on === true && sent[0].body.station_id === hereId(station) && Object.keys(station.offHere).length === 1, JSON.stringify(sent.map((c) => c.body)));
+  check(`${tag}: no do-not-play call and the category is unchanged`, writes(station, /do-not-play$/).length === 0 && a.category === was && await page.getByTestId('song-category').inputValue() === was);
+  check(`${tag}: panel still shows the category, plus NOT ON THIS STATION`, (await page.getByTestId('song-state').innerText()).includes(was) && /NOT ON THIS STATION: Kol Berama/.test(await page.getByTestId('song-state-here').innerText()));
+  let t = await toastText(page);
+  check(`${tag}: toast names the station, says others are unchanged, counts copies`, /Will not play on Kol Berama/.test(t) && /Other stations are not changed/.test(t) && /2 waiting copies removed/.test(t) && /1 already on air, loaded or timed/.test(t), t);
+  check(`${tag}: waiting copies left the queue, timed copy stayed`, station.queue.filter((e) => e.asset_id === a.id).length === 1);
+  check(`${tag}: the song on air is untouched and nothing was sent to the player`, station.playing()?.id === cur.id && station.playing().started_at === before && airCalls(station).length === 0);
+  check(`${tag}: button now offers to allow it here again; the every-station button did not change`, /Allow on this station again/.test(await here.innerText()) && await here.getAttribute('aria-pressed') === 'true' && /Do not play this song again/.test(await page.getByTestId('song-dnp').innerText()) && await page.getByTestId('song-dnp').getAttribute('aria-pressed') === 'false');
+  await shot(page, 'desktop-song-panel-not-here');
+  // closing and opening again reads the state back from the server
+  await page.keyboard.press('Escape');
+  await page.getByTestId('now-song').click();
+  await panel(page).waitFor();
+  await page.waitForFunction(() => !document.querySelector('[data-testid=song-here]').disabled);
+  check(`${tag}: another song is not marked`, /Not on this station/.test(await here.innerText()) && await page.getByTestId('song-state-here').count() === 0);
+  await page.keyboard.press('Escape');
+  station.add({ asset_id: a.id, position: 2, source: 'manual' });
+  await sleep(2500);
+  const again = station.pending().find((e) => e.asset_id === a.id && !e.preempt_at);
+  await openForRow(page, again.id, false);
+  await page.getByTestId('song-state-here').waitFor({ timeout: 4000 });
+  check(`${tag}: reopened, the song still shows as off this station`, /Allow on this station again/.test(await here.innerText()));
+  // both at once: each keeps its own undo
+  await page.getByTestId('song-dnp').click();
+  await page.getByTestId('song-state').filter({ hasText: 'DO NOT PLAY' }).waitFor({ timeout: 4000 });
+  check(`${tag}: with both on, allow-again help says it stays off this station`, /stays off Kol Berama/.test(await page.getByTestId('song-dnp-help').innerText()));
+  await page.getByTestId('song-dnp').click();
+  await page.getByTestId('song-state').filter({ hasText: was }).waitFor({ timeout: 4000 });
+  check(`${tag}: allowing it on every station leaves the station block on`, station.offHere[hereId(station)].has(a.id) && await page.getByTestId('song-state-here').isVisible());
+  await here.click();
+  await page.getByTestId('toast').filter({ hasText: 'Allowed on Kol Berama again' }).waitFor({ timeout: 4000 });
+  check(`${tag}: undo sends on:false and clears the mark`, writes(station, /station-block$/).at(-1).body.on === false && !station.offHere[hereId(station)].has(a.id) && await page.getByTestId('song-state-here').count() === 0 && a.category === was);
+  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+
+  // a failed call says so and changes nothing; a DJ cannot press it
+  let st = songStation({ failDnp: true });
+  let r = await openRoom(browser, DESKTOP, st);
+  await openForRow(r.page, st.pending()[2].id, false);
+  await r.page.waitForFunction(() => !document.querySelector('[data-testid=song-here]').disabled);
+  await r.page.getByTestId('song-here').click();
+  await r.page.getByTestId('toast').filter({ hasText: 'did not go through' }).waitFor({ timeout: 4000 });
+  check(`${tag}: a failed call says so and the button still offers the block`, /Not on this station/.test(await r.page.getByTestId('song-here').innerText()));
+  await r.ctx.close();
+  st = songStation({ role: 'dj' });
+  r = await openRoom(browser, DESKTOP, st);
+  await r.page.getByTestId('now-song').click();
+  await panel(r.page).waitFor();
+  await sleep(500);
+  check(`${tag}: a DJ cannot press "Not on this station"`, await r.page.getByTestId('song-here').isDisabled() && writes(st, /station-block/).length === 0);
+  await r.ctx.close();
+}
+
 // ── Failures and view only ───────────────────────────────────
 async function refusals(browser) {
   const tag = 'refusals';
@@ -239,6 +341,26 @@ async function reach(browser) {
     const station = songStation();
     const { ctx, page, errors } = await openRoom(browser, { viewport: { width: w, height: h } }, station);
     const p = station.pending();
+    // The right-hand button column: all of it shows on a 900 px high window; a shorter
+    // one scrolls and says so with "more", which goes to the end and then disappears
+    const col = page.locator('aside[aria-label=Controls]');
+    const fits = await col.evaluate((el) => el.scrollHeight <= el.clientHeight + 1);
+    const more = page.getByTestId('cr-controls-more');
+    if (h >= 900) {
+      const last = await col.getByRole('tab').last().boundingBox();
+      const cb = await col.boundingBox();
+      check(`${tag}: the whole button column fits, down to Errors, with no "more"`, fits && last.y + last.height <= cb.y + cb.height && await more.count() === 0, JSON.stringify({ last, cb }));
+    } else {
+      check(`${tag}: the button column is longer than the window and says "more"`, !fits && await more.isVisible());
+      await more.click();
+      await page.waitForFunction(() => !document.querySelector('[data-testid=cr-controls-more]'), null, { timeout: 3000 }).catch(() => {});
+      const last = await col.getByRole('tab').last().boundingBox();
+      const cb = await col.boundingBox();
+      check(`${tag}: "more" scrolls to the last button and goes away`, await more.count() === 0 && last.y + last.height <= cb.y + cb.height + 1, JSON.stringify({ last, cb }));
+      await col.evaluate((el) => el.scrollTo(0, 0));
+      await more.waitFor({ timeout: 3000 });
+      check(`${tag}: scrolled back up, "more" returns and Loop is whole`, (await col.getByTestId('loop').boundingBox()).y >= cb.y - 0.5);
+    }
     // A click selects the row; its Song / Move up / Move down are then pressable without hovering first
     const row = rowOf(page, p[3].id);
     await row.locator('[draggable=true]').click({ position: { x: 300, y: 8 } });
@@ -339,7 +461,7 @@ async function phone(browser, contextOpts, tag, landscape = false) {
   const box = await panel(page).boundingBox();
   check(`${tag}: panel fits the screen`, box.x >= 0 && box.x + box.width <= vp.width + 0.5 && box.y >= 0 && box.y + box.height <= vp.height + 0.5, JSON.stringify(box));
   check(`${tag}: page does not scroll sideways`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
-  for (const id of ['song-category', 'song-dnp', 'song-save', 'song-library']) {
+  for (const id of ['song-category', 'song-here', 'song-dnp', 'song-save', 'song-library']) {
     const el = page.getByTestId(id);
     await el.scrollIntoViewIfNeeded();
     const b = await el.boundingBox();
@@ -352,6 +474,13 @@ async function phone(browser, contextOpts, tag, landscape = false) {
   await page.getByTestId('song-dnp').tap();
   await page.getByTestId('song-state').filter({ hasText: 'DO NOT PLAY' }).waitFor({ timeout: 4000 });
   check(`${tag}: do not play works by tap, song stays on air`, station.playing()?.id === 'q1' && airCalls(station).length === 0);
+  await page.getByTestId('song-here').scrollIntoViewIfNeeded();
+  const labels = await page.getByTestId('song-stop').locator('button span').evaluateAll((els) => els.every((el) => el.scrollWidth <= el.clientWidth + 1));
+  check(`${tag}: no label on the two stop buttons is cut off`, labels);
+  await page.getByTestId('song-here').tap();
+  await page.getByTestId('song-state-here').count();
+  await page.getByTestId('toast').filter({ hasText: 'Will not play on Kol Berama' }).waitFor({ timeout: 4000 });
+  check(`${tag}: not on this station works by tap, song stays on air`, station.offHere[hereId(station)].has('' + station.playing().asset_id) && station.playing()?.id === 'q1' && airCalls(station).length === 0);
   await page.getByRole('button', { name: 'Close' }).tap();
   check(`${tag}: Close closes`, await panel(page).count() === 0);
   if (!landscape) {
@@ -380,6 +509,7 @@ const ONLY = process.env.ONLY || '';
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 try {
   if (run('air')) await onAir(browser);
+  if (run('here')) await notHere(browser);
   if (run('row')) await queueRow(browser);
   if (run('refusals')) await refusals(browser);
   if (run('reach')) await reach(browser);

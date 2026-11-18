@@ -315,3 +315,229 @@ def test_http_front_door_needs_the_token(rig):
         assert json.loads(urllib.request.urlopen(base + "/relay/status").read())["online"] is True
     finally:
         server.shutdown()
+
+
+# ── Commands to a box with no inbound line ───────────────────────────────────
+
+
+@pytest.fixture
+def tunnel_station(monkeypatch):
+    from app.services import playout_engine, playout_tunnel
+
+    sid = uuid.uuid4()
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", str(sid))
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", TOKEN)
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", f" {sid} ")
+    playout_engine.reset_state()
+    playout_tunnel.reset()
+    yield sid
+    playout_tunnel.reset()
+
+
+@pytest.mark.asyncio
+async def test_command_goes_through_the_relay_when_one_is_polling(client, tunnel_station):
+    import asyncio
+
+    from app.services import playout_engine, playout_tunnel
+
+    sid = tunnel_station
+    url = f"/api/v1/playout/{sid}/commands/poll"
+    assert (await client.post(url, json={"wait": 0})).status_code == 403
+    assert not playout_tunnel.connected(sid)
+    assert (await client.post(url, json={"wait": 0}, headers=HEADERS)).json() == {"commands": []}
+    assert playout_tunnel.connected(sid)
+
+    async def relay_once(status=200, body=None):
+        got = (await client.post(url, json={"wait": 5}, headers=HEADERS)).json()["commands"]
+        answers = [{"id": c["id"], "status": status, "body": body or {"ok": True}} for c in got]
+        await client.post(url, json={"wait": 0, "answers": answers}, headers=HEADERS)
+        return got
+
+    poller = asyncio.create_task(relay_once())
+    await asyncio.sleep(0.05)  # the relay's call is being held open
+    started = asyncio.get_running_loop().time()
+    assert await playout_engine.engine_skip(sid, fade_seconds=0.5) is True
+    assert asyncio.get_running_loop().time() - started < 1.0
+    got = await poller
+    assert [(c["path"], c["payload"]) for c in got] == [("/skip", {"fade": 0.5})]
+
+    poller = asyncio.create_task(relay_once(body={"ok": True, "lane": "main", "entry": "e1"}))
+    assert (await playout_engine.engine_status(sid))["entry"] == "e1"
+    await poller
+
+    # The engine refused it: the command reports failure
+    poller = asyncio.create_task(relay_once(status=502))
+    assert await playout_engine.engine_flush(sid) is False
+    await poller
+
+
+@pytest.mark.asyncio
+async def test_command_nobody_fetched_is_withdrawn_not_delivered_late(client, tunnel_station, monkeypatch):
+    from app.services import playout_tunnel
+
+    sid = tunnel_station
+    url = f"/api/v1/playout/{sid}/commands/poll"
+    await client.post(url, json={"wait": 0}, headers=HEADERS)
+    assert await playout_tunnel.send(sid, "/skip", {}, timeout=0.1) is None
+    assert (await client.post(url, json={"wait": 0}, headers=HEADERS)).json() == {"commands": []}
+    # A relay that stopped polling: commands go by HTTPS again
+    monkeypatch.setattr(playout_tunnel, "CONNECTED_SECONDS", 0.0)
+    assert not playout_tunnel.connected(sid)
+
+
+def test_relay_fetches_commands_gives_them_to_the_engine_and_answers(rig):
+    fake, relay, _ = rig
+    polls = []
+
+    def call(method, path, body=None, timeout=5.0):
+        assert (method, path) == ("POST", "/commands/poll")
+        polls.append(json.loads(body))
+        if len(polls) == 1:
+            return 200, json.dumps({"commands": [
+                {"id": "c1", "path": "/timed", "payload": {"uri": "u", "at": 5.0, "id": "x"}},
+                {"id": "c2", "path": "/../etc", "payload": {}},
+            ]}).encode()
+        relay.stop.set()
+        return 200, b'{"commands": []}'
+
+    relay._call = call
+    relay.run_commands(wait=1.0)
+    assert fake.timed == [{"uri": "u", "at": 5.0, "id": "x"}]
+    assert polls[0]["answers"] == []
+    assert polls[1]["answers"] == [
+        {"id": "c1", "status": 200, "body": {"ok": True}},
+        {"id": "c2", "status": 400, "body": None},
+    ]
+    assert relay.status()["commands_done"] == 2
+
+
+@pytest.mark.asyncio
+async def test_station_not_named_for_the_relay_keeps_its_commands(client, tunnel_station, monkeypatch):
+    """A box set up with the wrong station id (say Main's) cannot take that station's
+    commands away from its engine on the stream server."""
+    from app.services import playout_engine, playout_tunnel
+
+    sid = tunnel_station
+    url = f"/api/v1/playout/{sid}/commands/poll"
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", "")
+    resp = await client.post(url, json={"wait": 0}, headers=HEADERS)
+    assert resp.status_code == 403
+    assert not playout_tunnel.connected(sid)
+    sent = []
+
+    # the command still leaves by PLAYOUT_ENGINE_URL
+    class Resp:
+        status_code = 200
+
+    class Client:
+        async def post(self, u, **kw):
+            sent.append(u)
+            return Resp()
+
+    monkeypatch.setattr(playout_engine, "_client", lambda: Client())
+    assert await playout_engine.engine_flush(sid) is True
+    assert sent == [f"http://engine.invalid/{sid}/flush"]
+
+    # Named: the switch is written to the log, both ways
+    monkeypatch.setattr(settings, "PLAYOUT_RELAY_STATION_ID", str(sid))
+    lines = []
+    monkeypatch.setattr(playout_tunnel.logger, "warning", lambda msg, *a: lines.append(msg % a))
+    assert (await client.post(url, json={"wait": 0}, headers=HEADERS)).status_code == 200
+    assert playout_tunnel.connected(sid)
+    monkeypatch.setattr(playout_tunnel, "CONNECTED_SECONDS", 0.0)
+    assert not playout_tunnel.connected(sid)
+    text = " ".join(lines)
+    assert len(lines) == 2
+    assert "now go to its local box's relay" in text and "stopped polling" in text
+
+
+@pytest.mark.asyncio
+async def test_slow_command_by_relay_is_taken_only_when_it_was_fetched(client, tunnel_station):
+    """Same rules as a command sent by HTTPS: `wait` is the whole wait, and a /timed whose
+    file is still loading counts as taken (slow_is_ok), not refused. A command the relay
+    never fetched was never given to the engine: that stays a failure."""
+    import asyncio
+
+    from app.services import playout_engine, playout_tunnel
+
+    sid = tunnel_station
+    url = f"/api/v1/playout/{sid}/commands/poll"
+    await client.post(url, json={"wait": 0}, headers=HEADERS)
+    assert playout_tunnel.connected(sid)
+
+    async def timed(**kw):
+        return await playout_engine.engine_timed(sid, "http://x/a.mp3", 0.0, "e1", **kw)
+
+    # Nobody fetched it within the wait: not taken, whatever slow_is_ok says
+    started = asyncio.get_running_loop().time()
+    assert await timed(wait=0.3, slow_is_ok=True) is False
+    assert 0.25 < asyncio.get_running_loop().time() - started < 1.0
+
+    # The relay fetched it and the engine is still loading the file when the wait ends
+    async def fetch_only():
+        return (await client.post(url, json={"wait": 5}, headers=HEADERS)).json()["commands"]
+
+    poller = asyncio.create_task(fetch_only())
+    await asyncio.sleep(0.05)
+    assert await timed(wait=0.3, slow_is_ok=True) is True
+    got = await poller
+    assert got[0]["path"] == "/timed" and 0.2 < got[0]["wait"] <= 0.5  # the relay's wait for its engine
+
+    poller = asyncio.create_task(fetch_only())
+    await asyncio.sleep(0.05)
+    assert await timed(wait=0.3) is False  # a caller that needs the answer does not get a yes
+    await poller
+
+    # The relay's own wait for the engine ran out first: it answers "still working"
+    async def relay_says_working():
+        got = await fetch_only()
+        await client.post(url, json={"wait": 0, "answers": [
+            {"id": got[0]["id"], "status": playout_tunnel.STILL_WORKING}]}, headers=HEADERS)
+
+    poller = asyncio.create_task(relay_says_working())
+    await asyncio.sleep(0.05)
+    assert await timed(wait=2.0, slow_is_ok=True) is True
+    await poller
+    poller = asyncio.create_task(relay_says_working())
+    await asyncio.sleep(0.05)
+    assert await timed(wait=2.0) is False
+    await poller
+
+
+def test_relay_reports_an_engine_still_loading_as_working_not_failed(tmp_path):
+    """The relay waits for its engine as long as the backend waits (the command's `wait`);
+    an engine that took the command and has not answered yet is 202, a dead one 502."""
+    import http.server
+    import threading
+    import time as _time
+
+    class Slow(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            _time.sleep(0.2 if self.path == "/quick" else 1.5)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true}')
+            except OSError:
+                pass
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Slow)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        relay = kbr_relay.Relay(
+            "http://127.0.0.1:9/api/v1", "s", "t", tmp_path,
+            f"http://127.0.0.1:{srv.server_address[1]}",
+        )
+        assert relay._engine_call("/quick", {}, wait=1.0) == (200, {"ok": True})
+        assert relay._engine_call("/timed", {}, wait=0.5) == (202, None)
+        relay.engine_control = "http://127.0.0.1:9"
+        assert relay._engine_call("/timed", {}, wait=0.5)[0] == 502
+    finally:
+        srv.shutdown()

@@ -237,6 +237,9 @@ class _Resolver:
             )
             if category:
                 stmt = stmt.where(in_category(category))
+            from app.services.station_blocks import blocked_asset_ids
+
+            stmt = stmt.where(Asset.id.notin_(blocked_asset_ids(self.station.id)))
             self.pools[key] = list((await self.db.execute(stmt.order_by(Asset.title))).all())
         pool = self.pools[key]
         if not pool:
