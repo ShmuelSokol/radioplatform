@@ -167,7 +167,7 @@ crash. Found while testing a cut:
   plan's time at least. A clock that is wrong but later than the plan cannot be seen.
 - Harness `local_box_power_loss`: engine killed (SIGKILL) and relay dropped 10 s after
   the hand-over with the line down, a torn `.part` file left, both started again:
-  station music 0.1 s after the engine wrote sound again (about 10 s after "power on"),
+  station music 0.1 s after the engine wrote sound again (about 10 s after "power on" here),
   the song on air at the cut not replayed, time check +0.7 s, once, recorded once.
 - By hand, once per box: BIOS "power on after AC loss".
 
@@ -178,7 +178,7 @@ engine after the relay and the sound system. Reruns keep every setting (token, c
 restart the relay freely (not heard) and the engine only when its script or settings
 changed. A new radio.liq is checked first; if the engine does not answer within 90 s
 with it, the old script goes back and the engine restarts on it. An engine restart is
-still about 10 s of silence on FM: the gapless update is not built.
+still 10 to 30 s of silence on FM (see the note on restart time below): the gapless update is not built.
 
 Tested without systemd: a stand-in `systemctl` on PATH that really starts and stops
 Icecast, the relay and the engine from the files the script wrote
@@ -206,7 +206,7 @@ silence on the card itself. No page shows `box` yet; the alerts are the interfac
 
 No standby engine for gap-free updates: a second engine sharing the sound card is one
 more way for two engines to play on the transmitter at once. A new radio.liq costs
-about 10 s of quiet on FM, so setup-box.sh should apply it only in a quiet window (a
+10 to 30 s of quiet on FM, so setup-box.sh should apply it only in a quiet window (a
 blackout within the next day, else 3 AM local) unless forced, and restart at a song
 boundary. Built in stage 4b, below. If Shmuel says 10 s at 3 AM is not acceptable, the engine
 thread builds standby (flag, `/takeover`, relay stops the old engine at a song boundary).
@@ -225,7 +225,9 @@ Run by hand the script does everything at once except restarting an engine that 
 air: that waits for the quiet time ("a change is waiting") unless `KBR_APPLY=now`. A
 first install, or an engine that is down, starts at once. Before any restart of a
 running engine it waits up to 20 min for `/status` `main_remaining` to fall under 1.5 s,
-so no song is cut; the gap on FM is the engine's start (about 10 s) between two items.
+so no song is cut; the gap on FM is the engine's start between two items. How long that
+is depends on the machine: about 10 s in this test container, 23 to 28 s from stop to
+sound on the one-core stream server (four reruns, 2026-11-18). Measure it on the box.
 The check, the 90 s wait and the return of the old script are as before.
 
 Tested with the stand-in `systemctl` (`KBR_FAKE_HHMM=0330` sets the station's clock for

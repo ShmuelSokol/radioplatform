@@ -19,7 +19,7 @@
 #
 # Updates: the box looks for a new release by itself every hour at :35 and takes it only
 # in a quiet time (inside a Shabbos / Yom Tov blackout, or between 3 and 4 AM station
-# time), because a new engine script means about 10 s of silence on FM. The engine is
+# time), because a new engine script means 10 to 30 s of silence on FM. The engine is
 # restarted between two songs. Run by hand, the script sets everything up at once
 # except a restart of an engine that is on air, which waits for the quiet time;
 # KBR_APPLY=now does it at once. KBR_BOX_AUTO_UPDATE=0 switches the hourly look off,
@@ -267,7 +267,7 @@ else
   echo "Relay: unchanged, left running"
 fi
 
-# The engine: a restart is about 10 s of silence on FM. So: only when something changed,
+# The engine: a restart is 10 to 30 s of silence on FM. So: only when something changed,
 # only in a quiet time (or KBR_APPLY=now, or when it is not running at all), and between
 # two songs.
 wait_song_end() {

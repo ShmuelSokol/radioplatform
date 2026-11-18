@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { usePlayerStore } from '../../stores/playerStore';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useStations } from '../../hooks/useStations';
 import { getArchives } from '../../api/archives';
@@ -72,6 +73,7 @@ export default function Archives() {
     // Another card: stop the first, play this one
     if (current) current.pause();
     setFailedId(null);
+    usePlayerStore.getState().stop();   // a station playing in the bar gives way to the recording
     const audio = new Audio(archive.audio_url);
     audio.addEventListener('ended', () => { setPlayingId(null); setPaused(false); });
     audio.addEventListener('play', () => setPaused(false));

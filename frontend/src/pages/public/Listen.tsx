@@ -16,6 +16,7 @@ import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { holdUpdates } from '../../lib/appUpdate';
 import { serverNow } from '../../lib/serverClock';
+import { usePlayerStore } from '../../stores/playerStore';
 import { displayTitle } from '../../lib/displayTitle';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
 import type { AssetInfo } from '../../types';
@@ -34,8 +35,11 @@ interface ActiveShowData {
   } | null;
 }
 
-export default function Listen() {
-  const { stationId } = useParams<{ stationId: string }>();
+export default function Listen({ stationId: given }: { stationId?: string } = {}) {
+  // ListenHost names the station (it keeps this page alive while the listener looks at
+  // other listener pages); on its own the page reads it from the address
+  const params = useParams<{ stationId: string }>();
+  const stationId = given ?? params.stationId;
   const { data: station, isLoading, error: stationError } = useQuery({
     queryKey: ['station', stationId],
     queryFn: () => getStation(stationId!),
@@ -386,6 +390,19 @@ export default function Listen() {
     stopProbe();
     stopLive();
   };
+
+  // Tell the rest of the site what is playing: the bar on the other listener pages shows
+  // it and its Stop presses this page's Stop
+  const stationName = station?.name;
+  useEffect(() => {
+    if (!stationId || !stationName || !userStarted) return;
+    usePlayerStore.getState().listening(stationId, stationName, () => stopRef.current());
+    return () => usePlayerStore.getState().clear(stationId);
+  }, [stationId, stationName, userStarted]);
+  useEffect(() => {
+    if (!userStarted) return;
+    usePlayerStore.getState().setTrack(nowTitle ? { title: nowTitle, artist: nowArtist || undefined } : null);
+  }, [userStarted, nowTitle, nowArtist]);
 
   // The phone's own controls (lock screen, CarPlay, headphones) act like the page's
   // buttons. Left to the browser, their pause only paused the audio, and play then
