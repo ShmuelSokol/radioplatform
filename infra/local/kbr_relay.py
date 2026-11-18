@@ -50,6 +50,9 @@ MISSED_SOFT_SECONDS = 3600.0
 # The computer's clock is this far behind the newest plan on disk: it was not set after a
 # power cut (no internet, flat clock battery). Nothing timed is trusted until it is right.
 CLOCK_BEHIND_SECONDS = 120.0
+# Live show audio with nothing new from the backend for this long ends the pass-through;
+# the engine's live lane goes quiet and opens it again.
+LIVE_STALL_SECONDS = 10.0
 DONE_KEEP = 5000
 URL_AT_END = re.compile(r'(?:^|(?<=":))(https?://\S+)$')
 
@@ -176,6 +179,42 @@ class Relay:
             raise Offline(str(e)) from None
         self._set_online(True)
         return result
+
+    def pass_live(self, handler) -> None:
+        """The live show for the engine's live lane (engine proto 5): the backend's
+        live.mp3 passed through as it arrives, never held back. 204 while no show is
+        heard and while the backend cannot be reached (the lane stays quiet and the
+        engine asks again); a refusal (403, 409) goes back to the engine as it came."""
+        headers = {"X-Playout-Token": self.token}
+        if self.engine_instance:
+            headers["X-Playout-Instance"] = self.engine_instance
+        req = urllib.request.Request(f"{self.upstream}/playout/{self.station_id}/live.mp3", headers=headers)
+        try:
+            resp = urllib.request.urlopen(req, timeout=LIVE_STALL_SECONDS)
+        except urllib.error.HTTPError as e:
+            return handler._send(e.code if e.code < 500 else 204, b"")
+        except (OSError, ValueError) as e:
+            log.info("live show audio: backend not reached (%s); lane stays quiet", e)
+            return handler._send(204, b"")
+        handler.close_connection = True
+        try:
+            if resp.status != 200:
+                return handler._send(204 if resp.status == 204 else resp.status, b"")
+            handler.send_response(200)
+            handler.send_header("Content-Type", resp.headers.get("Content-Type") or "audio/mpeg")
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            log.info("live show audio: passing through to the engine")
+            while True:
+                chunk = resp.read1(16384)
+                if not chunk:
+                    break
+                handler.wfile.write(chunk)
+                handler.wfile.flush()
+        except (OSError, ValueError) as e:  # engine closed it, or the backend stalled
+            log.info("live show audio ended: %s", e)
+        finally:
+            resp.close()
 
     def _set_online(self, value: bool) -> None:
         if value != self.online:
@@ -654,6 +693,8 @@ def make_handler(relay: Relay):
                 return self._send(*relay.started(body))
             if tail == "/hello" and method == "POST":
                 return self._send(*relay.hello(body))
+            if tail == "/live.mp3" and method == "GET":
+                return relay.pass_live(self)
             return self._send(404, b'{"ok":false}')
 
         def do_GET(self):  # noqa: N802

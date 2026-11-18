@@ -105,6 +105,8 @@ class Fake:
         self.timed = []
         self.instances = []
         self.refuse_instance = None
+        self.live_chunks = None  # None = no show (204); else pieces sent one by one
+        self.live_gate = threading.Event()
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -123,6 +125,18 @@ class Fake:
                 fake.instances.append(self.headers.get("X-Playout-Instance"))
                 if fake.refuse_instance and self.headers.get("X-Playout-Instance") == fake.refuse_instance:
                     return self._out(409, b'{"detail":"Another playout engine plays this station"}')
+                if path.endswith("/live.mp3"):
+                    if fake.live_chunks is None:
+                        return self._out(204, b"")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "audio/mpeg")
+                    self.end_headers()
+                    for i, chunk in enumerate(fake.live_chunks):
+                        if i:
+                            fake.live_gate.wait(5)
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                    return None
                 if "/plan" in path:
                     return self._out(200, json.dumps(fake.plan).encode())
                 if "/next" in path:
@@ -221,6 +235,48 @@ def test_the_engine_instance_id_reaches_the_backend_and_a_refusal_reaches_the_en
         fake.refuse_instance = "copied"
         assert call("/hello", "copied", "POST") == 409
         assert call("/next?given=", "copied") == 409
+    finally:
+        server.shutdown()
+
+
+def test_live_show_audio_reaches_the_engine_through_the_box(rig):
+    """Engine proto 5 plays a live show from live.mp3. On a box the engine asks the relay,
+    which passes the show through as it arrives (not after it ends); with no show, or
+    with the line down, the answer is 204 and the engine's live lane stays quiet."""
+    import socket
+    import urllib.error
+    import urllib.request
+
+    fake, relay, _ = rig
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    server = kbr_relay.serve(relay, port)
+    url = f"http://127.0.0.1:{port}/api/v1/playout/sid/live.mp3"
+
+    def open_live(token=TOKEN):
+        req = urllib.request.Request(url, headers={"X-Playout-Token": token, "X-Playout-Instance": "box-1"})
+        try:
+            return urllib.request.urlopen(req, timeout=5)
+        except urllib.error.HTTPError as e:
+            return e
+
+    try:
+        assert open_live("wrong").code == 403
+        assert open_live().status == 204  # no show on air
+        fake.live_chunks = [b"ID3first", b"second", b"third"]
+        resp = open_live()
+        assert resp.status == 200 and resp.headers["Content-Type"] == "audio/mpeg"
+        assert resp.read1(64) == b"ID3first"  # the show's start, before the backend sent more
+        fake.live_gate.set()
+        assert resp.read() == b"secondthird"
+        resp.close()
+        assert fake.instances[-1] == "box-1"
+        fake.up = False
+        fake.live_chunks = None
+        fake.server.shutdown()
+        fake.server.server_close()
+        assert open_live().status == 204  # backend not reached: quiet, never an error
     finally:
         server.shutdown()
 
