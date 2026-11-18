@@ -564,6 +564,51 @@ async def _wait_for_database(limit: float = 90.0) -> None:
             wait = min(wait * 2, 8.0)
 
 
+async def _log_database_link() -> None:
+    """Once after a start: how far away the database is and how big it is.
+
+    On 2026-11-18 single statements took 0.6 to 1 s with an idle event loop and a
+    free pool, and a 48 MB table took 27 s to vacuum. Whether that is distance
+    (this server's region against the database's) or a small database that reads
+    from disk cannot be seen from outside; this line says both."""
+    import os
+    import statistics
+    import time as _time
+
+    from sqlalchemy import text
+    from sqlalchemy.engine import make_url
+
+    from app.db.engine import engine
+
+    if engine.dialect.name != "postgresql":
+        return
+    await asyncio.sleep(45)  # after the startup rush, so the times are the link's own
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+            times = []
+            for _ in range(7):
+                began = _time.monotonic()
+                await conn.execute(text("SELECT 1"))
+                times.append((_time.monotonic() - began) * 1000)
+            facts = (await conn.execute(text(
+                "SELECT current_setting('shared_buffers'), current_setting('effective_cache_size'), "
+                "current_setting('max_connections'), pg_size_pretty(pg_database_size(current_database())), "
+                "current_setting('server_version'), current_setting('track_io_timing')"
+            ))).first()
+        logger.warning(
+            "DATABASE LINK: one statement (SELECT 1) takes %.0f ms at best, %.0f ms typically, %.0f ms at worst. "
+            "This server: region %s. Database host: %s. Database: version %s, shared_buffers %s, "
+            "effective_cache_size %s, max_connections %s, size %s, track_io_timing %s",
+            min(times), statistics.median(times), max(times),
+            os.environ.get("RAILWAY_REPLICA_REGION") or os.environ.get("RAILWAY_REGION") or "unknown",
+            make_url(settings.DATABASE_URL).host,
+            facts[4], facts[0], facts[1], facts[2], facts[3], facts[5],
+        )
+    except Exception as e:
+        logger.warning("Database link facts not read: %s", e)
+
+
 # Tables read by index-only scans. The database skips the table itself only for
 # pages its visibility map marks clean, and only VACUUM marks them: on
 # 2026-11-18 the last-played read of play_logs fetched 139,992 of 145,557 rows
@@ -876,6 +921,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.services.last_played import warm_all
     warm_task = _asyncio.get_running_loop().create_task(warm_all())
     vacuum_task = _asyncio.get_running_loop().create_task(_vacuum_stale_tables())
+    link_task = _asyncio.get_running_loop().create_task(_log_database_link())
     # Bug reports: push "fix ready" to ntfy (see wiki/bug-reports.md)
     from app.services.bug_report_service import notify_loop
     bug_task = _asyncio.get_running_loop().create_task(notify_loop())
@@ -892,6 +938,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     index_task.cancel()
     warm_task.cancel()
     vacuum_task.cancel()
+    link_task.cancel()
     loop_watch.stop()
     # Shutdown — stop the scheduler cleanly
     try:

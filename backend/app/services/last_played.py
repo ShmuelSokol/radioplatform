@@ -164,6 +164,10 @@ async def _reload(station_id) -> None:
             async with async_session_factory() as session:
                 await session.connection()  # timed apart: a new connection costs about 2 s
                 connected = time.monotonic()
+                # The first read after a start, run by the database with its own
+                # stopwatch (see _explain); the real read follows it
+                await _explain(session, station_id)
+                explained = time.monotonic() - connected
                 rows = (await session.execute(_full_query(station_id))).all()
                 took = time.monotonic() - started
                 if took > EXPLAIN_OVER_SECONDS:
@@ -172,11 +176,11 @@ async def _reload(station_id) -> None:
 
                     log.warning(
                         "Last-played whole-history read for station %s: %.1f s (connection %.1f s, "
-                        "query and %d rows %.1f s; loop held %.1f s of it; %s)",
-                        sid, took, connected - started, len(rows), time.monotonic() - connected,
+                        "the database's own timed run %.1f s, query and %d rows %.1f s; loop held %.1f s of it; %s)",
+                        sid, took, connected - started, explained, len(rows),
+                        took - explained - (connected - started),
                         loop_watch.stalled_since(started), pool_state(),
                     )
-                    await _explain(session, station_id, took)
         fresh: dict[str, datetime] = {}
         _merge(fresh, rows)
         async with _locks.setdefault(sid, asyncio.Lock()):
@@ -200,11 +204,17 @@ async def _reload(station_id) -> None:
 _explained = False
 
 
-async def _explain(session, station_id, took: float) -> None:
-    """Once per process, when the whole-history read was slow: log the
-    database's own account of it (plan, rows, buffers) and the table's indexes.
-    Nobody has SQL access to the live database, and 9 to 19 s for 145,000 rows
-    (2026-11-18) is far more than the query should cost."""
+async def _explain(session, station_id) -> None:
+    """Once per process, as the first whole-history read after a start: the
+    database runs the read under EXPLAIN (ANALYZE, BUFFERS) and the plan, its
+    own time and what it had to fetch from disk ("read=", against "hit=" for
+    memory) go to the log with the table's indexes and sizes.
+
+    Nobody has SQL access to the live database. On 2026-11-18 the first read
+    after each start took 12 to 16 s while the same read a moment later took
+    0.13 s by the database's own clock, with the connection, the pool and the
+    event loop ruled out; this shows whether those seconds are spent inside the
+    database (a cold read from disk) or on the way to it."""
     global _explained
     if _explained:
         return
@@ -217,6 +227,12 @@ async def _explain(session, station_id, took: float) -> None:
     try:
         if session.bind.dialect.name != "postgresql":
             return
+        began = time.monotonic()
+        plan = (await session.execute(text(
+            "EXPLAIN (ANALYZE, BUFFERS) SELECT asset_id, max(start_utc) FROM play_logs"
+            " WHERE station_id = :sid AND asset_id IS NOT NULL GROUP BY asset_id"
+        ), {"sid": station_id})).all()
+        plan_took = time.monotonic() - began
         indexes = (await session.execute(text(
             "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'play_logs'"
         ))).all()
@@ -224,14 +240,10 @@ async def _explain(session, station_id, took: float) -> None:
             "SELECT pg_size_pretty(pg_table_size('play_logs')), pg_size_pretty(pg_indexes_size('play_logs')),"
             " (SELECT reltuples::bigint FROM pg_class WHERE relname = 'play_logs')"
         ))).first()
-        plan = (await session.execute(text(
-            "EXPLAIN (ANALYZE, BUFFERS) SELECT asset_id, max(start_utc) FROM play_logs"
-            " WHERE station_id = :sid AND asset_id IS NOT NULL GROUP BY asset_id"
-        ), {"sid": station_id})).all()
         log.warning(
-            "LAST-PLAYED DIAGNOSIS: the whole-history read took %.1f s. Table %s, indexes %s, about %s rows. "
-            "Indexes: %s. Plan: %s",
-            took, size[0], size[1], size[2],
+            "LAST-PLAYED DIAGNOSIS: the first whole-history read after this start, timed by the database, "
+            "took %.1f s as seen from here. Table %s, indexes %s, about %s rows. Indexes: %s. Plan: %s",
+            plan_took, size[0], size[1], size[2],
             "; ".join(f"{name}: {definition}" for name, definition in indexes),
             " / ".join(row[0] for row in plan),
         )
