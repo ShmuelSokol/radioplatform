@@ -1006,13 +1006,11 @@ async def handle_started(
         # Back on the station's own queue: the emergency alert has served its purpose.
         # Also checked once per process, since a backend restart forgets on_emergency.
         state.emergency_cleared = True
-        try:
-            from app.services.alert_service import clear_alerts
-
-            await clear_alerts(db, station_id, EMERGENCY_ALERT_TITLE,
-                               "the engine went back to the station's queue")
-        except Exception as e:
-            logger.warning("Could not clear the emergency alert: %s", e)
+        # In the background, in its own session: the alerts read took 0.87 s inside a
+        # start report on production (2026-11-18 10:45Z), and the engine waits for it
+        task = asyncio.create_task(_clear_emergency_alert(station_id))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
     state.on_emergency = False
     if state.cued_entry_id == str(entry.id):
         state.cued_entry_id = None
@@ -1050,6 +1048,20 @@ async def handle_started(
 
 
 EMERGENCY_ALERT_TITLE = "Playout engine is on its emergency playlist"
+
+
+async def _clear_emergency_alert(station_id) -> None:
+    """Resolve the open emergency-music alert: the engine is back on the station's queue."""
+    try:
+        from app.db.engine import async_session_factory
+        from app.services.alert_service import clear_alerts
+
+        async with async_session_factory() as own:
+            if await clear_alerts(own, station_id, EMERGENCY_ALERT_TITLE,
+                                  "the engine went back to the station's queue"):
+                await own.commit()
+    except Exception as e:
+        logger.warning("Could not clear the emergency alert: %s", e)
 # A critical alert (and its push) only when the emergency music lasts: a second of it
 # while an item loads after a Next raised one on Main (03:46Z 2026-11-18) and cleared it
 # half a second later.

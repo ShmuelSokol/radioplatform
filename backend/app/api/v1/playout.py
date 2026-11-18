@@ -4,6 +4,8 @@ Endpoints called BY the playout engine (Liquidsoap on the stream server).
 Authenticated with the shared secret in the `X-Playout-Token` header, not a user login.
 """
 
+import logging
+import time
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Header, Query, Response
@@ -14,6 +16,8 @@ from app.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.db.session import get_db
 from app.services import playout_engine, playout_plan, playout_tunnel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/playout", tags=["playout"])
 
@@ -150,7 +154,13 @@ async def started(
     db: AsyncSession = Depends(get_db),
 ):
     """The engine reports what just went on air."""
-    return await playout_engine.handle_started(
+    t0 = time.monotonic()
+    result = await playout_engine.handle_started(
         db, station_id, body.entry_id, body.lane, at=body.at, kept=body.kept,
         quiet=body.kept and body.more,
     )
+    # Every start report's time, for the production log: only those over 3 s were
+    # logged, so a regression under that went unseen (2026-11-18)
+    logger.info("Start report station=%s entry=%s lane=%s answered in %d ms", station_id,
+                body.entry_id or "-", body.lane or "-", (time.monotonic() - t0) * 1000)
+    return result
