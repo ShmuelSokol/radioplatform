@@ -27,6 +27,10 @@
  *   # optional: ONLY=idle,hidden,grace,loop,loop-nostorage,loop-clockback,push,resume,away,away-typing,at,at-fast,unnamed,offline,middeploy,crash,stale  CONCURRENCY=6
  */
 import { chromium, checker, sleep, makeStation, routeApi, routeNowPlaying, AUDIO_PROBE } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/e2e page crash|Failed to fetch dynamically imported module|The site was updated while this tab was open|not a valid JavaScript MIME type|Expected a JavaScript-or-Wasm module script|Something went wrong/, 'a page crash and a release under an open tab are staged to see the recovery screens');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
 const CONCURRENCY = Number(process.env.CONCURRENCY || 6);

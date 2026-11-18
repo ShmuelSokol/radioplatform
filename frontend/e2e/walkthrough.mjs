@@ -81,13 +81,15 @@ const SITE_WIDE = {
   '/admin/holidays': 'lists every blackout, each with its stations',
   '/admin/alerts': 'lists every station\'s alerts',
   '/admin/live': 'lists every station\'s live shows',
+  '/admin/playlists': 'lists every station\'s playlists, each with its station named',
   '/admin/requests': 'lists every station\'s requests',
   '/admin/archives': 'lists every station\'s archives',
 };
 // The sizes a control must be fully visible and pressable at (1366x900 is the walk's own size)
 const SIZES = [{ name: 'phone 390x844', width: 390, height: 844 }];
 const WALK_SIZE = { width: 1366, height: 900 };
-const NOT_PRESSED = /delete|\bdel\b|remove|clear|panic|end show|go live|start show|sign out|log out|logout|resolve all|reset|push now|wipe|purge|seed|regenerate|🐞|report a problem/i;
+// "do not play" changes the shared library for every station; it has its own test
+const NOT_PRESSED = /do not play|delete|\bdel\b|remove|clear|panic|end show|go live|start show|sign out|log out|logout|resolve all|reset|push now|wipe|purge|seed|regenerate|🐞|report a problem/i;
 
 const findings = [];
 const shots = [];
@@ -263,6 +265,15 @@ async function reachAt(page, st, route, sizeName) {
 async function restore(page, route) {
   // Close whatever the press opened, and come back if it navigated
   for (let i = 0; i < 2; i++) await page.keyboard.press('Escape').catch(() => {});
+  // A dialog that Esc did not close: say so once (people expect Esc to close a dialog),
+  // then close it the way it offers, or everything behind it counts as "cannot be pressed"
+  const dialog = page.locator('div.fixed.inset-0').filter({ has: page.locator('button') }).first();
+  if (await dialog.isVisible().catch(() => false)) {
+    if (current) finding(current.tag, route, 'Esc', 'a dialog does not close with Esc', (await dialog.innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 60), '');
+    const close = dialog.getByRole('button', { name: /^(cancel|close|done|✕|×|x)$/i }).first();
+    if (await close.count()) await close.click({ timeout: 1500 }).catch(() => {});
+    if (await dialog.isVisible().catch(() => false)) await open(page, route);
+  }
   if (new URL(page.url()).pathname !== route) await open(page, route);
 }
 
@@ -388,12 +399,13 @@ async function dragInQueue(page, guard, st) {
 async function main() {
   if (!STATIONS.length) throw new Error('STATIONS_JSON is empty: run e2e/walkthrough-seed.py first');
   if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
-  const tokens = await loginApi();
+  let tokens = await loginApi();
   const browser = await chromium.launch();
   const summary = [];
   for (const st of STATIONS) {
     if (ONLY_ST.length && !ONLY_ST.includes(st.tag)) continue;
     current = st;
+    tokens = await loginApi();   // a fresh login per station: a walk outlasts one access token
     const settingsBefore = await stationSettings(tokens);
     const ctx = await browser.newContext({ viewport: WALK_SIZE });
     await ctx.addInitScript(([a, r, sid]) => {
@@ -427,10 +439,21 @@ async function main() {
     // on a live station by a test script, 2026-11-18)
     const settingsAfter = await stationSettings(tokens);
     for (const id of Object.keys(settingsBefore)) {
-      if (settingsBefore[id] !== settingsAfter[id]) {
+      // A setting that had a value and now has another (or none). A key that only appeared
+      // is a form writing out its defaults on Save, which changes nothing on air; the seed
+      // gives every mode an explicit value so a switch left off always shows here.
+      const b = JSON.parse(settingsBefore[id]); const c = JSON.parse(settingsAfter[id] || '{}');
+      const changed = [];
+      if (b.active !== c.active) changed.push(`active ${b.active} -> ${c.active}`);
+      if (b.protected !== c.protected) changed.push(`protected ${b.protected} -> ${c.protected}`);
+      for (const k of Object.keys(b.config || {})) {
+        const was = JSON.stringify(b.config[k]); const is = JSON.stringify((c.config || {})[k]);
+        if (was !== is) changed.push(`${k} ${was} -> ${is}`);
+      }
+      if (changed.length) {
         const who = STATIONS.find((s) => s.id === id)?.tag || id;
         finding(st.tag, '(whole walk)', 'end', who === st.tag ? 'the walk left this station changed' : 'walking one station changed another',
-          `${who}: ${settingsBefore[id]} -> ${settingsAfter[id]}`, '');
+          `${who}: ${changed.join('; ')}`, '');
       }
     }
   }

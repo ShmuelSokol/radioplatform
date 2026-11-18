@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { mainFirst } from '../../lib/lastStation';
 import { useQuery } from '@tanstack/react-query';
 import { listStationsOnAir } from '../../api/stations';
 import PlayoutBadge from '../../components/audio/PlayoutBadge';
@@ -30,7 +31,7 @@ export default function StationList() {
 
       {!isLoading && !isError && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {data?.stations?.map((station) => (
+          {mainFirst(data?.stations ?? []).map((station) => (
             <Link
               key={station.id}
               to={`/listen/${station.id}`}
