@@ -278,7 +278,7 @@ class Stack:
         return env
 
     def start_backend(self) -> None:
-        out = open(self.dir / "backend.log", "w")
+        out = open(self.dir / "backend.log", "a")
         p = subprocess.Popen(
             ["uv", "run", "uvicorn", "app.main:app", "--port", str(BACKEND_PORT)],
             cwd=BACKEND, env=self.backend_env(), stdout=out, stderr=subprocess.STDOUT,
@@ -748,6 +748,57 @@ async def sc_block_shiur_spans_hour(h: Harness, policy: str = "pause") -> None:
     await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
                    ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
     await _expect_hour(h, name, policy, t1, shiur_start, "shiur")
+
+
+async def sc_resume_without_old_song(h: Harness) -> None:
+    """KBR Jerusalem 2026-11-18 01:00Z: Main's Daf Yomi block cut a song at 00:45; at
+    01:00 the shiur paused for the time check, and before it resumed 2.8 s of the song cut
+    15 minutes earlier were heard. Here a long item (the story, 150 s) is on air when the
+    block's shiur takes over; 40 s later the time check pauses the shiur. Nothing of the
+    story may be heard between the block's start and the shiur's resume."""
+    name = "resume_without_old_song"
+    await h.set_config(timed_during_long_items="pause")
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("story", {}), ("song5", {}), ("song6", {})])
+    await asyncio.sleep(16)  # let the engine drop the song it held before the queue changed
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    if await h.wait_on_air("story", 60) is None:
+        h.check(name, False, "the story never went on air")
+        return
+    t0 = at(20)
+    block = str(uuid.uuid4())
+    await h.queue([
+        ("announce", {"preempt_at": t0, "timing_mode": "hard", "source": "block", "block_id": block}),
+        ("shiur", {"preempt_at": t0, "timing_mode": "hard", "source": "block", "block_id": block}),
+    ])
+    shiur_start = await h.wait_on_air("shiur", 60)
+    if shiur_start is None:
+        h.check(name, False, "the block's shiur never went on air")
+        return
+    t1 = at(40)
+    await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
+                   ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 30)
+    times = await h.started_times("time", t1.timestamp() - 5)
+    late = times[0][0] - t1.timestamp() if times else None
+    h.check(name, late is not None and abs(late) <= 1.0,
+            f"time check {'never' if late is None else f'{late:+.1f} s'}")
+    windows = h.heard(shiur_start + 2, t1.timestamp() + 28)
+    h.print_timeline(windows, t1.timestamp())
+    story = tone_name(TONES["story"][0])
+    old = sum(1 for _, db, f in windows if db > -45 and tone_name(f) == story)
+    step = (windows[1][0] - windows[0][0]) if len(windows) > 1 else 0.0
+    at_ = [round(t - t1.timestamp(), 1) for t, db, f in windows if db > -45 and tone_name(f) == story]
+    h.check(name, old == 0, f"nothing of the interrupted story after the block took over "
+                            f"(heard for about {old * step:.1f} s, at {at_[:8]} s from the time check)")
+    names = [n for _, n in timeline(h.heard(t1.timestamp() - 3, t1.timestamp() + 28))]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    h.check(name, runs[:4] == ["shiur", "time", "weather", "shiur"],
+            f"heard shiur -> time -> weather -> shiur: {runs}")
+    gap, _ = longest_silence(windows)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 
 async def sc_music_lane_shiur_spans_hour(h: Harness, policy: str = "pause") -> None:
@@ -2177,6 +2228,7 @@ SCENARIOS = {
     "next_after_idle": sc_next_after_idle,
     "next_right_after_change": sc_next_right_after_change,
     "site_matches_stream": sc_site_matches_stream,
+    "resume_without_old_song": sc_resume_without_old_song,
     "next_twice": sc_next_twice,
     "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,

@@ -262,3 +262,4 @@ UPDATE 2026-11-18 streaming-architecture.md tick takes back a pre-loaded song th
 INGEST 2026-11-17 engine-harness.md new scenarios next_skips_one, engine_restart_15s_before_hour, engine_restart_across_hour, backend_restart_before_hour; rows() returns every queue row of the run, so check entries by the ids h.queue returned, never by asset
 UPDATE 2026-11-18 streaming-architecture.md the engine starts a hard item early when more than 1 s (was 3 s) is left after the last song, so the quiet before it never passes 1 s
 INGEST 2026-11-18 docs/test-checklist.md third pass (V3-1 to V3-56): untested ideas seeded by the night's surprises; air watch judges later items of a hard group against the end of those before them
+INGEST 2026-11-18 engine-harness.md resume_without_old_song; backend.log kept across restarts; direct queue writes at a song change are a test artifact
