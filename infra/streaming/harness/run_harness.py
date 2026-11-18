@@ -1027,6 +1027,55 @@ async def sc_live_show_over_hard_item(h: Harness) -> None:
     h.check(name, bool(cur) and cur.asset.asset_type == "music", f"the site shows music ({cur.asset.title if cur else None})")
 
 
+async def sc_next_while_soft_spot_waits(h: Harness, slow: float = 0.0) -> None:
+    """Main 03:46Z 2026-11-18: a soft sponsorship was the queue's next item (waiting for
+    the song to end) and the engine held the following song pre-loaded. Next dropped the
+    spot, marked it played without airing it and put a second of emergency audio on air.
+    Now Next plays the spot: it airs once, whole, is not closed before it airs, no
+    emergency audio, and the song the engine held plays after it. `slow`: the spot's
+    file takes this long to arrive."""
+    name = "next_while_soft_spot_waits" + (f"_slow_{slow:g}s" if slow else "")
+    await wait_music(h)
+    await asyncio.sleep(8)   # the engine holds its next song
+    t1 = at(2)
+    if slow:
+        h.stack.slow_files["weather.mp3"] = slow
+    try:
+        spot = (await h.queue([("weather", {"preempt_at": t1, "timing_mode": "soft", "source": "ad_slot"})]))[0]
+        await asyncio.sleep(5)   # due and waiting for the song to end
+        before = next((e for e in await h.rows() if e.id == spot), None)
+        h.check(name, before is not None and before.status == "pending",
+                f"the spot waits for the song (status {before.status if before else None})")
+        pressed = time.time()
+        code, _ = h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+        h.check(name, code == 200, f"Next answered {code} after {time.time() - pressed:.1f} s")
+        t = await h.wait_on_air("weather", 8 + slow)
+    finally:
+        h.stack.slow_files.pop("weather.mp3", None)
+    h.check(name, t is not None and t - pressed <= 3.0 + slow,
+            f"the spot went on air {'never' if t is None else f'{t - pressed:.1f} s'} after Next")
+    await asyncio.sleep(TONES["weather"][1] + 8)
+    times = await h.started_times("weather", pressed - 1)
+    h.check(name, len(times) == 1, f"the spot aired once ({len(times)})")
+    heard = h.heard(pressed - 4, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    tl = [(ts, n) for ts, n in timeline(heard)]
+    names = [n for _, n in tl]
+    wname = tone_name(TONES["weather"][0])
+    h.check(name, "EMERGENCY" not in names, f"no emergency audio: {names}")
+    spans = [w[0] for w in heard if w[0] > pressed and w[1] > -45 and tone_name(w[2]) == wname]
+    whole = (spans[-1] - spans[0]) if spans else 0.0
+    h.check(name, whole >= TONES["weather"][1] - 1.5, f"the spot was heard whole ({whole:.1f} s of {TONES['weather'][1]} s)")
+    after = [n for ts, n in tl if spans and ts > spans[-1] - 0.5 and n not in (wname, "silence")]
+    h.check(name, bool(after) and after[0].startswith("song"), f"a song follows the spot: {after}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0 + slow, f"longest silence {gap:.1f} s")
+    row = next((e for e in await h.rows() if e.id == spot), None)
+    h.check(name, row is not None and row.status == "played", f"the spot is marked played after it aired ({row.status if row else None})")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"the site shows a song ({cur.asset.title if cur else None})")
+
+
 async def sc_resume_without_old_song(h: Harness) -> None:
     """KBR Jerusalem 2026-11-18 01:00Z: Main's Daf Yomi block cut a song at 00:45; at
     01:00 the shiur paused for the time check, and before it resumed 2.8 s of the song cut
@@ -2533,6 +2582,8 @@ SCENARIOS = {
     "hard_group_overruns_next_hard": sc_hard_group_overruns_next_hard,
     "engine_starts_every_time": sc_engine_starts_every_time,
     "live_show_over_hard_item": sc_live_show_over_hard_item,
+    "next_while_soft_spot_waits": sc_next_while_soft_spot_waits,
+    "next_while_soft_spot_waits_slow": lambda h: sc_next_while_soft_spot_waits(h, 3.0),
     "resume_without_old_song": sc_resume_without_old_song,
     "next_twice": sc_next_twice,
     "next_skips_one": sc_next_skips_one,
