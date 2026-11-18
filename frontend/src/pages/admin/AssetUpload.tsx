@@ -14,7 +14,7 @@ const IMPORT_FORMATS = [
   { value: 'flac', label: 'FLAC' },
   { value: 'ogg', label: 'OGG' },
   { value: 'aac', label: 'AAC' },
-  { value: 'original', label: 'Keep Original' },
+  { value: 'original', label: 'Keep Original (MP2 files are still converted to MP3 so they can play)' },
 ] as const;
 
 const FILE_ACCEPT = 'audio/*,video/*,.mp2,.mpg,.mpeg,.mp4,.mkv,.avi,.mov,.webm,.flac,.ogg,.opus,.wma,.aac,.m4a,.wv,.ape,.aiff,.aif';

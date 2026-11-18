@@ -35,7 +35,16 @@ export const updateUser = async (id: string, data: {
   bio?: string; photo_url?: string; is_public?: boolean; social_links?: Record<string, string>;
   station_ids?: string[] | null;
 }): Promise<User> => {
-  const res = await apiClient.put<User>(`/users/${id}`, data);
+  const res = await apiClient.put<User & { new_tokens?: { access_token: string; refresh_token: string } | null }>(
+    `/users/${id}`, data,
+  );
+  // Changing your own password signs your other devices out; the server sends
+  // this browser fresh tokens so it stays signed in.
+  const fresh = res.data.new_tokens;
+  if (fresh?.access_token && fresh.refresh_token) {
+    localStorage.setItem('access_token', fresh.access_token);
+    localStorage.setItem('refresh_token', fresh.refresh_token);
+  }
   return res.data;
 };
 

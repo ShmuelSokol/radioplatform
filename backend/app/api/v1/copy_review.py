@@ -63,7 +63,13 @@ async def rules_history(
     result = await db.execute(
         select(SponsorshipRules).order_by(SponsorshipRules.version.desc()).limit(50)
     )
-    return [_out(r) for r in result.scalars().all()]
+    rows = [_out(r) for r in result.scalars().all()]
+    if rows and len(rows) < 50:
+        # The built-in starting rules were never a saved row, so the first save
+        # left nothing to go back to. They are listed last as version 0.
+        from app.services.copy_review_service import DEFAULT_RULES
+        rows.append(RulesOut(version=0, rules_text=DEFAULT_RULES, is_default=True))
+    return rows
 
 
 @router.post("/copy-review", response_model=CopyReviewResponse)

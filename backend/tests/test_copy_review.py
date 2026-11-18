@@ -61,7 +61,9 @@ async def test_rules_default_then_editable_with_history(
     r = await client.get("/api/v1/sponsorship/rules", headers=auth_headers)
     assert r.json()["version"] == 2 and r.json()["rules_text"].endswith("Rule three.")
     r = await client.get("/api/v1/sponsorship/rules/history", headers=auth_headers)
-    assert [h["version"] for h in r.json()] == [2, 1]
+    # Newest first; the built-in starting rules close the list so they can be brought back
+    assert [h["version"] for h in r.json()] == [2, 1, 0]
+    assert r.json()[-1]["is_default"] is True and len(r.json()[-1]["rules_text"]) > 100
 
 
 @pytest.mark.asyncio
