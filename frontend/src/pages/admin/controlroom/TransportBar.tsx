@@ -30,6 +30,8 @@ interface Props {
   onStation: (id: string) => void;
   isPlaying: boolean;
   nowAsset: CtlAsset | null;
+  /** Open the quick actions for the song on air (category, do not play, details) */
+  onNowSong?: () => void;
   nextAsset: CtlAsset | null;
   elapsed: number;
   remaining: number;
@@ -236,6 +238,16 @@ export default function TransportBar(p: Props) {
     );
   };
 
+  // Quick actions for the song on air. A 44 px wide tap target on phones (the row is 32 px tall).
+  const songButton = p.onNowSong && p.nowAsset && p.nowAsset.asset_type !== 'silence' ? (
+    <button type="button" onClick={p.onNowSong} data-testid="now-song"
+      title="Song on air: change category, do not play again, edit details"
+      aria-label="Actions for the song on air"
+      className="qn-btn shrink-0 w-14 lg:w-16 flex flex-col items-center justify-center leading-tight text-sm font-bold">
+      <span>Song</span>
+      <span className="text-[10px] font-normal">on air</span>
+    </button>
+  ) : null;
   const nowType = p.nowAsset?.category || p.nowAsset?.asset_type || '';
   const nextType = p.nextAsset?.category || p.nextAsset?.asset_type || '';
 
@@ -273,17 +285,20 @@ export default function TransportBar(p: Props) {
             <div className="qn-digits text-base"><Clock tz={p.stationTz} /></div>
           </div>
         </div>
-        <div className="px-1 pb-1 pt-0.5 space-y-[3px] bg-[#1c1c1c]">
-          <div className="bg-black qn-sunken px-2 h-8 flex items-center" title={nowType}>
-            <span className="truncate text-base font-bold text-[var(--qn-digit)] leading-none">
-              {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
-            </span>
+        <div className="px-1 pb-1 pt-0.5 flex gap-[3px] bg-[#1c1c1c]">
+          <div className="flex-1 min-w-0 space-y-[3px]">
+            <div className="bg-black qn-sunken px-2 h-8 flex items-center" title={nowType}>
+              <span className="truncate text-base font-bold text-[var(--qn-digit)] leading-none">
+                {p.nowAsset ? assetLabel(p.nowAsset) : (p.statusMessage ?? 'Stopped. Press Start to begin.')}
+              </span>
+            </div>
+            <div className="bg-black qn-sunken px-2 h-7 flex items-center" title={nextType}>
+              <span className="truncate text-sm font-bold text-[var(--qn-yellow)] leading-none">
+                <span className="sr-only">Next: </span>{p.nextAsset ? assetLabel(p.nextAsset) : 'nothing queued'}
+              </span>
+            </div>
           </div>
-          <div className="bg-black qn-sunken px-2 h-7 flex items-center" title={nextType}>
-            <span className="truncate text-sm font-bold text-[var(--qn-yellow)] leading-none">
-              <span className="sr-only">Next: </span>{p.nextAsset ? assetLabel(p.nextAsset) : 'nothing queued'}
-            </span>
-          </div>
+          {songButton}
         </div>
         <div className="h-1 bg-black" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
           <div className={`h-full ${ending ? 'bg-red-500' : 'bg-[var(--qn-digit)]'}`} style={{ width: `${progress}%` }} />
@@ -372,7 +387,8 @@ export default function TransportBar(p: Props) {
       </div>
 
       {/* On air and next, as on the old program */}
-      <div className="px-1 lg:px-2 pb-1 space-y-[3px] bg-[#1c1c1c] pt-1">
+      <div className="px-1 lg:px-2 pb-1 flex gap-[3px] bg-[#1c1c1c] pt-1">
+        <div className="flex-1 min-w-0 space-y-[3px]">
         <div className="flex gap-[3px]">
           <div className="flex-1 min-w-0 bg-black qn-sunken px-2 h-8 lg:h-9 flex items-center">
             <span className="truncate text-lg lg:text-2xl font-bold text-[var(--qn-digit)] leading-none">
@@ -393,6 +409,8 @@ export default function TransportBar(p: Props) {
             <span className="truncate text-sm lg:text-lg font-bold text-[var(--qn-yellow)]">{nextType}</span>
           </div>
         </div>
+        </div>
+        {songButton}
       </div>
 
       {/* Progress */}

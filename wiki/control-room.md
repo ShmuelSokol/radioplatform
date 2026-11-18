@@ -155,3 +155,26 @@ Layout (Shmuel, 2026-11-16 and 11-17: "unusable sideways"):
 Checked by `e2e/control-room-landscape.mjs` (iPhone SE / 14 / Pro Max with and without
 Safari's bars, Pixel 7, Galaxy S21; tap sizes in every pane; every control; turning the
 phone keeps state and sound; keyboard) and `e2e/control-room.mjs` `phoneLandscape`.
+
+## Quick song actions (Song panel)
+
+`controlroom/SongPanel.tsx`, opened from the Song button beside the on air line
+(TransportBar `onNowSong`), a queue row's Song button, or a click on the playing row.
+Shmuel, 2026-11-18: he wants to fix a song where he sees it, not in the Library.
+
+- **Category** saves at once through `PATCH /assets/{id}`; queued copies are left alone.
+- **Do not play** is `POST /assets/{id}/do-not-play` (`asset_service.set_do_not_play`):
+  category `do_not_play` (already refused by every automatic pick, `models/asset.py`),
+  the old category kept in `metadata_extra.category_before_do_not_play` so "Allow again"
+  restores it, and the song's untimed waiting copies deleted on every station. It never
+  deletes the copy on air, a copy in `playout_engine.held_entry_ids` (the engine's
+  pre-loaded song) or a timed copy, so audio is never interrupted; the answer counts
+  them in `still_to_play` and the toast says so. It does not go through the queue's
+  own delete/Next paths and sends the engine nothing.
+- Managers and admins change; DJs and viewers get the panel read-only (`isManager`).
+- The transport's Song button spans the on air and next lines so it is a 44 px tap
+  target on phones (the lines are 32 and 28 px); `e2e/control-room-landscape.mjs`
+  fails any control under 44 x 44.
+- The phone row action bar is fixed at 61 px (`ACTIONS_H`) and now holds five buttons;
+  under 360 px "+ Insert before" shows as "+ Insert" (its aria-label stays).
+- Checked by `e2e/control-room-song-actions.mjs` and `backend/tests/test_song_quick_actions.py`.
