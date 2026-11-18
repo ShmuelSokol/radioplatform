@@ -38,6 +38,8 @@ import HotButtons from './controlroom/HotButtons';
 import { usePfl, WEATHER_PFL_ID, type PflClip } from './controlroom/pfl';
 import { PflDeck } from './controlroom/PflDeck';
 import { ErrorsPanel, LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
+import { SponsorsToday } from './controlroom/SponsorsToday';
+import type { StationDayPlay } from '../../api/spotSchedules';
 import ModeButtons from './controlroom/ModeButtons';
 import { panicRequest, setStationModes, type StationModes } from '../../api/queue';
 import { canAccess, canChange, isManager } from '../../auth/access';
@@ -47,8 +49,8 @@ import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/Resu
 import { useMayChange } from '../../hooks/useMayChange';
 import { serverNow } from '../../lib/serverClock';
 
-type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule' | 'errors';
-type SideTab = 'library' | 'live' | 'log' | 'schedule' | 'errors';
+type Pane = 'queue' | 'buttons' | 'library' | 'live' | 'log' | 'schedule' | 'errors' | 'sponsors';
+type SideTab = 'library' | 'live' | 'log' | 'schedule' | 'errors' | 'sponsors';
 
 interface Toast { text: string; type: 'ok' | 'warn' | 'error' }
 
@@ -56,6 +58,7 @@ const SIDE_TABS: Array<{ id: SideTab; label: string }> = [
   { id: 'library', label: 'Songs' },
   { id: 'live', label: 'Go live' },
   { id: 'log', label: 'Played' },
+  { id: 'sponsors', label: 'Sponsors' },
   { id: 'schedule', label: 'Schedule' },
   { id: 'errors', label: 'Errors' },
 ];
@@ -222,6 +225,10 @@ export default function Dashboard() {
     if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing', source: row.source ?? null });
   }, []);
   const closeSong = useCallback(() => setSongTarget(null), []);
+  // The Sponsors list: one tap opens that play's Sponsorship panel
+  const openSponsorPlay = useCallback((play: StationDayPlay) => {
+    setSongTarget({ asset: play.asset, onAir: play.status === 'playing', source: play.source || 'ad_slot' });
+  }, []);
   const songToast = useCallback((text: string, type: Toast['type']) => setToast({ text, type }), []);
   const [busyId, setBusyId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -1037,6 +1044,7 @@ export default function Dashboard() {
     tab === 'library' ? libraryPanel
     : tab === 'live' ? <LivePanel stationId={stationId} stationTz={stationTz} />
     : tab === 'log' ? <LogPanel stationId={stationId} stationTz={stationTz} />
+    : tab === 'sponsors' ? <SponsorsToday stationId={stationId} onOpen={openSponsorPlay} />
     : tab === 'errors' ? <ErrorsPanel stationId={stationId} stationTz={stationTz} canSee={isManager(user?.role)} />
     : <SchedulePanel stationId={stationId} />;
 
@@ -1117,7 +1125,7 @@ export default function Dashboard() {
               <div className="flex flex-col gap-1" role="tablist" aria-label="Lower pane">
                 {SIDE_TABS.map(t => (
                   <button key={t.id} type="button" role="tab" aria-selected={sideTab === t.id} onClick={() => setSideTab(t.id)}
-                    className={`qn-btn h-8 [@media(max-height:1000px)]:h-7 text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
+                    className={`qn-btn h-8 [@media(max-height:1000px)]:h-[26px] text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
                     {t.id === 'live' && liveShow ? '● Live' : t.label}
                   </button>
                 ))}
@@ -1139,15 +1147,15 @@ export default function Dashboard() {
         <div className="cr-side flex-1 min-h-0 flex flex-col">
           <div className="flex-1 min-h-0 flex flex-col">
             {/* Sideways, HS, Spots and Panic sit under Go next in the left column */}
-            {!phoneLandscape && (pane === 'log' || pane === 'schedule' || pane === 'errors') && (
+            {!phoneLandscape && (pane === 'log' || pane === 'schedule' || pane === 'errors' || pane === 'sponsors') && (
               <ModeButtons p={modeProps} stacked={false} />
             )}
-            {(pane === 'log' || pane === 'schedule' || pane === 'errors') && (
+            {(pane === 'log' || pane === 'schedule' || pane === 'errors' || pane === 'sponsors') && (
               <div className="shrink-0 flex gap-1 p-1 bg-[#c0c0c0]">
-                {(['log', 'schedule', 'errors'] as Pane[]).map(t => (
+                {(['log', 'sponsors', 'schedule', 'errors'] as Pane[]).map(t => (
                   <button key={t} type="button" onClick={() => setPane(t)} aria-pressed={pane === t}
                     className="qn-btn cr-tap flex-1 h-9 text-sm">
-                    {t === 'log' ? 'Played' : t === 'schedule' ? 'Schedule' : 'Errors'}
+                    {t === 'log' ? 'Played' : t === 'sponsors' ? 'Sponsors' : t === 'schedule' ? 'Schedule' : 'Errors'}
                   </button>
                 ))}
                 <Link to="/admin/databank?tab=log" className="qn-btn cr-tap flex-1 h-9 text-sm flex items-center justify-center" data-testid="cr-databank">Databank</Link>
@@ -1160,7 +1168,7 @@ export default function Dashboard() {
           {!phoneLandscape && <PflDeck pfl={pfl} compact />}
           <nav className="cr-tabs shrink-0 flex gap-1 px-1 pt-1 bg-[#c0c0c0] border-t-2 border-white pb-[max(0.25rem,env(safe-area-inset-bottom))]" aria-label="Control room sections">
             {MOBILE_TABS.map(t => {
-              const active = pane === t.id || (t.id === 'log' && (pane === 'schedule' || pane === 'errors'));
+              const active = pane === t.id || (t.id === 'log' && (pane === 'schedule' || pane === 'errors' || pane === 'sponsors'));
               return (
                 <button key={t.id} type="button" onClick={() => setPane(t.id)} aria-current={active ? 'page' : undefined}
                   className={`qn-btn flex-1 h-12 flex flex-col items-center justify-center gap-0.5 text-[11px]
