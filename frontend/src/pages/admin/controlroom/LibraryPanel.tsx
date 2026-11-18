@@ -2,6 +2,7 @@ import { memo, useEffect, useState } from 'react';
 import { useAssets } from '../../../hooks/useAssets';
 import { useAssetTypes } from '../../../hooks/useAssetTypes';
 import { fmtDur, useDebounced } from './shared';
+import { useMayChange } from '../../../hooks/useMayChange';
 import type { CtlAsset, SendFn } from './shared';
 
 interface Props {
@@ -22,6 +23,8 @@ interface Props {
 const PAGE = 50;
 
 function LibraryPanel(p: Props) {
+  // A viewer searches and pre-listens; sending to the queue and the instant buttons are off
+  const readOnly = !useMayChange();
   const [search, setSearch] = useState('');
   const [type, setType] = useState('all');
   const [limit, setLimit] = useState(PAGE);
@@ -134,26 +137,26 @@ function LibraryPanel(p: Props) {
                 <span className="w-28 truncate" title={asset.asset_type}>{asset.category || asset.asset_type}</span>
                 <span className="w-10 text-right tabular-nums">{fmtDur(asset.duration)}</span>
               </div>
-              <button type="button" onClick={() => p.onTogglePin(asset)}
+              {!readOnly && <button type="button" onClick={() => p.onTogglePin(asset)}
                 title={pinned ? 'Remove from instant buttons' : 'Add to instant buttons'}
                 aria-label={pinned ? 'Remove from instant buttons' : 'Add to instant buttons'}
                 aria-pressed={pinned}
                 className={`cr-tap w-9 h-9 lg:w-6 lg:h-6 shrink-0 text-lg lg:text-sm ${pinned ? 'text-[var(--qn-yellow)]' : 'text-gray-600 hover:text-gray-300'}`}>
                 {pinned ? '★' : '☆'}
-              </button>
+              </button>}
               {inserting ? (
-                <button type="button" disabled={busy || p.disabled} onClick={() => p.onSend(asset, 'insert')}
+                <button type="button" disabled={busy || p.disabled || readOnly} onClick={() => p.onSend(asset, 'insert')}
                   className="qn-btn h-10 lg:h-6 px-3 shrink-0 text-sm lg:text-xs">
                   {busy ? '…' : 'Insert'}
                 </button>
               ) : (
                 <>
-                  <button type="button" disabled={busy || p.disabled} onClick={() => p.onSend(asset, 'next')}
+                  <button type="button" disabled={busy || p.disabled || readOnly} onClick={() => p.onSend(asset, 'next')}
                     title="Play right after the current item"
                     className="qn-btn h-10 lg:h-6 px-3 shrink-0 text-sm lg:text-xs">
                     {busy ? '…' : 'Next'}
                   </button>
-                  <button type="button" disabled={busy || p.disabled} onClick={() => p.onSend(asset, 'end')}
+                  <button type="button" disabled={busy || p.disabled || readOnly} onClick={() => p.onSend(asset, 'end')}
                     title="Add to the end of the queue" aria-label="Add to the end of the queue"
                     className="qn-btn h-10 lg:h-6 px-3 shrink-0 text-sm lg:text-xs">
                     + End

@@ -748,6 +748,22 @@ if (run('spots')) {
   await page.getByTestId('db-edit-input').press('Enter');
   await sleep(300);
   check('F-DATABANK-38 spot Category edit saves the category', db.patches.length === p + 1 && db.patches.at(-1).body.category === 'insurance' && (await text('s3')).includes('insurance'));
+  // F-DATABANK-57 a spot can be renamed in place (it could not be renamed on any screen)
+  {
+    const p2 = db.patches.length;
+    await page.locator('[data-row="s3"] [data-testid="spot-title"]').click();
+    await page.getByTestId('db-edit-input').fill('Renamed Spot Three');
+    await page.getByTestId('db-edit-input').press('Enter');
+    await sleep(300);
+    check('F-DATABANK-57 spot Title edit saves the title and the row shows it',
+      db.patches.length === p2 + 1 && db.patches.at(-1).id === 's3' && db.patches.at(-1).body.title === 'Renamed Spot Three' && (await text('s3')).includes('Renamed Spot Three'));
+    await page.locator('[data-row="s3"] [data-testid="spot-title"]').click();
+    await page.getByTestId('db-edit-input').fill('   ');
+    await page.getByTestId('db-edit-input').press('Enter');
+    await sleep(200);
+    check('F-DATABANK-57 an empty spot title is refused with words and nothing is sent',
+      db.patches.length === p2 + 1 && await page.getByRole('status').filter({ hasText: 'The title cannot be empty.' }).isVisible() && (await text('s3')).includes('Renamed Spot Three'));
+  }
   check('spots: no script errors', errors.length === 0, errors.join(' | '));
   await ctx.close();
 

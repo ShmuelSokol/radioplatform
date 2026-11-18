@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useEnhancePresets, useEnhanceAsset, useEnhancePreview, useRestoreOriginal, useAutoEnhance } from '../../hooks/useAssets';
+import { useAuth } from '../../hooks/useAuth';
+import { isManager } from '../../auth/access';
 import Spinner from '../Spinner';
 
 interface EnhancePanelProps {
@@ -19,6 +21,10 @@ const PRESET_LABELS: Record<string, string> = {
 };
 
 export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePanelProps) {
+  // Changing the audio is for managers and admins (the API refuses the rest); others may
+  // still listen to a 15 s preview of a preset
+  const { user } = useAuth();
+  const canEdit = isManager(user?.role);
   const { data: presetsData } = useEnhancePresets();
   const enhanceMutation = useEnhanceAsset();
   const previewMutation = useEnhancePreview();
@@ -152,22 +158,26 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
     <div className="bg-white border border-gray-200 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold">Audio Enhancement</h3>
-        <Link
-          to={`/admin/audio-enhance/${assetId}`}
-          className="text-xs text-brand-600 hover:text-brand-800"
-        >
-          Full Editor &rarr;
-        </Link>
+        {canEdit && (
+          <Link
+            to={`/admin/audio-enhance/${assetId}`}
+            className="text-xs text-brand-600 hover:text-brand-800"
+          >
+            Full Editor &rarr;
+          </Link>
+        )}
       </div>
 
       {/* AI Auto-Enhance */}
-      <button
-        onClick={handleAutoEnhance}
-        disabled={autoEnhanceMutation.isPending}
-        className="w-full mb-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
-      >
-        {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'AI Auto-Enhance'}
-      </button>
+      {canEdit && (
+        <button
+          onClick={handleAutoEnhance}
+          disabled={autoEnhanceMutation.isPending}
+          className="w-full mb-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white px-4 py-2 rounded text-sm font-medium transition disabled:opacity-50"
+        >
+          {autoEnhanceMutation.isPending ? <><Spinner className="mr-1" />Analyzing &amp; Enhancing...</> : 'AI Auto-Enhance'}
+        </button>
+      )}
 
       {/* Preset buttons */}
       <div className="flex flex-wrap gap-2 mb-3">
@@ -196,13 +206,15 @@ export default function EnhancePanel({ assetId, onEnhanceComplete }: EnhancePane
           >
             {previewMutation.isPending ? <><Spinner className="mr-1" />Loading...</> : 'Preview 15s'}
           </button>
-          <button
-            onClick={handleApply}
-            disabled={enhanceMutation.isPending}
-            className="bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5 rounded text-sm transition disabled:opacity-50"
-          >
-            {enhanceMutation.isPending ? <><Spinner className="mr-1" />Applying...</> : 'Apply'}
-          </button>
+          {canEdit && (
+            <button
+              onClick={handleApply}
+              disabled={enhanceMutation.isPending}
+              className="bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5 rounded text-sm transition disabled:opacity-50"
+            >
+              {enhanceMutation.isPending ? <><Spinner className="mr-1" />Applying...</> : 'Apply'}
+            </button>
+          )}
         </div>
       )}
 

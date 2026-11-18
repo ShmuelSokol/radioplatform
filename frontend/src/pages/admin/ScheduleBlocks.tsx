@@ -7,9 +7,15 @@ import type { ScheduleBlock, CreateScheduleBlockData } from '../../hooks/useSche
 import { useCreateScheduleBlock, useUpdateScheduleBlock, useDeleteScheduleBlock, useCreatePlaylistEntry, useDeletePlaylistEntry } from '../../hooks/useSchedules';
 import { usePlaylistTemplates } from '../../hooks/usePlaylists';
 import AssetCategoryBadge from '../../components/AssetCategoryBadge';
+import { useAuth } from '../../hooks/useAuth';
+import { isManager } from '../../auth/access';
 
 export default function ScheduleBlocks() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
+  const { user } = useAuth();
+  // Only managers and admins may change blocks (the API refuses the rest); a DJ or viewer
+  // was offered New Block, Edit, Delete, + Add song and Remove beside the "View only" badge
+  const canEdit = isManager(user?.role);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -203,10 +209,12 @@ export default function ScheduleBlocks() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
         <button onClick={() => navigate('/admin/schedules')} className="text-blue-600 hover:text-blue-800">&larr; Schedules</button>
         <h1 className="text-2xl sm:text-3xl font-bold">{schedule?.name || 'Schedule'}: blocks</h1>
-        <button onClick={() => (showBlockForm ? closeBlockForm() : setShowBlockForm(true))}
-          className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-          {showBlockForm ? 'Cancel' : 'New Block'}
-        </button>
+        {canEdit && (
+          <button onClick={() => (showBlockForm ? closeBlockForm() : setShowBlockForm(true))}
+            className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            {showBlockForm ? 'Cancel' : 'New Block'}
+          </button>
+        )}
       </div>
       <p className="text-sm text-gray-600 mb-4 max-w-3xl">
         A block says when a playlist plays: which days, and what time it starts. Pick a playlist
@@ -431,10 +439,14 @@ export default function ScheduleBlocks() {
                 {!block.playlist_template_id && (
                   <span className="text-sm text-gray-400 hidden sm:inline">{block.playlist_entries?.length || 0} songs</span>
                 )}
-                <button onClick={(e) => { e.stopPropagation(); startEdit(block); }}
-                  className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200">Edit</button>
-                <button onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id); }}
-                  className="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">Delete</button>
+                {canEdit && (
+                  <>
+                    <button onClick={(e) => { e.stopPropagation(); startEdit(block); }}
+                      className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200">Edit</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id); }}
+                      className="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">Delete</button>
+                  </>
+                )}
                 <span className="text-gray-400">{expandedBlock === block.id ? '▲' : '▼'}</span>
               </div>
             </div>
@@ -465,10 +477,12 @@ export default function ScheduleBlocks() {
                 <>
                 <div className="flex justify-between items-center mb-3">
                   <h4 className="text-sm font-bold text-gray-700 uppercase">Songs in this block</h4>
-                  <button onClick={() => setAddingEntryTo(addingEntryTo === block.id ? null : block.id)}
-                    className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
-                    + Add song
-                  </button>
+                  {canEdit && (
+                    <button onClick={() => setAddingEntryTo(addingEntryTo === block.id ? null : block.id)}
+                      className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
+                      + Add song
+                    </button>
+                  )}
                 </div>
 
                 {addingEntryTo === block.id && (
@@ -511,8 +525,10 @@ export default function ScheduleBlocks() {
                                 w:{entry.weight} · {entry.playback_mode}
                                 {!entry.is_enabled && ' · disabled'}
                               </span>
-                              <button onClick={() => handleDeleteEntry(entry.id)}
-                                className="text-red-500 hover:text-red-700 text-xs">Remove</button>
+                              {canEdit && (
+                                <button onClick={() => handleDeleteEntry(entry.id)}
+                                  className="text-red-500 hover:text-red-700 text-xs">Remove</button>
+                              )}
                             </div>
                           </div>
                         );

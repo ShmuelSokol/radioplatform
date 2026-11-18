@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useUpdateAsset } from '../hooks/useAssets';
 import { useCategories } from '../hooks/useCategories';
+import { useAuth } from '../hooks/useAuth';
+import { isManager } from '../auth/access';
 import FloatingMenu from './FloatingMenu';
 
 const PALETTE = [
@@ -32,6 +34,10 @@ export default function AssetCategoryBadge({ assetId, category, dark, compact }:
   const closeMenu = useCallback(() => setOpen(false), []);
   const updateAsset = useUpdateAsset();
   const { data: dynamicCategories } = useCategories();
+  // Only managers and admins may change an item (the API refuses the rest): others see the
+  // category as plain text, not a menu whose every choice is refused
+  const { user } = useAuth();
+  const readOnly = !isManager(user?.role);
 
   // Build styled categories from dynamic list
   const CATEGORIES = useMemo(() => {
@@ -65,6 +71,14 @@ export default function AssetCategoryBadge({ assetId, category, dark, compact }:
   const badgeClass = dark
     ? `cursor-pointer block max-w-full truncate ${current?.darkColor ?? 'text-gray-600'} hover:underline`
     : `cursor-pointer block max-w-full truncate text-xs px-1.5 py-0.5 rounded-full ${current?.color ?? 'bg-gray-100 text-gray-600'} hover:ring-1 hover:ring-gray-300`;
+
+  if (readOnly) {
+    return (
+      <span className={badgeClass.replace('cursor-pointer ', '').replace(/ hover:\S+/g, '')} title={label} data-testid="category-text">
+        {compact ? (category === 'do_not_play' ? 'DNP' : label) : label}
+      </span>
+    );
+  }
 
   return (
     <div ref={ref} className="relative inline-block max-w-full align-middle">
