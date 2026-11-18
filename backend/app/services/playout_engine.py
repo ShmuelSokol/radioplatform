@@ -123,6 +123,11 @@ class EngineState:
     # What the engine was last told about a live show (None: not told since it or
     # we started, so it is told again)
     live_sent: bool | None = None
+    # One start report at a time: two at once both closed the item before and wrote
+    # its play log twice (Main 20:31Z, 2026-11-18: the same sponsorship counted twice)
+    started_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # (entry, monotonic time) of the last start report, to drop an exact repeat
+    last_started: tuple[str, float] | None = None
     live_tried: float = 0.0
     # Entry handed to the engine during a live show, to start when the show ends: the
     # tick's flush of a track pre-loaded before the show leaves this one alone
@@ -1032,7 +1037,34 @@ async def _live_show_on(db: AsyncSession, station_id) -> bool:
     return bool(station is not None and (station.automation_config or {}).get("live_show_id"))
 
 
+# A second report of the same entry this soon is the same start sent again
+REPEAT_START_SECONDS = 10.0
+
+
 async def handle_started(
+    db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
+    quiet: bool = False, kept: bool = False,
+) -> dict:
+    """The engine reports what just went on air (see _handle_started). Reports for one
+    station are taken one at a time, and an exact repeat (same entry within
+    REPEAT_START_SECONDS) changes nothing."""
+    state = get_state(station_id)
+    async with state.started_lock:
+        mono = time.monotonic()
+        if (entry_id and not kept and state.last_started is not None
+                and state.last_started[0] == str(entry_id)
+                and mono - state.last_started[1] < REPEAT_START_SECONDS):
+            logger.info("Engine started -> entry=%s again within %.1f s: repeat ignored",
+                        entry_id, mono - state.last_started[1])
+            _touch(state)
+            return {"ok": True, "known": True, "repeat": True}
+        result = await _handle_started(db, station_id, entry_id, lane, at=at, quiet=quiet, kept=kept)
+        if entry_id:
+            state.last_started = (str(entry_id), time.monotonic())
+        return result
+
+
+async def _handle_started(
     db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
     quiet: bool = False, kept: bool = False,
 ) -> dict:

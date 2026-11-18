@@ -908,3 +908,36 @@ async def test_a_song_the_engine_already_holds_is_taken_back_before_a_hard_item(
     state.cued_entry_id = str(entries[1].id)
     await playout_engine.tick(db_session, st)
     assert ("/flush", None) not in sent
+
+
+@pytest.mark.asyncio
+async def test_a_start_reported_twice_logs_the_item_before_once(client, db_session, engine_station):
+    """Main 20:31Z, 2026-11-18: two start reports for the next sponsorship were taken at
+    once; both closed the sponsorship before it and its play log row was written twice
+    (plays and missed-play counts one too high)."""
+    import asyncio
+
+    station, entries, _ = engine_station
+    await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    await client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS,
+                      json={"entry_id": str(entries[0].id), "lane": "main"})
+    row = (await db_session.execute(select(QueueEntry).where(QueueEntry.id == entries[0].id))).scalar_one()
+    row.started_at = datetime.now(UTC) - timedelta(seconds=30)
+    await db_session.commit()
+
+    await client.get(f"/api/v1/playout/{station.id}/next", headers=HEADERS)
+    body = {"entry_id": str(entries[1].id), "lane": "timed"}
+    first, second = await asyncio.gather(
+        client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS, json=body),
+        client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS, json=body),
+    )
+    assert first.status_code == 200 and second.status_code == 200
+    assert sorted(bool(r.json().get("repeat")) for r in (first, second)) == [False, True]
+    # and once more, later in the same item: still a repeat
+    third = await client.post(f"/api/v1/playout/{station.id}/started", headers=HEADERS, json=body)
+    assert third.json().get("repeat") is True
+
+    logs = (await db_session.execute(select(PlayLog).where(PlayLog.station_id == station.id))).scalars().all()
+    assert [log.asset_id for log in logs] == [entries[0].asset_id]
+    assert await _status(db_session, entries[0]) == "played"
+    assert await _status(db_session, entries[1]) == "playing"
