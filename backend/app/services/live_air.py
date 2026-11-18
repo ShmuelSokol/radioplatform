@@ -48,7 +48,12 @@ SHRINK_ABOVE = 0.5          # seconds over the target before shrinking starts
 QUIET_FLOOR = 300           # RMS at or under this is a pause whatever the voice level
 QUIET_SHARE = 0.15          # ... and so is anything under 15 % of the recent speech level
 EDGE = int(RATE * 0.01)     # 10 ms fades where a Dump cut the audio
-EXIT_BEFORE_END = 180.0     # seconds before a show's hard stop the delay winds down
+# Before a show's hard stop the delay may only be as long as can still be played out by
+# hurrying non-stop speech: this many seconds of delay per second left, less a margin.
+# (It was a fixed 3 minutes at up to 12 %: that takes back 21 s, so a 30 or 40 s delay,
+# or any show shorter than its delay plus 3 minutes, was cut with words still waiting.)
+WIND_RATE = 0.10
+WIND_MARGIN = 5.0
 CUSHION = int(RATE * 0.3)   # least audio waiting before it plays out (smooth, no stutter)
 STATUS_EVERY = 0.5
 HEARD_KEPT = int(RATE * 6)    # what aired just before a Dump, kept for the dump log          # seconds between status messages
@@ -194,6 +199,9 @@ class LiveAir:
         self.read = 0
         self.count = 0
         self.listening = False      # listeners hear this show now
+        # A timed item (the time check) is on air on the station: the show waits for it
+        # to end before listeners hear the host, and the host's words wait in the delay
+        self.hold_until = 0.0
         self.finishing = False      # show over (or host gone): play out what is left, take no more
         self.finish_reason = ""
         self.closed = False
@@ -337,11 +345,11 @@ class LiveAir:
     def _shrink_speech(self) -> float:
         """How fast speech plays while the delay shrinks: 3 % as a rule, more (up to
         12 %) when the show's hard stop is near and the delay would not be empty by then."""
-        if self.target == 0 and self.end_at is not None and not self.finishing:
-            left = self.end_at - self.clock() - 5.0
+        if self.auto_exit and self.end_at is not None and not self.finishing:
+            left = self.end_at - self.clock() - WIND_MARGIN
             if left <= 0:
                 return SHRINK_HURRY
-            return min(SHRINK_HURRY, max(SHRINK_SPEECH, 1.0 + self.buffered / left))
+            return min(SHRINK_HURRY, max(SHRINK_SPEECH, 1.0 + 1.1 * self.buffered / left))
         return SHRINK_SPEECH
 
     def _program(self, n: int) -> np.ndarray:
@@ -417,20 +425,22 @@ class LiveAir:
 
     def produce(self, n: int) -> np.ndarray | None:
         """The next `n` samples listeners hear (None while nothing airs yet)."""
+        if self.end_at is not None and not self.finishing and self.target > 0:
+            room = max(0.0, (self.end_at - self.clock() - WIND_MARGIN) * WIND_RATE)
+            if room < self.target:
+                self.target = room if room >= 0.3 else 0.0
+                self.auto_exit = True
         if not self.listening:
             if self.finishing:
                 return None
-            if self.count >= int(self.target * RATE) and (self.count > 0 or self.target == 0):
+            if self.count >= int(self.target * RATE) and (self.count > 0 or self.target == 0) \
+                    and self.clock() >= self.hold_until:
                 self.listening = True
                 self.mode = "steady" if self.target > 0 else "no delay"
                 self._notify_listening(True)
             else:
                 self.mode = "pre-roll"
                 return None
-        if self.end_at is not None and not self.finishing and self.target > 0 \
-                and self.clock() >= self.end_at - EXIT_BEFORE_END:
-            self.target = 0.0
-            self.auto_exit = True
         out = np.zeros(0, dtype=np.int16)
         while len(out) < n:
             need = n - len(out)
@@ -571,6 +581,8 @@ class LiveAir:
             "show_id": self.show_id,
             "mode": self.mode,
             "on_air": self.listening,
+            # Seconds the show still waits for a timed item on the station to end
+            "hold": 0.0 if self.listening else round(max(0.0, self.hold_until - now), 1),
             "delay": round(self.buffered, 2),
             "target": self.target,
             "configured": self.configured,

@@ -45,6 +45,8 @@ class SchedulerEngine:
         self.check_interval = check_interval  # seconds
         self.running = False
         self._task: Optional[asyncio.Task] = None
+        # When each station was last checked for a live show nobody ever heard (monotonic)
+        self._unheard_checked: dict = {}
         # Silence detection: station_id → datetime when silence first detected
         self._silence_start: dict[str, datetime] = {}
         # Block transition tracking: station_id → last active block ID
@@ -524,6 +526,36 @@ class SchedulerEngine:
             except Exception:
                 logger.warning("Live show hard-stop broadcast failed", exc_info=True)
 
+    async def _stop_unheard_live_show(self, db: AsyncSession, station: Station, now: datetime):
+        """A live show that never took the station over (started, but the host's
+        microphone never came, or the delay never filled) still ends at its hard stop.
+        The station's `live_show_id` is set only when listeners first hear the host, so
+        the check above never saw such a show and it stayed "live" for ever."""
+        from app.models.live_show import LiveShow, LiveShowStatus
+
+        mono = time.monotonic()
+        if mono - self._unheard_checked.get(station.id, 0.0) < 10.0:
+            return
+        self._unheard_checked[station.id] = mono
+        rows = (await db.execute(select(LiveShow.id, LiveShow.scheduled_end).where(
+            LiveShow.station_id == station.id, LiveShow.status == LiveShowStatus.LIVE,
+            LiveShow.scheduled_end.is_not(None),
+        ))).all()
+        for show_id, end in rows:
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            if end > now:
+                continue
+            from app.services.live_show_service import hard_stop_show
+            await hard_stop_show(db, show_id)
+            await db.commit()
+            logger.warning("Hard stopped live show %s on station %s (it was never heard)", show_id, station.id)
+            try:
+                from app.api.v1.live_shows_ws import broadcast_show_event
+                await broadcast_show_event(str(show_id), "show_hard_stopped", {"show_id": str(show_id)})
+            except Exception:
+                logger.warning("Live show hard-stop broadcast failed", exc_info=True)
+
     async def _check_silence_detection(self, db: AsyncSession, station: Station, has_playing_asset: bool, is_blacked_out: bool):
         """
         Detect dead air (nothing playing in the queue) and recover.
@@ -938,6 +970,7 @@ class SchedulerEngine:
                 logger.warning("Timed items for the live show on station %s failed", station.id, exc_info=True)
                 await _safe_rollback(db)
             return  # Skip normal scheduler logic
+        await self._stop_unheard_live_show(db, station, now)
 
         # Check blackout windows — fill silence for active AND upcoming blackouts
         from app.api.v1.queue import fill_blackout_queue

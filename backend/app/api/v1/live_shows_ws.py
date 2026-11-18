@@ -315,6 +315,8 @@ class StationLiveRelay:
                 pass
 
 
+_holds: set = set()  # watchers that keep a show from cutting a timed item (kept from collection)
+
 live_relay = StationLiveRelay()
 
 
@@ -546,6 +548,11 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         live_relay.on_first_air[station_id] = take_over_when_heard
     await live_relay.set_on_air(station_id, show_id, delay=delay, dump=dump, end_at=end_at,
                                 heard_now=taken_over)
+    _air = live_relay.airs.get(station_id)
+    if _air is not None and not taken_over and not _air.listening and delay > 0:
+        from app.services.live_show_service import hold_for_timed_items
+        _holds.add(_task := asyncio.ensure_future(hold_for_timed_items(station_id, _air)))
+        _task.add_done_callback(_holds.discard)
 
     from app.config import settings
     try:
