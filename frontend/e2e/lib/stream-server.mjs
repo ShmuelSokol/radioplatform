@@ -29,7 +29,7 @@ export async function startStreamServer(port) {
   const TICK = 100;
   const clients = new Set();
   let stalledUntil = 0;
-  const stats = { connects: 0, refused: 0, noCorsConnects: 0 };
+  const stats = { connects: 0, refused: 0, noCorsConnects: 0, hlsConnects: 0 };
   const state = { failing: false };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -37,10 +37,12 @@ export async function startStreamServer(port) {
     const cors = noCors ? { 'cache-control': 'no-store' } : { 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
     const mount = noCors ? url.pathname.slice('/nocors'.length) : url.pathname;
     if (req.method === 'OPTIONS') { res.writeHead(204, { ...cors, 'access-control-allow-headers': '*' }); res.end(); return; }
-    if (!mount.startsWith('/live-')) { res.writeHead(404, cors); res.end('no such mount'); return; }
+    const hls = /^\/hls\/[^/]+\/mp3\.m3u8$/.test(mount);
+    if (!mount.startsWith('/live-') && !hls) { res.writeHead(404, cors); res.end('no such mount'); return; }
     if (state.failing) { stats.refused++; res.writeHead(503, cors); res.end('restarting'); return; }
     stats.connects++;
     if (noCors) stats.noCorsConnects++;
+    if (hls) stats.hlsConnects++;
     res.writeHead(200, { ...cors, 'content-type': 'audio/mpeg' });
     let pos = 0;
     let owed = 0;

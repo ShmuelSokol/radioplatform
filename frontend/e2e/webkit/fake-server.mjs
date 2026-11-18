@@ -27,6 +27,7 @@ const UPSTREAM = new URL(process.env.UPSTREAM || 'http://localhost:4183');
 const STREAM_PORT = Number(process.env.STREAM_PORT || 4185);
 
 const stream = await startStreamServer(STREAM_PORT);
+const HLS_MOUNT_ID = '0b5e7c2a-1d4f-4e8b-9a6c-3f2d1e0c9b8a';
 
 // Records page errors (uncaught, rejected promises, console.error) before the app loads
 function ERROR_RECORDER() {
@@ -47,7 +48,21 @@ function NO_MSE() {
   try { off = sessionStorage.getItem('kbr_no_mse') === '1'; } catch { /* ignore */ }
   if (off) { window.MediaSource = undefined; window.ManagedMediaSource = undefined; }
 }
-const INJECT = `<script>(${ERROR_RECORDER})();(${NO_MSE})();(${AUDIO_PROBE})();</script>`;
+// iPhone Safari plays HLS natively and the site then takes the engine's HLS copy
+// (liveStream.ts hlsStream). WebKitGTK has no native HLS, so ?kbr_native_hls=1 makes the
+// tab say it has (canPlayType), and the fake HLS address serves the MP3 stream itself:
+// the site's iPhone code path runs in the real engine.
+function NATIVE_HLS() {
+  try { if (/[?&]kbr_native_hls=1/.test(location.search)) sessionStorage.setItem('kbr_native_hls', '1'); } catch { /* ignore */ }
+  let on = false;
+  try { on = sessionStorage.getItem('kbr_native_hls') === '1'; } catch { /* ignore */ }
+  if (!on) return;
+  const can = HTMLMediaElement.prototype.canPlayType;
+  HTMLMediaElement.prototype.canPlayType = function (type) {
+    return /mpegurl/i.test(type) ? 'maybe' : can.call(this, type);
+  };
+}
+const INJECT = `<script>(${ERROR_RECORDER})();(${NO_MSE})();(${NATIVE_HLS})();(${AUDIO_PROBE})();</script>`;
 
 // ── The scenario ─────────────
 let station;
@@ -55,6 +70,10 @@ let version = null;           // null: whatever the build says; else the "publis
 let policy = { mode: 'auto', push: null };
 const sockets = { np: new Set(), site: new Set(), call: new Set() };
 const call = { auths: [], opened: 0 };
+// A new release went out while the tab was open: the host no longer has the old
+// release's code files and answers them with the site's page (200, text/html), as
+// Vercel does. `keep`: the files the tab already loaded (it has them in memory).
+let redeploy = null;
 
 function reset({ mode = 'browser', stream: kind = 'ok', show = true } = {}) {
   station = makeStation({
@@ -76,13 +95,15 @@ function reset({ mode = 'browser', stream: kind = 'ok', show = true } = {}) {
     },
   });
   if (mode === 'server') {
-    const url = kind === 'missing' ? stream.missing : stream.url(station.SID);
+    // The site takes the HLS copy only for a mount named /live-<uuid>, as the engine's are
+    const url = kind === 'missing' ? stream.missing : kind === 'hls' ? stream.url(HLS_MOUNT_ID) : stream.url(station.SID);
     const np = station.nowPlaying;
     station.nowPlaying = (x) => ({ ...np(x), stream_url: url });
     station.playout = { stations: { [station.SID]: { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } };
   }
   station.onPush((data) => sendAll(sockets.np, { type: 'now_playing', data }));
   version = null;
+  redeploy = null;
   policy = { mode: 'auto', push: null };
   call.auths = [];
   call.opened = 0;
@@ -90,7 +111,7 @@ function reset({ mode = 'browser', stream: kind = 'ok', show = true } = {}) {
 reset();
 
 const ctl = {
-  // { mode: 'browser' | 'server', stream: 'ok' | 'missing', show: true }
+  // { mode: 'browser' | 'server', stream: 'ok' | 'missing' | 'hls', show: true }
   reset: (b) => { reset(b); return { ok: true, sid: station.SID }; },
   // The scheduler puts the next item on air (pushed on the now-playing channel)
   onair: () => { const id = station.pending()[0].asset_id; station.goOnAir(id); return { id, title: station.byId[id].title }; },
@@ -109,9 +130,17 @@ const ctl = {
     nowPlaying: station.nowPlaying(),
     calls: station.calls.map(({ method, path, body }) => ({ method, path, body })),
     callBody: station.callBody || null,
-    callAuths: call.auths, callSockets: call.opened, streamConnects: stream.stats.connects, streamUrl: stream.url(station.SID),
+    callAuths: call.auths, callSockets: call.opened, streamConnects: stream.stats.connects, hlsConnects: stream.stats.hlsConnects, streamUrl: stream.url(station.SID),
   }),
   stall: (b) => { stream.stall(b.ms || 4000); return { ok: true }; },
+  // { keep: [paths the tab has loaded] }: every other /assets/ file is gone from now on,
+  // and /version.json names the new release
+  redeploy: (b) => {
+    redeploy = { keep: new Set(b.keep || []), missed: [] };
+    version = `webkit-redeploy-${Date.now()}`;
+    return { version };
+  },
+  missed: () => ({ missed: redeploy ? redeploy.missed : [], reloaded: !!(redeploy && redeploy.reloaded) }),
 };
 
 // ── HTTP ─────────────
@@ -131,7 +160,18 @@ function tone(req, res, id) {
 }
 
 function proxy(req, res) {
-  const up = http.request({ host: UPSTREAM.hostname, port: UPSTREAM.port, path: req.url, method: req.method, headers: { ...req.headers, host: UPSTREAM.host, 'accept-encoding': 'identity' } }, (r) => {
+  let upPath = req.url;
+  const file = new URL(req.url, 'http://x').pathname;
+  // A page load after the release gets the new release, whose files all exist: from
+  // then on nothing is missing (the build here is the same, so stop hiding files)
+  if (redeploy && !redeploy.reloaded && !file.startsWith('/assets/') && /text\/html/.test(req.headers.accept || '')) {
+    redeploy.reloaded = true;
+  }
+  if (redeploy && !redeploy.reloaded && file.startsWith('/assets/') && !redeploy.keep.has(file)) {
+    redeploy.missed.push(file);
+    upPath = '/';
+  }
+  const up = http.request({ host: UPSTREAM.hostname, port: UPSTREAM.port, path: upPath, method: req.method, headers: { ...req.headers, host: UPSTREAM.host, 'accept-encoding': 'identity' } }, (r) => {
     const type = r.headers['content-type'] || '';
     if (!type.includes('text/html')) { res.writeHead(r.statusCode, r.headers); r.pipe(res); return; }
     const chunks = [];
