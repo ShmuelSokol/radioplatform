@@ -120,6 +120,7 @@ UPDATE 2026-11-16 audio-engine.md item starts within 1 s play from the top witho
 UPDATE 2026-11-16 hourly-slots.md automatic time/weather entries now get timing_mode from the station default (default_timing: hard at :00, soft otherwise); pending ones with no timing are backfilled on refill. Before, null timing on a non-ad_slot counted as hard, so the :30 weather cut songs.
 UPDATE 2026-11-16 audio-engine.md Listen mid-item in Safari: decks started inside the click, graph built before resume()
 INGEST 2026-11-16 control-room.md KBR Studio look (classic.css, desktop layout, row heights tied to ROW_*); jingle cart hides dated time/weather recordings via hide_generated
+INGEST 2026-11-18 qnet-site-theme.md every admin and sponsor page wears the KBR Studio look through one skin (.qn-site: styles/qnet-site.css + generated qnet-site-colors.css from scripts/gen-qnet-colors.mjs, run by build, checked by lint); listener pages untouched; coloured button = default-button frame, also the 'selected' look
 UPDATE 2026-11-16 audio-engine.md hard timed items preloaded on the idle deck 60 s ahead
 UPDATE 2026-11-17 deploys.md the unused Vercel project studio-kolbramah-api reports its production address as backend-gamma-six-68.vercel.app, so the ignore script now also skips backend-*
 INGEST 2026-11-16 control-room.md queue polls only the first 150 rows; whole queue on scroll-to-end or day pick, back to 150 at the top

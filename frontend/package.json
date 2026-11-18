@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/gen-qnet-colors.mjs && tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint . && node scripts/gen-qnet-colors.mjs --check"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",

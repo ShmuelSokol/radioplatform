@@ -9,6 +9,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [audio-engine](audio-engine.md) — Client-side dual-deck Web Audio engine, crossfade, pre-loading, gap fixes
 - [hourly-slots](hourly-slots.md) — Station ID, time announcements, weather, ad slots at :00/:15/:30/:45
 - [admin-page-layout](admin-page-layout.md) — Full-width rule for every admin page, the padding the dark pages depend on, phone tables, the layout audit script
+- [qnet-site-theme](qnet-site-theme.md) — The KBR Studio look on every admin and sponsor page: one shared skin (`.qn-site`), the generated colour remap, how to write a page under it
 - [control-room](control-room.md) — Operator screen layout, liveControl.ts seam, insert-by-entry-id, where instant buttons are stored
 - [station-modes](station-modes.md) — HS (hard start) and Spots mode switches, Panic, Errors pane: what they do and their limits
 - [databank](databank.md) — KBR Studio's database window: songs/jingles/spots/blocks tables, spot end dates (on the schedules), day log to the millisecond

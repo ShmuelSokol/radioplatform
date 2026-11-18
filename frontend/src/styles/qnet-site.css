@@ -1,0 +1,159 @@
+/*
+ * The KBR Studio ("qnet") look for the admin and sponsor pages, so the whole site
+ * feels like the control room's program: a grey window, navy title bars, raised grey
+ * buttons, sunken white boxes and lists, Tahoma. Layout.tsx / SponsorLayout.tsx put
+ * `.qn-site` on the menu bar and the page; the control room and the Databank keep
+ * their own `.qn` styles (controlroom/classic.css) and the listener pages are not
+ * touched. Looks only: no markup or behaviour depends on this file.
+ *
+ * The pages keep their Tailwind classes. This file restyles by element and by class
+ * (`[class~="bg-white"]`), and qnet-site-colors.css (generated) remaps each colour
+ * class. See wiki/qnet-site-theme.md.
+ */
+.qn-site {
+  --qn-face: #c0c0c0;
+  --qn-light: #ffffff;
+  --qn-shadow: #808080;
+  --qn-dark: #000000;
+  --qn-raised: inset -1px -1px 0 var(--qn-dark), inset 1px 1px 0 var(--qn-light), inset -2px -2px 0 var(--qn-shadow), inset 2px 2px 0 #dfdfdf;
+  --qn-pressed: inset 1px 1px 0 var(--qn-dark), inset -1px -1px 0 var(--qn-light), inset 2px 2px 0 var(--qn-shadow), inset -2px -2px 0 #dfdfdf;
+  --qn-sunk: inset 1px 1px 0 var(--qn-shadow), inset -1px -1px 0 var(--qn-light), inset 2px 2px 0 var(--qn-dark), inset -2px -2px 0 #dfdfdf;
+  --qn-panel: inset -1px -1px 0 var(--qn-shadow), inset 1px 1px 0 var(--qn-light);
+  font-family: Tahoma, Verdana, "Segoe UI", system-ui, sans-serif;
+  background-color: var(--qn-face);
+  color: #000;
+}
+.qn-site[class*="bg-gradient"] { background-image: none; }
+.qn-site [class~="font-mono"]:not(textarea):not(pre):not(code) { font-family: inherit; }
+
+/* Square corners and no soft shadows; round dots, pills and switches stay round. */
+.qn-site [class*="rounded"]:not([class~="rounded-full"]) { border-radius: 0; }
+.qn-site [class*="shadow"] { box-shadow: none; }
+.qn-site [class*="backdrop-blur"] { -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* ── Page title: a window title bar ── */
+.qn-site h1, .qn-site h1[class][class] {
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0;
+  padding: 4px 8px;
+}
+.qn-site h1 *, .qn-site h1 [class][class] { color: inherit; }
+.qn-site h2, .qn-site h3 { color: #000; font-weight: 700; }
+
+/* ── Panels: white and navy cards become raised grey window panels ── */
+.qn-site [class~="bg-white"]:not([class~="rounded-full"]):not(input):not(select):not(textarea) {
+  background-color: var(--qn-face);
+}
+.qn-site :is([class~="bg-white"], [class~="bg-[#12123a]"], [class~="bg-[#0a0a28]"], [class~="bg-[#101036]"], [class~="bg-[#16163e]"], [class~="bg-[#14143a]"], [class~="bg-gray-800"], [class~="bg-gray-900"]):is([class*="rounded"], [class*="shadow"], [class~="border"]):not([class~="rounded-full"]):not(input):not(select):not(textarea):not(button):not(a):not(tr):not(td):not(th):not(tbody):not(thead) {
+  border: 0;
+  box-shadow: var(--qn-raised);
+}
+/* Rings (focus rings and hairline card edges) are not part of the look */
+.qn-site [class*="ring-"]:not(input):not(select):not(textarea):not(button) { --tw-ring-shadow: 0 0 #0000; }
+
+/* ── Buttons: raised grey ── */
+.qn-site :is(button, a, label, summary)[class*="bg-"]:not([class~="rounded-full"]):not(.qn-plain),
+.qn-site input[type="submit"], .qn-site input[type="button"], .qn-site input::file-selector-button {
+  background: var(--qn-face);
+  color: #000;
+  border: 0;
+  border-radius: 0;
+  box-shadow: var(--qn-raised);
+  font-weight: 400;
+  text-decoration: none;
+  opacity: 1;
+}
+.qn-site :is(button, a, label, summary)[class*="bg-"]:not([class~="rounded-full"]):not(.qn-plain):hover:not(:disabled) { background: #cdcdcd; color: #000; }
+.qn-site :is(button, a, label, summary)[class*="bg-"]:not([class~="rounded-full"]):not(.qn-plain):active:not(:disabled),
+.qn-site button[aria-pressed="true"]:not([class~="rounded-full"]), .qn-site button[aria-selected="true"]:not([class~="rounded-full"]), .qn-site button[aria-checked="true"]:not([class~="rounded-full"]) {
+  box-shadow: var(--qn-pressed);
+  background: #b4b4b4;
+}
+/* The main action of a form, and the chosen tab or filter (pages colour these): the
+   default-button look, bold inside a black frame */
+.qn-site :is(button, a, label)[class*="bg-"]:is([class*=" bg-blue-"], [class^="bg-blue-"], [class*=" bg-brand-"], [class^="bg-brand-"], [class*=" bg-indigo-"], [class^="bg-indigo-"], [class*=" bg-cyan-"], [class^="bg-cyan-"], [class*=" bg-green-"], [class^="bg-green-"], [class*=" bg-emerald-"], [class^="bg-emerald-"], [class*=" bg-purple-"], [class^="bg-purple-"], [class*=" bg-orange-"], [class^="bg-orange-"], [class*=" bg-amber-"], [class^="bg-amber-"], [class*=" bg-yellow-"], [class^="bg-yellow-"], [class*=" bg-teal-"], [class^="bg-teal-"]):not([class~="rounded-full"]):not(.qn-plain) {
+  font-weight: 700;
+  box-shadow: 0 0 0 1px #000, var(--qn-raised);
+}
+/* Delete and other red buttons keep a red label */
+.qn-site :is(button, a, label)[class*="bg-"]:is([class*=" bg-red-"], [class^="bg-red-"], [class*=" bg-rose-"], [class^="bg-rose-"]):not([class~="rounded-full"]):not(.qn-plain),
+.qn-site :is(button, a, label)[class*="bg-"]:is([class*=" bg-red-"], [class^="bg-red-"], [class*=" bg-rose-"], [class^="bg-rose-"]):not([class~="rounded-full"]):not(.qn-plain):hover:not(:disabled) { color: #a00000; font-weight: 700; }
+.qn-site :is(button, a, label)[class*="bg-"]:not([class~="rounded-full"]) * { color: inherit; }
+.qn-site button:disabled:not([class~="rounded-full"]) { color: #808080; text-shadow: 1px 1px 0 #fff; opacity: 1; }
+.qn-site :is(button, a):focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
+/* Buttons and links written as plain coloured words */
+.qn-site :is(button, a):not([class*="bg-"]) { text-underline-offset: 2px; }
+
+/* ── Boxes you type in: sunken white ── */
+.qn-site input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="submit"]):not([type="button"]),
+.qn-site textarea {
+  background: #fff;
+  color: #000;
+  border: 0;
+  border-radius: 0;
+  box-shadow: var(--qn-sunk);
+  outline: none;
+}
+.qn-site input::placeholder, .qn-site textarea::placeholder { color: #808080; }
+.qn-site :is(input, textarea, select):focus { --tw-ring-shadow: 0 0 #0000; outline: none; }
+.qn-site :is(input, textarea):focus-visible:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { outline: 1px dotted #000; outline-offset: -4px; }
+.qn-site :is(input[type="checkbox"], input[type="radio"]) { accent-color: #000080; }
+/* Drop-down lists: grey with a raised arrow, as in the control room */
+.qn-site select {
+  -webkit-appearance: none;
+  appearance: none;
+  color: #000;
+  border: 0;
+  border-radius: 0;
+  box-shadow: var(--qn-sunk);
+  background-color: var(--qn-face);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23c0c0c0'/%3E%3Cpath d='M0 15.5h16M15.5 0v16' stroke='%23000'/%3E%3Cpath d='M1 14.5h14M14.5 1v14' stroke='%23808080'/%3E%3Cpath d='M0.5 0v15M0 0.5h15' stroke='%23fff'/%3E%3Cpath d='M4 6h8l-4 5z' fill='%23000'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 3px center;
+  background-size: 16px 16px;
+  padding-right: 24px;
+  cursor: pointer;
+}
+.qn-site select option { background: #fff; color: #000; }
+/* A long choice shortens inside a narrow phone instead of pushing the page sideways */
+.qn-site select { max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+.qn-site label { max-width: 100%; min-width: 0; }
+/* A list box (several rows showing) is a sunken white list, with no arrow */
+.qn-site select:is([multiple], [size]:not([size="1"])) { background: #fff; padding-right: 2px; cursor: default; }
+
+/* ── Lists: a sunken white list with grey column buttons ── */
+.qn-site table { background: #fff; color: #000; box-shadow: var(--qn-sunk); border-collapse: separate; border-spacing: 0; }
+.qn-site table :is(thead, tbody, tfoot, tr) { background-color: transparent; box-shadow: none; }
+.qn-site thead th {
+  background: var(--qn-face);
+  color: #000;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  box-shadow: var(--qn-panel);
+  border: 0;
+}
+.qn-site thead th * { color: #000; }
+.qn-site tbody td { border-color: #d4d4d4; }
+.qn-site tbody tr:hover { background-color: #e8e8f4; }
+/* the edge of the sunken frame must not be covered by the first and last cells */
+.qn-site table { padding: 2px; }
+
+/* ── Menu bar ── */
+nav.qn-site, .qn-site > nav { background-color: var(--qn-face); color: #000; border-bottom: 0; box-shadow: inset 0 -1px 0 var(--qn-shadow), inset 0 1px 0 var(--qn-light); }
+nav.qn-site :is(a, button), .qn-site > nav :is(a, button, span) { color: #000; }
+nav.qn-site :is(a, button):not([class*="bg-"]):hover { background: #000080; color: #fff; }
+nav.qn-site :is(a, button):not([class*="bg-"]):hover * { color: #fff; }
+nav.qn-site [class*="absolute"][class*="top-full"] { border: 0; box-shadow: var(--qn-raised); padding: 3px; }
+nav.qn-site .qn-brand { color: #000080; }
+nav.qn-site .qn-brand:hover { background: transparent; color: #000080; }
+
+/* Phones: fingers need the room, so buttons and boxes keep a tall enough face */
+@media (pointer: coarse) and (max-width: 767px) {
+  .qn-site main :is(button, a, label)[class*="bg-"]:not([class~="rounded-full"]):not(.qn-plain), .qn-site main select,
+  .qn-site main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]) { min-height: 36px; }
+}
