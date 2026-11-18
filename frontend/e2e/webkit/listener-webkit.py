@@ -53,13 +53,9 @@ ALLOW = ['--autoplay-policy=allow']
 _PLAIN = ('plain <audio> fallback for browsers without MSE: WebKitGTK (GStreamer) starts a 128 kbps MP3 stream '
           'only after about 2.1 s, every run. iPhone Safari takes the HLS copy instead (liveStream.ts hlsStream), '
           'which WebKitGTK cannot play (no native HLS), so this is the fallback path only, not the iPhone default')
-_RELEASE = ('a screen whose code file is gone after a release throws into RouteErrorBoundary (App.tsx), which '
-            'wraps the whole layout: the error screen replaces the menu and the player, the sound stops, and '
-            'reloadForStaleCode reloads the page; an iPhone cannot play again without a new tap (Shmuel, 2026-11-18)')
 KNOWN_BUGS = {
     'no MSE (iPhone path): stream heard within 2 s': _PLAIN,
     'no MSE (iPhone path): Listen again plays within 2 s': _PLAIN,
-    'after a new release,': _RELEASE,
 }
 state = {'passed': 0, 'failed': 0, 'xfail': 0}
 
