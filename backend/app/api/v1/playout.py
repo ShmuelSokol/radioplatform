@@ -227,10 +227,10 @@ async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
 
     air = live_relay.airs.get(str(station_id))
     # Open too in the last second before the show is first heard (the engine is told
-    # to go quiet then, `on_soon`): silence is sent until the first words. Answering
-    # 204 until then made the engine come back a second later and connect only after
-    # the show had begun: 2.3 s of silence on the stream at every take-over
-    # (KBR Jerusalem, 2026-11-18).
+    # of the show then, `on_soon`): the answer waits, empty, for the first words.
+    # Answering 204 until then made the engine come back a second later and connect
+    # only after the show had begun (KBR Jerusalem, 2026-11-18). The engine keeps its
+    # music until this feed has audio (radio.liq, /live).
     about_to = air is not None and air.told_soon and not air.finishing
     if air is None or air.closed or not (air.listening or about_to):
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
@@ -247,20 +247,10 @@ async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
 
         async def feed():
             try:
-                started = False
                 while True:
-                    if started:
-                        data = await tap.get()
-                    else:
-                        try:
-                            data = await asyncio.wait_for(tap.get(), 0.1)
-                        except asyncio.TimeoutError:
-                            # Not heard yet: silence in real time keeps the reader connected
-                            # and decoding, so the first words follow without a gap
-                            proc.stdin.write(bytes(int(RATE * 0.1) * 2))
-                            await proc.stdin.drain()
-                            continue
-                        started = True
+                    # (Nothing is sent until the first words: the engine keeps its music
+                    # until this feed has audio, so silence here would be dead air)
+                    data = await tap.get()
                     if data is None:
                         break
                     proc.stdin.write(data)
