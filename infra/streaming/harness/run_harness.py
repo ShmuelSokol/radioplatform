@@ -2962,9 +2962,11 @@ async def sc_engine_crash_restart(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s after the restart")
 
 
-async def _restart_near_hour(h: Harness, name: str, what: str, lead: float, allowed: float) -> None:
-    await wait_music(h)
-    due = at(60)
+async def _restart_near_hour(h: Harness, name: str, what: str, lead: float, allowed: float,
+                             due: datetime | None = None, sound_within: float | None = None) -> None:
+    if due is None:
+        await wait_music(h)
+        due = at(60)
     await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
     await asyncio.sleep(max(0, due.timestamp() - time.time() - lead))
     t_kill = time.time()
@@ -2983,6 +2985,13 @@ async def _restart_near_hour(h: Harness, name: str, what: str, lead: float, allo
     names = [n for _, n in tl]
     runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
     first = next((t for t, n in tl if n == clock), None)
+    if sound_within is not None:
+        # The engine is back at the start of its new recording (wav_t0): station sound then
+        back = [(t, n) for t, n in timeline(h.heard(t_from, due.timestamp())) if n != "silence"]
+        h.check(name, bool(back) and back[0][0] - t_from <= sound_within and back[0][1].startswith("song"),
+                f"a song as soon as the engine is back: "
+                f"{'nothing before the time check' if not back else f'{back[0][1]} after {back[0][0] - t_from:.1f} s'}"
+                f" (allowed {sound_within:.0f} s)")
     late = None if first is None else first - due.timestamp()
     h.check(name, late is not None and -1.0 <= late <= allowed,
             f"{what} restarted {due.timestamp() - t_kill:.0f} s before the time check and was back "
@@ -3001,6 +3010,31 @@ async def sc_engine_restart_15s_before_hour(h: Harness) -> None:
     """V1-30: the engine restarts 15 s before a hard time check that was already handed over.
     The backend hands it over again and it airs once, on its second."""
     await _restart_near_hour(h, "engine_restart_15s_before_hour", "engine", 15, 2.0)
+
+
+async def sc_engine_restart_song_ends_before_hour(h: Harness) -> None:
+    """PR 308: the engine restarts 30 s before a hard time check while the song the site
+    still shows as playing was due to end 4 s before it. That stale entry must not make the
+    backend hold the restarted engine back (hold-before-hard-item): a song starts as soon as
+    the engine is back, no emergency music meanwhile, and the time check airs once, on its
+    second."""
+    await wait_music(h)
+    end = None
+    for _ in range(90):
+        cur = await h.on_air()
+        if cur is not None and cur.started_at is not None:
+            end = cur.started_at.timestamp() + float(cur.asset.duration or TONES["song1"][1])
+            if 28.0 <= end - time.time() <= 39.0:
+                break
+        end = None
+        await asyncio.sleep(1)
+    h.check("engine_restart_song_ends_before_hour", end is not None,
+            "found a song on air with 28 to 39 s left to set the time check behind")
+    if end is None:
+        return
+    due = datetime.fromtimestamp(end + 4.0, UTC)
+    await _restart_near_hour(h, "engine_restart_song_ends_before_hour", "engine", 30, 2.0, due=due,
+                             sound_within=3.0)
 
 
 async def sc_engine_restart_across_hour(h: Harness) -> None:
@@ -3254,6 +3288,7 @@ SCENARIOS = {
     "live_show_quiet": sc_live_show_quiet,
     "speech_never_overlaps": sc_speech_never_overlaps,
     "engine_restart_15s_before_hour": sc_engine_restart_15s_before_hour,
+    "engine_restart_song_ends_before_hour": sc_engine_restart_song_ends_before_hour,
     "engine_restart_across_hour": sc_engine_restart_across_hour,
     "backend_restart_before_hour": sc_backend_restart_before_hour,
     "next_after_idle": sc_next_after_idle,
