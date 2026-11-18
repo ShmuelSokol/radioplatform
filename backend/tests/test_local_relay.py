@@ -274,6 +274,144 @@ def test_offline_blackout_is_silence_and_music_returns_after(rig):
     assert _next(relay)[1]["entry_id"] == "song"
 
 
+def test_box_setup_script_writes_only_settings_the_engine_and_relay_read():
+    """infra/local/setup-box.sh: a setting it writes under a name nothing reads would be
+    silently ignored on the box (a sound card that never plays, a relay on the wrong port)."""
+    import re
+    import subprocess
+
+    infra = Path(__file__).resolve().parents[2] / "infra"
+    script = infra / "local" / "setup-box.sh"
+    text = script.read_text()
+    assert subprocess.run(["bash", "-n", str(script)]).returncode == 0
+    engine_reads = set(re.findall(r'"(KBR_[A-Z_]+)"', (infra / "streaming" / "radio.liq").read_text()))
+    relay_reads = set(re.findall(r'"(KBR_[A-Z_]+)"', (infra / "local" / "kbr_relay.py").read_text()))
+
+    def written(start: str, end: str) -> set[str]:
+        block = text[text.index(start):]
+        return set(re.findall(r"^(KBR_[A-Z_]+)=", block[:block.index(end)], re.M))
+    engine_env = written('cat > "$ENV_FILE" <<ENV', "\nENV\n") | written('cat > "$STATION_ENV" <<SENV', "\nSENV\n")
+    # Icecast's own two passwords are kept there between runs; the engine does not read them
+    assert engine_env - engine_reads == {"KBR_ICECAST_RELAY_PASSWORD", "KBR_ICECAST_ADMIN_PASSWORD"}
+    assert {"KBR_ALSA_DEVICE", "KBR_BACKEND_URL", "KBR_STATION_ID", "KBR_PLAYOUT_TOKEN"} <= engine_env
+    relay_env = written('cat > "$RELAY_ENV" <<RENV', "\nRENV\n")
+    assert relay_env <= relay_reads and {"KBR_UPSTREAM_URL", "KBR_STATION_ID", "KBR_PLAYOUT_TOKEN"} <= relay_env
+    # The engine asks the relay on the box, on the relay's own port
+    assert "KBR_BACKEND_URL=http://127.0.0.1:${RELAY_PORT}/api/v1" in text
+    # The engine is ordered after the relay by the box's drop-in, not by the shared unit
+    assert "After=kbr-relay.service sound.target" in text
+    assert "kbr-relay" not in (infra / "streaming" / "kbr-engine@.service").read_text()
+
+
+def _again(fake, relay, clock):
+    """The relay after the box was switched off and on: only what is on the disk."""
+    again = kbr_relay.Relay(upstream=fake.base + "/api/v1", station_id="sid", token=TOKEN,
+                            data_dir=relay.dir, engine_control=fake.base, clock=lambda: clock["now"])
+    again.online = False
+    return again
+
+
+def test_power_cut_after_the_time_check_was_handed_over_hands_it_again(rig):
+    """The engine lost its timed lane with the power. The relay's note "already sent"
+    survived on disk, so without the engine's hello clearing it the time check never aired."""
+    fake, relay, clock = rig
+    at = clock["now"] + 40
+    fake.plan = {"blackouts": [], "entries": [
+        fake.entry("a", 1), fake.entry("time", 2, at=at, mode="hard", kind="time"), fake.entry("b", 3)]}
+    relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    relay.sync_plan()
+    assert _next(relay)[1]["entry_id"] == "a"
+    assert relay.hand_over_timed() == 1
+    # Power cut. Half-written files of the last moment lie about; the box starts again
+    (relay.dir / "state.json.part").write_text('{"done": ["a"')
+    (relay.dir / "plan.json.part").write_text("")
+    clock["now"] += 20
+    again = _again(fake, relay, clock)
+    assert again.hand_over_timed() == 0  # nothing yet: as far as the disk says it was sent
+    assert again.hello(b'{"proto":2}')[0] == 200  # the engine starts and says so
+    assert again.hand_over_timed() == 1
+    assert [t["id"] for t in fake.timed] == ["time", "time"]
+    assert json.loads(again.offline_next()[1])["entry_id"] == "b"
+    assert again.offline_next()[0] == 204
+    assert "a" in again.done  # what aired before the cut is not played again
+
+
+def test_power_cut_with_unreadable_files_starts_empty_not_broken(rig):
+    fake, relay, clock = rig
+    fake.plan = {"blackouts": [], "entries": [fake.entry("a", 1)]}
+    relay.sync_plan()
+    (relay.dir / "plan.json").write_text('{"entries": [{"entry_')
+    (relay.dir / "state.json").write_bytes(b"\x00" * 64)
+    (relay.dir / "spool.jsonl").write_text('{"entry_id": "x", "lane": "main", "at": 5, "kept": true}\n{"entry_id": "y", "la')
+    again = _again(fake, relay, clock)
+    assert again.offline_next() == (204, b"")  # the engine plays its emergency folder
+    assert again.status()["reports_kept"] == 2
+    fake.up = True
+    assert again.sync_plan()
+    again.catch_up()  # the torn line goes up as it is and is refused there; it does not block the rest
+    assert again.status()["reports_kept"] == 0
+    again.fetch_plan_audio()
+    again.online = False
+    assert json.loads(again.offline_next()[1])["entry_id"] == "a"
+
+
+def test_sponsorships_from_before_a_long_power_cut_do_not_air_in_a_row(rig):
+    fake, relay, clock = rig
+    now = clock["now"]
+    fake.plan = {"blackouts": [], "entries": [
+        fake.entry("spot1", 1, at=now + 900, mode="soft", kind="spot"),
+        fake.entry("spot2", 2, at=now + 2700, mode="soft", kind="spot"),
+        fake.entry("spot3", 3, at=now + 3 * 3600 - 600, mode="soft", kind="spot"),
+        fake.entry("song", 4),
+    ]}
+    relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    clock["now"] = now + 3 * 3600  # three hours without power
+    again = _again(fake, relay, clock)
+    assert json.loads(again.offline_next()[1])["entry_id"] == "spot3"  # ten minutes late: still airs
+    assert json.loads(again.offline_next()[1])["entry_id"] == "song"
+    assert {"spot1", "spot2"} <= set(again.done)
+
+
+def test_clock_not_set_after_a_power_cut_plays_music_only(rig):
+    """No internet and a flat clock battery: the computer wakes up in the past. A time
+    check would say the wrong hour, so nothing timed airs until the clock is right; a
+    blackout that had begun when the plan was fetched is still kept."""
+    fake, relay, clock = rig
+    now = clock["now"]
+    fake.plan = {"generated_at": now, "blackouts": [], "entries": [
+        fake.entry("time", 1, at=now - 86400 + 30, mode="hard", kind="time"),
+        fake.entry("spot", 2, at=now - 86400 - 60, mode="soft", kind="spot"),
+        fake.entry("song", 3),
+    ]}
+    relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    clock["now"] = now - 86400  # a day behind
+    again = _again(fake, relay, clock)
+    assert not again.clock_ok() and again.status()["clock_ok"] is False
+    assert again.hand_over_timed() == 0 and fake.timed == []
+    assert json.loads(again.offline_next()[1])["entry_id"] == "song"
+    assert "spot" not in again.done and "time" not in again.done
+    # A minute or two behind is an ordinary clock
+    clock["now"] = now - 60
+    assert again.clock_ok()
+    # Shabbos had begun when the plan was fetched: silence, whatever the clock says
+    clock["now"] = now
+    fake.up = True
+    fake.plan = {"generated_at": now, "blackouts": [{"start": now - 10, "end": now + 9000, "name": "Shabbos"}],
+                 "entries": [fake.entry("song2", 1)]}
+    relay.sync_plan()
+    relay.fetch_plan_audio()
+    fake.up = False
+    clock["now"] = now - 86400
+    again = _again(fake, relay, clock)
+    assert again.offline_next()[1].endswith(b'silence-60s.wav", "entry_id": ""}')
+
+
 def test_start_reports_are_kept_and_sent_in_order_when_the_line_returns(rig):
     fake, relay, clock = rig
     fake.up = False

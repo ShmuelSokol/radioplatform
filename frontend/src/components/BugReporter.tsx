@@ -153,13 +153,14 @@ export default function BugReporter() {
           onClick={start}
           title="Report a bug"
           aria-label="Report a bug"
-          className={`fixed left-3 bottom-24 z-[60] h-9 w-9 rounded-full ${hideFloating ? 'hidden' : 'flex'} bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden`}
+          // Phone: right edge, where cards have no text (on the left it covered their labels and the Library checkboxes)
+          className={`fixed right-3 sm:right-auto sm:left-3 bottom-24 z-[60] h-9 w-9 rounded-full ${hideFloating ? 'hidden' : 'flex'} bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden`}
         >
           <span aria-hidden>🐞</span>
         </button>
       )}
       {phase === 'capturing' && (
-        <div className="fixed left-3 bottom-24 z-[60] rounded-full bg-gray-800 px-3 py-2 text-xs text-gray-200 shadow-lg">
+        <div className="fixed right-3 sm:right-auto sm:left-3 bottom-24 z-[60] rounded-full bg-gray-800 px-3 py-2 text-xs text-gray-200 shadow-lg">
           Capturing the screen…
         </div>
       )}

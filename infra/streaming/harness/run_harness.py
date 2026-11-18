@@ -266,14 +266,33 @@ class Stack:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         data = self.dir / "relay"
-        data.mkdir()
+        data.mkdir(exist_ok=True)
         self.relay = mod.Relay(
             upstream=f"http://127.0.0.1:{BACKEND_PROXY_PORT}/api/v1", station_id=str(STATION_ID),
             token=TOKEN, data_dir=data, engine_control=f"http://127.0.0.1:{CONTROL_PORT}",
         )
         self.relay.silence_file()
-        self.servers.append(mod.serve(self.relay, RELAY_PORT))
+        self.relay_server = mod.serve(self.relay, RELAY_PORT)
+        self.servers.append(self.relay_server)
         self.relay.run_background(plan_every=5.0)
+
+    def stop_relay(self) -> None:
+        """The relay gone at once, as with the power: nothing is saved on the way out."""
+        self.relay.stop.set()
+        self.relay_server.shutdown()
+        self.relay_server.server_close()
+        self.servers.remove(self.relay_server)
+
+    def kill_engine(self) -> None:
+        """The engine gone at once (SIGKILL): no fade, no goodbye."""
+        p = self.engine
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except Exception:
+            pass
+        p.wait(timeout=10)
+        self.procs.remove(p)
+        self.wav.unlink(missing_ok=True)
 
     def _serve(self, handler, port: int) -> None:
         srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
@@ -2022,6 +2041,98 @@ async def sc_local_box_sound_card(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence on the card {gap:.1f} s")
 
 
+async def sc_local_box_power_loss(h: Harness) -> None:
+    """The local FM box loses power with its line down (needs --local-box): the engine and
+    the relay die at once, 10 s after a hard time check was handed to the engine, and
+    both start again from what is on the disk, still with no internet. Station music is
+    back within seconds of the engine starting, the song that was on air is not played
+    again, the time check airs once on its second, nothing from the emergency folder
+    after the first seconds; when the line returns the site learns what aired."""
+    name = "local_box_power_loss"
+    if h.stack.relay is None:
+        h.check(name, False, "run with --local-box")
+        return
+    await wait_music(h)
+    await h.queue([("song5", {}), ("song6", {})])
+    due_dt = at(110)
+    due = due_dt.timestamp()
+    ids = await h.queue([("time", {"preempt_at": due_dt, "timing_mode": "hard", "source": "auto"})])
+    time_id = str(ids[0])
+    relay = h.stack.relay
+
+    def copied() -> bool:
+        st = relay.status()
+        timed = [e for e in relay.plan.get("entries", []) if e.get("at") and abs(e["at"] - due) < 1]
+        return st["plan_audio_missing"] == 0 and bool(timed) and st["plan_entries"] >= 5
+    try:
+        wait_for(copied, 30, "the relay's copy of the plan and its audio")
+    except Exception as e:
+        h.check(name, False, f"plan not copied: {e!r} {relay.status()}")
+        return
+    cut = time.time()
+    h.stack.backend_down = h.stack.control_down = True
+    try:
+        # The relay hands the time check to the engine 45 s ahead; the power goes after that
+        try:
+            wait_for(lambda: time_id in relay.timed_sent, due - time.time() - 30, "the time check handed over")
+        except Exception as e:
+            h.check(name, False, f"time check not handed to the engine before the cut: {e!r}")
+            return
+        before = timeline(h.heard(cut, time.time() - 1))
+        on_air_before = [n for _, n in before if n.startswith("song")][-1:]
+        planned = [str(e.get("title") or "").split(" ")[0] for e in relay.plan.get("entries", [])
+                   if not e.get("at") and e["entry_id"] not in set(relay.done)]
+        await asyncio.sleep(max(0, due - 35 - time.time()))
+        power_off = time.time()
+        h.stack.kill_engine()
+        h.stack.stop_relay()
+        # What a cut in the middle of a write leaves behind
+        (h.stack.dir / "relay" / "state.json.part").write_text('{"done": [')
+        await asyncio.sleep(3)
+        h.stack.start_relay()   # reads plan.json and state.json, nothing else
+        h.stack.start_engine()  # returns when the engine writes sound
+        relay = h.stack.relay
+        power_on = time.time()
+        log(f"    power off {power_off - due:+.1f}s, engine writing again {power_on - due:+.1f}s")
+        await asyncio.sleep(max(0, due - time.time()) + 6 + 40)
+        heard = h.heard(power_on, time.time() - 1)
+    finally:
+        h.stack.backend_down = h.stack.control_down = False
+    back = time.time()
+    h.print_timeline(heard, due)
+    line = timeline(heard)
+    names = [n for _, n in line]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    h.check(name, power_on < due - 3, f"the box was up again {due - power_on:.0f} s before the time check")
+    music = [t for t, n in line if n.startswith("song")]
+    h.check(name, bool(music) and music[0] - power_on <= 8.0,
+            f"station music {music[0] - power_on:.1f} s after the engine started" if music else "no station music")
+    late_emergency = [round(t - power_on, 1) for t, n in line if n == "EMERGENCY" and t - power_on > 8.0]
+    h.check(name, not late_emergency, f"no emergency files after the first seconds: {late_emergency or runs}")
+    starts = [t for t, n in line if n == "time"]
+    h.check(name, bool(starts) and abs(starts[0] - due) <= 1.0,
+            f"time check heard {starts[0] - due:+.2f} s from its second" if starts else "time check never aired")
+    h.check(name, runs.count("time") == 1, f"time check aired once: {runs}")
+    songs = [n for n in runs if n.startswith("song")]
+    h.check(name, bool(songs) and songs[0] not in on_air_before,
+            f"the song on air at the cut ({on_air_before}) did not start again: {songs}")
+    def follows_plan(seq: list[str]) -> bool:
+        return any(planned[i:i + len(seq)] == seq for i in range(len(planned)))
+    h.check(name, len(songs) >= 2 and follows_plan(songs), f"songs in the plan's order: {songs} (plan {planned[:6]})")
+    gap, _ = longest_silence(h.heard(power_on + 8, back - 1))
+    h.check(name, gap <= 1.0, f"longest silence once it was up {gap:.1f} s")
+    try:
+        wait_for(lambda: relay.status()["online"] and relay.status()["reports_kept"] == 0, 40, "reports sent")
+    except Exception as e:
+        h.check(name, False, f"start reports not delivered: {e!r} {relay.status()}")
+    await asyncio.sleep(20)
+    times = await h.started_times("time", cut)
+    h.check(name, len(times) == 1 and abs(times[0][0] - due) <= 2.0,
+            f"the site recorded the time check once, at its time: {[round(t[0] - due, 1) for t in times]}")
+    late = [n for _, n in timeline(h.heard(back, time.time() - 1))]
+    h.check(name, "time" not in late, f"the time check did not air again when the line came back: {late[:4]}")
+
+
 async def sc_local_box_offline(h: Harness) -> None:
     """The local FM box with its line cut both ways (needs --local-box): the queue plays
     on in order from the box's own disk, a hard time check airs on the second, nothing
@@ -2930,6 +3041,7 @@ SCENARIOS = {
     "backend_unreachable": sc_backend_unreachable,
     "local_box_commands": sc_local_box_commands,
     "local_box_offline": sc_local_box_offline,
+    "local_box_power_loss": sc_local_box_power_loss,
     "local_box_sound_card": sc_local_box_sound_card,
     "control_endpoints": sc_control_endpoints,
     "slow_timed_file": sc_slow_timed_file,

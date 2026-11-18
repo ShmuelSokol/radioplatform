@@ -118,6 +118,33 @@ function rememberStation(id: string) {
   try { localStorage.setItem('radio_last_station', id); } catch { /* private mode */ }
 }
 
+/** A list that is loading says so; one that is slow or failed says that, with a way to try again
+ *  (the Databank sat on "Loading" with no word for as long as the server took, 2026-11-18). */
+function ListWait({ q, what }: { q: { isLoading: boolean; isError: boolean; isFetching: boolean; refetch: () => unknown }; what: string }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!q.isLoading) { setSlow(false); return; }
+    const t = setTimeout(() => setSlow(true), 4000);
+    return () => clearTimeout(t);
+  }, [q.isLoading]);
+  if (q.isError) {
+    return (
+      <p className="p-3 font-normal" role="alert" data-testid="databank-error">
+        Could not load {what}. The server did not answer or reported an error.{' '}
+        <button type="button" className="qn-btn h-11 lg:h-8 px-3 text-sm" onClick={() => q.refetch()} disabled={q.isFetching}>
+          {q.isFetching ? 'Trying…' : 'Try again'}
+        </button>
+      </p>
+    );
+  }
+  if (!q.isLoading) return null;
+  return (
+    <p className="p-3 font-normal" data-testid={slow ? 'databank-slow' : 'databank-loading'}>
+      {slow ? `Still loading ${what}. The server is answering slowly; it is still being asked.` : 'Loading…'}
+    </p>
+  );
+}
+
 export default function Databank() {
   const qc = useQueryClient();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -177,6 +204,7 @@ export default function Databank() {
     queryFn: () => listDbItems({ asset_type: assetType, station_id: stationId || undefined, search, category, files, sort, desc, skip: page * PAGE, limit: PAGE }),
     enabled: itemsTab,
     placeholderData: prev => prev,
+    retry: 1,   // one more try, then say it failed (three took 7 s of silence)
   });
   const totalQ = useQuery({
     queryKey: ['databank-total', assetType],
@@ -188,6 +216,7 @@ export default function Databank() {
     queryKey: ['databank-spots', stationId],
     queryFn: () => listDbSpots(stationId || undefined),
     enabled: tab === 'spots',
+    retry: 1,
   });
   const blocksQ = useQuery({
     queryKey: ['program-blocks', stationId],
@@ -406,8 +435,8 @@ export default function Databank() {
           </div>
         ))
       )}
-      {itemsQ.isLoading && <p className="p-3 font-normal">Loading…</p>}
-      {!itemsQ.isLoading && items.length === 0 && <p className="p-3 font-normal">{search || category || files !== 'all' ? 'Nothing matches.' : 'Nothing here yet.'}</p>}
+      <ListWait q={itemsQ} what="the list" />
+      {!itemsQ.isLoading && !itemsQ.isError && items.length === 0 && <p className="p-3 font-normal">{search || category || files !== 'all' ? 'Nothing matches.' : 'Nothing here yet.'}</p>}
     </div>
   );
 
@@ -457,8 +486,8 @@ export default function Databank() {
           </div>
         );
       })}
-      {spotsQ.isLoading && <p className="p-3 font-normal">Loading…</p>}
-      {!spotsQ.isLoading && spots.length === 0 && <p className="p-3 font-normal">{(spotsQ.data?.spots.length ?? 0) > 0 ? 'Nothing matches.' : 'No spots in the library yet.'}</p>}
+      <ListWait q={spotsQ} what="the spots" />
+      {!spotsQ.isLoading && !spotsQ.isError && spots.length === 0 && <p className="p-3 font-normal">{(spotsQ.data?.spots.length ?? 0) > 0 ? 'Nothing matches.' : 'No spots in the library yet.'}</p>}
     </div>
   );
 

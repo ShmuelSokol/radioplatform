@@ -68,5 +68,6 @@ export function useWeatherTemplatePreview(stationId: string | undefined, templat
     queryKey: ['weather-template-preview', stationId, template],
     queryFn: () => getTemplatePreview(stationId!, template),
     enabled: !!stationId,
+    retry: false,   // "no weather right now" is an answer: say so at once, do not go quiet for 7 s
   });
 }
