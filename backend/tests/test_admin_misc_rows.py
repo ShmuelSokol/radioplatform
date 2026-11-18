@@ -759,7 +759,8 @@ async def test_rds_shows_the_station_name_during_a_live_show(client, db_session,
     from app.models.live_show import LiveShow, LiveShowStatus
     from app.services import live_show_service
 
-    st = Station(id=uuid.uuid4(), name="Kol B'ramah Live", timezone="UTC")
+    st = Station(id=uuid.uuid4(), name="Kol B'ramah Live", timezone="UTC",
+                 automation_config={"live_delay_seconds": 0})  # no broadcast delay: the show takes the air at once
     song = Asset(id=uuid.uuid4(), title="Song", artist="Singer", duration=200, file_path="https://c/s.mp3", asset_type="music")
     db_session.add_all([st, song])
     await db_session.flush()

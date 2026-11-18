@@ -43,7 +43,8 @@ def _quiet(monkeypatch):
 
 
 async def _browser_station(db, *, on_air_kind="music", on_air_duration=200.0, songs=3, **on_air_fields):
-    station = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem")
+    station = Station(id=uuid.uuid4(), name="KBR Jerusalem", timezone="Asia/Jerusalem",
+                      automation_config={"live_delay_seconds": 0})  # no broadcast delay: a show takes the air at once
     db.add(station)
     on_air_asset = Asset(id=uuid.uuid4(), title="On air", duration=on_air_duration,
                          file_path="https://cdn.example.com/on-air.mp3", asset_type=on_air_kind)

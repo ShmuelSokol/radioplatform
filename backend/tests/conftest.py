@@ -304,7 +304,12 @@ def clock_off_the_slots(monkeypatch):
         def utcnow(cls):
             return pinned.replace(tzinfo=None)
 
+    # Not app.core.security: a sign-in token's expiry would come from the pinned time, while
+    # the token check uses the real clock, so after hh:35 every request answered 401
+    # (CI at 14:42Z 2026-11-18)
     for name, mod in list(sys.modules.items()):
+        if name == "app.core.security":
+            continue
         if name.split(".")[0] in ("app", "tests") and getattr(mod, "datetime", None) is real:
             monkeypatch.setattr(mod, "datetime", Pinned)
     return pinned

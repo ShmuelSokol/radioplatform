@@ -23,6 +23,8 @@ from app.schemas.live_show import (
     CallInRequestInDB,
     CallInRequestListResponse,
     ScreenerAction,
+    DumpRequest,
+    DelayRequest,
 )
 from app.services import live_show_service
 from app.config import settings
@@ -163,6 +165,176 @@ async def time_remaining(
     return {"seconds": seconds}
 
 
+# --- Broadcast delay: Dump, exit, build (services/live_air.py) ---
+
+def _air_of(show) -> "object | None":
+    from app.api.v1.live_shows_ws import live_relay
+    air = live_relay.airs.get(str(show.station_id))
+    return air if air is not None and air.show_id == str(show.id) and not air.closed else None
+
+
+async def _show_or_404(db: AsyncSession, show_id: uuid.UUID):
+    show = await live_show_service.get_show(db, show_id)
+    if not show:
+        raise NotFoundError("Live show not found")
+    return show
+
+
+@router.get("/{show_id}/air")
+async def air_status(
+    show_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """The show's broadcast delay now: how full, building or steady, safe to Dump."""
+    show = await _show_or_404(db, show_id)
+    air = _air_of(show)
+    if air is None:
+        from app.models.station import Station
+        from app.services.live_air import settings_for
+        station = await db.get(Station, show.station_id)
+        delay, dump, _rule = settings_for(station.automation_config if station else None)
+        return {"mode": "off", "on_air": False, "delay": 0.0, "target": delay, "configured": delay,
+                "dump_size": dump, "safe": False, "dumps": 0, "show_id": str(show.id)}
+    return air.status()
+
+
+@router.post("/{show_id}/dump")
+async def dump(
+    show_id: uuid.UUID,
+    body: DumpRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_dj_or_manager),
+):
+    """Dump: cut what was just said before listeners hear it. The newest audio waiting in
+    the delay is thrown away and the delay builds back by itself. With `drop_caller` the
+    caller on air is taken off as well."""
+    show = await _show_or_404(db, show_id)
+    air = _air_of(show)
+    if air is None:
+        raise HTTPException(status_code=409, detail="The show is not on air: there is nothing to dump")
+    if air.configured <= 0 and air.buffered <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="This show has no broadcast delay, so listeners have already heard it. Build the delay first.")
+    if air.buffered < 0.05:
+        raise HTTPException(
+            status_code=409,
+            detail="Nothing is waiting in the delay right now, so there is nothing to cut. It is still building back.")
+    cut = air.dump()
+    dropped = []
+    dropped_name = None
+    if body is not None and body.drop_caller:
+        for call in await live_show_service.get_show_calls(db, show_id):
+            if call.status == CallStatus.ON_AIR:
+                dropped_name = call.caller_name or call.caller_phone
+                await live_show_service.end_call(db, call.id)
+                dropped.append(str(call.id))
+        for call_id in dropped:
+            await _tell_web_caller(call_id, "completed")
+            try:
+                from app.api.v1.live_shows_ws import broadcast_show_event
+                await broadcast_show_event(str(show_id), "caller_removed", {"call_id": call_id, "reason": "dumped"})
+            except Exception:
+                pass
+    # The dump log: who, when, how much, and a recording of what was cut
+    from app.models.live_dump import LiveDump
+    from app.services.live_air import RATE as _RATE
+    heard, cut_pcm = air.last_dump or ((), ())
+    record = LiveDump(
+        id=uuid.uuid4(), live_show_id=show.id, station_id=show.station_id, user_id=user.id,
+        user_email=user.email, dumped_at=datetime.now(timezone.utc), cut_seconds=round(cut, 2),
+        heard_seconds=round(len(heard) / _RATE, 2), caller_name=dropped_name,
+    )
+    record.file_path = f"live-dumps/{show.id}/{record.id}.wav"
+    db.add(record)
+    await db.flush()
+    import asyncio as _asyncio
+    _dump_saves.add(task := _asyncio.ensure_future(
+        live_show_service.save_dump_audio(record.file_path, heard, cut_pcm)))
+    task.add_done_callback(_dump_saves.discard)
+    logger.warning("DUMP on live show %s by %s: %.1f s cut%s", show_id, user.email, cut,
+                   f", caller(s) dropped: {dropped}" if dropped else "")
+    status = air.status()
+    try:
+        from app.api.v1.live_shows_ws import broadcast_show_event
+        await broadcast_show_event(str(show_id), "air_dump", {"seconds": round(cut, 1), "by": user.email,
+                                                              "dropped_callers": dropped})
+        await broadcast_show_event(str(show_id), "air_status", status)
+    except Exception:
+        pass
+    return {"dumped_seconds": round(cut, 1), "dropped_callers": dropped, "air": status, "dump_id": str(record.id)}
+
+
+_dump_saves: set = set()  # recordings being stored (kept so the tasks are not collected)
+
+
+@router.get("/{show_id}/dumps")
+async def list_dumps(
+    show_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """The show's dump log, newest first."""
+    from app.models.live_dump import LiveDump
+    rows = (await db.execute(
+        select(LiveDump).where(LiveDump.live_show_id == show_id).order_by(LiveDump.dumped_at.desc())
+    )).scalars().all()
+    return {"dumps": [{
+        "id": str(d.id), "dumped_at": d.dumped_at.isoformat() if d.dumped_at else None,
+        "by": d.user_email, "cut_seconds": d.cut_seconds, "heard_seconds": d.heard_seconds,
+        "caller_name": d.caller_name, "has_audio": bool(d.file_path),
+    } for d in rows]}
+
+
+@router.get("/{show_id}/dumps/{dump_id}/audio")
+async def dump_audio(
+    show_id: uuid.UUID,
+    dump_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """The recording of one Dump: what listeners heard just before it, a short gap,
+    then what was cut. Staff only: this is the audio that was kept off the air."""
+    from app.models.live_dump import LiveDump
+    from app.services.storage_service import download_file
+    d = await db.get(LiveDump, dump_id)
+    if d is None or str(d.live_show_id) != str(show_id) or not d.file_path:
+        raise NotFoundError("Dump not found")
+    try:
+        data = await download_file(d.file_path)
+    except Exception:
+        raise HTTPException(status_code=404, detail="The recording of this dump is not stored (yet). Try again in a moment.")
+    return Response(content=data, media_type="audio/wav", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/{show_id}/delay")
+async def set_delay(
+    show_id: uuid.UUID,
+    body: DelayRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_dj_or_manager),
+):
+    """Change the delay during the show: `exit` winds it down to none (really live),
+    `build` brings it back, `seconds` sets a new length for this show."""
+    show = await _show_or_404(db, show_id)
+    air = _air_of(show)
+    if air is None:
+        raise HTTPException(status_code=409, detail="The show is not on air yet: start broadcasting first")
+    if body.action == "exit":
+        air.exit_delay()
+    else:
+        air.enter_delay(body.seconds)
+    logger.info("Live show %s: delay %s by %s (now steering to %.0f s)", show_id, body.action, user.email, air.target)
+    status = air.status()
+    try:
+        from app.api.v1.live_shows_ws import broadcast_show_event
+        await broadcast_show_event(str(show_id), "air_status", status)
+    except Exception:
+        pass
+    return status
+
+
 # --- Call management ---
 
 async def _tell_web_caller(call_id, status: str) -> None:
@@ -237,10 +409,23 @@ async def reject_call(
 async def put_on_air(
     show_id: uuid.UUID,
     call_id: uuid.UUID,
+    force: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    """Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted)."""
+    """Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted).
+    While the show's delay is not full enough to Dump a caller, 409 as well unless `force`."""
+    show = await live_show_service.get_show(db, show_id)
+    air = _air_of(show) if show else None
+    if air is not None and not force and air.configured > 0:
+        status = air.status()
+        if not status["safe"]:
+            need = air.dump_size if 0 < air.dump_size < air.configured else air.configured
+            raise HTTPException(status_code=409, detail={
+                "code": "delay_not_safe",
+                "message": (f"The delay is not safe yet: {air.buffered:.0f} s of {need:.0f} s. "
+                            "A caller put on air now could not be fully dumped."),
+            })
     call = await live_show_service.put_caller_on_air(db, show_id, call_id)
     if not call:
         raise NotFoundError("Call not found")

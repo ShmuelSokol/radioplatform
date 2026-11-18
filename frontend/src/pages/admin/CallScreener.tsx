@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
-import { approveCall, rejectCall, putCallerOnAir, endCall, updateCallInfo } from '../../api/liveShows';
+import { approveCall, rejectCall, putCallerOnAirAsking, endCall, updateCallInfo } from '../../api/liveShows';
 import type { CallInRequest } from '../../api/liveShows';
+import DelayPanel from './live/DelayPanel';
 
 export default function CallScreener() {
   const { showId } = useParams<{ showId: string }>();
-  const { show, callers, secondsRemaining, isConnected } = useLiveShowWS(showId);
+  const { show, callers, secondsRemaining, isConnected, air, lastDump } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [nameValue, setNameValue] = useState('');
@@ -30,11 +31,8 @@ export default function CallScreener() {
 
   const handlePutOnAir = async (callId: string) => {
     if (!showId) return;
-    try {
-      await putCallerOnAir(showId, callId);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed — another caller may be on air');
-    }
+    const problem = await putCallerOnAirAsking(showId, callId);
+    if (problem) alert(problem);
   };
 
   const handleEndCall = async (callId: string) => {
@@ -66,7 +64,7 @@ export default function CallScreener() {
             <span className="text-sm text-gray-400">{currentShow?.title}</span>
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-500'}`} />
             {currentShow?.status === 'live' && (
-              <span className="text-[10px] bg-red-700 text-red-200 px-2 py-0.5 rounded-full animate-pulse uppercase font-bold">
+              <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse uppercase font-bold">
                 LIVE
               </span>
             )}
@@ -80,6 +78,10 @@ export default function CallScreener() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="mb-6 max-w-md">
+        <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={!!onAirCaller} compact />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

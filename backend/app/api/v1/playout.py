@@ -164,3 +164,76 @@ async def started(
     logger.info("Start report station=%s entry=%s lane=%s answered in %d ms", station_id,
                 body.entry_id or "-", body.lane or "-", (time.monotonic() - t0) * 1000)
     return result
+
+
+# The show goes out as MP3 for the engine's live lane (agreed with the engine thread
+# 2026-11-18: CBR 192 kbps, 44.1 kHz stereo; engine proto 5 plays it)
+LIVE_MP3_ARGS = ("-f", "mp3", "-codec:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+                 "-write_xing", "0", "-id3v2_version", "0", "-flush_packets", "1")
+
+
+@router.get("/{station_id}/live.mp3")
+async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
+    """The station's live show as listeners hear it (after the broadcast delay, Dumps
+    applied, time checks included), for the playout engine's live lane and a local FM
+    box's relay. 204 while no show is heard; otherwise an MP3 stream that ends when the
+    show's delay has played out. Header token only, so it never lands in an access log."""
+    import asyncio
+
+    from fastapi.responses import StreamingResponse
+
+    from app.api.v1.live_shows_ws import live_relay
+    from app.services.live_air import RATE
+
+    air = live_relay.airs.get(str(station_id))
+    if air is None or not air.listening or air.closed:
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+    tap = air.tap()
+
+    async def stream():
+        proc = await asyncio.create_subprocess_exec(
+            # no probing and no input buffer: without these the first sound left 2 s late
+            "ffmpeg", "-v", "error", "-fflags", "nobuffer", "-probesize", "32", "-analyzeduration", "0",
+            "-f", "s16le", "-ar", str(RATE), "-ac", "1", "-i", "pipe:0",
+            *LIVE_MP3_ARGS, "pipe:1",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+
+        async def feed():
+            try:
+                while True:
+                    data = await tap.get()
+                    if data is None:
+                        break
+                    proc.stdin.write(data)
+                    await proc.stdin.drain()
+            except Exception:
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+
+        feeder = asyncio.ensure_future(feed())
+        try:
+            while True:
+                chunk = await proc.stdout.read(4096)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            air.untap(tap)
+            feeder.cancel()
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+            await proc.wait()
+
+    return StreamingResponse(stream(), media_type="audio/mpeg",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no",
+                                      # keeps the gzip middleware off it: gzip held the audio back
+                                      # in 64 KB lumps (2.7 s) for a client that accepts gzip
+                                      "Content-Encoding": "identity"})
