@@ -17,8 +17,8 @@ export default function ReviewQueues() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Review Queues</h1>
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <h1 className="text-2xl font-bold whitespace-nowrap">Review Queues</h1>
         <p className="text-sm text-gray-500">Select assets on the Assets page to create a queue</p>
       </div>
 

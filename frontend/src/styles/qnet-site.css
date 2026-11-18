@@ -41,6 +41,10 @@
   font-weight: 700;
   letter-spacing: 0;
   padding: 4px 8px;
+  /* one style on every page: the title is as wide as its words (alone on a line it used to
+     stretch into a bar across the page, beside buttons it was a short chip) */
+  width: fit-content;
+  max-width: 100%;
 }
 .qn-site h1 *, .qn-site h1 [class][class] { color: inherit; }
 .qn-site h2, .qn-site h3 { color: #000; font-weight: 700; }
@@ -159,4 +163,26 @@ nav.qn-site .qn-brand:hover { background: transparent; color: #000080; }
 @media (pointer: coarse) and (max-width: 767px) {
   .qn-site main :is(button, a, label)[class*="bg-"]:not([class~="rounded-full"]):not(.qn-plain):not([class*="min-h-"]), .qn-site main select,
   .qn-site main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]) { min-height: 36px; }
+}
+
+/* ── Phone tables: `phone-cards` on a <table> stacks each row as a card under 640 px ──
+   Every cell is a line of the card (`data-label` names it), columns hidden on small
+   screens show again, and the last cell (the actions) is a row of buttons in sight,
+   so nothing is off to the side. See wiki/admin-page-layout.md. */
+@media (max-width: 639px) {
+  table.phone-cards, table.phone-cards > tbody, table.phone-cards > tbody > tr { display: block !important; width: 100%; min-width: 0; }
+  table.phone-cards > thead { display: none !important; }
+  table.phone-cards > tbody > tr { padding: 8px 10px; border-top: 1px solid #808080; }
+  table.phone-cards > tbody > tr > td {
+    display: block !important;
+    width: auto;
+    padding: 2px 0 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    font-size: 13px !important;
+  }
+  table.phone-cards > tbody > tr > td:first-child { font-weight: 700; font-size: 15px; }
+  table.phone-cards > tbody > tr > td[data-label]::before { content: attr(data-label) ": "; font-weight: 400; opacity: 0.75; }
+  table.phone-cards > tbody > tr > td:last-child:not(:first-child) { display: flex !important; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 6px !important; }
 }

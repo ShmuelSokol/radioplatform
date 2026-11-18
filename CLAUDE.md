@@ -490,6 +490,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-landscape.mj
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 
+# Display findings of the page walk-through: Library cells and menus, Esc on dialogs, phone tables as cards, headings, labels
+cd frontend && for s in library-display display-findings; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+
 # Sound in the control room on an iPhone: the Listen button and tap-to-sound time, in Chromium made to follow Safari's tap rule
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound.mjs
 

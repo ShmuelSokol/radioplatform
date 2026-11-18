@@ -183,8 +183,8 @@ export default function Sponsors() {
               </p>
               <p className="text-xs text-gray-400">
                 {s.target_rules?.hour_start ?? 0}:00-{s.target_rules?.hour_end ?? 24}:00
-                · max {s.target_rules?.max_per_hour ?? '?'}/hr
-                · every {s.target_rules?.songs_between ?? '?'} songs
+                {s.target_rules?.max_per_hour != null ? ` · max ${s.target_rules.max_per_hour}/hr` : ' · no hourly limit'}
+                {s.target_rules?.songs_between != null ? ` · every ${s.target_rules.songs_between} songs` : ''}
               </p>
             </div>
             <div className="flex gap-2">

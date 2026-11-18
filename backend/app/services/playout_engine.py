@@ -915,6 +915,9 @@ async def handle_started(
         started = prev.started_at
         if started is not None and started.tzinfo is None:
             started = started.replace(tzinfo=UTC)
+        if started is not None:
+            # A resumed item: the moment it came back on air, not the shifted start
+            started = started + timedelta(seconds=resume_offset(prev))
         if started is not None and (now - started).total_seconds() >= MIN_LOGGED_PLAY_SECONDS:
             db.add(
                 PlayLog(

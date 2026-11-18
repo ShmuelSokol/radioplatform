@@ -84,8 +84,8 @@ export default function Rules() {
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-6 bg-[#080820] font-mono text-[13px] min-h-[calc(100vh-4rem)] flex flex-col text-white p-4 overflow-y-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-cyan-300">Schedule Rules</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <h1 className="text-xl font-bold text-cyan-300 whitespace-nowrap">Schedule Rules</h1>
         <div className="flex gap-2">
           <button onClick={() => setShowPreview(!showPreview)}
             className="px-3 py-1 bg-purple-700 hover:bg-purple-600 text-white text-sm rounded">
@@ -223,7 +223,7 @@ export default function Rules() {
         <div className="text-gray-500 text-center py-8">Loading rules...</div>
       ) : (
         <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-x-auto mb-4">
-          <table className="w-full text-sm">
+          <table className="phone-cards w-full text-sm">
             <thead>
               <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">
                 <th className="text-left px-3 py-2">Name</th>
@@ -241,7 +241,7 @@ export default function Rules() {
               {rules.map(r => (
                 <tr key={r.id} className={`border-t border-[#1a1a3e] hover:bg-[#14143a] ${!r.is_active ? 'opacity-40' : ''}`}>
                   <td className="px-3 py-1.5 text-cyan-300">{r.name}</td>
-                  <td className="px-3 py-1.5 text-[10px]">
+                  <td data-label="Station" className="px-3 py-1.5 text-[10px]">
                     {r.station_id
                       ? <span className="px-1.5 py-0.5 bg-indigo-900 text-indigo-300 rounded">
                           {stations.find(s => s.id === r.station_id)?.name ?? 'Station'}
@@ -251,21 +251,21 @@ export default function Rules() {
                         </span>
                     }
                   </td>
-                  <td className="px-3 py-1.5 text-gray-400 text-[11px]">{r.rule_type}</td>
-                  <td className="px-3 py-1.5">
+                  <td data-label="Type" className="px-3 py-1.5 text-gray-400 text-[11px]">{r.rule_type}</td>
+                  <td data-label="Content" className="px-3 py-1.5">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${TYPE_COLORS[r.asset_type] ?? 'bg-gray-800 text-gray-300'}`}>
                       {r.asset_type}
                     </span>
                     {r.category && <span className="text-[10px] text-gray-500 ml-1">/ {r.category}</span>}
                   </td>
-                  <td className="px-3 py-1.5 text-gray-400 text-[11px] tabular-nums">{r.hour_start}:00–{r.hour_end}:00</td>
-                  <td className="px-3 py-1.5 text-[10px] text-gray-500">
+                  <td data-label="Hours" className="px-3 py-1.5 text-gray-400 text-[11px] tabular-nums">{r.hour_start}:00–{r.hour_end}:00</td>
+                  <td data-label="Days" className="px-3 py-1.5 text-[10px] text-gray-500">
                     {r.days_of_week.split(',').map(d => DAYS[+d]?.[0] ?? '?').join('')}
                   </td>
-                  <td className="px-3 py-1.5 text-gray-400 text-[11px]">
+                  <td data-label="Freq" className="px-3 py-1.5 text-gray-400 text-[11px]">
                     {r.interval_minutes ? `${r.interval_minutes}m` : r.songs_between ? `${r.songs_between} songs` : '—'}
                   </td>
-                  <td className="px-3 py-1.5 text-yellow-300 text-[11px]">{r.priority}</td>
+                  <td data-label="Priority" className="px-3 py-1.5 text-yellow-300 text-[11px]">{r.priority}</td>
                   <td className={`px-3 py-1.5 flex gap-2 ${canEdit ? '' : 'invisible'}`} aria-hidden={!canEdit}>
                     <button disabled={!canEdit} onClick={() => startEdit(r)} className="text-yellow-400 hover:text-yellow-300 text-[11px]">Edit</button>
                     <button disabled={!canEdit} onClick={() => { if (confirm('Delete rule?')) deleteMut.mutate(r.id); }}
