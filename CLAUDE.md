@@ -259,7 +259,7 @@ radioplatform/
 - BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
-- HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), caller queue with each caller's topic and notes, Hold and Next caller, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
+- HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
 - CallScreener.tsx — Two-column call screener (waiting/approved/on-air management)
 - SongRequests.tsx — Song request management (approve/reject/delete)
 - Archives.tsx — Show archive management (CRUD, publish/unpublish)
@@ -300,7 +300,7 @@ radioplatform/
 | useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
 | useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
 | useLiveShowWS.ts | Live show WebSocket (real-time callers, countdown, with polling fallback) |
-| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter; plays the callers on air sent back by the server |
+| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter; plays the callers on air sent back by the server; mixes carts into what is sent |
 | useLiveAudio.ts | Plays a station's live show (host mic relayed by the server) and tells the page to silence the music meanwhile |
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |

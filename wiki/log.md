@@ -364,3 +364,4 @@ INGEST 2026-11-18 live-shows.md a show's pre-roll waits for a timed item on air 
 INGEST 2026-11-18 live-shows.md host gone: station back to music after live_host_gone_seconds with alert; engine told live-on 1 s before first air; control room badge NO HOST / FILLING / LIVE with delay; cut timed item not resumed after a show
 INGEST 2026-11-18 live-shows.md caller desk: the caller's topic/notes shown and editable on both screens (was stored, never shown), Hold, Next caller
 INGEST 2026-11-18 live-shows.md live_state.on_stream: Listen page plays a live show from the stream on proto 5 stations and declines the socket audio; control room mutes its stream during a show
+INGEST 2026-11-18 live-shows.md carts on the Host Console: instant buttons mixed into the host's outgoing audio in the browser (through the delay); Mute/Cough now close a mic gain instead of zeroing frames
