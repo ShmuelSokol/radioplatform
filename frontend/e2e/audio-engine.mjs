@@ -242,6 +242,27 @@ const SCENARIOS = {
     change: (set) => setTimeout(() => set({ ...B, overlap: 3, nextId: 'a', startedAt: now() }), 1700),
     overlapOf: ['p', 'b'], end: { src: 'b', minT: 1.5, maxT: 4 },
   },
+  // Shmuel, 2026-11-17: "Song ends first, then speech". The last second of a song
+  // played under the first words of a sponsorship. A song followed by a spoken item
+  // fades out to its end (the server sends end_fade_seconds, overlap 0 and hands over
+  // 0.3 s before the song's end) and the sponsorship starts from its first word.
+  'song-ends-before-a-sponsorship': {
+    start: { ...A, cross: 17.7, overlap: 0, endFade: 1, nextId: 'p', nextOverlap: 0 }, wait: 16, watch: 5,
+    change: (set) => setTimeout(() => set({ ...P, nextId: 'b', startedAt: now() }), 1700),
+    overlapOf: ['a', 'p'], neverTogether: ['a', 'p'], noSeekOn: 'p', end: { src: 'p', minT: 2.2, maxT: 3.6 },
+  },
+  // The page's own check brings the sponsorship in when the server's message is late
+  'song-ends-before-a-sponsorship-late-message': {
+    start: { ...A, cross: 17.7, overlap: 0, endFade: 1, nextId: 'p', nextOverlap: 0 }, wait: 16, watch: 5,
+    change: (set) => setTimeout(() => set({ ...P, nextId: 'b', startedAt: now() }), 3200),
+    overlapOf: ['a', 'p'], neverTogether: ['a', 'p'], noSeekOn: 'p', end: { src: 'p', minT: 2.2, maxT: 3.6 },
+  },
+  // A hard time check due in the song's last seconds still cuts in at once
+  'time-check-cuts-a-song-that-ends-before-speech': {
+    start: { ...A, cross: 17.7, overlap: 0, endFade: 1, nextId: 'p', nextOverlap: 0 }, wait: 14, watch: 4,
+    change: (set) => set({ ...T, nextId: 'p', startedAt: now() }),
+    audibleWithin: 1, end: { src: 't', minT: 3, maxT: 4.6 },
+  },
   // Station setting "Song crossfade" 0: songs do not overlap either
   'songs-with-crossfade-zero-do-not-overlap': {
     start: { ...A, cross: 19.7, overlap: 0, nextId: 'b', nextOverlap: 0 }, wait: 18, watch: 5,
@@ -455,7 +476,7 @@ async function run(name, sc) {
   const nextNow = (id, fade) => page.evaluate(([i, f]) => window.__nextNow(i, f), [id, fade]);
   sc.change(set, startA, nextNow);
   let silentFor = 0, longestSilence = 0, firstNew = null, outGone = null, firstSilent = null, last = [];
-  let overlap = 0, firstHeard = null;
+  let overlap = 0, together = 0, firstHeard = null;
   const target = sc.end?.src;
   while (Date.now() - t0 < sc.watch * 1000) {
     last = await page.evaluate(() => window.__snap());
@@ -466,6 +487,8 @@ async function run(name, sc) {
     longestSilence = Math.max(longestSilence, silentFor);
     if (sc.minOverlapOf && sc.minOverlapOf.every((id) => audible.some((d) => d.src === id && d.gain > 0.2))) overlap += 0.2;
     if (sc.overlapOf && sc.overlapOf.every((id) => audible.some((d) => d.src === id && d.gain > 0.2))) overlap += 0.2;
+    // sc.neverTogether: stricter, the two are never both audible at all
+    if (sc.neverTogether && sc.neverTogether.every((id) => audible.some((d) => d.src === id))) together += 0.2;
     if (firstNew === null && audible.some((d) => d.src === target && d.t < 4)) firstNew = (Date.now() - t0) / 1000;
     if (sc.firstHeard && firstHeard === null && audible.some((d) => d.src === sc.firstHeard.src && d.gain > 0.5)) firstHeard = (Date.now() - t0) / 1000;
     if (outGone === null && !audible.some((d) => d.src === sc.start.id)) outGone = (Date.now() - t0) / 1000;
@@ -504,6 +527,10 @@ async function run(name, sc) {
     (sc.firstHeardBug ? (n, ok, d) => xfail(n, ok, sc.firstHeardBug, d) : check)(
       `${name}: "${src}" heard from ${from} to ${to} s`, firstHeard !== null && firstHeard >= from && firstHeard <= to,
       firstHeard === null ? 'never' : `${firstHeard.toFixed(2)} s`);
+  }
+  if (sc.neverTogether) {
+    check(`${name}: "${sc.neverTogether[0]}" is silent before "${sc.neverTogether[1]}" starts`, together <= 0.2,
+      `both audible for about ${together.toFixed(1)} s`);
   }
   if (sc.overlapOf) {
     check(`${name}: "${sc.overlapOf[1]}" is not heard over "${sc.overlapOf[0]}"`, overlap <= 0.4,

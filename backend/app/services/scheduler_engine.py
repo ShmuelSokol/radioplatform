@@ -660,7 +660,11 @@ class SchedulerEngine:
                 duration = (asset.duration if asset else None) or 180.0
                 # Advance where clients start their crossfade: the queue's one
                 # hand-over rule (short and timed items play to their end)
-                from app.api.v1.queue import handover_seconds
+                from app.api.v1.queue import handover_seconds, is_song, predict_next_entry
+                if is_song(entry):
+                    # A song is not crossfaded into a spoken item: what follows it
+                    # decides when it hands over (noted by predict_next_entry)
+                    await predict_next_entry(db, station_id, entry)
                 cross_seconds = handover_seconds(entry)
 
                 # Calculate remaining time from started_at
@@ -809,14 +813,15 @@ class SchedulerEngine:
         cue_out = analysis.get("cue_out_seconds", asset.duration or 180.0)
         # Where pages hand over: the same rule the queue advances by, so a short or
         # timed item is not crossfaded 3 s before its end on the page
-        from app.api.v1.queue import handover_seconds, overlap_seconds
-        cross_start = (asset.duration or 180.0) - handover_seconds(entry)
+        from app.api.v1.queue import end_fade_seconds, handover_seconds, overlap_seconds
         replay_gain_db = analysis.get("replay_gain_db", 0)
 
         # What follows this item: the queue's own pick at the hand-over, so a soft
-        # sponsorship due by then is pre-loaded instead of the next song
+        # sponsorship due by then is pre-loaded instead of the next song. Asked first:
+        # a song followed by a spoken item hands over later (no crossfade into speech).
         from app.api.v1.queue import predict_next_entry
         next_entry = await predict_next_entry(db, station_id, entry)
+        cross_start = (asset.duration or 180.0) - handover_seconds(entry)
 
         # Items without a usable analysis get one now, before their hand-over
         from app.services import upcoming_analysis
@@ -889,6 +894,9 @@ class SchedulerEngine:
                 # How long it overlaps the next item at its end: the station's song
                 # crossfade, 0 for anything spoken (pages never crossfade those)
                 "overlap_seconds": overlap_seconds(entry),
+                # A song before a spoken item: it fades out over this long to its
+                # end and the spoken item starts after it (0 = not that case)
+                "end_fade_seconds": end_fade_seconds(entry),
                 "replay_gain_db": replay_gain_db,
             },
             "next_asset": next_asset_data,

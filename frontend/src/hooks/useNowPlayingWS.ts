@@ -23,6 +23,8 @@ export interface NowPlayingData {
     cross_start?: number;
     /** How long it overlaps the next item at its end: the station's song crossfade, 0 for anything spoken */
     overlap_seconds?: number;
+    /** A song before a spoken item: it fades out over this long to its end and the spoken item starts after it */
+    end_fade_seconds?: number;
     replay_gain_db?: number;
   };
   next_asset?: {
