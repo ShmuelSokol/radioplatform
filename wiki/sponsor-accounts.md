@@ -1,0 +1,15 @@
+# Sponsors as clients (the Sponsors page)
+
+Shmuel, 2026-11-18: the Sponsors page should be "a normal list of each client", active or not and when, and inside each client every spot through the whole flow, what played and when, and each one's settings.
+
+Modelled on radio traffic systems (WideOrbit, Marketron, NaturalLog): **client** (advertiser) -> **orders** (here a contract = one `SpotSchedule`: station, days, times, dates) -> **copy** (here spots = recordings and library audio tied to the client) -> **as-run log / affidavit** (the play log).
+
+- Backend: `services/sponsor_accounts.py`, read-only. `GET /sponsors/clients` (one line per client), `GET /sponsors/{id}/account` (contracts + spots by stage), `GET /sponsors/{id}/plays` (paged, filters station/spot/dates, station clock), `GET /sponsors/{id}/missed-plays` (same as the client's portal, `sponsor_delivery.py`). Manager only, like the rest of `/sponsors`.
+- Status is worked out on each read, never stored: contract = ended (end date past) > paused (`is_active` false) > upcoming (start date ahead) > running, on the contract station's own date. Client = best of its contracts (running, upcoming, paused, ended), or `none`.
+- A running contract whose audio cannot air (do_not_play, placeholder title, rejected) is shown with a `problem`; the planner skips it (`spot_schedule_service.airable_schedules`), so it is not counted as a spot on the air.
+- Spot stages (in flow order): wording, approved_not_recorded, recorded_needs_approval, ready_not_scheduled, starts_soon, on_air, paused, finished, rejected. A recording in `draft` is "wording" or "approved_not_recorded" by its stored wording check verdict; `ready` = waiting for approval; an approved recording shows once, as its library audio. Portal campaigns (`AdCampaign`) map by status. Audio swapped out of a contract keeps its `sponsor_id`, so it shows as "Approved, not in a contract" (the TEST stand-in voices do).
+- Plays in a contract = plays of its audio on its station (any station when `station_id` is NULL) between its start and end dates, station clock.
+- `GET /sponsors` returns up to 1000 (was 50: every sponsor picker on the site lost the 51st client) sorted by name. `DELETE /sponsors/{id}` answers 409 when the client has contracts or plays.
+- New columns `sponsors.contact_name`, `sponsors.notes`. A client is created without the old `length_seconds` / `audio_file_path` (defaults 30 / "").
+- Frontend: `pages/admin/Sponsors.tsx` (list, filters in `?show=` and `?q=`), `pages/admin/SponsorDetail.tsx` at `/admin/sponsors/:id` with `?tab=contracts|plays|missed|details` (plays filters in `?station=&spot=&from=&to=&page=`), `components/sponsors/ClientParts.tsx`. "New contract" / "Record a spot" open Spot Schedule / Record Spots with `?sponsor=<id>` chosen.
+- Check: `frontend/e2e/sponsor-clients.mjs` (real backend, desktop + iPhone 13 + SE, guard).

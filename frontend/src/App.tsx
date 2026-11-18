@@ -29,6 +29,7 @@ const Schedules = lazy(() => import('./pages/admin/Schedules'));
 const ScheduleBlocks = lazy(() => import('./pages/admin/ScheduleBlocks'));
 const Holidays = lazy(() => import('./pages/admin/Holidays'));
 const Sponsors = lazy(() => import('./pages/admin/Sponsors'));
+const SponsorDetail = lazy(() => import('./pages/admin/SponsorDetail'));
 const AdminCampaigns = lazy(() => import('./pages/admin/Campaigns'));
 const AdminCampaignDetail = lazy(() => import('./pages/admin/CampaignDetail'));
 const SpotSchedules = lazy(() => import('./pages/admin/SpotSchedules'));
@@ -178,6 +179,7 @@ export default function App() {
               <Route path="/admin/schedules/:scheduleId/blocks" element={<ProtectedRoute><ScheduleBlocks /></ProtectedRoute>} />
               <Route path="/admin/holidays" element={<ProtectedRoute><Holidays /></ProtectedRoute>} />
               <Route path="/admin/sponsors" element={<ProtectedRoute><Sponsors /></ProtectedRoute>} />
+              <Route path="/admin/sponsors/:sponsorId" element={<ProtectedRoute><SponsorDetail /></ProtectedRoute>} />
               <Route path="/admin/campaigns" element={<ProtectedRoute><AdminCampaigns /></ProtectedRoute>} />
               <Route path="/admin/campaigns/:id" element={<ProtectedRoute><AdminCampaignDetail /></ProtectedRoute>} />
               <Route path="/admin/spot-schedule" element={<ProtectedRoute><SpotSchedules /></ProtectedRoute>} />
