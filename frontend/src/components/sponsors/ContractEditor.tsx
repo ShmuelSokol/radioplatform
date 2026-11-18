@@ -60,7 +60,11 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
   const stations = stationData?.stations ?? [];
   const { data: account } = useQuery({ queryKey: ['sponsor-account', sponsorId], queryFn: () => getClientAccount(sponsorId) });
   // The client's own audio: what can air (the current one stays in the list even if off the air)
-  const spots = (account?.spots ?? []).filter((s) => s.asset_id);
+  // Off-the-air copies (stand-ins, rejected audio) are not offered, except the one the contract uses now
+  // (only the real voice airs on sponsorships, so a stand-in copy is never offered either)
+  const spots = (account?.spots ?? []).filter(
+    (s) => s.asset_id && (s.asset_id === contract.asset_id || (s.stage !== 'rejected' && !/stand-?in/i.test(s.title))),
+  );
 
   const [assetId, setAssetId] = useState(contract.asset_id);
   const [stationId, setStationId] = useState(contract.station_id ?? '');
@@ -83,8 +87,9 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
       queryClient.invalidateQueries({ queryKey: ['sponsor-clients'] });
       queryClient.invalidateQueries({ queryKey: ['spot-schedules'] });
       queryClient.invalidateQueries({ queryKey: ['spot-plan'] });
-      if (saved.warnings?.length) setWarnings(saved.warnings);
-      else onClose();
+      // Always say it saved; with nothing to warn about, close by itself shortly after
+      setWarnings(saved.warnings ?? []);
+      if (!saved.warnings?.length) window.setTimeout(onClose, 1500);
     },
     onError: (e: unknown) => {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -133,11 +138,11 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
 
         {warnings ? (
           <div className="space-y-3">
-            <p className="text-green-700 font-medium">Saved. The waiting plays were planned again.</p>
-            <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-sm">
+            <p className="text-green-700 font-medium" role="status" data-testid="contract-saved">Saved. The coming plays were planned again.</p>
+            {warnings.length > 0 && <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-sm">
               <p className="font-medium mb-1">Not everything fits in the coming days:</p>
               <ul className="list-disc ml-5">{warnings.map((w) => <li key={w}>{w}</li>)}</ul>
-            </div>
+            </div>}
             <button type="button" onClick={onClose} className="min-h-[44px] px-4 bg-blue-600 text-white rounded-lg">OK</button>
           </div>
         ) : (
