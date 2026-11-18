@@ -81,6 +81,7 @@ const SITE_WIDE = {
   '/admin/holidays': 'lists every blackout, each with its stations',
   '/admin/alerts': 'lists every station\'s alerts',
   '/admin/live': 'lists every station\'s live shows',
+  '/admin/playlists': 'lists every station\'s playlists, each with its station named',
   '/admin/requests': 'lists every station\'s requests',
   '/admin/archives': 'lists every station\'s archives',
 };
