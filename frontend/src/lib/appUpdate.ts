@@ -482,8 +482,16 @@ export function startAppUpdates() {
   window.setInterval(() => reportTab(true), 30_000);
   window.setInterval(() => reportTab(), 2_000);
   let hiddenAt = document.hidden ? Date.now() : 0;
+  // A page being left (reload, a typed address, a link to another site) also turns hidden,
+  // just after `pagehide`. A check started then is cut off by the browser at once, and Safari
+  // logs that as "Fetch API cannot load .../version.json due to access control checks" on
+  // every page change. Nothing to update on a page that is going away, so no check then.
+  // (Found by the PC's WebKit run 2026-11-18; test: e2e/webkit/version-check-webkit.py.)
+  let leaving = false;
+  window.addEventListener('pagehide', () => { leaving = true; });
+  window.addEventListener('pageshow', () => { leaving = false; }); // back from the back/forward cache
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { hiddenAt = Date.now(); void check().then(applyIfQuiet); return; }
+    if (document.hidden) { hiddenAt = Date.now(); if (!leaving) void check().then(applyIfQuiet); return; }
     const away = hiddenAt ? Date.now() - hiddenAt : 0;
     hiddenAt = 0;
     void check().then(() => {
