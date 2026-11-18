@@ -175,6 +175,14 @@ async def activate(
             if not ok:
                 alert.status = "failed"
                 alert.error = "The playout engine did not answer"
+            else:
+                # Shown (banner, Stop) from now: the engine's start report follows within a
+                # second or two, but staff screens waited for it and then for their next
+                # poll, and Stop could be pressed only 9 s after Send (live test 2026-11-18).
+                # "until" ends it if the engine never reports.
+                _active[sid] = {"alert_id": str(alert.id), "since": time.time(), "source": alert.source,
+                                "kind": alert.kind, "title": alert.title,
+                                "until": time.time() + (seconds or 120.0) + 30.0}
             # status becomes on_air when the engine reports the start
         else:
             # Browser player: every open player stops its programme, plays this, carries on
@@ -193,6 +201,7 @@ async def activate(
 
     await asyncio.gather(*(send(a) for a in rows))
     await db.flush()
+    await _nudge_screens()
     for alert in rows:
         if alert.status == "failed":
             await _notify(db, alert, "FAILED to reach the station")
@@ -265,6 +274,7 @@ async def engine_report(
             except Exception as e:
                 logger.warning("Emergency alert: closing late timed items failed: %s", e)
         await _notify(db, alert, "ended")
+    await _nudge_screens()
     return alert
 
 
@@ -287,4 +297,22 @@ async def stop(db: AsyncSession, alert: EmergencyAlert, by: str | None) -> bool:
     if (_active.get(sid) or {}).get("alert_id") == str(alert.id):
         _active.pop(sid, None)
     await db.flush()
+    await _nudge_screens()
     return ok
+
+
+async def _nudge_screens() -> None:
+    """Tell every open tab (its /ws/site socket) that emergency state changed: staff pages
+    refetch the banner and the Emergency Alerts page at once instead of at their next poll.
+    The message carries nothing; listener tabs ignore it."""
+    async def go() -> None:
+        # A moment's wait so the request has committed when the screens read the log
+        await asyncio.sleep(0.3)
+        try:
+            from app.api.v1.site_release import broadcast_event
+
+            await broadcast_event("emergency")
+        except Exception as e:
+            logger.debug("Emergency alert: screen nudge failed: %s", e)
+
+    asyncio.ensure_future(go())

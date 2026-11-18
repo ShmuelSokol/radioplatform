@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getEmergencyLog, getEmergencyStatus, sendEmergencyTest, stopEmergencyAlert,
@@ -67,6 +67,15 @@ export default function EmergencyAlerts() {
     },
   });
   const stop = useMutation({ mutationFn: stopEmergencyAlert, onSuccess: refresh });
+  // Sent, on air, ended, stopped (from any screen or the EAS box): refetch at once
+  useEffect(() => {
+    const again = () => {
+      qc.invalidateQueries({ queryKey: ['emergency-status'] });
+      qc.invalidateQueries({ queryKey: ['emergency-log'] });
+    };
+    window.addEventListener('kbr-emergency-changed', again);
+    return () => window.removeEventListener('kbr-emergency-changed', again);
+  }, [qc]);
 
   const stationName = stations.find((s) => s.station_id === chosen)?.name ?? 'the station';
 
