@@ -63,6 +63,8 @@ def all_active() -> dict[str, dict]:
 
 def reset() -> None:
     _active.clear()
+    _stopped_early.clear()
+    _stopped_by.clear()
 
 
 def duration_of(data: bytes) -> float | None:
@@ -128,7 +130,9 @@ async def _notify(db: AsyncSession, alert: EmergencyAlert, what: str) -> None:
     try:
         await alert_service.create_alert(
             db, "system", "critical" if real and what != "ended" else "warning",
-            f"{kind} {what}", message, station_id=alert.station_id,
+            # Each alert its own row: the Alerts page folds repeats of an open alert with the
+            # same title, and a second test's ON AIR vanished into the first's (2026-11-18)
+            f"{kind} {what} #{str(alert.id)[:6]}", message, station_id=alert.station_id,
             context={"emergency_alert_id": str(alert.id), "kind": alert.kind, "source": alert.source},
         )
     except Exception as e:
@@ -167,22 +171,32 @@ async def activate(
     async def send(alert: EmergencyAlert) -> None:
         sid = str(alert.station_id)
         if settings.engine_drives(sid):
+            # Shown (banner, Stop) before the engine is even asked: its answer waits for
+            # the file to load, and screens that waited for it (then for the start report
+            # and their next poll) showed the alert 5 to 9 s after Send (live tests
+            # 2026-11-18). Taken back below if the engine refuses; "until" ends it if the
+            # engine never reports.
+            _active[sid] = {"alert_id": str(alert.id), "since": time.time(), "source": alert.source,
+                            "kind": alert.kind, "title": alert.title,
+                            "until": time.time() + (seconds or 120.0) + 30.0}
+            await _nudge_screens(delay=0.0)
             # The engine answers once the file is loaded; a slow download is still taken
             ok = await playout_engine._command(
                 "/alert", {"uri": _uri(alert, url), "id": str(alert.id)},
                 station_id=sid, wait=8.0, slow_is_ok=True,
             )
-            if not ok:
+            if str(alert.id) in _stopped_early:
+                # Stop was pressed while the engine was still loading it
+                _stopped_early.discard(str(alert.id))
+                await playout_engine._command("/alert_stop", {}, station_id=sid)
+                alert.status = "cancelled"
+                alert.ended_at = datetime.now(timezone.utc)
+                alert.details = {**(alert.details or {}), "stopped_by": _stopped_by.pop(str(alert.id), None)}
+            elif not ok:
                 alert.status = "failed"
                 alert.error = "The playout engine did not answer"
-            else:
-                # Shown (banner, Stop) from now: the engine's start report follows within a
-                # second or two, but staff screens waited for it and then for their next
-                # poll, and Stop could be pressed only 9 s after Send (live test 2026-11-18).
-                # "until" ends it if the engine never reports.
-                _active[sid] = {"alert_id": str(alert.id), "since": time.time(), "source": alert.source,
-                                "kind": alert.kind, "title": alert.title,
-                                "until": time.time() + (seconds or 120.0) + 30.0}
+                if (_active.get(sid) or {}).get("alert_id") == str(alert.id):
+                    _active.pop(sid, None)
             # status becomes on_air when the engine reports the start
         else:
             # Browser player: every open player stops its programme, plays this, carries on
@@ -252,8 +266,9 @@ async def engine_report(
             alert.status = "on_air"
             alert.started_at = alert.started_at or when
             alert.error = None
-        _active[sid] = {"alert_id": str(alert.id), "since": time.time(), "source": alert.source,
-                        "kind": alert.kind, "title": alert.title, "until": None}
+        if alert.status != "cancelled" and str(alert.id) not in _stopped_early:
+            _active[sid] = {"alert_id": str(alert.id), "since": time.time(), "source": alert.source,
+                            "kind": alert.kind, "title": alert.title, "until": None}
         await db.flush()
         await _notify(db, alert, "ON AIR")
     elif phase == "ended":
@@ -301,13 +316,37 @@ async def stop(db: AsyncSession, alert: EmergencyAlert, by: str | None) -> bool:
     return ok
 
 
-async def _nudge_screens() -> None:
+# Alerts stopped before their row was saved (see stop_unsaved), and by whom
+_stopped_early: set[str] = set()
+_stopped_by: dict[str, str | None] = {}
+
+
+async def stop_unsaved(alert_id: str, by: str | None) -> bool:
+    """Stop for an alert still being sent: its row is not saved yet, but it shows as on
+    air. The engine is told now, and the send marks the row cancelled when it ends."""
+    from app.services import playout_engine
+
+    sid = next((s for s, a in _active.items() if a.get("alert_id") == alert_id), None)
+    if sid is None:
+        return False
+    _stopped_early.add(alert_id)
+    _stopped_by[alert_id] = by
+    _active.pop(sid, None)
+    if settings.engine_drives(sid):
+        await playout_engine._command("/alert_stop", {}, station_id=sid)
+    await _nudge_screens(delay=0.0)
+    return True
+
+
+async def _nudge_screens(delay: float = 0.3) -> None:
     """Tell every open tab (its /ws/site socket) that emergency state changed: staff pages
     refetch the banner and the Emergency Alerts page at once instead of at their next poll.
     The message carries nothing; listener tabs ignore it."""
     async def go() -> None:
         # A moment's wait so the request has committed when the screens read the log
-        await asyncio.sleep(0.3)
+        # (none for the banner's first sight of an alert: it reads memory, not the log)
+        if delay:
+            await asyncio.sleep(delay)
         try:
             from app.api.v1.site_release import broadcast_event
 

@@ -771,6 +771,7 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     end_at = None
     taken_over = True
     record = False
+    filler_id = None
     try:
         async for db in get_async_session():
             from app.models.station import Station
@@ -791,6 +792,8 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
                     delay, dump, _rule = settings_for(station_row.automation_config)
                     from app.services import live_recording
                     record = live_recording.wanted(station_row.automation_config)
+                    from app.services.live_air import filler_asset
+                    filler_id = filler_asset(station_row.automation_config)
                     taken_over = (station_row.automation_config or {}).get("live_show_id") == str(show.id)
                 if show.scheduled_end is not None:
                     end = show.scheduled_end
@@ -813,6 +816,10 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     await live_relay.set_on_air(station_id, show_id, delay=delay, dump=dump, end_at=end_at,
                                 heard_now=taken_over, record=record)
     _air = live_relay.airs.get(station_id)
+    if _air is not None and filler_id and _air.filler is None and delay > 0:
+        from app.services.live_inserts import load_filler
+        _holds.add(_fill := asyncio.ensure_future(load_filler(_air, filler_id)))
+        _fill.add_done_callback(_holds.discard)
     if _air is not None and not taken_over and not _air.listening and delay > 0:
         from app.services.live_show_service import hold_for_timed_items
         _holds.add(_task := asyncio.ensure_future(hold_for_timed_items(station_id, _air)))

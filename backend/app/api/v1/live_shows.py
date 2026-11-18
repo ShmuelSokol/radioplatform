@@ -340,7 +340,9 @@ async def say_in_chat(
     if len(text) > 500:
         raise HTTPException(status_code=422, detail="Too long: a chat line holds 500 characters")
     line = LiveChatMessage(id=uuid.uuid4(), live_show_id=show_id, user_id=user.id,
-                           author=user.display_name or user.email, text=text)
+                           author=user.display_name or user.email, text=text,
+                           # set here, to the microsecond: two lines in one second kept no order
+                           created_at=datetime.now(timezone.utc))
     db.add(line)
     await db.commit()
     await db.refresh(line)
