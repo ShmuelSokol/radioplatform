@@ -20,7 +20,7 @@ Setup (Ubuntu 24.04, once):
   pip install selenium
 Run:
   cd frontend && npm run build && (npx vite preview --port 4183 --strictPort &)
-  xvfb-run -a python3 e2e/webkit/listener-webkit.py        # ONLY=listen,stream,callin,release,pages
+  xvfb-run -a python3 e2e/webkit/listener-webkit.py        # ONLY=listen,stream,bar,callin,release,pages
 
 Exits non-zero if a check fails. KNOWN_BUGS lists checks expected to fail (XFAIL); a pass
 there prints XPASS and fails, like pytest's xfail(strict=True).
@@ -281,6 +281,49 @@ def listen_stream(tag, args, expect_mode, no_mse=False):
         d.quit()
 
 
+# ── The station keeps playing on the other listener pages (player bar) ─────────────
+GO = "history.pushState({}, '', arguments[0]); dispatchEvent(new PopStateEvent('popstate'));"
+
+
+def bar(tag, args, mode, no_mse=False):
+    """One tap on Listen Live, then the guide, the DJs and the station list with no
+    further tap: WebKit refuses sound a tap did not start, so a player that was rebuilt
+    on the way would be silent here."""
+    np = ctl('reset', {'mode': mode, 'show': False})
+    d = browser(args, no_mse)
+    stream = mode == 'server'
+    clock = ("return document.querySelector('audio') ? +document.querySelector('audio').currentTime.toFixed(2) : null"
+             if stream else 'return window.__audible()[0]?.t ?? null')
+    try:
+        open_page(d, f'/listen/{np["sid"]}')
+        if stream:
+            wait_for(d, "document.body.innerText.includes('Server stream')", 8)
+        ms = press(d, STREAM_PLAYING if stream else AUDIBLE, button(d, 'Listen Live'), 8)
+        check(f'{tag}: Listen Live heard on the station page', ms >= 0, f'{ms} ms')
+        for path, ready in (('/guide', 'Program Guide'), ('/hosts', 'DJs'), ('/stations', 'Stations')):
+            t1 = js(d, clock)
+            js(d, GO, path)
+            shown = wait_for(d, "!!document.querySelector('[data-testid=\"player-bar\"]') && location.pathname === " + json.dumps(path), 4)
+            time.sleep(3.0)
+            t2 = js(d, clock)
+            check(f'{tag}: {path} shows the bar', shown >= 0, f'{shown} ms')
+            check(f'{tag}: still playing on {path} with no new tap (clock moved, no restart)',
+                  t1 is not None and t2 is not None and t2 - t1 > 2.0, f'{t1} -> {t2} in 3 s')
+        bar_text = js(d, "return document.querySelector('[data-testid=\"player-bar\"]').innerText")
+        check(f'{tag}: the bar names the station', np.get('name', "Kol B'ramah") in bar_text or "Kol B'ramah" in bar_text, bar_text)
+        js(d, "document.querySelector('[data-testid=\"player-bar\"] button').click()")
+        time.sleep(0.8)
+        if stream:
+            st = js(d, "const a = document.querySelector('audio'); return !a || a.paused;")
+        else:
+            st = js(d, 'return window.__audible().length === 0')
+        check(f'{tag}: Stop in the bar stops the sound and the bar goes',
+              st and not js(d, "return !!document.querySelector('[data-testid=\"player-bar\"]')"), st)
+        check(f'{tag}: no script errors', not errors(d), ' | '.join(errors(d)))
+    finally:
+        d.quit()
+
+
 def stream_missing(tag, args, no_mse=False):
     np = ctl('reset', {'mode': 'server', 'stream': 'missing', 'show': False})
     d = browser(args, no_mse)
@@ -436,6 +479,9 @@ def main():
             listen_stream('stream WebKit (MSE)', SAFARI, 'mse')
             listen_stream('stream WebKit no MSE (iPhone path)', SAFARI, 'plain', no_mse=True)
             stream_missing('stream WebKit no MSE', SAFARI, no_mse=True)
+        if run('bar'):
+            bar('bar WebKit', SAFARI, 'browser')
+            bar('bar WebKit no MSE (iPhone path), server stream', SAFARI, 'server', no_mse=True)
         if run('callin'):
             call_in('call-in WebKit', SAFARI + ['--enable-media-stream=true', '--enable-mock-capture-devices=true'])
         if run('release'):
