@@ -138,3 +138,14 @@ When the last words of a host who left have played out, `_host_gone_now` runs th
 ## Staff chat (host and screener)
 
 A short text line between the people working a show, never heard on air: `ChatPanel` (`pages/admin/live/ChatPanel.tsx`) on the Host Console and the Call Screener. `POST /live-shows/{id}/chat` (DJ and up) stores a `LiveChatMessage` and sends a `chat` event on the show's socket; `GET /live-shows/{id}/chat` gives the last 200, so a page opened later (or a show with the socket down, polled every 10 s) still has them. Lines are 1 to 500 characters after trimming. Another person's new line is lit for 8 s. The lines stay with the show. Browser check: `ONLY=chat` in `e2e/live-delay.cjs`.
+
+## Caller history (repeat, priority and blocked callers)
+
+A caller is known by `CallInRequest.caller_key`: `tel:<number>` for a phone call, `web:<id>` for a browser, where the id is a random value the call-in page keeps in that browser (`kbr_caller_id` in localStorage; older pages send none and such a call has no history). `services/caller_history.py` adds `history` to every call the screens get (the calls list, `show_state`, `caller_queued`): earlier calls, times on air, last call, and the staff's standing and note from `CallerProfile`.
+
+- **Priority**: a badge, and first in Waiting on the Call Screener.
+- **Blocked**: `PUT /live-shows/{show}/calls/{call}/caller` with `blocked` also rejects that person's waiting and approved calls in the show; one on air stays (End Call and Dump are the tools there). Later calls get 403 "This show cannot take your call." (a phone caller hears the no-show message), and a refused call does not count against the rate limit.
+- The note "about the caller" belongs to the person, not the call, and shows on their later calls.
+- `GET /caller-profiles` and `PUT /caller-profiles/{id}`: the list at the foot of the Call Screener, where a block is lifted when the person is not calling.
+
+A web caller who clears their browser data is a new caller. The block is a convenience for the screener, who still sees every call; it is not a wall. The Host Console shows the history read only. Browser check: `ONLY=history` in `e2e/live-delay.cjs`; tests in `tests/test_caller_history.py`.

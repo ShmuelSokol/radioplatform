@@ -119,6 +119,7 @@ radioplatform/
 | RdsSettings / RdsMessage / RdsPlay | rds.py | RDS: per-station PS and rotation settings, scheduled RadioText lines (slogan, time, weather, sponsor), and the log of lines the encoder fetched (see `wiki/rds-feed.md`) |
 | LiveDump | live_dump.py | One Dump of a live show: who, when, seconds cut, caller dropped, and the stored recording of what aired before and what was cut (see `wiki/live-shows.md`) |
 | LiveChatMessage | live_chat_message.py | One line of a live show's staff chat (host and screener, never on air; see `wiki/live-shows.md`) |
+| CallerProfile | caller_profile.py | What the staff decided about one caller across shows: priority, blocked, a note (see `wiki/live-shows.md`) |
 | SiteRelease | site_release.py | One row: how open tabs take a new website release (auto/manual) and the admin's last push (see `wiki/release-pickup.md`) |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
@@ -173,6 +174,7 @@ radioplatform/
 | rds | rds.py | Public `/stations/{id}/rds.txt` (RadioText now; `?mode=now_playing` = song only), `/rds-ps.txt`, `/rds.json` for the RDS encoder; staff `/rds/...`: settings, messages CRUD, check, preview, plays (see `wiki/rds-feed.md`) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
 | playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen); `box` = a local FM box's own health report; `engine_proto` and `live_on_stream` (the engine's stream carries a live show, proto 5) |
+| caller_profiles | caller_profiles.py | /caller-profiles (DJ and up): callers marked priority or blocked, and lifting it; marking happens on a call, `PUT /live-shows/{id}/calls/{call_id}/caller` (see `wiki/live-shows.md`) |
 | call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
 | air_watch | air_watch.py | /air-watch (staff): recent on-air self-check findings |
@@ -221,6 +223,7 @@ radioplatform/
 | hour_fit.py | Shortly before a hard timed item, swaps queue positions so a song (or pair) that ends near it replaces one that would be faded soon after starting; automatic songs only, both players; `automation_config.fit_before_hard_items: false` switches it off (see `wiki/hourly-slots.md`) |
 | timed_groups.py | A hard timed group due while an earlier short one still plays is moved to follow it (browser check 90 s ahead, engine before hand-over; the engine gets it at the first group's time) (see `wiki/hourly-slots.md`) |
 | tail_analysis.py | Song end and crossfade point from HTTP range reads (MP3 header + last 20 s), so re-analysis does not download whole files |
+| caller_history.py | Who called before: each call's history (earlier calls, times on air) and the caller's standing, keyed by `caller_key` |
 | call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |
 | activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
@@ -266,7 +269,7 @@ radioplatform/
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
 - HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, Talk off air (a private word with a caller, `hooks/useTalkback.ts`), and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
-- CallScreener.tsx — Two-column call screener (waiting/approved/on-air management), with the delay panel and the staff chat (`pages/admin/live/ChatPanel.tsx`, also on the Host Console)
+- CallScreener.tsx — Two-column call screener (waiting/approved/on-air management), each caller's history with Priority and Block (`pages/admin/live/CallerHistory.tsx`), the list of marked callers, with the delay panel and the staff chat (`pages/admin/live/ChatPanel.tsx`, also on the Host Console)
 - SongRequests.tsx — Song request management (approve/reject/delete)
 - Archives.tsx — Show archive management (CRUD, publish/unpublish)
 

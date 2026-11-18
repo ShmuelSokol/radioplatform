@@ -377,3 +377,4 @@ INGEST 2026-11-18 live-shows.md talkback: staff talk to a web caller off the air
 INGEST 2026-11-18 live-shows.md a backend restart during a show: the host page reconnects by itself for 60 s and is heard at once (was: stopped with an error, silence until the host pressed Start again)
 INGEST 2026-11-18 live-shows.md up to four callers on air together (Next ends them all); engine quieted for a show about to be heard is not told the show is over; host-gone check runs as the delay empties
 INGEST 2026-11-18 live-shows.md staff chat between host and screener: LiveChatMessage, GET/POST /live-shows/{id}/chat, `chat` socket event, ChatPanel on both screens; never on air
+INGEST 2026-11-18 live-shows.md caller history: caller_key (tel:/web: id kept by the call-in page), CallerProfile priority/blocked/note, history on every call row, /caller-profiles list; a web block is per browser, not a wall

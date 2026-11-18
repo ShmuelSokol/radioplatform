@@ -6,7 +6,9 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +29,7 @@ from app.schemas.live_show import (
     DumpRequest,
     DelayRequest,
 )
-from app.services import live_show_service
+from app.services import caller_history, live_show_service
 from app.config import settings
 from app.services.twilio_voice_service import generate_hold_twiml, generate_no_show_twiml
 
@@ -406,7 +408,50 @@ async def list_calls(
 ):
     """List all callers for a show."""
     calls = await live_show_service.get_show_calls(db, show_id)
-    return CallInRequestListResponse(calls=calls, total=len(calls))
+    rows = await caller_history.with_history(db, calls)
+    return CallInRequestListResponse(calls=rows, total=len(rows))
+
+
+class CallerStanding(BaseModel):
+    standing: Literal["normal", "priority", "blocked"] | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.put("/{show_id}/calls/{call_id}/caller")
+async def set_caller_standing(
+    show_id: uuid.UUID,
+    call_id: uuid.UUID,
+    body: CallerStanding,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_dj_or_manager),
+):
+    """Mark the person behind a call as priority, blocked or normal, or note something
+    about them. It holds for their later calls on every show. Blocking also takes
+    their calls that wait in this show out of the queue (one on air stays: End Call
+    and Dump are the tools there)."""
+    call = await live_show_service.get_call(db, call_id)
+    if not call or str(call.live_show_id) != str(show_id):
+        raise NotFoundError("Call not found")
+    if not call.caller_key:
+        raise HTTPException(409, "This call does not say who is calling, so nothing can be kept about the caller.")
+    profile = await caller_history.set_standing(
+        db, call.caller_key, call.caller_name, body.standing, body.note, user.id)
+    same = [c for c in await live_show_service.get_show_calls(db, show_id) if c.caller_key == call.caller_key]
+    removed = []
+    if body.standing == "blocked":
+        for c in same:
+            if c.status in (CallStatus.WAITING, CallStatus.SCREENING, CallStatus.APPROVED):
+                await live_show_service.reject_call(db, c.id, screened_by=user.id)
+                removed.append(c)
+    await db.commit()
+    h = await caller_history.histories(db, same)
+    for c in removed:
+        await _tell_web_caller(c.id, "rejected")
+        await _say(show_id, "caller_removed", {"call_id": str(c.id), "reason": "blocked"})
+    for c in same:
+        if c not in removed:
+            await _say(show_id, "caller_updated", {"call_id": str(c.id), "history": h.get(str(c.id))})
+    return {"standing": profile.standing, "note": profile.note, "removed": len(removed)}
 
 
 @router.post("/{show_id}/calls/{call_id}/approve", response_model=CallInRequestInDB)
@@ -737,9 +782,13 @@ async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
 
     # Create call-in request
     now = datetime.now(timezone.utc)
+    key = caller_history.phone_key(caller_phone)
+    if await caller_history.standing_of(db, key) == "blocked":
+        return Response(content=generate_no_show_twiml(), media_type="application/xml")
     call_request = CallInRequest(
         live_show_id=show.id,
         caller_phone=caller_phone,
+        caller_key=key,
         status=CallStatus.WAITING,
         twilio_call_sid=call_sid,
         hold_start=now,
@@ -751,11 +800,9 @@ async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     # Broadcast WS event
     try:
         from app.api.v1.live_shows_ws import broadcast_show_event
-        await broadcast_show_event(str(show.id), "caller_queued", {
-            "call_id": str(call_request.id),
-            "caller_phone": caller_phone,
-            "hold_start": now.isoformat(),
-        })
+        # The whole call with its id (the screens key callers by id) and its history
+        row = (await caller_history.with_history(db, [call_request]))[0]
+        await broadcast_show_event(str(show.id), "caller_queued", {**row, "call_id": str(call_request.id)})
     except Exception:
         pass
 

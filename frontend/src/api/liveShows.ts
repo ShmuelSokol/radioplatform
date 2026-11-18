@@ -35,7 +35,25 @@ export interface CallInRequest {
   screened_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Earlier calls of the same person and what the staff decided about them; null when the call does not say who is calling */
+  history?: CallerHistoryInfo | null;
 }
+
+export type CallerStanding = 'normal' | 'priority' | 'blocked';
+export interface CallerHistoryInfo { calls: number; on_air: number; last_at: string | null; standing: CallerStanding; note: string | null }
+export interface MarkedCaller { id: string; name: string | null; standing: CallerStanding; note: string | null; kind: 'phone' | 'web'; phone: string | null; updated_at: string | null }
+
+/** Mark the person behind a call (it holds for their later calls on every show). Blocking takes their waiting calls out of the queue. */
+export const setCallerStanding = async (
+  showId: string, callId: string, data: { standing?: CallerStanding; note?: string },
+): Promise<{ standing: CallerStanding; note: string | null; removed: number }> =>
+  (await apiClient.put(`/live-shows/${showId}/calls/${callId}/caller`, data)).data;
+
+export const getMarkedCallers = async (): Promise<MarkedCaller[]> =>
+  (await apiClient.get('/caller-profiles')).data.callers;
+
+export const changeMarkedCaller = async (id: string, data: { standing?: CallerStanding; note?: string }): Promise<MarkedCaller> =>
+  (await apiClient.put(`/caller-profiles/${id}`, data)).data;
 
 export interface LiveShowListResponse {
   shows: LiveShow[];

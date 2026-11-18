@@ -14,6 +14,7 @@
  * Part J (ONLY=restart, with BACKEND_RESTART=<command>): the server restarts during a show.
  * Part K (ONLY=multi): several callers on air together (up to four).
  * Part L (ONLY=chat): the staff chat between the host and the screener.
+ * Part M (ONLY=history): repeat, priority and blocked callers.
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
  * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
@@ -1133,6 +1134,112 @@ function hostMic(showId, token) {
         const anon = await fetch(`${API}/live-shows/${show.id}/chat`);
         check('L6 the lines are stored with the show and not public', listed.length === 3 && anon.status === 401, `${listed.length} lines, anonymous ${anon.status}`);
         check('L7 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        await api('POST', `/live-shows/${show.id}/end`);
+      } finally {
+        await browser.close();
+      }
+    }
+    // ---------- Part M: caller history (repeat, priority and blocked callers) ----------
+    if (!ONLY || ONLY === 'history') {
+      await setConfig({ live_delay_seconds: 0, live_host_gone_seconds: 0 });
+      const show = await newShow('Delay test M');
+      await api('POST', `/live-shows/${show.id}/start`);
+      const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const open = async (url, opts = {}, signedIn = true) => {
+        const page = await (await browser.newContext(opts)).newPage();
+        if (signedIn) await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409|403|dynamically imported module|MIME type/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        page.on('dialog', (d) => { problems.push(`${url}: dialog "${d.message()}"`); d.dismiss(); });
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      const call = async (name, caller) => { const r = await fetch(`${API}/call-in/${STATION}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, caller }) }); return { status: r.status, json: await r.json().catch(() => null) }; };
+      const calls = async () => (await api('GET', `/live-shows/${show.id}/calls`)).json.calls;
+      try {
+        // Leftovers of an earlier run: nobody is marked
+        for (const m of (await api('GET', '/caller-profiles')).json.callers) await api('PUT', `/caller-profiles/${m.id}`, { standing: 'normal' });
+        const screener = await open(`/admin/live/${show.id}/screen`, { viewport: { width: 1440, height: 900 } });
+        await T(screener, 'marked-callers').waitFor({ timeout: 15000 });
+        const card = (page, name) => page.locator('div.rounded-lg').filter({ hasText: name }).filter({ has: page.getByTestId('caller-history') }).last();
+
+        // The first call comes from the real call-in page: it makes its own id
+        const phone = await open(`/call/${STATION}`, { ...devices['iPhone 13'] }, false);
+        await phone.getByPlaceholder('Name').fill('Moshe from Lakewood');
+        await phone.getByRole('button', { name: 'Call in' }).click();
+        await T(card(screener, 'Moshe from Lakewood'), 'caller-history-line').waitFor({ timeout: 10000 });
+        const id = await phone.evaluate(() => localStorage.getItem('kbr_caller_id'));
+        check('M1 a new caller from the call-in page is listed as "First call"; the page keeps a random id', /^First call$/.test(await T(card(screener, 'Moshe from Lakewood'), 'caller-history-line').innerText()) && /^[0-9a-f]{36}$/.test(id || ''), id);
+        const first = (await calls())[0];
+        await api('POST', `/live-shows/${show.id}/calls/${first.id}/approve`);
+        await api('POST', `/live-shows/${show.id}/calls/${first.id}/on-air?force=true`);
+        await sleep(500);
+        await api('POST', `/live-shows/${show.id}/calls/${first.id}/end-call`);
+        await phone.close();
+
+        // The same person calls again, and a stranger after them
+        const again = (await call('Moshe', id)).json;
+        const other = (await call('Dovid from Monsey', 'e2e-stranger-0123456789')).json;
+        await T(card(screener, 'Dovid from Monsey'), 'caller-history-line').waitFor({ timeout: 8000 });
+        const lineA = await T(card(screener, 'Moshe'), 'caller-history-line').innerText();
+        check('M2 the repeat caller\'s card says how often they called and were on air, and when', /^Called once before, on air once, last \w+ \d+$/.test(lineA), lineA);
+        const order = async () => (await screener.getByTestId('caller-history').evaluateAll((els) => els.map((e) => e.parentElement.innerText.split('\n')[0])));
+        const before = await order();
+
+        // Priority: a badge, and that caller moves to the top of Waiting
+        await sleep(600);
+        await T(card(screener, 'Dovid from Monsey'), 'caller-priority-button').click();
+        await T(card(screener, 'Dovid from Monsey'), 'caller-priority').waitFor({ timeout: 5000 });
+        const after = await order();
+        check('M3 Priority puts a badge on the card and the caller first in Waiting', /^Moshe/.test(before[0]) && /^Dovid/.test(after[0]) && await T(card(screener, 'Dovid from Monsey'), 'caller-priority-button').innerText() === 'Not priority', `${before.join(' | ')} -> ${after.join(' | ')}`);
+
+        // A note about the person
+        await T(card(screener, 'Moshe'), 'caller-person-note-button').click();
+        await screener.getByLabel('Note about this person, kept for their later calls').fill('Long winded, keep it to one question');
+        await screener.keyboard.press('Enter');
+        await T(card(screener, 'Moshe'), 'caller-person-note').waitFor({ timeout: 5000 });
+        await shot(screener, 'screener-history');
+
+        // The host sees the same on an approved caller, without the buttons
+        await api('POST', `/live-shows/${show.id}/calls/${other.call_id}/approve`);
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await T(host, 'caller-priority').waitFor({ timeout: 15000 });
+        check('M4 the Host Console shows the badge and the history, read only', /First call/.test(await T(host, 'caller-history').innerText()) && await T(host, 'caller-block-button').count() === 0 && await T(host, 'caller-priority-button').count() === 0);
+        await shot(host, 'host-history');
+
+        // Block: asks once more on the button, then the waiting call is gone and new calls are refused
+        await T(card(screener, 'Moshe'), 'caller-block-button').click();
+        check('M5 Block asks once more on the button itself', /Yes, block and remove/.test(await T(card(screener, 'Moshe'), 'caller-block-sure').innerText()) && (await calls()).find((c) => c.id === again.call_id).status === 'waiting');
+        await T(card(screener, 'Moshe'), 'caller-block-sure').click();
+        await screener.getByTestId('caller-person-note').waitFor({ state: 'detached', timeout: 5000 });
+        const refused = await call('Moshe', id);
+        check('M6 the blocked caller leaves the queue and their next call is refused with a plain message', (await calls()).find((c) => c.id === again.call_id).status === 'rejected' && refused.status === 403 && /cannot take your call/.test(refused.json.detail), `${refused.status} ${JSON.stringify(refused.json)}`);
+
+        // The list of marked callers: one priority, one blocked; lift the block
+        await sleep(600);
+        await T(screener, 'marked-callers-toggle').click();
+        await T(screener, 'marked-caller').nth(1).waitFor({ timeout: 5000 });
+        const listText = await T(screener, 'marked-callers').innerText();
+        check('M7 the list shows who is priority and who is blocked, with the note', /1 priority, 1 blocked/.test(listText) && /Moshe/.test(listText) && /Long winded/.test(listText) && /Dovid from Monsey/.test(listText), listText.replace(/\n/g, ' / '));
+        await shot(screener, 'screener-marked');
+        await T(screener, 'marked-caller').filter({ hasText: 'Moshe' }).getByTestId('marked-caller-clear').click();
+        await T(screener, 'marked-caller').nth(1).waitFor({ state: 'detached', timeout: 5000 });
+        const back = await call('Moshe', id);
+        await T(card(screener, 'Moshe'), 'caller-history-line').waitFor({ timeout: 8000 });
+        const lineBack = await T(card(screener, 'Moshe'), 'caller-history-line').innerText();
+        check('M8 "Allow again" lets them call; the card counts both earlier calls and keeps the note', back.status === 201 && /^Called 2 times before, on air once/.test(lineBack) && /Long winded/.test(await T(card(screener, 'Moshe'), 'caller-person-note').innerText()), `${back.status} ${lineBack}`);
+
+        // Phone size
+        const small = await open(`/admin/live/${show.id}/screen`, { ...devices['iPhone 13'] });
+        await T(small, 'caller-history').first().waitFor({ timeout: 15000 });
+        const m = await small.evaluate(() => ({ scroll: document.documentElement.scrollWidth - window.innerWidth, low: [...document.querySelectorAll('[data-testid="caller-history"] button')].map((b) => Math.round(b.getBoundingClientRect().height)).filter((h) => h < 24) }));
+        check('M9 on a phone nothing scrolls sideways and the buttons can be tapped', m.scroll <= 0 && m.low.length === 0, JSON.stringify(m));
+        await shot(small, 'screener-history-phone');
+        check('M10 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        for (const mk of (await api('GET', '/caller-profiles')).json.callers) await api('PUT', `/caller-profiles/${mk.id}`, { standing: 'normal' });
         await api('POST', `/live-shows/${show.id}/end`);
       } finally {
         await browser.close();

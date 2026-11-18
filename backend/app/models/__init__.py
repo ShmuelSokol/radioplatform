@@ -24,6 +24,7 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.live_show import LiveShow, LiveShowStatus, BroadcastMode
 from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.live_chat_message import LiveChatMessage
+from app.models.caller_profile import CallerProfile
 from app.models.live_dump import LiveDump
 from app.models.rds import RdsMessage, RdsPlay, RdsSettings
 from app.models.song_request import SongRequest, RequestStatus
@@ -93,6 +94,7 @@ __all__ = [
     "StationBlockedAsset",
     "EngineHandoff",
     "LiveChatMessage",
+    "CallerProfile",
     "LiveDump",
     "RdsSettings",
     "RdsMessage",

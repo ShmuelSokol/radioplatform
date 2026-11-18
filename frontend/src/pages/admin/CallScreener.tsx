@@ -6,6 +6,8 @@ import { approveCall, rejectCall, putCallerOnAirAsking, endCall, holdCall, nextC
 import type { CallInRequest } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
+import CallerHistory from './live/CallerHistory';
+import MarkedCallers from './live/MarkedCallers';
 import ChatPanel from './live/ChatPanel';
 import TalkButton, { TalkNote } from './live/TalkButton';
 import { useTalkback } from '../../hooks/useTalkback';
@@ -22,7 +24,13 @@ export default function CallScreener() {
 
   const currentShow = show || showData;
 
-  const waitingCallers = callers.filter(c => c.status === 'waiting' || c.status === 'screening');
+  // Priority callers first; among equals, who waited longest (the order they arrived in)
+  const waitingCallers = callers
+    .filter(c => c.status === 'waiting' || c.status === 'screening')
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => Number(b.c.history?.standing === 'priority') - Number(a.c.history?.standing === 'priority') || a.i - b.i)
+    .map(x => x.c);
+  const standings = callers.map(c => `${c.id}:${c.history?.standing ?? ''}`).join(',');
   const approvedCallers = callers.filter(c => c.status === 'approved');
   // Up to MAX_ON_AIR callers can be on air together; each hears the host and the others
   const onAirCallers = callers.filter(c => c.status === 'on_air');
@@ -174,6 +182,7 @@ export default function CallScreener() {
                   </div>
 
                   <CallerNote showId={showId} caller={caller} />
+                  <CallerHistory showId={showId} caller={caller} />
 
                   <div className="flex gap-2">
                     <button
@@ -221,6 +230,7 @@ export default function CallScreener() {
                   )}
                 </div>
                 <CallerNote showId={showId} caller={onAirCaller} />
+                <CallerHistory showId={showId} caller={onAirCaller} />
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleHold(onAirCaller.id)}
@@ -278,6 +288,7 @@ export default function CallScreener() {
                     </span>
                   </div>
                   <CallerNote showId={showId} caller={caller} />
+                  <CallerHistory showId={showId} caller={caller} />
                   <div className="flex gap-2">
                     <button
                       onClick={() => handlePutOnAir(caller.id)}
@@ -301,6 +312,8 @@ export default function CallScreener() {
           )}
         </div>
       </div>
+
+      <MarkedCallers refresh={standings} />
     </div>
   );
 }

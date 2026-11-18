@@ -10,6 +10,7 @@ import { useTalkback } from '../../hooks/useTalkback';
 import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
+import CallerHistory from './live/CallerHistory';
 
 const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AIR)
 
@@ -314,6 +315,7 @@ export default function HostConsole() {
                   )}
                 </div>
                 <CallerNote showId={showId} caller={onAirCaller} big />
+                <CallerHistory showId={showId} caller={onAirCaller} readOnly />
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleHold(onAirCaller.id)}
@@ -374,6 +376,7 @@ export default function HostConsole() {
                     </div>
                     <div className="text-[11px] text-gray-500 mb-2">{caller.caller_phone}</div>
                     <CallerNote showId={showId} caller={caller} />
+                    <CallerHistory showId={showId} caller={caller} readOnly />
                     <div className="mb-2">
                       <TalkButton callId={caller.id} talkingTo={talk.talkingTo} onStart={talk.start} onStop={talk.stop} />
                     </div>
