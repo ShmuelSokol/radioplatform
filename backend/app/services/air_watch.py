@@ -296,7 +296,9 @@ class AirWatch:
                 if st.drift_since is None or st.drift_entry != engine_entry:
                     st.drift_since, st.drift_entry = mono, engine_entry
                 elif mono - st.drift_since >= DRIFT_SECONDS:
-                    detail = ("The stream server does not answer." if status is None else
+                    box = str(station.id) in settings.relay_station_ids
+                    detail = (("The local FM box does not answer (its relay is not fetching commands)."
+                               if box else "The stream server does not answer.") if status is None else
                               f"The stream server plays {status.get('title') or engine_entry}, "
                               f"the site shows {_title(current) if current else 'nothing'}.")
                     add("engine_drift", DRIFT_TITLE, detail, f"{int(st.drift_since)}")
