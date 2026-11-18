@@ -57,7 +57,7 @@ MASECHTOS: list[tuple[str, str | None, int, tuple[str, ...]]] = [
     ("Menachos", "Meh-nah-khos", 110, ("menachot", "menachoth")),
     ("Chullin", "Khoo-lin", 142, ("chulin", "hullin")),
     ("Bechoros", "Beh-khoh-ros", 61, ("bechorot", "bekhorot")),
-    ("Arachin", "Ah-rah-khin", 34, ("erchin", "arakhin")),
+    ("Arachin", "Ah-rah-khin", 34, ("erchin", "arakhin", "arachan")),
     ("Temurah", "Teh-moo-rah", 34, ("temura",)),
     ("Kereisos", "Keh-ray-sos", 28, ("keritot", "kerisos", "kreisos")),
     ("Me'ilah", "Meh-ee-lah", 22, ("meilah", "meila")),
@@ -206,6 +206,13 @@ def _spoken_numbers(text: str) -> list[int]:
                 found.append(total + current)
             total, current, in_run = 0, 0, False
     return found
+
+
+def whisper_prompt() -> str:
+    """initial_prompt for speech recognition of a made clip: every masechta name, with no
+    hint which one the clip says. Without it Whisper (small.en) heard "Arachin" as
+    "Rakhine" in 6 of 6 takes; with it 11 of 12 good takes passed (PC, 2026-11-18)."""
+    return "Daf Yomi. Maseches " + ", ".join(n for n, _, _, _ in MASECHTOS) + "."
 
 
 def transcript_matches(transcript: str, name: str, daf: int) -> bool:

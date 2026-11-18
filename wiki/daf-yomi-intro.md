@@ -31,7 +31,7 @@ programme" rule in [program-blocks](program-blocks.md)). Test: `tests/test_daf_i
   calendar's daf for the day it airs, the words drop "today's" ("Up next, the Daf Yomi
   shiur: ..."). Daf two of a masechta (and Kinnim 23, Tamid 26, Middos 34) says "we begin".
 - A title the parser cannot read gets no intro (the shiur still airs), never a guess.
-- Each made clip is run through speech recognition and must pass `transcript_matches`
+- Each made clip is run through speech recognition (with `initial_prompt=whisper_prompt()`: all masechta names, no hint which; without it Whisper hears "Arachin" as "Rakhine") and must pass `transcript_matches`
   (right masechta and right number) before upload; a failing clip is made again.
 - Numbers are said in English ("a hundred and one"). Hebrew letters would be a change of
   wording only.

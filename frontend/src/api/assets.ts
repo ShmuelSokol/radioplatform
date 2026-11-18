@@ -154,6 +154,18 @@ export const trimAsset = async (
   return res.data;
 };
 
+/** Cut every given silent region out of the item (start, middle and end) and join the
+ *  rest. The original is kept: restoreOriginal brings it back. */
+export const removeSilence = async (
+  id: string,
+  regions: Array<{ start: number; end: number }>,
+): Promise<Asset> => {
+  const res = await apiClient.post<Asset>(`/assets/${id}/remove-silence`, {
+    regions: regions.map((r) => ({ start: r.start, end: r.end })),
+  }, { timeout: 300_000 });
+  return res.data;
+};
+
 export const restoreOriginal = async (id: string): Promise<Asset> => {
   const res = await apiClient.post<Asset>(`/assets/${id}/restore-original`);
   return res.data;
