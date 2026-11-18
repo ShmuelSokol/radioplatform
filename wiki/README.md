@@ -27,6 +27,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [spot-schedules](spot-schedules.md) — Sponsor spot scheduling by daypart, how clock slots get filled, legacy single-spot fallback, sponsor portal data sources
 - [schedule-look-ahead](schedule-look-ahead.md) — Conflict look-ahead page, shared block resolver, tie-break order, blocks are station-local time (were UTC)
 - [sponsorship-copy-review](sponsorship-copy-review.md) — LP station sponsorship (not advertising) wording rules as editable data, AI copy review, basic-check fallback
+- [sponsor-accounts](sponsor-accounts.md) — Sponsors page as a client database: status and dates, spots by stage, contracts, as-run log, missed plays
 - [spot-recordings](spot-recordings.md) — Record Spots page: script, wording check, audio (Shprach stub makes placeholder tones), listen, approve into the library
 - [program-blocks](program-blocks.md) — Named blocks ("Weather Sponsors"): one event that queues a run of items at clock times, hard or soft; replaces the built-in hourly time and weather
 - [operator-actions](operator-actions.md) — Next with a fade choice, fire-now, insert at a point, intro length, hard/soft timed items (`timing_mode`)

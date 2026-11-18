@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { rememberStation, stationToShow } from '../../lib/lastStation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listSponsors } from '../../api/sponsors';
@@ -109,13 +110,16 @@ export default function SpotSchedules() {
   });
 
   const [error, setError] = useState('');
-  const [form, setFormState] = useState(emptyForm);
+  // "New contract" on a client's page opens the form with that client chosen
+  const [params] = useSearchParams();
+  const forSponsor = params.get('sponsor') || '';
+  const [form, setFormState] = useState(forSponsor ? { ...emptyForm, sponsor_id: forSponsor } : emptyForm);
   // A message about the form goes away as soon as the form is changed.
   const setForm = (next: typeof emptyForm) => {
     setFormState(next);
     setError('');
   };
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(!!forSponsor);
   const [spotSearch, setSpotSearch] = useState('');
   const [spot, setSpot] = useState<Asset | null>(null);
   const [previewStation, setPreviewStation] = useState('');
@@ -512,7 +516,9 @@ export default function SpotSchedules() {
               <li key={s.id} className="px-6 py-4 flex flex-wrap items-center gap-3">
                 <div className="flex-1 min-w-[16rem]">
                   <p className="font-medium">
-                    {sponsorName(s.sponsor_id)}
+                    <Link to={`/admin/sponsors/${s.sponsor_id}`} className="hover:underline">
+                      {sponsorName(s.sponsor_id)}
+                    </Link>
                     {!s.is_active && (
                       <span className="ml-2 text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded">
                         Paused

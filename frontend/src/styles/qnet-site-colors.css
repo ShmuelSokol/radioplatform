@@ -56,6 +56,7 @@
 .qn-site [class~="border-amber-200"]{border-color:#d97706}
 .qn-site [class~="border-amber-300"]{border-color:#d97706}
 .qn-site [class~="border-blue-200"]{border-color:#2563eb}
+.qn-site [class~="border-blue-300"]{border-color:#2563eb}
 .qn-site [class~="border-brand-200"]{border-color:#2563eb}
 .qn-site [class~="border-brand-300"]{border-color:#2563eb}
 .qn-site [class~="border-gray-100"]{border-color:var(--qn-shadow)}
@@ -208,6 +209,7 @@
 .qn-site [class~="text-yellow-400"]{color:#713f12}
 .qn-site [class~="text-yellow-500"]{color:#713f12}
 .qn-site [class~="text-yellow-700"]{color:#713f12}
+.qn-site [class~="text-yellow-800"]{color:#713f12}
 .qn-site [class~="bg-amber-500"][class~="text-white"],
 .qn-site [class~="bg-amber-500"]:not(button):not(a) [class~="text-white"],
 .qn-site [class~="bg-amber-600"][class~="text-white"],
