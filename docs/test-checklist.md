@@ -2504,21 +2504,21 @@ Round 1 of the test list for each. Covered rows name the test; the rest are the 
 - [x] V3-66 Off by default; when on, an ID airs only after a song, every 12 to 20 min, the IDs rotate | modes: both | covered: test_station_ids_between_songs.py test_off_by_default_no_ids, test_ids_are_spaced_rotated_and_only_after_songs, test_settings_defaults_and_limits
 - [x] V3-67 Never within 3 min of a timed break, never right after a spoken item or a break | modes: both | covered: test_ids_keep_clear_of_timed_breaks, test_no_id_right_after_a_spoken_item_or_a_break_before_the_fill, test_clock_clear_of_timed
 - [x] V3-68 A top-up of the queue keeps the spacing from the last ID already queued; on with no jingles says so | modes: both | covered: test_spacing_counts_from_the_last_id_already_queued, test_queue_fill_puts_ids_between_songs_and_a_top_up_keeps_the_spacing, test_on_with_no_jingles_says_so
-- [ ] V3-69 After Next, a reshuffle, a schedule change or a live show the spacing still holds (no two IDs within 12 min, none in front of the :00 time check) | modes: both | covered: NOT COVERED (T, H)
-- [ ] V3-70 On an engine station the ID is heard on the stream once, from its start, between two songs (crossfade into and out of it like a song, no silence) | modes: engine | covered: NOT COVERED (H)
-- [ ] V3-71 Turning IDs on for one station adds none to the other two; the setting shows only on that station | modes: both | covered: NOT COVERED (T, PC)
+- [ ] V3-69 After Next, a reshuffle, a schedule change or a live show the spacing still holds (no two IDs within 12 min, none in front of the :00 time check) | modes: both | covered: the spacing counts from an ID that already aired, not only one still queued (a redraw empties the queue of IDs): test_station_ids_edges.py test_an_id_that_just_aired_holds_off_the_next; after a live show on the engine: NOT COVERED (H)
+- [x] V3-70 On an engine station the ID is heard on the stream once, from its start, between two songs. An ID is a short jingle, so it counts as spoken: the song fades out first, no overlap either side, no gap over 1 s | modes: engine | covered: harness speech_never_overlaps (a block_only jingle in the music lane between items; 9 passed on main 2026-11-18 22:53Z: 0.0 s together, 0.0 s gap)
+- [ ] V3-71 Turning IDs on for one station adds none to the other two; the setting shows only on that station | modes: both | covered: test_ids_on_one_station_add_none_to_another, test_an_id_category_of_another_station_is_not_drawn; the setting on the page per station: PC
 
 ### Daf Yomi intro clip (PR 371)
 - [x] V3-72 The calendar names the right daf, numbers are said as words, the clip words match | modes: n.a. | covered: test_daf_intro.py
 - [x] V3-73 The intro airs right before the shiur | modes: both | covered: test_the_intro_airs_right_before_the_shiur
-- [ ] V3-74 Still right before it after a reshuffle, a Move in the control room, a schedule refresh, or a hard time check falling between them (the time check goes before the intro, never between intro and shiur) | modes: both | covered: NOT COVERED (T, H)
-- [ ] V3-75 No clip for today (the PC job did not run): the shiur airs without an intro and nothing stale (yesterday's daf) airs | modes: both | covered: NOT COVERED (T)
+- [x] V3-74 Still right before it when a hard time check or the schedule announcement shares the minute (the intro is the shiur's own block item, one timed group in (preempt_at, position) order, so a reshuffle of songs does not reach it) | modes: both | covered: test_the_intro_airs_right_before_the_shiur (H-10c)
+- [ ] V3-75 No clip for today (the PC job did not run): the shiur airs and the intro, if one is left in the block, names the shiur's own daf, never yesterday's | modes: both | covered: the clip is chosen by the PC job from the shiur's title (parse_title, test_a_shiur_title_gives_its_daf); a block left with yesterday's clip because the job did not run: PC job check
 - [ ] V3-76 Listening check on Main: the clip names today's daf and the shiur follows with no gap | modes: both | covered: PC (pending, noted in memory)
 
 ### Sponsorship three-hour time slots and levelling (PRs 370, 373, 375)
 - [x] V3-77 Time slots cover the day with no gaps; every break gets three before any gets a fourth; the next play goes to the break with the fewest | modes: both | covered: test_slot_leveling.py
 - [x] V3-78 One contract's own plays stay apart; exact times still work and count toward the level; no blocks means spread over clock slots, never doubled | modes: both | covered: test_a_contracts_own_plays_stay_apart, test_exact_times_still_work_and_count_toward_the_level, test_without_blocks_a_slot_spreads_over_its_clock_slots_and_never_doubles_up
-- [ ] V3-79 A contract edited mid-day (slot changed, plays raised or lowered): plays already aired count, the rest move, levelling holds and no break is overfilled | modes: both | covered: test_edit_cancel_and_delete_take_effect_on_the_queue covers the queue; levelling after a mid-day edit: NOT COVERED (T)
+- [ ] V3-79 A contract edited mid-day (slot changed, plays raised or lowered): plays already aired count, the rest move, levelling holds and no break is overfilled | modes: both | covered: test_slot_leveling_midday_edit.py (comes with PR 381). FOUND 2026-11-18: raising one contract's plays at 6:50 AM reshuffled the others, so two that already aired were planned again, and its own new plays landed in breaks already over; PR 381 (sponsorship thread) plans from today's play log
 - [ ] V3-80 What the sponsor's portal and the client page show per slot equals what aired | modes: both | covered: NOT COVERED (T, PC)
 
 ### Contract Edit dialog (PRs 369, 373)
@@ -2526,4 +2526,4 @@ Round 1 of the test list for each. Covered rows name the test; the rest are the 
 - [ ] V3-82 The Edit dialog on the client page and on Spot Schedule opens with the contract's values, offers the three-hour slots, saves, and shows no unexpected toast or console error, at desktop and iPhone size | modes: both | covered: NOT COVERED (J)
 
 ### Sponsors top menu (PR 368)
-- [ ] V3-83 Sponsors is its own top menu with All Clients first; Campaigns opens the client page; each role sees only what it may (sponsor and viewer cannot open it; dj per access.ts) | modes: n.a. | covered: test_role_access.py for the routes; the menu per role on the page: NOT COVERED (J)
+- [ ] V3-83 Sponsors is its own top menu with All Clients first; Campaigns opens the client page; each role sees only what it may (sponsor and viewer cannot open it; dj per access.ts) | modes: n.a. | covered: the menu shows only links canAccess(role) allows (Navbar.tsx), and access.ts mirrors the guards checked by test_role_access.py; a look at the menu per role on the page: NOT COVERED (J)
