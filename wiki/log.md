@@ -263,3 +263,4 @@ INGEST 2026-11-17 engine-harness.md new scenarios next_skips_one, engine_restart
 UPDATE 2026-11-18 streaming-architecture.md the engine starts a hard item early when more than 1 s (was 3 s) is left after the last song, so the quiet before it never passes 1 s
 INGEST 2026-11-18 docs/test-checklist.md third pass (V3-1 to V3-56): untested ideas seeded by the night's surprises; air watch judges later items of a hard group against the end of those before them
 INGEST 2026-11-18 engine-harness.md resume_without_old_song; backend.log kept across restarts; direct queue writes at a song change are a test artifact
+INGEST 2026-11-18 operator-actions.md engine station: Play next/delete/move/reorder take back the engine's pre-loaded song at once (take_operator_change), Next takes it back first and waits up to ~1 s for the new file (settle_before_next); before, Play next then Next played the held automatic song
