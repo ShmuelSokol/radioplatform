@@ -114,3 +114,8 @@ def test_without_blocks_a_slot_spreads_over_its_clock_slots_and_never_doubles_up
     assert len({p.local for p in placed}) == 12  # one sponsorship per clock slot
     assert all(6 <= p.local.hour < 9 for p in placed if p.schedule.name == "n")
     assert set(DAYPARTS) >= set(TIME_SLOTS)
+
+
+def test_a_spread_play_is_labelled_with_its_contracts_slot():
+    placed, _ = plan_spots([_spot("a", "late_morning")], NY, DAY, 1, breaks=_breaks(9, 12))
+    assert [p.daypart for p in placed] == ["late_morning"]
