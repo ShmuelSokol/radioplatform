@@ -260,7 +260,7 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     assert "[on_air_quiet, timed, main, hold, emergency]" in liq
     assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
     assert 'elsif hold_open() then "hold" else "emergency"' in liq
-    assert "engine_proto = 4" in liq
+    assert "engine_proto = 5" in liq
 
 
 def test_speech_is_never_overlapped_and_the_song_crossfade_comes_from_the_backend():
@@ -319,7 +319,8 @@ def test_the_stream_is_quiet_while_a_host_is_on_air():
     # start, and the engine says with each ask whether it is on (a show that ended while
     # the backend restarted).
     liq = (INFRA / "radio.liq").read_text()
-    assert 'on_air_quiet = switch(id="host_gate", track_sensitive=false, [({live_on()}, blank(id="host_on_air"))])' in liq
+    assert 'on_air_quiet = switch(id="host_gate", track_sensitive=false, [' in liq
+    assert '({live_on()}, fallback(id="host_lane", track_sensitive=false, [live_feed, blank(id="host_on_air")]))' in liq
     assert 'control("/live"' in liq
     assert 'elsif live_on() then "live"' in liq
     assert "&live=#{if live_on() then 1 else 0 end}" in liq
@@ -498,7 +499,7 @@ def test_the_item_after_a_live_show_loads_during_the_show():
     once the show was over. /flush now asks under the live lane too (proto 4), and the
     backend quiets the engine before it flushes, so the flush loads that item."""
     liq = _liq()
-    assert "engine_proto = 4" in liq
+    assert "engine_proto = 5" in liq
     flush = liq[liq.index('control("/flush"'):]
     flush = flush[:flush.index("end)")]
     assert 'on_air_lane() != "main" or live_on()' in flush
@@ -510,3 +511,22 @@ def test_the_item_after_a_live_show_loads_during_the_show():
     assert take.index("engine_live(station.id, True)") < take.index("engine_flush(station.id)")
     release = svc[svc.index("async def release_station"):]
     assert "engine_live(station.id, False)" in release[:release.index("return True")]
+
+
+def test_the_live_lane_plays_the_show_from_live_mp3_with_the_token_in_a_header():
+    """Engine proto 5: the host's show (after the broadcast delay) is on the stream. The
+    feed opens on live on, closes on live off, and the lane is quiet without it."""
+    liq = _liq()
+    assert "engine_proto = 5" in liq
+    feed = liq[liq.index("live_feed = input.http("):]
+    feed = feed[:feed.index("\n)\n")]
+    assert "start=false" in feed
+    assert '"#{backend_url}/playout/#{station_id}/live.mp3"' in feed
+    assert 'X-Playout-Token: #{token}' in feed and "token=" not in feed.split("live.mp3")[1]
+    lane = liq[liq.index("on_air_quiet = switch("):]
+    lane = lane[:lane.index("\n])\n")]
+    assert "[live_feed, blank(" in lane
+    live = liq[liq.index('control("/live"'):]
+    live = live[:live.index("end)")]
+    on, off = live.split("elsif not body.on")
+    assert "live_feed.start()" in on and "live_feed.stop()" in off

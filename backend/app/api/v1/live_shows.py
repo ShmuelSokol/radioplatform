@@ -415,17 +415,7 @@ async def put_on_air(
 ):
     """Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted).
     While the show's delay is not full enough to Dump a caller, 409 as well unless `force`."""
-    show = await live_show_service.get_show(db, show_id)
-    air = _air_of(show) if show else None
-    if air is not None and not force and air.configured > 0:
-        status = air.status()
-        if not status["safe"]:
-            need = air.dump_size if 0 < air.dump_size < air.configured else air.configured
-            raise HTTPException(status_code=409, detail={
-                "code": "delay_not_safe",
-                "message": (f"The delay is not safe yet: {air.buffered:.0f} s of {need:.0f} s. "
-                            "A caller put on air now could not be fully dumped."),
-            })
+    await _refuse_while_not_safe(db, show_id, force)
     call = await live_show_service.put_caller_on_air(db, show_id, call_id)
     if not call:
         raise NotFoundError("Call not found")
@@ -440,6 +430,82 @@ async def put_on_air(
         pass
 
     return call
+
+
+async def _refuse_while_not_safe(db: AsyncSession, show_id, force: bool) -> None:
+    show = await live_show_service.get_show(db, show_id)
+    air = _air_of(show) if show else None
+    if air is not None and not force and air.configured > 0:
+        status = air.status()
+        if not status["safe"]:
+            need = air.dump_size if 0 < air.dump_size < air.configured else air.configured
+            raise HTTPException(status_code=409, detail={
+                "code": "delay_not_safe",
+                "message": (f"The delay is not safe yet: {air.buffered:.0f} s of {need:.0f} s. "
+                            "A caller put on air now could not be fully dumped."),
+            })
+
+
+async def _say(show_id, event: str, data: dict) -> None:
+    try:
+        from app.api.v1.live_shows_ws import broadcast_show_event
+        await broadcast_show_event(str(show_id), event, data)
+    except Exception:
+        pass
+
+
+@router.post("/{show_id}/calls/{call_id}/hold", response_model=CallInRequestInDB)
+async def hold_call(
+    show_id: uuid.UUID,
+    call_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """Take the caller on air off the air without hanging up (back to Approved). They
+    stay connected, hear the show, and can be put on air again. 409 if not on air."""
+    call = await live_show_service.hold_caller(db, call_id)
+    if not call or str(call.live_show_id) != str(show_id):
+        raise NotFoundError("Call not found")
+    await _tell_web_caller(call_id, "approved")
+    await _say(show_id, "caller_updated", {"call_id": str(call_id), "status": "approved"})
+    return call
+
+
+@router.post("/{show_id}/calls/next")
+async def next_caller(
+    show_id: uuid.UUID,
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """One press between callers: the call on air ends and the approved caller who
+    has waited longest goes on air. With nobody approved it only ends the call on air;
+    409 when there is neither. Like Put On Air, refused (409 delay_not_safe) while the
+    delay could not cut the new caller, unless `force`; nothing is ended then."""
+    from app.models.call_in_request import CallInRequest, CallStatus
+
+    current = (await db.execute(select(CallInRequest).where(
+        CallInRequest.live_show_id == show_id, CallInRequest.status == CallStatus.ON_AIR,
+    ))).scalars().first()
+    coming = await live_show_service.next_approved_call(db, show_id)
+    if current is None and coming is None:
+        raise HTTPException(status_code=409, detail="No caller is on air and none is approved")
+    if coming is not None:
+        await _refuse_while_not_safe(db, show_id, force)
+    ended = None
+    if current is not None:
+        ended = await live_show_service.end_call(db, current.id)
+        await _tell_web_caller(current.id, "completed")
+        await _say(show_id, "caller_removed", {"call_id": str(current.id), "reason": "ended"})
+    on_air = None
+    if coming is not None:
+        on_air = await live_show_service.put_caller_on_air(db, show_id, coming.id)
+        await _tell_web_caller(coming.id, "on_air")
+        await _say(show_id, "caller_updated", {
+            "call_id": str(coming.id), "status": "on_air",
+            "air_start": on_air.air_start.isoformat() if on_air and on_air.air_start else None,
+        })
+    return {"ended": str(ended.id) if ended else None, "on_air": str(on_air.id) if on_air else None}
 
 
 @router.post("/{show_id}/calls/{call_id}/end-call", response_model=CallInRequestInDB)

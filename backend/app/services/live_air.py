@@ -48,7 +48,13 @@ SHRINK_ABOVE = 0.5          # seconds over the target before shrinking starts
 QUIET_FLOOR = 300           # RMS at or under this is a pause whatever the voice level
 QUIET_SHARE = 0.15          # ... and so is anything under 15 % of the recent speech level
 EDGE = int(RATE * 0.01)     # 10 ms fades where a Dump cut the audio
-EXIT_BEFORE_END = 180.0     # seconds before a show's hard stop the delay winds down
+# Before a show's hard stop the delay may only be as long as can still be played out by
+# hurrying non-stop speech: this many seconds of delay per second left, less a margin.
+# (It was a fixed 3 minutes at up to 12 %: that takes back 21 s, so a 30 or 40 s delay,
+# or any show shorter than its delay plus 3 minutes, was cut with words still waiting.)
+WIND_RATE = 0.10
+SOON = 1.0                  # seconds before first air that `on_soon` is called
+WIND_MARGIN = 5.0
 CUSHION = int(RATE * 0.3)   # least audio waiting before it plays out (smooth, no stutter)
 STATUS_EVERY = 0.5
 HEARD_KEPT = int(RATE * 6)    # what aired just before a Dump, kept for the dump log          # seconds between status messages
@@ -175,6 +181,7 @@ class LiveAir:
         delay: float = 0.0,
         dump: float = 0.0,
         on_listening: Callable[[bool], Awaitable[None]] | None = None,
+        on_soon: Callable[[], Awaitable[None]] | None = None,
         on_status: Callable[[dict], Awaitable[None]] | None = None,
         on_done: Callable[[], Awaitable[None]] | None = None,
         clock: Callable[[], float] = time.time,
@@ -186,6 +193,12 @@ class LiveAir:
         self.target = self.configured     # what the delay is steering to now (0 = exiting)
         self.dump_size = max(0.0, dump)
         self.on_listening = on_listening
+        # Called once, SOON seconds before listeners first hear the show: a stream server
+        # needs that long to go quiet (it lagged the host by 2.5 s on Jerusalem)
+        self.on_soon = on_soon
+        self.told_soon = False
+        self.on_closed: Callable[[], Awaitable[None]] | None = None   # always runs at the end
+        self.ever_heard = False
         self.on_status = on_status
         self.on_done = on_done
         self.clock = clock
@@ -194,6 +207,9 @@ class LiveAir:
         self.read = 0
         self.count = 0
         self.listening = False      # listeners hear this show now
+        # A timed item (the time check) is on air on the station: the show waits for it
+        # to end before listeners hear the host, and the host's words wait in the delay
+        self.hold_until = 0.0
         self.finishing = False      # show over (or host gone): play out what is left, take no more
         self.finish_reason = ""
         self.closed = False
@@ -337,11 +353,11 @@ class LiveAir:
     def _shrink_speech(self) -> float:
         """How fast speech plays while the delay shrinks: 3 % as a rule, more (up to
         12 %) when the show's hard stop is near and the delay would not be empty by then."""
-        if self.target == 0 and self.end_at is not None and not self.finishing:
-            left = self.end_at - self.clock() - 5.0
+        if self.auto_exit and self.end_at is not None and not self.finishing:
+            left = self.end_at - self.clock() - WIND_MARGIN
             if left <= 0:
                 return SHRINK_HURRY
-            return min(SHRINK_HURRY, max(SHRINK_SPEECH, 1.0 + self.buffered / left))
+            return min(SHRINK_HURRY, max(SHRINK_SPEECH, 1.0 + 1.1 * self.buffered / left))
         return SHRINK_SPEECH
 
     def _program(self, n: int) -> np.ndarray:
@@ -417,20 +433,28 @@ class LiveAir:
 
     def produce(self, n: int) -> np.ndarray | None:
         """The next `n` samples listeners hear (None while nothing airs yet)."""
+        if self.end_at is not None and not self.finishing and self.target > 0:
+            room = max(0.0, (self.end_at - self.clock() - WIND_MARGIN) * WIND_RATE)
+            if room < self.target:
+                self.target = room if room >= 0.3 else 0.0
+                self.auto_exit = True
         if not self.listening:
             if self.finishing:
                 return None
-            if self.count >= int(self.target * RATE) and (self.count > 0 or self.target == 0):
+            if self.count >= int(self.target * RATE) and (self.count > 0 or self.target == 0) \
+                    and self.clock() >= self.hold_until:
                 self.listening = True
+                self.ever_heard = True
                 self.mode = "steady" if self.target > 0 else "no delay"
                 self._notify_listening(True)
             else:
                 self.mode = "pre-roll"
+                if not self.told_soon and self.on_soon is not None and self.count > 0 \
+                        and self.count >= int((self.target - SOON) * RATE) \
+                        and self.clock() >= self.hold_until - SOON:
+                    self.told_soon = True
+                    asyncio.ensure_future(self._safe(self.on_soon()))
                 return None
-        if self.end_at is not None and not self.finishing and self.target > 0 \
-                and self.clock() >= self.end_at - EXIT_BEFORE_END:
-            self.target = 0.0
-            self.auto_exit = True
         out = np.zeros(0, dtype=np.int16)
         while len(out) < n:
             need = n - len(out)
@@ -537,6 +561,8 @@ class LiveAir:
             if self.on_listening is not None:
                 await self._safe(self.on_listening(False))
         await self._maybe_status(force=True)
+        if self.on_closed is not None:
+            await self._safe(self.on_closed())
         if self.on_done is not None:
             await self._safe(self.on_done())
 
@@ -571,6 +597,8 @@ class LiveAir:
             "show_id": self.show_id,
             "mode": self.mode,
             "on_air": self.listening,
+            # Seconds the show still waits for a timed item on the station to end
+            "hold": 0.0 if self.listening else round(max(0.0, self.hold_until - now), 1),
             "delay": round(self.buffered, 2),
             "target": self.target,
             "configured": self.configured,

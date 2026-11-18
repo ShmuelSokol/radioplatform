@@ -150,6 +150,9 @@ class StationLiveRelay:
         self.callers: Dict[str, CallerLine] = {}  # call_id -> caller line
         # station_id -> the broadcast delay listeners hear the show through (services/live_air.py)
         self.airs: Dict[str, Any] = {}
+        # Listener sockets that asked for no audio (their page plays the show from the stream)
+        self.no_audio: Set[WebSocket] = set()
+        self.quieted_early: set[str] = set()   # engine stations told to go quiet before first air
         # station_id -> called once when listeners first hear the show (takes the station over)
         self.on_first_air: Dict[str, object] = {}
 
@@ -157,7 +160,18 @@ class StationLiveRelay:
         air = self.airs.get(station_id)
         live = air is not None and air.listening
         return {"type": "live_state", "live": live, "show_id": air.show_id if live else None,
-                "sample_rate": LIVE_SAMPLE_RATE}
+                "sample_rate": LIVE_SAMPLE_RATE, "on_stream": self.on_stream(station_id)}
+
+    @staticmethod
+    def on_stream(station_id: str) -> bool:
+        """The station's public stream carries the show itself (engine proto 5 plays
+        /playout/{id}/live.mp3): a page playing that stream must not also play the
+        frames sent here, or the host is heard twice, seconds apart."""
+        from app.config import settings
+        from app.services import playout_engine
+
+        return bool(settings.engine_drives(station_id) and settings.public_stream_url(station_id)
+                    and playout_engine.get_state(station_id).engine_proto >= playout_engine.ENGINE_PROTO_LIVE_AUDIO)
 
     async def _send_all(self, station_id: str, send) -> None:
         conns = list(self.listeners.get(station_id, ()))
@@ -169,7 +183,14 @@ class StationLiveRelay:
                 self.listeners.get(station_id, set()).discard(ws)
 
     async def _send_frame(self, station_id: str, data: bytes) -> None:
-        await self._send_all(station_id, lambda ws: asyncio.wait_for(ws.send_bytes(data), 2.0))
+        conns = [ws for ws in self.listeners.get(station_id, ()) if ws not in self.no_audio]
+        if not conns:
+            return
+        results = await asyncio.gather(*(asyncio.wait_for(ws.send_bytes(data), 2.0) for ws in conns),
+                                       return_exceptions=True)
+        for ws, result in zip(conns, results):
+            if isinstance(result, Exception):
+                self.listeners.get(station_id, set()).discard(ws)
 
     async def broadcast_state(self, station_id: str) -> None:
         message = json.dumps(self.state(station_id))
@@ -224,13 +245,33 @@ class StationLiveRelay:
         async def status(data: dict, _show=show_id) -> None:
             await live_show_manager.broadcast_to_show(_show, {"type": "air_status", "data": data})
 
+        async def soon(_station=station_id) -> None:
+            # The stream server goes quiet a moment before the host is heard: told only
+            # at first air it played music under the host's first 2.5 s
+            from app.config import settings as _settings
+            if _settings.engine_drives(_station):
+                from app.services import playout_engine
+                self.quieted_early.add(_station)
+                await playout_engine.engine_live(_station, True)
+
         new = LiveAir(station_id, show_id, send, delay=delay, dump=dump,
-                      on_listening=listening, on_status=status)
+                      on_listening=listening, on_status=status, on_soon=soon)
         new.end_at = end_at
 
         async def done(_station=station_id, _air=new) -> None:
             if self.airs.get(_station) is _air:
                 self.airs.pop(_station, None)  # listeners were told when it stopped airing
+
+        async def closed(_station=station_id, _air=new) -> None:
+            if _station in self.quieted_early:
+                self.quieted_early.discard(_station)
+                if not _air.ever_heard:
+                    # Ended in the last second of its pre-roll: nothing took the station
+                    # over, so nothing else would give the stream its sound back
+                    from app.services import playout_engine
+                    await playout_engine.engine_live(_station, False)
+
+        new.on_closed = closed
 
         new.on_done = done
         self.airs[station_id] = new
@@ -239,6 +280,7 @@ class StationLiveRelay:
             # already the show's (the host came back after a drop): on air at once and
             # the delay builds back while they talk, with no second pre-roll of silence
             new.listening = True
+            new.ever_heard = True
             new.mode = "no delay" if new.target == 0 else "building"
             await listening(True)
         new.start()
@@ -315,6 +357,8 @@ class StationLiveRelay:
                 pass
 
 
+_holds: set = set()  # watchers that keep a show from cutting a timed item (kept from collection)
+
 live_relay = StationLiveRelay()
 
 
@@ -326,13 +370,25 @@ async def websocket_station_live_listen(websocket: WebSocket, station_id: str):
     try:
         await websocket.send_text(json.dumps(live_relay.state(station_id)))
         while True:
-            await websocket.receive_text()  # nothing expected; this only notices the close
+            text = await websocket.receive_text()  # also how the close is noticed
+            # {"type":"audio","on":false}: this page hears the show on the station's
+            # stream and wants only the live_state messages
+            try:
+                msg = json.loads(text)
+            except ValueError:
+                continue
+            if isinstance(msg, dict) and msg.get("type") == "audio":
+                if msg.get("on") is False:
+                    live_relay.no_audio.add(websocket)
+                else:
+                    live_relay.no_audio.discard(websocket)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.debug("Live listen WS for station %s ended: %s", station_id, e)
     finally:
         live_relay.listeners.get(station_id, set()).discard(websocket)
+        live_relay.no_audio.discard(websocket)
 
 
 # --- Auth Helper ---
@@ -546,6 +602,11 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         live_relay.on_first_air[station_id] = take_over_when_heard
     await live_relay.set_on_air(station_id, show_id, delay=delay, dump=dump, end_at=end_at,
                                 heard_now=taken_over)
+    _air = live_relay.airs.get(station_id)
+    if _air is not None and not taken_over and not _air.listening and delay > 0:
+        from app.services.live_show_service import hold_for_timed_items
+        _holds.add(_task := asyncio.ensure_future(hold_for_timed_items(station_id, _air)))
+        _task.add_done_callback(_holds.discard)
 
     from app.config import settings
     try:

@@ -3,8 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useLiveShow, useEndLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
 import { useHostAudio } from '../../hooks/useHostAudio';
-import { endCall, putCallerOnAirAsking } from '../../api/liveShows';
+import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
+import CallerNote from './live/CallerNote';
 
 export default function HostConsole() {
   const { showId } = useParams<{ showId: string }>();
@@ -96,6 +97,17 @@ export default function HostConsole() {
   const handleEndCall = async (callId: string) => {
     if (!showId) return;
     await endCall(showId, callId);
+  };
+
+  const handleHold = async (callId: string) => {
+    if (!showId) return;
+    try { await holdCall(showId, callId); } catch (err: any) { alert(err?.response?.data?.detail || 'Could not hold the caller'); }
+  };
+
+  const handleNext = async () => {
+    if (!showId) return;
+    const problem = await nextCallerAsking(showId);
+    if (problem) alert(problem);
   };
 
   const handlePutOnAir = async (callId: string) => {
@@ -233,7 +245,9 @@ export default function HostConsole() {
             )}
             {isRecording && air?.mode === 'pre-roll' && (
               <div className="text-yellow-400 text-sm mt-2 font-bold" data-testid="preroll-note">
-                Listeners hear you in {Math.max(0, Math.ceil(air.target - air.delay))} s. Start talking now.
+                {(air.hold ?? 0) > Math.max(0, air.target - air.delay)
+                  ? `A timed item is on air first. Listeners hear you in ${Math.ceil(air.hold ?? 0)} s. Start talking now.`
+                  : `Listeners hear you in ${Math.max(0, Math.ceil(air.target - air.delay))} s. Start talking now.`}
               </div>
             )}
             {isRecording && air?.on_air && (
@@ -253,12 +267,12 @@ export default function HostConsole() {
           <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4">
             <div className="text-[11px] text-gray-400 uppercase mb-3">Caller On Air</div>
             {onAirCaller ? (
-              <div className="bg-red-950 border border-red-800 rounded-lg p-4">
+              <div className="bg-red-950 border border-red-800 rounded-lg p-4" data-testid="on-air-card">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-red-300 font-bold text-lg">
                     {onAirCaller.caller_name || onAirCaller.caller_phone}
                   </span>
-                  <span className="text-[10px] bg-red-700 text-red-200 px-2 py-0.5 rounded-full animate-pulse">
+                  <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse">
                     ON AIR
                   </span>
                 </div>
@@ -270,12 +284,33 @@ export default function HostConsole() {
                     </span>
                   )}
                 </div>
-                <button
-                  onClick={() => handleEndCall(onAirCaller.id)}
-                  className="w-full bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
-                >
-                  End Call
-                </button>
+                <CallerNote showId={showId} caller={onAirCaller} big />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleHold(onAirCaller.id)}
+                    data-testid="hold-button"
+                    title="Off the air, still connected: back to the approved queue"
+                    className="flex-1 bg-amber-800 hover:bg-amber-700 text-amber-200 px-3 py-2 rounded text-sm transition"
+                  >
+                    Hold
+                  </button>
+                  <button
+                    onClick={() => handleEndCall(onAirCaller.id)}
+                    className="flex-1 bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
+                  >
+                    End Call
+                  </button>
+                </div>
+                {approvedCallers.length > 0 && (
+                  <button
+                    onClick={handleNext}
+                    data-testid="next-caller-button"
+                    title="Ends this call and puts the caller who waited longest on air"
+                    className="mt-2 w-full bg-green-800 hover:bg-green-700 text-green-200 px-3 py-3 rounded text-sm font-bold transition"
+                  >
+                    Next caller: {approvedCallers[0].caller_name || approvedCallers[0].caller_phone}
+                  </button>
+                )}
               </div>
             ) : (
               <div className="text-gray-600 text-center py-8 text-sm">
@@ -308,6 +343,7 @@ export default function HostConsole() {
                       </span>
                     </div>
                     <div className="text-[11px] text-gray-500 mb-2">{caller.caller_phone}</div>
+                    <CallerNote showId={showId} caller={caller} />
                     <button
                       onClick={() => handlePutOnAir(caller.id)}
                       disabled={!!onAirCaller}

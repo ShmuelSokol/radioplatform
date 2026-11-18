@@ -7,6 +7,9 @@
  * the screen says, on a desktop and a phone size. Part C is the station's settings.
  * Part D (ONLY=desk): Cough and Mute, the dump log and its recording, Put On Air while
  * the delay is not safe, and with PLAYOUT_TOKEN the engine's copy of the show (live.mp3).
+ * Part F (ONLY=callers): the caller desk (the caller's topic and notes, Hold, Next caller).
+ * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
+ * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
  *   KBR_ADMIN_EMAIL=admin KBR_ADMIN_PASSWORD=... node e2e/live-delay.cjs <station id>
  * API_URL / BASE_URL default to :8000 and :3000; SHOTS_DIR keeps screenshots.
@@ -168,7 +171,7 @@ function hostMic(showId, token) {
       const open = async (url, opts = {}) => {
         const page = await (await browser.newContext({ permissions: ['microphone'], ...opts })).newPage();
         await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
-        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|dynamically imported module|MIME type/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
         page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
         await page.goto(`${SITE}${url}`);
         return page;
@@ -441,6 +444,157 @@ function hostMic(showId, token) {
         }
         check('D23 no errors on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
         l.ws.close();
+      } finally {
+        await browser.close();
+      }
+    }
+    // ---------- Part E: the host is gone; the control room's badge ----------
+    if (!ONLY || ONLY === 'gone') {
+      await setConfig({ live_delay_seconds: 6, live_dump_seconds: 0, live_host_gone_seconds: 5 });
+      const show = await newShow('Delay test E');
+      const browser = await chromium.launch();
+      try {
+        const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+        await page.addInitScript(([t, st]) => { localStorage.setItem('access_token', t); localStorage.setItem('radio_last_station', st); }, [token, STATION]);
+        await api('POST', `/live-shows/${show.id}/start`);
+        await page.goto(`${SITE}/admin/dashboard`);
+        const badge = page.getByTestId('live-badge');
+        await badge.waitFor({ timeout: 20000 });
+        await page.getByText(/SHOW OPEN, NO HOST/).waitFor({ timeout: 6000 }).catch(() => {});
+        const noHost = await badge.innerText();
+        check('E1 control room, show started but no microphone: not LIVE', /SHOW OPEN, NO HOST: Delay test E/.test(noHost), noHost);
+        const l = listener();
+        const h = hostMic(show.id, token);
+        await h.ready;
+        const filling = await page.getByText(/FILLING DELAY, \d s: Delay test E/).waitFor({ timeout: 5000 }).then(() => true, () => false);
+        check('E2 while the delay fills the badge says FILLING DELAY, and listeners hear nothing', filling && !l.live(), await badge.innerText());
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'control-room-filling.png') });
+        const heard = await page.getByText(/LIVE, [56] s delay: Delay test E/).waitFor({ timeout: 12000 }).then(() => true, () => false);
+        await sleep(300);
+        check('E3 LIVE with the delay only once listeners hear the host', heard && l.live(), `${await badge.innerText()} / listeners live ${l.live()}`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'control-room-live.png') });
+
+        // The host's page closes without End Show
+        h.close();
+        const gone = Date.now();
+        let back = null;
+        while (Date.now() - gone < 30000 && back === null) {
+          await sleep(500);
+          const st = (await api('GET', `/stations/${STATION}`)).json;
+          if (!(st.automation_config || {}).live_show_id) back = (Date.now() - gone) / 1000;
+        }
+        // 6 s of delay play out, then 5 s without a host
+        check('E4 host gone: the station is handed back to its music by itself', back !== null && back > 8 && back < 20, `${back} s after the page closed`);
+        const s2 = (await api('GET', `/live-shows/${show.id}`)).json;
+        check('E5 the show stays open for the host to come back', s2.status === 'live' && !l.live(), s2.status);
+        const alerts = (await api('GET', '/alerts?limit=20')).json;
+        const list = alerts.alerts || alerts.items || alerts;
+        check('E6 an alert says the show lost its host', Array.isArray(list) && list.some((a) => /Live show lost its host: Delay test E/.test(a.title)), JSON.stringify((list[0] || {}).title));
+        const after = await page.getByText(/SHOW OPEN, NO HOST: Delay test E/).waitFor({ timeout: 6000 }).then(() => true, () => false);
+        check('E7 the control room badge goes back to NO HOST', after, await badge.innerText());
+
+        // The host comes back: on air again through the delay
+        const h2 = hostMic(show.id, token);
+        await h2.ready;
+        const again = await page.getByText(/LIVE, [56] s delay: Delay test E/).waitFor({ timeout: 14000 }).then(() => true, () => false);
+        check('E8 the host comes back and is on air again', again && l.live(), await badge.innerText());
+        h2.close();
+        l.ws.close();
+        await api('POST', `/live-shows/${show.id}/end`);
+      } finally {
+        await browser.close();
+      }
+    }
+    // ---------- Part F: the caller desk (notes, Hold, Next caller) ----------
+    if (!ONLY || ONLY === 'callers') {
+      await setConfig({ live_delay_seconds: 0, live_host_gone_seconds: 0 });
+      const show = await newShow('Delay test F');
+      await api('POST', `/live-shows/${show.id}/start`);
+      const browser = await chromium.launch();
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const open = async (url, opts) => {
+        const page = await (await browser.newContext(opts)).newPage();
+        await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409|dynamically imported module|MIME type/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        page.on('dialog', (d) => { problems.push(`${url}: dialog "${d.message()}"`); d.dismiss(); });
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const callIn = async (name, note) => { const r = await fetch(`${API}/call-in/${STATION}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, note }) }).then((x) => x.json()); return r.call?.id || r.id || r.call_id; };
+      const statusOf = async (id) => ((await api('GET', `/live-shows/${show.id}/calls`)).json.calls.find((c) => c.id === id) || {}).status;
+      try {
+        const screener = await open(`/admin/live/${show.id}/screen`, { viewport: { width: 1440, height: 900 } });
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await screener.getByText('Call Screener').waitFor({ timeout: 15000 });
+        const first = await callIn('Avi from Lakewood', 'A question about Shabbos candles');
+        const second = await callIn('Berel from Jerusalem', '');
+        const cardA = screener.locator('div.rounded-lg').filter({ hasText: 'Avi from Lakewood' }).last();
+        const cardB = screener.locator('div.rounded-lg').filter({ hasText: 'Berel from Jerusalem' }).last();
+        await cardA.getByText('A question about Shabbos candles').waitFor({ timeout: 6000 });
+        check('F1 the screener sees what the caller wants to talk about', true);
+        check('F2 a caller who wrote nothing shows "No note" and "add note"', /No note/.test(await T(cardB, 'caller-note').innerText()) && /add note/.test(await T(cardB, 'caller-note-button').innerText()));
+        await T(cardB, 'caller-note-button').click();
+        await screener.getByLabel('Note about this caller').fill('Wants to thank the station. Good line.');
+        await T(screener, 'caller-note-save').click();
+        await cardB.getByText('Wants to thank the station. Good line.').waitFor({ timeout: 4000 });
+        check('F3 the screener writes a note and it is saved', /edit note/.test(await T(cardB, 'caller-note-button').innerText()));
+        // Esc leaves the note as it was
+        await T(cardA, 'caller-note-button').click();
+        await screener.getByLabel('Note about this caller').fill('thrown away');
+        await screener.keyboard.press('Escape');
+        check('F4 Esc cancels a note edit', await cardA.getByText('A question about Shabbos candles').count() === 1 && await screener.getByText('thrown away').count() === 0);
+        await shot(screener, 'screener-notes');
+
+        await cardA.getByRole('button', { name: 'Approve' }).click();
+        await screener.locator('div.rounded-lg').filter({ hasText: 'Berel from Jerusalem' }).last().getByRole('button', { name: 'Approve' }).click();
+        const hostB = host.locator('div.rounded').filter({ hasText: 'Berel from Jerusalem' }).last();
+        await hostB.getByText('Wants to thank the station. Good line.').waitFor({ timeout: 6000 });
+        check('F5 the host sees the screener\'s note on the approved caller', await host.getByText('A question about Shabbos candles').count() === 1);
+        check('F6 no Next caller button while nobody is on air', await T(host, 'next-caller-button').count() === 0 && await T(screener, 'next-caller-button').count() === 0);
+
+        await host.locator('div.rounded').filter({ hasText: 'Avi from Lakewood' }).last().getByRole('button', { name: 'Put On Air' }).click();
+        await T(host, 'hold-button').waitFor({ timeout: 5000 });
+        await sleep(400);
+        const onAirCard = T(host, 'on-air-card');
+        check('F7 on air: the host sees the caller\'s topic in the on-air card', await onAirCard.getByText('A question about Shabbos candles').count() === 1 && await statusOf(first) === 'on_air');
+        check('F8 Next caller names who is next', /Next caller: Berel from Jerusalem/.test(await T(host, 'next-caller-button').innerText()) && await T(screener, 'next-caller-button').isVisible(), await T(host, 'next-caller-button').innerText());
+        await shot(host, 'host-caller-desk');
+
+        // Hold: off the air, still in the queue
+        await T(host, 'hold-button').click();
+        await host.getByText('No caller on air').waitFor({ timeout: 5000 });
+        await sleep(400);
+        check('F9 Hold: the caller is off the air and back in the approved queue', await statusOf(first) === 'approved' && await host.getByRole('button', { name: 'Put On Air' }).count() === 2 && await T(host, 'hold-button').count() === 0);
+        await screener.getByText('Approved (2)').waitFor({ timeout: 4000 });
+        check('F10 the screener sees the held caller as approved again', await T(screener, 'hold-button').count() === 0);
+
+        // On air again, then Next caller from the screener
+        await host.locator('div.rounded').filter({ hasText: 'Avi from Lakewood' }).last().getByRole('button', { name: 'Put On Air' }).click();
+        await T(screener, 'hold-button').waitFor({ timeout: 5000 });
+        await T(screener, 'next-caller-button').click();
+        await T(host, 'on-air-card').getByText('Berel from Jerusalem').waitFor({ timeout: 5000 });
+        await sleep(400);
+        check('F11 Next caller: the first call ends and the next caller is on air', await statusOf(first) === 'completed' && await statusOf(second) === 'on_air');
+        check('F12 with nobody left in the queue the Next caller button is gone', await T(host, 'next-caller-button').count() === 0 && await host.getByText('Avi from Lakewood').count() === 0);
+        await T(screener, 'hold-button').click();
+        await screener.getByText('Approved (1)').waitFor({ timeout: 4000 });
+        await sleep(400);
+        check('F13 Hold works from the screener too', await statusOf(second) === 'approved');
+
+        // Phone size: the note and the buttons are usable
+        const phone = await open(`/admin/live/${show.id}/host`, { ...devices['iPhone 13'] });
+        await phone.getByText('Berel from Jerusalem').first().waitFor({ timeout: 15000 });
+        const m = await phone.evaluate(() => ({
+          scroll: document.documentElement.scrollWidth - window.innerWidth,
+          note: !!document.querySelector('[data-testid="caller-note"]'),
+        }));
+        check('F14 phone: the note shows and nothing scrolls sideways', m.scroll <= 0 && m.note, JSON.stringify(m));
+        await shot(phone, 'host-caller-desk-phone');
+        check('F15 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        await api('POST', `/live-shows/${show.id}/end`);
       } finally {
         await browser.close();
       }

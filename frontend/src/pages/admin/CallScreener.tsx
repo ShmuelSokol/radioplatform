@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
-import { approveCall, rejectCall, putCallerOnAirAsking, endCall, updateCallInfo } from '../../api/liveShows';
+import { approveCall, rejectCall, putCallerOnAirAsking, endCall, holdCall, nextCallerAsking, updateCallInfo } from '../../api/liveShows';
 import type { CallInRequest } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
+import CallerNote from './live/CallerNote';
 
 export default function CallScreener() {
   const { showId } = useParams<{ showId: string }>();
@@ -32,6 +33,17 @@ export default function CallScreener() {
   const handlePutOnAir = async (callId: string) => {
     if (!showId) return;
     const problem = await putCallerOnAirAsking(showId, callId);
+    if (problem) alert(problem);
+  };
+
+  const handleHold = async (callId: string) => {
+    if (!showId) return;
+    try { await holdCall(showId, callId); } catch (err: any) { alert(err?.response?.data?.detail || 'Could not hold the caller'); }
+  };
+
+  const handleNext = async () => {
+    if (!showId) return;
+    const problem = await nextCallerAsking(showId);
     if (problem) alert(problem);
   };
 
@@ -146,6 +158,8 @@ export default function CallScreener() {
                     </span>
                   </div>
 
+                  <CallerNote showId={showId} caller={caller} />
+
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleApprove(caller.id)}
@@ -172,12 +186,12 @@ export default function CallScreener() {
           {onAirCaller && (
             <div className="mb-6">
               <h2 className="text-sm font-bold text-red-400 uppercase mb-3">On Air</h2>
-              <div className="bg-red-950 border border-red-800 rounded-lg p-4">
+              <div className="bg-red-950 border border-red-800 rounded-lg p-4" data-testid="on-air-card">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-red-300 font-bold text-lg">
                     {onAirCaller.caller_name || onAirCaller.caller_phone}
                   </span>
-                  <span className="text-[10px] bg-red-700 text-red-200 px-2 py-0.5 rounded-full animate-pulse">
+                  <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse">
                     ON AIR
                   </span>
                 </div>
@@ -189,20 +203,43 @@ export default function CallScreener() {
                     </span>
                   )}
                 </div>
-                <button
-                  onClick={() => handleEndCall(onAirCaller.id)}
-                  className="w-full bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
-                >
-                  End Call
-                </button>
+                <CallerNote showId={showId} caller={onAirCaller} />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleHold(onAirCaller.id)}
+                    data-testid="hold-button"
+                    title="Off the air, still connected: back to Approved"
+                    className="flex-1 bg-amber-800 hover:bg-amber-700 text-amber-200 px-3 py-2 rounded text-sm transition"
+                  >
+                    Hold
+                  </button>
+                  <button
+                    onClick={() => handleEndCall(onAirCaller.id)}
+                    className="flex-1 bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
+                  >
+                    End Call
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
           {/* Approved Queue */}
-          <h2 className="text-sm font-bold text-gray-400 uppercase mb-3">
-            Approved ({approvedCallers.length})
-          </h2>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="text-sm font-bold text-gray-400 uppercase">
+              Approved ({approvedCallers.length})
+            </h2>
+            {approvedCallers.length > 0 && onAirCaller && (
+              <button
+                onClick={handleNext}
+                data-testid="next-caller-button"
+                title="Ends the call on air and puts the caller who waited longest on air"
+                className="bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1.5 rounded text-[11px] font-bold transition"
+              >
+                Next caller
+              </button>
+            )}
+          </div>
           {approvedCallers.length === 0 ? (
             <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-8 text-center text-gray-600 text-sm">
               No approved callers
@@ -218,10 +255,11 @@ export default function CallScreener() {
                       </span>
                       <div className="text-[11px] text-gray-500">{caller.caller_phone}</div>
                     </div>
-                    <span className="text-[10px] bg-green-800 text-green-200 px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] bg-green-700 text-white px-2 py-0.5 rounded-full">
                       Approved
                     </span>
                   </div>
+                  <CallerNote showId={showId} caller={caller} />
                   <div className="flex gap-2">
                     <button
                       onClick={() => handlePutOnAir(caller.id)}

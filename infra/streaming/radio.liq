@@ -47,9 +47,10 @@ auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")
 # What this engine understands, sent with /hello and every /next. 2 = timed groups handed
 # over in parallel (seq/of) and /timed_drop. 3 = the hold lane (quiet before a hard item
 # when no song is handed out). 4 = the next item is loaded while a host is on air (the
-# live lane keeps it off the stream until the show ends). The backend keeps to the old
-# serial hand-over for an engine that sends nothing.
-engine_proto = 4
+# live lane keeps it off the stream until the show ends). 5 = the live lane plays the
+# show from the backend's live.mp3 (listener pages then hear it on the stream). The
+# backend keeps to the old serial hand-over for an engine that sends nothing.
+engine_proto = 5
 
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
 # track is requested, so the two cannot cross. If the backend cannot be reached (or
@@ -398,13 +399,25 @@ def hold_open() =
 end
 hold = switch(id="hold_gate", track_sensitive=false, [(hold_open, blank(id="hold"))])
 
-# ── Live lane: the stream is quiet while a host is on air ────────────────────
-# The host's microphone reaches listeners through the site, not through this stream
-# (Shmuel's choice, PR 112), and automation pauses. Without this lane the song on the
-# engine played on under the host (Jerusalem 23:06Z 2026-11-17): the backend only
-# stopped handing out new items. While the lane is on air the lanes below stand still;
-# the backend switches it with /live.
-on_air_quiet = switch(id="host_gate", track_sensitive=false, [({live_on()}, blank(id="host_on_air"))])
+# ── Live lane: the host's show while a host is on air ─────────────────────────
+# Without this lane the song on the engine played on under the host (Jerusalem 23:06Z
+# 2026-11-17): the backend only stopped handing out new items. While the lane is on
+# air the lanes below stand still; the backend switches it with /live.
+# The show itself comes from the backend as listeners hear it (after the broadcast
+# delay, with Dumps and the time checks in it): live.mp3, opened on "live on" and
+# closed on "live off" (engine proto 5). Until its first audio, when it stalls and
+# after it ends (the delay played out) the lane is quiet: never music or emergency
+# under the host. The token goes as a header (ffmpeg's "headers"), never in the URL.
+live_feed = input.http(
+  id="live_feed", start=false, timeout=5., poll_delay=1., max_buffer=3.,
+  string_args=[("headers", "X-Playout-Token: #{token}\r\n")],
+  on_connect=fun (_) -> log.important("live: show audio connected"),
+  on_disconnect=fun () -> log.important("live: show audio ended or stalled; quiet"),
+  "#{backend_url}/playout/#{station_id}/live.mp3"
+)
+on_air_quiet = switch(id="host_gate", track_sensitive=false, [
+  ({live_on()}, fallback(id="host_lane", track_sensitive=false, [live_feed, blank(id="host_on_air")]))
+])
 
 radio = fallback(id="radio", track_sensitive=false, [on_air_quiet, timed, main, hold, emergency])
 radio = amplify(override=null(), {master_gain()}, radio)
@@ -716,6 +729,7 @@ control("/live", fun (req) -> begin
   if body.on and not live_on() then
     log.important("live: show starts")
     go_live()
+    live_feed.start()
     # The item that follows the show loads during it: the backend sends /flush right
     # after this (it takes back a track pre-loaded before the show), and /flush asks
     # again under the live lane. (A second ask from here crossed that one with a slow
@@ -724,6 +738,7 @@ control("/live", fun (req) -> begin
     log.important("live: show ended")
     live_release := time() + 12.
     live_on := false
+    live_feed.stop()
   end
   '{"ok":true}'
 end)

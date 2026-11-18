@@ -70,6 +70,12 @@ async def _mark_aired(entry_id, station_id, asset_id, seconds: float) -> None:
             db.add(PlayLog(id=uuid.uuid4(), station_id=station_id, asset_id=asset_id,
                            start_utc=now, end_utc=now + timedelta(seconds=seconds), source="scheduler"))
             await db.commit()
+            from app.config import settings
+            if settings.engine_drives(station_id):
+                # The engine may hold it in its timed lane: it aired here, so it must
+                # not air again when the stream comes back after the show
+                from app.services import playout_engine
+                await playout_engine.engine_timed_drop(station_id, [str(entry_id)])
         except Exception:
             logger.exception("Could not record timed item %s aired during the live show", entry_id)
             await db.rollback()
