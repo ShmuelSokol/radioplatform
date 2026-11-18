@@ -78,6 +78,19 @@ def slot_key_for(at_utc: datetime, zone: ZoneInfo) -> str:
     return at_utc.astimezone(zone).strftime("%Y-%m-%dT%H")
 
 
+def clip_minute(asset: Asset) -> int:
+    """30 for a half-hour clip ("The time is 10:30 ..."), 0 for the top of the hour."""
+    meta = asset.metadata_extra if isinstance(asset.metadata_extra, dict) else {}
+    return 30 if str(meta.get("time_minute") or "") == "30" else 0
+
+
+def half_hour_time_check(automation_config: dict | None) -> bool:
+    """Station setting automation_config.half_hour_time_check: at hh:30 it plays the
+    uploaded half-hour time clip before the :30 weather. Off by default; with no
+    half-hour clip recorded for the station's region nothing is played."""
+    return (automation_config or {}).get("half_hour_time_check") is True
+
+
 def clip_hour(asset: Asset) -> int | None:
     """The hour of the day a time announcement says (uploaded or generated clip)."""
     meta = asset.metadata_extra or {}
@@ -197,8 +210,20 @@ async def find_weather_spot_asset(
     return result.scalar_one_or_none()
 
 
-async def find_own_time_clip(db: AsyncSession, hour: int, region: str | None = None) -> Asset | None:
+def _minute_filter(minute: int):
+    stored = Asset.metadata_extra["time_minute"].astext
+    if minute == 30:
+        return stored == "30"
+    # Clips from before half-hour clips existed have no minute: they are hh:00
+    return or_(stored.is_(None), stored != "30")
+
+
+async def find_own_time_clip(
+    db: AsyncSession, hour: int, region: str | None = None, minute: int = 0
+) -> Asset | None:
     """The uploaded "the time is" clip recorded for this region and hour (0-23), if any.
+
+    minute 30: the half-hour clip ("The time is 10:30 ..."), else the top of the hour.
 
     Regions are the same as the weather's (automation_config.weather_region), so
     KBR Jerusalem can have its own set; clips made before regions existed belong
@@ -209,22 +234,25 @@ async def find_own_time_clip(db: AsyncSession, hour: int, region: str | None = N
             Asset.asset_type == "jingle",
             Asset.category == "time_announcement",
             Asset.metadata_extra["time_of_day"].astext == f"{hour:02d}",
+            _minute_filter(minute),
             _region_filter(normalize_region(region)),
         ).limit(1)
     )
     return result.scalar_one_or_none()
 
 
-async def find_time_clip_asset(db: AsyncSession, hour: int, region: str | None = None) -> Asset | None:
+async def find_time_clip_asset(
+    db: AsyncSession, hour: int, region: str | None = None, minute: int = 0
+) -> Asset | None:
     """The clip a station of this region plays at this hour: its own, else the default set's.
 
     Unlike weather, the default set is a fair fallback: the hour is the station's
     own local hour either way, only the recording is shared.
     """
     region = normalize_region(region)
-    own = await find_own_time_clip(db, hour, region)
+    own = await find_own_time_clip(db, hour, region, minute)
     if own is None and region != DEFAULT_WEATHER_REGION:
-        own = await find_own_time_clip(db, hour, DEFAULT_WEATHER_REGION)
+        own = await find_own_time_clip(db, hour, DEFAULT_WEATHER_REGION, minute)
     return own
 
 
@@ -334,8 +362,12 @@ async def store_uploaded_time_clip(
     source: str = "shprach",
     script: str | None = None,
     region: str | None = None,
+    minute: int = 0,
 ) -> tuple[Asset, bool]:
     """Store the reusable "the time is" recording for an hour of the day (0-23) and region.
+
+    minute 30 stores the half-hour clip ("The time is 10:30 ..."), played at hh:30
+    on stations with half_hour_time_check on.
 
     Unlike the per-slot ElevenLabs clips, one uploaded clip per hour is reused
     every day. An existing clip for the hour is updated in place, so entries
@@ -343,17 +375,19 @@ async def store_uploaded_time_clip(
     """
     if not 0 <= hour <= 23:
         raise ValueError("hour must be 0-23")
+    if minute not in (0, 30):
+        raise ValueError("minute must be 0 or 30")
     region = normalize_region(region)
     own = region != DEFAULT_WEATHER_REGION
     url, duration = await _store_upload(
-        audio_bytes, f"time/{region + '_' if own else ''}{hour:02d}_{source}"
+        audio_bytes, f"time/{region + '_' if own else ''}{hour:02d}{'_30' if minute else ''}_{source}"
     )
-    asset = await find_own_time_clip(db, hour, region)
+    asset = await find_own_time_clip(db, hour, region, minute)
     replaced = asset is not None
     if asset is None:
         asset = Asset(
             id=uuid.uuid4(),
-            title=f"Time Announcement - {hour:02d}:00" + (f" ({region.title()})" if own else ""),
+            title=f"Time Announcement - {hour:02d}:{minute:02d}" + (f" ({region.title()})" if own else ""),
             artist=STATION_DISPLAY_NAME,
             file_path=url,
             asset_type="jingle",
@@ -362,9 +396,12 @@ async def store_uploaded_time_clip(
         db.add(asset)
     asset.file_path = url
     asset.duration = duration
-    asset.metadata_extra = _upload_meta(source, script, time_of_day=f"{hour:02d}", region=region)
+    keys = {"time_of_day": f"{hour:02d}", "region": region}
+    if minute:
+        keys["time_minute"] = f"{minute:02d}"
+    asset.metadata_extra = _upload_meta(source, script, **keys)
     await db.flush()
-    logger.info("Stored uploaded %s time clip for %s, hour %02d (replaced=%s)", source, region, hour, replaced)
+    logger.info("Stored uploaded %s time clip for %s, %02d:%02d (replaced=%s)", source, region, hour, minute, replaced)
     return asset, replaced
 
 

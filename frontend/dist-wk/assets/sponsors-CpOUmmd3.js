@@ -1,0 +1,1 @@
+import{a as t}from"./index-BHNZfaQS.js";const n=async()=>(await t.get("/sponsors")).data,e=async s=>(await t.post("/sponsors",s)).data,p=async(s,a)=>(await t.put(`/sponsors/${s}`,a)).data,c=async s=>{await t.delete(`/sponsors/${s}`)};export{e as c,c as d,n as l,p as u};

@@ -209,22 +209,41 @@ class AirWatch:
                             f"Due {_local(due, station)}, now {waited:.0f} s late; the shiur had more "
                             "than 5 minutes left, so it should have paused for it.", e.id)
 
-        # hour_missing: around each hh:00, did a time check start?
+        # hour_missing: around each hh:00 (and hh:30 on a station with the half-hour
+        # time check on the second), did a time check start?
         local_now = now.astimezone(_tz(station))
-        hour_start = local_now.replace(minute=0, second=0, microsecond=0)
-        since_hour = (local_now - hour_start).total_seconds()
-        hour_key = hour_start.isoformat()
         st = self.state(sid)
         # With HS (hard start) off the time check waits for the song on air by design
         # (services/station_modes.py), so a late one is not a fault then.
+        from app.services.spot_schedule_service import default_timing
         from app.services.station_modes import hard_start_on
+        from app.services.weather_spot_service import half_hour_time_check
 
-        if (not blacked_out and hard_start_on(station) and HOUR_CHECK_AFTER_SECONDS <= since_hour < 600
+        config = station.automation_config or {}
+        mark = local_now.replace(minute=30 if local_now.minute >= 30 else 0, second=0, microsecond=0)
+        half = mark.minute == 30
+        since_mark = (local_now - mark).total_seconds()
+        hour_key = mark.isoformat()
+        watched = not half or (
+            half_hour_time_check(config) and default_timing(30, config.get("spot_timing")) == "hard"
+        )
+        if (watched and not blacked_out and hard_start_on(station)
+                and HOUR_CHECK_AFTER_SECONDS <= since_mark < 600
                 and hour_key not in st.hours_checked):
             st.hours_checked.add(hour_key)
-            st.hours_checked = {h for h in st.hours_checked if h >= (hour_start - timedelta(hours=3)).isoformat()}
-            if await _airs_hourly_time(db, station.id, now):
-                h_utc = hour_start.astimezone(UTC)
+            st.hours_checked = {h for h in st.hours_checked if h >= (mark - timedelta(hours=3)).isoformat()}
+            h_utc = mark.astimezone(UTC)
+            if half:
+                # only where a half-hour clip was queued for this minute (none recorded: none due)
+                expected = (await db.execute(
+                    select(QueueEntry.id).join(Asset, Asset.id == QueueEntry.asset_id).where(
+                        QueueEntry.station_id == station.id, Asset.category == TIME_CATEGORY,
+                        QueueEntry.preempt_at == h_utc,
+                    ).limit(1)
+                )).first() is not None
+            else:
+                expected = await _airs_hourly_time(db, station.id, now)
+            if expected:
                 lo, hi = h_utc - timedelta(seconds=HOUR_WINDOW_SECONDS), h_utc + timedelta(seconds=HOUR_WINDOW_SECONDS)
                 started = (await db.execute(
                     select(QueueEntry.started_at).join(Asset, Asset.id == QueueEntry.asset_id).where(
@@ -241,9 +260,10 @@ class AirWatch:
                     )).scalar()
                     what = (f"it started at {_local(_aware(later), station)}" if later
                             else f"none has started yet; on air: {_title(current) if current else 'nothing'}")
-                    add("hour_missing", f"No time check at {hour_start.strftime('%-I %p')}",
-                        f"No hourly time check started within {HOUR_WINDOW_SECONDS:.0f} s of "
-                        f"{hour_start.strftime('%-I:%M %p')}; {what}.", hour_key)
+                    label = mark.strftime('%-I:%M %p') if half else mark.strftime('%-I %p')
+                    add("hour_missing", f"No time check at {label}",
+                        f"No {'half-hour' if half else 'hourly'} time check started within "
+                        f"{HOUR_WINDOW_SECONDS:.0f} s of {mark.strftime('%-I:%M %p')}; {what}.", hour_key)
 
         # dead_air and overrun
         if current is None:

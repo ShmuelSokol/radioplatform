@@ -174,7 +174,7 @@ radioplatform/
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
 | air_watch | air_watch.py | /air-watch (staff): recent on-air self-check findings |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
-| weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); ElevenLabs is only the fallback |
+| weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); `?minute=30` for the half-hour clip ("The time is 10:30", played when the station has `half_hour_time_check`); ElevenLabs is only the fallback |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
@@ -248,7 +248,7 @@ radioplatform/
 - Campaigns.tsx — Sponsorship campaigns across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
 - CampaignDetail.tsx — One campaign for staff: drafts, comments, Save Status. Drafts and comments panels are shared with the sponsor portal (`components/campaigns/CampaignParts.tsx`)
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
-- SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead
+- SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead; station timing choices for :00, :30 and :15/:45 and the half-hour time check
 - SpotRecordings.tsx — Record Spots: write a script, make or upload audio, listen, approve into the library
 - Databank.tsx — KBR Studio's database window: Songs / Jingles / Spots / Blocks tables, Find, Edit mode, day log to the millisecond
 - ProgramBlocks.tsx — Named blocks ("Weather Sponsors"): items in order, clock times, hard or soft, next 24 hours
@@ -513,6 +513,9 @@ cd frontend && (npx vite preview --port 4183 --strictPort &) && xvfb-run -a pyth
 
 # The bug reporter's screenshot in real WebKit: each way of taking it, not blank, no-picture path, picture added by hand (same setup as above)
 cd frontend && xvfb-run -a python3 e2e/webkit/bug-screenshot-webkit.py
+
+# The bug report's picture vs a real screenshot, and 🐞 over every kind of dialog (fake backend, Chromium)
+cd frontend && for s in bug-screenshot-faithful bug-over-dialogs; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
 
 # Leaving pages in real WebKit logs no version.json console error (reads WebKit's own console via MiniBrowser)
 cd frontend && xvfb-run -a python3 e2e/webkit/version-check-webkit.py
