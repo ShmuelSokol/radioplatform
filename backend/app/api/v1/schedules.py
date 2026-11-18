@@ -237,10 +237,12 @@ async def list_schedules(
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
 ):
-    """List all schedules, optionally filtered by station."""
-    stmt = select(ScheduleModel).options(selectinload(ScheduleModel.blocks)).offset(skip).limit(limit)
+    """List all schedules, optionally filtered by station. The same list for every
+    role, in a fixed order (highest priority first, then by name)."""
+    stmt = select(ScheduleModel).options(selectinload(ScheduleModel.blocks))
     if station_id:
         stmt = stmt.where(ScheduleModel.station_id == station_id)
+    stmt = stmt.order_by(ScheduleModel.priority.desc(), ScheduleModel.name, ScheduleModel.id).offset(skip).limit(limit)
     result = await db.execute(stmt)
     return result.scalars().all()
 

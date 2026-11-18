@@ -583,9 +583,8 @@ async def skip_lapsed_sponsorships(db: AsyncSession, station_id, now: datetime |
 
     from app.api.v1.queue import OPERATOR_SOURCES
 
-    station = (
-        await db.execute(select(Station).where(Station.id == station_id))
-    ).scalar_one_or_none()
+    # from the session when it is already there: no round trip per step of a top-up
+    station = await db.get(Station, station_id)
     if station is None:
         return 0
     now = now or datetime.now(UTC)
@@ -686,9 +685,8 @@ async def reconcile_spot_slots(
     """
     from app.services.station_modes import spots_on
 
-    station = (
-        await db.execute(select(Station).where(Station.id == station_id))
-    ).scalar_one_or_none()
+    # from the session when it is already there: no round trip per step of a top-up
+    station = await db.get(Station, station_id)
     if station is None:
         return None
     # Spots mode off: carry on with an empty plan even with no schedules, so the

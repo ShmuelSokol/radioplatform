@@ -463,7 +463,7 @@ export default function Databank() {
         return isDesktop ? (
           <div key={s.id} role="row" data-row={s.id} data-expired={s.expired || undefined} onClick={() => setSel(s.id)} onDoubleClick={() => void pfl.toggle(s.id)}
             className={`${rowClass(s.id, sel === s.id ? '' : red)} grid h-[18px] leading-[18px] text-[13px]`} style={{ gridTemplateColumns: GRID_SPOTS }}>
-            <span className="truncate px-1" title={s.file}>{s.title}</span>
+            <span className="truncate px-1" title={s.file} onClick={startEdit(s.id, 'title')} data-testid="spot-title">{cell(s.id, 'title', s.title) ?? s.title}</span>
             <span className="truncate px-1" onClick={startEdit(s.id, 'type')}>{cat}</span>
             <span className="px-1 tabular-nums" {...endProps}>{end}</span>
             <span className="px-1 text-right tabular-nums">{fmtDur(s.length)}</span>
@@ -476,7 +476,7 @@ export default function Databank() {
               aria-label={pfl.playingId === s.id ? `Stop ${s.title}` : `Pre-listen ${s.title}`}
               className="qn-btn w-11 h-11 shrink-0 text-base">{pfl.playingId === s.id ? '■' : '🎧'}</button>
             <span className="flex-1 min-w-0 leading-tight">
-              <span className="block truncate text-[15px]">{s.title}</span>
+              <span className="block truncate text-[15px]" onClick={startEdit(s.id, 'title')} data-testid="spot-title">{cell(s.id, 'title', s.title) ?? s.title}</span>
               <span className="block truncate text-xs font-normal opacity-80" onClick={startEdit(s.id, 'type')}>{cat || 'no category'}</span>
             </span>
             <span className="shrink-0 text-right text-xs tabular-nums">
@@ -602,7 +602,7 @@ export default function Databank() {
       </div>
       {editMode && tab !== 'log' && tab !== 'blocks' && (
         <div className="shrink-0 bg-[#ffffc0] text-black text-xs px-2 py-1 border-b border-[#808080]">
-          Edit mode: {isDesktop ? 'click' : 'tap'} {tab === 'spots' ? 'a category or end date' : 'an artist, title, type, V or intro'} to change it. Enter saves, Esc cancels.
+          Edit mode: {isDesktop ? 'click' : 'tap'} {tab === 'spots' ? 'a title, category or end date' : 'an artist, title, type, V or intro'} to change it. Enter saves, Esc cancels.
           {tab === 'spots' ? ' A new end date moves every schedule of that spot.' : ''}
         </div>
       )}

@@ -258,11 +258,17 @@ async def test_past_due_hard_time_check_is_next(client, db_session, eng):
 
 @pytest.mark.asyncio
 async def test_started_broadcasts_and_tops_up(client, db_session, eng):
-    """B-PLAYOUT-15: a start report is broadcast at once and the queue topped up, but not
-    in a blackout. B-MODE-17: the start report is the play log (>= 1 s)."""
+    """B-PLAYOUT-15: a start report is broadcast at once and the queue topped up (in the
+    background, so the report is answered first), but not in a blackout. B-MODE-17: the start report is the play log (>= 1 s)."""
     station, entries, _, calls = eng
+
+    async def topped_up():
+        # The top-up runs after the answer, in the background (the report must not wait)
+        await asyncio.gather(*list(queue_module._background), return_exceptions=True)
+
     await _on_air(client, station, entries[0].id)
     assert calls["broadcast"] == [str(entries[0].id)]
+    await topped_up()
     assert calls["replenish"] == 1
 
     row = await _fresh(db_session, entries[0].id)
@@ -274,6 +280,7 @@ async def test_started_broadcasts_and_tops_up(client, db_session, eng):
     await db_session.commit()
     await _on_air(client, station, entries[1].id)
     assert calls["broadcast"] == [str(entries[0].id), str(entries[1].id)]
+    await topped_up()
     assert calls["replenish"] == 1  # not during the blackout
     logs = (await db_session.execute(select(PlayLog).where(PlayLog.station_id == station.id))).scalars().all()
     assert [log.asset_id for log in logs] == [entries[0].asset_id]
@@ -1322,18 +1329,24 @@ async def test_mix_over_while_a_timed_item_is_on_air(client, db_session, auth_he
 
 
 @pytest.mark.asyncio
-async def test_emergency_alert_clears_itself_on_a_known_start(client, db_session, eng):
+async def test_emergency_alert_clears_itself_on_a_known_start(client, db_session, eng, monkeypatch):
     """The open emergency alert is resolved once the engine plays the station's queue again
     (Jerusalem kept one open after the droplet reruns, 2026-11-17)."""
     from sqlalchemy import select
 
     from app.models.alert import Alert
 
+    from app.db import engine as db_engine
+    from tests.conftest import TestSessionLocal
+
+    monkeypatch.setattr(db_engine, "async_session_factory", TestSessionLocal)
     station, entries, _, _ = eng
     await _on_air(client, station, "", lane="emergency")
     open_ = (await db_session.execute(select(Alert).where(Alert.is_resolved == False))).scalars().all()  # noqa: E712
     assert [a.title for a in open_] == ["Playout engine is on its emergency playlist"]
     await _on_air(client, station, entries[0].id)
+    # cleared in the background, in its own session, so the start report does not wait
+    await asyncio.gather(*list(playout_engine._background))
     row = (await db_session.execute(select(Alert).execution_options(populate_existing=True))).scalar_one()
     assert row.is_resolved is True
     assert "queue" in row.context["cleared_by_itself"]

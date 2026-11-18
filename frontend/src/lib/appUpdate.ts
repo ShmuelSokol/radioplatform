@@ -177,9 +177,31 @@ export function isStaleCodeError(error: unknown): boolean {
  *  usually hits this by leaving the Listen page for another screen, which stops the
  *  player, so the grace would leave them on an error box for nothing. */
 export function reloadForStaleCode(): boolean {
-  if (holds.size > 0 || soundingNow() || reloadedRecently()) return false;
+  if (holds.size > 0 || soundingNow() || reloadedRecently()) {
+    waitToReloadForStaleCode();
+    return false;
+  }
   reloadForRelease(false);
   return true;
+}
+
+// A screen's code is gone (a release went out) while sound plays: the page keeps
+// playing, and reloads into the new release as soon as the sound is stopped
+// (Shmuel, 2026-11-18: the reload left his iPhone silent with no way back but a tap).
+let staleWait: ReturnType<typeof setInterval> | null = null;
+function waitToReloadForStaleCode() {
+  if (staleWait) return;
+  staleWait = setInterval(() => {
+    if (holds.size > 0 || soundingNow() || isTyping()) return;
+    if (staleWait) clearInterval(staleWait);
+    staleWait = null;
+    if (!reloadedRecently()) reloadForRelease(false);
+  }, 2000);
+}
+
+/** Waiting to reload for a missing screen until the sound stops. */
+export function staleReloadWaiting(): boolean {
+  return staleWait !== null;
 }
 
 function reloadForRelease(resume: boolean) {

@@ -34,6 +34,10 @@ from app.models.station import Station
 
 logger = logging.getLogger(__name__)
 
+# A queue filled from playlists is topped up only once it is this far below
+# its length (or a quarter of a short one); see _fill_from_playlists.
+TOP_UP_SLACK_SECONDS = 20 * 60.0
+
 TARGET_QUEUE_SECONDS = 604800  # 7 days
 DEFAULT_DURATION = 180  # 3 minutes fallback
 MAX_ADS_PER_RUN = 504  # 7 days × 24h × 3 quarter-hour slots
@@ -135,7 +139,7 @@ class QueueReplenishService:
         if by_schedule or (generation.enabled and await uses_block_playlists(self.db, self.station_id)):
             # Shortly before a block's playlist takes over, draw the songs again from
             # the real time on air so the block starts on time, not early
-            station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
+            station = await self._station()
             if await realign_before_block_change(self.db, station, datetime.now(timezone.utc), remove=False):
                 redraw = True
         if redraw and generation.enabled:
@@ -198,7 +202,7 @@ class QueueReplenishService:
             # next pass, or one due meanwhile would cut the song (wiki/station-modes.md)
             from app.services.station_modes import soften_hard_items
 
-            station = (await self.db.execute(select(Station).where(Station.id == self.station_id))).scalar_one()
+            station = await self._station()
             await soften_hard_items(self.db, station)
         await self.db.commit()
 
@@ -453,6 +457,15 @@ class QueueReplenishService:
             clock.play(seconds)
         return clock.start(), clock.timed
 
+    async def _station(self) -> Station:
+        """The station, read once per session. Reading it again for each step
+        of a top-up was two round trips a time (the station and its channels),
+        five times over. Where its settings are written it is still read afresh."""
+        station = await self.db.get(Station, self.station_id)
+        if station is None:
+            raise ValueError(f"Station {self.station_id} not found")
+        return station
+
     async def _fill_from_playlists(self, generation, queued_seconds: float) -> bool:
         """Top the queue up to `generation.hours` from playlist sequences.
 
@@ -466,9 +479,12 @@ class QueueReplenishService:
         queued_seconds = (fill_start - now).total_seconds()
         if queued_seconds >= target:
             return True
-        station = (
-            await self.db.execute(select(Station).where(Station.id == self.station_id))
-        ).scalar_one()
+        if not self.replacing and target - queued_seconds < min(TOP_UP_SLACK_SECONDS, target / 4):
+            # Nearly full: the next songs are drawn in one go once a few have
+            # played. Drawing one song after every song change cost about 14
+            # database round trips each time, inside the song change.
+            return True
+        station = await self._station()
         pending = (
             await self.db.execute(
                 select(QueueEntry.asset_id, Asset.artist)

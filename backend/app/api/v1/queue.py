@@ -2709,9 +2709,12 @@ async def remove_from_queue(
             await _remove_on_air_locked(db, station_id, entry)
         return
     await db.delete(entry)
-    await _replenish_queue(db, station_id)
     await db.commit()
     await _engine_takes_queue_change(db, station_id)
+    # The top-up runs after the answer, in its own session: it is dozens of
+    # database round trips (2.2 s on the live site for a plain delete), and the
+    # deleted row stayed locked until it had finished.
+    _replenish_soon(station_id)
 
 
 async def _remove_on_air_locked(db: AsyncSession, station_id, entry: QueueEntry) -> None:

@@ -13,8 +13,13 @@ import { createRequire } from 'node:module';
 
 // require() so a globally installed Playwright is found too (npx playwright / NODE_PATH).
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
-import { guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
+import { guardBrowser, guardVerdict, allowEverywhere } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
 
+// What this test provokes on purpose (anything else shown fails the run)
+allowEverywhere(/stations\/st-down\//, 'the Unreachable Feed station answers 503 on purpose');
+allowEverywhere(/Loop is on: this item repeats/, 'Loop is switched on to check it');
+allowEverywhere(/Panic: cut what was on air/, 'Panic is pressed to check it');
+allowEverywhere(/Can't play this file/, 'a file in an old format is opened to see the reason shown');
 const BASE = process.env.BASE_URL || 'http://localhost:4173';
 const SHOTS = process.env.SHOTS_DIR || '';
 const SID = 'st-1';
@@ -100,6 +105,12 @@ function makeBackend(queueSize = 60) {
       const done = { id: e.id, position: e.position, on_air: true, queue: view() };
       if (body.client_request_id) fired.set(body.client_request_id, done);
       return done;
+    }
+    if (path === `${q}/panic`) { // as the server: cut what is on air, start the next item
+      const cur = playing(); if (cur) cur.status = 'skipped';
+      loopId = null;
+      const nx = pending()[0]; if (nx) { nx.status = 'playing'; nx.started_at = new Date().toISOString(); }
+      return { message: 'Skipped', queue: view() };
     }
     if (path === `${q}/loop`) { loopId = body.on ? (playing()?.asset_id ?? null) : null; return { loop: !!loopId, asset_id: loopId, queue: view() }; }
     if (path === `${q}/mix-over`) return { message: 'Playing over', asset_id: body.asset_id, on_air: true };

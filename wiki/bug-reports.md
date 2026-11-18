@@ -13,7 +13,7 @@ Same pattern as his supplier-item-database project (`wiki/bug-autofix.md` there)
   ones not in the page: found by wrapping `HTMLMediaElement.play`) and every
   AudioContext (channels, state), React Query data whose key mentions queue / now
   playing / station / schedule (trimmed), localStorage minus anything token-like.
-- **Button**: bottom left on every page, except the control room at phone width (it covered a queue row's insert button); there it is "🐞 Report a bug" in the phone menu (event `kbr:report-bug`).
+- **Button**: on a computer, bottom left on every page (the control room and Databank carry it in their own bars). On a phone, a 44 px 🐞 beside the bell in the top bar of every staff page and in the sponsor portal's bar (`BugTopButton` in `BugReporter.tsx`); wherever that bar is on the page the floating button is not shown at phone size (it kept covering controls). The phone menu keeps "🐞 Report a bug" (44 px). Both use the event `kbr:report-bug`; an open menu closes first so the screenshot shows the page. Listener pages for visitors keep the floating button.
 - **Screenshot**: `html2canvas` (lazy-loaded) of the visible viewport, taken BEFORE
   the form opens; JPEG, about 20-150 KB. The reporter can untick it.
 - **Server** (`backend/app/core/log_buffer.py`): the app keeps its last 3000 log lines

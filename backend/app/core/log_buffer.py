@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 
 request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
 user_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("log_user", default=None)
+# "GET /api/v1/..." of the request being answered; None in background work
+request_path_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_path", default=None)
 
 LOG_LINES = 3000
 REQUESTS = 2000

@@ -698,3 +698,37 @@ async def test_later_items_of_a_hard_block_are_not_late(db_session):
     found = await AirWatch().check_station(db_session, st, now)
     late = [f for f in found if f.kind == "late_timed"]
     assert len(late) == 1 and "Daf Yomi Bechoros 60 aired 40 s late" in late[0].title, found
+
+
+def test_recent_starts_and_due_items_have_indexes():
+    """The self-check reads, every 5 s per station, what started or came due in the last
+    10 minutes. Production 2026-11-18: with no index on started_at or preempt_at that
+    read went through the station's whole queue history (2.4 to 3.9 s; 6,188 pages
+    against 30 on a 400,000 row copy). Both indexes must be on the model (new
+    databases) and in the list built in the background on the live one."""
+    from app import main as app_main
+    from app.models.queue_entry import QueueEntry
+
+    on_model = {tuple(c.name for c in ix.columns) for ix in QueueEntry.__table__.indexes}
+    assert ("station_id", "started_at") in on_model
+    assert ("station_id", "preempt_at") in on_model
+    assert app_main.CONCURRENT_INDEXES["ix_queue_entries_station_started"] == "queue_entries (station_id, started_at)"
+    assert app_main.CONCURRENT_INDEXES["ix_queue_entries_station_preempt"] == "queue_entries (station_id, preempt_at)"
+
+
+def test_waiting_and_playing_rows_have_their_own_indexes():
+    """GET /now-playing's next due timed item, the timed-groups check and the row on air
+    filter on status. Production 2026-11-18: 0.94 s, 3.6 s and 0.95 s, walking about 255k
+    played rows to find about 1,850 waiting ones. Partial indexes on just those rows."""
+    from app import main as app_main
+    from app.models.queue_entry import QueueEntry
+
+    ix = {i.name: i for i in QueueEntry.__table__.indexes}
+    assert str(ix["ix_qe_pending_preempt"].dialect_options["postgresql"]["where"]) == "status = 'pending'"
+    assert str(ix["ix_qe_playing_started"].dialect_options["postgresql"]["where"]) == "status = 'playing'"
+    assert app_main.CONCURRENT_INDEXES["ix_qe_pending_preempt"] == (
+        "queue_entries (station_id, preempt_at, position) WHERE status = 'pending'"
+    )
+    assert app_main.CONCURRENT_INDEXES["ix_qe_playing_started"] == (
+        "queue_entries (station_id, started_at) WHERE status = 'playing'"
+    )

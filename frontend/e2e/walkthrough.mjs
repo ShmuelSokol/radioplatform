@@ -113,9 +113,35 @@ function finding(station, route, step, kind, text, shot) {
   console.log(`FINDING [${station} ${route} / ${step}] ${kind}: ${text}${shot ? '  (' + shot + ')' : ''}`);
 }
 
+// ROLE=manager|dj|viewer|sponsor walks as that role (the seed makes one sign-in per role).
+// A page closed to the role may send it away; a page that opens must work for it: a
+// control that is offered and then refused, or change buttons beside "View only", are
+// findings (PC, 2026-11-18: a viewer's schedule blocks page showed New Block, Edit, Delete).
+const ROLE = (process.env.ROLE || 'admin').toLowerCase();
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || '';
+const ROLE_EMAIL = ROLE === 'admin' ? ADMIN_EMAIL : (ADMIN_EMAIL.includes('admin') ? ADMIN_EMAIL.replace('admin', ROLE) : `${ROLE}-${ADMIN_EMAIL}`);
+const SPONSOR_ROUTES = ['/sponsor/dashboard', '/sponsor/campaigns', '/sponsor/billing', '/sponsor/wording'];
+
+/** Change buttons in the page body while the page says "View only". */
+async function offeredWhileViewOnly(page) {
+  return page.evaluate(() => {
+    const badge = [...document.querySelectorAll('main *, [data-testid]')].some((el) => el.children.length === 0 && /^\s*View only\s*$/i.test(el.textContent || ''));
+    if (!badge) return [];
+    const out = [];
+    for (const el of document.querySelectorAll('main button, main a[class*="bg-"], main input[type=submit]')) {
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      const r = el.getBoundingClientRect(); const st = getComputedStyle(el);
+      if (r.width < 4 || r.height < 4 || st.visibility === 'hidden' || st.opacity === '0' || st.pointerEvents === 'none') continue;
+      const name = (el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
+      if (/^(\+ ?)?(new|add|edit|del|delete|remove|save|upload|create|rename|approve|reject|resolve|disable|enable|publish|turn (on|off)|go live)\b/i.test(name)) out.push(name.slice(0, 30));
+    }
+    return [...new Set(out)];
+  });
+}
+
 async function loginApi() {
   const r = await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: process.env.E2E_ADMIN_EMAIL, password: process.env.E2E_ADMIN_PASS }) });
+    body: JSON.stringify({ email: ROLE_EMAIL, password: process.env.E2E_ADMIN_PASS }) });
   if (!r.ok) throw new Error(`login failed: ${r.status}`);
   return r.json();
 }
@@ -239,6 +265,16 @@ async function lookAt(page, guard, st, route, step, expected = []) {
   return shot;
 }
 
+/** Make the page a touch screen (or a mouse again), so `pointer: coarse` rules apply.
+ *  The setting lives only as long as its session, so one session is kept per page. */
+const touchSessions = new WeakMap();
+async function touch(page, on) {
+  let cdp = touchSessions.get(page);
+  if (!cdp) { cdp = await page.context().newCDPSession(page); touchSessions.set(page, cdp); }
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: on }).catch(() => {});
+  await cdp.send('Emulation.setEmitTouchEventsForMouse', on ? { enabled: true, configuration: 'mobile' } : { enabled: false }).catch(() => {});
+}
+
 let current = null;   // the station being walked
 async function open(page, route) {
   await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' });
@@ -247,15 +283,44 @@ async function open(page, route) {
   // one last worked on, then choose ours so the rest of the walk is about this station
   const pick = current && await stationPicker(page);
   if (pick && !pick.chosen.includes(current.name)) {
-    if (pick.chosen) finding(current.tag, route, 'open', 'opens on another station than the one last worked on', `shows "${pick.chosen}"`, await shoot(page, `${current.tag}${route}-other-station`));
+    // listener pages open on Kol B'ramah Main by design (a listener has no "last worked on")
+    if (pick.chosen && route.startsWith('/admin')) finding(current.tag, route, 'open', 'opens on another station than the one last worked on', `shows "${pick.chosen}"`, await shoot(page, `${current.tag}${route}-other-station`));
     await page.locator('[data-walk-station]').first().selectOption({ label: await page.locator('[data-walk-station] option').evaluateAll((os, n) => (os.find((o) => o.textContent.includes(n)) || {}).textContent, current.name) }).catch(() => {});
     await settle(page, 500);
   }
 }
 
+/** Controls smaller than a finger at phone size: the control itself, or its label when
+ *  it sits in one (a checkbox with its words counts as one target). */
+async function tooSmall(page) {
+  return page.evaluate(() => {
+    const out = [];
+    for (const el of document.querySelectorAll('[data-walk]')) {
+      const st = getComputedStyle(el);
+      if (st.opacity === '0' || st.pointerEvents === 'none' || el.disabled) continue;
+      let r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4) continue;
+      const lb = el.closest('label') || (el.labels && el.labels[0]);
+      if (lb) { const lr = lb.getBoundingClientRect(); if (lr.width * lr.height > r.width * r.height) r = lr; }
+      if (r.width < 43.5 || r.height < 43.5) out.push({ label: el.getAttribute('data-walk'), w: Math.round(r.width), h: Math.round(r.height) });
+    }
+    return out.sort((a, b) => Math.min(a.w, a.h) - Math.min(b.w, b.h));
+  });
+}
+
 async function reachAt(page, st, route, sizeName) {
   await controls(page);
   const bad = await unreachable(page);
+  // On a phone a finger needs 44 x 44 px (PC measured Approve at 17x40 on Song Requests,
+  // 2026-11-18). One finding per page, naming the smallest ones.
+  if (sizeName.startsWith('phone')) {
+    const small = await tooSmall(page);
+    if (small.length) {
+      const shotS = await shoot(page, `${st.tag}${route}-small-${sizeName}`);
+      finding(st.tag, route, `look at ${sizeName}`, `${small.length} control(s) under 44 px for a finger`,
+        small.slice(0, 10).map((x) => `${x.label} ${x.w}x${x.h}`).join('; '), shotS);
+    }
+  }
   if (!bad.length) return;
   await page.evaluate(() => window.scrollTo(0, 0));
   const shot = await shoot(page, `${st.tag}${route}-reach-${sizeName}`);
@@ -280,16 +345,23 @@ async function restore(page, route) {
 async function walkPage(page, guard, st, route) {
   await open(page, route);
   if (new URL(page.url()).pathname !== route) {
+    if (ROLE !== 'admin') { console.log(`     ${st.tag} ${route}: closed to ${ROLE} (sent to ${new URL(page.url()).pathname})`); return { pressed: 0, skipped: [], total: 0, closed: true }; }
     finding(st.tag, route, 'open', 'did not open', `landed on ${new URL(page.url()).pathname}`, await shoot(page, `${st.tag}${route}-redirect`));
     return { pressed: 0, skipped: [], total: 0 };
   }
   await lookAt(page, guard, st, route, 'open');
+  if (ROLE !== 'admin') {
+    const offered = await offeredWhileViewOnly(page);
+    if (offered.length) finding(st.tag, route, `open as ${ROLE}`, 'says "View only" but offers change buttons', offered.slice(0, 10).join('; '), await shoot(page, `${st.tag}${route}-view-only-${ROLE}`));
+  }
   await reachAt(page, st, route, `${WALK_SIZE.width}x${WALK_SIZE.height}`);
-  for (const size of SIZES) {
+  for (const size of (ROLE === 'admin' ? SIZES : [])) {
     await page.setViewportSize({ width: size.width, height: size.height });
+    await touch(page, true);   // the site's phone rules are for touch screens (pointer: coarse)
     await open(page, route);
     await lookAt(page, guard, st, route, `open at ${size.name}`);
     await reachAt(page, st, route, size.name);
+    await touch(page, false);
   }
   await page.setViewportSize(WALK_SIZE);
   await open(page, route);
@@ -421,8 +493,9 @@ async function main() {
     guard.allow(/warning toast: (HS|Spots mode) is off/, 'switching a station mode off says so in amber on purpose');
     guard.allow(/You cannot disable your own account|PUT .*\/users\/[0-9a-f-]+$|status of 400 .*\/users\//, 'the walk is signed in as the only admin: Disable on itself is refused, and the page says so');
     guard.allow(/preview-weather|Could not load the weather preview/, 'no voice service on the test server');
-    await dragInQueue(page, guard, st).catch((e) => finding(st.tag, '/admin/dashboard', 'drag', 'test error', e.message, ''));
-    for (const route of ROUTES) {
+    guard.allow(/(HTTP 503|status of 503).*weather-readouts|weather is not set up/i, 'no weather key on the test server; the page says so (a 403 for a role is still a finding)');
+    if (ROLE === 'admin') await dragInQueue(page, guard, st).catch((e) => finding(st.tag, '/admin/dashboard', 'drag', 'test error', e.message, ''));
+    for (const route of (ROLE === 'sponsor' ? [...SPONSOR_ROUTES, '/admin/dashboard'] : ROUTES)) {
       if (ONLY.length && !ONLY.includes(route)) continue;
       const before = findings.length;
       let res;

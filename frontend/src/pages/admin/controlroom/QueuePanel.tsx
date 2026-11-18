@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useMayChange } from '../../../hooks/useMayChange';
 import { clockTime, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, useMediaQuery, usePhoneLandscape, weekdayShort } from './shared';
 
 export interface QueueRow {
@@ -65,6 +66,8 @@ function fmtStart(iso: string | null | undefined, today: string, tz?: string): {
 }
 
 function QueuePanel(p: Props) {
+  // A viewer watches the queue: no insert, move, remove or drag (the server refuses them)
+  const readOnly = !useMayChange();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -138,7 +141,7 @@ function QueuePanel(p: Props) {
 
   return (
     <section className="flex flex-col min-h-0 h-full qn-log" aria-label="Queue">
-      <div className="cr-queue-head shrink-0 flex items-center gap-2 px-2 h-8 bg-[#c0c0c0] text-black text-xs font-normal border-b border-[#808080]">
+      <div className="cr-queue-head shrink-0 flex items-center gap-2 px-2 h-12 lg:h-8 bg-[#c0c0c0] text-black text-xs font-normal border-b border-[#808080]">
         <span className="font-bold">Up next</span>
         <span className="truncate">
           {countLabel} items
@@ -150,7 +153,7 @@ function QueuePanel(p: Props) {
           onChange={(e) => p.onDateFilter(e.target.value)}
           onFocus={p.onNeedAll}
           onPointerDown={p.onNeedAll}
-          className="qn-field ml-auto h-6 text-xs px-1"
+          className="qn-field ml-auto h-11 lg:h-6 text-xs px-1"
         >
           <option value="">All days</option>
           {p.dates.map(d => (
@@ -222,18 +225,18 @@ function QueuePanel(p: Props) {
                 </div>
               )}
               <div
-                draggable={!isCur}
-                onDragStart={!isCur ? (e) => { setDragId(entry.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', entry.id); } : undefined}
-                onDragOver={!isCur ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverId(entry.id); } : undefined}
+                draggable={!isCur && !readOnly}
+                onDragStart={!isCur && !readOnly ? (e) => { setDragId(entry.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', entry.id); } : undefined}
+                onDragOver={!isCur && !readOnly ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverId(entry.id); } : undefined}
                 onDragLeave={!isCur ? () => setDragOverId(null) : undefined}
-                onDrop={!isCur ? (e) => {
+                onDrop={!isCur && !readOnly ? (e) => {
                   e.preventDefault();
                   setDragOverId(null);
                   if (dragId && dragId !== entry.id) p.onReorder(dragId, entry.position);
                   setDragId(null);
                 } : undefined}
                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
-                onClick={() => { if (!isCur) setSelectedId(isSel ? null : entry.id); else if (a && !isSilence) p.onSong?.(entry); }}
+                onClick={() => { if (!isCur && !readOnly) setSelectedId(isSel ? null : entry.id); else if (a && !isSilence) p.onSong?.(entry); }}
                 className={`relative flex items-center gap-2 lg:gap-0 pl-1.5 lg:pl-0.5 pr-2 lg:pr-3 ${landscape ? 'h-[50px]' : 'h-[66px]'} lg:h-[26px] overflow-hidden border-b border-[#222] lg:border-0 cursor-pointer group
                   ${tone}
                   ${isDragOver ? 'border-t-2 border-t-cyan-400' : ''}
@@ -241,7 +244,9 @@ function QueuePanel(p: Props) {
               >
                 {/* Insert-here button */}
                 {isCur ? (
-                  <span className="w-10 lg:w-7 shrink-0 text-center text-base lg:text-xs" aria-label="Playing now">▶</span>
+                  <span className="w-11 lg:w-7 shrink-0 text-center text-base lg:text-xs" aria-label="Playing now">▶</span>
+                ) : readOnly ? (
+                  <span className="w-11 lg:w-7 shrink-0" />
                 ) : (
                   <button
                     type="button"
@@ -249,7 +254,7 @@ function QueuePanel(p: Props) {
                     onClick={(e) => { e.stopPropagation(); p.onArmInsert(isArmed ? null : entry.id); }}
                     title="Insert a song before this one"
                     aria-label={`Insert a song before ${title}`}
-                    className={`cr-tap w-10 h-10 lg:w-6 lg:h-[22px] lg:mr-1 shrink-0 flex items-center justify-center text-xl lg:text-base font-bold leading-none
+                    className={`cr-tap w-11 h-11 lg:w-6 lg:h-[22px] lg:mr-1 shrink-0 flex items-center justify-center text-xl lg:text-base font-bold leading-none
                       ${isArmed ? 'bg-[#00ffff] text-black' : 'text-[#00ffff] hover:bg-[#003838]'}`}
                   >
                     +
@@ -304,7 +309,7 @@ function QueuePanel(p: Props) {
                     <button type="button" onClick={() => p.onSong?.(entry)} title="Song: category, do not play, details"
                       aria-label={`Song actions for ${title}`} data-testid="row-song" className="qn-btn px-1 h-5 text-[10px]">Song</button>
                   )}
-                  {!isCur && (
+                  {!isCur && !readOnly && (
                     <>
                       <button type="button" onClick={() => p.onMoveUp(entry.id)} title="Move up" aria-label="Move up" className="qn-btn w-6 h-5 text-[10px]">▲</button>
                       <button type="button" onClick={() => p.onMoveDown(entry.id)} title="Move down" aria-label="Move down" className="qn-btn w-6 h-5 text-[10px]">▼</button>
@@ -315,7 +320,7 @@ function QueuePanel(p: Props) {
               </div>
 
               {/* Touch-friendly actions for the selected row */}
-              {isSel && !isCur && (
+              {isSel && !isCur && !readOnly && (
                 <div className="flex items-stretch gap-1.5 sm:gap-2 px-2 py-2 h-[61px] bg-[#c0c0c0] border-b border-[#808080]" data-testid="row-actions">
                   <button type="button" onClick={() => { p.onArmInsert(entry.id); setSelectedId(null); }}
                     aria-label="+ Insert before"

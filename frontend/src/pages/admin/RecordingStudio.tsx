@@ -13,6 +13,8 @@ import {
 } from '../../hooks/useWeatherReadouts';
 import { useStudioRecorder } from '../../hooks/useStudioRecorder';
 import { uploadAsset } from '../../api/assets';
+import { useAuth } from '../../hooks/useAuth';
+import { isManager } from '../../auth/access';
 import type { WeatherReadout } from '../../api/weatherReadouts';
 
 function formatDuration(sec: number) {
@@ -304,7 +306,11 @@ function GeneralRecorder() {
 // What the server said when a weather step failed, in words for the screen
 function weatherError(e: unknown, doing: string): string {
   const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
-  const detail = typeof r?.data?.detail === 'string' ? r.data.detail : '';
+  // staff see plain words, not the name of a server setting ("OPENWEATHERMAP_API_KEY is empty")
+  const raw = typeof r?.data?.detail === 'string' ? r.data.detail : '';
+  const detail = /\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/.test(raw)
+    ? 'weather is not set up on the server yet. Ask the site admin to add the weather service key.'
+    : raw;
   if (!r) return `Could not ${doing}: the server did not answer. Check your connection and try again.`;
   return `Could not ${doing}${detail ? `: ${detail}` : r.status === 503 ? ': the weather service is not available right now.' : ` (error ${r.status}).`}`;
 }
@@ -362,6 +368,10 @@ export default function RecordingStudio() {
   const queueReadout = useQueueWeatherReadout();
   const updateReadout = useUpdateWeatherReadout();
   const deleteReadout = useDeleteWeatherReadout();
+  // Making, changing and queueing weather readouts is for managers and admins (the API
+  // refuses a DJ); a DJ reads the scripts and uses the recorder and mixer below
+  const { user } = useAuth();
+  const mayManage = isManager(user?.role);
 
   const readouts = readoutsData?.readouts ?? [];
 
@@ -393,12 +403,12 @@ export default function RecordingStudio() {
           </div>
           {selectedStation && (
             <>
-              <button
+              {mayManage && <button
                 onClick={() => createReadout.mutate({ station_id: selectedStation, readout_date: dateFilter })}
                 disabled={createReadout.isPending}
                 className="px-3 py-2 bg-cyan-800 hover:bg-cyan-700 rounded text-white text-sm disabled:opacity-50">
                 {createReadout.isPending ? 'Generating...' : 'Generate Readout'}
-              </button>
+              </button>}
               <button onClick={() => setShowTemplate(!showTemplate)}
                 className="px-3 py-2 bg-[#1a1a4e] hover:bg-[#2a2a5e] rounded text-gray-300 text-sm">
                 {showTemplate ? 'Hide Template' : 'Template Config'}
@@ -425,7 +435,7 @@ export default function RecordingStudio() {
         {/* Readout cards */}
         {readouts.length === 0 && selectedStation && (
           <div className="text-center text-gray-500 py-6 text-sm">
-            No readouts for this date. Click "Generate Readout" to create one.
+            {mayManage ? 'No readouts for this date. Click "Generate Readout" to create one.' : 'No readouts for this date. A manager makes them.'}
           </div>
         )}
         {readouts.map(r => (
@@ -445,7 +455,7 @@ export default function RecordingStudio() {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2 flex-wrap">
+            {mayManage && <div className="flex gap-2 flex-wrap">
               {r.status === 'pending' && (
                 <button
                   onClick={() => setRecordingReadoutId(recordingReadoutId === r.id ? null : r.id)}
@@ -486,7 +496,7 @@ export default function RecordingStudio() {
                 className="px-3 py-1 text-xs bg-red-900 hover:bg-red-800 rounded text-red-400">
                 Delete
               </button>
-            </div>
+            </div>}
 
             {/* Inline recorder */}
             {recordingReadoutId === r.id && (

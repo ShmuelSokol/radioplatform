@@ -15,6 +15,9 @@ active station, it checks:
                  shows, for DRIFT_SECONDS
   timed_skipped  a time check, weather or sponsorship was marked skipped although
                  nothing else aired in its place
+  box_clock, box_disk, box_audio
+                 a local FM box reports its clock wrong, its disk nearly full, or audio
+                 of the coming items not on its disk for 15 minutes
 
 Each finding becomes an alert on the Alerts page (repeats fold into one) and, for the
 serious ones, an ntfy push. GET /air-watch shows the recent findings. Only the process
@@ -31,7 +34,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -55,7 +58,7 @@ TIME_CATEGORY = "time_announcement"
 WEATHER_CATEGORY = "weather_spot"
 PUSH_REPEAT_SECONDS = 15 * 60
 RECENT_KEEP = 200
-SERIOUS = {"late_timed", "hour_missing", "dead_air", "engine_drift"}
+SERIOUS = {"late_timed", "hour_missing", "dead_air", "engine_drift", "box_clock"}
 
 
 DRIFT_TITLE = "Stream server and site disagree"
@@ -78,6 +81,7 @@ class _StationState:
     drift_since: float | None = None
     drift_entry: str | None = None
     drift_cleared: bool = False  # open drift alerts cleared since this process started
+    box_since: dict[str, float] = field(default_factory=dict)  # box problem -> first seen
     hours_checked: set = field(default_factory=set)
 
 
@@ -102,6 +106,8 @@ class AirWatch:
         sid = str(station.id)
         found: list[Finding] = []
         config = station.automation_config or {}
+        if sid in settings.relay_station_ids:
+            self._check_box(station, found, mono)  # also during a live show
         if config.get("live_show_id"):
             return found  # a live show owns the air
         from app.api.v1.queue import _is_blacked_out
@@ -112,17 +118,20 @@ class AirWatch:
             found.append(Finding(kind=kind, station_id=sid, station_name=station.name,
                                  title=title, detail=detail, key=f"{kind}:{sid}:{key}"))
 
+        # Three narrow lookups, each served by an index, joined in one statement, in
+        # place of one OR over status, started_at and preempt_at: no index serves an OR
+        # like that, so it read the station's whole queue history every 5 s (2.4 to
+        # 3.9 s on production, 2026-11-18).
+        since = now - LOOKBACK
+        here = QueueEntry.station_id == station.id
+        wanted = union(
+            select(QueueEntry.id).where(here, QueueEntry.status == "playing"),
+            select(QueueEntry.id).where(here, QueueEntry.started_at >= since),
+            select(QueueEntry.id).where(here, QueueEntry.preempt_at >= since, QueueEntry.preempt_at <= now),
+        )
         rows = (await db.execute(
             select(QueueEntry).options(joinedload(QueueEntry.asset))
-            .where(
-                QueueEntry.station_id == station.id,
-                or_(
-                    QueueEntry.status == "playing",
-                    QueueEntry.started_at >= now - LOOKBACK,
-                    and_(QueueEntry.preempt_at.isnot(None), QueueEntry.preempt_at >= now - LOOKBACK,
-                         QueueEntry.preempt_at <= now),
-                ),
-            )
+            .where(QueueEntry.id.in_(select(wanted.subquery().c.id)))
         )).unique().scalars().all()
         playing = [e for e in rows if e.status == "playing"]
         current = max(playing, key=lambda e: _aware(e.started_at) if e.started_at else now) if playing else None
@@ -317,6 +326,27 @@ class AirWatch:
                 st.drift_since = st.drift_entry = None
 
         return found
+
+    def _check_box(self, station: Station, found: list[Finding], mono: float) -> None:
+        """A local FM box's own report (sent with its relay's poll): one finding per
+        spell of each problem. A box that stopped reporting is the engine_drift alert."""
+        from app.services import playout_tunnel
+
+        sid = str(station.id)
+        st = self.state(sid)
+        health = playout_tunnel.box_health(sid)
+        if health is None or health["seen_seconds_ago"] > playout_tunnel.CONNECTED_SECONDS:
+            return  # nothing current to judge; what was open stays open
+        now_wrong = {kind: (title, detail) for kind, title, detail in playout_tunnel.box_problems(health)}
+        for kind in list(st.box_since):
+            if kind not in now_wrong:
+                del st.box_since[kind]
+        for kind, (title, detail) in now_wrong.items():
+            since = st.box_since.setdefault(kind, mono)
+            if kind == "box_audio" and mono - since < playout_tunnel.AUDIO_MISSING_SECONDS:
+                continue  # a new upload is still being copied
+            found.append(Finding(kind=kind, station_id=sid, station_name=station.name, title=title,
+                                 detail=detail, key=f"{kind}:{sid}:{int(since)}"))
 
     # ── reporting ────────────────────────────────────────────────────────────
 

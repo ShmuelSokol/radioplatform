@@ -1006,13 +1006,9 @@ async def handle_started(
         # Back on the station's own queue: the emergency alert has served its purpose.
         # Also checked once per process, since a backend restart forgets on_emergency.
         state.emergency_cleared = True
-        try:
-            from app.services.alert_service import clear_alerts
-
-            await clear_alerts(db, station_id, EMERGENCY_ALERT_TITLE,
-                               "the engine went back to the station's queue")
-        except Exception as e:
-            logger.warning("Could not clear the emergency alert: %s", e)
+        clear_emergency = True
+    else:
+        clear_emergency = False
     state.on_emergency = False
     if state.cued_entry_id == str(entry.id):
         state.cued_entry_id = None
@@ -1027,16 +1023,26 @@ async def handle_started(
     await compact_positions(db, station_id)
     entry_pk = entry.id
     await db.commit()
+    if clear_emergency:
+        # In the background, in its own session, once this report's own changes are
+        # committed: the alerts read took 0.87 s inside a start report on production
+        # (2026-11-18 10:45Z), and the engine waits for the answer
+        task = asyncio.create_task(_clear_emergency_alert(station_id))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
 
     if quiet:
         return {"ok": True, "known": True}
     # Tell every client right away, then top the queue up
     try:
-        from app.api.v1.queue import _broadcast_now_playing_entry, _is_blacked_out, _replenish_queue
+        from app.api.v1.queue import _broadcast_now_playing_entry, _is_blacked_out, _replenish_soon
 
         await _broadcast_now_playing_entry(db, station_id, entry_pk)
         if not await _is_blacked_out(db, station_id):
-            await _replenish_queue(db, station_id)
+            # In the background, in its own session: the top-up is some 44 database
+            # round trips (2 to 3 s from Railway), and the engine's start report waited
+            # for it (15 of 36 reports took 3 to 9 s, 2026-11-18 07:47Z to 08:14Z)
+            _replenish_soon(station_id)
     except Exception as e:
         logger.warning("Post-start broadcast/replenish failed (non-critical): %s", e)
 
@@ -1047,6 +1053,20 @@ async def handle_started(
 
 
 EMERGENCY_ALERT_TITLE = "Playout engine is on its emergency playlist"
+
+
+async def _clear_emergency_alert(station_id) -> None:
+    """Resolve the open emergency-music alert: the engine is back on the station's queue."""
+    try:
+        from app.db.engine import async_session_factory
+        from app.services.alert_service import clear_alerts
+
+        async with async_session_factory() as own:
+            if await clear_alerts(own, station_id, EMERGENCY_ALERT_TITLE,
+                                  "the engine went back to the station's queue"):
+                await own.commit()
+    except Exception as e:
+        logger.warning("Could not clear the emergency alert: %s", e)
 # A critical alert (and its push) only when the emergency music lasts: a second of it
 # while an item loads after a Next raised one on Main (03:46Z 2026-11-18) and cleared it
 # half a second later.

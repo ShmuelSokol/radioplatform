@@ -203,7 +203,7 @@ async function globalPlayer(browser) {
     const els0 = await elements();
 
     // every listener page in turn: never silent, never restarted, the bar says what is on
-    for (const [path, ready] of [['/guide', 'Program Guide'], ['/hosts', 'Reb Moshe'], ['/archives', 'Thursday Night Live'], ['/stations', "Kol B'ramah"]]) {
+    for (const [path, ready] of [['/guide', 'Schedule'], ['/hosts', 'Reb Moshe'], ['/archives', 'Thursday Night Live'], ['/stations', "Kol B'ramah"]]) {
       const heard = await listenWhile(1500, async () => { await go(path); await page.locator('main').getByText(ready).locator('visible=true').first().waitFor({ timeout: 5000 }); });
       check(`${tag}: moving to ${path} is never silent (sampled every 50 ms)`, heard.silent === 0 && heard.n > 20, JSON.stringify(heard));
       check(`${tag}: moving to ${path} does not restart the song`, heard.restarts === 0, JSON.stringify(heard));
@@ -258,13 +258,43 @@ async function globalPlayer(browser) {
     await sleep(400);
     check(`${tag}: and the first station does not come back on the next page`, (await bar.count()) === 0 && (await audible()).length === 0);
 
-    // Staff pages and the call-in page have their own sound: the station stops there
+    // The same walk by real taps on the site's own menu (the burger menu on a phone), not the router
     await page.goto(`${BASE}/listen/${station.SID}`);
     await page.getByRole('button', { name: 'Listen Live' }).click();
     await page.waitForFunction(() => window.__audible().length > 0, null, { timeout: 5000 }).catch(() => {});
-    await go('/admin/login');
-    await sleep(700);
-    check(`${tag}: leaving the listener pages (staff sign-in) stops the station`, (await audible()).length === 0 && (await bar.count()) === 0);
+    const nav = page.locator('nav').first();
+    const tapMenu = async (label) => {
+      const burger = nav.getByRole('button', { name: 'Menu' });
+      if (await burger.isVisible().catch(() => false)) await burger.click();
+      await nav.getByRole('link', { name: label, exact: true }).locator('visible=true').first().click();
+    };
+    for (const [label, path, ready] of [['Schedule', '/guide', 'Schedule'], ['DJs', '/hosts', 'Reb Moshe'], ['Archives', '/archives', 'Thursday Night Live'], ['Stations', '/stations', "Kol B'ramah"]]) {
+      const heard = await listenWhile(1500, async () => { await tapMenu(label); await page.locator('main').getByText(ready).locator('visible=true').first().waitFor({ timeout: 5000 }); });
+      check(`${tag}: tapping "${label}" in the menu keeps the station on, no gap, no restart, bar shown`,
+        new URL(page.url()).pathname === path && heard.silent === 0 && heard.restarts === 0 && heard.n > 20 && (await bar.count()) === 1, JSON.stringify(heard));
+    }
+    check(`${tag}: after the menu taps the phone menu is closed and does not cover the bar`, await page.evaluate(() => {
+      const b = document.querySelector('[data-testid="player-bar"]').getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return !!top && !!top.closest('[data-testid="player-bar"]');
+    }));
+    await bar.getByRole('button', { name: 'Stop' }).click();
+    await sleep(500);
+    check(`${tag}: Stop after the menu walk silences it`, (await audible()).length === 0);
+
+    // Staff pages keep it playing with the bar (Shmuel, 2026-11-18: the music must not
+    // stop when he moves around); the call-in page has its own sound: it stops there
+    await page.goto(`${BASE}/listen/${station.SID}`);
+    await page.getByRole('button', { name: 'Listen Live' }).click();
+    await page.waitForFunction(() => window.__audible().length > 0, null, { timeout: 5000 }).catch(() => {});
+    {
+      const heard = await listenWhile(1500, async () => { await go('/admin/login'); await sleep(300); });
+      check(`${tag}: a staff page (sign-in) keeps the station on with the bar, no gap`,
+        heard.silent === 0 && heard.restarts === 0 && (await bar.count()) === 1, JSON.stringify(heard));
+    }
+    await go(`/call/${station.SID}`);
+    await sleep(900);
+    check(`${tag}: the call-in page (its own sound) stops the station`, (await audible()).length === 0 && (await bar.count()) === 0);
 
     check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
     await ctx.close();

@@ -13,7 +13,7 @@ def test_tidy_text():
     assert tidy_text("\t") is None
     assert tidy_text("\t", keep_empty=True) == ""
     assert tidy_text("Two\twords\r\nhere") == "Two words here"
-    assert tidy_text("kept  as  typed") == "kept  as  typed"   # inner spaces are the person's own
+    assert tidy_text("two  spaces\u00a0 here") == "two spaces here"   # runs of spaces are one space, as the one-off cleanup did
     assert tidy_text(None) is None
 
 

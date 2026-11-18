@@ -74,7 +74,7 @@ radioplatform/
 ├── frontend/
 │   └── src/
 │       ├── api/                  # 14 API client modules + Axios client with JWT interceptor
-│       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer = the bar on listener pages, ListenHost keeps the Listen page playing across them; see `wiki/listener-player-bar.md`)
+│       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer = the bar while a station plays, ListenHost keeps the Listen page playing across pages; the server stream plays through one shared element, `lib/stationStream.ts`; see `wiki/listener-player-bar.md`)
 │       ├── pages/admin/          # Dashboard, Stations, Assets, AssetUpload, Schedules, Rules, Users, Login, SongRequests, Archives
 │       ├── pages/public/         # StationList, Listen, ProgramGuide, Hosts, Archives
 │       ├── hooks/                # 21 custom hooks
@@ -151,7 +151,7 @@ radioplatform/
 | channels | channels.py | /channels |
 | icecast | icecast.py | /icecast |
 | analytics | analytics.py | /analytics |
-| playlists | playlists.py | /playlists |
+| playlists | playlists.py | /playlists (the list is readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
 | spot_schedules | spot_schedules.py | /spot-schedules |
 | spot_recordings | spot_recordings.py | /spot-recordings |
@@ -166,9 +166,9 @@ radioplatform/
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
-| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); /plan and /library (token only) and /commands/poll for a local FM box's relay |
+| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
-| playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen) |
+| playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen); `box` = a local FM box's own health report |
 | call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
 | air_watch | air_watch.py | /air-watch (staff): recent on-air self-check findings |
@@ -209,7 +209,7 @@ radioplatform/
 | liquidsoap_client.py | Old telnet push client for Liquidsoap. Superseded by playout_engine.py; keep `LIQUIDSOAP_ENABLED` off |
 | duration_backfill.py | Measures the length of items that have none (they broke queue reads and restarts); runs once in the background after each start, and on demand via `POST /assets/backfill-durations` |
 | upcoming_analysis.py | Analyses the item on air and the next one in the background when their audio analysis is missing or older than `ANALYSIS_VERSION`, so song changes use real end and crossfade points (see `wiki/audio-engine.md`) |
-| last_played.py | When each item last aired per station, kept in memory: one full read per station at startup in the background (and hourly, also in the background), then only new plays are fetched, so no request waits for the full read. Used by playlist and program-block rotation and `GET /queue/last-played` |
+| last_played.py | When each item last aired per station, kept in memory: a station's first read is the last 30 days, later reads only the new plays; the whole history is read in the background (after the first read, then daily, one station at a time), so no request waits for it. Used by playlist and program-block rotation and `GET /queue/last-played` |
 | long_items.py | What a hard timed item does to a shiur or story on air: station `automation_config.timed_during_long_items` = pause (default; it resumes where it stopped), wait or cut; a soft item due with more than 5 min of the shiur left pauses it too (see `wiki/hourly-slots.md`) |
 | hour_fit.py | Shortly before a hard timed item, swaps queue positions so a song (or pair) that ends near it replaces one that would be faded soon after starting; automatic songs only, both players; `automation_config.fit_before_hard_items: false` switches it off (see `wiki/hourly-slots.md`) |
 | timed_groups.py | A hard timed group due while an earlier short one still plays is moved to follow it (browser check 90 s ahead, engine before hand-over; the engine gets it at the first group's time) (see `wiki/hourly-slots.md`) |
@@ -217,10 +217,10 @@ radioplatform/
 | call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |
 | activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
-| air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship; alerts + ntfy (see `wiki/air-watch.md`) |
+| air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship, a local FM box's clock, disk and missing audio; alerts + ntfy (see `wiki/air-watch.md`) |
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
 | queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement; shared by the browser player's song change, the engine's start report and the blackout fill |
-| playout_tunnel.py | Commands to an engine with no inbound line (a local FM box): its relay long-polls for them; used by playout_engine only while a relay is polling (see `wiki/local-fm-box.md`) |
+| playout_tunnel.py | Commands to an engine with no inbound line (a local FM box): its relay long-polls for them; used by playout_engine only while a relay is polling. Also keeps the box's health report and names its problems for air watch (see `wiki/local-fm-box.md`) |
 | playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay (see `wiki/local-fm-box.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
@@ -263,8 +263,8 @@ radioplatform/
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
-- Listen.tsx — Listen to a station (server stream or built-in player, song requests); keeps playing, with a bar, on the other listener pages
-- ProgramGuide.tsx — Public EPG with station/date picker and timeline
+- Listen.tsx — Listen to a station (server stream or built-in player, song requests); keeps playing, with a bar, on every other page except call-in and the live host screens, and takes over sound the control room was giving
+- ProgramGuide.tsx — Public EPG ("Schedule" in the menu; "Public Schedule" in the staff menu) with station/date picker and timeline
 - Hosts.tsx — Public DJ/host profile cards
 - Archives.tsx — Public show archive browser with playback
 - CallIn.tsx — Call the live show from the browser: name and topic, mic, hear the show while waiting, on-air status, Hang up
@@ -277,7 +277,7 @@ radioplatform/
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
 - CheckWording.tsx — Sponsor proposes wording, gets back what must change and why
 
-### Hooks (`frontend/src/hooks/`) — 21 hooks
+### Hooks (`frontend/src/hooks/`) — 22 hooks
 | Hook | Description |
 |------|-------------|
 | useAuth.ts | Authentication state + mutations |
@@ -302,6 +302,7 @@ radioplatform/
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |
 | useEscape.ts | Esc closes an open dialog (New Archive, Live show, bug report) |
+| useMayChange.ts | May the signed-in person change things on this screen? The one rule for hiding or disabling change controls (see `wiki/view-only-screens.md`) |
 
 ### API Clients (`frontend/src/api/`) — 14 modules
 auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
@@ -363,7 +364,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
-- **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`. `canChange()` there says who may change things on a screen (drives the "View only" marker); any refused action shows an app-wide "not allowed" notice (`components/layout/ViewOnlyNotice.tsx`).
+- **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`. `canChange()` there says who may change things on a screen (drives the "View only" marker); screens hide or disable their change controls with `hooks/useMayChange.ts` (see `wiki/view-only-screens.md`); any refused action shows an app-wide "not allowed" notice (`components/layout/ViewOnlyNotice.tsx`).
 - **Sessions**: every token carries the user's `session_version`; a new password or a changed role bumps it and signs the person out everywhere. Any new code that decodes a token must call `security.token_is_current`. See `wiki/sign-in-sessions.md`.
 - **Station permissions**: staff can be limited to named stations (`User.station_ids`), and a protected station (`Station.protected`, the FM feed) needs an explicit assignment. Rule: `may_operate_station`; guard: `require_station_operator`. See `wiki/station-permissions.md`.
 - **Caller address**: rate limits, listener IPs and the activity log take the caller's address from `app/core/client_ip.py` (rightmost non-internal X-Forwarded-For hop); never read the header by hand. See `wiki/client-ip.md`.
@@ -446,6 +447,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - **DB migrations in main.py**: When adding columns to models, add corresponding `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` to `_add_missing_columns()` in `main.py`. Each migration runs in its own transaction so one failure doesn't block others.
 - **bcrypt**: Must pin `bcrypt==4.1.3` — passlib breaks with bcrypt 5.x
 - **Supabase pooler**: Must use port 6543 (transaction mode) + `statement_cache_size=0`
+- **Slow requests**: a `SLOW QUERY` line times the app's wait, not the database. Read its "loop held N s" and "pool N in use" parts and look for `EVENT LOOP HELD ... by:` (code that ran without `await`, `app/core/loop_watch.py`) and `SLOW CONNECT` before blaming a query. See "Where the seconds go" in `wiki/playlist-generation.md`.
 - **Vercel IPv6**: Direct Supabase connection fails (IPv6 not supported). Use pooler URL.
 - **Password URL encoding**: `/` → `%2F`, `[` → `%5B`, `]` → `%5D` in DATABASE_URL
 - **Pydantic schemas**: ID fields use `uuid.UUID | str` for cross-DB compatibility (SQLite returns strings)

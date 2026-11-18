@@ -41,6 +41,14 @@ def _app():
 from app.api.v1 import playlists as _playlists
 
 _playlists.REFRESH_INLINE = True  # tests read the rebuilt queue right after a playlist edit
+from app.services import last_played as _last_played  # noqa: E402
+
+_last_played.BACKGROUND_FULL_READ = False  # tests see every play on the first read
+# Code that opens the app's own engine (no database behind it in the tests) fails
+# at once, as it always did, instead of trying again for 8 s
+import app.db.engine as _db_engine  # noqa: E402
+
+_db_engine.CONNECT_RETRY_WAITS = ()
 
 # Use SQLite for testing (no PostgreSQL needed)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
@@ -252,3 +260,24 @@ def _forget_recent_panics():
     queue_module._last_panic.clear()
     yield
     queue_module._last_panic.clear()
+
+
+@pytest.fixture(autouse=True)
+def app_log_reaches_caplog(caplog):
+    """A test that reads `caplog` sees the app's log lines however it is run.
+
+    The "app" logger does not pass lines up to the root logger (app/main.py), which
+    is where caplog listens. Whether a line reached caplog depended on which tests
+    had run before: several tests passed in the whole suite and failed when their
+    file ran by itself (found 2026-11-18). So caplog's handler also listens on the
+    "app" logger while it does not propagate.
+    """
+    import logging
+
+    app_logger = logging.getLogger("app")
+    added = not app_logger.propagate and caplog.handler not in app_logger.handlers
+    if added:
+        app_logger.addHandler(caplog.handler)
+    yield
+    if added:
+        app_logger.removeHandler(caplog.handler)

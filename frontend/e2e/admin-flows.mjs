@@ -35,11 +35,31 @@ import { allowEverywhere, guardBrowser, guardVerdict } from './lib/guard.mjs';  
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // What this suite provokes on purpose, or what only the local test stack does. Each needs its reason.
+allowEverywhere(/Pick at least one day for a weekly block/, 'the schedule blocks page is asked to save a weekly block with no day');
 allowEverywhere(/alert: Pick the city from the list under Location\./, 'F-STATIONS-2 presses Create Station with no city to see this message');
 allowEverywhere(rec => /\b401\b/.test(`${rec.kind} ${rec.text}`) && /\/api\/v1\/(auth\/me|activity\/page-view)\b/.test(rec.text) && /\/admin\/stations/.test(rec.url || ''),
   'F-GLOBAL-12 plants a bad access token and checks the site renews it without signing out');
 allowEverywhere(/(localhost:\d+|Failed to fetch )\/api\/v1\/assets\/[0-9a-f-]+\/download/,
   'local storage hands out a relative audio URL that the preview server answers itself; production hands out a storage URL');
+// What the walk-through provokes on purpose. Each line: what may show, where, and which check causes it.
+const provoked = (what, where, reason) => allowEverywhere(
+  rec => what.test(`${rec.kind} ${rec.text}`) && (!where || where.test(rec.url || '')), reason);
+provoked(/auth\/me.*ERR_CONNECTION_REFUSED|ERR_CONNECTION_REFUSED.*auth\/me/, /\/admin\/schedules/, 'F-ACCESS-4 cuts the account lookup to see "Try again"');
+provoked(/\b403\b.*\/api\/v1\/schedules\b/, /\/admin\/schedules$/, 'the view-only checks press Create as a role that may not change schedules');
+provoked(/alert:? The title cannot be empty/, /\/admin\/assets\//, 'F-ASSETDETAIL-9 leaves the title empty to see the refusal');
+provoked(/\b400\b.*\/api\/v1\/schedules\b|Failed to create schedule: AxiosError|alert:? E2E refused this schedule/, null, 'F-SCHED: the server is made to refuse a schedule to see the message');
+provoked(/\b(401|429)\b.*\/api\/v1\/auth\/login/, /\/(admin|sponsor)\/login/, 'sign-in checks type a wrong password and hit the sign-in limit');
+provoked(/\b409\b.*\/api\/v1\/users\b/, /\/admin\/users/, 'F-USERS creates a user whose email is taken to see the message');
+provoked(/example\.com\/p\.jpg/, /\/hosts/, 'the test DJ has a photo address that does not exist');
+provoked(/alert:? (Pick at least one day for a weekly block\.|Give the block a name\.|Add at least one time of day\.)/, null, 'the block forms are sent empty to see each message');
+provoked(/\b503\b.*weather-readouts|alert:? Could not (show the template preview|make the readout): [Ww]eather is not set up/, /\/admin\/studio/, 'no weather key in the test setup; the checks read these messages');
+provoked(/\b400\b.*\/crm\/raffles\/[0-9a-f-]+\/draw/, /\/admin\/crm/, 'F-CRM draws a raffle with no entries');
+provoked(/\b400\b.*\/billing\/invoices\/[0-9a-f-]+\/checkout/, /\/sponsor\/billing/, 'Stripe is off in the test setup; F-SPBILL-1 reads the refusal');
+provoked(/e2e page crash/, null, 'F-GLOBAL: a page is made to crash to see the error page');
+provoked(/\/assets\/(Sponsors|Archives)-[\w-]+\.js|The site was updated while this tab was open/, null, 'a release is published under the open tab to see the reload notice');
+provoked(/\b401\b.*\/api\/v1\/auth\/refresh/, /\/admin\/stations/, 'the session checks use a sign-in that was ended');
+provoked(/\b401\b.*\/api\/v1\/auth\/(me|refresh)/, /\/sponsor\/campaigns/, 'the sponsor session checks open the portal with an ended sign-in');
+provoked(/\b429\b.*\/sponsorship\/copy-review/, /\/sponsor\/wording/, 'the wording check is pressed past its limit of 12 a minute');
 const BASE = process.env.BASE_URL || 'http://localhost:4330';
 const API = process.env.API_URL || 'http://localhost:8230/api/v1';
 const SHOTS = process.env.SHOTS_DIR || '';
@@ -336,6 +356,8 @@ const VIEW_ONLY = {
   dj: ['/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns'],
   viewer: ['/admin/dashboard', '/admin/assets', '/admin/schedules', '/admin/rules', '/admin/program-clock', '/admin/campaigns'],
 };
+// Words a button that changes something starts with
+const WRITE_WORDS = /^(\+ ?)?(new|add|create|edit|delete|remove|save|upload|update|approve|reject|publish|rename|import|resolve|generate|record|schedule a|duplicate|copy to|move|insert|go next|loop|fade|soft fade|go live|● go live|play now|play next|mix over|next|start|▶ start|end show|panic|generate)\b/i;
 const short = p => p.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, ':id');
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -395,6 +417,7 @@ section('access', async () => {
     // View only pill on each screen the role can open (F-ACCESS-10/11)
     await step(`F-ACCESS-${role === 'manager' || role === 'admin' ? 11 : role === 'dj' ? 11 : 10} ${role}: "View only" marker exactly where the role cannot change`, async () => {
       const wrong = [];
+      const offeredWrites = [];
       for (const [p, roles] of adminRoutes()) {
         if (!roles.includes(role)) continue;
         if (p.includes('/live/') || p.includes('audio-enhance')) continue;
@@ -404,8 +427,26 @@ section('access', async () => {
         let has = false;
         try { await page.getByTestId('view-only').waitFor({ state: 'visible', timeout: expect ? 3000 : 400 }); has = true; } catch { has = false; }
         if (has !== expect) wrong.push(`${short(p)} ${expect ? 'missing' : 'shown wrongly'}`);
+        // A view-only screen offers nothing that changes things: no New / Edit / Delete /
+        // Save buttons beside the badge (live 2026-11-18: a viewer's schedule blocks page
+        // had New Block, Edit and Delete)
+        if (expect) {
+          await page.waitForTimeout(400);
+          const offered = await page.evaluate(() => {
+            const seen = el => { const r = el.getBoundingClientRect(); const c = getComputedStyle(el); return r.width > 0 && r.height > 0 && c.visibility !== 'hidden'; };
+            return [...document.querySelectorAll('main button:not([role="tab"]), main a, main [role="button"]')]
+              .filter(el => seen(el) && !el.matches(':disabled') && el.getAttribute('aria-disabled') !== 'true')
+              .flatMap(el => [el.innerText, el.getAttribute('aria-label')].map(t => (t || '').trim().replace(/\s+/g, ' ')))
+              .filter(Boolean);
+          });
+          if (process.env.DUMP_BUTTONS) console.log(`BUTTONS ${role} ${short(p)}: ${[...new Set(offered)].join(' | ')}`);
+          // "Save as Default" keeps the person's own pre-listen lengths, not the item
+          const writes = [...new Set(offered.filter(t => WRITE_WORDS.test(t) && t !== 'Save as Default'))];
+          if (writes.length) offeredWrites.push(`${short(p)}: ${writes.join(', ')}`);
+        }
       }
       assert(!wrong.length, wrong.join('; '));
+      assert(!offeredWrites.length, `view-only screens offer changes: ${offeredWrites.join('; ')}`);
     }, page);
     await closePage(page);
   }
@@ -597,10 +638,10 @@ section('shell', async () => {
   // F-GLOBAL-1 public nav (desktop and phone)
   for (const view of ['desktop', 'iphone']) {
     const page = await newPage(null, view);
-    await step(`F-GLOBAL-1 ${view}: public nav links Stations / Program Guide / DJs / Archives navigate`, async () => {
+    await step(`F-GLOBAL-1 ${view}: public nav links Stations / Schedule / DJs / Archives navigate`, async () => {
       await page.goto(`${BASE}/stations`);
       await page.locator("nav a", { hasText: "KBR Studio" }).waitFor();
-      for (const [label, p] of [['Program Guide', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives'], ['Stations', '/stations']]) {
+      for (const [label, p] of [['Schedule', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives'], ['Stations', '/stations']]) {
         const link = page.locator('nav').getByRole('link', { name: label, exact: true });
         if (view === 'iphone' && !(await link.first().isVisible())) {
           // Phones: the links must be reachable through a menu button.
@@ -640,7 +681,7 @@ section('shell', async () => {
   const groups = {
     Content: [['Library', '/admin/assets'], ['Categories', '/admin/categories'], ['Types', '/admin/asset-types'], ['Playlists', '/admin/playlists'], ['Studio', '/admin/studio'], ['Reviews', '/admin/reviews']],
     Broadcast: [['Schedules', '/admin/schedules'], ['Program Blocks', '/admin/program-blocks'], ['Schedule Check', '/admin/schedule-check'], ['Rules', '/admin/rules'], ['Blackouts', '/admin/holidays'], ['Program Clock', '/admin/program-clock'], ['Live Shows', '/admin/live']],
-    Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Program Guide', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
+    Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Public Schedule', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
     Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Sponsors', '/admin/sponsors'], ['Campaigns', '/admin/campaigns'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Sponsorship Rules', '/admin/sponsorship-rules'], ['Alerts', '/admin/alerts'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
   };
   const canOpen = (role, p) => {
@@ -865,7 +906,7 @@ section('shell', async () => {
       await page.goto(`${BASE}/admin/stations`);
       await page.getByRole('heading', { name: 'Manage Stations' }).waitFor();
       const openIt = async () => {
-        await page.locator('button[aria-label="Report a bug"]').click();
+        await page.locator('button[aria-label="Report a bug"]:visible, [data-testid="bug-top"]:visible').first().click();
         await page.getByRole('dialog', { name: 'Report a bug' }).waitFor({ timeout: 10000 });
       };
       const dlg = page.getByRole('dialog', { name: 'Report a bug' });
@@ -939,7 +980,7 @@ section('stations', async () => {
       return `saved in ${ms} ms`;
     }, page);
     await step(`F-STATIONS-5 ${view}: expand row, search location, Save Location updates coordinates and timezone`, async () => {
-      await rowOf(page, name).click();
+      await rowOf(page, name).getByText(name, { exact: true }).first().click();   // the name, as a person taps it: the card's middle holds the Protected box on a phone
       const panel = page.getByTestId('station-panel');
       await panel.getByPlaceholder('Search for a city...').fill('Lakewood');
       await panel.getByRole('button', { name: /Lakewood, New Jersey/ }).click();
@@ -962,7 +1003,7 @@ section('stations', async () => {
       const cfg = resp.request().postDataJSON().automation_config;
       assert(cfg.hourly_station_id && cfg.hourly_time_announcement && cfg.weather_enabled && cfg.weather_interval_minutes === 45 && cfg.timed_during_long_items === 'cut', `sent ${JSON.stringify(cfg)}`);
       await page.reload();
-      await rowOf(page, name).click();
+      await rowOf(page, name).getByText(name, { exact: true }).first().click();
       const p2 = page.getByTestId('station-panel');
       assert(await p2.getByTestId('timed-during-long-items').inputValue() === 'cut', 'long-items choice lost');
       assert(await p2.locator('input[type=number]:not([data-testid])').inputValue() === '45', 'interval lost');
@@ -2954,9 +2995,51 @@ section('asset-detail', async () => {
       await timedSave(page, 'comment', (m, p) => m === 'POST', () => page.getByRole('button', { name: 'Post Comment' }).click());
       await page.getByText(text).first().waitFor();
     }, page);
+    await step(`F-ASSETDETAIL-9 ${view}: title, artist and album can be changed here; an empty title is refused`, async () => {
+      const patch = (m, p) => m === 'PATCH' && p === `/assets/${asset.id}`;
+      const stored = async () => api('GET', `/assets/${asset.id}`, { token: USERS.admin.token });
+      const title = page.getByTestId('asset-title');
+      await title.fill(`E2E Detail ${RUN} renamed ${view}`);
+      await timedSave(page, 'title', patch, () => title.press('Enter'));
+      await until(async () => (await stored()).title === `E2E Detail ${RUN} renamed ${view}`, 'title stored');
+      await page.getByRole('heading', { name: `E2E Detail ${RUN} renamed ${view}` }).waitFor();
+      const artist = page.getByTestId('asset-artist');
+      await artist.fill(`Artist ${view}`);
+      await timedSave(page, 'artist', patch, () => artist.blur());
+      const album = page.getByTestId('asset-album');
+      await album.fill(`Album ${view}`);
+      await timedSave(page, 'album', patch, () => album.blur());
+      await until(async () => { const a = await stored(); return a.artist === `Artist ${view}` && a.album === `Album ${view}`; }, 'artist and album stored');
+      await page.getByTestId('asset-title').fill('  ');
+      await page.getByTestId('asset-title').blur();
+      await page.getByTestId('asset-save-error').filter({ hasText: 'The title cannot be empty.' }).waitFor();
+      assert((await stored()).title === `E2E Detail ${RUN} renamed ${view}`, 'an empty title was stored');
+      // back to the name the other steps look for
+      await page.getByTestId('asset-title').fill(`E2E Detail ${RUN}`);
+      await timedSave(page, 'title back', patch, () => page.getByTestId('asset-title').press('Enter'));
+      await until(async () => (await stored()).title === `E2E Detail ${RUN}`, 'title restored');
+    }, page);
     await step(`F-ASSETDETAIL-8 ${view}: Back to Assets`, async () => {
       await page.getByRole('link', { name: /Back to Assets/ }).click();
       await waitPath(page, '/admin/assets');
+    }, page);
+    await closePage(page);
+  }
+  // A DJ or viewer reads the same page with nothing to change on it
+  for (const role of ['dj', 'viewer']) {
+    const page = await newPage(role);
+    await proxyAudio(page, role);
+    await step(`F-ASSETDETAIL-10 ${role}: the item page shows the facts as text, with no field or button that changes the item`, async () => {
+      await page.goto(`${BASE}/admin/assets/${asset.id}`);
+      await page.getByRole('heading', { name: `E2E Detail ${RUN}` }).waitFor();
+      await page.getByText('Loading waveform...').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+      const main = page.locator('main');
+      // (the pre-listen lengths are the person's own setting and stay)
+      assert(await main.locator('[data-testid=asset-title], [data-testid=asset-artist], [data-testid=asset-album], input[type=date], input[title*="vote"]').count() === 0, 'an editable field of the item is shown');
+      for (const name of ['AI Auto-Enhance', 'Restore Original', 'Apply', 'Trim Out', 'Auto-Clip Start & End'])
+        assert(await main.getByRole('button', { name, exact: true }).count() === 0, `"${name}" is offered`);
+      assert(await main.getByRole('link', { name: /Full Editor/ }).count() === 0, '"Full Editor" is offered');
+      await main.getByRole('button', { name: 'Detect Silence' }).waitFor();   // looking is still allowed
     }, page);
     await closePage(page);
   }
@@ -3541,7 +3624,7 @@ section('release', async () => {
       // (a key press counts as input; a bare mouse move does not)
       for (let i = 0; i < 14; i++) { await page.keyboard.press('Shift'); await page.clock.runFor(5_000); }
       assert(loads() === before, 'reloaded while in use');
-      await page.getByRole('link', { name: /Program Guide/ }).first().click();
+      await page.getByRole('link', { name: /Schedule$/ }).first().click();
       await until(async () => loads() > before, 'reload on navigation', 10000);
     }, page);
     await ctx.close();
@@ -3733,7 +3816,7 @@ section('errors', async () => {
       const bad = without.filter(u => !PLAIN_FETCH.some(f => u.startsWith(f)));
       assert(seen.length > 2 && !bad.length, `${bad.length} of ${seen.length} axios calls without X-Request-ID: ${[...new Set(bad)].join(', ')}`);
       const plainNote = without.length ? `; plain fetch without id: ${[...new Set(without)].join(', ')}` : '';
-      await page.locator('button[aria-label="Report a bug"]').click();
+      await page.locator('button[aria-label="Report a bug"]:visible, [data-testid="bug-top"]:visible').first().click();
       const dlg = page.getByRole('dialog', { name: 'Report a bug' });
       await dlg.locator('#bug-what').fill(`E2E diagnostics ${RUN}`);
       const { resp } = await timedResponse(page, (m, p) => m === 'POST' && p === '/bug-reports', () => dlg.getByRole('button', { name: 'Send report' }).click());
@@ -3891,7 +3974,7 @@ section('a11y', async () => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
     if (await page.getByRole('heading', { name: 'Create Live Show' }).count()) fails.push('New Show');
-    await page.locator('button[aria-label="Report a bug"]').click();
+    await page.locator('button[aria-label="Report a bug"]:visible, [data-testid="bug-top"]:visible').first().click();
     await page.getByRole('dialog', { name: 'Report a bug' }).waitFor({ timeout: 10000 });
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
@@ -3947,6 +4030,7 @@ async function main() {
   const n = (st) => results.filter(r => r.status === st).length;
   console.log(`\n${n('PASS')} passed, ${n('KNOWN-BUG')} known bugs, ${n('FAIL')} failed, ${n('FIXED?')} known bugs now passing (${results.length} checks)`);
   fs.rmSync(TMP, { recursive: true, force: true });
-  process.exit(n('FAIL') || n('FIXED?') || guardVerdict() ? 1 : 0);
+  const looked = guardVerdict();   // always printed, also when checks failed
+  process.exit(n('FAIL') || n('FIXED?') || looked ? 1 : 0);
 }
 main().catch(e => { console.error(e); process.exit(2); });

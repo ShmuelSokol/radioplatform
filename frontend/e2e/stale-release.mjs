@@ -18,6 +18,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, checker, sleep, makeStation, AUDIO_PROBE, routeApi, routeNowPlaying } from './lib/fake-station.mjs';
 import { startReleaseHost } from './lib/release-server.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// What this suite provokes on purpose: the old release's code files answered with the
+// site's page. Each browser reports that in the console, and the release box may show
+// for a moment before the tab moves on (the checks below judge that box themselves).
+allowEverywhere(/MIME type of "text\/html"|Failed to fetch dynamically imported module|Importing a module script failed|ErrorBoundary caught: TypeError: Failed to fetch dynamically/,
+  'the old release\'s code files are gone and the host answers with the site\'s page: the situation under test');
+allowEverywhere(/error shown: The site was updated while this tab was open/, 'the release box this suite checks for itself');
+// The fake backend (lib/fake-station.mjs) answers only what the player screens need. These
+// screens get no data of the shape they read and show "Something went wrong"; with real
+// data they are checked by admin-flows.mjs and the walk-through (walkthrough.mjs).
+const NO_FAKE_DATA = ['/admin/assets', '/admin/assets/m1', '/admin/program-blocks', '/admin/campaigns', '/admin/campaigns/c1',
+  '/admin/schedules', '/admin/schedules/s1/blocks', '/admin/playlists', '/admin/sponsors', '/admin/sponsorship-rules',
+  '/admin/crm', '/admin/spot-schedule', '/admin/spot-recordings', '/archives'];
+const pageOf = (url) => { try { return new URL(url, 'http://x').pathname; } catch { return ''; } };
+allowEverywhere((rec) => NO_FAKE_DATA.includes(pageOf(rec.url))
+  && /^(TypeError: |ErrorBoundary caught: TypeError: |Something went wrong )/.test(rec.text || ''),
+'this screen has no data in the fake backend; real data: admin-flows.mjs and walkthrough.mjs');
+allowEverywhere(/WebSocket connection to '.*\/api\/v1\/listeners\/ws' failed/, 'the fake backend has no listeners WebSocket');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 4331);

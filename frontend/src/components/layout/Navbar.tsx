@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { REPORT_BUG_EVENT } from '../BugReporter';
+import { REPORT_BUG_EVENT, BugTopButton } from '../BugReporter';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useUnresolvedCount, useAlerts } from '../../hooks/useAlerts';
@@ -57,7 +57,7 @@ export default function Navbar() {
 
   const publicLinks: NavLink[] = [
     { to: '/stations', label: 'Stations', color: 'hover:text-white' },
-    { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
+    { to: '/guide', label: 'Schedule', color: 'hover:text-orange-300' },
     { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
     { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
   ];
@@ -107,7 +107,8 @@ export default function Navbar() {
         { to: '/admin/listeners', label: 'Listeners', color: 'hover:text-green-300' },
         { to: '/admin/analytics', label: 'Analytics', color: 'hover:text-pink-300' },
         { to: '/admin/requests', label: 'Requests', color: 'hover:text-lime-300' },
-        { to: '/guide', label: 'Program Guide', color: 'hover:text-orange-300' },
+        // "Public Schedule": beside Broadcast's Schedules, a plain "Schedule" would be mistaken for it
+        { to: '/guide', label: 'Public Schedule', color: 'hover:text-orange-300' },
         { to: '/archives', label: 'Archives', color: 'hover:text-amber-300' },
         { to: '/hosts', label: 'DJs', color: 'hover:text-purple-300' },
       ],
@@ -223,6 +224,9 @@ export default function Navbar() {
           <div className="flex items-center gap-3">
             {isAuthenticated ? (
               <>
+                {/* Phones: report a bug, one tap, same place on every staff page */}
+                {/* an open menu closes first, so the screenshot shows the page */}
+                <span className="contents" onClickCapture={() => setMenuOpen(false)}><BugTopButton className="text-gray-300" /></span>
                 {/* Alert Bell */}
                 {showAlerts && <div className="relative" ref={bellRef}>
                   <button onClick={() => setBellOpen(!bellOpen)}
@@ -351,7 +355,7 @@ export default function Navbar() {
 
             <button type="button"
               onClick={() => { setMenuOpen(false); window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT)); }}
-              className="w-full text-left py-2 px-3 text-sm text-gray-400 hover:text-white transition rounded hover:bg-[#1a1a4e]">
+              className="w-full min-h-[44px] flex items-center text-left py-2 px-3 text-sm text-gray-400 hover:text-white transition rounded hover:bg-[#1a1a4e]">
               🐞 Report a bug
             </button>
 

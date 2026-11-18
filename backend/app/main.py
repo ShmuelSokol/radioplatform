@@ -74,12 +74,59 @@ async def ensure_tables():
         logger.exception("DATABASE SETUP FAILED: tables were not created; /health will report 'starting'")
 
 
+def model_enum_labels() -> dict[str, list[str]]:
+    """Every enum type of the models with the labels SQLAlchemy sends (member NAMES)."""
+    from sqlalchemy import Enum as SAEnum
+
+    from app.db.base import Base
+
+    labels: dict[str, list[str]] = {}
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            kind = column.type
+            if isinstance(kind, SAEnum) and kind.name:
+                known = labels.setdefault(kind.name, [])
+                known += [label for label in kind.enums if label not in known]
+    return labels
+
+
+async def add_missing_enum_labels(raw_conn) -> list[str]:
+    """Adds the labels a database's enum types lack (asyncpg connection, autocommit).
+
+    A member added to a Python enum after its type was created is missing from the
+    database until this runs: 'DJ' was once added as 'dj', so creating a DJ user
+    failed on production only (the tests' SQLite has no enum types). Returns what
+    it added, as "type.LABEL".
+    """
+    added = []
+    for name, wanted in sorted(model_enum_labels().items()):
+        rows = await raw_conn.fetch(
+            "SELECT enumlabel FROM pg_enum WHERE enumtypid = to_regtype($1)::oid", name)
+        have = {r["enumlabel"] for r in rows}
+        if not have:
+            continue  # the type does not exist yet: create_all makes it whole
+        for label in wanted:
+            if label in have:
+                continue
+            safe = label.replace("'", "''")
+            try:
+                await raw_conn.execute(f"ALTER TYPE {name} ADD VALUE IF NOT EXISTS '{safe}'")
+                added.append(f"{name}.{label}")
+            except Exception as e:
+                logger.warning(f"Enum label {name}.{label} not added: {e}")
+    logger.info("Enum labels added: %s", ", ".join(added) or "none, every label the models send is there")
+    return added
+
+
 async def _add_missing_columns(engine):
     """Add columns that were added to models but missing from existing DB tables."""
 
     # ALTER TYPE ADD VALUE cannot run inside a transaction — use autocommit
     enum_migrations = [
         "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'SPONSOR'",
+        # The model stores a role by its NAME. The DJ role was first added as 'dj', which
+        # the code never writes, so creating a DJ user failed (production, 2026-11-18).
+        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'DJ'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'LIVE_SHOW'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'SILENCE'",
         # Live show enum types (created by create_all, but safe to re-run)
@@ -103,6 +150,10 @@ async def _add_missing_columns(engine):
                     await raw_conn.execute(sql)
                 except Exception as e:
                     logger.warning(f"Enum migration skipped ({sql[:50]}...): {e}")
+            try:
+                await add_missing_enum_labels(raw_conn)
+            except Exception as e:
+                logger.warning(f"Enum labels not checked: {e}")
         finally:
             await raw_conn.close()
     except Exception as e:
@@ -189,8 +240,6 @@ async def _add_missing_columns(engine):
         # Listener sessions index for fast heartbeat lookups
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_heartbeat ON listener_sessions (last_heartbeat)",
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_started ON listener_sessions (started_at)",
-        # DJ role enum value
-        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'dj'",
         # User activity tracking
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS intro_seconds DOUBLE PRECISION",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
@@ -407,6 +456,18 @@ async def _warm_connection_pool(timeout: float = 20.0) -> None:
 CONCURRENT_INDEXES = {
     # The library's "last played" per item looks up plays by item across stations
     "ix_play_logs_asset_start": "play_logs (asset_id, start_utc)",
+    # The on-air self-check (air_watch) reads, every 5 s per station, what started or
+    # came due in the last 10 minutes. Without these it read the station's whole queue
+    # history each time (2.4 to 3.9 s on production, 2026-11-18).
+    "ix_queue_entries_station_started": "queue_entries (station_id, started_at)",
+    "ix_queue_entries_station_preempt": "queue_entries (station_id, preempt_at)",
+    # queue_entries keeps every entry ever played (about 255k rows) and only about
+    # 1,850 wait. The next due timed item (GET /now-playing, the timed-groups check)
+    # and the row on air walked that history: 0.94 s, 0.95 s and 3.6 s on production,
+    # 2026-11-18. These hold only the waiting / playing rows: 0.01 to 0.06 ms locally
+    # on 250k history rows (a full read without them).
+    "ix_qe_pending_preempt": "queue_entries (station_id, preempt_at, position) WHERE status = 'pending'",
+    "ix_qe_playing_started": "queue_entries (station_id, started_at) WHERE status = 'playing'",
     # Deleting a library item makes Postgres look in every table that points at it
     # (cascade / set null). Without these each delete read the whole of queue_entries
     # (it keeps every entry ever played) and the other tables, row by row.
@@ -421,36 +482,243 @@ CONCURRENT_INDEXES = {
 }
 
 
-async def _build_concurrent_indexes() -> None:
+INDEX_BUILD_TRIES = 5
+INDEX_BUILD_WAIT = 30.0  # seconds between tries
+
+
+async def _build_indexes_once(conn, names) -> list[str]:
+    """Builds the named indexes that are missing or unusable. Returns those still missing."""
+    missing = []
+    for name in names:
+        target = CONCURRENT_INDEXES[name]
+        try:
+            valid = await conn.fetchval(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = $1", name,
+            )
+            if valid:
+                continue
+            if valid is False:  # a build that was interrupted leaves an unusable index
+                await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+            started = asyncio.get_running_loop().time()
+            await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
+            logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+        except Exception as e:
+            logger.warning("Index %s not built: %s", name, e)
+            missing.append(name)
+    return missing
+
+
+async def _build_concurrent_indexes(dsn: str | None = None, wait: float = INDEX_BUILD_WAIT) -> list[str]:
+    """Builds CONCURRENT_INDEXES in the background; a failed connection or build is
+    tried again, and the outcome is logged once either way (so the log of any start
+    says which indexes exist). Returns the names still missing."""
+    import asyncpg
+
+    if dsn is None:
+        if not settings.DATABASE_URL.startswith("postgresql"):
+            return []
+        dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    missing = list(CONCURRENT_INDEXES)
+    for attempt in range(1, INDEX_BUILD_TRIES + 1):
+        try:
+            conn = await asyncpg.connect(dsn, statement_cache_size=0)
+        except Exception as e:
+            logger.warning("Could not connect to build indexes (try %d of %d): %s", attempt, INDEX_BUILD_TRIES, e)
+        else:
+            try:
+                await conn.execute("SET statement_timeout = '10min'")
+                missing = await _build_indexes_once(conn, missing)
+            except Exception as e:
+                logger.warning("Index build stopped (try %d of %d): %s", attempt, INDEX_BUILD_TRIES, e)
+            finally:
+                await conn.close()
+            if not missing:
+                break
+        if attempt < INDEX_BUILD_TRIES:
+            await asyncio.sleep(wait)
+    if missing:
+        logger.error("INDEXES MISSING after %d tries: %s", INDEX_BUILD_TRIES, ", ".join(missing))
+    else:
+        logger.info("Indexes in place: %s", ", ".join(CONCURRENT_INDEXES))
+    return missing
+
+
+async def _wait_for_database(limit: float = 90.0) -> None:
+    """Nothing starts until the database answers. A process that came up while
+    the database refused connections ran its whole startup against nothing and
+    then served 500s."""
+    from sqlalchemy import text
+
+    from app.db.engine import engine
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    wait = 0.5
+    while True:
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            if loop.time() - started > 1.0:
+                logger.info("Database answered after %.1f s", loop.time() - started)
+            return
+        except Exception as e:
+            if loop.time() - started > limit:
+                logger.error("Database did not answer within %.0f s (%s); starting anyway", limit, e)
+                return
+            logger.warning("Database not answering yet (%s); trying again in %.1f s", e, wait)
+            await asyncio.sleep(wait)
+            wait = min(wait * 2, 8.0)
+
+
+async def _log_database_link() -> None:
+    """Once after a start: how far away the database is and how big it is.
+
+    On 2026-11-18 single statements took 0.6 to 1 s with an idle event loop and a
+    free pool, and a 48 MB table took 27 s to vacuum. Whether that is distance
+    (this server's region against the database's) or a small database that reads
+    from disk cannot be seen from outside; this line says both."""
+    import os
+    import statistics
+    import time as _time
+
+    from sqlalchemy import text
+    from sqlalchemy.engine import make_url
+
+    from app.db.engine import engine
+
+    if engine.dialect.name != "postgresql":
+        return
+    await asyncio.sleep(45)  # after the startup rush, so the times are the link's own
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+            times = []
+            for _ in range(7):
+                began = _time.monotonic()
+                await conn.execute(text("SELECT 1"))
+                times.append((_time.monotonic() - began) * 1000)
+            facts = (await conn.execute(text(
+                "SELECT current_setting('shared_buffers'), current_setting('effective_cache_size'), "
+                "current_setting('max_connections'), pg_size_pretty(pg_database_size(current_database())), "
+                "current_setting('server_version'), current_setting('track_io_timing')"
+            ))).first()
+        logger.warning(
+            "DATABASE LINK: one statement (SELECT 1) takes %.0f ms at best, %.0f ms typically, %.0f ms at worst. "
+            "This server: region %s. Database host: %s. Database: version %s, shared_buffers %s, "
+            "effective_cache_size %s, max_connections %s, size %s, track_io_timing %s",
+            min(times), statistics.median(times), max(times),
+            os.environ.get("RAILWAY_REPLICA_REGION") or os.environ.get("RAILWAY_REGION") or "unknown",
+            make_url(settings.DATABASE_URL).host,
+            facts[4], facts[0], facts[1], facts[2], facts[3], facts[5],
+        )
+    except Exception as e:
+        logger.warning("Database link facts not read: %s", e)
+    await _log_first_use_cost()
+
+
+async def _log_first_use_cost() -> None:
+    """What the first use of an enum column costs on a new connection (asyncpg
+    looks the type up once per connection), against the same statement again,
+    and the database's JIT setting. Connections are kept 30 minutes so this is
+    paid rarely; this line says how much it is."""
+    import time as _time
+
+    import asyncpg
+
+    dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    try:
+        began = _time.monotonic()
+        conn = await asyncpg.connect(dsn, statement_cache_size=0)
+        try:
+            connected = (_time.monotonic() - began) * 1000
+            began = _time.monotonic()
+            await conn.fetch("SELECT role FROM users LIMIT 1")
+            first = (_time.monotonic() - began) * 1000
+            began = _time.monotonic()
+            await conn.fetch("SELECT role FROM users LIMIT 1")
+            second = (_time.monotonic() - began) * 1000
+            jit = await conn.fetchval("SHOW jit")
+        finally:
+            await conn.close()
+        logger.warning(
+            "FIRST USE OF A TYPE on a new connection (SELECT role FROM users LIMIT 1): connecting %.0f ms, "
+            "first use %.0f ms, second %.0f ms, database jit %s",
+            connected, first, second, jit,
+        )
+    except Exception as e:
+        logger.warning("First-use cost not measured: %s", type(e).__name__)
+
+
+# Tables read by index-only scans. The database skips the table itself only for
+# pages its visibility map marks clean, and only VACUUM marks them: on
+# 2026-11-18 the last-played read of play_logs fetched 139,992 of 145,557 rows
+# from the table anyway. Inserts alone start autovacuum late (20% of the table).
+VACUUM_TABLES = ("play_logs", "queue_entries", "assets", "alerts")
+VACUUM_EVERY_DAYS = 7
+# A table with this share of dead rows is vacuumed whatever its last vacuum.
+# queue_entries has 700 to 900 rows rewritten at every song change.
+VACUUM_DEAD_SHARE = 0.10
+
+
+async def _vacuum_stale_tables() -> None:
+    """After startup, in the background: VACUUM (ANALYZE) each of VACUUM_TABLES
+    that was not vacuumed in the last week or holds many dead rows, and make
+    autovacuum come sooner for them. VACUUM does not block reads or writes.
+    Every table gets a log line either way, with its sizes and dead rows:
+    nobody can look at the live database directly."""
     import asyncpg
 
     if not settings.DATABASE_URL.startswith("postgresql"):
         return
+    await asyncio.sleep(120)  # after the startup rush
     dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
     try:
         conn = await asyncpg.connect(dsn, statement_cache_size=0)
     except Exception as e:
-        logger.warning("Could not connect to build indexes: %s", e)
+        logger.warning("Could not connect to vacuum: %s", e)
         return
     try:
         await conn.execute("SET statement_timeout = '10min'")
-        for name, target in CONCURRENT_INDEXES.items():
+        for table in VACUUM_TABLES:
             try:
-                valid = await conn.fetchval(
-                    "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
-                    "WHERE c.relname = $1", name,
+                row = await conn.fetchrow(
+                    "SELECT greatest(last_vacuum, last_autovacuum) AS last, "
+                    "coalesce(now() - greatest(last_vacuum, last_autovacuum) > make_interval(days => $2), true) AS old, "
+                    "n_live_tup AS live, n_dead_tup AS dead, vacuum_count + autovacuum_count AS runs, "
+                    "pg_size_pretty(pg_table_size(relid)) AS size, pg_size_pretty(pg_indexes_size(relid)) AS indexes "
+                    "FROM pg_stat_user_tables WHERE relname = $1", table, VACUUM_EVERY_DAYS,
                 )
-                if valid:
+                if row is None:
                     continue
-                if valid is False:  # a build that was interrupted leaves an unusable index
-                    await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+                state = (
+                    f"{row['live']} live and {row['dead']} dead rows, table {row['size']}, indexes {row['indexes']}, "
+                    f"last vacuum {row['last'] or 'never'}, {row['runs']} vacuums so far"
+                )
+                many_dead = row["dead"] > 1000 and row["dead"] > VACUUM_DEAD_SHARE * max(row["live"], 1)
+                if not row["old"] and not many_dead:
+                    logger.info("Vacuum not needed for %s: %s", table, state)
+                    continue
+                await conn.execute(
+                    f"ALTER TABLE {table} SET (autovacuum_vacuum_insert_scale_factor = 0.02, "
+                    "autovacuum_vacuum_scale_factor = 0.02, autovacuum_analyze_scale_factor = 0.02)"
+                )
                 started = asyncio.get_running_loop().time()
-                await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
-                logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+                await conn.execute(f"VACUUM (ANALYZE) {table}")
+                after = await conn.fetchrow(
+                    "SELECT pg_size_pretty(pg_table_size(relid)) AS size, "
+                    "pg_size_pretty(pg_indexes_size(relid)) AS indexes "
+                    "FROM pg_stat_user_tables WHERE relname = $1", table,
+                )
+                logger.info(
+                    "Vacuumed %s in %.1f s. Before: %s. After: table %s, indexes %s",
+                    table, asyncio.get_running_loop().time() - started, state, after["size"], after["indexes"],
+                )
             except Exception as e:
-                logger.warning("Index %s not built: %s", name, e)
+                logger.warning("Vacuum of %s failed: %s", table, e)
     finally:
         await conn.close()
+
 
 async def _seed_default_categories():
     """Insert default categories if the categories table is empty."""
@@ -681,7 +949,10 @@ async def _resume_playback_on_startup():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from app.core import loop_watch
+    loop_watch.start()  # logs what holds the event loop when requests stall
     # Startup — create tables and start the scheduler engine
+    await _wait_for_database()
     await ensure_tables()
     await _warm_connection_pool()
     await _seed_default_categories()
@@ -710,6 +981,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # When each item last aired: read before the first refill or redraw needs it
     from app.services.last_played import warm_all
     warm_task = _asyncio.get_running_loop().create_task(warm_all())
+    vacuum_task = _asyncio.get_running_loop().create_task(_vacuum_stale_tables())
+    link_task = _asyncio.get_running_loop().create_task(_log_database_link())
     # Bug reports: push "fix ready" to ntfy (see wiki/bug-reports.md)
     from app.services.bug_report_service import notify_loop
     bug_task = _asyncio.get_running_loop().create_task(notify_loop())
@@ -725,6 +998,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backfill_task.cancel()
     index_task.cancel()
     warm_task.cancel()
+    vacuum_task.cancel()
+    link_task.cancel()
+    loop_watch.stop()
     # Shutdown — stop the scheduler cleanly
     try:
         from app.services.scheduler_engine import stop_scheduler

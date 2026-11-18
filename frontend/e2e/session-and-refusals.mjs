@@ -11,7 +11,10 @@
  * station write shows the "not allowed" notice naming the login; nothing changes).
  * Exits non-zero if a check fails.
  */
-import { chromium, checker, sleep } from './lib/fake-station.mjs';
+import { chromium, checker, sleep, allowEverywhere } from './lib/fake-station.mjs';
+
+// What this test provokes on purpose (anything else on screen is a finding).
+allowEverywhere(/is not allowed to do that\. Nothing was changed/, 'the refused station write under test (B-ROLE-22)');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4173';
 const { check, done } = checker({});

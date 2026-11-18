@@ -54,6 +54,21 @@ function currentStationId(): string | null {
   try { return localStorage.getItem('radio_last_station'); } catch { return null; }
 }
 
+/**
+ * The bug button of the top bar on a phone: beside the bell on every staff page (and in
+ * the sponsor portal's bar), 44 px, one tap from the same place everywhere. Where it is
+ * on the page the floating button is not shown at phone size (it kept covering things).
+ */
+export function BugTopButton({ className = '' }: { className?: string }) {
+  return (
+    <button type="button" data-bug-top="" data-testid="bug-top" title="Report a bug" aria-label="Bug report"
+      onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
+      className={`sm:hidden inline-flex items-center justify-center w-11 h-11 shrink-0 text-lg leading-none rounded hover:bg-white/10 ${className}`}>
+      <span aria-hidden>🐞</span>
+    </button>
+  );
+}
+
 type Phase = 'closed' | 'capturing' | 'open' | 'sending' | 'sent';
 
 export default function BugReporter() {
@@ -77,7 +92,18 @@ export default function BugReporter() {
   // a queue row's insert button on a phone and the cart's buttons on a computer. There
   // it lives in the menu (phone) and in the status bar along the bottom (computer).
   const hideFloating = pathname === '/admin/dashboard' || pathname === '/admin/databank';
-  const startRef = useRef<() => void>(() => {});
+  // The Library has controls on both edges of every row (checkbox left, View right): on a
+  // phone the button would sit on one while scrolling. There it is in the menu ("Report a bug").
+  const hideOnPhone = pathname === '/admin/assets';
+  // A top bar that carries the bug button (BugTopButton) replaces the floating one on phones
+  const [topButton, setTopButton] = useState(false);
+  useEffect(() => {
+    const look = () => setTopButton(!!document.querySelector('[data-bug-top]'));
+    look();
+    const t = window.setTimeout(look, 300); // a page that loads late brings its bar late
+    return () => window.clearTimeout(t);
+  }, [pathname]);
+  const startRef = useRef<(delay?: number) => void>(() => {});
 
   const start = async () => {
     setPhase('capturing');
@@ -97,12 +123,12 @@ export default function BugReporter() {
     setPhase('open');
   };
 
-  startRef.current = () => {
+  startRef.current = (delay = 250) => {
     // Give a menu that triggered this a moment to close before the screenshot.
-    if (phase === 'closed') setTimeout(start, 250);
+    if (phase === 'closed') setTimeout(start, delay);
   };
   useEffect(() => {
-    const onEvent = () => startRef.current();
+    const onEvent = (e: Event) => startRef.current((e as CustomEvent).detail?.delay);
     window.addEventListener(REPORT_BUG_EVENT, onEvent);
     return () => window.removeEventListener(REPORT_BUG_EVENT, onEvent);
   }, []);
@@ -151,8 +177,8 @@ export default function BugReporter() {
           onClick={start}
           title="Report a bug"
           aria-label="Report a bug"
-          // Phone: right edge, where cards have no text (on the left it covered their labels and the Library checkboxes)
-          className={`fixed right-3 sm:right-auto sm:left-3 bottom-24 z-[60] h-9 w-9 rounded-full ${hideFloating ? 'hidden' : 'flex'} bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden`}
+          // Phone: right edge, where cards have no text (on the left it covered their labels and the Library checkboxes); 44 px there for a finger
+          className={`fixed right-3 sm:right-auto sm:left-3 bottom-24 z-[60] h-11 w-11 sm:h-9 sm:w-9 rounded-full ${hideFloating ? 'hidden' : hideOnPhone || topButton ? 'hidden sm:flex' : 'flex'} bg-gray-800/80 text-gray-200 shadow-lg ring-1 ring-white/15 hover:bg-rose-600 hover:text-white transition-colors items-center justify-center text-base print:hidden`}
         >
           <span aria-hidden>🐞</span>
         </button>

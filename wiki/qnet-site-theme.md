@@ -14,6 +14,7 @@ Write ordinary Tailwind; the skin does the rest. Things worth knowing:
 
 - A coloured button (`bg-blue-600` etc.) becomes grey; a blue/green/etc. one is drawn as the default button (bold, black frame). Pages mark the chosen tab or filter by colouring it, so that frame is also what "selected" looks like. `aria-pressed/selected/checked="true"` draws pressed. Red buttons keep a red label.
 - `rounded-full` things (dots, pills, switches, round record buttons) are left alone. `qn-plain` on a button or link opts it out of the button face.
+- Phones (coarse pointer, under 768 px): every button, select and box is 44 x 44 px, and so is the label of a checkbox or radio button (the label is the tap target). A box with no words beside it is wrapped in `<label className="qn-tap">` (Library rows). The control room sets its own sizes (`h-11 lg:h-6`). The floating bug button is hidden on the Library at phone size, where rows have controls on both edges; it is in the menu there.
 - White text survives only on a strong colour (500 to 800 shade) set on the same element or its parent badge; elsewhere `text-white` becomes black.
 - `[class~=...]` matches whole class names, so `hover:bg-x` never triggers the `bg-x` rule. Only plain and `hover:` colour classes are remapped; `md:`/`focus:` colour variants are not.
 - Specificity is `.qn-site` + one attribute (0,2,0), above Tailwind utilities, with no `!important`. Inline styles still win.

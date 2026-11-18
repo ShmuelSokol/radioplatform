@@ -1058,19 +1058,27 @@ async def sc_engine_starts_every_time(h: Harness, times: int = 6) -> None:
     h.check(name, not bad, f"station music 8 s after every start, no emergency files: {bad or 'all'}")
 
 
-async def sc_live_show_over_hard_item(h: Harness) -> None:
+async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False, restart: bool = False) -> None:
     """V3-52: a live show starts while a hard time check is on air, and a second time
     check comes due during the show. The stream goes quiet for the host, the time check
-    that came due during the show is not aired late after it, and music is back after."""
-    name = "live_show_over_hard_item"
+    that came due during the show is not aired late after it, and music is back after.
+    `hard_stop` (V3-52b): nobody presses End; the scheduler ends the show at its
+    planned end time. `restart` (V3-52c): the backend restarts (a deploy) 6 s into the
+    show, before the second item is due, so what it kept in memory about the show and
+    about what it handed to the engine is lost."""
+    name = "live_show_over_hard_item" + ("_hard_stop" if hard_stop else "") + ("_restart" if restart else "")
     await wait_music(h)
     t1 = at(20)
-    t2 = t1 + timedelta(seconds=20)
+    t2 = t1 + timedelta(seconds=45 if restart else 20)
     await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
                    ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
     second = await h.queue([("announce", {"preempt_at": t2, "timing_mode": "hard", "source": "auto"})])
-    code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show 2",
-                                               "calls_enabled": False})
+    body = {"station_id": str(STATION_ID), "title": "Harness show 2", "calls_enabled": False}
+    planned_end = t2 + timedelta(seconds=12)
+    if hard_stop:
+        body["scheduled_start"] = (t1 - timedelta(seconds=30)).isoformat()
+        body["scheduled_end"] = planned_end.isoformat()
+    code, show = h.api("POST", "/live-shows", body)
     if code != 201:
         h.check(name, False, f"could not create the show ({code})")
         return
@@ -1078,10 +1086,35 @@ async def sc_live_show_over_hard_item(h: Harness) -> None:
     t_start = time.time()
     code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
     h.check(name, code == 200, f"show started 3 s into the time check ({code})")
-    await asyncio.sleep(max(0, t2.timestamp() + 12 - time.time()))
-    t_end = time.time()
-    code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
-    h.check(name, code == 200, f"show ended 12 s after the second item was due ({code})")
+    if restart:
+        await asyncio.sleep(3)
+        r0 = time.time()
+        await asyncio.to_thread(h.stack.restart_backend)
+        h.check(name, time.time() < t2.timestamp() - 3,
+                f"the backend was back {time.time() - r0:.0f} s later, before the second item was due")
+        _, cur_show = h.api("GET", f"/live-shows/{show['id']}")
+        h.check(name, (cur_show or {}).get("status") == "live", f"the show is still live after the restart ({(cur_show or {}).get('status')})")
+    if hard_stop:
+        t_end = None
+        deadline = planned_end.timestamp() + 15
+        while time.time() < deadline:
+            _, cur_show = h.api("GET", f"/live-shows/{show['id']}")
+            if (cur_show or {}).get("status") not in ("live", "LIVE"):
+                t_end = time.time()
+                break
+            await asyncio.sleep(0.5)
+        late = None if t_end is None else t_end - planned_end.timestamp()
+        h.check(name, late is not None and -1.0 <= late <= 5.0,
+                f"the scheduler ended the show at its planned end ({'never' if late is None else f'{late:+.1f} s'})")
+        if t_end is None:
+            h.api("POST", f"/live-shows/{show['id']}/end")
+            t_end = time.time()
+        t_end -= 0.5   # seen up to one poll late
+    else:
+        await asyncio.sleep(max(0, t2.timestamp() + 12 - time.time()))
+        t_end = time.time()
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
+        h.check(name, code == 200, f"show ended 12 s after the second item was due ({code})")
     # long enough for the song that comes back to end, so a stale item would get its turn
     await asyncio.sleep(18 + 45)
     heard = h.heard(t1.timestamp() - 3, time.time() - 1)
@@ -1999,6 +2032,12 @@ async def sc_local_box_commands(h: Harness) -> None:
     h.check(name, now is not None and cur is not None and now.id != cur.id, "the site moved to the next song")
     h.check(name, relay.status()["commands_done"] > before,
             f"the relay carried the command ({before} -> {relay.status()['commands_done']})")
+    # The box tells the site how it is doing with the same call
+    _, shown = h.api("GET", "/playout-status")
+    box = (shown.get("stations", {}).get(str(STATION_ID)) or {}).get("box") or {}
+    h.check(name, box.get("clock_ok") is True and box.get("engine_ok") is True
+            and (box.get("disk_free_gb") or 0) > 0 and box.get("seen_seconds_ago", 99) < 40,
+            f"the site holds the box's own report: {box}")
     # A hard time check handed over by the backend, through the relay
     due_dt = at(55)
     due = due_dt.timestamp()
@@ -2698,6 +2737,49 @@ async def sc_next_twice(h: Harness) -> None:
                 f"{'no change in 8 s' if second is None else f'{second:.1f} s'}")
 
 
+async def sc_next_twice_slow_file(h: Harness) -> None:
+    """V3-52k: Next, then Next again 1 s later while the engine is still waiting for the
+    next item's file (5 s to arrive). An impatient operator pressing twice gets one
+    skip: the slow item airs and stays, the item after it is not skipped to, and the
+    song on air plays on meanwhile (no emergency music, no silence over 1 s)."""
+    name = "next_twice_slow_file"
+    await wait_music(h)
+    await asyncio.sleep(5)
+    await h.clear_pending()
+    await asyncio.sleep(1.5)
+    h.stack.slow_files["story.mp3"] = 5.0
+    t0 = time.time()
+    try:
+        await h.queue([("story", {}), ("song2", {}), ("song3", {})])
+        await asyncio.sleep(0.5)
+        base = f"/stations/{STATION_ID}/queue"
+        pressed = time.time()
+        h.api("POST", f"{base}/skip?fade=hard")
+        await asyncio.sleep(1.0)
+        code, _ = h.api("POST", f"{base}/skip?fade=hard")
+        h.check(name, code < 500, f"the second Next is answered without a server error ({code})")
+        t = await h.wait_on_air("story", 20)
+    finally:
+        h.stack.slow_files.pop("story.mp3", None)
+    h.check(name, t is not None,
+            f"the slow item went on air ({'never' if t is None else f'{t - pressed:.1f} s after the first press'})")
+    await asyncio.sleep(6)
+    cur = await h.on_air()
+    h.check(name, cur is not None and cur.asset_id == h.assets["story"],
+            f"and stays on air 6 s later: one skip, not two (site shows {cur.asset.title if cur else None})")
+    heard = h.heard(t0 - 2, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    tl = timeline(heard)
+    names = [n for _, n in tl]
+    after = [n for ts, n in tl if ts > pressed]
+    h.check(name, tone_name(TONES["song2"][0]) not in after and tone_name(TONES["song3"][0]) not in after,
+            f"the items after the slow one were not heard: {after}")
+    h.check(name, tone_name(TONES["story"][0]) in after, f"the slow item was heard: {after}")
+    h.check(name, "EMERGENCY" not in names, f"no emergency music while the file loads: {names}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"no silence over 1 s (longest {gap:.1f} s)")
+
+
 async def sc_next_skips_one(h: Harness) -> None:
     """PR 224: every Next moves on by exactly one item: single, twice 0.5 s apart, within
     2 s of a natural song change, and with nothing queued. The item after the skipped one
@@ -3067,7 +3149,62 @@ async def sc_block_with_slow_shiur(h: Harness, delay: float = 15.0) -> None:
     h.check(name, bool(tail) and all(n.startswith("song") for n in tail), f"music after Next: {tail}")
 
 
+async def sc_hour_change_slow_backend(h: Harness, seconds: float = 4.0) -> None:
+    """The hour change while every answer the backend gives the engine takes 4 s
+    (Jerusalem 2026-11-18). Judged by what is heard, because the backend learns of a
+    start only when the slow report arrives: the time check within 2 s of its time,
+    then the weather, then music, no silence over 1 s, no emergency music."""
+    name = "hour_change_slow_backend"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song5", {}), ("song6", {}), ("song1", {})])
+    h.stack.slow_backend = seconds
+    try:
+        t1 = at(25)
+        await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
+                       ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+        due = t1.timestamp()
+        await asyncio.sleep(max(0, due - time.time()) + 30)
+    finally:
+        h.stack.slow_backend = 0.0
+    heard = h.heard(due - 5, due + 26)
+    h.print_timeline(heard, due)
+    line = [(t - due, n) for t, n in timeline(heard)]
+    first_time = next((t for t, n in line if n == "time"), None)
+    h.check(name, first_time is not None and -1.0 <= first_time <= 2.0,
+            f"time check heard {'never' if first_time is None else f'{first_time:+.1f} s'} from its time")
+    names = [n for _, n in line if n != "silence"]
+    after = names[names.index("time"):] if "time" in names else []
+    h.check(name, after[:2] == ["time", "weather"] and len(after) > 2 and after[2].startswith("song"),
+            f"time check, weather, then music: {names}")
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+    h.check(name, names.count("time") == 1 and names.count("weather") == 1, "each aired once")
+    gap, gap_at = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s" + (f" at {_fmt(gap_at)}" if gap_at else ""))
+    times = await h.started_times("time", due - 5)
+    rec = times[0][0] - due if times else None
+    log(f"    note: the backend recorded the time check at {'never' if rec is None else f'{rec:+.1f} s'} (the report itself was held {seconds:.0f} s)")
+    await asyncio.sleep(6)
+
+
+def with_slow_backend(scenario, seconds: float = 4.0):
+    """The same scenario while every answer the backend gives the engine takes
+    `seconds` (engine thread, 2026-11-18: slow answers were behind 2.6 to 3.8 s gaps
+    on Jerusalem). Timed items must still start on time and nothing may go silent."""
+    async def run(h: Harness) -> None:
+        h.stack.slow_backend = seconds
+        try:
+            await scenario(h)
+        finally:
+            h.stack.slow_backend = 0.0
+    return run
+
+
 SCENARIOS = {
+    "hour_change_slow_backend": sc_hour_change_slow_backend,
+    "soft_timed_waits_for_song_slow_backend": with_slow_backend(sc_soft_waits_for_song),
+    "live_show_over_hard_item_slow_backend": with_slow_backend(sc_live_show_over_hard_item),
+    "live_show_quiet_slow_backend": with_slow_backend(sc_live_show_quiet),
     "block_shiur_spans_hour": lambda h: sc_block_shiur_spans_hour(h, "pause"),
     "block_shiur_spans_hour_wait": lambda h: sc_block_shiur_spans_hour(h, "wait"),
     "block_shiur_spans_hour_cut": lambda h: sc_block_shiur_spans_hour(h, "cut"),
@@ -3122,6 +3259,9 @@ SCENARIOS = {
     "site_matches_stream": sc_site_matches_stream,
     "operator_queue_then_next": sc_operator_queue_then_next,
     "operator_next_slow_file": sc_operator_next_slow_file,
+    "next_twice_slow_file": sc_next_twice_slow_file,
+    "live_show_over_hard_item_hard_stop": lambda h: sc_live_show_over_hard_item(h, hard_stop=True),
+    "live_show_over_hard_item_restart": lambda h: sc_live_show_over_hard_item(h, restart=True),
     "operator_next_overtakes_commit": sc_operator_next_overtakes_commit,
     "two_sources_same_second": sc_two_sources_same_second,
     "hard_group_overruns_next_hard": sc_hard_group_overruns_next_hard,

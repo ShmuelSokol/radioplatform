@@ -3,6 +3,8 @@ import { useDetectSilence, useTrimAsset, useRestoreOriginal } from '../../hooks/
 import Spinner from '../Spinner';
 import { useEscape } from '../../hooks/useEscape';
 import type { WaveformPlayerHandle } from './WaveformPlayer';
+import { useAuth } from '../../hooks/useAuth';
+import { isManager } from '../../auth/access';
 import type { SilenceRegion } from '../../types';
 
 interface SilenceDetectionPanelProps {
@@ -13,6 +15,9 @@ interface SilenceDetectionPanelProps {
 }
 
 export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsDetected, onTrimComplete }: SilenceDetectionPanelProps) {
+  // Finding silence is open to all staff; cutting it out is for managers and admins
+  const { user } = useAuth();
+  const canEdit = isManager(user?.role);
   const [thresholdDb, setThresholdDb] = useState(-30);
   const [minDuration, setMinDuration] = useState(0.5);
   const [regions, setRegions] = useState<SilenceRegion[]>([]);
@@ -200,14 +205,16 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
     <div className="bg-white border border-gray-200 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold">Silence Detection</h3>
-        <button
-          onClick={handleUndoTrim}
-          disabled={restoreMutation.isPending}
-          className="text-xs text-gray-500 hover:text-brand-600 disabled:opacity-50"
-          title="Undo all trims and restore original file"
-        >
-          {restoreMutation.isPending ? <><Spinner className="mr-1" />Restoring...</> : 'Restore Original'}
-        </button>
+        {canEdit && (
+          <button
+            onClick={handleUndoTrim}
+            disabled={restoreMutation.isPending}
+            className="text-xs text-gray-500 hover:text-brand-600 disabled:opacity-50"
+            title="Undo all trims and restore original file"
+          >
+            {restoreMutation.isPending ? <><Spinner className="mr-1" />Restoring...</> : 'Restore Original'}
+          </button>
+        )}
       </div>
 
       {/* Detection controls */}
@@ -248,7 +255,7 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
         >
           {detectMutation.isPending ? <><Spinner className="mr-1" />Scanning...</> : 'Detect Silence'}
         </button>
-        {regions.length > 0 && (
+        {canEdit && regions.length > 0 && (
           <button
             onClick={() => setShowConfirm('auto')}
             className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-1.5 rounded text-sm transition"
@@ -308,12 +315,14 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
             >
               Play Region
             </button>
-            <button
-              onClick={() => setShowConfirm('region')}
-              className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs transition"
-            >
-              Trim Out
-            </button>
+            {canEdit && (
+              <button
+                onClick={() => setShowConfirm('region')}
+                className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs transition"
+              >
+                Trim Out
+              </button>
+            )}
             <button
               onClick={() => setSelectedIndex(null)}
               className="text-gray-500 hover:text-gray-700 px-2 py-1 text-xs"
