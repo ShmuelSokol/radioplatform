@@ -64,7 +64,7 @@ the line is cut both ways during the alert).
 ## Staff screens follow at once (2026-11-18 live test)
 
 The first live test on KBR Jerusalem played whole (on air 1.9 s after Send) and Stop took it off in under 0.1 s. But the banner showed 6 s after Send, and the page's Stop card only after 7 to 9 s, because screens waited for the engine's start report and then for their next poll. Now:
-- an engine station counts as on air the moment the engine accepts the alert (an `until` ends it if no report comes)
+- an engine station counts as on air the moment the alert is sent, before the engine answers (its answer waits for the file to load: the second live test still showed the banner at +5 s when it waited for that). Stop pressed before the row is saved goes through `stop_unsaved`, and the send tells the engine to stop once more after it answers. An `until` ends it if no report comes
 - every change (sent, started, ended, stopped) sends `{"type":"emergency"}` over `/ws/site`; `lib/appUpdate.ts` turns it into the `kbr-emergency-changed` window event, and the banner and page refetch.
 
-The second test's ON AIR and ended alerts folded into the first test's open alerts, which have the same title (alerts fold repeats). The ntfy pushes still go out every time. The log's length field is `seconds_on_air`.
+Alerts titles carry the alert's short id (`#1a2b3c`), so each alert gets its own row; with one shared title the second test's ON AIR and ended folded into the first's open alerts (alerts fold repeats). The log's length field is `seconds_on_air`.
