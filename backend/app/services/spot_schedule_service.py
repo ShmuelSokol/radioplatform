@@ -764,6 +764,20 @@ async def reconcile_spot_slots(
             await db.delete(entry)
             removed += 1
 
+    # Plays an operator skipped (Sponsor panel) stay skipped: not planned again
+    cancelled = await db.execute(
+        select(QueueEntry.preempt_at, QueueEntry.asset_id).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.status == "cancelled",
+            QueueEntry.source == "ad_slot",
+            QueueEntry.preempt_at > now,
+        )
+    )
+    for at_raw, asset_id in cancelled.all():
+        at = as_utc(at_raw).replace(second=0, microsecond=0)
+        if str(desired.get(at)) == str(asset_id):
+            kept.add(at)
+
     max_pos = (
         await db.execute(
             select(func.coalesce(func.max(QueueEntry.position), 0)).where(

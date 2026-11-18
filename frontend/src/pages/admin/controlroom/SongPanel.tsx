@@ -5,11 +5,23 @@ import { getStationBlock, setDoNotPlay, setStationBlock, updateAsset } from '../
 import { useAssetDetail } from '../../../hooks/useAssets';
 import { useCategories } from '../../../hooks/useCategories';
 import { useAssetTypes } from '../../../hooks/useAssetTypes';
-import { assetLabel } from './shared';
+import { assetLabel, isSponsorSpot } from './shared';
 import type { CtlAsset } from './shared';
 
 /** The song a quick-actions panel is open for, and where it was opened from. */
-export interface SongTarget { asset: CtlAsset; onAir: boolean }
+export interface SongTarget {
+  asset: CtlAsset;
+  onAir: boolean;
+  /** Queue row source ("ad_slot" = a planned sponsorship play) */
+  source?: string | null;
+  /** Show the item's own options even for a sponsorship spot */
+  itemOptions?: boolean;
+}
+
+/** A sponsorship spot opens the Sponsor panel instead of the song options. */
+export function isSponsorship(t: SongTarget): boolean {
+  return isSponsorSpot(t.source, t.asset);
+}
 
 interface Props {
   target: SongTarget;

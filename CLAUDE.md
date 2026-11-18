@@ -145,7 +145,7 @@ radioplatform/
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
-| queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `fire-now`, `insert`, `loop`, `mix-over`, `panic`, `modes` (HS / Spots mode); see `wiki/operator-actions.md`, `wiki/station-modes.md`) |
+| queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `{entry_id}/skip-sponsorship` (skip or put back one coming sponsorship play; the row stays as `cancelled`), `fire-now`, `insert`, `loop`, `mix-over`, `panic`, `modes` (HS / Spots mode); see `wiki/operator-actions.md`, `wiki/station-modes.md`) |
 | rules | rules.py | /rules |
 | schedules | schedules.py | /schedules |
 | now_playing | now_playing.py | /now-playing |
@@ -158,7 +158,7 @@ radioplatform/
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists (the list is readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
-| spot_schedules | spot_schedules.py | /spot-schedules |
+| spot_schedules | spot_schedules.py | /spot-schedules (`GET /for-asset/{asset_id}?station_id=`: the control room's Sponsor panel, any staff role) |
 | spot_recordings | spot_recordings.py | /spot-recordings |
 | program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
 | databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, every type of a table, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
@@ -199,6 +199,7 @@ radioplatform/
 | queue_replenish_service.py | Auto-replenish playback queue |
 | schedule_refresh_service.py | After a schedule, block or playlist change, replaces the unplayed automatic songs so the change takes over on time, and redraws them 15 min before a block's playlist takes over so it starts on time, not early; drops dated weather/time queued as songs (see `wiki/playlist-generation.md`) |
 | schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
+| sponsor_item.py | What the control room's Sponsor panel shows for one spot on one station: sponsor, contracts, today's and coming plays, missed plays |
 | spot_schedule_service.py | Plans sponsor spots into clock slots or block places and keeps pending `ad_slot` queue entries in step; when blocks are over-booked it shares the room fairly, rolls plays to a later block and warns (see `wiki/spot-schedules.md`, `wiki/program-blocks.md`) |
 | spot_voice_service.py | Makes spot audio from a script; Shprach call is a stub, placeholder tones until wired (see `wiki/spot-recordings.md`) |
 | program_block_service.py | Expands program blocks into timed queue entries (`source="block"`) and replaces the built-in hourly time and weather (see `wiki/program-blocks.md`) |
@@ -246,7 +247,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
@@ -522,6 +523,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
 
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
+
+# The control room's Sponsor panel (tapping a sponsorship spot) on three stations, roles, desktop and phone sizes
+cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-sponsor-panel.mjs
 
 # Display findings of the page walk-through: Library cells and menus, Esc on dialogs, phone tables as cards, headings, labels
 cd frontend && for s in library-display display-findings; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done

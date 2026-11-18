@@ -2717,6 +2717,42 @@ async def remove_from_queue(
     _replenish_soon(station_id)
 
 
+@router.post("/{entry_id}/skip-sponsorship", dependencies=[Depends(operator_turn)])
+async def skip_sponsorship_play(
+    station_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    restore: bool = False,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """Skip one coming play of a sponsorship (the control room's Sponsor panel), or put
+    it back with ?restore=true. The row stays as "cancelled" so the spot planner does
+    not plan that play again; the sponsor's delivery report counts it as missed."""
+    from app.services.spot_schedule_service import SAFETY_MARGIN, as_utc
+    from app.services.sponsor_item import CANCELLED
+
+    entry = (await db.execute(_station_entry(station_id, entry_id))).scalar_one_or_none()
+    if not entry:
+        raise NotFoundError("Queue entry not found")
+    if entry.source != "ad_slot" or entry.preempt_at is None:
+        raise HTTPException(status_code=422, detail="Only a scheduled sponsorship play can be skipped here")
+    if as_utc(entry.preempt_at) <= datetime.now(timezone.utc) + SAFETY_MARGIN:
+        raise HTTPException(
+            status_code=409,
+            detail="It is due within 2 minutes and may already be loading. Remove it from the queue or press Next when it plays.",
+        )
+    wanted_from, wanted_to = (CANCELLED, "pending") if restore else ("pending", CANCELLED)
+    if entry.status != wanted_from:
+        raise HTTPException(
+            status_code=409,
+            detail="It was put back already" if restore else "It is not waiting to play any more",
+        )
+    entry.status = wanted_to
+    await db.commit()
+    await _engine_takes_queue_change(db, station_id)
+    return {"entry_id": str(entry.id), "status": entry.status}
+
+
 async def _remove_on_air_locked(db: AsyncSession, station_id, entry: QueueEntry) -> None:
     await db.delete(entry)
     await db.flush()
