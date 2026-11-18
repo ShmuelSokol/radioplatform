@@ -797,6 +797,18 @@ async def test_no_song_is_handed_out_seconds_before_a_hard_item(client, db_sessi
     assert old.json()["entry_id"] == str(entries[1].id)
 
 
+async def test_next_gets_a_song_while_the_engine_is_held_before_a_hard_item(client, db_session, engine_station):
+    # Next pressed while the engine holds nothing (the song on air ends just before the
+    # hard item): the engine waits for a file before it skips, so it must be handed one.
+    # It was handed nothing and skipped into emergency music (harness next_while_held).
+    station, entries, sent = engine_station
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=59.0)
+    url = f"/api/v1/playout/{station.id}/next?proto=3"
+    assert (await client.get(url, headers=HEADERS)).status_code == 204
+    playout_engine.get_state(station.id).skip_requested = True   # what engine_skip sets
+    assert (await client.get(url, headers=HEADERS)).json()["entry_id"] == str(entries[1].id)
+
+
 async def test_a_song_is_still_handed_out_when_there_is_room_or_the_hard_item_cuts_in(
     client, db_session, engine_station
 ):
