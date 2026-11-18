@@ -264,6 +264,66 @@ async def take_over_station(db: AsyncSession, station: Station, show: LiveShow, 
             logger.warning("Could not quiet the engine for the live show: %s", e)
 
 
+HOLD_LIMIT = 45.0   # the longest a show waits for timed items before it is heard anyway
+
+
+async def timed_item_ends(db: AsyncSession, station_id, now: datetime, within: float) -> datetime | None:
+    """When the timed item on air (or a hard one due in the next `within` seconds) ends.
+    None when there is none. A show whose delay fills meanwhile waits for that moment:
+    taking the station over cut a time check after 3.4 of its 6 s (reviewer, 2026-11-18)."""
+    from sqlalchemy.orm import selectinload
+
+    from app.models.queue_entry import QueueEntry
+    from app.services.playout_engine import _airs_until
+
+    rows = (await db.execute(
+        select(QueueEntry).options(selectinload(QueueEntry.asset)).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.preempt_at.is_not(None),
+            QueueEntry.status.in_(("playing", "pending")),
+            QueueEntry.preempt_at >= now - timedelta(seconds=600),
+            QueueEntry.preempt_at <= now + timedelta(seconds=within),
+        )
+    )).scalars().all()
+    ends: list[datetime] = []
+    for entry in rows:
+        if entry.status == "playing":
+            end = _airs_until(entry)
+        else:
+            hard = entry.timing_mode == "hard" or (entry.timing_mode is None and entry.source != "ad_slot")
+            due = entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=timezone.utc)
+            if not hard or due < now - timedelta(seconds=60) or entry.asset is None or not entry.asset.duration:
+                continue
+            end = max(due, now) + timedelta(seconds=float(entry.asset.duration))
+        if end is not None and end > now:
+            ends.append(end)
+    return max(ends) if ends else None
+
+
+async def hold_for_timed_items(station_id: str, air) -> None:
+    """While the show's delay fills, keep it from going to listeners in the middle of a
+    timed item. Looks once a second; the host's words wait in the delay meanwhile."""
+    import asyncio
+
+    from app.db.session import get_async_session
+
+    started = air.clock()
+    while not (air.listening or air.closed or air.finishing):
+        try:
+            async for db in get_async_session():
+                now = datetime.now(timezone.utc)
+                within = max(0.0, air.target - air.buffered) + 2.0
+                end = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within)
+                await db.rollback()
+                if end is not None:
+                    until = air.clock() + (end - now).total_seconds() + 0.3
+                    air.hold_until = min(until, started + air.target + HOLD_LIMIT)
+                break
+        except Exception:
+            logger.warning("Could not look for timed items before live show on %s", station_id, exc_info=True)
+        await asyncio.sleep(1.0)
+
+
 async def take_over_when_heard(station_id: str, show_id: str) -> None:
     """Listeners just started hearing the show through its delay: take the station over now."""
     from app.db.session import get_async_session
