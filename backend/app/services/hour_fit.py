@@ -326,8 +326,8 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         if _said_nothing.get(key) != hard_at:
             _said_nothing[key] = hard_at
             logger.info(
-                "Station %s: no better order found before the %s hard item (the song on air then loses %.0f s; %d songs to choose from)",
-                station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare),
+                "Station %s: queue left as it is before the %s hard item (the song on air then loses %.0f s; no swap among %d songs saves %.0f s or more)",
+                station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare), WORTH_IT,
             )
         return False
 

@@ -2412,7 +2412,6 @@ async def _validate_queue_move(
     Returns a list of human-readable warning strings (empty if no conflicts).
     """
     from app.models.category import Category
-    from app.models.schedule_rule import ScheduleRule
 
     warnings: list[str] = []
     moved_asset = moved_entry.asset
@@ -2467,22 +2466,24 @@ async def _validate_queue_move(
         cumulative_duration += dur
 
     estimated_play_time = now + timedelta(seconds=cumulative_duration)
-    est_hour = estimated_play_time.hour
-    est_day = estimated_play_time.weekday()
 
-    # Check active daypart rules
-    result = await db.execute(
-        select(ScheduleRule).where(
-            ScheduleRule.is_active == True,
-            ScheduleRule.rule_type == "daypart",
-            ScheduleRule.hour_start <= est_hour,
-            ScheduleRule.hour_end > est_hour,
-        ).order_by(ScheduleRule.priority.desc())
-    )
-    daypart_rules = result.scalars().all()
+    # This station's rules only (its own, or the global ones when it has none), at
+    # the station's own clock. This used to read every station's rules at UTC hours:
+    # a move on Kol B'ramah Main was warned about by the All Day Stories rule.
+    from zoneinfo import ZoneInfo
+
+    from app.models.station import Station
+    from app.services.queue_replenish_service import rule_covers, rules_for_station
+
+    tz_name = (await db.execute(select(Station.timezone).where(Station.id == station_id))).scalar()
+    try:
+        zone = ZoneInfo(tz_name or "UTC")
+    except Exception:
+        zone = timezone.utc
+    local_play_time = estimated_play_time.astimezone(zone)
     daypart_rules = [
-        r for r in daypart_rules
-        if str(est_day) in (r.days_of_week or "0,1,2,3,4,5,6").split(",")
+        r for r in await rules_for_station(db, station_id)
+        if r.rule_type == "daypart" and rule_covers(r, local_play_time)
     ]
 
     for rule in daypart_rules:
