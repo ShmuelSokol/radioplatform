@@ -3,6 +3,7 @@ import json
 import os
 
 from app.config import settings
+from app.core.hebrew_text import fix_garbled_hebrew
 
 
 async def extract_metadata(file_path: str) -> dict:
@@ -31,9 +32,9 @@ async def extract_metadata(file_path: str) -> dict:
             "duration": float(fmt.get("duration", 0)),
             "bitrate": int(fmt.get("bit_rate", 0)),
             "format_name": fmt.get("format_name", ""),
-            "title": tags.get("title", ""),
-            "artist": tags.get("artist", ""),
-            "album": tags.get("album", ""),
+            "title": fix_garbled_hebrew(tags.get("title", "")),
+            "artist": fix_garbled_hebrew(tags.get("artist", "")),
+            "album": fix_garbled_hebrew(tags.get("album", "")),
             "genre": tags.get("genre", ""),
         }
     except (json.JSONDecodeError, ValueError):

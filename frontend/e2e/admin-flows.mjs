@@ -41,6 +41,24 @@ allowEverywhere(rec => /\b401\b/.test(`${rec.kind} ${rec.text}`) && /\/api\/v1\/
   'F-GLOBAL-12 plants a bad access token and checks the site renews it without signing out');
 allowEverywhere(/(localhost:\d+|Failed to fetch )\/api\/v1\/assets\/[0-9a-f-]+\/download/,
   'local storage hands out a relative audio URL that the preview server answers itself; production hands out a storage URL');
+// What the walk-through provokes on purpose. Each line: what may show, where, and which check causes it.
+const provoked = (what, where, reason) => allowEverywhere(
+  rec => what.test(`${rec.kind} ${rec.text}`) && (!where || where.test(rec.url || '')), reason);
+provoked(/auth\/me.*ERR_CONNECTION_REFUSED|ERR_CONNECTION_REFUSED.*auth\/me/, /\/admin\/schedules/, 'F-ACCESS-4 cuts the account lookup to see "Try again"');
+provoked(/\b403\b.*\/api\/v1\/schedules\b/, /\/admin\/schedules$/, 'the view-only checks press Create as a role that may not change schedules');
+provoked(/\b400\b.*\/api\/v1\/schedules\b|Failed to create schedule: AxiosError|alert:? E2E refused this schedule/, null, 'F-SCHED: the server is made to refuse a schedule to see the message');
+provoked(/\b(401|429)\b.*\/api\/v1\/auth\/login/, /\/(admin|sponsor)\/login/, 'sign-in checks type a wrong password and hit the sign-in limit');
+provoked(/\b409\b.*\/api\/v1\/users\b/, /\/admin\/users/, 'F-USERS creates a user whose email is taken to see the message');
+provoked(/example\.com\/p\.jpg/, /\/hosts/, 'the test DJ has a photo address that does not exist');
+provoked(/alert:? (Pick at least one day for a weekly block\.|Give the block a name\.|Add at least one time of day\.)/, null, 'the block forms are sent empty to see each message');
+provoked(/\b503\b.*weather-readouts|alert:? Could not (show the template preview|make the readout): Weather is not set up/, /\/admin\/studio/, 'no weather key in the test setup; the checks read these messages');
+provoked(/\b400\b.*\/crm\/raffles\/[0-9a-f-]+\/draw/, /\/admin\/crm/, 'F-CRM draws a raffle with no entries');
+provoked(/\b400\b.*\/billing\/invoices\/[0-9a-f-]+\/checkout/, /\/sponsor\/billing/, 'Stripe is off in the test setup; F-SPBILL-1 reads the refusal');
+provoked(/e2e page crash/, null, 'F-GLOBAL: a page is made to crash to see the error page');
+provoked(/\/assets\/(Sponsors|Archives)-[\w-]+\.js|The site was updated while this tab was open/, null, 'a release is published under the open tab to see the reload notice');
+provoked(/\b401\b.*\/api\/v1\/auth\/refresh/, /\/admin\/stations/, 'the session checks use a sign-in that was ended');
+provoked(/\b401\b.*\/api\/v1\/auth\/(me|refresh)/, /\/sponsor\/campaigns/, 'the sponsor session checks open the portal with an ended sign-in');
+provoked(/\b429\b.*\/sponsorship\/copy-review/, /\/sponsor\/wording/, 'the wording check is pressed past its limit of 12 a minute');
 const BASE = process.env.BASE_URL || 'http://localhost:4330';
 const API = process.env.API_URL || 'http://localhost:8230/api/v1';
 const SHOTS = process.env.SHOTS_DIR || '';

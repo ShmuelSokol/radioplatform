@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core import station_guard as sg
-from app.core.dependencies import get_db, require_manager
+from app.core.dependencies import get_db, require_manager, require_staff
 from app.models.asset import Asset
 from app.models.playlist_template import PlaylistTemplate, TemplateSlot
 from app.models.queue_entry import QueueEntry
@@ -46,7 +46,8 @@ router = APIRouter(
 async def list_templates(
     station_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_manager),
+    # every staff role: the schedule's blocks screen names each block's playlist, view only
+    _=Depends(require_staff),
 ):
     stmt = select(PlaylistTemplate).options(selectinload(PlaylistTemplate.slots))
     if station_id:

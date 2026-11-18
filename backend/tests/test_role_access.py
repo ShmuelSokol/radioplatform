@@ -29,6 +29,7 @@ CASES = [
     ("/api/v1/rules", STAFF),
     ("/api/v1/reviews/queues", STAFF),
     ("/api/v1/live-shows", STAFF),  # the dashboard shows the on-air show to every staff role
+    ("/api/v1/playlists", STAFF),  # the blocks screen names each block's playlist for every staff role
     ("/api/v1/users", {"admin"}),
     ("/api/v1/sponsors", {"admin", "manager"}),
     ("/api/v1/campaigns", STAFF | {"sponsor"}),  # dj/viewer: admin Campaigns screen, view only
