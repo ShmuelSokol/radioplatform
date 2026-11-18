@@ -618,6 +618,31 @@ async def put_caller_on_air(
     return call
 
 
+async def hold_caller(db: AsyncSession, call_id: UUID | str) -> CallInRequest | None:
+    """Take the caller off air without hanging up: back to the approved list, still
+    connected and hearing the show, ready to go on air again."""
+    call = await get_call(db, call_id)
+    if not call:
+        return None
+    if call.status != CallStatus.ON_AIR:
+        from app.core.exceptions import ConflictError
+        raise ConflictError("This caller is not on air")
+    call.status = CallStatus.APPROVED
+    await db.flush()
+    await db.refresh(call)
+    return call
+
+
+async def next_approved_call(db: AsyncSession, show_id: UUID | str) -> CallInRequest | None:
+    """The approved caller who has waited longest."""
+    result = await db.execute(
+        select(CallInRequest)
+        .where(CallInRequest.live_show_id == show_id, CallInRequest.status == CallStatus.APPROVED)
+        .order_by(CallInRequest.created_at)
+    )
+    return result.scalars().first()
+
+
 async def end_call(
     db: AsyncSession,
     call_id: UUID | str,
