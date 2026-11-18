@@ -209,3 +209,13 @@ Shmuel, 2026-11-18: he wants to fix a song where he sees it, not in the Library.
   click, so the buttons are there; on a touch screen an invisible ✕ must not take a tap.
 - The desktop Time column is 124 px and never wraps: "12:02:47 AM Thu" wrapped at 92 px
   and the day name ran into the next 26 px row.
+
+## Sponsor panel (tapping a sponsorship spot, 2026-11-18)
+
+A queue row whose source is `ad_slot`, or an item of type `spot` that is not the weather or a time check (`isSponsorSpot` in `controlroom/shared.ts`), opens `controlroom/SponsorPanel.tsx` instead of the Song panel; the row's button reads "Spot". It reads `GET /spot-schedules/for-asset/{asset_id}?station_id=` (`services/sponsor_item.py`, any staff role): the sponsor (from the contracts, else the recording's own `sponsor_id`), this station's contracts first and other stations' folded away, today's queue rows of the spot on this station, coming rows (12 at most), and the sponsor's missed plays for the last 7 days filtered to this station and recording (same report as the sponsor portal, [spot-schedules](spot-schedules.md)).
+
+- **Skip / Put back** one coming play: `POST /stations/{id}/queue/{entry_id}/skip-sponsorship[?restore=true]` (DJ and up). The row is kept with status `cancelled`, not deleted: `reconcile_spot_slots` would plan a deleted play again at once. Only `ad_slot` rows due more than 2 minutes ahead (`SAFETY_MARGIN`); air watch's "skipped sponsorship" alert looks only at status `skipped`, so a skip by staff is quiet; the sponsor's report counts it as missed.
+- **Pause / Resume** a contract is the existing `PUT /spot-schedules/{id}` with `is_active` (managers).
+- "Recording options" opens the old Song panel for the same item (`SongTarget.itemOptions`).
+- Links are shown only to roles that may open the page (`canAccess`). `/admin/spot-schedule?contract=<id>&station=<id>` marks that contract and opens the look-ahead on that station.
+- Browser check: `e2e/control-room-sponsor-panel.mjs` (three stations, roles, phone sizes).

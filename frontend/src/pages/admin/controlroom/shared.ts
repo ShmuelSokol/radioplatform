@@ -247,3 +247,11 @@ export function clockTime(d: Date | string | number, tz?: string): string {
 export function weekdayShort(d: Date | string | number, tz?: string): string {
   return cachedFmt('en-US', { weekday: 'short', ...tzOpt(tz) }).format(new Date(d));
 }
+
+/** A sponsorship spot: a planned sponsor play, or an item of type spot that is not the
+ *  weather or a time check. Tapping one opens the Sponsor panel, not the song options. */
+export function isSponsorSpot(source: string | null | undefined, asset: { asset_type?: string | null; category?: string | null } | null | undefined): boolean {
+  if (source === 'ad_slot') return true;
+  if ((asset?.asset_type ?? '').toLowerCase() !== 'spot') return false;
+  return !['weather', 'time', 'zmanim'].includes((asset?.category ?? '').trim().toLowerCase());
+}

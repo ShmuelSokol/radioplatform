@@ -100,3 +100,73 @@ export const getTimingDefaults = async (stationId: string): Promise<TimingDefaul
 
 export const setTimingDefaults = async (stationId: string, defaults: TimingDefaults): Promise<TimingDefaults> =>
   (await apiClient.put<TimingDefaults>('/spot-schedules/timing-defaults', { station_id: stationId, ...defaults })).data;
+
+/** The control room's Sponsor panel: one spot's sponsor, contracts and plays on one station. */
+export interface SponsorItemSponsor {
+  id: string;
+  name: string;
+  company_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+}
+export interface SponsorItemContract {
+  id: string;
+  name: string | null;
+  sponsor: SponsorItemSponsor | null;
+  station_id: string | null;
+  station_name: string;
+  on_this_station: boolean;
+  state: 'running' | 'paused' | 'ended' | 'not_started';
+  days_of_week: string;
+  days_text: string;
+  dayparts: string[];
+  plays_per_daypart: number;
+  fixed_times: string[];
+  timing_mode: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  is_active: boolean;
+}
+export interface SponsorItemPlay {
+  entry_id: string;
+  status: string;
+  status_text: string;
+  source: string;
+  at: string | null;
+  due: string | null;
+  local_time: string | null;
+  local_day: string | null;
+  timing_mode: string | null;
+  can_skip: boolean;
+  can_restore: boolean;
+}
+export interface SponsorItemMissed {
+  when: 'past' | 'coming';
+  local_date: string;
+  day: string;
+  daypart: string;
+  promised: number;
+  played: number;
+  missed: number;
+  moved: number;
+  note: string;
+}
+export interface SponsorItem {
+  asset: { id: string; title: string; artist: string | null; asset_type: string; category: string | null; duration: number | null };
+  station: { id: string; name: string; timezone: string };
+  owner: SponsorItemSponsor | null;
+  contracts: SponsorItemContract[];
+  aired_today: number;
+  today: SponsorItemPlay[];
+  upcoming: SponsorItemPlay[];
+  missed: SponsorItemMissed[];
+}
+
+export const getSponsorItem = async (assetId: string, stationId: string): Promise<SponsorItem> =>
+  (await apiClient.get<SponsorItem>(`/spot-schedules/for-asset/${assetId}`, { params: { station_id: stationId } })).data;
+
+/** Skip one coming sponsorship play, or put it back (restore). */
+export const skipSponsorshipPlay = async (stationId: string, entryId: string, restore = false) =>
+  (await apiClient.post<{ entry_id: string; status: string }>(
+    `/stations/${stationId}/queue/${entryId}/skip-sponsorship`, null, { params: restore ? { restore: true } : undefined },
+  )).data;

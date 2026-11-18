@@ -25,8 +25,9 @@ import TransportBar, { TransportButtons } from './controlroom/TransportBar';
 import type { TransportProps } from './controlroom/TransportBar';
 import { REPORT_BUG_EVENT } from '../../components/BugReporter';
 import QueuePanel from './controlroom/QueuePanel';
-import SongPanel from './controlroom/SongPanel';
+import SongPanel, { isSponsorship } from './controlroom/SongPanel';
 import type { SongTarget } from './controlroom/SongPanel';
+import SponsorPanel from './controlroom/SponsorPanel';
 import type { QueueRow } from './controlroom/QueuePanel';
 import { nextCut } from './controlroom/timing';
 import LibraryPanel from './controlroom/LibraryPanel';
@@ -36,7 +37,7 @@ import { PflDeck } from './controlroom/PflDeck';
 import { ErrorsPanel, LivePanel, LogPanel, SchedulePanel } from './controlroom/SidePanels';
 import ModeButtons from './controlroom/ModeButtons';
 import { panicRequest, setStationModes, type StationModes } from '../../api/queue';
-import { isManager } from '../../auth/access';
+import { canAccess, canChange, isManager } from '../../auth/access';
 import { dayKey, isValidTz, useHotButtons, useMediaQuery, usePhoneLandscape, useStored } from './controlroom/shared';
 import type { CtlAsset, FireMode, SendHow } from './controlroom/shared';
 import { ResumePrompt, useResumeAfterRelease } from '../../components/audio/ResumeAfterRelease';
@@ -201,7 +202,7 @@ export default function Dashboard() {
   // Quick actions panel for one song (the one on air or a queue row)
   const [songTarget, setSongTarget] = useState<SongTarget | null>(null);
   const openRowSong = useCallback((row: QueueRow) => {
-    if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing' });
+    if (row.asset) setSongTarget({ asset: row.asset, onAir: row.status === 'playing', source: row.source ?? null });
   }, []);
   const closeSong = useCallback(() => setSongTarget(null), []);
   const songToast = useCallback((text: string, type: Toast['type']) => setToast({ text, type }), []);
@@ -902,7 +903,7 @@ export default function Dashboard() {
     onStation: setSelectedStationId,
     isPlaying: isPlaying,
     nowAsset: nowAsset,
-    onNowSong: nowAsset ? () => setSongTarget({ asset: nowAsset, onAir: true }) : undefined,
+    onNowSong: nowAsset ? () => setSongTarget({ asset: nowAsset, onAir: true, source: queueEntries.find((e) => e.status === 'playing')?.source ?? null }) : undefined,
     nextAsset: nextAsset,
     elapsed: shownElapsed,
     remaining: remaining,
@@ -1035,7 +1036,14 @@ export default function Dashboard() {
         </div>
       )}
 
-      {songTarget && (
+      {songTarget && stationId && !songTarget.itemOptions && isSponsorship(songTarget) && (
+        <SponsorPanel target={{ ...songTarget, onAir: !!nowAsset && nowAsset.id === songTarget.asset.id }} stationId={stationId}
+          canSkip={canChange(user?.role, '/admin/dashboard')} canManage={isManager(user?.role)}
+          canOpen={(path) => canAccess(user?.role, path)}
+          onItemOptions={() => setSongTarget({ ...songTarget, itemOptions: true })}
+          onClose={closeSong} onToast={songToast} />
+      )}
+      {songTarget && (songTarget.itemOptions || !stationId || !isSponsorship(songTarget)) && (
         <SongPanel target={{ ...songTarget, onAir: !!nowAsset && nowAsset.id === songTarget.asset.id }} stationId={stationId ?? null} stationName={station?.name ?? null} canEdit={isManager(user?.role)}
           onClose={closeSong} onToast={songToast} />
       )}

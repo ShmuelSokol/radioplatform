@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import station_guard as sg
-from app.core.dependencies import get_db, may_operate_every_station, require_manager
+from app.core.dependencies import get_db, may_operate_every_station, require_manager, require_staff
 from app.core.exceptions import NotFoundError
 from app.models.asset import Asset
 from app.models.sponsor import Sponsor
@@ -180,6 +180,22 @@ async def list_spot_schedules(
             (SpotSchedule.station_id == station_id) | (SpotSchedule.station_id.is_(None))
         )
     return (await db.execute(stmt)).scalars().all()
+
+
+@router.get("/for-asset/{asset_id}")
+async def sponsorship_of_asset(
+    asset_id: UUID,
+    station_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_staff),
+):
+    """The control room's Sponsor panel: the sponsor and contracts that use this
+    recording, today's and coming plays on the station, and recent missed plays."""
+    from app.services.sponsor_item import sponsor_item
+
+    asset = await _get_or_404(db, Asset, asset_id, "Spot")
+    station = await _get_or_404(db, Station, station_id, "Station")
+    return await sponsor_item(db, asset, station)
 
 
 @router.get("/preview", response_model=SpotPlanPreview)
