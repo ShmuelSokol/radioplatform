@@ -1,9 +1,12 @@
 import hashlib
 import asyncio
 import logging
+import time
 import uuid
 
-from sqlalchemy import func, or_, select, update
+from fastapi import HTTPException
+from sqlalchemy import func, or_, select, text, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
@@ -274,8 +277,47 @@ async def delete_asset(db: AsyncSession, asset_id: uuid.UUID) -> None:
         raise ConflictError(
             "This item is used by " + "; ".join(uses) + ". Change or remove those first, then delete it."
         )
-    await db.delete(asset)
-    await db.flush()
+    # The delete cascades to the item's waiting queue entries and must wait for anything
+    # that holds them or the item (a queue refill that just drew it, a song change
+    # renumbering the queue). Waiting has no limit by default: one delete sat 42 s on
+    # production (2026-11-18) with refills queueing up behind it. Give up after a few
+    # seconds instead and say "busy", so the caller tries again and nothing piles up.
+    started = time.monotonic()
+    is_pg = db.bind is not None and db.bind.dialect.name == "postgresql"
+    try:
+        if is_pg:
+            await db.execute(text(f"SET LOCAL lock_timeout = '{DELETE_LOCK_TIMEOUT_MS}ms'"))
+            await db.execute(text(f"SET LOCAL statement_timeout = '{DELETE_STATEMENT_TIMEOUT_MS}ms'"))
+        await db.delete(asset)
+        await db.flush()
+    except DBAPIError as e:
+        if not _is_timeout(e):
+            raise
+        await db.rollback()
+        logger.warning("Delete of asset %s gave up after %.1f s: %s", asset_id, time.monotonic() - started,
+                       str(getattr(e, "orig", e))[:200])
+        raise HTTPException(
+            status_code=503,
+            detail="The library is busy (the queue is being refilled). Nothing was deleted; try again in a few seconds.",
+            headers={"Retry-After": "5"},
+        ) from e
+    took = time.monotonic() - started
+    if took > 1.0:
+        logger.warning("Delete of asset %s took %.1f s", asset_id, took)
+
+
+# How long a library delete waits for a lock, and for the whole statement, before it
+# answers "busy" (503 with Retry-After) and leaves everything as it was.
+DELETE_LOCK_TIMEOUT_MS = 3000
+DELETE_STATEMENT_TIMEOUT_MS = 8000
+
+
+def _is_timeout(e: DBAPIError) -> bool:
+    """Postgres lock_timeout (55P03) or statement_timeout (57014)."""
+    orig = getattr(e, "orig", None)
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    text_ = str(orig or e).lower()
+    return code in ("55P03", "57014") or "lock timeout" in text_ or "statement timeout" in text_
 
 
 async def bulk_update_category(

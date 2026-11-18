@@ -387,7 +387,7 @@ def pages(tag, args):
     ctl('reset', {'mode': 'browser', 'show': False})
     d = browser(args)
     try:
-        for path, expect in [('/stations', 'Kol Berama'), ('/guide', 'Morning music'), ('/hosts', 'Reb Moshe'), ('/archives', 'Motzei Shabbos Live')]:
+        for path, expect in [('/stations', "Kol B'ramah"), ('/guide', 'Morning music'), ('/hosts', 'Reb Moshe'), ('/archives', 'Motzei Shabbos Live')]:
             d.get(BASE + path)
             shown = wait_for(d, f'document.body.innerText.includes({json.dumps(expect)})', 8)
             time.sleep(0.8)

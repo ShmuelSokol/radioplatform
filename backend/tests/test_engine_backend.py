@@ -1508,6 +1508,53 @@ async def test_a_timed_item_still_loading_counts_as_taken_only_when_asked(monkey
 
 
 @pytest.mark.asyncio
+async def test_kept_start_reports_are_recorded_when_they_aired(client, db_session, eng):
+    """A local FM box's relay sends the start reports it kept while its line was down,
+    each with the time the item went on air (`at`). Start times and the play log use
+    that time, not the time the report arrived; a time in the future or absurdly old
+    is not believed. The engine's own reports carry no `at` and are unchanged."""
+    station, entries, _, calls = eng
+    base = datetime.now(UTC) - timedelta(minutes=10)
+    url = f"/api/v1/playout/{station.id}/started"
+    for i in range(3):
+        at = (base + timedelta(seconds=180 * i)).timestamp()
+        r = await client.post(url, headers=HEADERS, json={"entry_id": str(entries[i].id), "lane": "main", "at": at, "kept": True, "more": i < 2})
+        assert r.status_code == 200
+    # Only the newest is told to the pages: they do not flick through the outage
+    assert calls["broadcast"] == [str(entries[2].id)]
+
+    def aware(t):
+        return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+    rows = [await _fresh(db_session, e.id) for e in entries[:3]]
+    assert [r.status for r in rows] == ["played", "played", "playing"]
+    for i, row in enumerate(rows):
+        assert abs((aware(row.started_at) - base).total_seconds() - 180 * i) < 1
+    logs = (await db_session.execute(
+        select(PlayLog).where(PlayLog.station_id == station.id).execution_options(populate_existing=True)
+    )).scalars().all()
+    logs.sort(key=lambda log: log.start_utc)
+    assert [log.asset_id for log in logs] == [entries[0].asset_id, entries[1].asset_id]
+    for i, log in enumerate(logs):
+        assert abs((aware(log.start_utc) - base).total_seconds() - 180 * i) < 1
+        assert abs((aware(log.end_utc) - aware(log.start_utc)).total_seconds() - 180) < 1
+
+    # A box with a wrong clock: the future and the far past are not believed
+    for bad in (datetime.now(UTC).timestamp() + 3600, 1000.0):
+        r = await client.post(url, headers=HEADERS, json={"entry_id": str(entries[3].id), "lane": "main", "at": bad, "kept": True})
+        assert r.status_code == 200
+        row = await _fresh(db_session, entries[3].id)
+        assert abs((aware(row.started_at) - datetime.now(UTC)).total_seconds()) < 5
+
+    # The engine's own report carries its clock too; it is not a kept report
+    extra = await _add(db_session, station, title="Later", duration=100.0, position=9)
+    r = await client.post(url, headers=HEADERS, json={
+        "entry_id": str(extra.id), "lane": "main", "at": datetime.now(UTC).timestamp() - 300})
+    assert r.status_code == 200
+    row = await _fresh(db_session, extra.id)
+    assert abs((aware(row.started_at) - datetime.now(UTC)).total_seconds()) < 5
+
+
 async def test_a_resumed_item_is_logged_from_when_it_came_back(client, db_session, eng):
     """A shiur that carries on after a time check has started_at shifted back by the
     part already played (so its position lines up). Its play log row must begin when

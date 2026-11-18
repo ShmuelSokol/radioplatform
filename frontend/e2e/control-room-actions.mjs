@@ -92,7 +92,7 @@ async function transport(browser) {
   check(`${tag}: back from a hidden tab the queue is read at once`, gets() > g0, `${g0} -> ${gets()}`);
   // Footer
   const foot = await page.locator('footer').innerText();
-  check(`${tag}: footer shows shortcuts, station + timezone, user + role`, /N.*next.*\/.*search.*Esc/s.test(foot) && foot.includes('Kol Berama · America/New_York') && foot.includes('operator@example.com (admin)'), foot.replace(/\n/g, ' '));
+  check(`${tag}: footer shows shortcuts, station + timezone, user + role`, /N.*next.*\/.*search.*Esc/s.test(foot) && foot.includes("Kol B'ramah · America/New_York") && foot.includes('operator@example.com (admin)'), foot.replace(/\n/g, ' '));
   // Station switch: remembered, cancels insert marker and day filter
   await rowOf(page, station.pending()[2].id).getByTestId('insert-here').click();
   await page.getByLabel('Show day').selectOption({ index: 1 });

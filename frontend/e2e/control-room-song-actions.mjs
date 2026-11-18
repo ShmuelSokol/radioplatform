@@ -52,7 +52,7 @@ function songStation(opts = {}) {
           removed++; return false;
         });
       } else list.delete(a.id);
-      return { id: a.id, station_id: sid, station_name: 'Kol Berama', blocked: !!body.on, removed_from_queue: removed, still_to_play: kept };
+      return { id: a.id, station_id: sid, station_name: "Kol B'ramah", blocked: !!body.on, removed_from_queue: removed, still_to_play: kept };
     }
     const full = () => ({ album: null, file_path: 'x.mp3', album_art_path: null, metadata_extra: null, created_by: null, created_at: null, last_played_at: null, vote: 0, release_date: null, sponsor_id: null, sponsor_name: null, ...a });
     if (m[2] && method === 'POST') {
@@ -236,7 +236,7 @@ async function notHere(browser) {
   const hb = await here.boundingBox();
   const db = await page.getByTestId('song-dnp').boundingBox();
   check(`${tag}: both choices show, this station first, not overlapping`, hb.y + hb.height <= db.y, JSON.stringify({ hb, db }));
-  check(`${tag}: the station choice names the station`, /Not on this station/.test(await here.innerText()) && /Only Kol Berama/.test(await page.getByTestId('song-here-scope').innerText()));
+  check(`${tag}: the station choice names the station`, /Not on this station/.test(await here.innerText()) && /Only Kol B'ramah/.test(await page.getByTestId('song-here-scope').innerText()));
   check(`${tag}: the other choice says every station`, /Do not play this song again/.test(await page.getByTestId('song-dnp').innerText()) && /Every station/.test(await page.getByTestId('song-dnp-scope').innerText()));
   check(`${tag}: help text says the other stations keep playing it`, /other stations keep playing it/.test(await page.getByTestId('song-here-help').innerText()) && /every station/.test(await page.getByTestId('song-dnp-help').innerText()));
   await shot(page, 'desktop-song-panel-two-choices');
@@ -247,9 +247,9 @@ async function notHere(browser) {
   const sent = writes(station, /station-block$/);
   check(`${tag}: one call, for this station, on:true`, sent.length === 1 && sent[0].body.on === true && sent[0].body.station_id === hereId(station) && Object.keys(station.offHere).length === 1, JSON.stringify(sent.map((c) => c.body)));
   check(`${tag}: no do-not-play call and the category is unchanged`, writes(station, /do-not-play$/).length === 0 && a.category === was && await page.getByTestId('song-category').inputValue() === was);
-  check(`${tag}: panel still shows the category, plus NOT ON THIS STATION`, (await page.getByTestId('song-state').innerText()).includes(was) && /NOT ON THIS STATION: Kol Berama/.test(await page.getByTestId('song-state-here').innerText()));
+  check(`${tag}: panel still shows the category, plus NOT ON THIS STATION`, (await page.getByTestId('song-state').innerText()).includes(was) && /NOT ON THIS STATION: Kol B'ramah/.test(await page.getByTestId('song-state-here').innerText()));
   let t = await toastText(page);
-  check(`${tag}: toast names the station, says others are unchanged, counts copies`, /Will not play on Kol Berama/.test(t) && /Other stations are not changed/.test(t) && /2 waiting copies removed/.test(t) && /1 already on air, loaded or timed/.test(t), t);
+  check(`${tag}: toast names the station, says others are unchanged, counts copies`, /Will not play on Kol B'ramah/.test(t) && /Other stations are not changed/.test(t) && /2 waiting copies removed/.test(t) && /1 already on air, loaded or timed/.test(t), t);
   check(`${tag}: waiting copies left the queue, timed copy stayed`, station.queue.filter((e) => e.asset_id === a.id).length === 1);
   check(`${tag}: the song on air is untouched and nothing was sent to the player`, station.playing()?.id === cur.id && station.playing().started_at === before && airCalls(station).length === 0);
   check(`${tag}: button now offers to allow it here again; the every-station button did not change`, /Allow on this station again/.test(await here.innerText()) && await here.getAttribute('aria-pressed') === 'true' && /Do not play this song again/.test(await page.getByTestId('song-dnp').innerText()) && await page.getByTestId('song-dnp').getAttribute('aria-pressed') === 'false');
@@ -270,12 +270,12 @@ async function notHere(browser) {
   // both at once: each keeps its own undo
   await page.getByTestId('song-dnp').click();
   await page.getByTestId('song-state').filter({ hasText: 'DO NOT PLAY' }).waitFor({ timeout: 4000 });
-  check(`${tag}: with both on, allow-again help says it stays off this station`, /stays off Kol Berama/.test(await page.getByTestId('song-dnp-help').innerText()));
+  check(`${tag}: with both on, allow-again help says it stays off this station`, /stays off Kol B'ramah/.test(await page.getByTestId('song-dnp-help').innerText()));
   await page.getByTestId('song-dnp').click();
   await page.getByTestId('song-state').filter({ hasText: was }).waitFor({ timeout: 4000 });
   check(`${tag}: allowing it on every station leaves the station block on`, station.offHere[hereId(station)].has(a.id) && await page.getByTestId('song-state-here').isVisible());
   await here.click();
-  await page.getByTestId('toast').filter({ hasText: 'Allowed on Kol Berama again' }).waitFor({ timeout: 4000 });
+  await page.getByTestId('toast').filter({ hasText: "Allowed on Kol B'ramah again" }).waitFor({ timeout: 4000 });
   check(`${tag}: undo sends on:false and clears the mark`, writes(station, /station-block$/).at(-1).body.on === false && !station.offHere[hereId(station)].has(a.id) && await page.getByTestId('song-state-here').count() === 0 && a.category === was);
   check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
@@ -479,7 +479,7 @@ async function phone(browser, contextOpts, tag, landscape = false) {
   check(`${tag}: no label on the two stop buttons is cut off`, labels);
   await page.getByTestId('song-here').tap();
   await page.getByTestId('song-state-here').count();
-  await page.getByTestId('toast').filter({ hasText: 'Will not play on Kol Berama' }).waitFor({ timeout: 4000 });
+  await page.getByTestId('toast').filter({ hasText: "Will not play on Kol B'ramah" }).waitFor({ timeout: 4000 });
   check(`${tag}: not on this station works by tap, song stays on air`, station.offHere[hereId(station)].has('' + station.playing().asset_id) && station.playing()?.id === 'q1' && airCalls(station).length === 0);
   await page.getByRole('button', { name: 'Close' }).tap();
   check(`${tag}: Close closes`, await panel(page).count() === 0);
