@@ -374,6 +374,8 @@ class Stack:
             "KBR_ICECAST_MOUNT": "/harness",
             "KBR_DEBUG_WAV": str(self.wav),
             "KBR_HLS_DIR": str(self.hls),
+            # A sound card for the local_box_sound_card scenario (see wiki/local-fm-box.md)
+            "KBR_ALSA_DEVICE": os.environ.get("KBR_HARNESS_ALSA_DEVICE", ""),
         })
         self.hls.mkdir(exist_ok=True)
         os.chmod(self.hls, 0o777)  # the engine runs as another user here
@@ -1945,6 +1947,80 @@ async def sc_local_box_commands(h: Harness) -> None:
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
 
 
+def record_card(seconds: float, dest: Path) -> tuple[subprocess.Popen, float]:
+    """Record what the sound card receives (PulseAudio monitor of the test sink)."""
+    monitor = os.environ.get("KBR_HARNESS_ALSA_MONITOR", "fm.monitor")
+    p = subprocess.Popen(
+        ["timeout", str(seconds), "parec", "-d", monitor, "--rate=44100", "--channels=2",
+         "--format=s16le", "--latency-msec=50", str(dest)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return p, time.time()
+
+
+def raw_to_wav(raw: Path, dest: Path) -> None:
+    with wave.open(str(dest), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        data = raw.read_bytes()
+        w.writeframes(data[:len(data) // 4 * 4])
+
+
+async def sc_local_box_sound_card(h: Harness) -> None:
+    """The local FM box's sound card output (needs KBR_HARNESS_ALSA_DEVICE, a PulseAudio
+    null sink in tests): the card gets the same items in the same order as the stream,
+    within a second of it, through a Next and a hard time check, with no gaps; and the
+    stream's own timing is what it is without a card."""
+    name = "local_box_sound_card"
+    if not os.environ.get("KBR_HARNESS_ALSA_DEVICE"):
+        h.check(name, False, "set KBR_HARNESS_ALSA_DEVICE (and start a PulseAudio null sink)")
+        return
+    await wait_music(h)
+    await h.queue([("song5", {}), ("song6", {})])
+    due_dt = at(40)
+    due = due_dt.timestamp()
+    await h.queue([("time", {"preempt_at": due_dt, "timing_mode": "hard", "source": "auto"})])
+    raw = h.stack.dir / "card.raw"
+    rec, card_t0 = record_card(62, raw)
+    start = time.time() + 1
+    await asyncio.sleep(12)
+    pressed = time.time()
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    await asyncio.sleep(due - time.time() + 16)
+    end = time.time() - 1
+    stream = timeline(h.heard(start, end))
+    rec.wait(timeout=30)
+    card_wav = h.stack.dir / "card.wav"
+    raw_to_wav(raw, card_wav)
+    card_windows = analyse_wav(card_wav, card_t0, start, end)
+    card = timeline(card_windows)
+    for t, n in stream:
+        log(f"    stream {t - due:+7.1f}s  {n}")
+    for t, n in card:
+        log(f"    card   {t - due:+7.1f}s  {n}")
+
+    def runs(line):
+        names = [n for _, n in line if n not in ("mix", "silence")]
+        return [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    h.check(name, len(runs(card)) >= 4 and runs(card) == runs(stream),
+            f"the card got the same items in order: {runs(card)} (stream {runs(stream)})")
+    s_time = [t for t, n in stream if n == "time"]
+    c_time = [t for t, n in card if n == "time"]
+    h.check(name, bool(s_time) and abs(s_time[0] - due) <= 1.0,
+            f"stream: time check {s_time[0] - due:+.2f} s from its second (as without a card)"
+            if s_time else "time check not on the stream")
+    h.check(name, bool(c_time) and bool(s_time) and -0.5 <= c_time[0] - s_time[0] <= 1.5,
+            f"card: time check {c_time[0] - s_time[0]:+.2f} s after the stream"
+            if c_time and s_time else "time check not on the card")
+    s_next = [t for t, n in stream[1:] if n.startswith("song") and t >= pressed - 0.5]
+    c_next = [t for t, n in card[1:] if n.startswith("song") and t >= pressed - 0.5]
+    h.check(name, bool(s_next) and bool(c_next) and c_next[0] - pressed <= 3.0,
+            f"Next: card changed song {c_next[0] - pressed:+.2f} s after the press (stream {s_next[0] - pressed:+.2f} s)"
+            if s_next and c_next else "no song change on the card after Next")
+    gap, _ = longest_silence(card_windows)
+    h.check(name, gap <= 1.0, f"longest silence on the card {gap:.1f} s")
+
+
 async def sc_local_box_offline(h: Harness) -> None:
     """The local FM box with its line cut both ways (needs --local-box): the queue plays
     on in order from the box's own disk, a hard time check airs on the second, nothing
@@ -2853,6 +2929,7 @@ SCENARIOS = {
     "backend_unreachable": sc_backend_unreachable,
     "local_box_commands": sc_local_box_commands,
     "local_box_offline": sc_local_box_offline,
+    "local_box_sound_card": sc_local_box_sound_card,
     "control_endpoints": sc_control_endpoints,
     "slow_timed_file": sc_slow_timed_file,
     "queue_change_drops_preloaded": sc_queue_change_drops_preloaded,
@@ -2959,7 +3036,11 @@ def main() -> None:
     ap.add_argument("--local-box", action="store_true",
                     help="run the engine behind the local FM box relay (infra/local/kbr_relay.py)")
     args = ap.parse_args()
-    names = args.scenarios or [n for n in SCENARIOS if args.local_box or not n.startswith("local_box_")]
+    names = args.scenarios or [
+        n for n in SCENARIOS
+        if (args.local_box or not n.startswith("local_box_"))
+        and (n != "local_box_sound_card" or os.environ.get("KBR_HARNESS_ALSA_DEVICE"))
+    ]
     for n in names:
         if n not in SCENARIOS:
             sys.exit(f"unknown scenario {n}")

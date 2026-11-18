@@ -356,6 +356,25 @@ def test_the_limiter_is_not_wrapped_in_mksafe_and_a_long_gap_starts_the_timed_it
 
 
 
+def test_sound_card_output_is_off_unless_named_and_asks_before_using_the_card():
+    """Local FM box: the sound card output exists only with KBR_ALSA_DEVICE (the stream
+    server sets none), sits behind a buffer on its own clock, and is used only after the
+    card answered a probe; a missing card means stream only and one restart when it is
+    back (wiki/local-fm-box.md)."""
+    liq = _liq()
+    assert 'alsa_device = environment.get("KBR_ALSA_DEVICE")' in liq
+    start = liq.index('if alsa_device != "" then')
+    block = liq[start:liq.index("encoded = ffmpeg.encode.audio(")]
+    assert liq.count("output.alsa(") == 1 and "output.alsa(" in block
+    assert "if card_there() then" in block
+    assert "card = buffer(buffer=0.2, max=0.6, fallible=true, radio)" in block
+    assert 'bufferize=false, fallible=true, card)' in block
+    assert "shutdown()" in block and "thread.run(fast=false, delay=10., every=10.," in block
+    # No engine setting file of the stream server names a card
+    for name in ("kbr-engine.env.example", "setup.sh"):
+        assert "KBR_ALSA_DEVICE" not in (INFRA / name).read_text()
+
+
 def test_quick_steps_have_task_queues_the_backend_calls_cannot_fill():
     """Jerusalem 2026-11-18: with the backend answering in 3 to 4 s, the engine's start
     report and its ask for the next item filled Liquidsoap's two task queues and the
