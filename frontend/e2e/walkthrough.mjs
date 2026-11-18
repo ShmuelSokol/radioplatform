@@ -88,7 +88,8 @@ const SITE_WIDE = {
 // The sizes a control must be fully visible and pressable at (1366x900 is the walk's own size)
 const SIZES = [{ name: 'phone 390x844', width: 390, height: 844 }];
 const WALK_SIZE = { width: 1366, height: 900 };
-const NOT_PRESSED = /delete|\bdel\b|remove|clear|panic|end show|go live|start show|sign out|log out|logout|resolve all|reset|push now|wipe|purge|seed|regenerate|🐞|report a problem/i;
+// "do not play" changes the shared library for every station; it has its own test
+const NOT_PRESSED = /do not play|delete|\bdel\b|remove|clear|panic|end show|go live|start show|sign out|log out|logout|resolve all|reset|push now|wipe|purge|seed|regenerate|🐞|report a problem/i;
 
 const findings = [];
 const shots = [];
@@ -264,6 +265,15 @@ async function reachAt(page, st, route, sizeName) {
 async function restore(page, route) {
   // Close whatever the press opened, and come back if it navigated
   for (let i = 0; i < 2; i++) await page.keyboard.press('Escape').catch(() => {});
+  // A dialog that Esc did not close: say so once (people expect Esc to close a dialog),
+  // then close it the way it offers, or everything behind it counts as "cannot be pressed"
+  const dialog = page.locator('div.fixed.inset-0').filter({ has: page.locator('button') }).first();
+  if (await dialog.isVisible().catch(() => false)) {
+    if (current) finding(current.tag, route, 'Esc', 'a dialog does not close with Esc', (await dialog.innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 60), '');
+    const close = dialog.getByRole('button', { name: /^(cancel|close|done|✕|×|x)$/i }).first();
+    if (await close.count()) await close.click({ timeout: 1500 }).catch(() => {});
+    if (await dialog.isVisible().catch(() => false)) await open(page, route);
+  }
   if (new URL(page.url()).pathname !== route) await open(page, route);
 }
 
