@@ -85,13 +85,16 @@ async def test_seed_reset_with_two_admins_does_not_crash(client: AsyncClient, db
     monkeypatch.setattr(settings, "ADMIN_SEED_PASSWORD", "made-up-seed-pw")
     first, admin = await _login(db_session, UserRole.ADMIN)
     first.created_at = datetime.now(timezone.utc) - timedelta(days=30)
-    second, _ = await _login(db_session, UserRole.ADMIN)
+    first.is_active = False  # V1-103: the first admin is switched back on
+    second, second_headers = await _login(db_session, UserRole.ADMIN)
     await db_session.commit()
-    r = await client.post("/api/v1/auth/seed-reset", headers=admin)
+    r = await client.post("/api/v1/auth/seed-reset", headers=second_headers)
     assert r.status_code == 200, r.text
     await db_session.refresh(first)
     await db_session.refresh(second)
     assert first.email == "admin" and second.email != "admin"
+    assert first.is_active is True
+    # the 404 ("no admin") branch cannot be reached: only a signed-in active admin may call it
 
 
 @pytest.mark.asyncio

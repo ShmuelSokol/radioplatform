@@ -19,6 +19,8 @@ class CampaignCreate(BaseModel):
     end_date: date | None = None
     budget_cents: int | None = None
     target_rules: dict[str, Any] | None = None
+    # Staff creating a campaign for a sponsor name it here; a sponsor's own id is always used for them
+    sponsor_id: UUID | None = None
 
 
 class CampaignUpdate(BaseModel):

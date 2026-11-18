@@ -98,7 +98,7 @@ WRITE_POLICY = {
     ("PATCH", "/assets/bulk-category"): MANAGERS,
     ("POST", "/assets/bulk-create"): MANAGERS,
     ("POST", "/assets/refresh-requested-category"): MANAGERS,
-    ("POST", "/assets/upload"): MANAGERS,
+    ("POST", "/assets/upload"): ON_AIR,  # DJs save Recording Studio takes (owner decision)
     ("DELETE", "/assets/{asset_id}"): MANAGERS,
     ("PATCH", "/assets/{asset_id}"): MANAGERS,
     ("POST", "/assets/{asset_id}/analyze-audio"): MANAGERS,

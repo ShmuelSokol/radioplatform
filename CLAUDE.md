@@ -302,6 +302,7 @@ radioplatform/
 | useLiveAudio.ts | Plays a station's live show (host mic relayed by the server) and tells the page to silence the music meanwhile |
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |
+| useEscape.ts | Esc closes an open dialog (New Archive, Live show, bug report) |
 
 ### API Clients (`frontend/src/api/`) — 14 modules
 auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
@@ -406,7 +407,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `RESEND_FROM_EMAIL` | Sender email (default: noreply@kolbramah.com) | For emails |
 | `ANTHROPIC_API_KEY` | Claude API key for AI email drafting | For AI emails |
 | `TWILIO_ACCOUNT_SID` | Twilio account SID (empty to disable) | For SMS/WhatsApp alerts |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token | For SMS/WhatsApp alerts |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token; when set, Twilio webhooks must carry a valid X-Twilio-Signature (403 otherwise) | For SMS/WhatsApp alerts |
 | `TWILIO_PHONE_NUMBER` | Twilio phone number | For SMS/WhatsApp alerts |
 | `TWILIO_VOICE_NUMBER` | Dedicated voice number for live call-ins | For live shows |
 | `LIVE_SHOW_HOLD_MUSIC_URL` | Public URL to hold music MP3 | For live shows |
@@ -489,6 +490,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-landscape.mj
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 
+# Display findings of the page walk-through: Library cells and menus, Esc on dialogs, phone tables as cards, headings, labels
+cd frontend && for s in library-display display-findings; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+
 # Sound in the control room on an iPhone: the Listen button and tap-to-sound time, in Chromium made to follow Safari's tap rule
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound.mjs
 
@@ -496,7 +500,7 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound
 cd frontend && node e2e/stale-release.mjs
 
 # Every control room button, the Listen page, call-in and release-pickup timings, same fake backend (ONLY=<part> for one part; see wiki/audio-engine.md)
-cd frontend && for s in control-room-actions listen-page call-in release-timing; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+cd frontend && for s in control-room-actions listen-page call-in release-timing admin-misc; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
 
 # Listener pages in real WebKit (Safari's engine, WebKitGTK + Selenium; setup in the script's docstring and wiki/audio-engine.md)
 cd frontend && (npx vite preview --port 4183 --strictPort &) && xvfb-run -a python3 e2e/webkit/listener-webkit.py
