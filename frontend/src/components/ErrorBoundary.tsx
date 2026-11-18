@@ -49,7 +49,7 @@ export default class ErrorBoundary extends Component<Props, State> {
           <p className="text-sm text-red-600 mb-4">
             {stale
               ? (staleReloadWaiting()
-                ? 'The station keeps playing. This screen opens in the new version by itself when you stop the sound, or tap Reload Page now.'
+                ? 'The station keeps playing. This screen opens in the new version by itself when you stop listening.'
                 : 'Reload to open this screen in the new version.')
               : this.state.error?.message}
           </p>
@@ -60,7 +60,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             }}
             className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm transition"
           >
-            Reload Page
+            {stale && staleReloadWaiting() ? 'Reload now (stops the sound)' : 'Reload Page'}
           </button>
         </div>
       );
