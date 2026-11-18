@@ -101,6 +101,7 @@ async def delete_rule(
 @router.get("/preview", response_model=SchedulePreview)
 async def preview_schedule(
     date: str = Query(None, description="Date in YYYY-MM-DD format"),
+    station_id: uuid.UUID | None = Query(None, description="Preview this station's rules only"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_staff),
 ):
@@ -109,10 +110,16 @@ async def preview_schedule(
     day_of_week = target_date.weekday()  # 0=Mon
 
     # Fetch active rules for this day
-    result = await db.execute(
-        select(ScheduleRule).where(ScheduleRule.is_active == True).order_by(ScheduleRule.priority.desc())
-    )
-    rules = result.scalars().all()
+    if station_id is not None:
+        # The rules that really drive this station: its own, or the global ones
+        from app.services.queue_replenish_service import rules_for_station
+
+        rules = await rules_for_station(db, station_id)
+    else:
+        result = await db.execute(
+            select(ScheduleRule).where(ScheduleRule.is_active == True).order_by(ScheduleRule.priority.desc())
+        )
+        rules = result.scalars().all()
     active_rules = [r for r in rules if str(day_of_week) in r.days_of_week.split(",")]
 
     # Fetch asset counts per type for context
