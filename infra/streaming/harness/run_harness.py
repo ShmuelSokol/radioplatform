@@ -78,6 +78,11 @@ ALERT_FREQ = 1000
 EMERGENCY_TOKEN = "harness-emergency-token"
 # The host's show as the backend's live.mp3 serves it (the harness stands in for it)
 HOST_FREQ = 1200
+# PLAYOUT_STREAM_LIVE for the harness backend (production: true); KBR_HARNESS_STREAM_LIVE=0 to turn off
+STREAM_LIVE = os.environ.get("KBR_HARNESS_STREAM_LIVE", "1") != "0"
+# PR 352: on a stream station a timed item enters a live show this much early, so stream
+# listeners (about 2 s behind the page) hear it on its second; the page hears it early
+STREAM_LEAD = 2.0 if STREAM_LIVE else 0.0
 # A shiur whose pitch rises steadily (300 Hz at 0 s to 600 Hz at 150 s): the pitch heard
 # tells the position played, so a resume can be checked to the second
 CHIRP = ("chirp", 300.0, 600.0, 150)
@@ -395,6 +400,9 @@ class Stack:
             "OPENWEATHERMAP_API_KEY": "",
             "NTFY_TOPIC": "",
             "PLAYOUT_ENGINE_ENABLED": "true",
+            # as production: listener pages play the engine's stream (PR 352 times live
+            # inserts for it)
+            "PLAYOUT_STREAM_LIVE": "true" if STREAM_LIVE else "false",
             "PLAYOUT_ENGINE_STATION_ID": str(STATION_ID),
             # --local-box: no inbound line to the engine; the backend's commands can only
             # travel through the relay's own outbound call (playout_tunnel)
@@ -2153,6 +2161,78 @@ async def sc_live_show_host_gone(h: Harness) -> None:
     h.check(name, bool(after) and "EMERGENCY" not in after, f"station music after the show: {after}")
 
 
+async def sc_live_show_song_ends_at_takeover(h: Harness, end_after_air: float = 1.0) -> None:
+    """PR 347: the engine keeps the music until the show's audio is ready (live_feed
+    ready, 5 s at most). Here the song on air ends `end_after_air` s after the host is
+    first heard, inside that wait. The item /flush loaded for after the show must not air
+    for a moment during the wait, and no other song may start: it first airs after End.
+    Also measured: silence on the stream before the host's first words."""
+    name = f"live_show_song_ends_at_takeover_{end_after_air:+.0f}s"
+    delay = 6.0
+    before = set_live_settings(h, live_delay_seconds=int(delay), live_dump_seconds=0, live_timed_items="time")
+    listener, mic = LiveListener(), None
+    try:
+        await wait_music(h)
+        cur = await h.on_air()
+        started = cur.started_at.timestamp() if cur and cur.started_at else time.time()
+        song_end = started + float(cur.asset.duration or 40.0) if cur else time.time() + 40
+        start_at = song_end - delay - end_after_air
+        if start_at < time.time() + 2:
+            # too late for this song: use the next one
+            await asyncio.sleep(max(0, song_end - time.time() + 1.5))
+            cur = await h.on_air()
+            started = cur.started_at.timestamp() if cur and cur.started_at else time.time()
+            song_end = started + float(cur.asset.duration or 40.0)
+            start_at = song_end - delay - end_after_air
+        now = datetime.now(UTC)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness song ends at take-over", "calls_enabled": False,
+            "scheduled_start": now.isoformat(), "scheduled_end": (now + timedelta(minutes=10)).isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        listener.task = asyncio.ensure_future(listener.run())
+        await asyncio.sleep(max(0, start_at - time.time()))
+        t_start = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/start")
+        mic = HostMic(show["id"], h.token)
+        mic.task = asyncio.ensure_future(mic.run())
+        await asyncio.sleep(delay + 16)
+        mic.stop = True
+        t_end = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/end")
+        await asyncio.sleep(delay + 15)
+    finally:
+        if mic is not None:
+            mic.stop = True
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+        if listener.task:
+            listener.task.cancel()
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    first = next((t for t, _ in listener.frames if t >= t_start), None)
+    h.check(name, first is not None, "listeners hear the host")
+    if first is None:
+        return
+    log(f"    song on air ended {song_end - first:+.1f} s from first air")
+    segs = timeline(heard)
+    early = [(round(t - first, 1), n) for t, n in segs
+             if first - 0.5 <= t <= t_end and n not in ("silence", "HOST")]
+    h.check(name, not early, f"no song starts between first air and End, the after-show item waits for End ({early} s from first air)")
+    host_on = next((w[0] for w in heard if w[0] >= first - 1.0 and w[1] >= -45 and tone_name(w[2]) == "HOST"), None)
+    music_end = max((w[0] + WINDOW for w in heard if (host_on or 0) - 10 <= w[0] < (host_on or 0)
+                     and w[1] >= -45 and tone_name(w[2]) != "HOST"), default=None)
+    gap = None if host_on is None or music_end is None else host_on - music_end
+    h.check(name, gap is not None and gap <= 1.0,
+            f"silence on the stream before the host's first words {'?' if gap is None else f'{gap:.1f} s'} "
+            f"(host on the stream {'never' if host_on is None else f'{host_on - first:+.1f} s'} after the page)")
+    during = [w for w in heard if (host_on or first) + 1.0 <= w[0] <= t_end - 0.3]
+    loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) != "HOST")
+    h.check(name, bool(during) and loud <= 0.3, f"no music under the host (music for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n not in ("silence", "HOST")]
+    h.check(name, bool(after) and "EMERGENCY" not in [n for _, n in after], f"music after the show: {[n for _, n in after]}")
+
+
 async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> None:
     """LD-4b/11b/14b (PR 316): a live show with a 6 s broadcast delay on an engine station,
     with a real host microphone (440 Hz). The engine keeps the music through the pre-roll
@@ -2257,11 +2337,12 @@ async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> N
         h.check(name, not page_clock, f"and not again over the delay on the listener page (at {[round(t - due.timestamp(), 1) for t in page_clock]} s)")
     else:
         late = page_clock[0] - due.timestamp() if page_clock else None
-        h.check(name, late is not None and -1.0 <= late <= 1.5,
-                f"the time check is heard on the listener page on its second over the delay ({'never' if late is None else f'{late:+.1f} s'})")
+        h.check(name, late is not None and -1.0 - STREAM_LEAD <= late <= 1.5 - STREAM_LEAD,
+                f"the time check is heard on the listener page on its second over the delay, "
+                f"{STREAM_LEAD:.0f} s early for a stream station ({'never' if late is None else f'{late:+.1f} s'})")
         # On proto 5 the stream carries the show, time check included: once, and on time
         on_stream = [t for t in engine_clock if t_start <= t <= t_end + delay + 5]
-        h.check(name, len(on_stream) == 1 and -1.0 <= on_stream[0] - due.timestamp() <= 1.5,
+        h.check(name, len(on_stream) == 1 and -0.7 <= on_stream[0] - due.timestamp() <= 0.7,
                 f"on the engine stream once and on its second, inside the show "
                 f"({[round(t - due.timestamp(), 1) for t in on_stream]} s)")
         host_after = listener.tone_at(HOST_FREQ, due.timestamp() + TONES["time"][1] + 0.5, due.timestamp() + TONES["time"][1] + 2.5)
@@ -4363,6 +4444,9 @@ SCENARIOS = {
     "live_show_delay_restart": lambda h: sc_live_show_delay_controls(h, restart=True),
     "live_show_no_host": sc_live_show_no_host,
     "live_show_host_gone": sc_live_show_host_gone,
+    "live_show_song_ends_at_takeover": sc_live_show_song_ends_at_takeover,
+    "live_show_song_ends_in_wait": lambda h: sc_live_show_song_ends_at_takeover(h, end_after_air=3.0),
+    "live_show_song_ends_before_air": lambda h: sc_live_show_song_ends_at_takeover(h, end_after_air=-1.0),
     "live_show_delay_engine_preroll_item": lambda h: sc_live_show_delay_engine(h, preroll_item=True),
     "live_show_on_the_stream": sc_live_show_on_the_stream,
     "speech_never_overlaps": sc_speech_never_overlaps,
