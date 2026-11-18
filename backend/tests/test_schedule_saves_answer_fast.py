@@ -147,13 +147,15 @@ async def test_old_songs_stay_on_the_air_until_the_new_ones_are_written(db_sessi
     async def watched_fill(self, *a, **kw):
         seen_mid_redraw.append(await player_sees())
         done = await real_fill(self, *a, **kw)
-        seen_mid_redraw.append(await player_sees())  # its own commit is held back too
+        seen_mid_redraw.append(await player_sees())  # the swap: old out and new in together
         return done
 
     monkeypatch.setattr(qrs_mod.QueueReplenishService, "_fill_from_playlists", watched_fill)
     removed = await refresh_station(db_session, station_id, had_playlists=True)
     assert removed == 39  # all but the next song
-    assert seen_mid_redraw and all(n == 40 for n in seen_mid_redraw), seen_mid_redraw
+    # While the new songs are picked the player still sees all the old ones; the
+    # fill then swaps old for new in one short transaction of its own
+    assert seen_mid_redraw[0] == 40 and seen_mid_redraw[1] > 40, seen_mid_redraw
     titles = await _titles(db_session, station_id)
     assert set(titles[1:]) == {"The one song"}, titles[:5]
 
