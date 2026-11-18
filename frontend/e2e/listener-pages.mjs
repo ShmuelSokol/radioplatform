@@ -232,6 +232,19 @@ async function stationListChecks(browser) {
       text.includes('Unable to connect to the server') && !text.includes('not yet configured'), text.slice(0, 200).replace(/\n/g, ' '));
     await ctx.close();
   }
+  // Kol B'ramah Main is listed first, then the rest as the server orders them (by name)
+  {
+    const st = stationFor({}, { stations: [
+      { id: 'st-jer', name: 'KBR Jerusalem', timezone: 'Asia/Jerusalem' },
+      { id: 'st-stories', name: "Kol B'ramah - All Day Stories", timezone: 'America/New_York' },
+      { id: 'st-main', name: "Kol B'ramah Main", timezone: 'America/New_York' },
+    ] });
+    const { ctx, page } = await openAt(browser, DESKTOP, st, '/stations');
+    await page.getByText('KBR Jerusalem').waitFor({ timeout: 8000 }).catch(() => {});
+    const order = await page.locator('a[href^="/listen/"]').evaluateAll((els) => els.map((e) => e.getAttribute('href').split('/').pop()));
+    check(`${tag}: Kol B'ramah Main is the first station in the list, the others follow in order`, order.join(',') === 'st-main,st-jer,st-stories', order.join(','));
+    await ctx.close();
+  }
   const list = pagedStations(120, (i) => (i === 2 ? { is_active: false, name: 'Feed 003 (old)' } : i === 0 ? { description: 'Torah, music and news. '.repeat(20) } : {}));
   // On air: Kol Berama (st-1) and the inactive st-3; Feed 002 is switched on with nothing playing
   const st = stationFor({ '/stations': (m, q) => pageOf(list, q, 'stations'), '/now-playing': () => ({ playing: ['st-1', 'st-3'] }) }, {

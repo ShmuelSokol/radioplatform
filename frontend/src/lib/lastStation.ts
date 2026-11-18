@@ -49,3 +49,10 @@ export function rememberListenerStation(id: string): void {
   if (!id) return;
   try { localStorage.setItem(LISTENER_KEY, id); } catch { /* private mode */ }
 }
+
+/** A station list for listeners: Kol B'ramah Main first, the rest in the order given. */
+export function mainFirst<T extends { id: string; name?: string }>(stations: T[]): T[] {
+  const main = mainStationId(stations);
+  const found = stations.find((s) => s.id === main && /\bmain\b/i.test(s.name || ''));
+  return found ? [found, ...stations.filter((s) => s !== found)] : stations;
+}
