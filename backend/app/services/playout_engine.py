@@ -762,7 +762,13 @@ async def _hold_before_hard_item(
     if due.tzinfo is None:
         due = due.replace(tzinfo=UTC)
     room = (due - change).total_seconds()
-    return 0 <= room < HOLD_BEFORE_HARD_SECONDS
+    hold = 0 <= room < HOLD_BEFORE_HARD_SECONDS
+    if hold:
+        logger.info(
+            "No song for the engine now: it would start %.1f s before the hard item at %s (on air %s, pre-loaded %s)",
+            room, due.strftime("%H:%M:%S"), getattr(current, "id", None), getattr(held, "id", None),
+        )
+    return hold
 
 
 async def _live_show_on(db: AsyncSession, station_id) -> bool:
@@ -1176,6 +1182,30 @@ async def _flush_if_head_changed(db: AsyncSession, station_id, state: EngineStat
     await engine_flush(station_id)
 
 
+async def _take_back_before_hard_item(db: AsyncSession, station_id, state: EngineState) -> None:
+    """The engine already holds its next song, and that song would start seconds before
+    a hard timed item: take it back (flush), so the engine asks again and is held.
+
+    The engine does not always ask at the moment a song starts: around a Next it can
+    load a song further ahead, before the rule in handle_next could apply to it (harness
+    song_ends_before_hour, one run in six: the pre-loaded song played 1.5 s and was cut).
+    """
+    if state.engine_proto < ENGINE_PROTO_HOLD or not state.cued_entry_id:
+        return
+    res = await db.execute(
+        select(QueueEntry.id).where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+        .order_by(QueueEntry.started_at.desc().nullslast())
+    )
+    current_id = res.scalars().first()
+    if current_id is None or str(current_id) == state.cued_entry_id:
+        return  # the pre-loaded entry is the one starting now
+    # Would the song after the one on air start in the hold window?
+    if await _hold_before_hard_item(db, station_id, None):
+        logger.info("Taking back pre-loaded entry %s: it would start seconds before a hard item",
+                    state.cued_entry_id)
+        await engine_flush(station_id)
+
+
 # Alert when the item on air is still "on air" this long after its known end
 OVERRUN_ALERT_SECONDS = 30.0
 
@@ -1468,6 +1498,11 @@ async def tick(db: AsyncSession, station) -> None:
     # 3. The queue changed after the engine pre-loaded its next track: make it ask again
     if state.cued_entry_id:
         await _flush_if_head_changed(db, station_id, state, now)
+    try:
+        await _take_back_before_hard_item(db, station_id, state)
+    except Exception as e:
+        logger.warning("Take-back before a hard item failed for station %s: %s", station_id, e)
+        await db.rollback()
 
     # 4. "After the song, but no later than hard_by": the song is still on, so fade it
     await _enforce_hard_by(db, station_id, state, now)

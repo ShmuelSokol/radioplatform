@@ -825,3 +825,23 @@ async def test_the_hold_counts_a_song_whose_start_report_has_not_arrived(client,
     again = await client.get(f"{url}&given={entries[1].id}", headers=HEADERS)
     assert again.status_code == 204
     assert await _status(db_session, entries[2]) == "pending"
+
+
+async def test_a_song_the_engine_already_holds_is_taken_back_before_a_hard_item(client, db_session, engine_station):
+    # Around a Next the engine can load its next song before the one on air has even
+    # started, so the rule in /next never saw it: the tick takes it back.
+    station, entries, sent = engine_station
+    state = playout_engine.get_state(station.id)
+    state.engine_proto = 3
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=59.5)
+    state.cued_entry_id = str(entries[1].id)
+    st = await db_session.get(Station, station.id)
+    await playout_engine.tick(db_session, st)
+    assert ("/flush", None) in sent
+    assert state.cued_entry_id is None
+    # With room for the song (20 s before the item) it is left alone
+    sent.clear()
+    await _on_air_ending(db_session, entries, ends_in=60.0, hard_in=80.0)
+    state.cued_entry_id = str(entries[1].id)
+    await playout_engine.tick(db_session, st)
+    assert ("/flush", None) not in sent
