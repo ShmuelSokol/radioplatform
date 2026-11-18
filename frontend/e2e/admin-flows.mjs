@@ -1373,7 +1373,7 @@ section('blocks', async () => {
     const st = FX.takeover;
     const sched = await api('POST', '/schedules', { token: T, body: { name: `E2E Takeover Sched ${RUN}`, station_id: st.id } });
     const song = FX.assets[0];
-    await step('F-BLOCKS-5 all-day block with one song: the queue plays only that song after the change', async () => {
+    await step('F-BLOCKS-5 all-day block with one song: after the next song the queue holds only that song', async () => {
       const deadline = Date.now() + 45000;
       while ((await api('GET', `/stations/${st.id}/queue?limit=3`, { token: T })).entries.length === 0) {
         assert(Date.now() < deadline, 'test station never started');
@@ -1396,7 +1396,9 @@ section('blocks', async () => {
       while (Date.now() - t0 < 15000) {
         const q = await api('GET', `/stations/${st.id}/queue?limit=8`, { token: T });
         titles = q.entries.filter(e => e.status === 'pending').map(e => e.asset?.title);
-        if (titles.length >= 3 && titles.every(t => t === song.title)) return `queue switched after ${Date.now() - t0} ms`;
+        // The next song stays where it is (the player may already be loading it, and a
+        // redraw must never leave the queue without one); everything after it is the block's.
+        if (titles.length >= 4 && titles.slice(1).every(t => t === song.title)) return `queue switched after ${Date.now() - t0} ms`;
         await new Promise(r => setTimeout(r, 500));
       }
       throw new Error(`block has only "${song.title}" but the queue holds ${titles.slice(0, 4).join(' | ') || 'nothing'}`);

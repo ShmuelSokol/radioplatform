@@ -88,6 +88,25 @@ async def drop_dated_clips(db: AsyncSession, station_id) -> int:
     return result.rowcount or 0
 
 
+async def songs_to_replace(db: AsyncSession, station_id, *, keep_next: int = 0) -> tuple[list, dict]:
+    """The unplayed automatic songs a redraw replaces, and how far each block's
+    place in its playlist goes back for them. Reads only: nothing is locked while
+    the new songs are picked, and the swap itself is done by the fill in one short
+    transaction (QueueReplenishService._fill_from_playlists)."""
+    which = automatic_songs(station_id)
+    rows = (
+        await db.execute(
+            select(QueueEntry.id, QueueEntry.block_id).where(*which).order_by(QueueEntry.position)
+        )
+    ).all()
+    rows = rows[keep_next:]
+    back: dict = {}
+    for _id, block_id in rows:
+        if block_id is not None:
+            back[block_id] = back.get(block_id, 0) + 1
+    return [r[0] for r in rows], back
+
+
 async def remove_automatic_songs(db: AsyncSession, station_id, *, keep_next: int = 0) -> int:
     """Throw away the unplayed automatic songs so they are drawn again.
 
@@ -141,10 +160,13 @@ REALIGN_WINDOW = timedelta(minutes=15)
 _realigned: dict[str, str] = {}
 
 
-async def realign_before_block_change(db: AsyncSession, station: Station, now: datetime) -> bool:
+async def realign_before_block_change(
+    db: AsyncSession, station: Station, now: datetime, *, remove: bool = True
+) -> bool:
     """Redraw the automatic songs once, shortly before the playlist on the air changes.
 
-    Returns True when the songs were thrown away (the caller fills again).
+    Returns True when the songs were thrown away (the caller fills again). With
+    `remove=False` nothing is deleted here: the caller replaces them itself.
     """
     from app.services.scheduling import SchedulingService
 
@@ -191,8 +213,13 @@ async def realign_before_block_change(db: AsyncSession, station: Station, now: d
     if change is None or _realigned.get(str(station.id)) == change:
         return False
     _realigned[str(station.id)] = change
-    removed = await remove_automatic_songs(db, station.id, keep_next=KEEP_NEXT)
-    logger.info("Station %s: redrew %d automatic songs before the playlist changes (%s)", station.id, removed, change)
+    if remove:
+        removed = await remove_automatic_songs(db, station.id, keep_next=KEEP_NEXT)
+        logger.info(
+            "Station %s: redrew %d automatic songs before the playlist changes (%s)", station.id, removed, change
+        )
+    else:
+        logger.info("Station %s: redrawing the automatic songs before the playlist changes (%s)", station.id, change)
     return True
 
 
@@ -219,23 +246,46 @@ KEEP_NEXT = 1
 
 
 async def replace_automatic_songs(db: AsyncSession, station_id) -> int:
-    """Draw the unplayed automatic songs again, swapping old for new in ONE transaction.
+    """Draw the unplayed automatic songs again. Returns songs removed (0 when the
+    refill failed; nothing changes then).
 
-    The redraw can take a minute on the live database. Deleting first and
-    committing left the queue with no songs until the new ones were written
-    (Jerusalem had none from 16:21:34 to 16:22:31 on 2026-11-17), so a song ending
-    then would have jumped to a timed item early or gone silent. Now the refill's
-    own commits are held back: the player keeps seeing the old songs until the new
-    ones are committed together with their removal. If the refill fails, nothing
-    changes. Returns songs removed (0 when the refill failed).
+    A station that fills from playlists: the new songs are picked first, with the
+    old ones only left out of the count, and then old and new are swapped in one
+    short transaction. Picking takes seconds on the live database (longer on the
+    first draw after a restart, which reads the play history); done after the
+    delete, as it was until 2026-11-18, it held the deleted rows locked all that
+    time, and song changes, start reports from the playout engine and library
+    deletes waited behind it.
+
+    A station that fills from schedule rules: the old songs are deleted and the
+    fill's own commits are held back until the new ones are written, so the
+    player never sees a queue without songs (Jerusalem had none from 16:21:34 to
+    16:22:31 on 2026-11-17 when the delete was committed first).
     """
+    from app.services.playlist_generator_service import settings_for
     from app.services.queue_replenish_service import QueueReplenishService
 
     await db.commit()  # the caller's own change is saved whatever happens below
+    # The change was just made in this session; read blocks and playlists afresh
+    db.expire_all()
+    config = (
+        await db.execute(select(Station.automation_config).where(Station.id == station_id))
+    ).scalar_one_or_none()
+    if settings_for(config).enabled or await uses_block_playlists(db, station_id):
+        service = QueueReplenishService(db, station_id)
+        service.replace_all = True
+        try:
+            await service.replenish()
+            await db.commit()
+        except Exception:
+            logger.exception("Queue refill after a schedule change failed for station %s", station_id)
+            await db.rollback()
+            return 0
+        return service.replaced
+
     db.commit = db.flush  # replenish commits in batches; hold them until the swap
     try:
         removed = await remove_automatic_songs(db, station_id, keep_next=KEEP_NEXT)
-        # The change was just made in this session; read blocks and playlists afresh
         db.expire_all()
         await QueueReplenishService(db, station_id).replenish()
     except Exception:
