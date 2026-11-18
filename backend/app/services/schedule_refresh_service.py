@@ -272,11 +272,16 @@ async def replace_automatic_songs(db: AsyncSession, station_id) -> int:
         await db.execute(select(Station.automation_config).where(Station.id == station_id))
     ).scalar_one_or_none()
     if settings_for(config).enabled or await uses_block_playlists(db, station_id):
+        from app.api.v1.queue import _refill_lock
+
         service = QueueReplenishService(db, station_id)
         service.replace_all = True
         try:
-            await service.replenish()
-            await db.commit()
+            # One refill of a station at a time: a top-up after a song change
+            # that ran beside the redraw added songs the redraw had not counted.
+            async with _refill_lock(station_id):
+                await service.replenish()
+                await db.commit()
         except Exception:
             logger.exception("Queue refill after a schedule change failed for station %s", station_id)
             await db.rollback()
