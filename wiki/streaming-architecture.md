@@ -243,6 +243,7 @@ A plain `<audio src=stream>` in Chrome waits for about 200 KB of the 320 kbps st
 Heard live on Main: the stream kept playing but the site showed nothing on air and the listener page said "Offline". A schedule refresh (`schedule_refresh_service.remove_automatic_songs` / redraw) deleted the unplayed automatic songs, including the one already handed to the engine. Its `/started` report then matched no queue entry, so nothing was marked playing and the queue drifted from what was heard.
 
 - `playout_engine.held_entry_ids(station)` (the cued entry and timed items already sent) are excluded from the refresh.
+- **One start report at a time** (2026-11-18): `handle_started` holds a per-station lock (`EngineState.started_lock`), and a report repeating the last entry within `REPEAT_START_SECONDS` (10 s) changes nothing and answers `repeat: true`. Two reports taken at once both closed the item before and wrote its play log twice (Main 20:31Z: a sponsorship counted twice in plays and missed plays). Test: `test_a_start_reported_twice_logs_the_item_before_once`.
 - The link remembers the asset of the last 30 entries it handed out (`EngineState.handed`), and of every hand-over in the `engine_handoffs` table (model `EngineHandoff`), so it also works after a backend restart. A start report for one that was deleted some other way puts a fresh entry with that asset on air instead of leaving the station empty.
 - The listener page shows "On Air" whenever the stream is playing, whatever the now-playing record says.
 

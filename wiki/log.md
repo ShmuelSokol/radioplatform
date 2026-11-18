@@ -395,4 +395,5 @@ INGEST 2026-11-18 sponsor-accounts.md Sponsors page is a client database (list w
 INGEST 2026-11-18 live-shows.md phone callers join the show's own mixer over a Twilio media stream (/ws/live/phone/{call}, services/phone_audio.py); the conference redirect is skipped for them; V2-70 fixed
 INGEST 2026-11-18 live-shows.md sponsorships and was-soft items due during a live show go back to soft and play first after it (soft_items_wait_for_show, QueueEntry.was_soft, take_back_timed); take-over deletes older resume@ entries of the paused item (story replayed 3 times on Jerusalem)
 INGEST 2026-11-18 control-room.md finding the Sponsor panel: SPONSOR › tag on queue rows (min-h-0 button, rows stay one line) and the Sponsors tab (SponsorsToday.tsx, GET /spot-schedules/station-day)
+INGEST 2026-11-18 streaming-architecture.md start reports taken one at a time per station and an exact repeat ignored: two at once wrote the previous item's play log twice (Main 20:31Z sponsorship counted twice)
 UPDATE 2026-11-18 control-room.md sponsorship rule tightened (weather report no longer tagged), station-day query uses indexes, panel shows today's not-aired plays at once
