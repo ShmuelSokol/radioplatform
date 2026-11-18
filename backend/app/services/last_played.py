@@ -34,6 +34,11 @@ FIRST_READ_DAYS = 30
 # False in the tests (conftest): the first read is then the whole history, in
 # the caller's session, so a test sees every play at once.
 BACKGROUND_FULL_READ = True
+# A failed whole-history read is tried again after this long, a failed warm-up read after that long
+RETRY_SECONDS = 600.0
+WARM_RETRY_SECONDS = 2.0
+# A whole-history read slower than this logs the database's plan for it, once per process
+EXPLAIN_OVER_SECONDS = 3.0
 
 
 class _Entry:
@@ -141,17 +146,23 @@ def _in_background(coro) -> None:
 
 async def _reload(station_id) -> None:
     """The whole history again, in its own session; then swapped in, keeping any
-    play that was merged in while the read ran."""
+    play that was merged in while the read ran. A failed read (the live database
+    drops connections now and then) is tried again after RETRY_SECONDS."""
     import logging
 
     from app.db.engine import async_session_factory
 
+    log = logging.getLogger(__name__)
     sid = str(station_id)
     try:
         async with _reload_turn():
             began = datetime.now(timezone.utc)
+            started = time.monotonic()
             async with async_session_factory() as session:
                 rows = (await session.execute(_full_query(station_id))).all()
+                took = time.monotonic() - started
+                if took > EXPLAIN_OVER_SECONDS:
+                    await _explain(session, station_id, took)
         fresh: dict[str, datetime] = {}
         _merge(fresh, rows)
         async with _locks.setdefault(sid, asyncio.Lock()):
@@ -165,7 +176,52 @@ async def _reload(station_id) -> None:
             entry.last = fresh
             entry.full_at = time.monotonic()
     except Exception:
-        logging.getLogger(__name__).warning("Last-played re-read failed for station %s", sid, exc_info=True)
+        log.warning("Last-played whole-history read failed for station %s", sid, exc_info=True)
+        entry = _cache.get(sid)
+        if entry is not None:
+            entry.full_at = time.monotonic() - FULL_RELOAD_SECONDS + RETRY_SECONDS
+
+
+_explained = False
+
+
+async def _explain(session, station_id, took: float) -> None:
+    """Once per process, when the whole-history read was slow: log the
+    database's own account of it (plan, rows, buffers) and the table's indexes.
+    Nobody has SQL access to the live database, and 9 to 19 s for 145,000 rows
+    (2026-11-18) is far more than the query should cost."""
+    global _explained
+    if _explained:
+        return
+    _explained = True
+    import logging
+
+    from sqlalchemy import text
+
+    log = logging.getLogger(__name__)
+    try:
+        if session.bind.dialect.name != "postgresql":
+            return
+        indexes = (await session.execute(text(
+            "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'play_logs'"
+        ))).all()
+        size = (await session.execute(text(
+            "SELECT pg_size_pretty(pg_table_size('play_logs')), pg_size_pretty(pg_indexes_size('play_logs')),"
+            " (SELECT reltuples::bigint FROM pg_class WHERE relname = 'play_logs')"
+        ))).first()
+        plan = (await session.execute(text(
+            "EXPLAIN (ANALYZE, BUFFERS) SELECT asset_id, max(start_utc) FROM play_logs"
+            " WHERE station_id = :sid AND asset_id IS NOT NULL GROUP BY asset_id"
+        ), {"sid": station_id})).all()
+        log.warning(
+            "LAST-PLAYED DIAGNOSIS: the whole-history read took %.1f s. Table %s, indexes %s, about %s rows. "
+            "Indexes: %s. Plan: %s",
+            took, size[0], size[1], size[2],
+            "; ".join(f"{name}: {definition}" for name, definition in indexes),
+            " / ".join(row[0] for row in plan),
+        )
+    except Exception:
+        log.warning("Last-played diagnosis failed", exc_info=True)
 
 
 async def warm_all() -> None:
@@ -187,8 +243,16 @@ async def warm_all() -> None:
     for station_id in ids:
         if str(station_id) in _cache:
             continue
-        try:
-            async with async_session_factory() as session:
-                await last_played(session, station_id)
-        except Exception:
-            log.warning("Last-played warm-up failed for station %s", station_id, exc_info=True)
+        for attempt in (1, 2, 3):
+            try:
+                async with async_session_factory() as session:
+                    await last_played(session, station_id)
+                break
+            except Exception:
+                # "connection was closed in the middle of operation" left every
+                # station unread after the 08:35Z restart on 2026-11-18
+                log.warning(
+                    "Last-played warm-up failed for station %s (attempt %d of 3)",
+                    station_id, attempt, exc_info=True,
+                )
+                await asyncio.sleep(WARM_RETRY_SECONDS)

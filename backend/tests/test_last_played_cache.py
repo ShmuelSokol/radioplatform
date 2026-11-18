@@ -241,3 +241,86 @@ async def test_whole_history_reads_take_turns(db_session, monkeypatch):
     await asyncio.gather(*(lp._reload(i) for i in ids))
     assert most == 1
     assert all(str(i) in lp._cache for i in ids)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_whole_history_read_is_tried_again_soon(db_session, monkeypatch):
+    """The live database drops a connection now and then ("connection was closed
+    in the middle of operation", 08:35Z on 2026-11-18). A failed read must not
+    count as done for a day."""
+    import app.db.engine as db_engine
+
+    monkeypatch.setattr(lp, "BACKGROUND_FULL_READ", True)
+    station = Station(id=uuid.uuid4(), name="Retry FM", timezone="America/New_York")
+    db_session.add(station)
+    await db_session.commit()
+
+    class Broken(_Sessions):
+        async def __aenter__(self):
+            raise ConnectionError("connection was closed in the middle of operation")
+
+    started = []
+
+    async def nothing(station_id):
+        started.append(station_id)
+
+    real = lp._reload
+    monkeypatch.setattr(lp, "_reload", nothing)
+    await lp.last_played(db_session, station.id)  # first read; the background read is "running"
+    entry = lp._cache[str(station.id)]
+    monkeypatch.setattr(db_engine, "async_session_factory", Broken(db_session))
+    await real(station.id)  # it fails, without raising
+
+    await lp.last_played(db_session, station.id)
+    assert len(started) == 1  # not again at once
+    entry.full_at -= lp.RETRY_SECONDS + 1
+    await lp.last_played(db_session, station.id)
+    import asyncio
+    await asyncio.sleep(0)
+    assert len(started) == 2  # but after ten minutes, not a day
+
+
+@pytest.mark.asyncio
+async def test_warm_up_tries_a_station_again(db_session, monkeypatch):
+    import app.db.engine as db_engine
+
+    monkeypatch.setattr(lp, "WARM_RETRY_SECONDS", 0.0)
+    station = Station(id=uuid.uuid4(), name="Warm FM", timezone="America/New_York")
+    db_session.add(station)
+    await db_session.commit()
+    monkeypatch.setattr(db_engine, "async_session_factory", _Sessions(db_session))
+    calls = []
+    real = lp.last_played
+
+    async def flaky(db, station_id):
+        calls.append(station_id)
+        if len([c for c in calls if c == station_id]) == 1:
+            raise ConnectionError("connection was closed in the middle of operation")
+        return await real(db, station_id)
+
+    monkeypatch.setattr(lp, "last_played", flaky)
+    await lp.warm_all()
+    assert calls.count(station.id) == 2
+    assert str(station.id) in lp._cache
+
+
+def test_a_slow_query_line_shows_the_end_of_the_statement_and_the_request():
+    """A 3.9 s SELECT could not be named from its log line: the first 500
+    characters were the column list, and nothing said which request ran it."""
+    from app.core import log_buffer
+    from app.db import engine as db_engine
+
+    statement = "SELECT " + ", ".join(f"queue_entries.col_{n}" for n in range(80)) + \
+        " FROM queue_entries WHERE queue_entries.station_id = $1 ORDER BY queue_entries.position"
+    shown = db_engine._shown(statement)
+    assert shown.startswith("SELECT queue_entries.col_0")
+    assert shown.endswith("WHERE queue_entries.station_id = $1 ORDER BY queue_entries.position")
+    assert len(shown) < 820
+    assert db_engine._shown("SELECT 1") == "SELECT 1"
+
+    assert db_engine._asked_by() == "background"
+    token = log_buffer.request_path_var.set("GET /api/v1/stations/x/queue")
+    try:
+        assert db_engine._asked_by() == "GET /api/v1/stations/x/queue"
+    finally:
+        log_buffer.request_path_var.reset(token)

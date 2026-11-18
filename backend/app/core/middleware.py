@@ -34,6 +34,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request_id = (request.headers.get("X-Request-ID") or str(uuid_mod.uuid4())[:8])[:40]
         request.state.request_id = request_id
         token = log_buffer.request_id_var.set(request_id)
+        path_token = log_buffer.request_path_var.set(f"{request.method} {request.url.path}")
         started = time.perf_counter()
         status = 500
         try:
@@ -51,6 +52,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
                 if status >= 500 or ms > 3000:
                     logger.warning("%s %s -> %s in %.0f ms [rid %s]", request.method, path, status, ms, request_id)
             log_buffer.request_id_var.reset(token)
+            log_buffer.request_path_var.reset(path_token)
 
 
 class ErrorsKeepCors:
