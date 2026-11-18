@@ -24,6 +24,9 @@ from app.services.spot_schedule_service import (
     reconcile_spot_slots,
 )
 
+# Slot counts depend on the minute; see clock_off_the_slots in conftest.py
+pytestmark = pytest.mark.usefixtures("clock_off_the_slots")
+
 NY = ZoneInfo("America/New_York")
 
 
@@ -142,7 +145,7 @@ async def test_exact_time_spot_reaches_the_queue_with_its_timing(
     # the station default: make the on-the-hour slot soft, and let the schedule follow it
     url = "/api/v1/spot-schedules/timing-defaults"
     r = await client.get(url, params={"station_id": str(station_id)}, headers=auth_headers)
-    assert r.json() == {"on_the_hour": "hard", "other": "soft"}
+    assert r.json() == {"on_the_hour": "hard", "half_hour": "soft", "other": "soft", "half_hour_time_check": False}
     r = await client.put(
         f"/api/v1/spot-schedules/{body['id']}", json={"timing_mode": None}, headers=auth_headers
     )

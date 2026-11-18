@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.db.session import get_db
 from app.services import playout_engine, playout_plan, playout_tunnel
 
@@ -47,6 +47,17 @@ def _require_engine(
         raise ForbiddenError("Invalid playout token")
     if not settings.engine_drives(station_id):
         raise NotFoundError("This station is not driven by the playout engine")
+    return station_id
+
+
+async def _one_engine(
+    station_id: uuid.UUID = Depends(_require_engine),
+    x_playout_instance: str | None = Header(default=None),
+) -> uuid.UUID:
+    """One engine per station: a second engine calling with this station's id is refused
+    (409) and takes nothing from the queue (playout_engine.instance_ok)."""
+    if not await playout_engine.instance_ok(station_id, x_playout_instance):
+        raise ConflictError("Another playout engine plays this station")
     return station_id
 
 
@@ -118,17 +129,18 @@ async def commands_poll(
 
 @router.post("/{station_id}/hello")
 async def hello(
-    station_id: uuid.UUID = Depends(_require_engine),
+    station_id: uuid.UUID = Depends(_one_engine),
     body: HelloReport | None = Body(default=None),
+    x_playout_instance: str | None = Header(default=None),
 ):
     """The engine announces that it (re)started, and what it understands (`proto`)."""
-    await playout_engine.handle_hello(station_id, body.proto if body else None)
+    await playout_engine.handle_hello(station_id, body.proto if body else None, x_playout_instance)
     return {"ok": True}
 
 
 @router.get("/{station_id}/next")
 async def next_track(
-    station_id: uuid.UUID = Depends(_require_engine),
+    station_id: uuid.UUID = Depends(_one_engine),
     given: str | None = None,
     proto: int | None = None,
     live: int | None = None,
@@ -150,7 +162,7 @@ async def next_track(
 @router.post("/{station_id}/started")
 async def started(
     body: StartedReport,
-    station_id: uuid.UUID = Depends(_require_engine),
+    station_id: uuid.UUID = Depends(_one_engine),
     db: AsyncSession = Depends(get_db),
 ):
     """The engine reports what just went on air."""
@@ -164,3 +176,76 @@ async def started(
     logger.info("Start report station=%s entry=%s lane=%s answered in %d ms", station_id,
                 body.entry_id or "-", body.lane or "-", (time.monotonic() - t0) * 1000)
     return result
+
+
+# The show goes out as MP3 for the engine's live lane (agreed with the engine thread
+# 2026-11-18: CBR 192 kbps, 44.1 kHz stereo; engine proto 5 plays it)
+LIVE_MP3_ARGS = ("-f", "mp3", "-codec:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+                 "-write_xing", "0", "-id3v2_version", "0", "-flush_packets", "1")
+
+
+@router.get("/{station_id}/live.mp3")
+async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
+    """The station's live show as listeners hear it (after the broadcast delay, Dumps
+    applied, time checks included), for the playout engine's live lane and a local FM
+    box's relay. 204 while no show is heard; otherwise an MP3 stream that ends when the
+    show's delay has played out. Header token only, so it never lands in an access log."""
+    import asyncio
+
+    from fastapi.responses import StreamingResponse
+
+    from app.api.v1.live_shows_ws import live_relay
+    from app.services.live_air import RATE
+
+    air = live_relay.airs.get(str(station_id))
+    if air is None or not air.listening or air.closed:
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+    tap = air.tap()
+
+    async def stream():
+        proc = await asyncio.create_subprocess_exec(
+            # no probing and no input buffer: without these the first sound left 2 s late
+            "ffmpeg", "-v", "error", "-fflags", "nobuffer", "-probesize", "32", "-analyzeduration", "0",
+            "-f", "s16le", "-ar", str(RATE), "-ac", "1", "-i", "pipe:0",
+            *LIVE_MP3_ARGS, "pipe:1",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+
+        async def feed():
+            try:
+                while True:
+                    data = await tap.get()
+                    if data is None:
+                        break
+                    proc.stdin.write(data)
+                    await proc.stdin.drain()
+            except Exception:
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+
+        feeder = asyncio.ensure_future(feed())
+        try:
+            while True:
+                chunk = await proc.stdout.read(4096)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            air.untap(tap)
+            feeder.cancel()
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+            await proc.wait()
+
+    return StreamingResponse(stream(), media_type="audio/mpeg",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no",
+                                      # keeps the gzip middleware off it: gzip held the audio back
+                                      # in 64 KB lumps (2.7 s) for a client that accepts gzip
+                                      "Content-Encoding": "identity"})

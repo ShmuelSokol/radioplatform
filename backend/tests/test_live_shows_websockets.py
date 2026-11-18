@@ -111,12 +111,12 @@ def _clean_relay(monkeypatch):
 
     monkeypatch.setattr(queue_module, "_replenish_queue", no_replenish)
     relay = live_shows_ws.live_relay
-    for d in (relay.listeners, relay.on_air, relay.hosts, relay.callers,
+    for d in (relay.listeners, relay.on_air, relay.hosts, relay.callers, relay.airs, relay.on_first_air,
               live_shows_ws.live_show_manager.active_connections):
         d.clear()
     call_in_api._recent.clear()
     yield
-    for d in (relay.listeners, relay.on_air, relay.hosts, relay.callers,
+    for d in (relay.listeners, relay.on_air, relay.hosts, relay.callers, relay.airs, relay.on_first_air,
               live_shows_ws.live_show_manager.active_connections):
         d.clear()
 
@@ -135,7 +135,8 @@ async def ws_app(db_session, monkeypatch):
 
 
 async def _show(db, status=LiveShowStatus.LIVE, calls_enabled=True):
-    station = Station(id=uuid.uuid4(), name=f"Main {uuid.uuid4().hex[:6]}", timezone="America/New_York")
+    station = Station(id=uuid.uuid4(), name=f"Main {uuid.uuid4().hex[:6]}", timezone="America/New_York",
+                      automation_config={"live_delay_seconds": 0})  # the delay has its own tests
     db.add(station)
     await db.flush()
     now = datetime.now(UTC)
@@ -177,7 +178,7 @@ async def test_host_audio_reaches_the_station_listeners(ws_app, db_session):
     listener = WS(ws_app, f"/api/v1/ws/live/station/{station.id}/listen")
     await listener.connect()
     assert await listener.receive_json() == {"type": "live_state", "live": False, "show_id": None,
-                                             "sample_rate": 24000}
+                                             "sample_rate": 24000, "on_stream": False}
     elsewhere = WS(ws_app, f"/api/v1/ws/live/station/{other_show.station_id}/listen")
     await elsewhere.connect()
     await elsewhere.receive_json()

@@ -429,13 +429,16 @@ if (want('diag')) {
   });
   await safe('V2-99 capture fails', async () => {
     await page.evaluate(() => document.querySelectorAll('[data-bug-reporter=""]').forEach((d) => d.remove()));
-    // html2canvas loads but throws (e.g. a page it cannot draw)
+    // Both ways of taking it load but throw (e.g. a page they cannot draw; bug 8: Safari)
     await page.route(/html2canvas[^/]*\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: 'export default async function () { throw new Error("e2e capture failed"); }' }));
+    await page.route(/modern-screenshot[^/]*\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: 'export async function domToJpeg() { throw new Error("e2e ms failed"); }' }));
     await page.reload();
     await page.getByRole('heading', { name: 'Manage Stations' }).waitFor({ timeout: 15000 });
     await sendReport('E2E no screenshot');
     const body = report();
     check('V2-99 if the screenshot cannot be taken the report is still sent without one', body.description === 'E2E no screenshot' && body.screenshot === null, String(body.screenshot).slice(0, 30));
+    const why = body.context?.screenshot?.failed || [];
+    check('V2-99 the report carries why each way of taking it failed (bug 8)', why.length === 2 && why[0].includes('e2e ms failed') && why[1].includes('e2e capture failed'), JSON.stringify(why));
   });
   await ctx.close();
 }

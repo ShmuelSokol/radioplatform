@@ -267,6 +267,8 @@
 .qn-site [class~="bg-rose-600"]:not(button):not(a) [class~="text-white"],
 .qn-site [class~="bg-yellow-500"][class~="text-white"],
 .qn-site [class~="bg-yellow-500"]:not(button):not(a) [class~="text-white"],
+.qn-site [class~="bg-yellow-600"][class~="text-white"],
+.qn-site [class~="bg-yellow-600"]:not(button):not(a) [class~="text-white"],
 .qn-site [class~="bg-yellow-700"][class~="text-white"],
 .qn-site [class~="bg-yellow-700"]:not(button):not(a) [class~="text-white"],
 .qn-site [class~="bg-yellow-800"][class~="text-white"],

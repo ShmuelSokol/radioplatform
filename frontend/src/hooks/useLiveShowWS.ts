@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import type { LiveShow, CallInRequest } from '../api/liveShows';
+import type { LiveShow, CallInRequest, AirStatus, ChatMessage } from '../api/liveShows';
 
 interface LiveShowWSState {
   show: LiveShow | null;
   callers: CallInRequest[];
   secondsRemaining: number | null;
   isConnected: boolean;
+  /** The show's broadcast delay, sent by the server twice a second while on air */
+  air: AirStatus | null;
+  /** The last Dump anyone pressed (host or screener) */
+  lastDump: { seconds: number; by: string; at: number } | null;
+  /** A staff chat line that just arrived (the chat panel adds it to what it loaded) */
+  lastChat: ChatMessage | null;
 }
 
 /**
@@ -18,6 +24,9 @@ export function useLiveShowWS(showId: string | undefined): LiveShowWSState {
   const [callers, setCallers] = useState<CallInRequest[]>([]);
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [air, setAir] = useState<AirStatus | null>(null);
+  const [lastDump, setLastDump] = useState<LiveShowWSState['lastDump']>(null);
+  const [lastChat, setLastChat] = useState<ChatMessage | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempts = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,7 +115,8 @@ export function useLiveShowWS(showId: string | undefined): LiveShowWSState {
                 setSecondsRemaining(message.data.seconds ?? null);
                 break;
               case 'caller_queued':
-                setCallers(prev => [...prev, message.data]);
+                // Never twice (a second socket, or a call already in show_state)
+                setCallers(prev => (prev.some(c => c.id === message.data.id) ? prev : [...prev, message.data]));
                 break;
               case 'caller_updated':
                 setCallers(prev =>
@@ -126,6 +136,15 @@ export function useLiveShowWS(showId: string | undefined): LiveShowWSState {
               case 'show_ended':
               case 'show_hard_stopped':
                 setShow(prev => prev ? { ...prev, status: 'ended' } : prev);
+                break;
+              case 'air_status':
+                setAir(message.data);
+                break;
+              case 'air_dump':
+                setLastDump({ seconds: message.data.seconds, by: message.data.by, at: Date.now() });
+                break;
+              case 'chat':
+                setLastChat(message.data);
                 break;
               case 'ping':
                 ws.send('pong');
@@ -176,11 +195,14 @@ export function useLiveShowWS(showId: string | undefined): LiveShowWSState {
         pollTimer.current = null;
       }
       if (wsRef.current) {
+        // Leaving the page: this close must not start a reconnect (a second socket
+        // then listed every caller twice)
+        wsRef.current.onclose = null;
         wsRef.current.close();
         wsRef.current = null;
       }
     };
   }, [showId]); // Only re-run when showId changes
 
-  return { show, callers, secondsRemaining, isConnected };
+  return { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat };
 }

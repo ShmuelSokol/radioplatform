@@ -9,7 +9,7 @@ What it reports, per active station (none during a live show):
 | kind | when | severity |
 |---|---|---|
 | late_timed | a hard timed item (time check, hard block, hard sponsorship) started more than 8 s after its time, or is still pending 8 s after it | critical + push |
-| hour_missing | 40 s after each local hh:00, a station that aired a time check in the past 3 h has none that started within 20 s of the hour | critical + push |
+| hour_missing | 40 s after each local hh:00, a station that aired a time check in the past 3 h has none that started within 20 s of the hour; also at hh:30 on a station with `half_hour_time_check` and the half hour on the second, when a half-hour time check was queued for that minute (see hourly-slots.md) | critical + push |
 | dead_air | nothing on air for 20 s, outside blackouts | critical + push |
 | engine_drift | engine station: the engine's /status entry differs from the site's playing entry for 20 s, or the engine does not answer | critical + push |
 | overrun | the item shown on air is 30 s past its length (site and air parted) | warning |

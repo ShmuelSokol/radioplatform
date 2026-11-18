@@ -2,21 +2,39 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
-import { approveCall, rejectCall, putCallerOnAir, endCall, updateCallInfo } from '../../api/liveShows';
+import { approveCall, rejectCall, putCallerOnAirAsking, endCall, holdCall, nextCallerAsking, updateCallInfo } from '../../api/liveShows';
 import type { CallInRequest } from '../../api/liveShows';
+import DelayPanel from './live/DelayPanel';
+import CallerNote from './live/CallerNote';
+import CallerHistory from './live/CallerHistory';
+import MarkedCallers from './live/MarkedCallers';
+import ChatPanel from './live/ChatPanel';
+import TalkButton, { TalkNote } from './live/TalkButton';
+import { useTalkback } from '../../hooks/useTalkback';
+
+const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AIR)
 
 export default function CallScreener() {
   const { showId } = useParams<{ showId: string }>();
-  const { show, callers, secondsRemaining, isConnected } = useLiveShowWS(showId);
+  const { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [nameValue, setNameValue] = useState('');
+  const talk = useTalkback(showId);
 
   const currentShow = show || showData;
 
-  const waitingCallers = callers.filter(c => c.status === 'waiting' || c.status === 'screening');
+  // Priority callers first; among equals, who waited longest (the order they arrived in)
+  const waitingCallers = callers
+    .filter(c => c.status === 'waiting' || c.status === 'screening')
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => Number(b.c.history?.standing === 'priority') - Number(a.c.history?.standing === 'priority') || a.i - b.i)
+    .map(x => x.c);
+  const standings = callers.map(c => `${c.id}:${c.history?.standing ?? ''}`).join(',');
   const approvedCallers = callers.filter(c => c.status === 'approved');
-  const onAirCaller = callers.find(c => c.status === 'on_air');
+  // Up to MAX_ON_AIR callers can be on air together; each hears the host and the others
+  const onAirCallers = callers.filter(c => c.status === 'on_air');
+  const anyOnAir = onAirCallers.length > 0;
 
   const handleApprove = async (callId: string) => {
     if (!showId) return;
@@ -30,11 +48,19 @@ export default function CallScreener() {
 
   const handlePutOnAir = async (callId: string) => {
     if (!showId) return;
-    try {
-      await putCallerOnAir(showId, callId);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed — another caller may be on air');
-    }
+    const problem = await putCallerOnAirAsking(showId, callId);
+    if (problem) alert(problem);
+  };
+
+  const handleHold = async (callId: string) => {
+    if (!showId) return;
+    try { await holdCall(showId, callId); } catch (err: any) { alert(err?.response?.data?.detail || 'Could not hold the caller'); }
+  };
+
+  const handleNext = async () => {
+    if (!showId) return;
+    const problem = await nextCallerAsking(showId);
+    if (problem) alert(problem);
   };
 
   const handleEndCall = async (callId: string) => {
@@ -66,7 +92,7 @@ export default function CallScreener() {
             <span className="text-sm text-gray-400">{currentShow?.title}</span>
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-500'}`} />
             {currentShow?.status === 'live' && (
-              <span className="text-[10px] bg-red-700 text-red-200 px-2 py-0.5 rounded-full animate-pulse uppercase font-bold">
+              <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse uppercase font-bold">
                 LIVE
               </span>
             )}
@@ -81,6 +107,17 @@ export default function CallScreener() {
           </div>
         )}
       </div>
+
+      <div className="mb-6 grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={anyOnAir} compact />
+        <ChatPanel showId={showId} lastChat={lastChat} />
+      </div>
+
+      <TalkNote
+
+        name={talk.talkingTo ? (callers.find(c => c.id === talk.talkingTo)?.caller_name || "the caller") : null}
+
+        error={talk.error} onStop={talk.stop} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Waiting callers */}
@@ -139,10 +176,13 @@ export default function CallScreener() {
                         {caller.caller_phone} &middot; waiting {getWaitTime(caller)}
                       </div>
                     </div>
-                    <span className="text-[10px] bg-amber-800 text-amber-200 px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] bg-amber-800 text-white px-2 py-0.5 rounded-full">
                       Hold
                     </span>
                   </div>
+
+                  <CallerNote showId={showId} caller={caller} />
+                  <CallerHistory showId={showId} caller={caller} />
 
                   <div className="flex gap-2">
                     <button
@@ -157,6 +197,7 @@ export default function CallScreener() {
                     >
                       Reject
                     </button>
+                    <TalkButton callId={caller.id} talkingTo={talk.talkingTo} onStart={talk.start} onStop={talk.stop} />
                   </div>
                 </div>
               ))}
@@ -167,15 +208,16 @@ export default function CallScreener() {
         {/* Right: On Air + Approved */}
         <div>
           {/* On Air */}
-          {onAirCaller && (
+          {anyOnAir && (
             <div className="mb-6">
-              <h2 className="text-sm font-bold text-red-400 uppercase mb-3">On Air</h2>
-              <div className="bg-red-950 border border-red-800 rounded-lg p-4">
+              <h2 className="text-sm font-bold text-red-400 uppercase mb-3">On Air{onAirCallers.length > 1 ? ` (${onAirCallers.length} together)` : ''}</h2>
+              {onAirCallers.map(onAirCaller => (
+              <div key={onAirCaller.id} className="bg-red-950 border border-red-800 rounded-lg p-4 mb-2" data-testid="on-air-card">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-red-300 font-bold text-lg">
                     {onAirCaller.caller_name || onAirCaller.caller_phone}
                   </span>
-                  <span className="text-[10px] bg-red-700 text-red-200 px-2 py-0.5 rounded-full animate-pulse">
+                  <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse">
                     ON AIR
                   </span>
                 </div>
@@ -187,20 +229,45 @@ export default function CallScreener() {
                     </span>
                   )}
                 </div>
-                <button
-                  onClick={() => handleEndCall(onAirCaller.id)}
-                  className="w-full bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
-                >
-                  End Call
-                </button>
+                <CallerNote showId={showId} caller={onAirCaller} />
+                <CallerHistory showId={showId} caller={onAirCaller} />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleHold(onAirCaller.id)}
+                    data-testid="hold-button"
+                    title="Off the air, still connected: back to Approved"
+                    className="flex-1 bg-amber-800 hover:bg-amber-700 text-amber-200 px-3 py-2 rounded text-sm transition"
+                  >
+                    Hold
+                  </button>
+                  <button
+                    onClick={() => handleEndCall(onAirCaller.id)}
+                    className="flex-1 bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
+                  >
+                    End Call
+                  </button>
+                </div>
               </div>
+              ))}
             </div>
           )}
 
           {/* Approved Queue */}
-          <h2 className="text-sm font-bold text-gray-400 uppercase mb-3">
-            Approved ({approvedCallers.length})
-          </h2>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="text-sm font-bold text-gray-400 uppercase">
+              Approved ({approvedCallers.length})
+            </h2>
+            {approvedCallers.length > 0 && anyOnAir && (
+              <button
+                onClick={handleNext}
+                data-testid="next-caller-button"
+                title="Ends every call on air and puts the caller who waited longest on air"
+                className="bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1.5 rounded text-[11px] font-bold transition"
+              >
+                Next caller
+              </button>
+            )}
+          </div>
           {approvedCallers.length === 0 ? (
             <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-8 text-center text-gray-600 text-sm">
               No approved callers
@@ -216,18 +283,22 @@ export default function CallScreener() {
                       </span>
                       <div className="text-[11px] text-gray-500">{caller.caller_phone}</div>
                     </div>
-                    <span className="text-[10px] bg-green-800 text-green-200 px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] bg-green-700 text-white px-2 py-0.5 rounded-full">
                       Approved
                     </span>
                   </div>
+                  <CallerNote showId={showId} caller={caller} />
+                  <CallerHistory showId={showId} caller={caller} />
                   <div className="flex gap-2">
                     <button
                       onClick={() => handlePutOnAir(caller.id)}
-                      disabled={!!onAirCaller}
+                      disabled={onAirCallers.length >= MAX_ON_AIR}
+                      title={anyOnAir ? (onAirCallers.length >= MAX_ON_AIR ? `${MAX_ON_AIR} callers are on air already` : 'Goes on air together with the caller already there') : undefined}
                       className="flex-1 bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1.5 rounded text-[11px] transition disabled:opacity-50"
                     >
                       Put On Air
                     </button>
+                    <TalkButton callId={caller.id} talkingTo={talk.talkingTo} onStart={talk.start} onStop={talk.stop} />
                     <button
                       onClick={() => handleEndCall(caller.id)}
                       className="bg-red-900 hover:bg-red-800 text-red-300 px-3 py-1.5 rounded text-[11px] transition"
@@ -241,6 +312,8 @@ export default function CallScreener() {
           )}
         </div>
       </div>
+
+      <MarkedCallers refresh={standings} />
     </div>
   );
 }

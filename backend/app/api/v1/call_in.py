@@ -14,7 +14,7 @@ from app.core.client_ip import client_ip
 from app.core.dependencies import get_db
 from app.models.call_in_request import CallInRequest, CallStatus
 from app.models.live_show import LiveShow, LiveShowStatus
-from app.schemas.live_show import CallInRequestInDB
+from app.services import caller_history
 from app.services.call_in import WEB_CALLER_PHONE, call_token
 
 router = APIRouter(prefix="/call-in", tags=["call-in"])
@@ -42,6 +42,9 @@ def _count_call(key: str) -> None:
 class WebCallIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     note: str | None = Field(default=None, max_length=300)
+    # A random id the call-in page keeps in this browser, so the screener sees
+    # "called 3 times before" (caller_history). Optional: older pages send none.
+    caller: str | None = Field(default=None, max_length=64)
 
 
 @router.post("/{station_id}", status_code=201)
@@ -59,17 +62,20 @@ async def start_web_call(station_id: uuid.UUID, body: WebCallIn, request: Reques
         raise HTTPException(409, "There is no live show on this station right now.")
     if not show.calls_enabled:
         raise HTTPException(409, "This show is not taking calls.")
+    key = caller_history.web_key(body.caller)
+    if await caller_history.standing_of(db, key) == "blocked":
+        raise HTTPException(403, "This show cannot take your call.")
     _count_call(rate_key)
     now = datetime.now(timezone.utc)
     call = CallInRequest(
         id=uuid.uuid4(), live_show_id=show.id, caller_phone=WEB_CALLER_PHONE,
         caller_name=body.name.strip(), notes=(body.note or "").strip() or None,
-        status=CallStatus.WAITING, hold_start=now,
+        status=CallStatus.WAITING, hold_start=now, caller_key=key,
     )
     db.add(call)
     await db.commit()
     await db.refresh(call)
-    data = CallInRequestInDB.model_validate(call).model_dump(mode="json")
+    data = (await caller_history.with_history(db, [call]))[0]
     try:
         from app.api.v1.live_shows_ws import broadcast_show_event
         # The full call, so the screener can list it at once (it keys callers by id)

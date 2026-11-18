@@ -64,7 +64,8 @@ class Engine:
 async def eng(db_session, monkeypatch):
     # Alerts at once in these tests; the 5 s hold has its own test
     monkeypatch.setattr(playout_engine, "EMERGENCY_ALERT_AFTER", 0)
-    station = Station(id=uuid.uuid4(), name="Engine FM", timezone="America/New_York")
+    station = Station(id=uuid.uuid4(), name="Engine FM", timezone="America/New_York",
+                      automation_config={"live_delay_seconds": 0})  # no broadcast delay: a show takes the air at once
     db_session.add(station)
     songs = []
     for i in range(4):
@@ -187,6 +188,77 @@ async def test_hello_forgets_what_the_engine_held(client, db_session, eng):
     # The engine lost its pre-loaded track: the same entry is handed to it again
     again = (await _next(client, station)).json()
     assert again["entry_id"] == str(entries[0].id)
+
+
+@pytest.mark.asyncio
+async def test_a_second_engine_with_the_same_station_id_is_refused(client, db_session, eng, monkeypatch):
+    """One engine per station (local FM box safety): an engine calling with another id while
+    the station's engine answers on its control line gets 409 and nothing from the queue,
+    and an alert is raised once. A restart (the control line answers with the new id, or
+    not at all) is taken, and an engine that sends no id is not checked."""
+    station, entries, _, _ = eng
+    import app.db.engine as db_engine
+    from tests.conftest import TestSessionLocal
+
+    monkeypatch.setattr(db_engine, "async_session_factory", TestSessionLocal)
+    reached = {"instance": "real-1"}
+
+    async def status(station_id):
+        return {"ok": True, **reached} if reached["instance"] else None
+
+    monkeypatch.setattr(playout_engine, "engine_status", status)
+    real = {**HEADERS, "X-Playout-Instance": "real-1"}
+    other = {**HEADERS, "X-Playout-Instance": "copied-box"}
+
+    assert (await client.post(f"/api/v1/playout/{station.id}/hello", headers=real)).status_code == 200
+    first = await client.get(f"/api/v1/playout/{station.id}/next", headers=real)
+    assert first.json()["entry_id"] == str(entries[0].id)
+
+    # The copied box: its hello does not wipe what the real engine holds, it gets nothing
+    assert (await client.post(f"/api/v1/playout/{station.id}/hello", headers=other)).status_code == 409
+    assert playout_engine.get_state(station.id).cued_entry_id == str(entries[0].id)
+    assert (await client.get(f"/api/v1/playout/{station.id}/next", headers=other)).status_code == 409
+    r = await client.post(f"/api/v1/playout/{station.id}/started", headers=other,
+                          json={"entry_id": str(entries[1].id), "lane": "main"})
+    assert r.status_code == 409
+    assert (await _fresh(db_session, entries[1].id)).status == "pending"
+    for _ in range(20):
+        await asyncio.sleep(0.05)
+        if [a for a in await _alerts(db_session, station.id)
+            if a.title == playout_engine.SECOND_ENGINE_ALERT_TITLE]:
+            break
+    alerts = [a for a in await _alerts(db_session, station.id)
+              if a.title == playout_engine.SECOND_ENGINE_ALERT_TITLE]
+    assert len(alerts) == 1 and alerts[0].severity == "critical"
+    # Its retries do not ask the real engine again
+    asked = []
+
+    async def counting(station_id):
+        asked.append(1)
+        return await status(station_id)
+
+    monkeypatch.setattr(playout_engine, "engine_status", counting)
+    assert (await client.get(f"/api/v1/playout/{station.id}/next", headers=other)).status_code == 409
+    assert asked == []
+    # The real engine carries on
+    assert (await client.get(f"/api/v1/playout/{station.id}/next?given={entries[0].id}",
+                             headers=real)).status_code == 200
+
+    # The real engine restarts: its control line answers with the new id, which is taken
+    reached["instance"] = "real-2"
+    restarted = {**HEADERS, "X-Playout-Instance": "real-2"}
+    assert (await client.post(f"/api/v1/playout/{station.id}/hello", headers=restarted)).status_code == 200
+    assert playout_engine.get_state(station.id).instance == "real-2"
+    # A backend restart: the first caller is checked against the control line again
+    playout_engine.reset_state(station.id)
+    assert (await client.get(f"/api/v1/playout/{station.id}/next", headers=other)).status_code == 409
+    assert (await client.get(f"/api/v1/playout/{station.id}/next", headers=restarted)).status_code == 200
+    # Control line down: the caller is taken (a blip must not take the station off air)
+    playout_engine.reset_state(station.id)
+    reached["instance"] = None
+    assert (await client.get(f"/api/v1/playout/{station.id}/next", headers=restarted)).status_code == 200
+    # An engine with no id is never checked
+    assert (await _next(client, station)).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -723,6 +795,38 @@ async def test_engine_gets_no_music_during_a_live_show(client, db_session, eng):
     await db_session.commit()
     r = await _next(client, station, str(entries[0].id))
     assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_engine_loads_the_item_after_the_show_during_the_show(client, db_session, eng):
+    """About 5 s of quiet after a show ended on Main (2026-11-18): the engine only asked for
+    its next item then and waited for the download. An engine that loads under its live
+    lane (proto 4, live=1) is handed the item that follows the show, the resume entry
+    first, and the tick leaves it alone. An older one, or one not yet quiet, gets nothing."""
+    from app.services import live_show_service
+
+    station, entries, engine, _ = eng
+    await _next(client, station)
+    await _on_air(client, station, entries[0].id)
+    row = await _fresh(db_session, entries[0].id)
+    row.started_at = datetime.now(UTC) - timedelta(seconds=60)
+    await db_session.commit()
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    base = f"/api/v1/playout/{station.id}/next?given={entries[0].id}"
+    assert (await client.get(f"{base}&proto=3&live=1", headers=HEADERS)).status_code == 204
+    assert (await client.get(f"{base}&proto=4&live=0", headers=HEADERS)).status_code == 204
+    r = await client.get(f"{base}&proto=4&live=1", headers=HEADERS)
+    assert r.status_code == 200
+    resume = await _fresh(db_session, uuid.UUID(r.json()["entry_id"]))
+    assert resume.asset_id == entries[0].asset_id   # the paused item carries on first
+    st = await db_session.get(Station, station.id)
+    await db_session.refresh(st)
+    engine.sent.clear()
+    await playout_engine.tick(db_session, st)
+    assert "/flush" not in engine.paths()
+    assert playout_engine.get_state(station.id).cued_entry_id == r.json()["entry_id"]
 
 
 @pytest.mark.asyncio

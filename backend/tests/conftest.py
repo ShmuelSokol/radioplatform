@@ -281,3 +281,48 @@ def app_log_reaches_caplog(caplog):
     yield
     if added:
         app_logger.removeHandler(caplog.handler)
+
+
+@pytest.fixture
+def clock_off_the_slots(monkeypatch):
+    """Pins "now" to minute 5 of the current hour (today's date, so date logic is
+    unchanged) for tests that count sponsorship slots. Slots sit on quarter hours, and
+    one due within the 2-minute safety margin is left alone by design (it may already
+    be with the player), so a test run at hh:13 to hh:15 counted one slot too many.
+    Patches `datetime` in every loaded app and test module."""
+    import sys
+    from datetime import UTC, datetime as real
+
+    pinned = real.now(UTC).replace(minute=5, second=0, microsecond=0)
+
+    class Pinned(real):
+        @classmethod
+        def now(cls, tz=None):
+            return pinned.astimezone(tz) if tz else pinned.replace(tzinfo=None)
+
+        @classmethod
+        def utcnow(cls):
+            return pinned.replace(tzinfo=None)
+
+    # Not app.core.security: a sign-in token's expiry would come from the pinned time, while
+    # the token check uses the real clock, so after hh:35 every request answered 401
+    # (CI at 14:42Z 2026-11-18)
+    for name, mod in list(sys.modules.items()):
+        if name == "app.core.security":
+            continue
+        if name.split(".")[0] in ("app", "tests") and getattr(mod, "datetime", None) is real:
+            monkeypatch.setattr(mod, "datetime", Pinned)
+    return pinned
+
+
+@pytest.fixture(autouse=True)
+def _no_live_recording_without_ffmpeg(monkeypatch):
+    """A live show is recorded with ffmpeg (live_recording.py). Where there is none (the
+    GitHub runner), the recorder failed and wrote its alert through the test's shared
+    database session in the middle of another request, which then answered 500."""
+    import shutil
+
+    if shutil.which("ffmpeg") is None:
+        from app.services import live_recording
+
+        monkeypatch.setattr(live_recording, "start", lambda *a, **k: None)

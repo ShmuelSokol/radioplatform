@@ -260,7 +260,7 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     assert "[on_air_quiet, timed, main, hold, emergency]" in liq
     assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
     assert 'elsif hold_open() then "hold" else "emergency"' in liq
-    assert "engine_proto = 3" in liq
+    assert "engine_proto = 5" in liq
 
 
 def test_speech_is_never_overlapped_and_the_song_crossfade_comes_from_the_backend():
@@ -319,7 +319,8 @@ def test_the_stream_is_quiet_while_a_host_is_on_air():
     # start, and the engine says with each ask whether it is on (a show that ended while
     # the backend restarted).
     liq = (INFRA / "radio.liq").read_text()
-    assert 'on_air_quiet = switch(id="host_gate", track_sensitive=false, [({live_on()}, blank(id="host_on_air"))])' in liq
+    assert 'on_air_quiet = switch(id="host_gate", track_sensitive=false, [' in liq
+    assert '({live_on()}, fallback(id="host_lane", track_sensitive=false, [live_feed, blank(id="host_on_air")]))' in liq
     assert 'control("/live"' in liq
     assert 'elsif live_on() then "live"' in liq
     assert "&live=#{if live_on() then 1 else 0 end}" in liq
@@ -415,7 +416,7 @@ def test_the_music_lane_stays_muted_until_the_next_item_starts_and_loads_it_ahea
     assert "main.skip()" in first and "main_gain := 1." not in first and "main_interrupted := false" not in first
     flush = liq[liq.index('control("/flush"'):]
     flush = flush[:flush.index("end)")]
-    assert 'on_air_lane() != "main" and not live_on()' in flush
+    assert 'on_air_lane() != "main" or live_on()' in flush
     assert "thread.run(fast=false, {ignore(main_requests.fetch())})" in flush
 
 
@@ -481,3 +482,63 @@ def test_the_engine_starts_quiet_until_its_first_item_instead_of_an_emergency_so
     started = liq[liq.index("def send_started"):]
     first_main = started[started.index('if lane == "main" then\n      last_main_entry := entry'):]
     assert "start_quiet_until := 0." in first_main[:200]
+
+
+def test_a_skip_holds_quiet_until_the_next_item_has_audio_instead_of_emergency_music():
+    """Main 13:27:42Z 2026-11-18: Next by hand onto an item "prepared" with nothing decoded
+    yet put 1.7 s of the emergency lane on air. Every skip of the music lane opens the
+    hold lane for up to 6 s; the next start from the music lane closes it."""
+    liq = _liq()
+    skip = liq[liq.index("def skip_main() ="):]
+    skip = skip[:skip.index("main.skip()")]
+    assert "start_quiet_until := time() + 6." in skip
+
+
+def test_the_item_after_a_live_show_loads_during_the_show():
+    """About 5 s of quiet after a show on Main: the music lane only asked for its next item
+    once the show was over. /flush now asks under the live lane too (proto 4), and the
+    backend quiets the engine before it flushes, so the flush loads that item."""
+    liq = _liq()
+    assert "engine_proto = 5" in liq
+    flush = liq[liq.index('control("/flush"'):]
+    flush = flush[:flush.index("end)")]
+    assert 'on_air_lane() != "main" or live_on()' in flush
+    live = liq[liq.index('control("/live"'):]
+    live = live[:live.index("end)")]
+    assert "main_requests.fetch()" not in live   # one ask only: the flush's
+    svc = (Path(__file__).resolve().parents[1] / "app/services/live_show_service.py").read_text()
+    take = svc[svc.index("async def take_over_station"):]
+    assert take.index("engine_live(station.id, True)") < take.index("engine_flush(station.id)")
+    release = svc[svc.index("async def release_station"):]
+    assert "engine_live(station.id, False)" in release[:release.index("return True")]
+
+
+def test_the_live_lane_plays_the_show_from_live_mp3_with_the_token_in_a_header():
+    """Engine proto 5: the host's show (after the broadcast delay) is on the stream. The
+    feed opens on live on, closes on live off, and the lane is quiet without it."""
+    liq = _liq()
+    assert "engine_proto = 5" in liq
+    feed = liq[liq.index("live_feed = input.http("):]
+    feed = feed[:feed.index("\n)\n")]
+    assert "start=false" in feed
+    assert '"#{backend_url}/playout/#{station_id}/live.mp3"' in feed
+    assert 'X-Playout-Token: #{token}' in feed and "token=" not in feed.split("live.mp3")[1]
+    lane = liq[liq.index("on_air_quiet = switch("):]
+    lane = lane[:lane.index("\n])\n")]
+    assert "[live_feed, blank(" in lane
+    live = liq[liq.index('control("/live"'):]
+    live = live[:live.index("end)")]
+    on, off = live.split("elsif not body.on")
+    assert "live_feed.start()" in on and "live_feed.stop()" in off
+
+
+def test_every_engine_call_carries_its_own_instance_id_for_the_one_engine_rule():
+    """One engine per station: each engine run sends a random id with every call and in
+    /status, so the backend can refuse a second engine with the same station id."""
+    liq = _liq()
+    assert 'engine_instance = "#{random.int(' in liq
+    assert '("X-Playout-Instance", engine_instance)' in liq
+    assert "instance=engine_instance" in liq  # in /status
+    # Every backend call uses the shared headers
+    assert liq.count("headers=auth_headers") >= 3
+    assert "status_code == 409" in liq

@@ -398,3 +398,31 @@ Each engine start report renumbered every playing and pending row (`compact_posi
 
 ## An engine start is quiet until its first item loads (2026-11-18)
 After a restart the engine's output began before its first item had loaded, so about 2 s of an emergency song went on air (Main and Jerusalem at every setup.sh rerun; on a local FM box it would go out on FM). `radio.liq` now keeps the hold lane open for up to 8 s after a start that reached the backend (`start_quiet_until`, set only when `/hello` answered; with the backend down the emergency folder still plays at once). The first start from the music lane closes it. The backend side mattered too: after `/hello` the entry it still shows as playing was cut by the restart, but the hold rule (`_hold_before_hard_item`) waited for that entry's end and answered 204 for 20 s when it would have ended just before a hard item, so the quiet window ran out into emergency music. `EngineState.fresh_start` (set by `/hello`, cleared by the next start report) makes the rule treat the station as having nothing on air. Harness `engine_crash_restart` now fails on any EMERGENCY after the restart.
+
+## The item after a live show loads during the show (2026-11-18)
+Music came back about 5 s after a show ended on Main (2 s in the harness): the music lane stands still under the live lane and only asked `/next` once the show was over, then waited for the download, and the backend told the engine "show over" only on its next scheduler pass. Now (engine `proto` 4, `ENGINE_PROTO_LIVE_PRELOAD`) `start_show` quiets the engine first and then flushes; `/flush` asks again under the live lane, and `/next` hands an engine that says `live=1` the item that follows the show (the paused item's resume entry first) instead of 204. `EngineState.cued_for_after_show` keeps the tick's during-show flush off that item. `end_show` sends `/live off` at once. Harness `live_show_quiet`: music back 0.8 s after the end (0.7 s with a 4 s backend). Gotcha: a second ask from the `/live` handler crossed the flush's ask with a slow backend, two items loaded, and the backend's queue-head check flushed both when the show ended; only the flush asks now.
+
+## A Next never falls into emergency music (2026-11-18)
+Main 13:27:42Z: Shmuel pressed Next by hand; the next item was "prepared" with 0.00 s decoded (cross analysis -nan dB) on the busy one-CPU droplet, so the music lane ran dry and the emergency lane played for 1.7 s. `skip_main` now sets `start_quiet_until` 6 s ahead, so the hold lane keeps the stream quiet until the next item has audio; the next music-lane start closes it. Harness `next_on_a_busy_server` pins the engine to one CPU beside two busy processes and presses Next right after items start; it did not reproduce the empty prepare locally (no emergency music with or without the fix), so the guard is the text test `test_a_skip_holds_quiet_until_the_next_item_has_audio_instead_of_emergency_music`.
+
+## The live show is on the stream (engine proto 5, 2026-11-18)
+The live lane used to be blank: the host was heard only through the listener pages' own socket. Now it plays the show from the backend's `GET /playout/{station}/live.mp3` (PR 317: after the broadcast delay, with Dumps and time checks, MP3 192 kbps; 204 when no show is heard; EOF when the delay has played out). `radio.liq` opens it with `input.http(start=false, ...)` on `/live on` and stops it on `/live off`; the token goes in ffmpeg's `headers` string arg, never in the URL (the endpoint refuses `?token=`). The lane is `fallback([live_feed, blank])` inside the `host_gate` switch, so before the first audio, during a stall and after EOF it is quiet, never music or emergency. `/playout-status` reports `engine_proto` and `live_on_stream` (proto >= `ENGINE_PROTO_LIVE_AUDIO`, 5), which listener pages use to switch to the stream for a show. Harness `live_show_on_the_stream` (the harness proxy serves a 1200 Hz "HOST" tone as live.mp3): host heard 1.5 s after the start, an 8 s stall is quiet (silence 2.4 s after the stall, host back 1.7 s after the feed returns), music back 1.0 s after the end, no emergency music. The harness station has `live_delay_seconds: 0`, since no host audio is sent there.
+
+## One engine per station (instance id)
+
+Every engine run makes a random id (`engine_instance` in radio.liq) and sends it as
+`X-Playout-Instance` with every call to the backend (hello, next, started) and in its
+`/status`. A local FM box's relay passes it on. The backend (`playout_engine.instance_ok`,
+dependency `_one_engine` in `api/v1/playout.py`) plays a station to one engine only: a
+caller whose id differs from the station's known engine is checked against the station's
+control line (the stream server's URL, or the box's relay while it polls). If that line
+answers with another id, the caller gets 409 on hello, next and started, takes nothing
+from the queue and does not reset what the real engine holds; a critical alert
+"Two playout engines for one station" is raised once, and the refused id is rechecked
+only every 60 s. A restart is never refused (the old engine is gone; the line answers with
+the new id or not yet at all), a control line that does not answer means the caller is
+taken (a blip must not take a station off air), and after a backend restart the first
+caller is checked the same way. An engine that sends no id is not checked. The refused
+engine's log says `hello: REFUSED`. Tests: `test_a_second_engine_with_the_same_station_id_is_refused`,
+relay `test_the_engine_instance_id_reaches_the_backend_and_a_refusal_reaches_the_engine`,
+harness `second_engine_refused`.

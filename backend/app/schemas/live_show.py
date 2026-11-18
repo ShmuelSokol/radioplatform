@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # --- LiveShow schemas ---
@@ -69,6 +70,8 @@ class CallInRequestInDB(BaseModel):
     screened_by: uuid.UUID | str | None = None
     created_at: datetime
     updated_at: datetime
+    # Earlier calls and the staff's standing for this caller (caller_history.with_history)
+    history: dict | None = None
 
 
 class CallInRequestListResponse(BaseModel):
@@ -79,3 +82,12 @@ class CallInRequestListResponse(BaseModel):
 class ScreenerAction(BaseModel):
     caller_name: str | None = None
     notes: str | None = None
+
+
+class DumpRequest(BaseModel):
+    drop_caller: bool = False
+
+
+class DelayRequest(BaseModel):
+    action: Literal["exit", "build"]
+    seconds: float | None = Field(default=None, ge=0, le=40)

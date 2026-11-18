@@ -80,3 +80,5 @@ a second for ever (review thread's walk-through; do-not-play is one tap in the c
 room since PR 251). Spots mode off alone did not cause it (the plan is empty). The
 sponsor's Missed Plays still lists the plays that did not air. Taking the mark off plans
 it again on the next refill. Test: `backend/tests/test_spot_slot_churn.py`.
+
+Tests and the clock: a slot due within the 2-minute safety margin is left alone by every replan (edit, pause, Spots off), so it still airs. Tests that count slots therefore depend on the minute they run (a run at hh:13 to hh:15 saw the hh:15 slot stay); `test_spot_schedules.py` and `test_spot_slot_churn.py` pin "now" to minute 5 of the hour with the `clock_off_the_slots` fixture in `tests/conftest.py`. Use it for any new slot-counting test.

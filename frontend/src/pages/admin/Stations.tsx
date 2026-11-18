@@ -369,12 +369,20 @@ function AutomationConfig({ config, onSave, saving }: {
   const [weatherInterval, setWeatherInterval] = useState(config.weather_interval_minutes ?? 30);
   const [longItems, setLongItems] = useState<string>(config.timed_during_long_items ?? 'pause');
   const [crossfade, setCrossfade] = useState<string>(String(config.crossfade_seconds ?? 1));
+  const [liveDelay, setLiveDelay] = useState<string>(String(config.live_delay_seconds ?? 15));
+  const [liveDump, setLiveDump] = useState<string>(String(config.live_dump_seconds ?? 0));
+  const [liveTimed, setLiveTimed] = useState<string>(config.live_timed_items ?? 'time');
+  const [liveRecord, setLiveRecord] = useState<boolean>(config.live_record_shows !== false);
 
   const handleSave = () => {
     onSave({
       ...config, // keep settings made elsewhere (program clock, weather region)
       timed_during_long_items: longItems,
       crossfade_seconds: Math.min(10, Math.max(0, Number.isFinite(parseFloat(crossfade)) ? parseFloat(crossfade) : 1)),
+      live_delay_seconds: Math.min(40, Math.max(0, Number.isFinite(parseFloat(liveDelay)) ? parseFloat(liveDelay) : 15)),
+      live_dump_seconds: Math.min(40, Math.max(0, Number.isFinite(parseFloat(liveDump)) ? parseFloat(liveDump) : 0)),
+      live_timed_items: liveTimed,
+      live_record_shows: liveRecord,
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
       weather_enabled: weatherOn,
@@ -423,6 +431,52 @@ function AutomationConfig({ config, onSave, saving }: {
         <span className="block mt-1 text-xs text-gray-500">
           How long the end of one song plays over the start of the next. 0 = no overlap: each song ends, then the next starts.
           Sponsorships, time checks, weather, shiurim and stories never overlap, whatever is set here.
+        </span>
+      </label>
+      <h4 className="text-sm font-bold text-gray-700 uppercase mt-6 mb-2">Live shows</h4>
+      <label className="block max-w-lg text-sm">
+        <span className="block font-medium text-gray-700">Broadcast delay (seconds)</span>
+        <input type="number" value={liveDelay} min={0} max={40} step={1}
+          onChange={e => setLiveDelay(e.target.value)}
+          className="mt-1 w-24 px-2 py-1 border rounded" data-testid="live-delay-seconds" />
+        <span className="block mt-1 text-xs text-gray-500">
+          Listeners hear a live show this many seconds after it is said, so the Dump button can cut a word
+          before it airs. 15 to 20 is usual. 0 = no delay: really live, and nothing can be cut. Up to 40.
+          The host can also change it during a show.
+        </span>
+      </label>
+      <label className="mt-4 block max-w-lg text-sm">
+        <span className="block font-medium text-gray-700">One Dump cuts (seconds)</span>
+        <input type="number" value={liveDump} min={0} max={40} step={1}
+          onChange={e => setLiveDump(e.target.value)}
+          className="mt-1 w-24 px-2 py-1 border rounded" data-testid="live-dump-seconds" />
+        <span className="block mt-1 text-xs text-gray-500">
+          0 = everything waiting in the delay (safest). A smaller number, such as 8 of 20, leaves room for a second Dump
+          right away, but only cuts what was said in the last 8 seconds.
+        </span>
+      </label>
+      <label className="mt-4 block max-w-lg text-sm">
+        <span className="block font-medium text-gray-700">Timed items during a live show</span>
+        <select value={liveTimed} onChange={e => setLiveTimed(e.target.value)}
+          className="mt-1 w-full px-2 py-1 border rounded" data-testid="live-timed-items">
+          <option value="time">The time check airs on time; the rest waits for the show to end</option>
+          <option value="all">Every hard timed item airs on time (time check, weather, hard sponsorships)</option>
+          <option value="none">Nothing interrupts the show</option>
+        </select>
+        <span className="block mt-1 text-xs text-gray-500">
+          The item plays to listeners at its exact time while the host keeps talking; the host's words wait in the delay
+          and air after it, so nothing is lost. Needs a delay above 0.
+        </span>
+      </label>
+      <label className="mt-4 flex max-w-lg items-start gap-2 text-sm">
+        <input type="checkbox" checked={liveRecord} onChange={e => setLiveRecord(e.target.checked)}
+          className="mt-1" data-testid="live-record-shows" />
+        <span>
+          <span className="block font-medium text-gray-700">Record every live show</span>
+          <span className="block mt-1 text-xs text-gray-500">
+            The show is recorded as listeners heard it (anything dumped is not in it) and appears in Archives as a
+            draft when it ends. Listen to it there and publish it.
+          </span>
         </span>
       </label>
       <button onClick={handleSave} disabled={saving}

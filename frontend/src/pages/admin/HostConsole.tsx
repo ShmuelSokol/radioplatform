@@ -3,15 +3,52 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useLiveShow, useEndLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
 import { useHostAudio } from '../../hooks/useHostAudio';
-import { endCall, putCallerOnAir } from '../../api/liveShows';
+import CartPanel from './live/CartPanel';
+import ChatPanel from './live/ChatPanel';
+import TalkButton, { TalkNote } from './live/TalkButton';
+import { useTalkback } from '../../hooks/useTalkback';
+import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../../api/liveShows';
+import DelayPanel from './live/DelayPanel';
+import CallerNote from './live/CallerNote';
+import CallerHistory from './live/CallerHistory';
+
+const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AIR)
 
 export default function HostConsole() {
   const { showId } = useParams<{ showId: string }>();
   const navigate = useNavigate();
-  const { show, callers, secondsRemaining, isConnected } = useLiveShowWS(showId);
+  const { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
-  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError } = useHostAudio(showId);
+  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting } = useHostAudio(showId);
+  // Cough: silent while the button (or the C key) is held. Mute: stays silent until pressed again.
+  const [micOff, setMicOff] = useState(false);
+  const [coughing, setCoughing] = useState(false);
+  // Talking to a caller off the air: the host's microphone to listeners is closed meanwhile
+  const [talking, setTalking] = useState(false);
+  const talk = useTalkback(showId, setTalking);
+  useEffect(() => { setMuted(micOff || coughing || talking); }, [micOff, coughing, talking, setMuted]);
+  useEffect(() => { if (!isRecording) { setMicOff(false); setCoughing(false); } }, [isRecording]);
+  useEffect(() => {
+    if (!isRecording) return;
+    const typing = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'c' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e)) setCoughing(true);
+    };
+    const up = (e: KeyboardEvent) => { if (e.key.toLowerCase() === 'c') setCoughing(false); };
+    const away = () => setCoughing(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', away);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', away);
+    };
+  }, [isRecording]);
 
   // Local countdown timer (decremented every 1s, re-synced via WS every 10s)
   const [localSeconds, setLocalSeconds] = useState<number | null>(null);
@@ -44,7 +81,9 @@ export default function HostConsole() {
   }, [show?.status, hardStopped]);
 
   const currentShow = show || showData;
-  const onAirCaller = callers.find(c => c.status === 'on_air');
+  // Up to MAX_ON_AIR callers can be on air together; each hears the host and the others
+  const onAirCallers = callers.filter(c => c.status === 'on_air');
+  const anyOnAir = onAirCallers.length > 0;
   const approvedCallers = callers.filter(c => c.status === 'approved');
 
   const formatTime = (seconds: number | null): string => {
@@ -72,13 +111,21 @@ export default function HostConsole() {
     await endCall(showId, callId);
   };
 
+  const handleHold = async (callId: string) => {
+    if (!showId) return;
+    try { await holdCall(showId, callId); } catch (err: any) { alert(err?.response?.data?.detail || 'Could not hold the caller'); }
+  };
+
+  const handleNext = async () => {
+    if (!showId) return;
+    const problem = await nextCallerAsking(showId);
+    if (problem) alert(problem);
+  };
+
   const handlePutOnAir = async (callId: string) => {
     if (!showId) return;
-    try {
-      await putCallerOnAir(showId, callId);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to put caller on air');
-    }
+    const problem = await putCallerOnAirAsking(showId, callId);
+    if (problem) alert(problem);
   };
 
   if (hardStopped) {
@@ -99,18 +146,18 @@ export default function HostConsole() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-3 sm:p-4">
+    <div className="min-h-screen bg-gray-950 text-white p-3 sm:p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 sm:mb-6">
         <div className="min-w-0 flex-1">
           <h1 className="text-lg sm:text-xl font-bold text-cyan-300 truncate">{currentShow?.title || 'Host Console'}</h1>
           <div className="flex items-center gap-2 mt-1">
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-500'}`} />
-            <span className="text-[11px] text-gray-500">
+            <span className="text-[11px] text-gray-400">
               {isConnected ? 'Connected' : 'Reconnecting...'}
             </span>
             {currentShow?.status === 'live' && (
-              <span className="text-[10px] bg-red-700 text-red-200 px-2 py-0.5 rounded-full animate-pulse uppercase font-bold">
+              <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse uppercase font-bold">
                 LIVE
               </span>
             )}
@@ -123,6 +170,12 @@ export default function HostConsole() {
           End Show
         </button>
       </div>
+
+      <TalkNote
+
+        name={talk.talkingTo ? (callers.find(c => c.id === talk.talkingTo)?.caller_name || "the caller") : null}
+
+        error={talk.error} onStop={talk.stop} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left column: Countdown + Mic */}
@@ -161,33 +214,95 @@ export default function HostConsole() {
               )}
             </div>
 
+            {isRecording && (
+              <div className="flex items-stretch gap-2 mb-3">
+                <button
+                  onPointerDown={e => { e.preventDefault(); setCoughing(true); }}
+                  onPointerUp={() => setCoughing(false)}
+                  onPointerLeave={() => setCoughing(false)}
+                  onPointerCancel={() => setCoughing(false)}
+                  onContextMenu={e => e.preventDefault()}
+                  data-testid="cough-button"
+                  title="Hold C"
+                  className={`flex-1 px-3 py-3 rounded text-sm font-bold transition select-none touch-none ${
+                    coughing ? 'bg-yellow-500 text-black' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+                >
+                  Cough
+                  <span className="block text-[11px] font-normal">hold (or hold C)</span>
+                </button>
+                <button
+                  onClick={() => setMicOff(v => !v)}
+                  aria-pressed={micOff}
+                  data-testid="mute-button"
+                  className={`flex-1 px-3 py-3 rounded text-sm font-bold transition ${
+                    micOff ? 'bg-yellow-500 text-black' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+                >
+                  {micOff ? 'Unmute mic' : 'Mute mic'}
+                  <span className="block text-[11px] font-normal">{micOff ? 'you are not heard' : 'stays off until pressed again'}</span>
+                </button>
+              </div>
+            )}
+            {isRecording && muted && (
+              <div className="text-yellow-400 text-sm mb-2 font-bold" role="status" data-testid="mic-muted-note">
+                {talking
+                  ? 'TALKING OFF AIR: only the caller hears you. Listeners do not. Press End talk to go back.'
+                  : 'MIC OFF: listeners do not hear you. Callers on air are still heard.'}
+              </div>
+            )}
+
             {/* VU Meter */}
             <div className="h-4 bg-[#0a0a28] rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-75 rounded-full ${
                   audioLevel > 0.8 ? 'bg-red-500' : audioLevel > 0.5 ? 'bg-yellow-500' : 'bg-green-500'
                 }`}
-                style={{ width: `${audioLevel * 100}%` }}
+                style={{ width: `${(muted ? 0 : audioLevel) * 100}%` }}
               />
             </div>
 
+            {reconnecting && (
+              <div className="text-yellow-400 text-sm mt-2 font-bold" role="status" data-testid="reconnecting-note">
+                Connection lost. Reconnecting… keep talking; you are back on air as soon as it returns.
+              </div>
+            )}
             {audioError && (
               <div className="text-red-400 text-[11px] mt-2">{audioError}</div>
             )}
+            {isRecording && air?.mode === 'pre-roll' && (
+              <div className="text-yellow-400 text-sm mt-2 font-bold" data-testid="preroll-note">
+                {(air.hold ?? 0) > Math.max(0, air.target - air.delay)
+                  ? `A timed item is on air first. Listeners hear you in ${Math.ceil(air.hold ?? 0)} s. Start talking now.`
+                  : `Listeners hear you in ${Math.max(0, Math.ceil(air.target - air.delay))} s. Start talking now.`}
+              </div>
+            )}
+            {isRecording && air?.on_air && !muted && (
+              <div className="text-red-400 text-sm mt-2 font-bold" data-testid="heard-note">
+                {air.delay > 0.5
+                  ? `Listeners hear you ${air.delay.toFixed(0)} s later.`
+                  : air.target > 0 ? 'Listeners hear you almost at once: the delay is building back.' : 'Listeners hear you now.'}
+              </div>
+            )}
           </div>
+
+          {(show ?? showData)?.station_id && (
+            <CartPanel stationId={String((show ?? showData)!.station_id)}
+              live={isRecording} playing={cartPlaying} onPlay={playCart} onStop={stopCart} />
+          )}
+
+          <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={anyOnAir} />
         </div>
 
         {/* Center: On-air caller */}
         <div className="space-y-4">
           <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4">
-            <div className="text-[11px] text-gray-400 uppercase mb-3">Caller On Air</div>
-            {onAirCaller ? (
-              <div className="bg-red-950 border border-red-800 rounded-lg p-4">
+            <div className="text-[11px] text-gray-400 uppercase mb-3">Caller On Air{onAirCallers.length > 1 ? ` (${onAirCallers.length} together)` : ''}</div>
+            {anyOnAir ? onAirCallers.map((onAirCaller, i) => (
+              <div key={onAirCaller.id} className="bg-red-950 border border-red-800 rounded-lg p-4 mb-2" data-testid="on-air-card">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-red-300 font-bold text-lg">
                     {onAirCaller.caller_name || onAirCaller.caller_phone}
                   </span>
-                  <span className="text-[10px] bg-red-700 text-red-200 px-2 py-0.5 rounded-full animate-pulse">
+                  <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse">
                     ON AIR
                   </span>
                 </div>
@@ -199,19 +314,42 @@ export default function HostConsole() {
                     </span>
                   )}
                 </div>
-                <button
-                  onClick={() => handleEndCall(onAirCaller.id)}
-                  className="w-full bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
-                >
-                  End Call
-                </button>
+                <CallerNote showId={showId} caller={onAirCaller} big />
+                <CallerHistory showId={showId} caller={onAirCaller} readOnly />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleHold(onAirCaller.id)}
+                    data-testid="hold-button"
+                    title="Off the air, still connected: back to the approved queue"
+                    className="flex-1 bg-amber-800 hover:bg-amber-700 text-amber-200 px-3 py-2 rounded text-sm transition"
+                  >
+                    Hold
+                  </button>
+                  <button
+                    onClick={() => handleEndCall(onAirCaller.id)}
+                    className="flex-1 bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
+                  >
+                    End Call
+                  </button>
+                </div>
+                {i === onAirCallers.length - 1 && approvedCallers.length > 0 && (
+                  <button
+                    onClick={handleNext}
+                    data-testid="next-caller-button"
+                    title="Ends every call on air and puts the caller who waited longest on air"
+                    className="mt-2 w-full bg-green-800 hover:bg-green-700 text-green-200 px-3 py-3 rounded text-sm font-bold transition"
+                  >
+                    Next caller: {approvedCallers[0].caller_name || approvedCallers[0].caller_phone}
+                  </button>
+                )}
               </div>
-            ) : (
+            )) : (
               <div className="text-gray-600 text-center py-8 text-sm">
                 No caller on air
               </div>
             )}
           </div>
+          <ChatPanel showId={showId} lastChat={lastChat} />
         </div>
 
         {/* Right: Approved queue */}
@@ -232,14 +370,20 @@ export default function HostConsole() {
                       <span className="text-white text-sm font-medium">
                         {caller.caller_name || caller.caller_phone}
                       </span>
-                      <span className="text-[10px] bg-green-800 text-green-200 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] bg-green-700 text-white px-2 py-0.5 rounded-full">
                         Approved
                       </span>
                     </div>
                     <div className="text-[11px] text-gray-500 mb-2">{caller.caller_phone}</div>
+                    <CallerNote showId={showId} caller={caller} />
+                    <CallerHistory showId={showId} caller={caller} readOnly />
+                    <div className="mb-2">
+                      <TalkButton callId={caller.id} talkingTo={talk.talkingTo} onStart={talk.start} onStop={talk.stop} />
+                    </div>
                     <button
                       onClick={() => handlePutOnAir(caller.id)}
-                      disabled={!!onAirCaller}
+                      disabled={onAirCallers.length >= MAX_ON_AIR}
+                      title={anyOnAir ? (onAirCallers.length >= MAX_ON_AIR ? `${MAX_ON_AIR} callers are on air already` : 'Goes on air together with the caller already there') : undefined}
                       className="w-full bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1.5 rounded text-[11px] transition disabled:opacity-50"
                     >
                       Put On Air

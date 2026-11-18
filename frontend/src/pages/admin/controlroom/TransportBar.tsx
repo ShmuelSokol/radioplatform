@@ -53,7 +53,7 @@ interface Props {
   loopBusy: boolean;
   audio: TransportAudio;
   stationTz?: string;
-  liveShow: { id: string; title: string } | null;
+  liveShow: { id: string; title: string; label: string; short: string; heard: boolean; hint: string } | null;
   /** Phone held sideways: the compact left column (classic.css "phone landscape"). */
   landscape?: boolean;
   /** Sideways only: HS, Spots and Panic, in the button grid under Go next. */
@@ -76,17 +76,30 @@ function Clock({ tz }: { tz?: string }) {
 }
 
 /** A level meter in the style operators know: cyan segments, red near the top. */
-function VuBar({ level, label }: { level: number; label: string }) {
+function VuBar({ level, label, small = false }: { level: number; label: string; small?: boolean }) {
   return (
     <div className="flex items-center gap-1" title="Station level (RMS), -40 to 0 dBFS; red is above -8 dBFS">
-      <span className="w-9 text-[9px] italic text-cyan-200 leading-none">{label}</span>
-      <div className="flex-1 h-2.5 flex gap-px bg-black">
+      <span className={`${small ? 'w-2.5' : 'w-9'} text-[9px] italic text-cyan-200 leading-none`}>{small ? label[0] : label}</span>
+      <div className={`flex-1 ${small ? 'h-2' : 'h-2.5'} flex gap-px bg-black`}>
         {Array.from({ length: 30 }).map((_, i) => (
-          <div key={i} className={`flex-1 ${
+          <div key={i} data-lit={i < level ? '1' : undefined} className={`flex-1 ${
             i < level ? (i < 24 ? 'bg-cyan-400' : 'bg-red-500') : (i < 24 ? 'bg-cyan-950' : 'bg-red-950')
           }`} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Left and right meters for phones, tablets and car screens: no scale, one letter
+ *  labels, filling the room left in the LCD strip. They were drawn only on screens
+ *  1024 px wide or more, so a Tesla's browser never showed them (Shmuel, 2026-11-18). */
+function SmallMeters({ l, r, ready, className = '' }: { l: number; r: number; ready: boolean; className?: string }) {
+  return (
+    <div className={`flex flex-col justify-center gap-1 min-w-[48px] ${className}`} aria-hidden="true" data-testid="vu-meters"
+      title={ready ? 'Level of the station' : 'Tap anywhere to see levels'}>
+      <VuBar level={l} label="LEFT" small />
+      <VuBar level={r} label="RIGHT" small />
     </div>
   );
 }
@@ -283,7 +296,7 @@ export default function TransportBar(p: Props) {
             <div className={`qn-digits text-[28px] ${remainingCls}`} data-testid="remaining">{remainingText}</div>
           </div>
           {p.introSeconds > 0 && intro}
-          <div className="flex-1" />
+          <SmallMeters l={audio.vuL} r={audio.vuR} ready={audio.audioReady} className="flex-1 mx-1" />
           <div className="leading-none shrink-0 text-right">
             <div className="qn-lcd-label">Clock</div>
             <div className="qn-digits text-base"><Clock tz={p.stationTz} /></div>
@@ -317,10 +330,11 @@ export default function TransportBar(p: Props) {
             {soundControl('land')}
             {p.liveShow && (
               <Link to={`/admin/live/${p.liveShow.id}/host`}
-                className="inline-flex items-center gap-1 h-11 px-2 bg-red-700 text-white text-xs font-bold shrink-0 max-w-[110px]"
-                title="A live show is on. Open the host console.">
-                <span className="w-2 h-2 rounded-full bg-white animate-pulse shrink-0" />
-                <span className="truncate">LIVE</span>
+                data-testid="live-badge-small"
+                className={`inline-flex items-center gap-1 h-11 px-2 text-white text-xs font-bold shrink-0 max-w-[110px] ${p.liveShow.heard ? 'bg-red-700' : 'bg-yellow-600'}`}
+                title={p.liveShow.hint}>
+                <span className={`w-2 h-2 rounded-full bg-white shrink-0 ${p.liveShow.heard ? 'animate-pulse' : ''}`} />
+                <span className="truncate">{p.liveShow.short}</span>
               </Link>
             )}
             {p.stations.length > 1 ? (
@@ -345,11 +359,13 @@ export default function TransportBar(p: Props) {
   return (
     <header className="shrink-0 qn-lcd border-b-2 border-[#808080]">
       {/* LCD strip: status, remaining, intro, on air, levels, clock */}
-      <div className="flex items-center gap-3 lg:gap-5 px-2 lg:px-3 py-1.5 bg-black">
+      <div className="flex items-center gap-2 sm:gap-3 lg:gap-5 px-2 lg:px-3 py-1.5 bg-black">
         <div className="flex flex-col items-start gap-1 shrink-0 min-w-[70px]">
           {status}
           <span className="hidden lg:block">{stationSelect}</span>
           <PlayoutBadge stationId={p.stationId} chip className="hidden lg:inline-flex" />
+          {/* Phones and tablets: server or browser in short words here, so it needs no row of its own */}
+          <PlayoutBadge stationId={p.stationId} chip short className="lg:hidden" />
         </div>
         <div className="leading-none shrink-0"
           title={cutClock ? `This item fades at ${cutClock} for a timed item` : undefined}>
@@ -363,7 +379,7 @@ export default function TransportBar(p: Props) {
           <div className="qn-lcd-label">On air</div>
           <div className={`qn-digits text-2xl lg:text-[34px] ${p.isPlaying ? '' : '!text-green-900'}`}>{fmtDur(p.elapsed)}<span className="text-base lg:text-xl opacity-70"> / {fmtDur(p.duration)}</span></div>
         </div>
-        <div className="hidden lg:flex flex-1 min-w-[160px] max-w-[420px] flex-col gap-1" aria-hidden="true"
+        <div className="hidden lg:flex flex-1 min-w-[160px] max-w-[420px] flex-col gap-1" aria-hidden="true" data-testid="vu-meters"
           title={audio.audioReady ? 'Level of what you are hearing' : 'Press Listen to see levels'}>
           <VuBar level={audio.vuL} label="LEFT" />
           <VuBar level={audio.vuR} label="RIGHT" />
@@ -371,16 +387,17 @@ export default function TransportBar(p: Props) {
             <span>-40</span><span>-30</span><span>-24</span><span>-18</span><span>-12</span><span>-9</span><span>-6</span><span>-3</span><span>0</span>
           </div>
         </div>
-        <div className="flex-1 lg:hidden" />
+        <SmallMeters l={audio.vuL} r={audio.vuR} ready={audio.audioReady} className="flex-1 lg:hidden max-w-[360px] ml-auto max-[374px]:hidden" />
         {p.liveShow && (
           <Link to={`/admin/live/${p.liveShow.id}/host`}
-            className="hidden md:inline-flex items-center gap-1.5 h-8 px-2 bg-red-700 text-white text-xs font-bold shrink-0 max-w-[180px]"
-            title="A live show is on. Open the host console.">
-            <span className="w-2 h-2 rounded-full bg-white animate-pulse shrink-0" />
-            <span className="truncate">LIVE: {p.liveShow.title}</span>
+            data-testid="live-badge"
+            className={`hidden md:inline-flex items-center gap-1.5 h-8 px-2 text-white text-xs font-bold shrink-0 max-w-[240px] ${p.liveShow.heard ? 'bg-red-700' : 'bg-yellow-600'}`}
+            title={p.liveShow.hint}>
+            <span className={`w-2 h-2 rounded-full bg-white shrink-0 ${p.liveShow.heard ? 'animate-pulse' : ''}`} />
+            <span className="truncate">{p.liveShow.label}: {p.liveShow.title}</span>
           </Link>
         )}
-        <div className="leading-none shrink-0 text-right">
+        <div className="leading-none shrink-0 flex flex-col items-end" data-testid="lcd-clock">
           <div className="qn-lcd-label">Clock</div>
           <div className="qn-digits text-xl lg:text-[34px]"><Clock tz={p.stationTz} /></div>
         </div>
@@ -422,19 +439,26 @@ export default function TransportBar(p: Props) {
         <div className={`h-full ${ending ? 'bg-red-500' : 'bg-[var(--qn-digit)]'}`} style={{ width: `${progress}%` }} />
       </div>
 
-      {/* Phones and tablets: buttons and sound under the titles */}
-      <div className="lg:hidden flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#c0c0c0]">
-        {soundControl('phone')}
-        <PlayoutBadge stationId={p.stationId} chip />
-        <div className="flex-1" />
+      {/* Phones and tablets: sound, station and buttons under the titles. Sound and
+          station share a row (the station had a row of its own, one less song showed). */}
+      <div className="lg:hidden flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#c0c0c0] text-black">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 basis-full sm:basis-auto">
+          {soundControl('phone')}
+          {p.stations.length > 1 ? (
+            <select
+              aria-label="Station"
+              value={p.stationId ?? ''}
+              onChange={(e) => p.onStation(e.target.value)}
+              className="qn-field h-11 flex-1 min-w-0 sm:max-w-[320px] text-sm px-1.5"
+            >
+              {p.stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          ) : (
+            <span className="flex-1 min-w-0 truncate text-sm font-bold">{p.stations[0]?.name ?? 'No station'}</span>
+          )}
+        </div>
         <TransportButtons p={p} stacked={false} />
       </div>
-      {p.stations.length > 1 && (
-        <div className="lg:hidden px-2 py-1 bg-[#c0c0c0] border-t border-[#808080] flex items-center gap-2 text-black">
-          <span className="text-[11px]">Station</span>
-          {stationSelect}
-        </div>
-      )}
     </header>
   );
 }

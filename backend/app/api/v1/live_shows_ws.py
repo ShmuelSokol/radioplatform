@@ -5,7 +5,8 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Dict, Set
+from datetime import datetime, timezone
+from typing import Any, Dict, Set
 
 import numpy as np
 
@@ -116,6 +117,9 @@ class CallerLine:
         self.on_air = False
         self.buf = np.zeros(0, dtype=np.int16)
         self.primed = False
+        # Talkback: the screener or host talking to this caller off the air. While
+        # set, the caller hears that person (not the show) and they hear the caller
+        self.talk: WebSocket | None = None
 
     def add(self, frame: bytes) -> None:
         if not self.on_air or len(frame) < 2:
@@ -147,11 +151,30 @@ class StationLiveRelay:
         self.on_air: Dict[str, str] = {}  # station_id -> show_id whose host is sending
         self.hosts: Dict[str, WebSocket] = {}  # station_id -> host audio socket
         self.callers: Dict[str, CallerLine] = {}  # call_id -> caller line
+        # station_id -> the broadcast delay listeners hear the show through (services/live_air.py)
+        self.airs: Dict[str, Any] = {}
+        # Listener sockets that asked for no audio (their page plays the show from the stream)
+        self.no_audio: Set[WebSocket] = set()
+        self.quieted_early: set[str] = set()   # engine stations told to go quiet before first air
+        # station_id -> called once when listeners first hear the show (takes the station over)
+        self.on_first_air: Dict[str, object] = {}
 
     def state(self, station_id: str) -> dict:
-        show_id = self.on_air.get(station_id)
-        return {"type": "live_state", "live": show_id is not None, "show_id": show_id,
-                "sample_rate": LIVE_SAMPLE_RATE}
+        air = self.airs.get(station_id)
+        live = air is not None and air.listening
+        return {"type": "live_state", "live": live, "show_id": air.show_id if live else None,
+                "sample_rate": LIVE_SAMPLE_RATE, "on_stream": self.on_stream(station_id)}
+
+    @staticmethod
+    def on_stream(station_id: str) -> bool:
+        """The station's public stream carries the show itself (engine proto 5 plays
+        /playout/{id}/live.mp3): a page playing that stream must not also play the
+        frames sent here, or the host is heard twice, seconds apart."""
+        from app.config import settings
+        from app.services import playout_engine
+
+        return bool(settings.engine_drives(station_id) and settings.public_stream_url(station_id)
+                    and playout_engine.get_state(station_id).engine_proto >= playout_engine.ENGINE_PROTO_LIVE_AUDIO)
 
     async def _send_all(self, station_id: str, send) -> None:
         conns = list(self.listeners.get(station_id, ()))
@@ -162,13 +185,136 @@ class StationLiveRelay:
             if isinstance(result, Exception):
                 self.listeners.get(station_id, set()).discard(ws)
 
-    async def set_on_air(self, station_id: str, show_id: str | None) -> None:
-        if show_id is None:
-            self.on_air.pop(station_id, None)
-        else:
-            self.on_air[station_id] = show_id
+    async def _send_frame(self, station_id: str, data: bytes) -> None:
+        conns = [ws for ws in self.listeners.get(station_id, ()) if ws not in self.no_audio]
+        if not conns:
+            return
+        results = await asyncio.gather(*(asyncio.wait_for(ws.send_bytes(data), 2.0) for ws in conns),
+                                       return_exceptions=True)
+        for ws, result in zip(conns, results):
+            if isinstance(result, Exception):
+                self.listeners.get(station_id, set()).discard(ws)
+
+    async def broadcast_state(self, station_id: str) -> None:
         message = json.dumps(self.state(station_id))
         await self._send_all(station_id, lambda ws: ws.send_text(message))
+
+    async def set_on_air(
+        self, station_id: str, show_id: str | None, delay: float = 0.0, dump: float = 0.0,
+        end_at: float | None = None, drain: bool = True, on_done=None, heard_now: bool = False,
+        record: bool = False,
+    ) -> None:
+        """A host starts sending for `show_id` (listeners hear it `delay` seconds later),
+        or (show_id None) the show is over: what is still in the delay plays out first
+        when `drain`, then `on_done` runs and listeners are told it is off air."""
+        from app.services.live_air import LiveAir
+
+        air = self.airs.get(station_id)
+        if show_id is None:
+            self.on_air.pop(station_id, None)
+            if air is None:
+                await self.broadcast_state(station_id)
+                if on_done is not None:
+                    await on_done()
+                return
+            if on_done is not None:
+                air.on_done = on_done
+            air.finish("ended")
+            if not drain or air.drained() or not air.listening:
+                await air.stop()
+            return
+
+        self.on_air[station_id] = show_id
+        if air is not None and air.show_id == show_id and not air.closed \
+                and (not air.finishing or air.finish_reason == "host left"):
+            # The host came back (a reload, a network drop): carry on in the same delay
+            air.finishing = False
+            air.finish_reason = ""
+            air.enter_delay()
+            air.end_at = end_at
+            return
+        if air is not None:
+            await air.stop()
+
+        async def send(data: bytes, _station=station_id) -> None:
+            await self._send_frame(_station, data)
+
+        async def listening(on: bool, _station=station_id, _show=show_id) -> None:
+            await self.broadcast_state(_station)
+            if on:
+                first = self.on_first_air.pop(_station, None)
+                if first is not None:
+                    await first(_station, _show)
+
+        async def status(data: dict, _show=show_id) -> None:
+            await live_show_manager.broadcast_to_show(_show, {"type": "air_status", "data": data})
+
+        async def soon(_station=station_id) -> None:
+            # The stream server goes quiet a moment before the host is heard: told only
+            # at first air it played music under the host's first 2.5 s
+            from app.config import settings as _settings
+            if _settings.engine_drives(_station):
+                from app.services import playout_engine
+                self.quieted_early.add(_station)
+                await playout_engine.engine_live(_station, True)
+
+        new = LiveAir(station_id, show_id, send, delay=delay, dump=dump,
+                      on_listening=listening, on_status=status, on_soon=soon)
+        new.end_at = end_at
+
+        async def done(_station=station_id, _air=new) -> None:
+            if self.airs.get(_station) is _air:
+                self.airs.pop(_station, None)  # listeners were told when it stopped airing
+
+        async def closed(_station=station_id, _air=new) -> None:
+            if _station in self.quieted_early:
+                self.quieted_early.discard(_station)
+                if not _air.ever_heard:
+                    # Ended in the last second of its pre-roll: nothing took the station
+                    # over, so nothing else would give the stream its sound back
+                    from app.services import playout_engine
+                    await playout_engine.engine_live(_station, False)
+            from app.services import scheduler_engine as _sched
+            if _air.finish_reason == "host left" and _air.ever_heard \
+                    and _sched._scheduler_instance is not None and _sched._scheduler_instance.running:
+                # The last words of a host who left have played out: look now whether
+                # the station goes back to music, not on the scheduler's next pass
+                # (up to 3 s more silence; harness measured 3.6 to 3.9 s)
+                task = asyncio.ensure_future(_host_gone_now(_station, _air.show_id))
+                _holds.add(task)
+                task.add_done_callback(_holds.discard)
+
+        new.on_closed = closed
+
+        new.on_done = done
+        self.airs[station_id] = new
+        if new.target == 0 or heard_now:
+            # No delay: on air at once, like before the delay existed. Or the station is
+            # already the show's (the host came back after a drop): on air at once and
+            # the delay builds back while they talk, with no second pre-roll of silence
+            new.listening = True
+            new.ever_heard = True
+            new.mode = "no delay" if new.target == 0 else "building"
+            await listening(True)
+        new.start()
+        if record:
+            try:
+                from app.services import live_recording
+                live_recording.start(station_id, show_id, new)
+            except Exception:
+                logger.warning("Could not start recording live show %s", show_id, exc_info=True)
+
+    async def host_left(self, station_id: str, show_id: str) -> None:
+        """The host's page went away (the show goes on): play out what is in the delay."""
+        if self.on_air.get(station_id) == show_id:
+            self.on_air.pop(station_id, None)
+        air = self.airs.get(station_id)
+        if air is None or air.show_id != show_id:
+            await self.broadcast_state(station_id)
+            return
+        air.finish("host left")
+        if air.drained() or not air.listening:
+            await air.stop()
 
     def station_callers(self, station_id: str) -> list[CallerLine]:
         return [c for c in self.callers.values() if c.station_id == station_id]
@@ -177,7 +323,7 @@ class StationLiveRelay:
         """A frame of the host's microphone: mix in the callers on air and send it on."""
         lines = self.station_callers(station_id)
         if not lines:
-            await self._send_all(station_id, lambda ws: asyncio.wait_for(ws.send_bytes(frame), 2.0))
+            await self._to_listeners(station_id, frame)
             return
         host = np.frombuffer(frame[: len(frame) // 2 * 2], dtype="<i2").astype(np.int32)
         parts = {c.call_id: c.take(len(host)) for c in lines}
@@ -185,13 +331,54 @@ class StationLiveRelay:
         for part in parts.values():
             callers_sum += part
         mixed = _pcm(host + callers_sum)
-        sends = [self._send_all(station_id, lambda ws: asyncio.wait_for(ws.send_bytes(mixed), 2.0))]
+        sends = [self._to_listeners(station_id, mixed)]
         host_ws = self.hosts.get(station_id)
         if host_ws is not None and any(c.on_air for c in lines):
             sends.append(self._send_quiet(host_ws, _pcm(callers_sum)))
         for c in lines:
-            sends.append(self._send_quiet(c.ws, _pcm(host + callers_sum - parts[c.call_id])))
+            if c.talk is None:   # in a talkback the caller hears the screener, not the show
+                sends.append(self._send_quiet(c.ws, _pcm(host + callers_sum - parts[c.call_id])))
         await asyncio.gather(*sends)
+
+    async def talk_start(self, call_id: str, ws: WebSocket) -> bool:
+        """A screener or the host starts talking to a caller off the air. False when
+        the caller's page is not connected or the caller is on air."""
+        line = self.callers.get(call_id)
+        if line is None or line.on_air:
+            return False
+        old = line.talk
+        line.talk = ws
+        if old is not None and old is not ws:
+            try:
+                await old.close(code=4000)   # someone else took the caller over
+            except Exception:
+                pass
+        await self._send_quiet(line.ws, json.dumps({"type": "talk", "on": True}))
+        return True
+
+    async def talk_end(self, call_id: str, ws: WebSocket | None = None, close: bool = False) -> None:
+        """The talkback is over (`ws` given: only if it is still that person's)."""
+        line = self.callers.get(call_id)
+        if line is None or line.talk is None or (ws is not None and line.talk is not ws):
+            return
+        staff = line.talk
+        line.talk = None
+        await self._send_quiet(line.ws, json.dumps({"type": "talk", "on": False}))
+        if close:
+            try:
+                await staff.close(code=4000)
+            except Exception:
+                pass
+
+    async def _to_listeners(self, station_id: str, data: bytes) -> None:
+        """Listeners get the show through the station's delay (straight away when it has none)."""
+        air = self.airs.get(station_id)
+        if air is None or air.passthrough():
+            if air is not None:
+                air.passed(data)
+            await self._send_frame(station_id, data)
+        else:
+            air.feed(data)
 
     @staticmethod
     async def _send_quiet(ws: WebSocket, data: bytes | str) -> None:
@@ -209,6 +396,10 @@ class StationLiveRelay:
         if line is None:
             return
         line.on_air = status == "on_air"
+        if status in ("on_air", "rejected", "completed", "abandoned"):
+            # On air (or gone): a private word with them ends here, so nothing said
+            # off the air can follow the caller onto it
+            await self.talk_end(call_id, close=True)
         if not line.on_air:
             line.buf = np.zeros(0, dtype=np.int16)
             line.primed = False
@@ -219,6 +410,26 @@ class StationLiveRelay:
             except Exception:
                 pass
 
+
+async def _host_gone_now(station_id: str, show_id: str) -> None:
+    from app.models.live_show import LiveShow, LiveShowStatus
+    from app.models.station import Station
+    from app.services.scheduler_engine import get_scheduler
+
+    try:
+        async for db in get_async_session():
+            station = await db.get(Station, uuid.UUID(station_id))
+            show = await db.get(LiveShow, uuid.UUID(show_id))
+            if station is not None and show is not None and show.status == LiveShowStatus.LIVE \
+                    and (station.automation_config or {}).get("live_show_id") == show_id:
+                await get_scheduler()._host_gone(db, station, show, datetime.now(timezone.utc))
+            await db.rollback()
+            break
+    except Exception:
+        logger.warning("Could not look for a gone host on station %s", station_id, exc_info=True)
+
+
+_holds: set = set()  # watchers that keep a show from cutting a timed item (kept from collection)
 
 live_relay = StationLiveRelay()
 
@@ -231,13 +442,25 @@ async def websocket_station_live_listen(websocket: WebSocket, station_id: str):
     try:
         await websocket.send_text(json.dumps(live_relay.state(station_id)))
         while True:
-            await websocket.receive_text()  # nothing expected; this only notices the close
+            text = await websocket.receive_text()  # also how the close is noticed
+            # {"type":"audio","on":false}: this page hears the show on the station's
+            # stream and wants only the live_state messages
+            try:
+                msg = json.loads(text)
+            except ValueError:
+                continue
+            if isinstance(msg, dict) and msg.get("type") == "audio":
+                if msg.get("on") is False:
+                    live_relay.no_audio.add(websocket)
+                else:
+                    live_relay.no_audio.discard(websocket)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.debug("Live listen WS for station %s ended: %s", station_id, e)
     finally:
         live_relay.listeners.get(station_id, set()).discard(websocket)
+        live_relay.no_audio.discard(websocket)
 
 
 # --- Auth Helper ---
@@ -343,7 +566,8 @@ async def websocket_live_events(websocket: WebSocket, show_id: str):
         try:
             from app.db.session import get_async_session
             from app.services.live_show_service import get_show, get_show_calls, get_seconds_until_hard_stop
-            from app.schemas.live_show import LiveShowInDB, CallInRequestInDB
+            from app.schemas.live_show import LiveShowInDB
+            from app.services.caller_history import with_history
 
             async for db in get_async_session():
                 show = await get_show(db, show_id)
@@ -353,10 +577,7 @@ async def websocket_live_events(websocket: WebSocket, show_id: str):
                         "type": "show_state",
                         "data": {
                             "show": LiveShowInDB.model_validate(show).model_dump(mode="json"),
-                            "callers": [
-                                CallInRequestInDB.model_validate(c).model_dump(mode="json")
-                                for c in calls
-                            ],
+                            "callers": await with_history(db, calls),
                             "seconds_remaining": get_seconds_until_hard_stop(show),
                         },
                     })
@@ -409,16 +630,34 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
 
     station_id = None
     started = False
+    delay = dump = 0.0
+    end_at = None
+    taken_over = True
+    record = False
     try:
         async for db in get_async_session():
+            from app.models.station import Station
+            from app.services.live_air import settings_for
             from app.services.live_show_service import get_show, start_if_scheduled
             show = await get_show(db, show_id)
             if show is not None:
                 station_id = str(show.station_id)
                 # Broadcasting puts the show on air: pause the station's automation
+                # (with a broadcast delay, once the delay is full: see live_air.py)
                 started = await start_if_scheduled(db, show.id, host_user_id=user.id)
                 if started:
                     await db.commit()
+                await db.refresh(show)
+                station_row = await db.get(Station, show.station_id)
+                if station_row is not None:
+                    await db.refresh(station_row)
+                    delay, dump, _rule = settings_for(station_row.automation_config)
+                    from app.services import live_recording
+                    record = live_recording.wanted(station_row.automation_config)
+                    taken_over = (station_row.automation_config or {}).get("live_show_id") == str(show.id)
+                if show.scheduled_end is not None:
+                    end = show.scheduled_end
+                    end_at = (end if end.tzinfo else end.replace(tzinfo=timezone.utc)).timestamp()
             break
     except Exception as e:
         logger.error("Audio WS: could not load or start show %s: %s", show_id, e)
@@ -430,8 +669,17 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
 
     audio_manager.active_connections[show_id] = websocket
     live_relay.hosts[station_id] = websocket  # hears the callers on air
-    logger.info("Audio WS authed for show %s user %s (station %s)", show_id, user.id, station_id)
-    await live_relay.set_on_air(station_id, show_id)
+    logger.info("Audio WS authed for show %s user %s (station %s, delay %.0f s)", show_id, user.id, station_id, delay)
+    if not taken_over:
+        from app.services.live_show_service import take_over_when_heard
+        live_relay.on_first_air[station_id] = take_over_when_heard
+    await live_relay.set_on_air(station_id, show_id, delay=delay, dump=dump, end_at=end_at,
+                                heard_now=taken_over, record=record)
+    _air = live_relay.airs.get(station_id)
+    if _air is not None and not taken_over and not _air.listening and delay > 0:
+        from app.services.live_show_service import hold_for_timed_items
+        _holds.add(_task := asyncio.ensure_future(hold_for_timed_items(station_id, _air)))
+        _task.add_done_callback(_holds.discard)
 
     from app.config import settings
     try:
@@ -459,8 +707,9 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
             live_relay.hosts.pop(station_id, None)
         if live_relay.on_air.get(station_id) == show_id:
             # Shielded: a handler cancelled as the host leaves must still tell the
-            # listener pages the show is off air, or their music stays silenced
-            await asyncio.shield(live_relay.set_on_air(station_id, None))
+            # listener pages the show is off air (once the delay has played out), or
+            # their music stays silenced
+            await asyncio.shield(live_relay.host_left(station_id, show_id))
 
 
 @router.websocket("/ws/live/call/{call_id}")
@@ -517,16 +766,65 @@ async def websocket_web_caller(websocket: WebSocket, call_id: str):
                 break
             data = message.get("bytes")
             if data:
-                line.add(data)
+                if line.talk is not None and not line.on_air:
+                    await live_relay._send_quiet(line.talk, data)   # off the air, to whoever talks to them
+                else:
+                    line.add(data)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         logger.debug("Caller WS %s ended: %s", call_id, e)
     finally:
+        if line.talk is not None:
+            staff, line.talk = line.talk, None
+            try:
+                await staff.close(code=4004)   # the caller is gone
+            except Exception:
+                pass
         if live_relay.callers.get(call_id) is line:
             live_relay.callers.pop(call_id, None)
             # Shielded: the grace timer must start even if this handler is cancelled
             await asyncio.shield(caller_left(call_id, line.show_id))
+
+
+@router.websocket("/ws/live/{show_id}/talk/{call_id}")
+async def websocket_talkback(websocket: WebSocket, show_id: str, call_id: str):
+    """Talkback: the screener or the host talks to a web caller off the air. First
+    message {"type":"auth","token":...} (same rule as the host's microphone), then
+    their microphone as PCM frames, which go to that caller only; the caller's
+    microphone comes back here. Nothing on this socket reaches listeners. Closes
+    with 4004 when the caller is not connected or leaves, 4009 when the caller is on
+    air, 4000 when the caller goes on air or someone else takes the talkback."""
+    user = await _authenticate_ws(websocket, show_id)
+    if user is None:
+        return
+    line = live_relay.callers.get(call_id)
+    if line is None or line.show_id != show_id:
+        await websocket.close(code=4004)
+        return
+    if line.on_air:
+        await websocket.close(code=4009)
+        return
+    await live_relay.talk_start(call_id, websocket)
+    logger.info("Talkback: user %s talks to caller %s (show %s)", user.id, call_id, show_id)
+    try:
+        await websocket.send_text(json.dumps({"type": "talk", "on": True, "sample_rate": LIVE_SAMPLE_RATE}))
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            current = live_relay.callers.get(call_id)
+            if current is None or current.talk is not websocket:
+                break
+            if data:
+                await live_relay._send_quiet(current.ws, data)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Talkback WS for call %s ended: %s", call_id, e)
+    finally:
+        await asyncio.shield(live_relay.talk_end(call_id, websocket))
 
 
 # --- Broadcast helpers ---

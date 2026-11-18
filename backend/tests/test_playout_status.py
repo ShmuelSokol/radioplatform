@@ -73,3 +73,19 @@ async def test_browser_player_when_stream_is_off(client, engine_station, monkeyp
     monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", False)
     data = (await client.get("/api/v1/playout-status")).json()
     assert data["stations"] == {} and data["default"] == {"mode": "browser"}
+
+
+@pytest.mark.asyncio
+async def test_status_says_when_the_stream_carries_a_live_show(client, engine_station, monkeypatch):
+    # Listener pages switch from their own live feed to the stream only for an engine
+    # whose live lane plays the show (proto 5), so nobody hears the host twice
+    station, entry = engine_station
+    _engine_says(monkeypatch, {"ok": True, "entry_id": str(entry.id), "title": "Yom Shabboson"})
+    playout_engine.reset_state(station.id)
+    await playout_engine.handle_hello(station.id, 4)
+    s = (await client.get("/api/v1/playout-status")).json()["stations"][str(station.id)]
+    assert s["engine_proto"] == 4 and s["live_on_stream"] is False
+    playout_status._cache.clear()
+    await playout_engine.handle_hello(station.id, 5)
+    s = (await client.get("/api/v1/playout-status")).json()["stations"][str(station.id)]
+    assert s["engine_proto"] == 5 and s["live_on_stream"] is True

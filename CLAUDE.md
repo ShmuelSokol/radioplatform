@@ -116,6 +116,10 @@ radioplatform/
 | HsSoftened | hs_softened.py | A timed queue item that HS off made wait, with its old timing so HS on restores it (see `wiki/station-modes.md`) |
 | StationBlockedAsset | station_blocked_asset.py | An item one station never plays by itself ("Not on this station"); do_not_play is the all-stations version (see `wiki/control-room.md`) |
 | EngineHandoff | engine_handoff.py | A queue entry handed to the playout engine and its asset, so a start report for an entry deleted meanwhile still shows what is on air after a backend restart (pruned after 6 h; see `wiki/streaming-architecture.md`) |
+| RdsSettings / RdsMessage / RdsPlay | rds.py | RDS: per-station PS and rotation settings, scheduled RadioText lines (slogan, time, weather, sponsor), and the log of lines the encoder fetched (see `wiki/rds-feed.md`) |
+| LiveDump | live_dump.py | One Dump of a live show: who, when, seconds cut, caller dropped, and the stored recording of what aired before and what was cut (see `wiki/live-shows.md`) |
+| LiveChatMessage | live_chat_message.py | One line of a live show's staff chat (host and screener, never on air; see `wiki/live-shows.md`) |
+| CallerProfile | caller_profile.py | What the staff decided about one caller across shows: priority, blocked, a note (see `wiki/live-shows.md`) |
 | SiteRelease | site_release.py | One row: how open tabs take a new website release (auto/manual) and the admin's last push (see `wiki/release-pickup.md`) |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
@@ -162,18 +166,20 @@ radioplatform/
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
-| live_shows | live_shows.py | /live-shows |
-| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
+| live_shows | live_shows.py | /live-shows (`GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `GET` and `POST /{id}/chat`: the staff chat; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
+| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
-| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report) |
+| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); one engine per station: hello/next/started from a second engine (other `X-Playout-Instance`) get 409 and an alert; /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report); `/live.mp3` (token only): the live show as listeners hear it, for the engine's live lane (see `wiki/live-shows.md`) |
+| rds | rds.py | Public `/stations/{id}/rds.txt` (RadioText now; `?mode=now_playing` = song only), `/rds-ps.txt`, `/rds.json` for the RDS encoder; staff `/rds/...`: settings, messages CRUD, check, preview, plays (see `wiki/rds-feed.md`) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
-| playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen); `box` = a local FM box's own health report |
+| playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen); `box` = a local FM box's own health report; `engine_proto` and `live_on_stream` (the engine's stream carries a live show, proto 5) |
+| caller_profiles | caller_profiles.py | /caller-profiles (DJ and up): callers marked priority or blocked, and lifting it; marking happens on a call, `PUT /live-shows/{id}/calls/{call_id}/caller` (see `wiki/live-shows.md`) |
 | call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
 | air_watch | air_watch.py | /air-watch (staff): recent on-air self-check findings |
 | bug_reports | bug_reports.py | /bug-reports (POST open to all, rate-limited; GET staff; PATCH/resend admin) |
-| weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); ElevenLabs is only the fallback |
+| weather_spots | weather_spots.py | /weather-spots/{date} and /time-announcements/{hour}: upload ready-made recordings (Shprach voice) for the daily weather spot and the reusable hourly time clips, both per region (`?region=jerusalem`); `?minute=30` for the half-hour clip ("The time is 10:30", played when the station has `half_hour_time_check`); ElevenLabs is only the fallback |
 
 ### Services (`backend/app/services/`)
 | Service | Description |
@@ -205,6 +211,9 @@ radioplatform/
 | alert_service.py | Alert creation, resolution, conflict detection, user notification dispatch |
 | sms_service.py | Twilio SMS and WhatsApp notification delivery |
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
+| live_air.py | A live show's broadcast (profanity) delay: listeners hear the show `live_delay_seconds` late, Dump cuts the newest audio, the delay builds back at the voice's own pitch, winds down before the hard stop and plays out at End show (see `wiki/live-shows.md`) |
+| live_recording.py | Records every live show as listeners heard it (the delay's output, nothing dumped) and files it in Archives as a draft; station `automation_config.live_record_shows` (see `wiki/live-shows.md`) |
+| live_inserts.py | Hard timed items (the time check) that air on time during a live show, over the delay, while the host's words wait |
 | twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
 | liquidsoap_client.py | Old telnet push client for Liquidsoap. Superseded by playout_engine.py; keep `LIQUIDSOAP_ENABLED` off |
 | duration_backfill.py | Measures the length of items that have none (they broke queue reads and restarts); runs once in the background after each start, and on demand via `POST /assets/backfill-durations` |
@@ -214,6 +223,7 @@ radioplatform/
 | hour_fit.py | Shortly before a hard timed item, swaps queue positions so a song (or pair) that ends near it replaces one that would be faded soon after starting; automatic songs only, both players; `automation_config.fit_before_hard_items: false` switches it off (see `wiki/hourly-slots.md`) |
 | timed_groups.py | A hard timed group due while an earlier short one still plays is moved to follow it (browser check 90 s ahead, engine before hand-over; the engine gets it at the first group's time) (see `wiki/hourly-slots.md`) |
 | tail_analysis.py | Song end and crossfade point from HTTP range reads (MP3 header + last 20 s), so re-analysis does not download whole files |
+| caller_history.py | Who called before: each call's history (earlier calls, times on air) and the caller's standing, keyed by `caller_key` |
 | call_in.py | Web call-in tokens (HMAC of the call id) and closing a call when the caller's page leaves |
 | activity_log.py | Activity log: middleware that records every signed-in change, before/after capture from SQLAlchemy flushes, batched background writer (see `wiki/activity-log.md`) |
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
@@ -222,6 +232,7 @@ radioplatform/
 | queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement (browser player's song change, blackout fill); `put_playing_first` moves only the item on air before the first waiting one (engine start report) |
 | playout_tunnel.py | Commands to an engine with no inbound line (a local FM box): its relay long-polls for them; used by playout_engine only while a relay is polling. Also keeps the box's health report and names its problems for air watch (see `wiki/local-fm-box.md`) |
 | playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay (see `wiki/local-fm-box.md`) |
+| rds_service.py | RDS line now: clock-based weighted rotation, sponsor line while their spot airs, Latin-only text (Hebrew dropped), 8/64 limits, play log of encoder fetches (see `wiki/rds-feed.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
@@ -244,9 +255,10 @@ radioplatform/
 - Campaigns.tsx — Sponsorship campaigns across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
 - CampaignDetail.tsx — One campaign for staff: drafts, comments, Save Status. Drafts and comments panels are shared with the sponsor portal (`components/campaigns/CampaignParts.tsx`)
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
-- SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead
+- SpotSchedules.tsx — Schedule sponsor spots by day and daypart, with a 7-day look-ahead; station timing choices for :00, :30 and :15/:45 and the half-hour time check
 - SpotRecordings.tsx — Record Spots: write a script, make or upload audio, listen, approve into the library
 - Databank.tsx — KBR Studio's database window: Songs / Jingles / Spots / Blocks tables, Find, Edit mode, day log to the millisecond
+- Rds.tsx — RDS: what radios show now and next 10 minutes, PS and rotation settings, rotation lines (templates, sponsor lines, days/hours/dates), encoder pickup log, feed links for Magic RDS
 - ProgramBlocks.tsx — Named blocks ("Weather Sponsors"): items in order, clock times, hard or soft, next 24 hours
 - SponsorshipRules.tsx — Edit the sponsorship wording rules (versioned) and try the wording check
 - Playlists.tsx — Playlist template rotation management
@@ -256,8 +268,8 @@ radioplatform/
 - BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
-- HostConsole.tsx — Full-screen host broadcasting console with countdown, mic controls, caller queue
-- CallScreener.tsx — Two-column call screener (waiting/approved/on-air management)
+- HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, Talk off air (a private word with a caller, `hooks/useTalkback.ts`), and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
+- CallScreener.tsx — Two-column call screener (waiting/approved/on-air management), each caller's history with Priority and Block (`pages/admin/live/CallerHistory.tsx`), the list of marked callers, with the delay panel and the staff chat (`pages/admin/live/ChatPanel.tsx`, also on the Host Console)
 - SongRequests.tsx — Song request management (approve/reject/delete)
 - Archives.tsx — Show archive management (CRUD, publish/unpublish)
 
@@ -277,7 +289,7 @@ radioplatform/
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
 - CheckWording.tsx — Sponsor proposes wording, gets back what must change and why
 
-### Hooks (`frontend/src/hooks/`) — 22 hooks
+### Hooks (`frontend/src/hooks/`) — 23 hooks
 | Hook | Description |
 |------|-------------|
 | useAuth.ts | Authentication state + mutations |
@@ -297,10 +309,11 @@ radioplatform/
 | useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
 | useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
 | useLiveShowWS.ts | Live show WebSocket (real-time callers, countdown, with polling fallback) |
-| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter; plays the callers on air sent back by the server |
+| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter; plays the callers on air sent back by the server; mixes carts into what is sent |
 | useLiveAudio.ts | Plays a station's live show (host mic relayed by the server) and tells the page to silence the music meanwhile |
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |
+| useTalkback.ts | Talk to one web caller off the air: own microphone capture and socket, nothing reaches listeners |
 | useEscape.ts | Esc closes an open dialog (New Archive, Live show, bug report) |
 | useMayChange.ts | May the signed-in person change things on this screen? The one rule for hiding or disabling change controls (see `wiki/view-only-screens.md`) |
 
@@ -329,6 +342,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/spot-recordings` → SpotRecordings (protected)
 - `/admin/databank` → Databank (protected)
 - `/admin/program-blocks` → ProgramBlocks (protected)
+- `/admin/rds` → Rds (staff; managers change)
 - `/admin/sponsorship-rules` → SponsorshipRules (protected)
 - `/admin/playlists` → Playlists (protected)
 - `/admin/alerts` → Alerts (protected)
@@ -489,6 +503,12 @@ cd frontend && npm run build && (npx vite preview --port 4173 &) && node e2e/con
 # The control room with a phone held sideways (9 phone sizes, tap targets, every control, turning the phone)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-landscape.mjs
 
+# The RDS page against a real backend (Postgres + seeded admin; see wiki/rds-feed.md)
+cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/rds-page.mjs
+
+# Queue rows and level meters on car screens, tablets, phones and desktop (rows on screen, one-line titles, meters move)
+cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
+
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 
@@ -506,6 +526,15 @@ cd frontend && for s in control-room-actions listen-page call-in release-timing 
 
 # Listener pages in real WebKit (Safari's engine, WebKitGTK + Selenium; setup in the script's docstring and wiki/audio-engine.md)
 cd frontend && (npx vite preview --port 4183 --strictPort &) && xvfb-run -a python3 e2e/webkit/listener-webkit.py
+
+# The bug reporter's screenshot in real WebKit: each way of taking it, not blank, no-picture path, picture added by hand (same setup as above)
+cd frontend && xvfb-run -a python3 e2e/webkit/bug-screenshot-webkit.py
+
+# The bug report's picture vs a real screenshot, and 🐞 over every kind of dialog (fake backend, Chromium)
+cd frontend && for s in bug-screenshot-faithful bug-over-dialogs; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
+
+# Leaving pages in real WebKit logs no version.json console error (reads WebKit's own console via MiniBrowser)
+cd frontend && xvfb-run -a python3 e2e/webkit/version-check-webkit.py
 
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs

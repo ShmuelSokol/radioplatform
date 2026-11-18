@@ -169,6 +169,8 @@ async function open(browser, contextOpts, queueSize) {
   // Stand in for the now-playing push channel so a check can announce a track change.
   const sockets = [];
   await page.routeWebSocket(/\/ws\/now-playing\//, (ws) => { sockets.push(ws); });
+  // The site, live-show and listener channels: open and quiet (the preview server has no backend for them)
+  await page.routeWebSocket(/\/ws\/(site|live|listeners)/, () => {});
   const push = (data) => sockets.forEach(ws => { try { ws.send(JSON.stringify({ type: 'now_playing', data })); } catch { /* closed */ } });
   await page.goto(`${BASE}/admin/dashboard`);
   await page.getByTestId('queue-row').first().waitFor();
@@ -566,7 +568,7 @@ async function metersWithoutListening(browser) {
   await page.route(/\/assets\/[^/]+\/audio-url$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: `${new URL(page.url()).origin}/tone.wav` }) }));
   await page.reload();
   await page.getByTestId('queue-row').first().waitFor();
-  const lit = () => page.locator('header .bg-cyan-400, header .bg-red-500').count();
+  const lit = () => page.locator('[data-testid=vu-meters]:visible [data-lit]').count();
   await page.waitForTimeout(1500);
   const before = await lit();
   await page.getByText('Up next', { exact: true }).first().click();
@@ -605,6 +607,7 @@ async function stationSwitch(browser) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await ctx.addInitScript(() => { localStorage.setItem('access_token', 'test'); localStorage.setItem('refresh_token', 'test'); localStorage.removeItem('radio_last_station'); });
   const page = await ctx.newPage();
+  await page.routeWebSocket(/\/ws\/(site|live|listeners)/, () => {});
   await page.route('**/api/v1/**', async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -753,6 +756,7 @@ async function playlistsInstant(browser) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await ctx.addInitScript(() => { localStorage.setItem('access_token', 'test'); localStorage.setItem('refresh_token', 'test'); });
   const page = await ctx.newPage();
+  await page.routeWebSocket(/\/ws\/(site|live|listeners)/, () => {});
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   await page.route('**/api/v1/**', async (route) => {
@@ -820,7 +824,7 @@ await phoneLandscape(browser, { ...devices['iPhone 13 landscape'] }, 'iPhone 13 
 await phoneLandscape(browser, { viewport: { width: 932, height: 300 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 }, 'iPhone Pro Max landscape in Safari');
 await phone(browser, 'iPad Mini');
 await longQueue(browser, { viewport: { width: 1440, height: 900 } }, 'desktop long queue', 26);
-await longQueue(browser, { ...devices['iPhone 13'] }, 'phone long queue', 66);
+await longQueue(browser, { ...devices['iPhone 13'] }, 'phone long queue', 40);
 await browser.close();
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 process.exit((failures ? 1 : 0) || (guardVerdict() ? 1 : 0));

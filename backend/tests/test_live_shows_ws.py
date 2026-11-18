@@ -60,6 +60,8 @@ def _clean_relay():
     def clear():
         live_shows_ws.live_relay.listeners.clear()
         live_shows_ws.live_relay.on_air.clear()
+        live_shows_ws.live_relay.airs.clear()
+        live_shows_ws.live_relay.on_first_air.clear()
         live_shows_ws.live_relay.hosts.clear()
         live_shows_ws.live_relay.callers.clear()
         live_shows_ws.live_show_manager.active_connections.clear()
@@ -106,7 +108,8 @@ def ws_client():
 
 
 async def _show(db, status=LiveShowStatus.LIVE, host=None):
-    station = Station(id=uuid.uuid4(), name="Main", timezone="America/New_York")
+    station = Station(id=uuid.uuid4(), name="Main", timezone="America/New_York",
+                      automation_config={"live_delay_seconds": 0})  # the delay has its own tests
     db.add(station)
     await db.flush()
     now = datetime.now(UTC)
@@ -162,11 +165,12 @@ async def test_listener_hears_the_host_while_the_show_is_on_air(db_session, ws_d
     with ws_client() as tc:
         with tc.websocket_connect(f"/api/v1/ws/live/station/{station.id}/listen") as listener:
             assert json.loads(listener.receive_text()) == {
-                "type": "live_state", "live": False, "show_id": None, "sample_rate": 24000}
+                "type": "live_state", "live": False, "show_id": None, "sample_rate": 24000, "on_stream": False}
             with tc.websocket_connect(f"/api/v1/ws/live/{show.id}/audio") as host:
                 host.send_text(_auth(token))
                 assert json.loads(listener.receive_text()) == {
-                    "type": "live_state", "live": True, "show_id": str(show.id), "sample_rate": 24000}
+                    "type": "live_state", "live": True, "show_id": str(show.id), "sample_rate": 24000,
+                    "on_stream": False}
                 host.send_bytes(frame)
                 assert listener.receive_bytes() == frame  # no callers: the host frame, unchanged
             # The host stopped: listeners are told at once, so the music comes back
@@ -177,7 +181,15 @@ async def test_listener_hears_the_host_while_the_show_is_on_air(db_session, ws_d
 async def test_listener_joining_mid_show_is_told_it_is_live(db_session, ws_db):
     station_id = str(uuid.uuid4())
     show_id = str(uuid.uuid4())
+    from app.services.live_air import LiveAir
+
+    async def nowhere(data):
+        return None
+
+    air = LiveAir(station_id, show_id, nowhere)
+    air.listening = True  # listeners hear the show (the delay, if any, is full)
     live_shows_ws.live_relay.on_air[station_id] = show_id
+    live_shows_ws.live_relay.airs[station_id] = air
     with ws_client() as tc:
         with tc.websocket_connect(f"/api/v1/ws/live/station/{station_id}/listen") as listener:
             msg = json.loads(listener.receive_text())

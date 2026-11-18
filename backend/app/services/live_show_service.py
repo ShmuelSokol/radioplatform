@@ -131,6 +131,11 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
                        start_utc=aired_from(current), end_utc=now, source="scheduler"))
     at = long_items.resume_point(current, now)
     current.status = "played"
+    if current.preempt_at is not None:
+        # A time check or other timed item: half of it after the show would be a stale
+        # time (the engine harness heard it come back after End, 2026-11-18)
+        await _air_cut_item_over_the_delay(db, station_id, current, now)
+        return
     if at is None:
         return  # it was nearly over
     first = (await db.execute(
@@ -146,6 +151,39 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
     db.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id, position=first,
                       status="pending", source=resume_source(at)))
     await db.flush()
+
+
+async def _air_cut_item_over_the_delay(db: AsyncSession, station_id, entry, now: datetime) -> None:
+    """A timed item that had only just started when the show took the station (the
+    engine started it early as the delay filled, and the wait for timed items had
+    already looked): listeners got 0.8 s of the time check and it was gone (harness,
+    2026-11-18). It goes back to waiting, so live_inserts airs it whole over the
+    delay at its time. Only when the station's rule would air it there, and only
+    when less than half was heard: a time check heard nearly whole is not said twice."""
+    from app.models.asset import Asset
+    from app.models.queue_entry import aired_from
+    from app.services import live_inserts
+    from app.services.live_air import settings_for
+
+    station = await db.get(Station, station_id)
+    asset = await db.get(Asset, entry.asset_id) if entry.asset_id else None
+    if station is None or asset is None or not asset.duration:
+        return
+    _delay, _dump, rule = settings_for(station.automation_config)
+    if _delay <= 0 or rule == "none" or (rule == "time" and asset.category != live_inserts.TIME_CATEGORY):
+        return
+    hard = entry.timing_mode == "hard" or (entry.timing_mode is None and entry.source != "ad_slot")
+    if not hard:
+        return
+    start = aired_from(entry) if entry.started_at else now
+    if start is not None and start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    heard = max(0.0, (now - start).total_seconds()) if start else 0.0
+    if heard >= float(asset.duration) / 2:
+        return
+    entry.status = "pending"
+    entry.started_at = None
+    live_inserts._preparing.discard(str(entry.id))
 
 
 async def _resume_automation(db: AsyncSession, station_id, now: datetime) -> None:
@@ -213,24 +251,16 @@ async def start_show(
     if host_user_id:
         show.host_user_id = host_user_id
 
-    # Signal scheduler to pause for this station
+    # Take the station over: its automation pauses under the host. With a broadcast
+    # delay this waits until listeners really hear the host (the delay is full), so
+    # the music keeps playing while it fills: see take_over_when_heard.
     station_result = await db.execute(select(Station).where(Station.id == show.station_id))
     station = station_result.scalar_one_or_none()
     if station:
-        config = dict(station.automation_config or {})
-        config["live_show_id"] = str(show.id)
-        station.automation_config = config
-        await _pause_automation(db, station.id, now)
-        from app.config import settings as _settings
-        if _settings.engine_drives(station.id):
-            # At once, not on the scheduler's next pass: the song must not play on
-            # under the host's first words
-            try:
-                from app.services import playout_engine
-                await playout_engine.engine_flush(station.id)
-                await playout_engine.engine_live(station.id, True)
-            except Exception as e:
-                logger.warning("Could not quiet the engine for the live show: %s", e)
+        from app.services.live_air import settings_for
+        delay, _dump, _rule = settings_for(station.automation_config)
+        if delay <= 0:
+            await take_over_station(db, station, show, now)
 
     # Set icecast mount for WebRTC mode
     if show.broadcast_mode == "webrtc" and not show.icecast_mount:
@@ -251,6 +281,155 @@ async def start_show(
     return show
 
 
+async def take_over_station(db: AsyncSession, station: Station, show: LiveShow, now: datetime) -> None:
+    """The host is heard from now on: the scheduler leaves the station alone, the item
+    playing stops (to carry on after the show) and an engine station's stream goes quiet."""
+    config = dict(station.automation_config or {})
+    if config.get("live_show_id") == str(show.id):
+        return
+    config["live_show_id"] = str(show.id)
+    station.automation_config = config
+    await _pause_automation(db, station.id, now)
+    from app.config import settings as _settings
+    if _settings.engine_drives(station.id):
+        # At once, not on the scheduler's next pass: the song must not play on
+        # under the host's first words
+        try:
+            from app.services import playout_engine
+            # Quiet first, then the flush: under the live lane the engine loads the
+            # item that follows the show at once (the paused item's resume entry),
+            # so music is back the moment the show ends
+            await playout_engine.engine_live(station.id, True)
+            await playout_engine.engine_flush(station.id)
+        except Exception as e:
+            logger.warning("Could not quiet the engine for the live show: %s", e)
+
+
+EARLY_START = 8.0   # how early a hard timed item may start (queue.TIMED_EARLY_START_SECONDS)
+HOLD_LIMIT = 45.0   # the longest a show waits for timed items before it is heard anyway
+
+
+async def timed_item_ends(db: AsyncSession, station_id, now: datetime, within: float) -> datetime | None:
+    """When the timed item on air (or a hard one due in the next `within` seconds) ends.
+    None when there is none. A show whose delay fills meanwhile waits for that moment:
+    taking the station over cut a time check after 3.4 of its 6 s (reviewer, 2026-11-18)."""
+    from sqlalchemy.orm import selectinload
+
+    from app.models.queue_entry import QueueEntry
+    from app.services.playout_engine import _airs_until
+
+    rows = (await db.execute(
+        select(QueueEntry).options(selectinload(QueueEntry.asset)).where(
+            QueueEntry.station_id == station_id,
+            QueueEntry.preempt_at.is_not(None),
+            QueueEntry.status.in_(("playing", "pending")),
+            QueueEntry.preempt_at >= now - timedelta(seconds=600),
+            QueueEntry.preempt_at <= now + timedelta(seconds=within),
+        )
+    )).scalars().all()
+    ends: list[datetime] = []
+    for entry in rows:
+        if entry.status == "playing":
+            end = _airs_until(entry)
+        else:
+            hard = entry.timing_mode == "hard" or (entry.timing_mode is None and entry.source != "ad_slot")
+            due = entry.preempt_at if entry.preempt_at.tzinfo else entry.preempt_at.replace(tzinfo=timezone.utc)
+            if not hard or due < now - timedelta(seconds=60) or entry.asset is None or not entry.asset.duration:
+                continue
+            end = max(due, now) + timedelta(seconds=float(entry.asset.duration))
+        if end is not None and end > now:
+            ends.append(end)
+    return max(ends) if ends else None
+
+
+async def hold_for_timed_items(station_id: str, air) -> None:
+    """While the show's delay fills, keep it from going to listeners in the middle of a
+    timed item. Looks once a second; the host's words wait in the delay meanwhile."""
+    import asyncio
+
+    from app.db.session import get_async_session
+
+    started = air.clock()
+    while not (air.listening or air.closed or air.finishing):
+        try:
+            async for db in get_async_session():
+                now = datetime.now(timezone.utc)
+                # Also an item due up to EARLY_START after that: when the song before
+                # it ends early the player starts the item early, and a take-over in
+                # that moment left 0.8 s of the time check on the stream, with the
+                # whole check again over the delay 8 s later (harness, 2026-11-18)
+                within = max(0.0, air.target - air.buffered) + 2.0 + EARLY_START
+                end = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within)
+                await db.rollback()
+                if end is not None and not air.told_soon:
+                    # (Not once the stream server was told to go quiet: holding the
+                    # show longer then would leave the stream silent over the item)
+                    # The stream server is told to go quiet SOON before the show is
+                    # heard, so that word leaves as the item ends, not during it
+                    from app.services.live_air import SOON
+                    until = air.clock() + (end - now).total_seconds() + SOON
+                    air.hold_until = min(until, started + air.target + HOLD_LIMIT)
+                break
+        except Exception:
+            logger.warning("Could not look for timed items before live show on %s", station_id, exc_info=True)
+        await asyncio.sleep(1.0)
+
+
+async def take_over_when_heard(station_id: str, show_id: str) -> None:
+    """Listeners just started hearing the show through its delay: take the station over now."""
+    from app.db.session import get_async_session
+
+    async for db in get_async_session():
+        try:
+            show = await get_show(db, uuid.UUID(str(show_id)))
+            station = await db.get(Station, uuid.UUID(str(station_id)))
+            if show is not None and station is not None and show.status == LiveShowStatus.LIVE:
+                await take_over_station(db, station, show, datetime.now(timezone.utc))
+                await db.commit()
+                logger.info("Live show %s is heard on station %s: automation paused", show_id, station_id)
+        except Exception:
+            logger.exception("Could not take station %s over for live show %s", station_id, show_id)
+            await db.rollback()
+        break
+
+
+async def release_station(db: AsyncSession, station_id, show_id, now: datetime) -> bool:
+    """The show is over for listeners: the scheduler and the queue (or the engine) carry on."""
+    station = await db.get(Station, station_id)
+    if station is None:
+        return False
+    config = dict(station.automation_config or {})
+    if config.get("live_show_id") != str(show_id):
+        return False  # never taken over (the delay never filled): the music never stopped
+    config.pop("live_show_id", None)
+    station.automation_config = config
+    await _resume_automation(db, station.id, now)
+    from app.config import settings as _settings
+    if _settings.engine_drives(station.id):
+        # At once, not on the scheduler's next pass (up to a second or two more of
+        # quiet): the item that follows the show is already loaded
+        try:
+            from app.services import playout_engine
+            await playout_engine.engine_live(station.id, False)
+        except Exception as e:
+            logger.warning("Could not tell the engine the live show is over: %s", e)
+    return True
+
+
+async def _release_later(station_id: str, show_id: str) -> None:
+    from app.db.session import get_async_session
+
+    async for db in get_async_session():
+        try:
+            if await release_station(db, uuid.UUID(station_id), show_id, datetime.now(timezone.utc)):
+                await db.commit()
+                logger.info("Live show %s played out of the delay: station %s carries on", show_id, station_id)
+        except Exception:
+            logger.exception("Could not hand station %s back after live show %s", station_id, show_id)
+            await db.rollback()
+        break
+
+
 async def start_if_scheduled(
     db: AsyncSession, show_id: UUID | str, host_user_id: UUID | None = None,
 ) -> bool:
@@ -267,7 +446,15 @@ async def start_if_scheduled(
     return True
 
 
-async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
+def _with_state(relay, station_key: str, then):
+    """After the delay played out: hand the station back."""
+    async def run():
+        relay.airs.pop(station_key, None)  # listeners were told when it stopped airing
+        await then()
+    return run
+
+
+async def end_show(db: AsyncSession, show_id: UUID | str, drain: bool = True) -> LiveShow | None:
     """End a live show — set status, clear scheduler signal, end all calls, stop Icecast."""
     result = await db.execute(select(LiveShow).where(LiveShow.id == show_id))
     show = result.scalar_one_or_none()
@@ -278,19 +465,26 @@ async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
     show.status = LiveShowStatus.ENDED
     show.actual_end = now
 
-    # Clear scheduler signal
-    station_result = await db.execute(select(Station).where(Station.id == show.station_id))
-    station = station_result.scalar_one_or_none()
-    if station and station.automation_config:
-        config = dict(station.automation_config)
-        config.pop("live_show_id", None)
-        station.automation_config = config
-        await _resume_automation(db, station.id, now)
+    # Listeners still have the end of the show waiting in the broadcast delay: it plays
+    # out (wound down quickly) and the station carries on after it. A hard stop does
+    # not wait (the delay winds down by itself before it). Without a delay, at once.
+    from app.api.v1.live_shows_ws import live_relay
+    station_key = str(show.station_id)
+    air = live_relay.airs.get(station_key)
+    if drain and air is not None and air.show_id == str(show.id) and air.listening and air.buffered > 0.3:
+        async def later(_station=station_key, _show=str(show.id)):
+            await _release_later(_station, _show)
+        try:
+            await live_relay.set_on_air(station_key, None, drain=True,
+                                        on_done=_with_state(live_relay, station_key, later))
+        except Exception as e:
+            logger.warning("Could not let show %s play out of the delay: %s", show_id, e)
+    else:
+        await release_station(db, show.station_id, show.id, now)
         # The host is off air from this moment, even if the host's page stays open
         try:
-            from app.api.v1.live_shows_ws import live_relay
-            if live_relay.on_air.get(str(station.id)) == str(show.id):
-                await live_relay.set_on_air(str(station.id), None)
+            if live_relay.on_air.get(station_key) == str(show.id) or station_key in live_relay.airs:
+                await live_relay.set_on_air(station_key, None, drain=False)
         except Exception as e:
             logger.warning("Could not take the host off air for show %s: %s", show_id, e)
 
@@ -330,7 +524,7 @@ async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
 
 async def hard_stop_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
     """Hard stop a live show (triggered by scheduler at scheduled_end) — same as end_show + creates alert."""
-    show = await end_show(db, show_id)
+    show = await end_show(db, show_id, drain=False)
     if not show:
         return None
 
@@ -424,27 +618,30 @@ async def reject_call(
     return call
 
 
+MAX_CALLERS_ON_AIR = 4
+
+
 async def put_caller_on_air(
     db: AsyncSession,
     show_id: UUID | str,
     call_id: UUID | str,
 ) -> CallInRequest | None:
-    """Put an approved caller on air. Only one caller can be on_air at a time."""
+    """Put an approved caller on air. Up to MAX_CALLERS_ON_AIR can be on air together
+    (the mix carries them all and each hears the host and the others); it was one."""
     from app.core.exceptions import ConflictError
-
-    # Check if another caller is already on air
-    existing = await db.execute(
-        select(CallInRequest).where(
-            CallInRequest.live_show_id == show_id,
-            CallInRequest.status == CallStatus.ON_AIR,
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise ConflictError("Another caller is already on air")
 
     call = await get_call(db, call_id)
     if not call:
         return None
+    on_air = (await db.execute(
+        select(CallInRequest.id).where(
+            CallInRequest.live_show_id == show_id,
+            CallInRequest.status == CallStatus.ON_AIR,
+            CallInRequest.id != call.id,
+        )
+    )).scalars().all()
+    if len(on_air) >= MAX_CALLERS_ON_AIR:
+        raise ConflictError(f"{MAX_CALLERS_ON_AIR} callers are on air already. Hold or end one first.")
 
     now = datetime.now(timezone.utc)
     call.status = CallStatus.ON_AIR
@@ -463,6 +660,31 @@ async def put_caller_on_air(
     await db.flush()
     await db.refresh(call)
     return call
+
+
+async def hold_caller(db: AsyncSession, call_id: UUID | str) -> CallInRequest | None:
+    """Take the caller off air without hanging up: back to the approved list, still
+    connected and hearing the show, ready to go on air again."""
+    call = await get_call(db, call_id)
+    if not call:
+        return None
+    if call.status != CallStatus.ON_AIR:
+        from app.core.exceptions import ConflictError
+        raise ConflictError("This caller is not on air")
+    call.status = CallStatus.APPROVED
+    await db.flush()
+    await db.refresh(call)
+    return call
+
+
+async def next_approved_call(db: AsyncSession, show_id: UUID | str) -> CallInRequest | None:
+    """The approved caller who has waited longest."""
+    result = await db.execute(
+        select(CallInRequest)
+        .where(CallInRequest.live_show_id == show_id, CallInRequest.status == CallStatus.APPROVED)
+        .order_by(CallInRequest.created_at)
+    )
+    return result.scalars().first()
 
 
 async def end_call(
@@ -508,3 +730,35 @@ async def update_call_info(
     await db.flush()
     await db.refresh(call)
     return call
+
+
+# --- Dump log (models/live_dump.py) ---
+
+def dump_wav(heard, cut) -> bytes:
+    """What listeners heard just before the Dump, half a second of silence, then
+    what was cut, as a WAV file (16-bit mono)."""
+    import io
+    import wave
+
+    import numpy as np
+
+    from app.services.live_air import RATE
+
+    gap = np.zeros(RATE // 2, dtype=np.int16)
+    pcm = np.concatenate((np.asarray(heard, dtype=np.int16), gap, np.asarray(cut, dtype=np.int16)))
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(pcm.astype("<i2").tobytes())
+    return out.getvalue()
+
+
+async def save_dump_audio(key: str, heard, cut) -> None:
+    from app.services.storage_service import upload_file
+
+    try:
+        await upload_file(dump_wav(heard, cut), key, content_type="audio/wav")
+    except Exception:
+        logger.exception("Could not save the dump recording %s", key)
