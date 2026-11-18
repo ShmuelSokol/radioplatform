@@ -170,6 +170,14 @@ async def _resume_automation(db: AsyncSession, station_id, now: datetime) -> Non
     await db.flush()
     from app.config import settings
     if settings.engine_drives(station_id):
+        # What the engine was handed and could not air under the host is closed, not
+        # left waiting in the queue
+        try:
+            from app.services import playout_engine
+
+            await playout_engine.close_timed_lost_to_live_show(db, station_id, now)
+        except Exception as e:
+            logger.error("Station %s: timed items lost to the show were not closed: %s", station_id, e)
         # The playout engine starts the next item itself (it asks /next again once the
         # show is over). start_from_queue would mark an entry "playing" here that the
         # engine was never given, and the site would show it on air.
