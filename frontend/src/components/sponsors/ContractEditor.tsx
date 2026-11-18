@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientAccount } from '../../api/sponsors';
-import { updateSpotSchedule, type Daypart, type SpotScheduleInput, type TimingMode } from '../../api/spotSchedules';
+import { TIME_SLOTS, WIDE_DAYPARTS, updateSpotSchedule, type Daypart, type SpotScheduleInput, type TimingMode } from '../../api/spotSchedules';
 import { useStations } from '../../hooks/useStations';
 import { useEscape } from '../../hooks/useEscape';
 import Spinner from '../Spinner';
@@ -28,12 +28,6 @@ export interface EditableContract {
 }
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const DAYPARTS: { key: Daypart; label: string; hours: string }[] = [
-  { key: 'morning', label: 'Morning', hours: '6 AM to 12 PM' },
-  { key: 'afternoon', label: 'Afternoon', hours: '12 PM to 6 PM' },
-  { key: 'evening', label: 'Evening', hours: '6 PM to 12 AM' },
-  { key: 'overnight', label: 'Overnight', hours: '12 AM to 6 AM' },
-];
 
 function toggle<T>(list: T[], item: T): T[] {
   return list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
@@ -98,7 +92,7 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
     if (!days.length) return setError('Choose at least one day.');
     const allTimes = [...new Set([...times, ...(newTime ? [newTime] : [])])].sort();
     if (mode === 'exact' && !allTimes.length) return setError('Add at least one time.');
-    if (mode === 'spread' && !dayparts.length) return setError('Choose at least one part of the day.');
+    if (mode === 'spread' && !dayparts.length) return setError('Choose at least one time slot.');
     if (start && end && start > end) return setError('The last day is before the first day.');
     const data: Partial<SpotScheduleInput> = {
       asset_id: assetId,
@@ -169,19 +163,21 @@ export default function ContractEditor({ contract, sponsorId, onClose }: {
             <fieldset>
               <legend className="text-sm font-medium mb-1">When in the day</legend>
               <div className="flex flex-wrap gap-2 mb-2">
-                <button type="button" aria-pressed={mode === 'spread'} className={chip(mode === 'spread')} onClick={() => setMode('spread')}>Spread over parts of the day</button>
+                <button type="button" aria-pressed={mode === 'spread'} className={chip(mode === 'spread')} onClick={() => setMode('spread')}>Spread over time slots</button>
                 <button type="button" aria-pressed={mode === 'exact'} className={chip(mode === 'exact')} onClick={() => setMode('exact')}>At set times</button>
               </div>
               {mode === 'spread' ? (
                 <div className="space-y-2">
-                  <div className="flex flex-wrap gap-2">
-                    {DAYPARTS.map((p) => (
+                  <p className="text-xs text-gray-500">Plays go anywhere in the slot, to the break with the fewest sponsorships so far.</p>
+                  <div className="flex flex-wrap gap-2" data-testid="editor-time-slots">
+                    {/* A whole morning/afternoon/evening shows only on an older contract that has it */}
+                    {[...TIME_SLOTS, ...WIDE_DAYPARTS.filter((w) => dayparts.includes(w.key))].map((p) => (
                       <button key={p.key} type="button" aria-pressed={dayparts.includes(p.key)} className={chip(dayparts.includes(p.key))} onClick={() => setDayparts(toggle(dayparts, p.key))}>
                         {p.label} <span className="text-xs opacity-75">{p.hours}</span>
                       </button>
                     ))}
                   </div>
-                  <label className="flex items-center gap-2 text-sm">Plays in each part of the day
+                  <label className="flex items-center gap-2 text-sm">Plays in each slot
                     <input type="number" min={1} max={12} value={perPart} onChange={(e) => setPerPart(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} className="w-20 px-2 py-1 border rounded-lg" />
                   </label>
                 </div>
