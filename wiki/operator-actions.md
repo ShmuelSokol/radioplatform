@@ -137,3 +137,6 @@ block). The response carries `protected: true` and the control room says it play
 the end; on an engine station the engine is not asked to skip. Play-now (fire-now) still puts
 something else on air. Songs stay skippable one per press. Test:
 `backend/tests/test_rapid_next.py`.
+
+## Operator actions take turns (2026-11-18)
+Play next, fire-now, Next, insert, move, reorder and delete on one station run one at a time, in arrival order (`operator_turn`, a route dependency in `queue.py`, its own lock per station, not the advance lock). Found live on Jerusalem at 03:23Z: Play next and Next sent 0.1 s apart ran side by side, Next read the queue before Play next's commit (50 to 150 ms on Supabase), saw the old head and played the song the engine had pre-loaded. Local Postgres commits in a millisecond, so the harness needs a trigger that delays the insert to show it (`operator_next_overtakes_commit`). A turn is waited for at most 8 s (`OPERATOR_TURN_WAIT`), then the action goes ahead anyway, so one stuck request cannot freeze the control room. A new operator endpoint that changes what is next must add `dependencies=[Depends(operator_turn)]` (`test_every_operator_queue_action_takes_its_turn`).

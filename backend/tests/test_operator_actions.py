@@ -314,3 +314,75 @@ async def test_an_ordinary_next_is_not_flushed_or_delayed(client, auth_headers, 
     assert res.json()["message"] == "Skipped" and commands == ["/skip"]
     assert _time.monotonic() - t0 < 1.0
     assert state.cued_entry_id == str(pending.id)
+
+
+# ── One operator action at a time per station (Jerusalem 03:23Z 2026-11-18) ──────────
+
+
+@pytest.mark.asyncio
+async def test_operator_actions_on_one_station_take_turns_in_order():
+    """Play next and Next sent 0.1 s apart ran side by side and Next read the queue
+    before Play next's commit. Each action now waits for the one before it."""
+    import asyncio
+    import uuid as _uuid
+
+    from app.api.v1 import queue as q
+
+    station, other = _uuid.uuid4(), _uuid.uuid4()
+    order: list[str] = []
+
+    async def action(name: str, sid, work: float) -> None:
+        turn = q.operator_turn(sid)
+        await turn.__anext__()
+        try:
+            order.append(f"{name} starts")
+            await asyncio.sleep(work)
+            order.append(f"{name} done")
+        finally:
+            with pytest.raises(StopAsyncIteration):
+                await turn.__anext__()
+
+    slow = asyncio.create_task(action("play next", station, 0.2))  # a slow commit
+    await asyncio.sleep(0.02)
+    nxt = asyncio.create_task(action("next", station, 0.0))
+    elsewhere = asyncio.create_task(action("other station", other, 0.0))
+    await asyncio.gather(slow, nxt, elsewhere)
+    assert order.index("play next done") < order.index("next starts")
+    # another station is not held up
+    assert order.index("other station done") < order.index("play next done")
+
+
+@pytest.mark.asyncio
+async def test_a_stuck_operator_action_does_not_block_the_next_one_for_ever(monkeypatch):
+    import asyncio
+    import uuid as _uuid
+
+    from app.api.v1 import queue as q
+
+    monkeypatch.setattr(q, "OPERATOR_TURN_WAIT", 0.1)
+    station = _uuid.uuid4()
+    stuck = q.operator_turn(station)
+    await stuck.__anext__()  # never finishes
+    later = q.operator_turn(station)
+    await asyncio.wait_for(later.__anext__(), 1.0)  # goes ahead after the wait
+    with pytest.raises(StopAsyncIteration):
+        await later.__anext__()
+    with pytest.raises(StopAsyncIteration):
+        await stuck.__anext__()
+    # and the turn is free again afterwards
+    again = q.operator_turn(station)
+    await asyncio.wait_for(again.__anext__(), 0.05)
+    with pytest.raises(StopAsyncIteration):
+        await again.__anext__()
+
+
+def test_every_operator_queue_action_takes_its_turn():
+    from app.api.v1 import queue as q
+
+    need = {"/play-next", "/fire-now", "/skip", "/insert", "/move-up", "/move-down", "/reorder",
+            "/reorder-dnd", "/{entry_id}"}
+    have = set()
+    for route in q.router.routes:
+        if any(d.dependency is q.operator_turn for d in getattr(route, "dependencies", [])):
+            have.add(route.path.split("/queue", 1)[-1])
+    assert need <= have, need - have

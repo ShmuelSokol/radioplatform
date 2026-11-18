@@ -743,6 +743,37 @@ def _remember_fire_request(station_id, request_id: str | None, response: dict) -
         _fire_requests[(str(station_id), request_id)] = (time.monotonic(), response)
 
 
+_operator_locks: dict[str, asyncio.Lock] = {}
+# Longest an operator's action waits for the one before it (a Next that waits for the
+# engine to load a file holds its turn about 3 s). After that it goes ahead anyway.
+OPERATOR_TURN_WAIT = 8.0
+
+
+async def operator_turn(station_id: uuid.UUID):
+    """One operator action at a time per station, in the order they arrived.
+
+    Play next and Next sent 0.1 s apart ran side by side: Next read the queue before
+    Play next's commit, saw the old head and played the song the engine had pre-loaded
+    (Jerusalem 03:23Z 2026-11-18). A route dependency, so the turn is taken before the
+    handler reads anything. Not the advance lock: the handlers take that themselves.
+    """
+    key = str(station_id)
+    lock = _operator_locks.get(key)
+    if lock is None:
+        lock = _operator_locks[key] = asyncio.Lock()
+    held = False
+    try:
+        await asyncio.wait_for(lock.acquire(), OPERATOR_TURN_WAIT)
+        held = True
+    except TimeoutError:
+        logger.warning("Operator action on %s went ahead without its turn (waited %.0f s)", key, OPERATOR_TURN_WAIT)
+    try:
+        yield
+    finally:
+        if held:
+            lock.release()
+
+
 _advance_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -1714,7 +1745,7 @@ async def _engine_takes_queue_change(db: AsyncSession, station_id) -> None:
         logger.warning("Engine could not be told about the queue change", exc_info=True)
 
 
-@router.post("/play-next", status_code=201)
+@router.post("/play-next", status_code=201, dependencies=[Depends(operator_turn)])
 async def play_next(
     station_id: uuid.UUID,
     body: QueueAdd,
@@ -1744,7 +1775,7 @@ async def play_next(
     return {"id": str(entry.id), "position": entry.position, "message": "Queued as next"}
 
 
-@router.post("/fire-now", status_code=201)
+@router.post("/fire-now", status_code=201, dependencies=[Depends(operator_turn)])
 async def fire_now(
     station_id: uuid.UUID,
     body: QueueFireNow,
@@ -1856,7 +1887,7 @@ async def mix_over(
 SKIP_FADE_SECONDS = {"hard": 0.0, "fade": 0.5, "soft": 3.0}
 
 
-@router.post("/skip")
+@router.post("/skip", dependencies=[Depends(operator_turn)])
 async def skip_current(
     station_id: uuid.UUID,
     fade: Literal["hard", "fade", "soft"] = Query("fade"),
@@ -2242,7 +2273,7 @@ async def panic(
     return {**done, "queue": await _queue_after_action(db, station_id)}
 
 
-@router.post("/insert", status_code=201)
+@router.post("/insert", status_code=201, dependencies=[Depends(operator_turn)])
 async def insert_into_queue(
     station_id: uuid.UUID,
     body: QueueInsert,
@@ -2305,7 +2336,7 @@ async def insert_into_queue(
     }
 
 
-@router.post("/move-up")
+@router.post("/move-up", dependencies=[Depends(operator_turn)])
 async def move_up(
     station_id: uuid.UUID,
     body: QueueReorder,
@@ -2336,7 +2367,7 @@ async def move_up(
     return {"message": "Moved up"}
 
 
-@router.post("/move-down")
+@router.post("/move-down", dependencies=[Depends(operator_turn)])
 async def move_down(
     station_id: uuid.UUID,
     body: QueueReorder,
@@ -2366,7 +2397,7 @@ async def move_down(
     return {"message": "Moved down"}
 
 
-@router.put("/reorder")
+@router.put("/reorder", dependencies=[Depends(operator_turn)])
 async def reorder_queue(
     station_id: uuid.UUID,
     body: QueueReorder,
@@ -2506,7 +2537,7 @@ async def _validate_queue_move(
     return warnings
 
 
-@router.post("/reorder-dnd")
+@router.post("/reorder-dnd", dependencies=[Depends(operator_turn)])
 async def reorder_dnd(
     station_id: uuid.UUID,
     body: QueueDndReorder,
@@ -2562,7 +2593,7 @@ async def reorder_dnd(
     return {"message": "Reordered", "warnings": warnings}
 
 
-@router.delete("/{entry_id}", status_code=204)
+@router.delete("/{entry_id}", status_code=204, dependencies=[Depends(operator_turn)])
 async def remove_from_queue(
     station_id: uuid.UUID,
     entry_id: uuid.UUID,
