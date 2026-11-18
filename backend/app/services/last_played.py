@@ -34,9 +34,12 @@ FIRST_READ_DAYS = 30
 # False in the tests (conftest): the first read is then the whole history, in
 # the caller's session, so a test sees every play at once.
 BACKGROUND_FULL_READ = True
-# A failed whole-history read is tried again after this long, a failed warm-up read after that long
+# A failed whole-history read is tried again after this long
 RETRY_SECONDS = 600.0
-WARM_RETRY_SECONDS = 2.0
+# A failed startup read of a station is tried again after these waits (a
+# minute and a half in all). If all fail, the first request that asks makes the
+# same bounded read itself.
+WARM_RETRY_WAITS = (2.0, 8.0, 20.0, 60.0)
 # A whole-history read slower than this logs the database's plan for it, once per process
 EXPLAIN_OVER_SECONDS = 3.0
 
@@ -159,9 +162,20 @@ async def _reload(station_id) -> None:
             began = datetime.now(timezone.utc)
             started = time.monotonic()
             async with async_session_factory() as session:
+                await session.connection()  # timed apart: a new connection costs about 2 s
+                connected = time.monotonic()
                 rows = (await session.execute(_full_query(station_id))).all()
                 took = time.monotonic() - started
                 if took > EXPLAIN_OVER_SECONDS:
+                    from app.core import loop_watch
+                    from app.db.engine import pool_state
+
+                    log.warning(
+                        "Last-played whole-history read for station %s: %.1f s (connection %.1f s, "
+                        "query and %d rows %.1f s; loop held %.1f s of it; %s)",
+                        sid, took, connected - started, len(rows), time.monotonic() - connected,
+                        loop_watch.stalled_since(started), pool_state(),
+                    )
                     await _explain(session, station_id, took)
         fresh: dict[str, datetime] = {}
         _merge(fresh, rows)
@@ -175,6 +189,7 @@ async def _reload(station_id) -> None:
                     fresh[key] = t
             entry.last = fresh
             entry.full_at = time.monotonic()
+        log.info("Last-played whole history read for station %s: %d items, %.1f s", sid, len(fresh), took)
     except Exception:
         log.warning("Last-played whole-history read failed for station %s", sid, exc_info=True)
         entry = _cache.get(sid)
@@ -243,16 +258,24 @@ async def warm_all() -> None:
     for station_id in ids:
         if str(station_id) in _cache:
             continue
-        for attempt in (1, 2, 3):
+        for attempt, wait in enumerate(WARM_RETRY_WAITS, start=1):
+            if str(station_id) in _cache:
+                break  # a request read it meanwhile
             try:
+                began = time.monotonic()
                 async with async_session_factory() as session:
-                    await last_played(session, station_id)
-                break
-            except Exception:
-                # "connection was closed in the middle of operation" left every
-                # station unread after the 08:35Z restart on 2026-11-18
-                log.warning(
-                    "Last-played warm-up failed for station %s (attempt %d of 3)",
-                    station_id, attempt, exc_info=True,
+                    known = await last_played(session, station_id)
+                log.info(
+                    "Last-played warm-up read station %s: %d items aired in the last %d days, %.1f s",
+                    station_id, len(known), FIRST_READ_DAYS, time.monotonic() - began,
                 )
-                await asyncio.sleep(WARM_RETRY_SECONDS)
+                break
+            except Exception as e:
+                # "connection was closed in the middle of operation" left every
+                # station unread after the 08:35Z restart on 2026-11-18; three
+                # tries inside 6 s all met a refused connection at 09:31Z
+                log.warning(
+                    "Last-played warm-up failed for station %s (attempt %d of %d): %s",
+                    station_id, attempt, len(WARM_RETRY_WAITS), e,
+                )
+                await asyncio.sleep(wait)
