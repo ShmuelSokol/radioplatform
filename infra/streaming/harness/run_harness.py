@@ -1109,7 +1109,7 @@ async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False, resta
     about what it handed to the engine is lost."""
     name = "live_show_over_hard_item" + ("_hard_stop" if hard_stop else "") + ("_restart" if restart else "")
     # No host microphone: run with no broadcast delay (PR 316), see sc_live_show_quiet
-    before = set_live_settings(h, live_delay_seconds=0)
+    before = set_live_settings(h, live_delay_seconds=0, live_host_gone_seconds=0)   # no microphone here (PR 321 would hand back)
     try:
         await _live_show_over_hard_item(h, name, hard_stop, restart)
     finally:
@@ -1171,8 +1171,9 @@ async def _live_show_over_hard_item(h: Harness, name: str, hard_stop: bool, rest
     h.print_timeline(heard, t1.timestamp())
     during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
     loud = sum(WINDOW for w in during if w[1] >= -45)
+    what = [f"{w[0] - t_start:+.1f}s {tone_name(w[2])} {w[1]:.0f}dB" for w in during if w[1] >= -45][::4][:10]
     h.check(name, bool(during) and loud <= 0.2,
-            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s) {what}")
     after = [n for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
     late_tones = {tone_name(TONES[n][0]) for n in ("time", "weather", "announce")}
     h.check(name, not (set(after) & late_tones),
@@ -1701,7 +1702,7 @@ async def sc_live_show_quiet(h: Harness) -> None:
     name = "live_show_quiet"
     # No host microphone here: with a broadcast delay (PR 316) the show would never be
     # heard and the music rightly plays on, so this checks the take-over with no delay
-    before = set_live_settings(h, live_delay_seconds=0)
+    before = set_live_settings(h, live_delay_seconds=0, live_host_gone_seconds=0)   # no microphone here (PR 321 would hand back)
     try:
         await _live_show_quiet(h, name)
     finally:
@@ -1728,8 +1729,9 @@ async def _live_show_quiet(h: Harness, name: str) -> None:
     h.print_timeline(heard, t_start)
     during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
     loud = sum(WINDOW for w in during if w[1] >= -45)
+    what = [f"{w[0] - t_start:+.1f}s {tone_name(w[2])} {w[1]:.0f}dB" for w in during if w[1] >= -45][::4][:10]
     h.check(name, bool(during) and loud <= 0.2,
-            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s) {what}")
     names = [n for _, n in timeline(heard)]
     h.check(name, "EMERGENCY" not in names, f"no emergency music during or after the show: {names}")
     after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
