@@ -272,6 +272,10 @@ async def test_play_next_takes_back_the_song_the_engine_holds(client, auth_heade
     commands.clear()
     res = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade=hard", headers=auth_headers)
     assert res.json()["message"] == "Skipped" and commands == ["/skip"]
+    # The song that was taken back is not lost: it is handed out again after the item
+    state.cued_entry_id = None
+    again = await playout_engine.handle_next(db_session, station.id, given=[got["entry_id"]])
+    assert again["entry_id"] == str(pending.id)
 
 
 @pytest.mark.asyncio

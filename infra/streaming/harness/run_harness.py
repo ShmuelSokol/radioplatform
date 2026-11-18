@@ -1907,7 +1907,12 @@ async def sc_next_skips_one(h: Harness) -> None:
     airs, never the one after that."""
     name = "next_skips_one"
     await wait_music(h)
+    # Not in the second of a song change: the refill that runs then is still writing, and
+    # this test's direct queue writes landed among its songs (2026-11-18, run right after
+    # next_twice's last Next: automatic songs aired between the queued ones)
+    await asyncio.sleep(5)
     await h.clear_pending()
+    await asyncio.sleep(1.5)
     order = ["song2", "song3", "song4", "song5", "song6", "story", "shiur"]
     ids = await h.queue([(n, {}) for n in order])
     await asyncio.sleep(3)
