@@ -372,6 +372,7 @@ function AutomationConfig({ config, onSave, saving }: {
   const [liveDelay, setLiveDelay] = useState<string>(String(config.live_delay_seconds ?? 15));
   const [liveDump, setLiveDump] = useState<string>(String(config.live_dump_seconds ?? 0));
   const [liveTimed, setLiveTimed] = useState<string>(config.live_timed_items ?? 'time');
+  const [liveRecord, setLiveRecord] = useState<boolean>(config.live_record_shows !== false);
 
   const handleSave = () => {
     onSave({
@@ -381,6 +382,7 @@ function AutomationConfig({ config, onSave, saving }: {
       live_delay_seconds: Math.min(40, Math.max(0, Number.isFinite(parseFloat(liveDelay)) ? parseFloat(liveDelay) : 15)),
       live_dump_seconds: Math.min(40, Math.max(0, Number.isFinite(parseFloat(liveDump)) ? parseFloat(liveDump) : 0)),
       live_timed_items: liveTimed,
+      live_record_shows: liveRecord,
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
       weather_enabled: weatherOn,
@@ -464,6 +466,17 @@ function AutomationConfig({ config, onSave, saving }: {
         <span className="block mt-1 text-xs text-gray-500">
           The item plays to listeners at its exact time while the host keeps talking; the host's words wait in the delay
           and air after it, so nothing is lost. Needs a delay above 0.
+        </span>
+      </label>
+      <label className="mt-4 flex max-w-lg items-start gap-2 text-sm">
+        <input type="checkbox" checked={liveRecord} onChange={e => setLiveRecord(e.target.checked)}
+          className="mt-1" data-testid="live-record-shows" />
+        <span>
+          <span className="block font-medium text-gray-700">Record every live show</span>
+          <span className="block mt-1 text-xs text-gray-500">
+            The show is recorded as listeners heard it (anything dumped is not in it) and appears in Archives as a
+            draft when it ends. Listen to it there and publish it.
+          </span>
         </span>
       </label>
       <button onClick={handleSave} disabled={saving}

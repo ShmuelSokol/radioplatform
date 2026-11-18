@@ -366,4 +366,5 @@ INGEST 2026-11-18 live-shows.md host gone: station back to music after live_host
 INGEST 2026-11-18 hourly-slots.md half hour on the second as a setting: spot_timing.half_hour (falls back to other), half_hour_time_check plays uploaded :30 clips (?minute=30) then the :30 weather, _put_first puts a new time check ahead of a :30 block queued earlier; saving re-times queued time/weather
 INGEST 2026-11-18 live-shows.md caller desk: the caller's topic/notes shown and editable on both screens (was stored, never shown), Hold, Next caller
 INGEST 2026-11-18 live-shows.md live_state.on_stream: Listen page plays a live show from the stream on proto 5 stations and declines the socket audio; control room mutes its stream during a show
+INGEST 2026-11-18 live-shows.md live shows are recorded from the delay line's output (what listeners heard, no dumped audio) and land in Archives as drafts; live_record_shows setting
 UPDATE 2026-11-18 air-watch.md hour_missing also checks hh:30 when the station plays a half-hour time check on the second and one was queued for that minute

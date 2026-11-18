@@ -199,6 +199,7 @@ class StationLiveRelay:
     async def set_on_air(
         self, station_id: str, show_id: str | None, delay: float = 0.0, dump: float = 0.0,
         end_at: float | None = None, drain: bool = True, on_done=None, heard_now: bool = False,
+        record: bool = False,
     ) -> None:
         """A host starts sending for `show_id` (listeners hear it `delay` seconds later),
         or (show_id None) the show is over: what is still in the delay plays out first
@@ -284,6 +285,12 @@ class StationLiveRelay:
             new.mode = "no delay" if new.target == 0 else "building"
             await listening(True)
         new.start()
+        if record:
+            try:
+                from app.services import live_recording
+                live_recording.start(station_id, show_id, new)
+            except Exception:
+                logger.warning("Could not start recording live show %s", show_id, exc_info=True)
 
     async def host_left(self, station_id: str, show_id: str) -> None:
         """The host's page went away (the show goes on): play out what is in the delay."""
@@ -563,6 +570,7 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     delay = dump = 0.0
     end_at = None
     taken_over = True
+    record = False
     try:
         async for db in get_async_session():
             from app.models.station import Station
@@ -581,6 +589,8 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
                 if station_row is not None:
                     await db.refresh(station_row)
                     delay, dump, _rule = settings_for(station_row.automation_config)
+                    from app.services import live_recording
+                    record = live_recording.wanted(station_row.automation_config)
                     taken_over = (station_row.automation_config or {}).get("live_show_id") == str(show.id)
                 if show.scheduled_end is not None:
                     end = show.scheduled_end
@@ -601,7 +611,7 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
         from app.services.live_show_service import take_over_when_heard
         live_relay.on_first_air[station_id] = take_over_when_heard
     await live_relay.set_on_air(station_id, show_id, delay=delay, dump=dump, end_at=end_at,
-                                heard_now=taken_over)
+                                heard_now=taken_over, record=record)
     _air = live_relay.airs.get(station_id)
     if _air is not None and not taken_over and not _air.listening and delay > 0:
         from app.services.live_show_service import hold_for_timed_items

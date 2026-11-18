@@ -41,6 +41,10 @@ Since the engine plays `/playout/{id}/live.mp3` its stream carries the show, so 
 - FM (a local box) gets the show the same way, through the engine.
 - Check: `e2e/listen-page.mjs` part `livestream`.
 
+## Recording (2026-11-18)
+`services/live_recording.py`: every live show is recorded as it aired and lands in Archives as a draft. The recorder taps the output of the delay line (`LiveAir.tap`, the same tap the engine's live.mp3 reads), so the file is what listeners heard: after the delay, without anything dumped, with callers and time checks. Mono MP3 at 32 kbps (about 14 MB an hour; the storage's file limit is 50 MB). When the air closes the file is uploaded to `show-recordings/<show>/<id>.mp3` and a `ShowArchive` row is made with `is_published` false and `live_show_id`: a manager listens and publishes it on the Archives page. Under 20 s aired nothing is kept. A host who drops and returns after the delay had played out makes "(part 2)". Station setting `automation_config.live_record_shows` (default on; Stations page, "Record every live show"). A failed save raises a warning alert. The recording is written to a temp file on the web server while the show runs, so a backend restart mid-show loses that part.
+Checks: `tests/test_live_recording.py` (a dumped 1000 Hz "curse" must not be in the file), `e2e/live-delay.cjs` part G (`ONLY=record`).
+
 ## Caller desk (2026-11-18)
 - **The caller's topic and notes** (`pages/admin/live/CallerNote.tsx`): the topic a web caller types goes into `CallInRequest.notes`. It was stored and shown nowhere, so the host put callers on air blind. Every caller card on the Call Screener and the Host Console now shows it, editable in place (`PATCH .../calls/{id}`, which already broadcast `caller_updated` with the notes).
 - **Hold** (`POST .../calls/{id}/hold`): the caller on air goes back to Approved, still connected and hearing the show. 409 when not on air.
