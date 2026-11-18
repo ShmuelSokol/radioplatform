@@ -44,12 +44,12 @@ export const insertAfter = async (stationId: string, assetIds: string[], afterEn
 
 export const moveUp = async (stationId: string, entryId: string) => {
   const res = await apiClient.post(`/stations/${stationId}/queue/move-up`, { entry_id: entryId, new_position: 0 });
-  return res.data;
+  return res.data as { message: string; warnings?: string[] };
 };
 
 export const moveDown = async (stationId: string, entryId: string) => {
   const res = await apiClient.post(`/stations/${stationId}/queue/move-down`, { entry_id: entryId, new_position: 0 });
-  return res.data;
+  return res.data as { message: string; warnings?: string[] };
 };
 
 export const removeFromQueue = async (stationId: string, entryId: string): Promise<void> => {
