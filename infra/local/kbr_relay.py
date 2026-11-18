@@ -85,6 +85,7 @@ class Relay:
         self.last_plan_at = 0.0
         self.hello_owed = False
         self.spool_path = self.dir / "spool.jsonl"
+        self.commands_done = 0
         self.stop = threading.Event()
 
     # ── disk ────────────────────────────────────────────────────────────────
@@ -354,6 +355,57 @@ class Relay:
                 break
         return have, missing
 
+    def run_commands(self, wait: float = 25.0) -> None:
+        """Fetch the backend's commands for the engine (Next, Play Now, flush, timed
+        hand-over) over a call this box makes itself, so nothing has to reach in from
+        outside. The call is held open until a command is made; each answer goes back
+        with the next call."""
+        answers: list[dict] = []
+        while not self.stop.is_set():
+            try:
+                status, data = self._call(
+                    "POST", "/commands/poll", json.dumps({"wait": wait, "answers": answers}).encode(),
+                    timeout=wait + 10.0,
+                )
+            except Offline:
+                answers = []
+                self.stop.wait(2.0)
+                continue
+            answers = []
+            if status != 200:
+                # 404: this station is not on the engine yet; nothing to fetch
+                self.stop.wait(15.0)
+                continue
+            try:
+                commands = json.loads(data).get("commands", [])
+            except (ValueError, AttributeError):
+                commands = []
+            for cmd in commands:
+                code, body = self._engine_call(cmd.get("path", ""), cmd.get("payload") or {})
+                answers.append({"id": cmd.get("id", ""), "status": code, "body": body})
+                self.commands_done += 1
+
+    def _engine_call(self, path: str, payload: dict) -> tuple[int, dict | None]:
+        if not path.startswith("/") or ".." in path or "?" in path:
+            return 400, None
+        req = urllib.request.Request(
+            self.engine_control + path, data=json.dumps(payload).encode(), method="POST",
+            headers={"X-Playout-Token": self.token, "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                code, raw = resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            code, raw = e.code, e.read()
+        except (OSError, ValueError) as e:
+            log.warning("engine %s failed: %s", path, e)
+            return 502, None
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            body = None
+        return code, body if isinstance(body, dict) else None
+
     def _post_engine(self, path: str, payload: dict) -> bool:
         req = urllib.request.Request(
             self.engine_control + path, data=json.dumps(payload).encode(), method="POST",
@@ -439,7 +491,15 @@ class Relay:
                     log.exception("sync loop")
                 self.stop.wait(plan_every)
 
-        for target in (timed_loop, sync_loop):
+        def command_loop():
+            while not self.stop.is_set():
+                try:
+                    self.run_commands()
+                except Exception:
+                    log.exception("command loop")
+                    self.stop.wait(2.0)
+
+        for target in (timed_loop, sync_loop, command_loop):
             threading.Thread(target=target, daemon=True, name=target.__name__).start()
 
     def status(self) -> dict:
@@ -452,6 +512,7 @@ class Relay:
                 "plan_audio_missing": sum(1 for e in entries if not self.have(e["url"])),
                 "reports_kept": sum(1 for _ in open(self.spool_path)) if self.spool_path.is_file() else 0,
                 "in_blackout": self.in_blackout(self.clock()),
+                "commands_done": self.commands_done,
             }
 
 

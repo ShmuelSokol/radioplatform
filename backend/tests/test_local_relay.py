@@ -315,3 +315,98 @@ def test_http_front_door_needs_the_token(rig):
         assert json.loads(urllib.request.urlopen(base + "/relay/status").read())["online"] is True
     finally:
         server.shutdown()
+
+
+# ── Commands to a box with no inbound line ───────────────────────────────────
+
+
+@pytest.fixture
+def tunnel_station(monkeypatch):
+    from app.services import playout_engine, playout_tunnel
+
+    sid = uuid.uuid4()
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", str(sid))
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", TOKEN)
+    playout_engine.reset_state()
+    playout_tunnel.reset()
+    yield sid
+    playout_tunnel.reset()
+
+
+@pytest.mark.asyncio
+async def test_command_goes_through_the_relay_when_one_is_polling(client, tunnel_station):
+    import asyncio
+
+    from app.services import playout_engine, playout_tunnel
+
+    sid = tunnel_station
+    url = f"/api/v1/playout/{sid}/commands/poll"
+    assert (await client.post(url, json={"wait": 0})).status_code == 403
+    assert not playout_tunnel.connected(sid)
+    assert (await client.post(url, json={"wait": 0}, headers=HEADERS)).json() == {"commands": []}
+    assert playout_tunnel.connected(sid)
+
+    async def relay_once(status=200, body=None):
+        got = (await client.post(url, json={"wait": 5}, headers=HEADERS)).json()["commands"]
+        answers = [{"id": c["id"], "status": status, "body": body or {"ok": True}} for c in got]
+        await client.post(url, json={"wait": 0, "answers": answers}, headers=HEADERS)
+        return got
+
+    poller = asyncio.create_task(relay_once())
+    await asyncio.sleep(0.05)  # the relay's call is being held open
+    started = asyncio.get_running_loop().time()
+    assert await playout_engine.engine_skip(sid, fade_seconds=0.5) is True
+    assert asyncio.get_running_loop().time() - started < 1.0
+    got = await poller
+    assert [(c["path"], c["payload"]) for c in got] == [("/skip", {"fade": 0.5})]
+
+    poller = asyncio.create_task(relay_once(body={"ok": True, "lane": "main", "entry": "e1"}))
+    assert (await playout_engine.engine_status(sid))["entry"] == "e1"
+    await poller
+
+    # The engine refused it: the command reports failure
+    poller = asyncio.create_task(relay_once(status=502))
+    assert await playout_engine.engine_flush(sid) is False
+    await poller
+
+
+@pytest.mark.asyncio
+async def test_command_nobody_fetched_is_withdrawn_not_delivered_late(client, tunnel_station, monkeypatch):
+    from app.services import playout_tunnel
+
+    sid = tunnel_station
+    url = f"/api/v1/playout/{sid}/commands/poll"
+    await client.post(url, json={"wait": 0}, headers=HEADERS)
+    assert await playout_tunnel.send(sid, "/skip", {}, timeout=0.1) is None
+    assert (await client.post(url, json={"wait": 0}, headers=HEADERS)).json() == {"commands": []}
+    # A relay that stopped polling: commands go by HTTPS again
+    monkeypatch.setattr(playout_tunnel, "CONNECTED_SECONDS", 0.0)
+    assert not playout_tunnel.connected(sid)
+
+
+def test_relay_fetches_commands_gives_them_to_the_engine_and_answers(rig):
+    fake, relay, _ = rig
+    polls = []
+
+    def call(method, path, body=None, timeout=5.0):
+        assert (method, path) == ("POST", "/commands/poll")
+        polls.append(json.loads(body))
+        if len(polls) == 1:
+            return 200, json.dumps({"commands": [
+                {"id": "c1", "path": "/timed", "payload": {"uri": "u", "at": 5.0, "id": "x"}},
+                {"id": "c2", "path": "/../etc", "payload": {}},
+            ]}).encode()
+        relay.stop.set()
+        return 200, b'{"commands": []}'
+
+    relay._call = call
+    relay.run_commands(wait=1.0)
+    assert fake.timed == [{"uri": "u", "at": 5.0, "id": "x"}]
+    assert polls[0]["answers"] == []
+    assert polls[1]["answers"] == [
+        {"id": "c1", "status": 200, "body": {"ok": True}},
+        {"id": "c2", "status": 400, "body": None},
+    ]
+    assert relay.status()["commands_done"] == 2

@@ -233,6 +233,15 @@ async def close_client() -> None:
 
 
 async def _command(path: str, payload: dict | None = None, *, station_id) -> bool:
+    from app.services import playout_tunnel
+
+    if playout_tunnel.connected(station_id):
+        # A local FM box: no inbound line, its relay fetches the command (playout_tunnel)
+        got = await playout_tunnel.send(station_id, path, payload or {}, timeout=4.0)
+        if got is None or got[0] != 200:
+            logger.warning("Playout engine %s by relay -> %s", path, "no answer" if got is None else got[0])
+            return False
+        return True
     url = settings.engine_control_url(station_id) + path
     try:
         resp = await _client().post(
@@ -250,6 +259,12 @@ async def _command(path: str, payload: dict | None = None, *, station_id) -> boo
 
 async def engine_status(station_id) -> dict | None:
     """What the engine says is on air (its /status), or None when it does not answer."""
+    from app.services import playout_tunnel
+
+    if playout_tunnel.connected(station_id):
+        got = await playout_tunnel.send(station_id, "/status", {}, timeout=3.0)
+        data = got[1] if got is not None and got[0] == 200 else None
+        return data if isinstance(data, dict) and data.get("ok") else None
     url = settings.engine_control_url(station_id) + "/status"
     try:
         resp = await _client().post(

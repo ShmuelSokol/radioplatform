@@ -59,22 +59,38 @@ for 150 s: songs in order from the local disk, time check on its second, no emer
 file, no silence; after the return the site shows the time check as aired and a song on
 air). Unit tests: `backend/tests/test_local_relay.py`.
 
+## Stage 2a (2026-11-18): commands reach a box with no inbound line
+
+The backend sends the stream server's engine its commands over HTTPS
+(`PLAYOUT_ENGINE_URL`). A box at BMG cannot be reached from outside, so the relay calls
+out: `POST /playout/{station}/commands/poll` (`{wait, answers}`) is held open by the
+backend (up to 25 s, no database session) until a command is made, and returns it at
+once; the relay posts it to the engine's control port and sends the engine's status and
+JSON body with its next poll. `app/services/playout_tunnel.py` keeps this in memory.
+`playout_engine._command` and `engine_status` use it **only while a relay is polling for
+that station** (a poll open, or one within the last 40 s); otherwise HTTPS as before, so
+the stream server's stations are untouched. A command nobody fetched within its timeout
+(4 s) is withdrawn, never delivered late. With the tunnel up the backend does the timed
+hand-over itself as on the stream server; the relay's own hand-over (`KBR_RELAY_TIMED=offline`)
+takes over only when the backend is unreachable.
+
+Harness: `--local-box` now sets the backend's `PLAYOUT_ENGINE_URL` to a dead address, so
+every command in those runs can only travel through the relay; `local_box_commands`
+checks Next and a backend-handed time check.
+
 ## Known gaps (next stages; nothing is installed at BMG yet)
 
-1. **Commands from the site** (Next, Play Now, flush, the online timed hand-over) are sent
-   by the backend to `PLAYOUT_ENGINE_URL`, which needs an inbound line. The box will have
-   none: the relay must hold an outbound connection and receive them. Until then
-   `KBR_RELAY_TIMED=always` makes the relay do every timed hand-over itself.
-2. **Sound card output** in radio.liq (`output.alsa` behind an env var), and the box's
+
+1. **Sound card output** in radio.liq (`output.alsa` behind an env var), and the box's
    own audio sent up to Icecast for online listeners.
-3. **Late start reports carry `at`**, but the backend still stamps them with the time
+2. **Late start reports carry `at`**, but the backend still stamps them with the time
    they arrive: play-log times for the outage are wrong until `handle_started` uses it.
-4. **Offline brain is simple:** the queue as it stood. No long-item rule (a shiur is cut
+3. **Offline brain is simple:** the queue as it stood. No long-item rule (a shiur is cut
    by a hard item, not paused), no `hard_by`, no hour fitting, no refill past the plan.
-5. **Updates without a gap** (second engine started alongside, switch between songs,
+4. **Updates without a gap** (second engine started alongside, switch between songs,
    automatic return to the old one), **power-loss start-up**, **alerts** (FM silent, box
    offline, disk full), **RDS** (the encoder model is not known yet), **setup script**.
-6. Waiting on Shmuel: photos of the room (audio path, RDS encoder), who has access, UPS.
+5. Waiting on Shmuel: photos of the room (audio path, RDS encoder), who has access, UPS.
    He believes the room has wired internet.
 
 Related: [streaming-architecture](streaming-architecture.md), [engine-harness](engine-harness.md),

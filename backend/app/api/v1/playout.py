@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.db.session import get_db
-from app.services import playout_engine, playout_plan
+from app.services import playout_engine, playout_plan, playout_tunnel
 
 router = APIRouter(prefix="/playout", tags=["playout"])
 
@@ -74,6 +74,30 @@ async def library(
         return await playout_plan.library_page(db, after, limit)
     except ValueError:
         raise NotFoundError("Unknown page") from None
+
+
+class CommandAnswer(BaseModel):
+    id: str
+    status: int = 0
+    body: dict | None = None
+
+
+class CommandPoll(BaseModel):
+    wait: float = playout_tunnel.MAX_WAIT_SECONDS
+    answers: list[CommandAnswer] = []
+
+
+@router.post("/{station_id}/commands/poll")
+async def commands_poll(
+    body: CommandPoll,
+    station_id: uuid.UUID = Depends(_require_engine),
+):
+    """A local FM box's relay collects the commands for its engine (Next, Play Now,
+    timed hand-over) and hands back the engine's answers to the ones before. Held open
+    until a command is made, so it arrives at once; no database session is held."""
+    for a in body.answers:
+        playout_tunnel.answer(station_id, a.id, a.status, a.body)
+    return {"commands": await playout_tunnel.poll(station_id, body.wait)}
 
 
 @router.post("/{station_id}/hello")
