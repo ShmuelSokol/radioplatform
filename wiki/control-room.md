@@ -180,3 +180,13 @@ Shmuel, 2026-11-18: he wants to fix a song where he sees it, not in the Library.
 - The phone row action bar is fixed at 61 px (`ACTIONS_H`) and now holds five buttons;
   under 360 px "+ Insert before" shows as "+ Insert" (its aria-label stays).
 - Checked by `e2e/control-room-song-actions.mjs` and `backend/tests/test_song_quick_actions.py`.
+- The desktop row strip (Song, ▲, ▼, ✕) shows on hover, on a selected row and always on
+  the playing row (Song only). Hover-only made it unreachable for a live browser check.
+- The right-hand column (`aside[aria-label=Controls]`) is taller than the window at
+  1366x900 and scrolls. Loop, Go next and the fades are `sticky top-0` inside it
+  (`cr-transport-pinned`), so scrolling to the lower tabs no longer hides Loop.
+- Hidden row strips are `pointer-events-none` only on devices without hover
+  (`[@media(hover:hover)]:pointer-events-auto`): with a mouse the row is hovered before any
+  click, so the buttons are there; on a touch screen an invisible ✕ must not take a tap.
+- The desktop Time column is 124 px and never wraps: "12:02:47 AM Thu" wrapped at 92 px
+  and the day name ran into the next 26 px row.

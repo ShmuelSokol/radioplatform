@@ -38,6 +38,8 @@ from app.services.spot_schedule_service import as_utc, load_blackouts
 CONFIG_KEY = "playlist_generation"
 DEFAULT_HOURS = 6
 DEFAULT_ARTIST_DISTANCE = 2
+# A place in the queue is counted as this long when working out when a waiting song airs
+QUEUED_PLACE_SECONDS = 240.0
 DEFAULT_DURATION = 180.0
 SKIP = timedelta(minutes=15)
 MAX_PICKS = 4000
@@ -142,13 +144,19 @@ def _artist_key(artist: str | None) -> str | None:
 class _Library:
     """Songs of each type, with when each last aired on this station."""
 
-    def __init__(self, db: AsyncSession, station_id, busy_ids: set, min_vote: int = 0):
+    def __init__(
+        self, db: AsyncSession, station_id, busy_ids: set, min_vote: int = 0,
+        queued: list | None = None, start: datetime | None = None,
+    ):
         self.db = db
         self.min_vote = min_vote
         # Types where no song reached the minimum vote, so the minimum was ignored.
         self.below_vote: set[tuple] = set()
         self.station_id = station_id
         self.busy = {str(i) for i in busy_ids}
+        # What waits in the queue, in order, and when the new songs start
+        self.queued = [str(i) for i in (queued or [])]
+        self.start = start
         self.pools: dict[tuple, list] = {}
         self.last_used: dict[str, datetime] | None = None
 
@@ -156,6 +164,16 @@ class _Library:
         from app.services.last_played import last_played
 
         self.last_used = await last_played(self.db, self.station_id)
+        # A song waiting in the queue counts as used when it will air (about four
+        # minutes a place, counted back from where the new songs start), not when
+        # it last aired. Otherwise a song queued an hour before the end that has
+        # never aired looks like the most rested one and is drawn again at once.
+        if self.start is not None:
+            n = len(self.queued)
+            for i, sid in enumerate(self.queued):
+                due = self.start - timedelta(seconds=QUEUED_PLACE_SECONDS * (n - i))
+                if due > self.last_used.get(sid, _EPOCH):
+                    self.last_used[sid] = due
 
     async def pool(self, asset_type: str, category: str | None) -> list:
         key = (asset_type, category)
@@ -193,16 +211,19 @@ class _Library:
         if not rows:
             return None, False
         epoch = datetime(1970, 1, 1, tzinfo=UTC)
-        # Longest-rested first. Songs already waiting in the queue go last.
-        far_future = datetime(9999, 1, 1, tzinfo=UTC)
+        # Longest-rested first. Songs already waiting in the queue go last, and
+        # among those the one drawn longest ago comes first: when a fill runs
+        # longer than the type has songs (48 hours from a few hundred), every
+        # song is waiting, and treating them all alike brought a song back a
+        # few songs after itself.
 
         def rested(row):
-            sid = str(row.id)
-            if sid in self.busy:
-                return far_future
-            return self.last_used.get(sid, epoch)
+            return self.last_used.get(str(row.id), epoch)
 
-        ordered = sorted(rows, key=lambda r: (rested(r), random.random()))
+        def waiting(row):
+            return str(row.id) in self.busy
+
+        ordered = sorted(rows, key=lambda r: (waiting(r), rested(r), random.random()))
         # The artist rule comes first, as in the studio program: when the only
         # songs clear of it are already waiting in the queue, one of those is
         # used again rather than putting an artist back too soon. Songs already
@@ -212,7 +233,9 @@ class _Library:
         candidates = clear or ordered
         # Draw from the most-rested third so the order is not the same every cycle...
         window = candidates[: max(1, math.ceil(len(candidates) / 3))]
-        # ...but only among songs that have rested about as long as the most
+        # ...never a waiting song while one that is not waiting is clear...
+        window = [r for r in window if waiting(r) == waiting(window[0])]
+        # ...and only among songs that have rested about as long as the most
         # rested one. Without this a song that aired an hour ago could be drawn
         # ahead of one that has never aired, just for sitting in the same third.
         longest = at - rested(window[0])
@@ -322,6 +345,7 @@ async def generate(
     cursor: dict | None = None,
     recent_artists: list[str | None] | None = None,
     busy_ids: set | None = None,
+    queued: list | None = None,
     timed: list[TimedItem] | None = None,
 ) -> Plan:
     """`timed`: items already queued for set times after `start`, so each pick's
@@ -345,7 +369,7 @@ async def generate(
     blackouts = await load_blackouts(db, station.id, start, end)
     songs_by_block = await block_songs(db, schedules)
     svc = SchedulingService(db)
-    library = _Library(db, station.id, busy_ids or set(), min_vote)
+    library = _Library(db, station.id, busy_ids or set(), min_vote, queued, start)
     recent: deque = deque(
         [k for k in (_artist_key(a) for a in (recent_artists or [])) if k],
         maxlen=artist_distance or 1,

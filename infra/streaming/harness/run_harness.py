@@ -907,6 +907,207 @@ async def sc_operator_next_overtakes_commit(h: Harness) -> None:
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 
+async def sc_two_sources_same_second(h: Harness) -> None:
+    """V3-5: hard items from two sources due on the same second (the hourly time check and
+    weather, and a program block's announcement). Each airs once, whole, one after the
+    other, none dropped, and two of them are never heard at once."""
+    name = "two_sources_same_second"
+    await wait_music(h)
+    t1 = at(22)
+    block = str(uuid.uuid4())
+    await h.queue([("announce", {"preempt_at": t1, "timing_mode": "hard", "source": "block", "block_id": block})])
+    await h.queue([(n, {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}) for n in ("time", "weather")])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8 + 6 + 12)
+    items = ("time", "weather", "announce")
+    starts = {n: await h.started_times(n, t1.timestamp() - 5) for n in items}
+    h.check(name, all(len(starts[n]) == 1 for n in items),
+            f"each aired once: { {n: len(starts[n]) for n in items} }")
+    first = min((starts[n][0][0] for n in items if starts[n]), default=None)
+    late = None if first is None else first - t1.timestamp()
+    h.check(name, late is not None and -1.0 <= late <= 2.0,
+            f"the first of them {'never' if late is None else f'{late:+.1f} s'} from the due second")
+    heard = h.heard(t1.timestamp() - 3, t1.timestamp() + 32)
+    h.print_timeline(heard, t1.timestamp())
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    for n in items:
+        h.check(name, runs.count(tone_name(TONES[n][0])) == 1, f"{n} heard once, in one piece: {runs}")
+    pairs = [("time", "weather"), ("time", "announce"), ("weather", "announce")]
+    over = {f"{x}+{y}": both_audible(h, t1.timestamp() - 1, t1.timestamp() + 30, TONES[x][0], TONES[y][0])
+            for x, y in pairs}
+    h.check(name, all(v <= 0.25 for v in over.values()), f"no two of them at once (seconds together: {over})")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"music back on air ({cur.asset.title if cur else None})")
+
+
+async def sc_hard_group_overruns_next_hard(h: Harness) -> None:
+    """V3-6: a hard group is still playing when the next hard item is due (time + weather
+    + announcement, 20 s, at T; another announcement and weather at T+10). Nothing is
+    lost, nothing airs twice, no two are heard at once, and the later group airs as soon
+    as the first is done."""
+    name = "hard_group_overruns_next_hard"
+    await wait_music(h)
+    t1 = at(22)
+    t2 = t1 + timedelta(seconds=10)
+    first_ids = await h.queue([(n, {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})
+                               for n in ("time", "weather", "announce")])
+    block = str(uuid.uuid4())
+    second_ids = await h.queue([("time", {"preempt_at": t2, "timing_mode": "hard", "source": "block", "block_id": block})])
+    await asyncio.sleep(max(0, t2.timestamp() - time.time()) + 45)
+    rows = {e.id: e for e in await h.rows()}
+    got = [(rows[i].status, rows[i].started_at.timestamp() - t1.timestamp() if rows[i].started_at else None)
+           for i in first_ids + second_ids if i in rows]
+    h.check(name, all(st in ("played", "playing") and at_ is not None for st, at_ in got),
+            f"all four aired (status, seconds after T): {[(st, None if a is None else round(a, 1)) for st, a in got]}")
+    second = rows.get(second_ids[0])
+    when = second.started_at.timestamp() - t1.timestamp() if second and second.started_at else None
+    h.check(name, when is not None and 9.0 <= when <= 24.0,
+            f"the later item aired {'never' if when is None else f'{when:.1f} s'} after T (due at +10, the first group lasts 20 s)")
+    heard = h.heard(t1.timestamp() - 3, t1.timestamp() + 50)
+    h.print_timeline(heard, t1.timestamp())
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    h.check(name, runs.count(tone_name(TONES["time"][0])) == 2, f"the time tone heard twice (once per group): {runs}")
+    over = {f"{x}+{y}": both_audible(h, t1.timestamp() - 1, t1.timestamp() + 45, TONES[x][0], TONES[y][0])
+            for x, y in (("time", "weather"), ("time", "announce"), ("weather", "announce"))}
+    h.check(name, all(v <= 0.25 for v in over.values()), f"no two of them at once (seconds together: {over})")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+
+
+async def sc_engine_starts_every_time(h: Harness, times: int = 6) -> None:
+    """V3-22, V3-23: the engine is started several times in a row. Each time /status
+    answers within 20 s of the restart being asked for (stop, start, also before the first
+    track), sound is on air within 30 s and it is the station's music, not the emergency files."""
+    name = "engine_starts_every_time"
+    await wait_music(h)
+    status_s, sound_s, bad = [], [], []
+    for i in range(times):
+        await h.clear_pending()
+        await h.queue([("song1", {}), ("song2", {}), ("song3", {})])
+        asked = time.time()   # times below count from the moment the restart was asked for
+        await asyncio.to_thread(h.stack.restart_engine)
+        t0 = h.stack.wav_t0
+        answered = None
+        while time.time() - asked < 30:
+            try:
+                if await asyncio.to_thread(_control, "/status") == 200:
+                    answered = time.time() - asked
+                    break
+            except OSError:
+                pass  # the control port is not open yet
+            await asyncio.sleep(0.2)
+        status_s.append(answered)
+        await asyncio.sleep(max(0, t0 + 16 - time.time()))
+        heard = h.heard(t0, time.time() - 1)
+        first = next((t for t, db, _ in heard if db > -45), None)
+        sound_s.append(None if first is None else first - asked)
+        names = {n for _, n in timeline(h.heard(t0 + 8, time.time() - 1))}
+        if not names or not all(n.startswith("song") for n in names):
+            bad.append((i + 1, sorted(names)))
+    h.check(name, all(a is not None and a <= 20.0 for a in status_s),
+            f"/status answered after each of {times} starts (s): {[None if a is None else round(a, 1) for a in status_s]}")
+    h.check(name, all(x is not None and x <= 30.0 for x in sound_s),
+            f"sound after each start (s): {[None if x is None else round(x, 1) for x in sound_s]}")
+    h.check(name, not bad, f"station music 8 s after every start, no emergency files: {bad or 'all'}")
+
+
+async def sc_live_show_over_hard_item(h: Harness) -> None:
+    """V3-52: a live show starts while a hard time check is on air, and a second time
+    check comes due during the show. The stream goes quiet for the host, the time check
+    that came due during the show is not aired late after it, and music is back after."""
+    name = "live_show_over_hard_item"
+    await wait_music(h)
+    t1 = at(20)
+    t2 = t1 + timedelta(seconds=20)
+    await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
+                   ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+    second = await h.queue([("announce", {"preempt_at": t2, "timing_mode": "hard", "source": "auto"})])
+    code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show 2",
+                                               "calls_enabled": False})
+    if code != 201:
+        h.check(name, False, f"could not create the show ({code})")
+        return
+    await asyncio.sleep(max(0, t1.timestamp() + 3 - time.time()))
+    t_start = time.time()
+    code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+    h.check(name, code == 200, f"show started 3 s into the time check ({code})")
+    await asyncio.sleep(max(0, t2.timestamp() + 12 - time.time()))
+    t_end = time.time()
+    code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
+    h.check(name, code == 200, f"show ended 12 s after the second item was due ({code})")
+    # long enough for the song that comes back to end, so a stale item would get its turn
+    await asyncio.sleep(18 + 45)
+    heard = h.heard(t1.timestamp() - 3, time.time() - 1)
+    h.print_timeline(heard, t1.timestamp())
+    during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
+    loud = sum(WINDOW for w in during if w[1] >= -45)
+    h.check(name, bool(during) and loud <= 0.2,
+            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    after = [n for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    late_tones = {tone_name(TONES[n][0]) for n in ("time", "weather", "announce")}
+    h.check(name, not (set(after) & late_tones),
+            f"no time check, weather or announcement aired late after the show: {after}")
+    h.check(name, bool(after) and "EMERGENCY" not in after, f"station music after the show: {after}")
+    rows = {e.id: e for e in await h.rows()}
+    st = rows[second[0]].status if second[0] in rows else "gone"
+    h.check(name, st != "pending" and st != "playing",
+            f"the item that came due during the show is closed, not left waiting in the queue ({st})")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"the site shows music ({cur.asset.title if cur else None})")
+
+
+async def sc_next_while_soft_spot_waits(h: Harness, slow: float = 0.0) -> None:
+    """Main 03:46Z 2026-11-18: a soft sponsorship was the queue's next item (waiting for
+    the song to end) and the engine held the following song pre-loaded. Next dropped the
+    spot, marked it played without airing it and put a second of emergency audio on air.
+    Now Next plays the spot: it airs once, whole, is not closed before it airs, no
+    emergency audio, and the song the engine held plays after it. `slow`: the spot's
+    file takes this long to arrive."""
+    name = "next_while_soft_spot_waits" + (f"_slow_{slow:g}s" if slow else "")
+    await wait_music(h)
+    await asyncio.sleep(8)   # the engine holds its next song
+    t1 = at(2)
+    if slow:
+        h.stack.slow_files["weather.mp3"] = slow
+    try:
+        spot = (await h.queue([("weather", {"preempt_at": t1, "timing_mode": "soft", "source": "ad_slot"})]))[0]
+        await asyncio.sleep(5)   # due and waiting for the song to end
+        before = next((e for e in await h.rows() if e.id == spot), None)
+        h.check(name, before is not None and before.status == "pending",
+                f"the spot waits for the song (status {before.status if before else None})")
+        pressed = time.time()
+        code, _ = h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+        h.check(name, code == 200, f"Next answered {code} after {time.time() - pressed:.1f} s")
+        t = await h.wait_on_air("weather", 8 + slow)
+    finally:
+        h.stack.slow_files.pop("weather.mp3", None)
+    h.check(name, t is not None and t - pressed <= 3.0 + slow,
+            f"the spot went on air {'never' if t is None else f'{t - pressed:.1f} s'} after Next")
+    await asyncio.sleep(TONES["weather"][1] + 8)
+    times = await h.started_times("weather", pressed - 1)
+    h.check(name, len(times) == 1, f"the spot aired once ({len(times)})")
+    heard = h.heard(pressed - 4, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    tl = [(ts, n) for ts, n in timeline(heard)]
+    names = [n for _, n in tl]
+    wname = tone_name(TONES["weather"][0])
+    h.check(name, "EMERGENCY" not in names, f"no emergency audio: {names}")
+    spans = [w[0] for w in heard if w[0] > pressed and w[1] > -45 and tone_name(w[2]) == wname]
+    whole = (spans[-1] - spans[0]) if spans else 0.0
+    h.check(name, whole >= TONES["weather"][1] - 1.5, f"the spot was heard whole ({whole:.1f} s of {TONES['weather'][1]} s)")
+    after = [n for ts, n in tl if spans and ts > spans[-1] - 0.5 and n not in (wname, "silence")]
+    h.check(name, bool(after) and after[0].startswith("song"), f"a song follows the spot: {after}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0 + slow, f"longest silence {gap:.1f} s")
+    row = next((e for e in await h.rows() if e.id == spot), None)
+    h.check(name, row is not None and row.status == "played", f"the spot is marked played after it aired ({row.status if row else None})")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"the site shows a song ({cur.asset.title if cur else None})")
+
+
 async def sc_resume_without_old_song(h: Harness) -> None:
     """KBR Jerusalem 2026-11-18 01:00Z: Main's Daf Yomi block cut a song at 00:45; at
     01:00 the shiur paused for the time check, and before it resumed 2.8 s of the song cut
@@ -2585,6 +2786,12 @@ SCENARIOS = {
     "operator_queue_then_next": sc_operator_queue_then_next,
     "operator_next_slow_file": sc_operator_next_slow_file,
     "operator_next_overtakes_commit": sc_operator_next_overtakes_commit,
+    "two_sources_same_second": sc_two_sources_same_second,
+    "hard_group_overruns_next_hard": sc_hard_group_overruns_next_hard,
+    "engine_starts_every_time": sc_engine_starts_every_time,
+    "live_show_over_hard_item": sc_live_show_over_hard_item,
+    "next_while_soft_spot_waits": sc_next_while_soft_spot_waits,
+    "next_while_soft_spot_waits_slow": lambda h: sc_next_while_soft_spot_waits(h, 3.0),
     "resume_without_old_song": sc_resume_without_old_song,
     "next_twice": sc_next_twice,
     "next_skips_one": sc_next_skips_one,

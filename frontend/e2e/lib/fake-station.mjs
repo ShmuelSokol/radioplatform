@@ -9,7 +9,23 @@
  */
 import { createRequire } from 'node:module';
 
-export const { chromium, webkit, devices } = createRequire(import.meta.url)('playwright');
+import { guardBrowser, guardReport, allowEverywhere } from './guard.mjs';
+
+const pw = createRequire(import.meta.url)('playwright');
+// Every browser a test launches is guarded (e2e/lib/guard.mjs): a warning or error toast,
+// a console error or a failed request that the test did not say it expects fails the test
+// in done(), even when every check passed. GUARD=off switches it off, GUARD=report prints only.
+const guarded = (type) => new Proxy(type, {
+  get(t, k) {
+    if (k === 'launch' && process.env.GUARD !== 'off') return async (...a) => guardBrowser(await t.launch(...a));
+    const v = t[k];
+    return typeof v === 'function' ? v.bind(t) : v;
+  },
+});
+export const chromium = guarded(pw.chromium);
+export const webkit = guarded(pw.webkit);
+export const devices = pw.devices;
+export { allowEverywhere };
 
 /** PASS/FAIL printing. `known` maps a check name to the bug it shows: those are
  *  expected to fail (printed XFAIL) and a pass there is an error (XPASS) so the
@@ -30,6 +46,13 @@ export function checker(known = {}) {
     console.log(`${tag.padEnd(5)}  ${name}${detail ? `  (${detail})` : ''}${bug ? `  [BUG: ${bug}]` : ''}`);
   };
   const done = () => {
+    // Look at the screen, not only at whether the action worked (Shmuel, 2026-11-17)
+    const odd = process.env.GUARD === 'off' ? [] : guardReport();
+    for (const o of odd) console.log(`LOOK   ${o.kind}: ${o.text}${o.count > 1 ? `  (x${o.count})` : ''}  [on ${o.url || o.page}]`);
+    if (odd.length) {
+      console.log(`\n${odd.length} thing(s) the screen, console or network showed that no check expected. Fix them, or say why they are expected with allowEverywhere(pattern, reason).`);
+      if (process.env.GUARD !== 'report') state.failures += odd.length;
+    }
     console.log(`\n${state.passes} passed, ${state.xfail} known bugs (xfail), ${state.failures} failed`);
     return state.failures ? 1 : 0;
   };
