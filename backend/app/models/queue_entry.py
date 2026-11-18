@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, and_, or_
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, and_, or_, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,6 +22,12 @@ class QueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_queue_entries_station_status_position", "station_id", "status", "position"),
         Index("ix_queue_entries_station_started", "station_id", "started_at"),
         Index("ix_queue_entries_station_preempt", "station_id", "preempt_at"),
+        # Only the waiting / playing rows (the table keeps every entry ever played);
+        # existing databases get them from CONCURRENT_INDEXES in app/main.py.
+        Index("ix_qe_pending_preempt", "station_id", "preempt_at", "position",
+              postgresql_where=text("status = 'pending'")),
+        Index("ix_qe_playing_started", "station_id", "started_at",
+              postgresql_where=text("status = 'playing'")),
     )
 
     station_id: Mapped[uuid.UUID] = mapped_column(
