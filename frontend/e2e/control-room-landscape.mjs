@@ -211,7 +211,10 @@ async function queries(browser) {
   for (const [name, opts, wantLand] of [
     ['iPad Mini sideways 1024x768', { viewport: { width: 1024, height: 768 }, isMobile: true, hasTouch: true }, false],
     ['phone exactly 500 px tall (900x500)', phoneCtx(900, 500), true],
-    ['501 px tall (900x501)', phoneCtx(900, 501), false],
+    // Car screens and small tablets held wide get it too, up to 720 px tall (2026-11-18)
+    ['car screen 960x540', phoneCtx(960, 540), true],
+    ['exactly 720 px tall (1000x720)', phoneCtx(1000, 720), true],
+    ['721 px tall (1000x721)', phoneCtx(1000, 721), false],
     ['iPhone portrait 390x844', phoneCtx(390, 844), false],
   ]) {
     const { ctx, page, errors } = await openRoom(browser, opts);
@@ -219,7 +222,7 @@ async function queries(browser) {
     const m = await page.evaluate(() => ({
       land: !!document.querySelector('[data-testid=transport-landscape]'),
       cls: document.documentElement.classList.contains('cr-land'),
-      mq: matchMedia('(orientation: landscape) and (max-height: 500px) and (max-width: 1023.98px)').matches,
+      mq: matchMedia('(orientation: landscape) and (max-height: 720px) and (max-width: 1023.98px)').matches,
       desktop: !!document.querySelector('aside[aria-label=Controls]'),
       docW: document.documentElement.scrollWidth, vw: innerWidth,
     }));

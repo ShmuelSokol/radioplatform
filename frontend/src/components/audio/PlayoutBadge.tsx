@@ -61,7 +61,13 @@ function describe(s: PlayoutStatus): { label: string; dot: string; title: string
  * to see if the station is running on server or not"; the small grey text was missed).
  * Colours are inline: the admin skin restyles Tailwind colour classes.
  */
-export default function PlayoutBadge({ stationId, dark = false, listener = false, chip = false, className = '' }: { stationId: string | null | undefined; dark?: boolean; listener?: boolean; chip?: boolean; className?: string }) {
+/** Short words for the chip on a phone's LCD strip, where the full label does not fit */
+const SHORT: Record<string, string> = {
+  'Browser player': 'Browser', 'Server stream': 'Server',
+  'Server stream: not answering': 'Not answering', 'Server stream: out of step': 'Out of step',
+};
+
+export default function PlayoutBadge({ stationId, dark = false, listener = false, chip = false, short = false, className = '' }: { stationId: string | null | undefined; dark?: boolean; listener?: boolean; chip?: boolean; short?: boolean; className?: string }) {
   const { data } = usePlayoutStatus();
   const s = playoutOf(data, stationId);
   if (!s) return null;
@@ -72,11 +78,12 @@ export default function PlayoutBadge({ stationId, dark = false, listener = false
   if (chip && !listener) {
     const c = describe(s);
     return (
-      <span title={c.title} data-testid="playout-badge" data-mode={s.mode} data-chip="1"
+      <span title={short ? `${c.label}. ${c.title}` : c.title} data-testid="playout-badge" data-mode={s.mode} data-chip="1"
+        aria-label={short ? c.label : undefined}
         style={{ backgroundColor: c.chip, color: '#fff' }}
         className={`inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] font-bold leading-none whitespace-nowrap ${className}`}>
         <span className="inline-block w-2 h-2 rounded-full bg-white" />
-        {c.label}
+        {short ? (SHORT[c.label] ?? c.label) : c.label}
       </span>
     );
   }
