@@ -217,7 +217,8 @@ try {
         // 13 while scrolling, the bug button covers no label, text or control of a card
         const covered = await page.evaluate(async () => {
           const bug = document.querySelector('button[aria-label="Report a bug"]');
-          if (!bug || !bug.getBoundingClientRect().width) return ['no bug button'];
+          // on a phone the bug button is in the top bar now (check 20): nothing floats over the cards
+          if (!bug || !bug.getBoundingClientRect().width) return document.querySelector('[data-bug-top]')?.getBoundingClientRect().width ? [] : ['no bug button at all'];
           const hits = new Set();
           const max = document.documentElement.scrollHeight - window.innerHeight;
           for (let y = 0; y <= max; y += 60) {
@@ -369,7 +370,7 @@ try {
         await sleep(200);
         const under = await page.evaluate(() => {
           const bug = document.querySelector('button[aria-label="Report a bug"]');
-          if (!bug || !bug.getBoundingClientRect().width) return { bug: false };
+          if (!bug || !bug.getBoundingClientRect().width) return { bug: !!document.querySelector('[data-bug-top]')?.getBoundingClientRect().width, hit: [] };
           const b = bug.getBoundingClientRect();
           const hit = [...document.querySelectorAll('main button, main a, main input, main select, main label, main textarea')].filter((e) => {
             const r = e.getBoundingClientRect();
@@ -378,6 +379,32 @@ try {
           return { bug: true, hit };
         });
         check(`${size}: 11 scrolled to the end of ${path}, the bug button covers no control`, under.bug && under.hit.length === 0, JSON.stringify(under));
+        // 20 phones: the bug button is beside the bell in the top bar, 44 px, and nothing floats
+        const top = await page.evaluate(() => {
+          const t = document.querySelector('[data-bug-top]')?.getBoundingClientRect();
+          const f = document.querySelector('button[aria-label="Report a bug"]')?.getBoundingClientRect();
+          return { w: t?.width ?? 0, h: t?.height ?? 0, inBar: !!document.querySelector('nav [data-bug-top]'), floating: !!f && f.width > 0,
+            fits: document.documentElement.scrollWidth <= window.innerWidth };
+        });
+        check(`${size}: 20 ${path}: bug button in the top bar at 44 px, no floating button, bar still fits`,
+          top.inBar && top.w >= 44 && top.h >= 44 && !top.floating && top.fits, JSON.stringify(top));
+      }
+      // 20 one tap opens the report with a screenshot of the page; with the menu open it closes first
+      {
+        await page.goto(`${BASE}/admin/users`);
+        await page.locator('h1').first().waitFor({ timeout: 15000 });
+        await page.getByRole('button', { name: 'Menu' }).click();
+        await sleep(200);
+        await page.getByTestId('bug-top').click();
+        const dlg = page.getByRole('dialog', { name: 'Report a bug' });
+        const opened = await dlg.waitFor({ timeout: 10000 }).then(() => true, () => false);
+        const menuShut = !(await page.locator('nav').getByRole('button', { name: /Report a bug$/ }).isVisible().catch(() => false));
+        check(`${size}: 20 the top-bar bug button opens the report, and an open menu is closed first`, opened && menuShut, JSON.stringify({ opened, menuShut }));
+        if (opened) await dlg.getByRole('button', { name: 'Cancel' }).click();
+        await page.getByRole('button', { name: 'Menu' }).click();
+        const entry = await page.locator('nav').getByRole('button', { name: /Report a bug$/ }).boundingBox();
+        check(`${size}: 20 the menu's "Report a bug" entry is 44 px high`, !!entry && entry.height >= 44, JSON.stringify(entry));
+        await page.getByRole('button', { name: 'Menu' }).click();
       }
     }
     // 18 phone: a checkbox or radio button with its words is a 44 px tap target

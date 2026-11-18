@@ -12,6 +12,11 @@
  * F-DATABANK-62, F-GLOBAL-10.
  */
 import { chromium, checker, sleep, makeStation, adminContext, newPage, routeSiteSocket } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/e2e uncaught|e2e rejection/, 'V2-98 throws an error and rejects a promise to see both kept in a bug report');
+allowEverywhere(/Someone else changed this item while you were on it/, 'a review decision is saved over another person\'s to see the notice');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4312';
 const want = (n) => !process.env.ONLY || process.env.ONLY.split(',').includes(n);
@@ -376,7 +381,7 @@ if (want('diag')) {
   page.on('request', (r) => { if (/\/api\/v1\//.test(r.url())) ids.push([r.url().replace(/^.*\/api\/v1/, '').split('?')[0], r.headers()['x-request-id'] || '']); });
   const report = () => station.calls.filter((c) => c.path === '/bug-reports' && c.method === 'POST').at(-1)?.body;
   const sendReport = async (what) => {
-    await page.locator('button[aria-label="Report a bug"]').click();
+    await page.locator('button[aria-label="Report a bug"]:visible, [data-testid="bug-top"]:visible').first().click();
     const dlg = page.getByRole('dialog', { name: 'Report a bug' });
     await dlg.locator('#bug-what').fill(what);
     await dlg.getByRole('button', { name: 'Send report' }).click();

@@ -12,17 +12,21 @@ import type { BulkAutoTrimStatus } from '../../api/assets';
 import Spinner from '../../components/Spinner';
 import { useAuth } from '../../hooks/useAuth';
 import { isManager } from '../../auth/access';
+import { veryQuietBy } from '../../lib/loudness';
 import { useEscape } from '../../hooks/useEscape';
 
 const EXPORT_FORMATS = ['original', 'mp2', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
 
 /** Real uploads have file_path starting with "assets/"; seed data uses music/, spots/, etc. */
-function hasRealAudio(filePath: string): boolean {
+function hasRealAudio(filePath: string | null | undefined): boolean {
+  // an item with no file must not take the whole Library down ("Something went wrong")
+  if (!filePath) return false;
   return filePath.startsWith('assets/') || filePath.startsWith('http');
 }
 
-function getFileFormat(filePath: string): string {
+function getFileFormat(filePath: string | null | undefined): string {
+  if (!filePath) return '—';
   const dot = filePath.lastIndexOf('.');
   if (dot < 0) return '—';
   return filePath.slice(dot + 1).toLowerCase();
@@ -689,6 +693,10 @@ export default function Assets() {
                 </td>
                 <td className="px-2 py-2 font-medium text-sm md:truncate" title={asset.title}>
                   <span className="line-clamp-2 md:line-clamp-none md:inline break-words">{asset.title}</span>
+                  {veryQuietBy(asset.metadata_extra) !== null && (
+                    <span className="ml-1 align-middle inline-block text-[11px] font-normal px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 whitespace-nowrap" data-testid="very-quiet"
+                      title={`This recording is very quiet. Even with the largest boost it plays about ${veryQuietBy(asset.metadata_extra)} LU quieter than the rest.`}>very quiet recording</span>
+                  )}
                   {/* Phones hide the other columns, so carry the essentials under the title */}
                   <span className="md:hidden block text-xs font-normal text-gray-500 truncate">
                     {asset.artist ? `${asset.artist} · ` : ''}{asset.asset_type}{asset.category ? ` · ${asset.category}` : ''}

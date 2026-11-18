@@ -46,6 +46,7 @@ const provoked = (what, where, reason) => allowEverywhere(
   rec => what.test(`${rec.kind} ${rec.text}`) && (!where || where.test(rec.url || '')), reason);
 provoked(/auth\/me.*ERR_CONNECTION_REFUSED|ERR_CONNECTION_REFUSED.*auth\/me/, /\/admin\/schedules/, 'F-ACCESS-4 cuts the account lookup to see "Try again"');
 provoked(/\b403\b.*\/api\/v1\/schedules\b/, /\/admin\/schedules$/, 'the view-only checks press Create as a role that may not change schedules');
+provoked(/alert:? The title cannot be empty/, /\/admin\/assets\//, 'F-ASSETDETAIL-9 leaves the title empty to see the refusal');
 provoked(/\b400\b.*\/api\/v1\/schedules\b|Failed to create schedule: AxiosError|alert:? E2E refused this schedule/, null, 'F-SCHED: the server is made to refuse a schedule to see the message');
 provoked(/\b(401|429)\b.*\/api\/v1\/auth\/login/, /\/(admin|sponsor)\/login/, 'sign-in checks type a wrong password and hit the sign-in limit');
 provoked(/\b409\b.*\/api\/v1\/users\b/, /\/admin\/users/, 'F-USERS creates a user whose email is taken to see the message');
@@ -905,7 +906,7 @@ section('shell', async () => {
       await page.goto(`${BASE}/admin/stations`);
       await page.getByRole('heading', { name: 'Manage Stations' }).waitFor();
       const openIt = async () => {
-        await page.locator('button[aria-label="Report a bug"]').click();
+        await page.locator('button[aria-label="Report a bug"]:visible, [data-testid="bug-top"]:visible').first().click();
         await page.getByRole('dialog', { name: 'Report a bug' }).waitFor({ timeout: 10000 });
       };
       const dlg = page.getByRole('dialog', { name: 'Report a bug' });
@@ -3033,7 +3034,8 @@ section('asset-detail', async () => {
       await page.getByRole('heading', { name: `E2E Detail ${RUN}` }).waitFor();
       await page.getByText('Loading waveform...').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
       const main = page.locator('main');
-      assert(await main.locator('input[type=text], input[type=number], input[type=date]').count() === 0, 'an editable field is shown');
+      // (the pre-listen lengths are the person's own setting and stay)
+      assert(await main.locator('[data-testid=asset-title], [data-testid=asset-artist], [data-testid=asset-album], input[type=date], input[title*="vote"]').count() === 0, 'an editable field of the item is shown');
       for (const name of ['AI Auto-Enhance', 'Restore Original', 'Apply', 'Trim Out', 'Auto-Clip Start & End'])
         assert(await main.getByRole('button', { name, exact: true }).count() === 0, `"${name}" is offered`);
       assert(await main.getByRole('link', { name: /Full Editor/ }).count() === 0, '"Full Editor" is offered');
@@ -3814,7 +3816,7 @@ section('errors', async () => {
       const bad = without.filter(u => !PLAIN_FETCH.some(f => u.startsWith(f)));
       assert(seen.length > 2 && !bad.length, `${bad.length} of ${seen.length} axios calls without X-Request-ID: ${[...new Set(bad)].join(', ')}`);
       const plainNote = without.length ? `; plain fetch without id: ${[...new Set(without)].join(', ')}` : '';
-      await page.locator('button[aria-label="Report a bug"]').click();
+      await page.locator('button[aria-label="Report a bug"]:visible, [data-testid="bug-top"]:visible').first().click();
       const dlg = page.getByRole('dialog', { name: 'Report a bug' });
       await dlg.locator('#bug-what').fill(`E2E diagnostics ${RUN}`);
       const { resp } = await timedResponse(page, (m, p) => m === 'POST' && p === '/bug-reports', () => dlg.getByRole('button', { name: 'Send report' }).click());
@@ -3972,7 +3974,7 @@ section('a11y', async () => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
     if (await page.getByRole('heading', { name: 'Create Live Show' }).count()) fails.push('New Show');
-    await page.locator('button[aria-label="Report a bug"]').click();
+    await page.locator('button[aria-label="Report a bug"]:visible, [data-testid="bug-top"]:visible').first().click();
     await page.getByRole('dialog', { name: 'Report a bug' }).waitFor({ timeout: 10000 });
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);

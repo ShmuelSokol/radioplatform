@@ -277,7 +277,7 @@ radioplatform/
 - Billing.tsx — Invoice table with Stripe checkout + billing summary
 - CheckWording.tsx — Sponsor proposes wording, gets back what must change and why
 
-### Hooks (`frontend/src/hooks/`) — 21 hooks
+### Hooks (`frontend/src/hooks/`) — 22 hooks
 | Hook | Description |
 |------|-------------|
 | useAuth.ts | Authentication state + mutations |
@@ -302,6 +302,7 @@ radioplatform/
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |
 | useEscape.ts | Esc closes an open dialog (New Archive, Live show, bug report) |
+| useMayChange.ts | May the signed-in person change things on this screen? The one rule for hiding or disabling change controls (see `wiki/view-only-screens.md`) |
 
 ### API Clients (`frontend/src/api/`) — 14 modules
 auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, playlists.ts, sponsorPortal.ts, campaigns.ts, billing.ts, alerts.ts, liveShows.ts, songRequests.ts, archives.ts, client.ts (Axios + JWT interceptor)
@@ -363,7 +364,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 
 ## Key Conventions
 - **Backend**: All endpoints under `/api/v1/`. UUID primary keys. Async SQLAlchemy sessions.
-- **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`. `canChange()` there says who may change things on a screen (drives the "View only" marker); any refused action shows an app-wide "not allowed" notice (`components/layout/ViewOnlyNotice.tsx`).
+- **Auth**: JWT Bearer tokens. Roles: admin, manager, dj, viewer, sponsor. Auth guards: `require_admin` (admin only), `require_manager` (admin + manager), `require_dj_or_manager` (admin + manager + dj), `require_staff` (everyone except sponsors — use this, not bare `get_current_user`, for staff-only reads), `require_sponsor` (sponsor only), `require_sponsor_or_manager` (admin + manager + sponsor). The frontend mirrors these in `frontend/src/auth/access.ts` (route → roles); when you add a screen or change a guard, update both, and `backend/tests/test_role_access.py`. `canChange()` there says who may change things on a screen (drives the "View only" marker); screens hide or disable their change controls with `hooks/useMayChange.ts` (see `wiki/view-only-screens.md`); any refused action shows an app-wide "not allowed" notice (`components/layout/ViewOnlyNotice.tsx`).
 - **Sessions**: every token carries the user's `session_version`; a new password or a changed role bumps it and signs the person out everywhere. Any new code that decodes a token must call `security.token_is_current`. See `wiki/sign-in-sessions.md`.
 - **Station permissions**: staff can be limited to named stations (`User.station_ids`), and a protected station (`Station.protected`, the FM feed) needs an explicit assignment. Rule: `may_operate_station`; guard: `require_station_operator`. See `wiki/station-permissions.md`.
 - **Caller address**: rate limits, listener IPs and the activity log take the caller's address from `app/core/client_ip.py` (rightmost non-internal X-Forwarded-For hop); never read the header by hand. See `wiki/client-ip.md`.

@@ -11,6 +11,7 @@ import AssetHistory from '../../components/review/AssetHistory';
 import CommentBox from '../../components/review/CommentBox';
 import type { SilenceRegion } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
+import { veryQuietBy } from '../../lib/loudness';
 import { isManager } from '../../auth/access';
 
 function formatDuration(seconds: number | null): string {
@@ -73,6 +74,11 @@ export default function AssetDetail() {
         <Link to="/admin/assets" className="text-brand-600 hover:text-brand-800 text-sm">&larr; Back to Assets</Link>
         <h1 className="text-2xl font-bold break-words min-w-0">{asset.title}</h1>
       </div>
+      {veryQuietBy(asset.metadata_extra) !== null && (
+        <p className="text-sm mb-3 px-3 py-2 rounded bg-amber-50 border border-amber-300 text-amber-900" data-testid="very-quiet">
+          Very quiet recording. Even with the largest boost it plays about {veryQuietBy(asset.metadata_extra)} LU quieter than the rest of the station. The file has not been changed.
+        </p>
+      )}
       {saveError && <p role="alert" className="text-sm text-red-600 mb-3" data-testid="asset-save-error">{saveError}</p>}
 
       {/* Metadata */}

@@ -50,6 +50,7 @@
 .qn-site [class~="border-[#2a2a5e]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-[#3a3a7e]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-amber-200"]{border-color:#d97706}
+.qn-site [class~="border-amber-300"]{border-color:#d97706}
 .qn-site [class~="border-blue-200"]{border-color:#2563eb}
 .qn-site [class~="border-brand-200"]{border-color:#2563eb}
 .qn-site [class~="border-brand-300"]{border-color:#2563eb}
