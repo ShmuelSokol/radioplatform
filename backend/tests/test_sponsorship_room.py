@@ -272,3 +272,27 @@ async def test_a_contract_that_ends_soon_is_warned_about_its_last_plays(
     )).json()
     assert all(u["local_date"] <= end.isoformat() for u in plan["unplaced"])
     assert not [p for p in plan["planned"] if p["asset_id"] == str(asset.id)]
+
+
+@pytest.mark.asyncio
+async def test_another_schedule_that_loses_plays_is_named_with_its_own_name(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """Live on Main: two 12-play schedules of one sponsor; the red box read like the
+    same warning twice. The other schedule is named 'Sponsor (schedule name)'."""
+    station, assets = await _station_with_seven(db_session, client, auth_headers, "19:00")
+    sponsor, asset = assets[0]
+    said = []
+    for name in ("TEST first", "TEST second"):
+        res = await client.post(
+            "/api/v1/spot-schedules",
+            json={
+                "sponsor_id": str(sponsor.id), "asset_id": str(asset.id), "station_id": str(station.id),
+                "name": name, "dayparts": "evening", "plays_per_daypart": 5,
+            },
+            headers=auth_headers,
+        )
+        assert res.status_code == 201, res.text
+        said = res.json()["warnings"]
+    assert any(w.startswith(f"{station.name}: This sponsorship misses") for w in said)
+    assert any("TEST sponsor 1 (TEST first) misses" in w for w in said)

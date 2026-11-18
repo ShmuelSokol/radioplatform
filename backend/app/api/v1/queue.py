@@ -1702,6 +1702,18 @@ async def bulk_add_to_queue(
     return {"message": f"Added {count} items to queue", "count": count}
 
 
+async def _engine_takes_queue_change(db: AsyncSession, station_id) -> None:
+    """After an operator changed what is next: an engine station drops the song it had
+    pre-loaded if that is no longer the head, so the change is what airs next."""
+    if not settings.engine_drives(station_id):
+        return
+    try:
+        from app.services import playout_engine
+        await playout_engine.take_operator_change(db, station_id)
+    except Exception:
+        logger.warning("Engine could not be told about the queue change", exc_info=True)
+
+
 @router.post("/play-next", status_code=201)
 async def play_next(
     station_id: uuid.UUID,
@@ -1728,6 +1740,7 @@ async def play_next(
     )
     db.add(entry)
     await db.commit()
+    await _engine_takes_queue_change(db, station_id)
     return {"id": str(entry.id), "position": entry.position, "message": "Queued as next"}
 
 
@@ -1867,6 +1880,12 @@ async def skip_current(
         if await stop_loop(db, station_id):
             await db.commit()
             await playout_engine.engine_flush(station_id)
+        else:
+            # The engine may hold a song the queue no longer has next (Play next, a delete
+            # or a move seconds ago): Next must play what the queue shows
+            await playout_engine.take_operator_change(db, station_id, before_next=True)
+            # ...and the engine needs a moment to load an item it was handed just now
+            await playout_engine.settle_before_next(station_id)
         if await playout_engine.engine_skip(station_id, fade_seconds):
             from app.services import activity_log
             activity_log.note("Sent to the playout engine", [on_air.asset_id if on_air else None])
@@ -2313,6 +2332,7 @@ async def move_up(
     if above:
         above.position, entry.position = entry.position, above.position
         await db.commit()
+    await _engine_takes_queue_change(db, station_id)
     return {"message": "Moved up"}
 
 
@@ -2342,6 +2362,7 @@ async def move_down(
     if below:
         below.position, entry.position = entry.position, below.position
         await db.commit()
+    await _engine_takes_queue_change(db, station_id)
     return {"message": "Moved down"}
 
 
@@ -2375,6 +2396,7 @@ async def reorder_queue(
     )
     entry.position = body.new_position
     await db.commit()
+    await _engine_takes_queue_change(db, station_id)
     return {"message": "Reordered"}
 
 
@@ -2536,6 +2558,7 @@ async def reorder_dnd(
         entry.position = new_pos
         await db.commit()
 
+    await _engine_takes_queue_change(db, station_id)
     return {"message": "Reordered", "warnings": warnings}
 
 
@@ -2559,6 +2582,7 @@ async def remove_from_queue(
     await db.delete(entry)
     await _replenish_queue(db, station_id)
     await db.commit()
+    await _engine_takes_queue_change(db, station_id)
 
 
 async def _remove_on_air_locked(db: AsyncSession, station_id, entry: QueueEntry) -> None:

@@ -395,7 +395,10 @@ async def broadcast_now_playing_update(station_id: str, now_playing_data: dict):
     Helper function to broadcast now-playing updates to all connected clients.
     Called by the scheduling engine when playback changes.
     """
-    started = _parse_start(now_playing_data.get("started_at"))
+    # Ordered by when the item really went on air: a resumed shiur's started_at lies
+    # before the time check that paused it (Stories 02:30Z 2026-11-18: every update
+    # was dropped for 25 minutes after a sponsorship paused a story)
+    started = _parse_start(now_playing_data.get("on_air_at") or now_playing_data.get("started_at"))
     latest = _latest_start.get(station_id)
     if started is not None and latest is not None and started < latest:
         # Something that started before what listeners already hear: a stale read

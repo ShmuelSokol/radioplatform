@@ -38,6 +38,8 @@
 }
 .qn-btn:disabled { color: #808080; text-shadow: 1px 1px 0 #fff; cursor: not-allowed; }
 .qn-btn:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
+/* The Listen button (sound on this device): the one control to find first */
+.qn-btn.cr-listen, .qn-btn.cr-listen:hover:not(:disabled) { background: #ffff80; }
 
 /* Sunken field (inputs, selects, panels) */
 .qn-field {

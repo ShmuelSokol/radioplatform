@@ -61,7 +61,7 @@ def test_levels_and_output_processing():
     assert "compress(threshold=-14., ratio=3." in liq
     # Look-ahead brickwall at -3 dBFS (limit() is a compressor: true peaks got through)
     assert "ffmpeg.filter.alimiter(graph, limit=0.708" in liq and "level=false" in liq
-    assert "radio = mksafe(true_peak_limit(radio))" in liq
+    assert "radio = true_peak_limit(radio)" in liq
     assert "limit(threshold=" not in liq
     # 320 kbps, 44.1 kHz stereo, best encoder setting; encoded once and copied to both
     # outputs (two encoders cost 14.9% of a core against 8.7% for one, 2026-11-17)
@@ -73,9 +73,10 @@ def test_levels_and_output_processing():
 
 
 def test_crossfade_and_timed_group_constants():
-    """V1-8/V1-10: 3 s crossfade; timed gate open 1.5 s; groups within 0.5 s are one take-over."""
+    """V1-8/V1-10: crossfade length from each item (1 s default); timed gate open 1.5 s; groups within 0.5 s are one take-over."""
     liq = _liq()
-    assert "cross(duration=3., transition, main)" in liq
+    assert 'cross(duration=default_overlap, override_duration="liq_cross_duration", transition, main)' in liq
+    assert "default_overlap = 1." in liq
     assert "thread.run(delay=1.5, {timed_armed := false})" in liq
     assert "abs(at - timed_group_at()) > 0.5" in liq
     # length() leaves out items already fetched, so the gate also stays open while one
@@ -245,3 +246,107 @@ def test_take_over_waits_for_the_timed_file():
     assert sched.index("timed_pending := timed_pending() + 1") < sched.index("timed_queue.push(r)")
     started = liq[liq.index("def send_started"):]
     assert 'was == "timed" and lane != "timed" and timed_pending() > 0 and not timed_waiting()' in started
+
+
+def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
+    # Jerusalem 23:00Z 2026-11-17: with no song handed out for the last seconds before a
+    # hard item, the emergency lane must not fill in. The hold lane sits above it, is
+    # open only while a timed item is loaded and due within 8 s, and is not reported.
+    liq = (INFRA / "radio.liq").read_text()
+    assert "[on_air_quiet, timed, main, hold, emergency]" in liq
+    assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
+    assert 'elsif hold_open() then "hold" else "emergency"' in liq
+    assert "engine_proto = 3" in liq
+
+
+def test_speech_is_never_overlapped_and_the_song_crossfade_comes_from_the_backend():
+    """Sponsorships played in a row ran into each other (Shmuel 2026-11-17): the engine
+    overlapped every change by a fixed 3 s. Now each item brings its own overlap."""
+    liq = _liq()
+    assert 'cross(duration=default_overlap, override_duration="liq_cross_duration", transition, main)' in liq
+    assert 'float_of_string(default=default_overlap, ending.metadata["kbr_overlap"])' in liq
+    assert "sequence([ending.source, starting.source])" in liq
+    assert "fade.out(duration=overlap, ending.source)" in liq
+    assert "duration=3." not in liq
+
+
+def test_a_song_ends_before_a_spoken_item_on_the_engine():
+    """Shmuel 2026-11-17 chose "Song ends first, then speech": the song fades out over
+    its overlap and the spoken item starts after it, decided by the starting item's kind."""
+    liq = _liq()
+    assert 'kind = starting.metadata["kbr_kind"]' in liq
+    assert 'speech_next = kind != "" and kind != "music"' in liq
+    assert "sequence([fade.out(duration=overlap, ending.source), starting.source])" in liq
+    # song into song still overlaps
+    assert "add(normalize=false, [starting.source, fade.out(duration=overlap, ending.source)])" in liq
+
+
+def test_engine_items_carry_their_overlap():
+    from types import SimpleNamespace
+
+    from app.api.v1 import queue as queue_module
+    from app.services import playout_engine
+
+    station = "s1"
+    queue_module._station_crossfade.pop(station, None)
+
+    def uri(kind, duration=120.0):
+        asset = SimpleNamespace(id="a", title="T", artist="", asset_type=kind, duration=duration,
+                                file_path="https://cdn.example.com/a.mp3", metadata_extra={})
+        entry = SimpleNamespace(id="e", asset=asset, station_id=station, preempt_at=None,
+                                timing_mode=None, source="auto", resume_seconds=None)
+        return playout_engine.build_uri(entry, "main")
+
+    song = uri("music")
+    assert 'kbr_overlap="1.00"' in song and 'liq_cross_duration="1.00"' in song
+    spot = uri("spot", 30.0)
+    assert 'kbr_overlap="0.00"' in spot and 'liq_cross_duration="0.20"' in spot
+    queue_module._station_crossfade[station] = 0.0
+    try:
+        song = uri("music")
+        assert 'kbr_overlap="0.00"' in song and 'liq_cross_duration="0.20"' in song
+    finally:
+        queue_module._station_crossfade.pop(station, None)
+
+
+def test_the_stream_is_quiet_while_a_host_is_on_air():
+    # Jerusalem 23:06Z 2026-11-17: the song on the engine played on under the host. The
+    # live lane sits above every other lane, is switched by /live, is not reported as a
+    # start, and the engine says with each ask whether it is on (a show that ended while
+    # the backend restarted).
+    liq = (INFRA / "radio.liq").read_text()
+    assert 'on_air_quiet = switch(id="host_gate", track_sensitive=false, [({live_on()}, blank(id="host_on_air"))])' in liq
+    assert 'control("/live"' in liq
+    assert 'elsif live_on() then "live"' in liq
+    assert "&live=#{if live_on() then 1 else 0 end}" in liq
+    assert "live_release := time() + 12." in liq
+
+
+
+def test_status_answers_before_the_first_track_and_setup_tries_a_new_script_for_real():
+    # Main's engine, started with no station routed, closed every /status call with no
+    # answer: the music lane's remaining time is infinite before its first track and
+    # JSON cannot carry that. And a script that passes `--check` can still hang at
+    # start, so setup.sh starts a new script once on a spare port before any restart.
+    liq = (INFRA / "radio.liq").read_text()
+    assert "left = if left >= 0. and left < 1000000. then left else -1. end" in liq
+    assert "main_remaining=left" in liq
+    setup = (INFRA / "setup.sh").read_text()
+    trial = setup.index("TRIAL_PORT=8990")
+    assert setup.index("liquidsoap --check /etc/kbr-engine/radio.liq.new") < trial
+    assert trial < setup.index("mv /etc/kbr-engine/radio.liq.new /etc/kbr-engine/radio.liq")
+    assert "The new engine script does not start" in setup
+
+
+def test_the_limiter_is_not_wrapped_in_mksafe_and_a_long_gap_starts_the_timed_item_early():
+    # mksafe() around the FFmpeg limiter made the engine spin at start depending on the
+    # number of definitions in the script (one unused ref was enough). And a song that
+    # ends more than 3 s before a hard item is followed by that item at once (Jerusalem
+    # 00:00Z 2026-11-18: 6.6 s were filled with the start of a song that was then cut).
+    liq = (INFRA / "radio.liq").read_text()
+    assert "radio = true_peak_limit(radio)" in liq
+    assert "mksafe(true_peak_limit" not in liq
+    assert "output.file(%wav, fallible=true, debug_wav, radio)" in liq
+    assert "if left > 1. and timed_pending() > 0 and timed_queue.is_ready() then" in liq
+    assert "{if timed_early() != at then timed_go_on_air(180, at) end}" in liq
+

@@ -668,3 +668,33 @@ async def test_drift_alert_clears_itself_once_in_step(db_session, monkeypatch):
     assert by_station[str(st.id)].resolved_by is None
     assert "agree again" in by_station[str(st.id)].context["cleared_by_itself"]
     assert by_station[str(other.id)].is_resolved is False  # another station's stays open
+
+
+@pytest.mark.asyncio
+async def test_later_items_of_a_hard_block_are_not_late(db_session):
+    """Main 2026-11-18 01:00Z: the 8 PM block is time check (6 s), promo (4 s), Daf Yomi.
+    The shiur starts 10 s after the hour, exactly behind the two before it: not late.
+    The same shiur starting 40 s after them is."""
+    now = datetime.now(UTC)
+    st = await _station(db_session)
+    tc = await _asset(db_session, "Time 20:00", category="time_announcement", kind="jingle", duration=6)
+    promo = await _asset(db_session, "Schedule promo", kind="jingle", duration=4)
+    shiur = await _asset(db_session, "Daf Yomi Bechoros 60", kind="shiur", duration=3000)
+    due = now - timedelta(minutes=3)
+    third = _entry(st, shiur, position=3, status="playing", preempt_at=due, timing_mode="hard",
+                   started_at=due + timedelta(seconds=10.5))
+    db_session.add_all([
+        _entry(st, tc, position=1, status="played", preempt_at=due, timing_mode="hard", started_at=due),
+        _entry(st, promo, position=2, status="played", preempt_at=due, timing_mode="hard",
+               started_at=due + timedelta(seconds=6.3)),
+        third,
+    ])
+    await db_session.commit()
+    found = await AirWatch().check_station(db_session, st, now)
+    assert [f for f in found if f.kind == "late_timed"] == [], found
+
+    third.started_at = due + timedelta(seconds=50)
+    await db_session.commit()
+    found = await AirWatch().check_station(db_session, st, now)
+    late = [f for f in found if f.kind == "late_timed"]
+    assert len(late) == 1 and "Daf Yomi Bechoros 60 aired 40 s late" in late[0].title, found

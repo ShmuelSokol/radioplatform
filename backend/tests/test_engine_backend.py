@@ -639,7 +639,61 @@ async def test_tick_leaves_the_engine_alone_during_a_live_show(db_session, eng):
     st.automation_config = {"live_show_id": str(uuid.uuid4())}
     await db_session.commit()
     await playout_engine.tick(db_session, st)
-    assert engine.sent == []
+    # Nothing but the word that a show is on: the stream goes quiet under the host
+    assert engine.sent == [("/live", {"on": True})]
+    await playout_engine.tick(db_session, st)
+    assert engine.paths() == ["/live"]  # said once
+
+
+@pytest.mark.asyncio
+async def test_the_engine_goes_quiet_for_a_live_show_and_plays_again_after(client, db_session, eng):
+    """Jerusalem 23:06Z 2026-11-17: the song on the engine played on under the host for
+    the whole show; only new items were held back. The engine is told the moment the
+    show starts, and again when it is over."""
+    from app.services import live_show_service
+
+    station, entries, engine, _ = eng
+    await _next(client, station)
+    await _on_air(client, station, entries[0].id)
+    engine.sent.clear()
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    assert ("/live", {"on": True}) in engine.sent
+    st = await db_session.get(Station, station.id)
+    await db_session.refresh(st)
+    await playout_engine.tick(db_session, st)
+    assert engine.paths().count("/live") == 1
+    await live_show_service.end_show(db_session, show.id)
+    await db_session.commit()
+    await db_session.refresh(st)
+    await playout_engine.tick(db_session, st)
+    assert engine.sent[-1] == ("/live", {"on": False})
+
+
+@pytest.mark.asyncio
+async def test_an_engine_left_quiet_after_a_show_is_released_when_it_asks(client, db_session, eng):
+    # The show ended while the backend was restarting: nothing remembers that the
+    # engine was told "live". Its next ask says so, and it is told the show is over.
+    import asyncio
+
+    station, entries, engine, _ = eng
+    r = await client.get(f"/api/v1/playout/{station.id}/next?live=1", headers=HEADERS)
+    assert r.status_code == 200
+    await asyncio.sleep(0.05)
+    assert ("/live", {"on": False}) in engine.sent
+
+
+@pytest.mark.asyncio
+async def test_an_engine_that_restarts_during_a_show_is_told_again(client, db_session, eng):
+    station, _, engine, _ = eng
+    st = await db_session.get(Station, station.id)
+    st.automation_config = {"live_show_id": str(uuid.uuid4())}
+    await db_session.commit()
+    await playout_engine.tick(db_session, st)
+    await playout_engine.handle_hello(station.id, 3)
+    await playout_engine.tick(db_session, st)
+    assert engine.sent == [("/live", {"on": True})] * 2
 
 
 @pytest.mark.asyncio
@@ -1337,3 +1391,23 @@ async def test_upcoming_items_are_analysed_ahead(db_session, eng, monkeypatch):
     assert str(soon.asset_id) in started
     assert {str(e.asset_id) for e in entries[:playout_engine.LOOK_AHEAD_ITEMS]} <= set(started)
     assert str(entries[3].asset_id) not in started
+
+
+@pytest.mark.asyncio
+async def test_ending_a_show_takes_the_host_off_air_at_once(db_session, eng):
+    # Jerusalem 2026-11-17: the host's page stayed open after End show and the
+    # microphone kept reaching listeners for a minute.
+    from app.api.v1.live_shows_ws import live_relay
+    from app.services import live_show_service
+
+    station, _, _, _ = eng
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    live_relay.on_air[str(station.id)] = str(show.id)
+    try:
+        await live_show_service.end_show(db_session, show.id)
+        await db_session.commit()
+        assert str(station.id) not in live_relay.on_air
+    finally:
+        live_relay.on_air.pop(str(station.id), None)

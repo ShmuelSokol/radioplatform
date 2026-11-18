@@ -356,7 +356,28 @@ async function badges(browser) {
     await page.getByTestId('playout-badge').first().waitFor();
     const t = (await page.getByTestId('playout-badge').first().innerText()).trim();
     check(`${tag}: playout badge "${label}"`, t === label, t);
+    // A solid coloured label, not small grey text (Shmuel: "I want to be able to see if
+    // the station is running on server or not")
+    const look = await page.getByTestId('playout-badge').first().evaluate((el) => {
+      const c = getComputedStyle(el);
+      return { chip: el.dataset.chip, bg: c.backgroundColor, color: c.color, weight: c.fontWeight, shown: el.getBoundingClientRect().width > 0 };
+    });
+    const bg = { 'Browser player': 'rgb(107, 114, 128)', 'Server stream': 'rgb(21, 128, 61)',
+      'Server stream: not answering': 'rgb(185, 28, 28)', 'Server stream: out of step': 'rgb(161, 98, 7)' }[label];
+    check(`${tag}: "${label}" is a coloured label (${bg})`,
+      look.chip === '1' && look.bg === bg && look.color === 'rgb(255, 255, 255)' && Number(look.weight) >= 700 && look.shown,
+      JSON.stringify(look));
   }
+  // Manage Stations: a "Plays from" column with the same label
+  station.playout = { stations: { [station.SID]: { mode: 'server', engine: true, engine_ok: true, in_sync: true } }, default: { mode: 'browser' } };
+  await page.goto(`${BASE}/admin/stations`);
+  const from = page.getByTestId('station-plays-from').first();
+  await from.waitFor({ timeout: 8000 }).catch(() => {});
+  const fromText = (await from.innerText().catch(() => '')).trim();
+  check(`${tag}: Manage Stations shows where the station plays from`, fromText === 'Server stream', fromText);
+  check(`${tag}: Manage Stations has a "Plays from" column`, await page.getByRole('columnheader', { name: 'Plays from' }).count() === 1);
+  await page.goBack();
+  await page.getByTestId('playout-badge').first().waitFor();
   // Fullscreen
   await page.getByRole('button', { name: 'Full screen' }).click();
   await sleep(300);
@@ -1129,7 +1150,7 @@ async function engineMode(browser, stream) {
     await sleep(2500);
     const el = await page.evaluate(() => { const a = document.querySelector('[data-testid=control-room] audio'); return { src: a.src, paused: a.paused, muted: a.muted, t: a.currentTime }; });
     if (!broken) {
-      check(`${tag}: listening plays the server stream`, el.src === stream.url(station.SID) && !el.paused && !el.muted && el.t > 0.3, JSON.stringify(el));
+      check(`${tag}: listening plays the server stream`, !!el.src && !el.paused && !el.muted && el.t > 0.3 && stream.stats.connects > 0, JSON.stringify(el));
       check(`${tag}: the built-in player only measures (not heard)`, (await page.evaluate(() => window.__outLevel())) < 0.01);
       // F-CR-TRANSPORT-25: the meters still move while the station is heard through the server stream
       const lit = () => page.locator('header .bg-cyan-400, header .bg-red-500').count();

@@ -111,7 +111,19 @@ Every `select.qn-field` in the control room is drawn grey with a raised arrow (`
 
 The audio engine always runs silently for the LEFT/RIGHT meters once the page has had any click or key (browsers need one gesture). Decks feed a bus; the bus feeds the meter analysers and an output gain to the speakers. Listen (`listenHere`, `setMonitor`) only opens that output gain on this computer; volume and mute act on it too, and deck gains carry replay gain only. In stream mode the engine still runs silently for the meters while the stream element makes the sound, so the meters lead the heard audio by the stream delay.
 
-Listen is remembered across reloads (`kbr-cr-listen`, like Mute): the header keeps its speaker controls and the first click anywhere turns the sound back on.
+Listen is remembered across reloads (`kbr-cr-listen`, like Mute), and the first click or key anywhere turns the sound back on. Until sound really runs the header shows the Listen button, never Mute: `TransportAudio.audioReady` is "listening and the audio context runs (and, on a server-stream station, the stream element plays)", not just the remembered wish.
+
+## Sound on an iPhone (2026-11-18)
+
+iPhone Safari lets sound start only inside a real tap: `click`, `touchend` that was not a scroll, `keydown`. `touchstart` and `pointerdown` do not count. The Dashboard used to start the engine on the first `pointerdown`/`touchstart` and then stop listening for taps, so on an iPhone with listening remembered the one try was refused and no later tap gave sound (the Mute control showed over silence; Shmuel sat 3 minutes). Rules now:
+
+- The page listens for `click` and `keydown` only, and keeps listening until sound is live (`soundLive`), and again whenever it stops being live (iOS sets the context to "interrupted" after a call or the lock screen; `initAudio` resumes any state that is not `running`).
+- The Listen button (`data-listen-button`) handles its own tap: the window listener skips it, because starting there first re-draws the header before React's handler runs and the button's handler (which also lifts an old Mute) never fired.
+- On a phone the control is `soundControl('phone' | 'land')` in `TransportBar.tsx`: a yellow 44 px "🔊 Listen" button, then "🔊 Sound on" / "🔇 Muted". Never an icon alone.
+- Server stream: `takeSound` starts it inside the tap with `lib/liveStream.startLiveStream` (MSE, or the HLS copy on an iPhone), as the Listen page does. It used to be a plain `<audio src>` started from an effect, which Safari refuses, and the page then fell back to the built-in player without saying so. The stream runs only while this device listens. With no stream known at the tap, the stream element plays a moment of silence so it may start later without another tap.
+- Joining mid-item: the engine gets the file address from the now-playing message (no `/audio-url` round trip), calls `play()` at once on the silent deck and goes live on `loadedmetadata`; an iPhone fetches nothing before `play()`, so waiting for `canplay` cost the 4 s limit. A deck started in the tap before its length is known is moved to the station's position at `loadedmetadata` (it started from the top and jumped at the next 10 s sync).
+
+Check: `e2e/control-room-iphone-sound.mjs`, Chromium with `IOS_SOUND_POLICY` (in `e2e/lib/fake-station.mjs`), which refuses `play()` and holds `resume()` outside a tap like Safari. It does not model "nothing loads before play()" or the HLS branch: a real iPhone is still the last word.
 
 Meter scale: each side is the RMS level of the on-air bus in dBFS over about 46 ms (`getFloatTimeDomainData`, fftSize 2048), with a quick rise and a ~20 dB/s fall. 30 segments span -40 to 0 dBFS; red (last 6) is above -8 dBFS. The old meter averaged FFT bins times 2.5, which sat in the red on normal music. The e2e plays a -5.1 dBFS tone and expects 26 segments a side.
 
