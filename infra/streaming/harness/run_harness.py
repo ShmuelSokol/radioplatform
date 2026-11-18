@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import re
 import shutil
@@ -72,6 +73,11 @@ TONES = {
     "longshiur": (395, 420, "shiur", None),
 }
 EMERGENCY_FREQ = 5000
+# An emergency alert sent through the override (a plain tone: never EAS tones on air)
+ALERT_FREQ = 1000
+EMERGENCY_TOKEN = "harness-emergency-token"
+# The host's show as the backend's live.mp3 serves it (the harness stands in for it)
+HOST_FREQ = 1200
 # A shiur whose pitch rises steadily (300 Hz at 0 s to 600 Hz at 150 s): the pitch heard
 # tells the position played, so a resume can be checked to the second
 CHIRP = ("chirp", 300.0, 600.0, 150)
@@ -111,6 +117,9 @@ class Stack:
         self.local_box = False
         # file name -> seconds the audio server waits before sending it (a slow download)
         self.slow_files: dict[str, float] = {}
+        # The host's show is heard: the proxy serves live.mp3 (a 1200 Hz tone in real time)
+        # instead of the backend's 204
+        self.live_audio = False
 
     # audio files
     def make_audio(self) -> None:
@@ -120,6 +129,9 @@ class Stack:
         emerg = self.dir / "emergency"
         emerg.mkdir(exist_ok=True)
         self._tone(emerg / "emergency.mp3", EMERGENCY_FREQ, 20)
+        self._tone(self.dir / "host.mp3", HOST_FREQ, 300)
+        for secs in (8, 14, 20):
+            self._tone(self.dir / f"alert{secs}.mp3", ALERT_FREQ, secs)
         # A blackout's silence asset (60 s of nothing)
         silent = self.audio / "silence.mp3"
         if not silent.exists():
@@ -216,7 +228,71 @@ class Stack:
         stack = self
 
         class BackendProxy(SimpleHTTPRequestHandler):
+            def _live_mp3(self):
+                """Stands in for the backend's live.mp3: 204 while no show is heard, else
+                the host tone in real time until the show stops being heard."""
+                if not stack.live_audio:
+                    return self._live_from_backend()
+                if not self.headers.get("X-Playout-Token"):
+                    self.send_response(204)
+                    self.end_headers()
+                    return
+                data = (stack.dir / "host.mp3").read_bytes()
+                rate = 128000 // 8
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                pos, t0, chunk = 0, time.time(), rate // 10
+                try:
+                    # a second ahead, as a real stream's first buffer
+                    self.wfile.write(data[:rate])
+                    pos = rate
+                    while stack.live_audio and pos < len(data):
+                        due = t0 + (pos - rate) / rate
+                        if due > time.time():
+                            time.sleep(due - time.time())
+                        self.wfile.write(data[pos:pos + chunk])
+                        self.wfile.flush()
+                        pos += chunk
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def _live_from_backend(self):
+                """The backend's real live.mp3 (the show after the delay), passed through
+                as it streams: what an engine on proto 5 plays during a show."""
+                headers = {k: v for k, v in self.headers.items() if k.lower() in ("x-playout-token", "accept")}
+                req = urllib.request.Request(f"http://127.0.0.1:{BACKEND_PORT}{self.path}", headers=headers)
+                try:
+                    resp = urllib.request.urlopen(req, timeout=30)
+                except urllib.error.HTTPError as e:
+                    self.send_response(e.code)
+                    self.end_headers()
+                    return
+                except Exception:
+                    self.send_response(502)
+                    self.end_headers()
+                    return
+                with resp:
+                    self.send_response(resp.status)
+                    self.send_header("Content-Type", resp.headers.get("Content-Type", "audio/mpeg"))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    if resp.status == 204:
+                        return
+                    try:
+                        while True:
+                            chunk = resp.read1(4096)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+
             def _forward(self, method: str):
+                if method == "GET" and self.path.split("?")[0].endswith("/live.mp3"):
+                    return self._live_mp3()
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method != "GET" else None
                 if stack.backend_down:
                     data = b"backend down (harness)"
@@ -231,7 +307,7 @@ class Stack:
                 if stack.slow_backend:
                     time.sleep(stack.slow_backend)
                 headers = {k: v for k, v in self.headers.items()
-                           if k.lower() in ("x-playout-token", "content-type", "accept")}
+                           if k.lower() in ("x-playout-token", "x-playout-instance", "content-type", "accept")}
                 req = urllib.request.Request(f"http://127.0.0.1:{BACKEND_PORT}{self.path}", data=body,
                                              method=method, headers=headers)
                 try:
@@ -326,6 +402,9 @@ class Stack:
             "PLAYOUT_RELAY_STATION_ID": str(STATION_ID) if self.local_box else "",
             "PLAYOUT_ENGINE_TOKEN": TOKEN,
             "LIQUIDSOAP_ENABLED": "false",
+            "EMERGENCY_API_TOKEN": EMERGENCY_TOKEN,
+            # alert audio is served by the backend itself here (no Supabase)
+            "BACKEND_PUBLIC_URL": f"http://127.0.0.1:{BACKEND_PORT}",
         })
         return env
 
@@ -395,6 +474,8 @@ class Stack:
             "KBR_HLS_DIR": str(self.hls),
             # A sound card for the local_box_sound_card scenario (see wiki/local-fm-box.md)
             "KBR_ALSA_DEVICE": os.environ.get("KBR_HARNESS_ALSA_DEVICE", ""),
+            # The EAS box's audio line (emergency_alert_line; a PulseAudio null sink's monitor)
+            "KBR_ALERT_ALSA_DEVICE": os.environ.get("KBR_HARNESS_ALERT_DEVICE", ""),
         })
         self.hls.mkdir(exist_ok=True)
         os.chmod(self.hls, 0o777)  # the engine runs as another user here
@@ -533,6 +614,10 @@ def tone_name(freq: float) -> str:
             best, dist = name, abs(f - freq)
     if abs(EMERGENCY_FREQ - freq) < dist:
         best, dist = "EMERGENCY", abs(EMERGENCY_FREQ - freq)
+    if abs(HOST_FREQ - freq) < dist:
+        best, dist = "HOST", abs(HOST_FREQ - freq)
+    if abs(ALERT_FREQ - freq) < dist:
+        best, dist = "ALERT", abs(ALERT_FREQ - freq)
     return best if dist < max(25, 0.08 * freq) else "mix"
 
 
@@ -568,9 +653,10 @@ class Harness:
 
         async with async_session_factory() as db:
             # No broadcast delay: no host audio is sent here, and with a delay the show
-            # takes the station over only once listeners hear the host (PR 316)
+            # takes the station over only once listeners hear the host (PR 316). For the same
+            # reason no hand-back to music when no host audio arrives (PR 321)
             db.add(Station(id=STATION_ID, name="Harness", timezone="America/New_York",
-                           automation_config={"live_delay_seconds": 0}))
+                           automation_config={"live_delay_seconds": 0, "live_host_gone_seconds": 0}))
             db.add(User(id=uuid.uuid4(), email=ADMIN_EMAIL, hashed_password=hash_password(ADMIN_PASSWORD),
                         role=UserRole.ADMIN, is_active=True))
             for name, (freq, secs, kind, category) in TONES.items():
@@ -1069,6 +1155,15 @@ async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False, resta
     show, before the second item is due, so what it kept in memory about the show and
     about what it handed to the engine is lost."""
     name = "live_show_over_hard_item" + ("_hard_stop" if hard_stop else "") + ("_restart" if restart else "")
+    # No host microphone: run with no broadcast delay (PR 316), see sc_live_show_quiet
+    before = set_live_settings(h, live_delay_seconds=0, live_host_gone_seconds=0)   # no microphone here (PR 321 would hand back)
+    try:
+        await _live_show_over_hard_item(h, name, hard_stop, restart)
+    finally:
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+
+
+async def _live_show_over_hard_item(h: Harness, name: str, hard_stop: bool, restart: bool) -> None:
     await wait_music(h)
     t1 = at(20)
     t2 = t1 + timedelta(seconds=45 if restart else 20)
@@ -1123,8 +1218,9 @@ async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False, resta
     h.print_timeline(heard, t1.timestamp())
     during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
     loud = sum(WINDOW for w in during if w[1] >= -45)
+    what = [f"{w[0] - t_start:+.1f}s {tone_name(w[2])} {w[1]:.0f}dB" for w in during if w[1] >= -45][::4][:10]
     h.check(name, bool(during) and loud <= 0.2,
-            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s) {what}")
     after = [n for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
     late_tones = {tone_name(TONES[n][0]) for n in ("time", "weather", "announce")}
     h.check(name, not (set(after) & late_tones),
@@ -1651,6 +1747,16 @@ async def sc_live_show_quiet(h: Harness) -> None:
     start (the host is heard through the site), stays quiet with no emergency music,
     and the station's music is back within a few seconds of its end."""
     name = "live_show_quiet"
+    # No host microphone here: with a broadcast delay (PR 316) the show would never be
+    # heard and the music rightly plays on, so this checks the take-over with no delay
+    before = set_live_settings(h, live_delay_seconds=0, live_host_gone_seconds=0)   # no microphone here (PR 321 would hand back)
+    try:
+        await _live_show_quiet(h, name)
+    finally:
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+
+
+async def _live_show_quiet(h: Harness, name: str) -> None:
     await wait_music(h)
     await asyncio.sleep(6)
     code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show",
@@ -1670,8 +1776,9 @@ async def sc_live_show_quiet(h: Harness) -> None:
     h.print_timeline(heard, t_start)
     during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
     loud = sum(WINDOW for w in during if w[1] >= -45)
+    what = [f"{w[0] - t_start:+.1f}s {tone_name(w[2])} {w[1]:.0f}dB" for w in during if w[1] >= -45][::4][:10]
     h.check(name, bool(during) and loud <= 0.2,
-            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s) {what}")
     names = [n for _, n in timeline(heard)]
     h.check(name, "EMERGENCY" not in names, f"no emergency music during or after the show: {names}")
     after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
@@ -1686,6 +1793,544 @@ async def sc_live_show_quiet(h: Harness) -> None:
     on_air = [k for k, v in h.assets.items() if st and v == st.asset_id and k in TONES]
     h.check(name, bool(after) and bool(on_air) and tone_name(TONES[on_air[0]][0]) == after[-1][1],
             f"the site shows what is heard ({on_air[0] if on_air else None} / {after[-1][1] if after else None})")
+
+
+LIVE_RATE = 24000   # live_shows_ws.LIVE_SAMPLE_RATE
+
+
+def set_live_settings(h: Harness, **values) -> dict:
+    """Change the station's live-show settings (PR 316); returns the old automation_config."""
+    _, st = h.api("GET", f"/stations/{STATION_ID}")
+    before = dict((st or {}).get("automation_config") or {})
+    h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": {**before, **values}})
+    return before
+
+
+def _goertzel(samples, freq: float, rate: int = LIVE_RATE) -> float:
+    k = 2 * math.cos(2 * math.pi * freq / rate)
+    s1 = s2 = 0.0
+    for x in samples:
+        s0 = x / 32768 + k * s1 - s2
+        s2, s1 = s1, s0
+    return math.sqrt(max(0.0, s1 * s1 + s2 * s2 - k * s1 * s2)) / max(1, len(samples))
+
+
+class LiveListener:
+    """A listener page's live socket: every PCM frame with its arrival time."""
+
+    def __init__(self):
+        self.frames: list[tuple[float, array]] = []
+        self.states: list[tuple[float, bool]] = []
+        self.task = None
+
+    async def run(self):
+        import websockets
+        url = f"ws://127.0.0.1:{BACKEND_PORT}/api/v1/ws/live/station/{STATION_ID}/listen"
+        while True:   # reconnects like a listener page after a backend restart
+            try:
+                async with websockets.connect(url, max_size=None) as ws:
+                    async for m in ws:
+                        if isinstance(m, str):
+                            msg = json.loads(m)
+                            if msg.get("type") == "live_state":
+                                self.states.append((time.time(), bool(msg.get("live"))))
+                            continue
+                        a = array("h")
+                        a.frombytes(m[: len(m) // 2 * 2])
+                        self.frames.append((time.time(), a))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+
+    def tone_at(self, freq: float, start: float, end: float) -> float:
+        out = array("h")
+        for t, a in self.frames:
+            if start <= t <= end:
+                out.extend(a)
+        return _goertzel(out, freq) if len(out) else 0.0
+
+    def tone_segments(self, freq: float, start: float, end: float, step: float = 0.5) -> list[float]:
+        """Start times of the half-second steps where `freq` is clearly heard."""
+        hits, t = [], start
+        while t < end:
+            if self.tone_at(freq, t, t + step) > 0.02:
+                hits.append(t)
+            t += step
+        return hits
+
+
+class HostMic:
+    """The host's microphone: a steady tone sent in real time over the audio socket."""
+
+    def __init__(self, show_id: str, token: str, freq: float = HOST_FREQ):
+        self.show_id, self.token, self.freq = show_id, token, freq
+        self.stop = False
+        self.task = None
+
+    async def run(self):
+        """Sends until stopped; reconnects like the Host Console when the socket drops
+        (a backend restart)."""
+        import websockets
+        url = f"ws://127.0.0.1:{BACKEND_PORT}/api/v1/ws/live/{self.show_id}/audio"
+        self.connects = []
+        while not self.stop:
+            try:
+                async with websockets.connect(url, max_size=None) as ws:
+                    await ws.send(json.dumps({"type": "auth", "token": self.token}))
+                    self.connects.append(time.time())
+                    t0, sent = time.time(), 0
+                    while not self.stop:
+                        due = int((time.time() - t0) * LIVE_RATE) - sent
+                        if due > 0:
+                            a = array("h", (int(8000 * math.sin(2 * math.pi * self.freq * (sent + i) / LIVE_RATE))
+                                            for i in range(due)))
+                            await ws.send(a.tobytes())
+                            sent += due
+                        await asyncio.sleep(0.04)
+            except Exception:
+                await asyncio.sleep(1.0)
+
+
+async def sc_live_show_no_host(h: Harness) -> None:
+    """LD-18 (PR 316): a show is started with the default 15 s delay but the host's
+    microphone never connects. The delay never fills, so listeners never hear the show and
+    the music must play on untouched; the scheduler still ends the show at its planned end
+    (a show left "live" for ever blocks the next one and keeps the console in a show)."""
+    name = "live_show_no_host"
+    before = set_live_settings(h, live_delay_seconds=15)
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        now = datetime.now(UTC)
+        planned_end = now + timedelta(seconds=25)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness show without a host", "calls_enabled": False,
+            "scheduled_start": (now - timedelta(seconds=5)).isoformat(), "scheduled_end": planned_end.isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        t_start = time.time()
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+        h.check(name, code == 200, f"show started ({code})")
+        t_end = None
+        while time.time() < planned_end.timestamp() + 15:
+            _, cur_show = h.api("GET", f"/live-shows/{show['id']}")
+            if (cur_show or {}).get("status") not in ("live", "LIVE"):
+                t_end = time.time()
+                break
+            await asyncio.sleep(0.5)
+        late = None if t_end is None else t_end - planned_end.timestamp()
+        # PR 320 checks every 10 s; the music plays on meanwhile, so a few seconds late is harmless
+        h.check(name, late is not None and -1.0 <= late <= 13.0,
+                f"the scheduler ends the show at its planned end even though nobody heard it "
+                f"({'still live 15 s after it' if late is None else f'{late:+.1f} s'})")
+        if t_end is None:
+            h.api("POST", f"/live-shows/{show['id']}/end")
+            t_end = time.time()
+        await asyncio.sleep(6)
+    finally:
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+    heard = h.heard(t_start - 2, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    gap, _ = longest_silence(heard)
+    names = [n for _, n in timeline(heard)]
+    h.check(name, gap <= 1.0 and "EMERGENCY" not in names,
+            f"the music played on the whole time (longest silence {gap:.1f} s): {names}")
+    _, st = h.api("GET", f"/stations/{STATION_ID}")
+    h.check(name, not ((st or {}).get("automation_config") or {}).get("live_show_id"),
+            "the station was never taken over by the show")
+
+
+async def sc_live_show_delay_controls(h: Harness, restart: bool = False) -> None:
+    """LD-24 / LD-19 (PR 316), engine station, 6 s delay, host microphone on.
+    LD-24: Next pressed in the pre-roll moves the music on as usual; once listeners hear
+    the host, Next and Panic must not put music back on the engine stream under the host.
+    `restart` (LD-19): the backend restarts (a deploy) 4 s after listeners first hear the
+    host. What was waiting in the delay is lost, but the engine must stay quiet (no music
+    under the host), the host's page reconnects and listeners hear the host again within
+    a delay of the reconnection, and End still brings the music back."""
+    name = "live_show_delay_restart" if restart else "live_show_delay_controls"
+    delay = 6.0
+    before = set_live_settings(h, live_delay_seconds=int(delay), live_dump_seconds=0, live_timed_items="time")
+    listener, mic = LiveListener(), None
+    base = f"/stations/{STATION_ID}/queue"
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        now = datetime.now(UTC)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness delay controls", "calls_enabled": False,
+            "scheduled_start": now.isoformat(), "scheduled_end": (now + timedelta(minutes=10)).isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        listener.task = asyncio.ensure_future(listener.run())
+        await asyncio.sleep(0.5)
+        before_song = await h.on_air()
+        t_start = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/start")
+        mic = HostMic(show["id"], h.token)
+        mic.task = asyncio.ensure_future(mic.run())
+        t_next = None
+        if not restart:
+            await asyncio.sleep(2.0)
+            t_next = time.time()
+            code, _ = h.api("POST", f"{base}/skip?fade=hard")
+            h.check(name, code == 200, f"Next in the pre-roll is answered ({code})")
+        first = None
+        for _ in range(40):
+            first = next((t for t, _ in listener.frames if t >= t_start), None)
+            if first is not None:
+                break
+            await asyncio.sleep(0.25)
+        h.check(name, first is not None, "listeners hear the host")
+        if first is None:
+            return
+        t_restart = t_back = None
+        if restart:
+            await asyncio.sleep(max(0, first + 4 - time.time()))
+            t_restart = time.time()
+            await asyncio.to_thread(h.stack.restart_backend)
+            t_back = time.time()
+            await asyncio.sleep(delay + 12)
+        else:
+            await asyncio.sleep(max(0, first + 3 - time.time()))
+            code_n, _ = h.api("POST", f"{base}/skip?fade=hard")
+            await asyncio.sleep(3)
+            code_p, body_p = h.api("POST", f"{base}/panic")
+            h.check(name, code_n < 500 and code_p < 500,
+                    f"Next and Panic during the show are answered without a server error ({code_n}, {code_p}: "
+                    f"{(body_p or {}).get('message', '')[:60]})")
+            await asyncio.sleep(6)
+        mic.stop = True
+        t_end = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/end")
+        await asyncio.sleep(delay + 20)
+    finally:
+        if mic is not None:
+            mic.stop = True
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+        if listener.task:
+            listener.task.cancel()
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    if t_next is not None:
+        after_next = [n for t, n in timeline([w for w in heard if t_next + 0.5 <= w[0] <= first])]
+        old = [k for k, v in h.assets.items() if before_song and v == before_song.asset_id and k in TONES]
+        old_tone = tone_name(TONES[old[0]][0]) if old else None
+        # a new segment starting soon after Next (the next song may have the same tone)
+        started = [n for t, n in timeline([w for w in heard if t_next - 1.0 <= w[0] <= first])
+                   if t_next + 0.3 <= t <= t_next + 4.0 and n not in ("silence", "EMERGENCY", "HOST")]
+        h.check(name, bool(started),
+                f"Next in the pre-roll moved the music on: {after_next} (was {old_tone})")
+    # no new song may start in the moment before the take-over (it would be cut after a
+    # fraction of a second: a blip on the stream, 2026-11-18 16:57Z after Next in the pre-roll)
+    blips = [(round(t - first, 1), n) for t, n in timeline(heard) if first - 2.5 <= t <= first + 2.5 and n not in ("silence", "HOST")]
+    h.check(name, not blips, f"no song starts just before the host is heard on the stream ({blips} s from first air)")
+    quiet_from = first + 3.0   # the stream runs about 2 s behind the page (live.mp3)
+    during = [w for w in heard if quiet_from <= w[0] <= t_end - 0.3]
+    loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) != "HOST")
+    what = "through the backend restart" if restart else "after Next and Panic"
+    h.check(name, bool(during) and loud <= 0.3,
+            f"the engine stream stays quiet under the host {what} (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    if restart:
+        reconnect = next((c for c in (mic.connects if mic else []) if c > t_restart), None)
+        h.check(name, reconnect is not None, "the host's page reconnected after the restart")
+        again = next((t for t, _ in listener.frames if t_back and t > t_back + 0.5), None)
+        wait = None if again is None or reconnect is None else again - reconnect
+        h.check(name, wait is not None and wait <= delay + 3.0,
+                f"listeners hear the host again within a delay of the reconnection "
+                f"({'never' if wait is None else f'{wait:.1f} s'})")
+        _, st = h.api("GET", f"/stations/{STATION_ID}")
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    h.check(name, bool(after) and "EMERGENCY" not in [n for _, n in after],
+            f"station music after the show: {[n for _, n in after]}")
+    _, st = h.api("GET", f"/stations/{STATION_ID}")
+    h.check(name, not ((st or {}).get("automation_config") or {}).get("live_show_id"),
+            "the station is handed back after the show")
+
+
+async def sc_live_show_host_gone(h: Harness) -> None:
+    """LD-30 (PR 321): mid-show the host's page goes away (tab closed, connection lost).
+    Listeners hear what was waiting in the delay; then, `live_host_gone_seconds` after the
+    last frame, the station goes back to its queue and the engine's music returns with no
+    long silence. The show stays live: when the host's page comes back the host is on air
+    again through the delay and the engine is quiet again; End brings the music back."""
+    name = "live_show_host_gone"
+    delay, gone_after = 8.0, 8.0
+    before = set_live_settings(h, live_delay_seconds=int(delay), live_dump_seconds=0,
+                               live_timed_items="time", live_host_gone_seconds=int(gone_after))
+    listener, mic, mic2 = LiveListener(), None, None
+    t_end = None
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        now = datetime.now(UTC)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness host gone", "calls_enabled": False,
+            "scheduled_start": now.isoformat(), "scheduled_end": (now + timedelta(minutes=10)).isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        listener.task = asyncio.ensure_future(listener.run())
+        await asyncio.sleep(0.5)
+        t_start = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/start")
+        mic = HostMic(show["id"], h.token)
+        mic.task = asyncio.ensure_future(mic.run())
+        first = None
+        for _ in range(60):
+            first = next((t for t, _ in listener.frames if t >= t_start), None)
+            if first is not None:
+                break
+            await asyncio.sleep(0.25)
+        h.check(name, first is not None, "listeners hear the host")
+        if first is None:
+            return
+        await asyncio.sleep(max(0, first + 6 - time.time()))
+        mic.stop = True                     # the host's tab closes
+        t_gone = time.time()
+        released = None
+        while time.time() < t_gone + gone_after + delay + 20:
+            _, st = h.api("GET", f"/stations/{STATION_ID}")
+            if not ((st or {}).get("automation_config") or {}).get("live_show_id"):
+                released = time.time()
+                break
+            await asyncio.sleep(0.5)
+        await asyncio.sleep(10)
+        _, cur = h.api("GET", f"/live-shows/{show['id']}")
+        show_live = (cur or {}).get("status") in ("live", "LIVE")
+        t_back = time.time()                # the host's page comes back
+        mic2 = HostMic(show["id"], h.token)
+        mic2.task = asyncio.ensure_future(mic2.run())
+        await asyncio.sleep(delay + 10)
+        _, st = h.api("GET", f"/stations/{STATION_ID}")
+        retaken = bool(((st or {}).get("automation_config") or {}).get("live_show_id"))
+        mic2.stop = True
+        t_end = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/end")
+        await asyncio.sleep(delay + 15)
+    finally:
+        for m in (mic, mic2):
+            if m is not None:
+                m.stop = True
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+        if listener.task:
+            listener.task.cancel()
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    wait = None if released is None else released - t_gone
+    h.check(name, wait is not None and gone_after - 1.0 <= wait <= gone_after + 4.0,
+            f"the station is handed back {gone_after:.0f} s after the host's last audio "
+            f"({'never' if wait is None else f'{wait:.1f} s'})")
+    last_host = max((t for t, _ in listener.frames if t < t_back), default=None)
+    # on proto 5 the stream carries the host too: the gap there runs from its last host audio
+    stream_host = [w[0] for w in heard if t_gone <= w[0] <= t_back and w[1] >= -45 and tone_name(w[2]) == "HOST"]
+    if stream_host:
+        last_host = max(last_host or 0, max(stream_host) + WINDOW)
+    music = [(t, n) for t, n in timeline([w for w in heard if t_gone <= w[0] <= t_back]) if n not in ("silence", "HOST")]
+    if last_host is not None and music:
+        gap = music[0][0] - last_host
+        h.check(name, gap <= 1.5,
+                f"no long silence between the host's last delayed words and the music "
+                f"({gap:+.1f} s; host last heard {last_host - t_gone:+.1f} s, music {music[0][0] - t_gone:+.1f} s after the tab closed)")
+    else:
+        h.check(name, False, f"music came back after the host left ({[n for _, n in music]})")
+    h.check(name, show_live, "the show itself stays live while the host is away")
+    again = next((t for t, _ in listener.frames if t > t_back + 0.5), None)
+    h.check(name, again is not None and again - t_back <= delay + 4.0,
+            f"the host's page comes back and listeners hear the host again "
+            f"({'never' if again is None else f'{again - t_back:.1f} s'} after it reconnected)")
+    h.check(name, retaken, "the station is the show's again once the host is back")
+    if again is not None:
+        during = [w for w in heard if again + 2.0 <= w[0] <= t_end - 0.3]
+        loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) != "HOST")
+        h.check(name, bool(during) and loud <= 0.3,
+                f"the engine is quiet under the host again (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    after = [n for _, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    h.check(name, bool(after) and "EMERGENCY" not in after, f"station music after the show: {after}")
+
+
+async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> None:
+    """LD-4b/11b/14b (PR 316): a live show with a 6 s broadcast delay on an engine station,
+    with a real host microphone (440 Hz). The engine keeps the music through the pre-roll
+    and goes quiet once listeners hear the host; a time check due during the show is heard
+    once, on the listener page over the delay, never also on the engine stream; after End
+    the delay plays out and then the music is back. `preroll_item` (LD-17/LD-26): the time
+    check falls in the pre-roll instead, so the engine (still playing music) airs it once
+    on its second and it is not aired again over the delay."""
+    name = "live_show_delay_engine" + ("_preroll_item" if preroll_item else "")
+    delay = 6.0
+    before = set_live_settings(h, live_delay_seconds=int(delay), live_dump_seconds=0, live_timed_items="time")
+    listener, mic = LiveListener(), None
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        due = at(14 if preroll_item else 26)
+        ids = await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+        # 18 s: due 12 s after the delay fills, past the 8 s the pre-roll waits for (PR 336)
+        start_at = due.timestamp() - (3 if preroll_item else 18)
+        now = datetime.now(UTC)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness delay show", "calls_enabled": False,
+            "scheduled_start": now.isoformat(), "scheduled_end": (now + timedelta(minutes=10)).isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        listener.task = asyncio.ensure_future(listener.run())
+        await asyncio.sleep(max(0, start_at - time.time()))
+        t_start = time.time()
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+        h.check(name, code == 200, f"show started ({code})")
+        mic = HostMic(show["id"], h.token)
+        mic.task = asyncio.ensure_future(mic.run())
+        await asyncio.sleep(max(0, due.timestamp() + 14 - time.time()))
+        # What is waiting in the delay now plays out after End: more than the set delay
+        # after a time check during non-stop talk (the clip lengthened it; it shrinks
+        # back only about 3 % a second while the host talks)
+        _, air = h.api("GET", f"/live-shows/{show['id']}/air")
+        waiting = float((air or {}).get("delay") or delay)
+        mic.stop = True
+        t_end = time.time()
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
+        h.check(name, code == 200, f"show ended ({code})")
+        await asyncio.sleep(delay + 30)
+    finally:
+        if mic is not None:
+            mic.stop = True
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+        if listener.task:
+            listener.task.cancel()
+
+    first = next((t for t, _ in listener.frames if t >= t_start), None)
+    last = max((t for t, _ in listener.frames), default=None)
+    heard_at = None if first is None else first - t_start
+    # Since PR 320 the pre-roll also waits for a time check on air, so the host comes in after it
+    latest = delay + (6.0 if preroll_item else 0.0) + 1.5
+    h.check(name, heard_at is not None and delay - 0.8 <= heard_at <= latest,
+            f"listeners hear the host one delay later, or after a time check in the pre-roll "
+            f"({'never' if heard_at is None else f'{heard_at:.1f} s'}, delay {delay:.0f} s)")
+    live_on = next((t for t, on in listener.states if on and t >= t_start), None)
+    h.check(name, live_on is not None and first is not None and abs(live_on - first) <= 1.0,
+            f"listener pages are told LIVE when the host is first heard, not at Start "
+            f"({'never' if live_on is None else f'{live_on - t_start:.1f} s after Start'})")
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    clock = tone_name(TONES["time"][0])
+    pre = [w for w in heard if t_start + 0.5 <= w[0] <= t_start + delay - 1.0]
+    pre_loud = sum(WINDOW for w in pre if w[1] >= -45)
+    h.check(name, bool(pre) and pre_loud >= (len(pre) * WINDOW) - 0.6,
+            f"the engine keeps the music through the pre-roll ({pre_loud:.1f} s of {len(pre) * WINDOW:.1f} s)")
+    if first is not None:
+        during = [w for w in heard if first + 2.0 <= w[0] <= t_end - 0.3]
+        loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) not in ("HOST", clock))
+        h.check(name, bool(during) and loud <= 0.3,
+                f"no music on the engine stream once listeners hear the host (music for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+        host_secs = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) == "HOST")
+        # LD-33, engine proto 5: the stream carries the show from the backend's live.mp3
+        h.check(name, host_secs >= 0.6 * len(during) * WINDOW,
+                f"the stream carries the host's show (host for {host_secs:.1f} s of {len(during) * WINDOW:.0f} s)")
+        host_on = next((w[0] for w in heard if w[0] >= first - 1.0 and w[1] >= -45 and tone_name(w[2]) == "HOST"), None)
+        music_end = max((w[0] + WINDOW for w in heard if (host_on or 0) - 10 <= w[0] < (host_on or 0)
+                         and w[1] >= -45 and tone_name(w[2]) != "HOST"), default=None)
+        gap = None if host_on is None or music_end is None else host_on - music_end
+        h.check(name, gap is not None and gap <= 1.0,
+                f"no silence on the stream between the music and the host (gap {'?' if gap is None else f'{gap:.1f} s'}; "
+                f"host on the stream {'never' if host_on is None else f'{host_on - first:+.1f} s'} after the page)")
+    clock = tone_name(TONES["time"][0])
+    engine_clock = [t for t, n in timeline(heard) if n == clock]
+    page_clock = listener.tone_segments(TONES["time"][0], t_start, time.time())
+    if preroll_item:
+        late = engine_clock[0] - due.timestamp() if engine_clock else None
+        # A song ending 1 to 8 s before a hard item lets the item start early instead of
+        # chopping the next song (accepted rule, see MEMORY "Playout engine")
+        h.check(name, late is not None and -8.5 <= late <= 2.0,
+                f"the engine airs the time check in the pre-roll on its second, or up to 8 s early "
+                f"after a song that ended then ({'never' if late is None else f'{late:+.1f} s'})")
+        h.check(name, len(engine_clock) <= 1, f"once on the engine ({len(engine_clock)} times)")
+        clock_secs = sum(WINDOW for w in heard if due.timestamp() - 9 <= w[0] <= due.timestamp() + 8
+                         and w[1] >= -45 and tone_name(w[2]) == clock)
+        h.check(name, clock_secs >= TONES["time"][1] - 1.0,
+                f"the time check is heard to its end before the host takes over ({clock_secs:.1f} s of {TONES['time'][1]} s)")
+        h.check(name, not page_clock, f"and not again over the delay on the listener page (at {[round(t - due.timestamp(), 1) for t in page_clock]} s)")
+    else:
+        late = page_clock[0] - due.timestamp() if page_clock else None
+        h.check(name, late is not None and -1.0 <= late <= 1.5,
+                f"the time check is heard on the listener page on its second over the delay ({'never' if late is None else f'{late:+.1f} s'})")
+        # On proto 5 the stream carries the show, time check included: once, and on time
+        on_stream = [t for t in engine_clock if t_start <= t <= t_end + delay + 5]
+        h.check(name, len(on_stream) == 1 and -1.0 <= on_stream[0] - due.timestamp() <= 1.5,
+                f"on the engine stream once and on its second, inside the show "
+                f"({[round(t - due.timestamp(), 1) for t in on_stream]} s)")
+        host_after = listener.tone_at(HOST_FREQ, due.timestamp() + TONES["time"][1] + 0.5, due.timestamp() + TONES["time"][1] + 2.5)
+        h.check(name, host_after > 0.02, f"the host is heard again after the time check ({host_after:.3f})")
+    rows = {e.id: e for e in await h.rows()}
+    st = rows[ids[0]].status if ids[0] in rows else "gone"
+    h.check(name, st not in ("pending", "playing"), f"the time check's queue entry is closed ({st})")
+    tail = None if last is None else last - t_end
+    h.check(name, tail is not None and waiting - 1.5 <= tail <= waiting + 2.0,
+            f"after End what was waiting in the delay ({waiting:.1f} s) plays out to listeners "
+            f"({'nothing' if tail is None else f'{tail:.1f} s'} after End)")
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n not in ("silence", "HOST")]
+    back = after[0][0] - (last or t_end) if after else None
+    h.check(name, back is not None and -1.0 <= back <= 6.0,
+            f"the engine's music is back after the delay played out ({'never' if back is None else f'{back:+.1f} s after the last delayed audio'})")
+    h.check(name, bool(after) and "EMERGENCY" not in [n for _, n in after] and clock not in [n for _, n in after],
+            f"station music after the show, no emergency files and no late time check: {[n for _, n in after]}")
+    h.check(name, len({n for _, n in after}) == 1,
+            f"one item after the show, not a fragment of the paused song first: {[n for _, n in after]}")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"the site shows music ({cur.asset.title if cur else None})")
+
+
+async def sc_live_show_on_the_stream(h: Harness) -> None:
+    """Engine proto 5: the host's show (the backend's live.mp3, here a 1200 Hz tone) is
+    heard on the stream while the show is on, with no music under it; when the show's
+    audio stalls mid-show the stream is quiet, not music or emergency; after the show
+    the station's music is back within a moment."""
+    name = "live_show_on_the_stream"
+    await wait_music(h)
+    await asyncio.sleep(4)
+    code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show",
+                                               "calls_enabled": False})
+    if code != 201:
+        h.check(name, False, f"could not create the show ({code})")
+        return
+    h.stack.live_audio = True
+    t_start = time.time()
+    code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+    h.check(name, code == 200, f"show started ({code})")
+    await asyncio.sleep(16)
+    t_stall = time.time()
+    h.stack.live_audio = False          # the show's audio stops coming (backend stall)
+    await asyncio.sleep(8)
+    h.stack.live_audio = True           # and comes back
+    await asyncio.sleep(10)
+    t_end = time.time()
+    h.stack.live_audio = False
+    code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
+    h.check(name, code == 200, f"show ended ({code})")
+    await asyncio.sleep(14)
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    first = [w for w in heard if t_start + 4.0 <= w[0] <= t_stall]
+    host = sum(WINDOW for w in first if w[1] >= -45 and tone_name(w[2]) == "HOST")
+    h.check(name, bool(first) and host >= len(first) * WINDOW - 0.5,
+            f"the host is heard on the stream from 4 s after the start ({host:.1f} s of {len(first) * WINDOW:.0f} s)")
+    show_names = [n for t, n in timeline([w for w in heard if t_start + 2.0 <= w[0] <= t_end])]
+    h.check(name, not [n for n in show_names if n not in ("HOST", "silence", "mix")],
+            f"nothing but the host or quiet during the show, also while its audio stalled: {show_names}")
+    back = [w for w in heard if t_stall + 9.0 <= w[0] <= t_end]
+    h.check(name, any(tone_name(w[2]) == "HOST" and w[1] >= -45 for w in back),
+            "the host is heard again after the stall")
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n not in ("silence", "HOST")]
+    gap = after[0][0] - t_end if after else None
+    h.check(name, gap is not None and gap <= 2.0,
+            f"music back {'never' if gap is None else f'{gap:.1f} s'} after the show ended")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
 
 
 async def sc_soft_waits_for_song(h: Harness) -> None:
@@ -1924,7 +2569,10 @@ async def sc_three_item_group(h: Harness) -> None:
     h.print_timeline(heard, t1.timestamp())
     names = [n for _, n in timeline(heard)]
     runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
-    cut_tone = tone_name(TONES[[k for k, v in h.assets.items() if v == cut.asset_id][0]][0])
+    # The cut song can be one of the extra assets that reuse a song's file (song3quiet)
+    cut_key = [k for k, v in h.assets.items() if v == cut.asset_id][0]
+    cut_key = cut_key if cut_key in TONES else cut_key.removesuffix("quiet")
+    cut_tone = tone_name(TONES[cut_key][0]) if cut_key in TONES else cut_key
     h.check(name, cut_tone not in runs[runs.index(tone_name(TONES["time"][0])) + 1:] if tone_name(TONES["time"][0]) in runs else False,
             f"heard {runs}; the cut song ({cut_tone}) not heard after the group")
     gap, _ = longest_silence(heard)
@@ -2965,6 +3613,80 @@ async def sc_site_matches_stream(h: Harness) -> None:
     h.check(name, len(playing) == 1, f"one item on air on the site ({len(playing)})")
 
 
+async def sc_second_engine_refused(h: Harness) -> None:
+    """One engine per station (local FM box safety): a second engine started with the same
+    station id (a box set up with a copied id) is refused at hello and at every ask, takes
+    nothing from the queue, and a critical alert is raised; the station's own engine plays
+    on without a gap and the site keeps showing what it plays."""
+    from sqlalchemy import select
+
+    from app.db.engine import async_session_factory
+    from app.models.alert import Alert
+    from app.services import playout_engine
+
+    name = "second_engine_refused"
+    await wait_music(h)
+    t_start = time.time()
+    second_dir = h.stack.dir / "second"
+    (second_dir / "emergency").mkdir(parents=True, exist_ok=True)
+    os.chmod(second_dir, 0o777)
+    os.chmod(second_dir / "emergency", 0o777)
+    env = dict(os.environ)
+    env.update({
+        "KBR_BACKEND_URL": f"http://127.0.0.1:{BACKEND_PROXY_PORT}/api/v1",
+        "KBR_STATION_ID": str(STATION_ID), "KBR_PLAYOUT_TOKEN": TOKEN,
+        "KBR_CONTROL_PORT": str(CONTROL_PORT + 1),
+        "KBR_EMERGENCY_DIR": str(second_dir / "emergency"),
+        "KBR_ICECAST_PORT": str(ICECAST_PORT), "KBR_ICECAST_SOURCE_PASSWORD": TOKEN,
+        "KBR_ICECAST_MOUNT": "/harness-second", "KBR_HLS_DIR": str(second_dir),
+        "KBR_DEBUG_WAV": "", "KBR_ALSA_DEVICE": "",
+    })
+    log_path = second_dir / "engine.log"
+    cmd = ["liquidsoap", str(RADIO_LIQ)]
+    if os.geteuid() == 0:
+        cmd = ["runuser", "-u", "nobody", "--"] + cmd
+    p = subprocess.Popen(cmd, env=env, stdout=open(log_path, "a"), stderr=subprocess.STDOUT,
+                         start_new_session=True)
+    try:
+        await asyncio.sleep(25)
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+            p.wait(timeout=10)
+        except Exception:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except Exception:
+                pass
+    log = log_path.read_text(errors="replace")
+    h.check(name, "hello: REFUSED" in log, "the second engine's hello was refused")
+    h.check(name, "next: backend gave entry" not in log, "the second engine got nothing from the queue")
+    async with async_session_factory() as db:
+        alerts = (await db.execute(select(Alert).where(
+            Alert.station_id == STATION_ID, Alert.title == playout_engine.SECOND_ENGINE_ALERT_TITLE,
+        ))).scalars().all()
+    h.check(name, len(alerts) >= 1, f"a critical alert was raised ({len(alerts)})")
+    heard = h.heard(t_start, time.time() - 1)
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"the station's own engine played on: longest silence {gap:.1f} s")
+    names = [n for _, n in timeline(heard) if n != "silence"]
+    h.check(name, bool(names) and all(n.startswith("song") for n in names),
+            f"station music only on the station's engine: {names}")
+    st = await h.on_air()
+    def engine_status() -> dict | None:
+        req = urllib.request.Request(f"http://127.0.0.1:{CONTROL_PORT}/status", method="POST", data=b"{}",
+                                     headers={"X-Playout-Token": TOKEN, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json.loads(r.read())
+        except Exception:
+            return None
+
+    status = await asyncio.to_thread(engine_status)
+    h.check(name, st is not None and status is not None and status.get("entry_id") == str(st.id),
+            "the site shows what the station's engine plays")
+
+
 async def sc_engine_crash_restart(h: Harness) -> None:
     """V1-25 / H-10: the engine crashes mid-song and starts again (systemd restarts it) with
     the backend up. It says hello, plays station music (not emergency files) within a few
@@ -3278,6 +4000,314 @@ def with_slow_backend(scenario, seconds: float = 4.0):
     return run
 
 
+
+# ── Emergency alerts (wiki/emergency-alerts.md) ──────────────────────────────
+
+
+def _multipart(fields: dict, files: dict) -> tuple[bytes, str]:
+    boundary = uuid.uuid4().hex
+    out = b""
+    for k, v in fields.items():
+        out += f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+    for k, (fname, data) in files.items():
+        out += (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"; filename="{fname}"\r\n'
+                f'Content-Type: audio/mpeg\r\n\r\n').encode() + data + b"\r\n"
+    out += f"--{boundary}--\r\n".encode()
+    return out, f"multipart/form-data; boundary={boundary}"
+
+
+def send_alert(h: Harness, clip: Path, *, device: bool = False, kind: str | None = None,
+               title: str = "Harness alert") -> tuple[int, dict]:
+    """Staff test (manager login) or the EAS box's call (emergency token)."""
+    fields = {"station_ids": str(STATION_ID), "title": title}
+    if kind:
+        fields["kind"] = kind
+    body, ctype = _multipart(fields, {"file": (clip.name, clip.read_bytes())})
+    path = "/emergency/device/activate" if device else "/emergency/activate"
+    headers = {"Content-Type": ctype}
+    headers.update({"X-Emergency-Token": EMERGENCY_TOKEN} if device else {"Authorization": f"Bearer {h.token}"})
+    req = urllib.request.Request(f"http://127.0.0.1:{BACKEND_PORT}/api/v1{path}", data=body,
+                                 method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, {"error": e.read().decode()[:400]}
+
+
+async def alert_row(alert_id: str):
+    from app.db.engine import async_session_factory
+    from app.models.emergency_alert import EmergencyAlert
+
+    async with async_session_factory() as db:
+        return await db.get(EmergencyAlert, uuid.UUID(alert_id))
+
+
+def runs_of(windows, name: str) -> list[tuple[float, float]]:
+    """(start, end) of each stretch where `name` was heard (gaps under 0.3 s bridged)."""
+    out: list[list[float]] = []
+    for t, db, f in windows:
+        if db >= -45 and tone_name(f) == name:
+            if out and t - out[-1][1] <= 0.3:
+                out[-1][1] = t + WINDOW
+            else:
+                out.append([t, t + WINDOW])
+    return [(a, b) for a, b in out if b - a >= 0.3]
+
+
+async def sc_emergency_alert_over_music(h: Harness) -> None:
+    """A staff test of the override over a song: on air within a moment, played whole,
+    the same song carries on afterwards, no gap, no emergency music, and the log says
+    when and how long."""
+    name = "emergency_alert_over_music"
+    await wait_music(h)
+    await asyncio.sleep(5)
+    sent = time.time()
+    code, body = send_alert(h, h.stack.dir / "alert8.mp3", title="Override test over music")
+    h.check(name, code == 201 and body.get("sent") == 1, f"alert sent ({code} {body.get('error', '')})")
+    if code != 201:
+        return
+    alert_id = body["alerts"][0]["id"]
+    await asyncio.sleep(3)
+    code, st = h.api("GET", "/emergency/status")
+    mine = next((x for x in st.get("stations", []) if x["station_id"] == str(STATION_ID)), {})
+    h.check(name, bool(mine.get("on_air")) and mine["on_air"]["alert_id"] == alert_id,
+            f"the status page shows the alert on air: {mine.get('on_air')}")
+    await asyncio.sleep(14)
+    heard = h.heard(sent - 4, time.time() - 1)
+    h.print_timeline(heard, sent)
+    alert = runs_of(heard, "ALERT")
+    h.check(name, len(alert) == 1, f"one alert heard: {[(round(a - sent, 1), round(b - sent, 1)) for a, b in alert]}")
+    if not alert:
+        return
+    a0, a1 = alert[0]
+    h.check(name, a0 - sent <= 2.0, f"on air {a0 - sent:.1f} s after it was sent")
+    h.check(name, abs((a1 - a0) - 8.0) <= 0.6, f"played whole: {a1 - a0:.1f} s of 8 s")
+    before = [n for t, n in timeline([w for w in heard if w[0] < a0 - 0.2]) if n not in ("silence", "mix")]
+    after = [n for t, n in timeline([w for w in heard if a1 + 0.2 < w[0] < a1 + 4]) if n not in ("silence", "mix")]
+    h.check(name, bool(before) and bool(after) and before[-1] == after[0],
+            f"the song carries on after the alert ({before[-1:] } then {after[:1]})")
+    gap, _ = longest_silence([w for w in heard if a0 - 3 <= w[0] <= a1 + 3])
+    h.check(name, gap <= 0.5, f"longest silence around the alert {gap:.1f} s")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+    row = await alert_row(alert_id)
+    h.check(name, row is not None and row.status == "done" and row.seconds_on_air is not None
+            and abs(row.seconds_on_air - 8.0) <= 1.0,
+            f"logged: {row.status if row else None}, {row.seconds_on_air if row else None} s")
+
+
+async def sc_emergency_alert_over_time_check(h: Harness) -> None:
+    """An alert on air when a hard time check is due: the time check does not air late
+    (it is dropped), the alert plays whole, then music."""
+    name = "emergency_alert_over_time_check"
+    await wait_music(h)
+    due_dt = at(14)
+    due = due_dt.timestamp()
+    [tid] = await h.queue([("time", {"preempt_at": due_dt, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(8)
+    sent = time.time()
+    code, body = send_alert(h, h.stack.dir / "alert14.mp3", title="Alert across a time check")
+    h.check(name, code == 201, f"alert sent ({code})")
+    await asyncio.sleep(due - time.time() + 30)
+    heard = h.heard(sent - 3, time.time() - 1)
+    h.print_timeline(heard, due)
+    alert = runs_of(heard, "ALERT")
+    h.check(name, len(alert) == 1 and abs((alert[0][1] - alert[0][0]) - 14.0) <= 0.6,
+            f"the alert played whole over the time check's second: {[(round(a - due, 1), round(b - due, 1)) for a, b in alert]}")
+    times = runs_of(heard, "time")
+    h.check(name, not times, f"no late time check: {[(round(a - due, 1)) for a, _ in times]}")
+    row = next((e for e in await h.rows() if e.id == tid), None)
+    h.check(name, row is not None and row.status == "skipped", f"time check closed: {row.status if row else None}")
+    after = [n for _, n in timeline([w for w in heard if alert and w[0] > alert[0][1] + 0.3]) if n != "silence"]
+    h.check(name, bool(after) and after[0].startswith("song"), f"music after the alert: {after[:3]}")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+
+
+async def sc_emergency_alert_over_live_show(h: Harness) -> None:
+    """A host on air: the alert takes the air over the show, and the show is heard again
+    after it."""
+    name = "emergency_alert_over_live_show"
+    before = set_live_settings(h, live_delay_seconds=0, live_host_gone_seconds=0)
+    try:
+        await wait_music(h)
+        code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show",
+                                                   "calls_enabled": False})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        h.stack.live_audio = True
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+        await asyncio.sleep(8)
+        sent = time.time()
+        code, body = send_alert(h, h.stack.dir / "alert8.mp3", title="Alert over a live show")
+        h.check(name, code == 201, f"alert sent ({code})")
+        await asyncio.sleep(16)
+        t_end = time.time()
+        h.stack.live_audio = False
+        h.api("POST", f"/live-shows/{show['id']}/end")
+        await asyncio.sleep(6)
+        heard = h.heard(sent - 4, t_end)
+        h.print_timeline(heard, sent)
+        alert = runs_of(heard, "ALERT")
+        h.check(name, len(alert) == 1 and alert[0][0] - sent <= 2.0 and abs(alert[0][1] - alert[0][0] - 8.0) <= 0.6,
+                f"the alert took the air over the host, whole: {[(round(a - sent, 1), round(b - sent, 1)) for a, b in alert]}")
+        host_during = sum(WINDOW for w in heard if alert and alert[0][0] + 0.3 <= w[0] <= alert[0][1] - 0.3
+                          and w[1] >= -45 and tone_name(w[2]) == "HOST")
+        h.check(name, host_during <= 0.2, f"the host is not heard under the alert ({host_during:.1f} s)")
+        back = runs_of([w for w in heard if alert and w[0] > alert[0][1]], "HOST")
+        h.check(name, bool(back) and back[0][0] - alert[0][1] <= 2.0,
+                f"the host is heard again {back[0][0] - alert[0][1]:.1f} s after the alert" if back and alert
+                else "the host is not heard after the alert")
+    finally:
+        h.stack.live_audio = False
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+
+
+async def sc_emergency_alert_stop(h: Harness) -> None:
+    """Stop on the page: the alert ends at once and the music is back; logged as stopped."""
+    name = "emergency_alert_stop"
+    await wait_music(h)
+    await asyncio.sleep(3)
+    code, body = send_alert(h, h.stack.dir / "alert20.mp3", title="Alert to stop")
+    h.check(name, code == 201, f"alert sent ({code})")
+    if code != 201:
+        return
+    alert_id = body["alerts"][0]["id"]
+    await asyncio.sleep(5)
+    pressed = time.time()
+    code, res = h.api("POST", f"/emergency/{alert_id}/stop")
+    h.check(name, code == 200 and res.get("status") == "cancelled", f"stopped ({code} {res})")
+    await asyncio.sleep(8)
+    heard = h.heard(pressed - 6, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    alert = runs_of(heard, "ALERT")
+    h.check(name, bool(alert) and alert[-1][1] - pressed <= 1.2,
+            f"alert off air {alert[-1][1] - pressed:.1f} s after Stop" if alert else "alert never heard")
+    after = [n for _, n in timeline([w for w in heard if w[0] > pressed + 1.5]) if n != "silence"]
+    h.check(name, bool(after) and after[0].startswith("song"), f"music back: {after[:2]}")
+    row = await alert_row(alert_id)
+    h.check(name, row is not None and row.status == "cancelled", f"logged as stopped: {row.status if row else None}")
+
+
+async def sc_emergency_alert_two_in_a_row(h: Harness) -> None:
+    """Two alerts sent a second apart (say English, then Spanish) play one after the
+    other, whole, never over each other."""
+    name = "emergency_alert_two_in_a_row"
+    await wait_music(h)
+    await asyncio.sleep(3)
+    sent = time.time()
+    c1, b1 = send_alert(h, h.stack.dir / "alert8.mp3", title="First")
+    await asyncio.sleep(1)
+    c2, b2 = send_alert(h, h.stack.dir / "alert8.mp3", title="Second")
+    h.check(name, c1 == 201 and c2 == 201, f"both sent ({c1}, {c2})")
+    await asyncio.sleep(22)
+    heard = h.heard(sent - 2, time.time() - 1)
+    h.print_timeline(heard, sent)
+    alert = runs_of(heard, "ALERT")
+    total = sum(b - a for a, b in alert)
+    h.check(name, abs(total - 16.0) <= 1.0, f"16 s of alert in all, one after the other: {total:.1f} s in {len(alert)} stretch(es)")
+    if c1 == 201 and c2 == 201:
+        r1, r2 = await alert_row(b1["alerts"][0]["id"]), await alert_row(b2["alerts"][0]["id"])
+        h.check(name, r1.status == "done" and r2.status == "done" and r1.started_at < r2.started_at,
+                f"both logged, in order: {r1.status} {r2.status}")
+
+
+async def sc_emergency_alert_tones(h: Harness) -> None:
+    """EAS tones: a staff upload holding them is refused and nothing airs. With
+    KBR_HARNESS_EAS_RECORDING (a real alert recording, this offline harness only: its
+    tones must never reach a public stream), the EAS box's own call is accepted and the
+    recording plays whole, then the music."""
+    name = "emergency_alert_tones"
+    await wait_music(h)
+    att = h.stack.dir / "attention.mp3"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "aevalsrc=0.4*sin(2*PI*853*t)+0.4*sin(2*PI*960*t):s=44100:d=4", str(att)], check=True)
+    t0 = time.time()
+    code, body = send_alert(h, att, title="Tones from staff")
+    h.check(name, code == 422 and "11.45" in body.get("error", ""), f"staff upload with EAS tones refused ({code})")
+    rec = os.environ.get("KBR_HARNESS_EAS_RECORDING")
+    if not rec:
+        log("    (no KBR_HARNESS_EAS_RECORDING: the real recording part is skipped)")
+        await asyncio.sleep(3)
+        heard = h.heard(t0, time.time() - 0.5)
+        h.check(name, not runs_of(heard, "ALERT"), "nothing aired")
+        return
+    clip = Path(rec)
+    code, body = send_alert(h, clip, title="Staff upload of a real recording")
+    h.check(name, code == 422, f"staff upload of the real recording refused ({code})")
+    secs = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                 str(clip)], capture_output=True, text=True).stdout.strip())
+    sent = time.time()
+    code, body = send_alert(h, clip, device=True, kind="alert", title="EAS box relay (harness only)")
+    h.check(name, code == 201 and body["alerts"][0]["has_tones"], f"the EAS box's call accepted, tones noted ({code})")
+    if code != 201:
+        return
+    await asyncio.sleep(secs + 8)
+    heard = h.heard(sent - 3, time.time() - 1)
+    songs = [(t, n) for t, n in timeline(heard) if n.startswith("song")]
+    before = [t for t, n in songs if t < sent + 0.5]
+    after = [t for t, n in songs if t > sent + 2]
+    h.check(name, bool(before) and bool(after) and secs - 1.0 <= after[0] - sent <= secs + 3.0,
+            f"the recording ({secs:.0f} s) played whole: music back {after[0] - sent:.1f} s after it was sent"
+            if after else "music never came back")
+    row = await alert_row(body["alerts"][0]["id"])
+    h.check(name, row.status == "done" and abs((row.seconds_on_air or 0) - secs) <= 2.0,
+            f"logged {row.status}, {row.seconds_on_air} s")
+
+
+async def sc_emergency_alert_line(h: Harness) -> None:
+    """The EAS box's audio line on a local FM box (needs KBR_HARNESS_ALERT_DEVICE and a
+    PulseAudio null sink whose monitor it records; KBR_HARNESS_ALERT_SINK names the sink):
+    sound there takes the air within a second, the music is back about 4 s after it ends,
+    and the site logs it. Run with --local-box it also cuts the line both ways for the
+    whole alert: the takeover needs no internet, and the log arrives when the line is back."""
+    name = "emergency_alert_line"
+    if not os.environ.get("KBR_HARNESS_ALERT_DEVICE"):
+        h.check(name, False, "set KBR_HARNESS_ALERT_DEVICE (and a PulseAudio null sink, see wiki/emergency-alerts.md)")
+        return
+    sink = os.environ.get("KBR_HARNESS_ALERT_SINK", "alertin")
+    await wait_music(h)
+    await asyncio.sleep(4)
+    offline = h.stack.local_box
+    if offline:
+        h.stack.backend_down = True
+        h.stack.control_down = True
+        await asyncio.sleep(2)
+    played = time.time()
+    subprocess.run(["paplay", "-d", sink, str(h.stack.dir / "alert8.mp3")], check=False, timeout=30)
+    ended = time.time()
+    await asyncio.sleep(10)
+    if offline:
+        h.stack.backend_down = False
+        h.stack.control_down = False
+        await asyncio.sleep(70)  # the relay's next plan sync sends the kept reports
+    heard = h.heard(played - 3, ended + 9)
+    h.print_timeline(heard, played)
+    alert = runs_of(heard, "ALERT")
+    # (includes paplay's own start-up, a few tenths of a second)
+    h.check(name, bool(alert) and alert[0][0] - played <= 2.0,
+            f"the line took the air {alert[0][0] - played:.1f} s after its sound began" if alert else "the line was never heard")
+    h.check(name, bool(alert) and sum(b - a for a, b in alert) >= 7.0,
+            f"heard {sum(b - a for a, b in alert):.1f} s of the 8 s on the line")
+    songs = [t for t, n in timeline([w for w in heard if w[0] > ended]) if n.startswith("song")]
+    h.check(name, bool(songs) and songs[0] - ended <= 6.0,
+            f"music back {songs[0] - ended:.1f} s after the line went quiet" if songs else "music never came back")
+    from sqlalchemy import select
+
+    from app.db.engine import async_session_factory
+    from app.models.emergency_alert import EmergencyAlert
+
+    async with async_session_factory() as db:
+        rows = (await db.execute(select(EmergencyAlert).where(
+            EmergencyAlert.source == "line", EmergencyAlert.station_id == STATION_ID)
+            .order_by(EmergencyAlert.requested_at.desc()).limit(1))).scalars().all()
+    row = rows[0] if rows else None
+    h.check(name, row is not None and row.status == "done" and row.seconds_on_air and row.seconds_on_air >= 8,
+            f"logged on the site{' after the line came back' if offline else ''}: "
+            f"{row.status if row else None}, {row.seconds_on_air if row else None} s")
+
 SCENARIOS = {
     "hour_change_slow_backend": sc_hour_change_slow_backend,
     "soft_timed_waits_for_song_slow_backend": with_slow_backend(sc_soft_waits_for_song),
@@ -3328,6 +4358,13 @@ SCENARIOS = {
     "song_ends_before_hour": sc_song_ends_before_hour,
     "song_ends_6s_before_hour": sc_song_ends_6s_before_hour,
     "live_show_quiet": sc_live_show_quiet,
+    "live_show_delay_engine": sc_live_show_delay_engine,
+    "live_show_delay_controls": sc_live_show_delay_controls,
+    "live_show_delay_restart": lambda h: sc_live_show_delay_controls(h, restart=True),
+    "live_show_no_host": sc_live_show_no_host,
+    "live_show_host_gone": sc_live_show_host_gone,
+    "live_show_delay_engine_preroll_item": lambda h: sc_live_show_delay_engine(h, preroll_item=True),
+    "live_show_on_the_stream": sc_live_show_on_the_stream,
     "speech_never_overlaps": sc_speech_never_overlaps,
     "engine_restart_15s_before_hour": sc_engine_restart_15s_before_hour,
     "engine_restart_song_ends_before_hour": sc_engine_restart_song_ends_before_hour,
@@ -3353,6 +4390,14 @@ SCENARIOS = {
     "next_on_a_busy_server": sc_next_on_a_busy_server,
     "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,
+    "second_engine_refused": sc_second_engine_refused,
+    "emergency_alert_over_music": sc_emergency_alert_over_music,
+    "emergency_alert_over_time_check": sc_emergency_alert_over_time_check,
+    "emergency_alert_over_live_show": sc_emergency_alert_over_live_show,
+    "emergency_alert_stop": sc_emergency_alert_stop,
+    "emergency_alert_two_in_a_row": sc_emergency_alert_two_in_a_row,
+    "emergency_alert_tones": sc_emergency_alert_tones,
+    "emergency_alert_line": sc_emergency_alert_line,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
@@ -3423,6 +4468,7 @@ def main() -> None:
         n for n in SCENARIOS
         if (args.local_box or not n.startswith("local_box_"))
         and (n != "local_box_sound_card" or os.environ.get("KBR_HARNESS_ALSA_DEVICE"))
+        and (n != "emergency_alert_line" or os.environ.get("KBR_HARNESS_ALERT_DEVICE"))
     ]
     for n in names:
         if n not in SCENARIOS:

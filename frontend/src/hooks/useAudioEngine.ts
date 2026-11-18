@@ -1323,6 +1323,62 @@ export function useAudioEngine(
     return () => window.removeEventListener('kbr-mix-over', onMixOver);
   }, [replayGainMultiplier]);
 
+  // ── Emergency alert: takes over this player, plays whole, then the programme ──
+  // The programme is muted (it runs on underneath) and the alert goes straight to the
+  // speakers, past the decks. One alert at a time; several pages each play it once.
+  useEffect(() => {
+    let playing: { id: string; source: AudioBufferSourceNode } | null = null;
+    const restore = () => {
+      const ctx = ctxRef.current;
+      const bus = busRef.current;
+      if (ctx && bus) bus.gain.setTargetAtTime(1, ctx.currentTime, 0.05);
+      playing = null;
+    };
+    const onAlert = (event: Event) => {
+      const data = (event as CustomEvent).detail as { id?: string; url?: string; _taken?: boolean };
+      const ctx = ctxRef.current;
+      const bus = busRef.current;
+      const out = outGainRef.current;
+      if (!data?.url || !data.id || data._taken || !ctx || !bus || !out) return;
+      data._taken = true;
+      fetch(data.url)
+        .then((res) => res.arrayBuffer())
+        .then((bytes) => ctx.decodeAudioData(bytes))
+        .then((buffer) => {
+          if (playing) {
+            try { playing.source.stop(); } catch { /* already ended */ }
+          }
+          bus.gain.setTargetAtTime(0, ctx.currentTime, 0.03);
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(out);
+          const mine = { id: data.id as string, source };
+          playing = mine;
+          source.onended = () => {
+            source.disconnect();
+            if (playing === mine) restore();
+          };
+          source.start(ctx.currentTime + 0.1);
+        })
+        .catch(() => {
+          // Not loaded: the programme carries on
+        });
+    };
+    const onStop = (event: Event) => {
+      const data = (event as CustomEvent).detail as { id?: string };
+      if (playing && (!data?.id || data.id === playing.id)) {
+        try { playing.source.stop(); } catch { /* already ended */ }
+        restore();
+      }
+    };
+    window.addEventListener('kbr-emergency-alert', onAlert);
+    window.addEventListener('kbr-emergency-alert-stop', onStop);
+    return () => {
+      window.removeEventListener('kbr-emergency-alert', onAlert);
+      window.removeEventListener('kbr-emergency-alert-stop', onStop);
+    };
+  }, []);
+
   const playNextNow = useCallback((asset: AssetInfo, fadeSeconds: number | null) => {
     if (!ctxRef.current || ctxRef.current.state !== 'running') return; // not listening here
     const now = serverNow(); // compared with the server's start times

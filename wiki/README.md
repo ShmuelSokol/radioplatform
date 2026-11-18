@@ -22,7 +22,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [listener-player-bar](listener-player-bar.md) — the station keeps playing on the other listener pages: the Listen page stays mounted, hidden; bar with Stop
 - [live-listeners](live-listeners.md): when a listener counts as live, instant join/leave push to admin pages
 - [playlist-generation](playlist-generation.md) — queue generated ahead from sequences of song types, artist distance, longest-rested first
-- [rds-feed](rds-feed.md) — plain-text now-playing line for the FM RDS encoder (Magic RDS)
+- [rds-feed](rds-feed.md) — RDS manager: PS, RadioText rotation, sponsor lines, encoder feeds and pickup log, Magic RDS setup
 - [song-request-matching.md](song-request-matching.md) — how listener requests map to library assets; known nickname + recall bugs
 - [spot-schedules](spot-schedules.md) — Sponsor spot scheduling by daypart, how clock slots get filled, legacy single-spot fallback, sponsor portal data sources
 - [schedule-look-ahead](schedule-look-ahead.md) — Conflict look-ahead page, shared block resolver, tie-break order, blocks are station-local time (were UTC)
@@ -38,6 +38,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [before-go-live](before-go-live.md) — decisions to look at again before the station depends on the site
 - [activity-log](activity-log.md) — who did what: every staff change with before/after, sign-ins, screens opened, listener sessions; how rows are captured
 - [air-watch](air-watch.md) — on-air self-check: late or missing time checks, dead air, engine drift, skipped timed items; alerts and ntfy
+- [emergency-alerts](emergency-alerts.md) — EAS: what the certified box does vs our override (engine alert lane, device API, line input on the FM box), the 47 CFR 11.45 tone guard, log page
 - [local-fm-box](local-fm-box.md) — Feeding FM from the transmitter room: the engine on a local box with a relay that keeps it on air with no internet (plan + library on disk); stages and gaps
 - [look-at-the-screen-tests](look-at-the-screen-tests.md) — the browser guard, the walk of every page and control on three stations, the station isolation sweep
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when

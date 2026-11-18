@@ -1,4 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { getAirStatus } from '../../api/liveShows';
+import type { AirStatus } from '../../api/liveShows';
+import { liveShowBadge } from './controlroom/liveBadge';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
@@ -174,6 +177,20 @@ export default function Dashboard() {
     ? queueEntries.find(e => e.id === skipIdRaw)?.asset ?? null
     : nextAsset;
   const liveShow = (liveData?.shows ?? []).find(s => s.status === 'live' && (!stationId || s.station_id === stationId)) ?? null;
+  // A show that is "live" is not heard yet while its delay fills (or with no host):
+  // the badge says which (PC live check 2026-11-18: LIVE showed 5 s before the host was heard)
+  const [liveAir, setLiveAir] = useState<AirStatus | null>(null);
+  const liveShowId = liveShow?.id;
+  useEffect(() => {
+    setLiveAir(null);
+    if (!liveShowId) return;
+    let stop = false;
+    const ask = () => getAirStatus(liveShowId).then(a => { if (!stop) setLiveAir(a); }).catch(() => {});
+    ask();
+    const id = setInterval(ask, 2000);
+    return () => { stop = true; clearInterval(id); };
+  }, [liveShowId]);
+  const liveBadge = liveShowBadge(liveAir);
 
   // ── UI state ───────────────────────────────────────────────
   const [pane, setPane] = useState<Pane>('queue');
@@ -556,9 +573,12 @@ export default function Dashboard() {
   useEffect(() => {
     const el = dashStreamAudioRef.current;
     if (!el) return;
-    el.muted = !listenHere || muted;
+    // During a live show the operator hears the host from the live feed (at once);
+    // the stream carries the same show seconds later (stream server proto 5) and
+    // would be the host a second time
+    el.muted = !listenHere || muted || live.onAir;
     el.volume = volume;
-  }, [volume, muted, listenHere]);
+  }, [volume, muted, listenHere, live.onAir]);
   const setLiveLevel = live.setLevel;
   useEffect(() => { setLiveLevel(volume, muted); }, [setLiveLevel, volume, muted]);
   useEffect(() => { setLiveEnabled(audioReady && listenHere); }, [audioReady, listenHere]);
@@ -920,7 +940,7 @@ export default function Dashboard() {
     loopBusy: loopBusy,
     audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive && streamStarting, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
     stationTz: stationTz,
-    liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
+    liveShow: liveShow ? { id: liveShow.id, title: liveShow.title, ...liveBadge } : null,
   };
   const noStation = !stationId;
   const queuePanel = (
@@ -1159,7 +1179,7 @@ export default function Dashboard() {
         <footer className="shrink-0 h-5 px-2 flex items-center justify-between gap-4 bg-[#c0c0c0] border-t border-[#808080] text-[11px] text-black">
           <span className="flex items-center gap-3">
             <span>Shortcuts: <b>N</b> next · <b>/</b> search · <b>Esc</b> cancel insert</span>
-            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
+            <button type="button" data-bug-trigger="" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
               className="underline hover:text-red-700">🐞 Report a bug</button>
           </span>
           <span className="truncate">{station?.name ?? ''}{station?.timezone ? ` · ${station.timezone}` : ''}</span>

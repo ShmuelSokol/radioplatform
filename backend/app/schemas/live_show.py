@@ -70,6 +70,9 @@ class CallInRequestInDB(BaseModel):
     screened_by: uuid.UUID | str | None = None
     created_at: datetime
     updated_at: datetime
+    # Earlier calls and the staff's standing for this caller (caller_history.with_history)
+    history: dict | None = None
+    locked: bool = False
 
 
 class CallInRequestListResponse(BaseModel):

@@ -64,7 +64,10 @@ export const typeStyle = (t: string | null | undefined) => (t && TYPE_STYLE[t]) 
 /** Phone held sideways: wider than tall, at most 500 px tall, under the desktop width.
  * The page decides (usePhoneLandscape) and sets html.cr-land; classic.css follows that
  * class, so there is one query only. */
-export const PHONE_LANDSCAPE = '(orientation: landscape) and (max-height: 500px) and (max-width: 1023.98px)';
+// Up to 720 px tall, not only phones: a car screen (Tesla browser) or small tablet held
+// wide gets the queue at full height beside the transport (Shmuel, 2026-11-18: only 3
+// songs showed in the car with the transport stacked above the queue).
+export const PHONE_LANDSCAPE = '(orientation: landscape) and (max-height: 720px) and (max-width: 1023.98px)';
 
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() =>

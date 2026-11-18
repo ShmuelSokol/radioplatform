@@ -35,7 +35,27 @@ export interface CallInRequest {
   screened_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Earlier calls of the same person and what the staff decided about them; null when the call does not say who is calling */
+  history?: CallerHistoryInfo | null;
+  /** End Call, Hold and Next leave a locked call alone */
+  locked?: boolean;
 }
+
+export type CallerStanding = 'normal' | 'priority' | 'blocked';
+export interface CallerHistoryInfo { calls: number; on_air: number; last_at: string | null; standing: CallerStanding; note: string | null }
+export interface MarkedCaller { id: string; name: string | null; standing: CallerStanding; note: string | null; kind: 'phone' | 'web'; phone: string | null; updated_at: string | null }
+
+/** Mark the person behind a call (it holds for their later calls on every show). Blocking takes their waiting calls out of the queue. */
+export const setCallerStanding = async (
+  showId: string, callId: string, data: { standing?: CallerStanding; note?: string },
+): Promise<{ standing: CallerStanding; note: string | null; removed: number }> =>
+  (await apiClient.put(`/live-shows/${showId}/calls/${callId}/caller`, data)).data;
+
+export const getMarkedCallers = async (): Promise<MarkedCaller[]> =>
+  (await apiClient.get('/caller-profiles')).data.callers;
+
+export const changeMarkedCaller = async (id: string, data: { standing?: CallerStanding; note?: string }): Promise<MarkedCaller> =>
+  (await apiClient.put(`/caller-profiles/${id}`, data)).data;
 
 export interface LiveShowListResponse {
   shows: LiveShow[];
@@ -142,10 +162,45 @@ export const putCallerOnAirAsking = async (showId: string, callId: string): Prom
   }
 };
 
+/** Off the air without hanging up: back to Approved, still connected */
+export const holdCall = async (showId: string, callId: string): Promise<CallInRequest> => {
+  const res = await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/hold`);
+  return res.data;
+};
+
+/**
+ * Next caller in one press: the call on air ends and the approved caller who waited
+ * longest goes on air. Asks first when the delay could not cut the new caller.
+ * Returns an error text to show, or null.
+ */
+export const nextCallerAsking = async (showId: string): Promise<string | null> => {
+  const go = (force: boolean) => apiClient.post(`/live-shows/${showId}/calls/next`, null, force ? { params: { force: true } } : undefined);
+  try {
+    await go(false);
+    return null;
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail;
+    if (detail?.code === 'delay_not_safe') {
+      if (!window.confirm(`${detail.message}\n\nPut the next caller on air anyway?`)) return null;
+      try {
+        await go(true);
+        return null;
+      } catch (again: any) {
+        const d = again?.response?.data?.detail;
+        return typeof d === 'string' ? d : 'Could not go to the next caller';
+      }
+    }
+    return typeof detail === 'string' ? detail : 'Could not go to the next caller';
+  }
+};
+
 export const endCall = async (showId: string, callId: string): Promise<CallInRequest> => {
   const res = await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/end-call`);
   return res.data;
 };
+
+export const lockCall = async (showId: string, callId: string, locked: boolean): Promise<CallInRequest> =>
+  (await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/lock`, { locked })).data;
 
 export const updateCallInfo = async (
   showId: string,
@@ -182,7 +237,11 @@ export interface AirStatus {
   auto_exit?: boolean;
   insert?: { title: string; kind: string; remaining: number } | null;
   next_insert?: { title: string; kind: string; in: number } | null;
+  /** Title of the station's filler (plays after a Dump while the delay refills), if one is ready */
+  filler?: string | null;
   host_silent_for?: number;
+  /** Names of the co-hosts on the show now */
+  cohosts?: string[];
 }
 
 export const getAirStatus = async (showId: string): Promise<AirStatus> => {
@@ -214,6 +273,19 @@ export interface DumpRecord {
   caller_name: string | null;
   has_audio: boolean;
 }
+
+export interface ChatMessage { id: string; by: string; user_id: string | null; text: string; at: string | null }
+
+/** The show's staff chat (host and screener), oldest first */
+export const getShowChat = async (showId: string): Promise<ChatMessage[]> => {
+  const res = await apiClient.get<{ messages: ChatMessage[] }>(`/live-shows/${showId}/chat`);
+  return res.data.messages;
+};
+
+export const sayInShowChat = async (showId: string, text: string): Promise<ChatMessage> => {
+  const res = await apiClient.post<ChatMessage>(`/live-shows/${showId}/chat`, { text });
+  return res.data;
+};
 
 export const getShowDumps = async (showId: string): Promise<DumpRecord[]> => {
   const res = await apiClient.get<{ dumps: DumpRecord[] }>(`/live-shows/${showId}/dumps`);

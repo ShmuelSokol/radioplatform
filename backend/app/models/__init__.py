@@ -23,7 +23,11 @@ from app.models.alert import Alert, AlertSeverity, AlertType
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.live_show import LiveShow, LiveShowStatus, BroadcastMode
 from app.models.call_in_request import CallInRequest, CallStatus
+from app.models.live_chat_message import LiveChatMessage
+from app.models.caller_profile import CallerProfile
 from app.models.live_dump import LiveDump
+from app.models.emergency_alert import EmergencyAlert
+from app.models.rds import RdsMessage, RdsPlay, RdsSettings
 from app.models.song_request import SongRequest, RequestStatus
 from app.models.show_archive import ShowArchive
 from app.models.weather_readout import WeatherReadout
@@ -90,5 +94,11 @@ __all__ = [
     "HsSoftened",
     "StationBlockedAsset",
     "EngineHandoff",
+    "LiveChatMessage",
+    "CallerProfile",
     "LiveDump",
+    "EmergencyAlert",
+    "RdsSettings",
+    "RdsMessage",
+    "RdsPlay",
 ]

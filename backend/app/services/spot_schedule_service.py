@@ -45,8 +45,20 @@ SAFETY_MARGIN = timedelta(minutes=2)
 
 
 TIMING_MODES = ("hard", "soft")
-# Station setting automation_config["spot_timing"] = {"on_the_hour": ..., "other": ...}
+# Station setting automation_config["spot_timing"] =
+#   {"on_the_hour": ..., "half_hour": ..., "other": ...}
+# half_hour (Shmuel 2026-11-18: the :30 time and weather on the second, so listeners
+# know when to tune in) falls back to "other" when a station has not chosen it.
 DEFAULT_TIMING = {"on_the_hour": "hard", "other": "soft"}
+TIMING_KEYS = ("on_the_hour", "half_hour", "other")
+
+
+def timing_choices(station_defaults: dict | None = None) -> dict:
+    """The station's three choices, with half_hour shown as "other" until it is set."""
+    saved = {k: v for k, v in (station_defaults or {}).items() if k in TIMING_KEYS and v in TIMING_MODES}
+    chosen = {**DEFAULT_TIMING, **saved}
+    chosen.setdefault("half_hour", chosen["other"])
+    return {k: chosen[k] for k in TIMING_KEYS}
 
 
 def default_timing(minute: int, station_defaults: dict | None = None) -> str:
@@ -55,9 +67,12 @@ def default_timing(minute: int, station_defaults: dict | None = None) -> str:
     hard: the song on air fades out and the spot starts on the second.
     soft: the song finishes and the spot plays right after.
     """
-    chosen = {**DEFAULT_TIMING, **(station_defaults or {})}
-    mode = chosen["on_the_hour"] if minute == 0 else chosen["other"]
-    return mode if mode in TIMING_MODES else DEFAULT_TIMING["other"]
+    chosen = timing_choices(station_defaults)
+    if minute == 0:
+        return chosen["on_the_hour"]
+    if minute == 30:
+        return chosen["half_hour"]
+    return chosen["other"]
 
 
 def parse_fixed_times(value: str | None) -> list[tuple[int, int]]:

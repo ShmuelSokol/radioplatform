@@ -17,6 +17,7 @@ from app.models.asset import Asset
 from app.models.station import Station
 from app.models.user import User
 from app.services.weather_spot_service import (
+    clip_minute,
     find_own_time_clip,
     find_weather_spot_asset,
     DEFAULT_WEATHER_REGION,
@@ -142,6 +143,7 @@ async def _read_upload(file: UploadFile, source: str) -> bytes:
 
 class TimeClipResponse(BaseModel):
     hour: int  # 0-23, the station's local time
+    minute: int = 0  # 30: the half-hour clip ("The time is 10:30 ...")
     asset_id: str
     file_url: str
     duration: float | None
@@ -155,6 +157,7 @@ def _time_response(hour: int, asset: Asset, replaced: bool = False) -> TimeClipR
     extra = asset.metadata_extra or {}
     return TimeClipResponse(
         hour=hour,
+        minute=clip_minute(asset),
         region=normalize_region(extra.get("region")),
         asset_id=str(asset.id),
         file_url=asset.file_path,
@@ -171,7 +174,7 @@ async def list_time_clips(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    """The region's own uploaded clips, by hour.
+    """The region's own uploaded clips, by hour (each hour's :00 clip, then its :30 clip if any).
 
     A station in another region plays the default region's clip for an hour its
     own set lacks; with neither, ElevenLabs (if configured).
@@ -179,9 +182,10 @@ async def list_time_clips(
     region = _region(region)
     clips = []
     for hour in range(24):
-        asset = await find_own_time_clip(db, hour, region)
-        if asset is not None:
-            clips.append(_time_response(hour, asset))
+        for minute in (0, 30):
+            asset = await find_own_time_clip(db, hour, region, minute)
+            if asset is not None:
+                clips.append(_time_response(hour, asset))
     return clips
 
 
@@ -192,21 +196,27 @@ async def upload_time_clip(
     script: str | None = Form(None),
     source: str = Form("shprach"),
     region: str | None = Query(None, description="Region, e.g. jerusalem (default: lakewood)"),
+    minute: int = Query(0, description="0: the top of the hour; 30: the half-hour clip"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
     """Upload the recording played at the top of this hour (0-23, the station's local time) every day.
 
+    ?minute=30 uploads the half-hour clip instead ("The time is 10:30 ..."), played at
+    hh:30 on stations with automation_config.half_hour_time_check on.
+
     Stations play the clips of their own region (automation_config.weather_region).
     """
     if not 0 <= hour <= 23:
         raise HTTPException(422, "hour must be 0-23")
+    if minute not in (0, 30):
+        raise HTTPException(422, "minute must be 0 or 30")
     region = _region(region)
     await _check_region_stations(db, _user, region, default_is_fallback=True)
     data = await _read_upload(file, source)
     try:
         asset, replaced = await store_uploaded_time_clip(
-            db, hour, data, source=source, script=(script or None), region=region
+            db, hour, data, source=source, script=(script or None), region=region, minute=minute
         )
     except ValueError as e:
         raise HTTPException(422, str(e))

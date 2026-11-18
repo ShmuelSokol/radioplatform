@@ -30,6 +30,22 @@ const STATUS_TEXT: Record<Status, string> = {
 
 const KNOWN_CALL_STATUS: string[] = ['waiting', 'screening', 'approved', 'on_air'];
 
+/** A random id kept in this browser, so the show's screener can see that the same
+ *  person called before. Nothing else is stored; without storage every call is a new caller. */
+function callerId(): string | null {
+  try {
+    let id = localStorage.getItem('kbr_caller_id');
+    if (!id || !/^[A-Za-z0-9_-]{16,64}$/.test(id)) {
+      const bytes = crypto.getRandomValues(new Uint8Array(18));
+      id = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('kbr_caller_id', id);
+    }
+    return id;
+  } catch {
+    return null;
+  }
+}
+
 export default function CallIn() {
   const { stationId } = useParams<{ stationId: string }>();
   const [active, setActive] = useState<ActiveShow | null>(null);
@@ -38,6 +54,7 @@ export default function CallIn() {
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
+  const [talk, setTalk] = useState(false); // the show's staff are talking to this caller off the air
   const [lookupFailed, setLookupFailed] = useState(false);
   const hangUpRef = useRef<() => void>(() => {});
 
@@ -74,7 +91,7 @@ export default function CallIn() {
     }
     let call: { call_id: string; token: string };
     try {
-      call = (await apiClient.post(`/call-in/${stationId}`, { name: name.trim(), note: note.trim() || null })).data;
+      call = (await apiClient.post(`/call-in/${stationId}`, { name: name.trim(), note: note.trim() || null, caller: callerId() })).data;
     } catch (e: unknown) {
       mic.getTracks().forEach((t) => t.stop());
       ctx.close().catch(() => {});
@@ -139,6 +156,7 @@ export default function CallIn() {
         if (e.data instanceof ArrayBuffer) { show.push(e.data); return; }
         try {
           const msg = JSON.parse(e.data);
+          if (msg.type === 'talk') { setTalk(!!msg.on); return; }
           if (msg.type !== 'call_status') return;
           if (msg.status === 'completed' || msg.status === 'abandoned') finish('ended');
           else if (msg.status === 'rejected') finish('rejected');
@@ -205,6 +223,11 @@ export default function CallIn() {
                   {status === 'on_air' && <span className="inline-block w-3 h-3 bg-red-500 rounded-full animate-pulse mr-2 align-middle" />}
                   {STATUS_TEXT[status]}
                 </div>
+                {talk && status !== 'on_air' && (
+                  <div className="rounded-lg p-4 font-medium bg-yellow-50 text-yellow-900 border border-yellow-300" role="status" data-testid="talk-note">
+                    The show's staff are talking to you now. You are not on the air: only they can hear you.
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-gray-500 w-20">Your mic</span>
                   <div className="flex-1 h-2 bg-gray-200 rounded">

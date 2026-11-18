@@ -35,6 +35,7 @@ const SpotSchedules = lazy(() => import('./pages/admin/SpotSchedules'));
 const SpotRecordings = lazy(() => import('./pages/admin/SpotRecordings'));
 const ProgramBlocks = lazy(() => import('./pages/admin/ProgramBlocks'));
 const Databank = lazy(() => import('./pages/admin/Databank'));
+const Rds = lazy(() => import('./pages/admin/Rds'));
 const ScheduleCheck = lazy(() => import('./pages/admin/ScheduleCheck'));
 const SponsorshipRules = lazy(() => import('./pages/admin/SponsorshipRules'));
 const Analytics = lazy(() => import('./pages/admin/Analytics'));
@@ -45,6 +46,7 @@ const Playlists = lazy(() => import('./pages/admin/Playlists'));
 const Categories = lazy(() => import('./pages/admin/Categories'));
 const AssetTypes = lazy(() => import('./pages/admin/AssetTypes'));
 const Alerts = lazy(() => import('./pages/admin/Alerts'));
+const EmergencyAlerts = lazy(() => import('./pages/admin/EmergencyAlerts'));
 const BugReports = lazy(() => import('./pages/admin/BugReports'));
 const SiteUpdates = lazy(() => import('./pages/admin/SiteUpdates'));
 const Activity = lazy(() => import('./pages/admin/Activity'));
@@ -181,6 +183,7 @@ export default function App() {
               <Route path="/admin/spot-schedule" element={<ProtectedRoute><SpotSchedules /></ProtectedRoute>} />
               <Route path="/admin/spot-recordings" element={<ProtectedRoute><SpotRecordings /></ProtectedRoute>} />
               <Route path="/admin/databank" element={<ProtectedRoute><Databank /></ProtectedRoute>} />
+              <Route path="/admin/rds" element={<ProtectedRoute><Rds /></ProtectedRoute>} />
               <Route path="/admin/program-blocks" element={<ProtectedRoute><ProgramBlocks /></ProtectedRoute>} />
               <Route path="/admin/schedule-check" element={<ProtectedRoute><ScheduleCheck /></ProtectedRoute>} />
               <Route path="/admin/sponsorship-rules" element={<ProtectedRoute><SponsorshipRules /></ProtectedRoute>} />
@@ -188,6 +191,7 @@ export default function App() {
               <Route path="/admin/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
               <Route path="/admin/asset-types" element={<ProtectedRoute><AssetTypes /></ProtectedRoute>} />
               <Route path="/admin/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
+              <Route path="/admin/emergency" element={<ProtectedRoute><EmergencyAlerts /></ProtectedRoute>} />
               <Route path="/admin/bug-reports" element={<ProtectedRoute><BugReports /></ProtectedRoute>} />
               <Route path="/admin/site-updates" element={<ProtectedRoute><SiteUpdates /></ProtectedRoute>} />
               <Route path="/admin/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />

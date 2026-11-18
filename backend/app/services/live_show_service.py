@@ -131,6 +131,11 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
                        start_utc=aired_from(current), end_utc=now, source="scheduler"))
     at = long_items.resume_point(current, now)
     current.status = "played"
+    if current.preempt_at is not None:
+        # A time check or other timed item: half of it after the show would be a stale
+        # time (the engine harness heard it come back after End, 2026-11-18)
+        await _air_cut_item_over_the_delay(db, station_id, current, now)
+        return
     if at is None:
         return  # it was nearly over
     first = (await db.execute(
@@ -146,6 +151,39 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
     db.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id, position=first,
                       status="pending", source=resume_source(at)))
     await db.flush()
+
+
+async def _air_cut_item_over_the_delay(db: AsyncSession, station_id, entry, now: datetime) -> None:
+    """A timed item that had only just started when the show took the station (the
+    engine started it early as the delay filled, and the wait for timed items had
+    already looked): listeners got 0.8 s of the time check and it was gone (harness,
+    2026-11-18). It goes back to waiting, so live_inserts airs it whole over the
+    delay at its time. Only when the station's rule would air it there, and only
+    when less than half was heard: a time check heard nearly whole is not said twice."""
+    from app.models.asset import Asset
+    from app.models.queue_entry import aired_from
+    from app.services import live_inserts
+    from app.services.live_air import settings_for
+
+    station = await db.get(Station, station_id)
+    asset = await db.get(Asset, entry.asset_id) if entry.asset_id else None
+    if station is None or asset is None or not asset.duration:
+        return
+    _delay, _dump, rule = settings_for(station.automation_config)
+    if _delay <= 0 or rule == "none" or (rule == "time" and asset.category != live_inserts.TIME_CATEGORY):
+        return
+    hard = entry.timing_mode == "hard" or (entry.timing_mode is None and entry.source != "ad_slot")
+    if not hard:
+        return
+    start = aired_from(entry) if entry.started_at else now
+    if start is not None and start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    heard = max(0.0, (now - start).total_seconds()) if start else 0.0
+    if heard >= float(asset.duration) / 2:
+        return
+    entry.status = "pending"
+    entry.started_at = None
+    live_inserts._preparing.discard(str(entry.id))
 
 
 async def _resume_automation(db: AsyncSession, station_id, now: datetime) -> None:
@@ -267,6 +305,7 @@ async def take_over_station(db: AsyncSession, station: Station, show: LiveShow, 
             logger.warning("Could not quiet the engine for the live show: %s", e)
 
 
+EARLY_START = 8.0   # how early a hard timed item may start (queue.TIMED_EARLY_START_SECONDS)
 HOLD_LIMIT = 45.0   # the longest a show waits for timed items before it is heard anyway
 
 
@@ -315,11 +354,20 @@ async def hold_for_timed_items(station_id: str, air) -> None:
         try:
             async for db in get_async_session():
                 now = datetime.now(timezone.utc)
-                within = max(0.0, air.target - air.buffered) + 2.0
+                # Also an item due up to EARLY_START after that: when the song before
+                # it ends early the player starts the item early, and a take-over in
+                # that moment left 0.8 s of the time check on the stream, with the
+                # whole check again over the delay 8 s later (harness, 2026-11-18)
+                within = max(0.0, air.target - air.buffered) + 2.0 + EARLY_START
                 end = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within)
                 await db.rollback()
-                if end is not None:
-                    until = air.clock() + (end - now).total_seconds() + 0.3
+                if end is not None and not air.told_soon:
+                    # (Not once the stream server was told to go quiet: holding the
+                    # show longer then would leave the stream silent over the item)
+                    # The stream server is told to go quiet SOON before the show is
+                    # heard, so that word leaves as the item ends, not during it
+                    from app.services.live_air import SOON
+                    until = air.clock() + (end - now).total_seconds() + SOON
                     air.hold_until = min(until, started + air.target + HOLD_LIMIT)
                 break
         except Exception:
@@ -450,7 +498,8 @@ async def end_show(db: AsyncSession, show_id: UUID | str, drain: bool = True) ->
     # Web callers: their calls end with the show
     try:
         from app.api.v1.live_shows_ws import live_relay
-        for line in [c for c in live_relay.callers.values() if c.show_id == str(show.id)]:
+        await live_relay.drop_cohosts(str(show.id))
+        for line in [c for c in live_relay.callers.values() if c.show_id == str(show.id) and not c.cohost]:
             call = await get_call(db, line.call_id)
             if call is not None and call.status in (CallStatus.WAITING, CallStatus.SCREENING,
                                                     CallStatus.APPROVED, CallStatus.ON_AIR):
@@ -570,27 +619,30 @@ async def reject_call(
     return call
 
 
+MAX_CALLERS_ON_AIR = 4
+
+
 async def put_caller_on_air(
     db: AsyncSession,
     show_id: UUID | str,
     call_id: UUID | str,
 ) -> CallInRequest | None:
-    """Put an approved caller on air. Only one caller can be on_air at a time."""
+    """Put an approved caller on air. Up to MAX_CALLERS_ON_AIR can be on air together
+    (the mix carries them all and each hears the host and the others); it was one."""
     from app.core.exceptions import ConflictError
-
-    # Check if another caller is already on air
-    existing = await db.execute(
-        select(CallInRequest).where(
-            CallInRequest.live_show_id == show_id,
-            CallInRequest.status == CallStatus.ON_AIR,
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise ConflictError("Another caller is already on air")
 
     call = await get_call(db, call_id)
     if not call:
         return None
+    on_air = (await db.execute(
+        select(CallInRequest.id).where(
+            CallInRequest.live_show_id == show_id,
+            CallInRequest.status == CallStatus.ON_AIR,
+            CallInRequest.id != call.id,
+        )
+    )).scalars().all()
+    if len(on_air) >= MAX_CALLERS_ON_AIR:
+        raise ConflictError(f"{MAX_CALLERS_ON_AIR} callers are on air already. Hold or end one first.")
 
     now = datetime.now(timezone.utc)
     call.status = CallStatus.ON_AIR
@@ -609,6 +661,31 @@ async def put_caller_on_air(
     await db.flush()
     await db.refresh(call)
     return call
+
+
+async def hold_caller(db: AsyncSession, call_id: UUID | str) -> CallInRequest | None:
+    """Take the caller off air without hanging up: back to the approved list, still
+    connected and hearing the show, ready to go on air again."""
+    call = await get_call(db, call_id)
+    if not call:
+        return None
+    if call.status != CallStatus.ON_AIR:
+        from app.core.exceptions import ConflictError
+        raise ConflictError("This caller is not on air")
+    call.status = CallStatus.APPROVED
+    await db.flush()
+    await db.refresh(call)
+    return call
+
+
+async def next_approved_call(db: AsyncSession, show_id: UUID | str) -> CallInRequest | None:
+    """The approved caller who has waited longest."""
+    result = await db.execute(
+        select(CallInRequest)
+        .where(CallInRequest.live_show_id == show_id, CallInRequest.status == CallStatus.APPROVED)
+        .order_by(CallInRequest.created_at)
+    )
+    return result.scalars().first()
 
 
 async def end_call(

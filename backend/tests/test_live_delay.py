@@ -5,6 +5,7 @@ could cut out curse words". Audio here is a ramp of sample values, so every test
 say exactly which part of what the host said reached listeners.
 """
 import asyncio
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -898,3 +899,386 @@ def test_the_delay_is_empty_by_the_hard_stop(delay, show):
     assert np.all(np.diff(at) >= -0.011)             # nothing skipped
     assert at[-1] > show - 0.8                       # the last words were heard
     assert air.status()["auto_exit"] is True
+
+
+# ---------- findings of the live check on Jerusalem (2026-11-18) ----------
+
+@pytest.mark.asyncio
+async def test_station_goes_back_to_music_when_the_host_is_gone(db_session, _quiet, monkeypatch):
+    from app.models.alert import Alert
+    from app.services import bug_report_service
+    from app.services.scheduler_engine import SchedulerEngine
+
+    pushes = []
+
+    async def push(message, title, **_):
+        pushes.append((title, message))
+        return True
+
+    monkeypatch.setattr(bug_report_service, "send_ntfy", push)
+    station, show, song, *_ = await _station(db_session, {"live_delay_seconds": 0, "live_host_gone_seconds": 15})
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    await db_session.refresh(station)
+    assert station.automation_config["live_show_id"] == str(show.id) and await _playing(db_session, station) == []
+    relay = live_shows_ws.live_relay
+    await relay.set_on_air(str(station.id), str(show.id), delay=0.0)
+    engine = SchedulerEngine()
+    now = datetime.now(UTC)
+
+    await relay.audio(str(station.id), speech(0.05).tobytes())
+    assert await engine._host_gone(db_session, station, show, now) is False      # the host is talking
+    # Muted (silent frames) for a long time is still a host
+    engine._host_gone_since[str(station.id)] = time.monotonic() - 60
+    await relay.audio(str(station.id), np.zeros(STEP, dtype="<i2").tobytes())
+    assert await engine._host_gone(db_session, station, show, now) is False
+    assert str(station.id) not in engine._host_gone_since
+
+    # The host's page closes
+    await relay.host_left(str(station.id), str(show.id))
+    assert await engine._host_gone(db_session, station, show, now) is False      # 0 s gone
+    engine._host_gone_since[str(station.id)] = time.monotonic() - 14
+    assert await engine._host_gone(db_session, station, show, now) is False      # 14 s gone
+    assert await _playing(db_session, station) == []
+    engine._host_gone_since[str(station.id)] = time.monotonic() - 15.5
+    assert await engine._host_gone(db_session, station, show, now) is True       # 15 s: music is back
+    await db_session.refresh(station)
+    await db_session.refresh(show)
+    assert "live_show_id" not in station.automation_config
+    assert [e.asset_id for e in await _playing(db_session, station)] == [song.id]
+    assert show.status == LiveShowStatus.LIVE                                     # the host may come back
+    alerts = (await db_session.execute(select(Alert).where(Alert.station_id == station.id))).scalars().all()
+    assert [a.title for a in alerts] == ["Live show lost its host: Live"] and "went back to its music" in alerts[0].message
+    assert len(pushes) == 1 and "No sound from the host" in pushes[0][1]
+    assert relay.state(str(station.id))["live"] is False
+
+
+@pytest.mark.asyncio
+async def test_frozen_host_connection_counts_as_gone_and_zero_switches_it_off(db_session, _quiet, monkeypatch):
+    from app.services import bug_report_service
+    from app.services.scheduler_engine import SchedulerEngine
+
+    async def push(*a, **k):
+        return True
+
+    monkeypatch.setattr(bug_report_service, "send_ntfy", push)
+    station, show, song, *_ = await _station(db_session, {"live_delay_seconds": 0, "live_host_gone_seconds": 0})
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    await db_session.refresh(station)
+    relay = live_shows_ws.live_relay
+    clock = Clock(time.time())
+    await relay.set_on_air(str(station.id), str(show.id), delay=0.0)
+    air = relay.airs[str(station.id)]
+    air.clock = clock
+    air.last_input = clock.t
+    engine = SchedulerEngine()
+    now = datetime.now(UTC)
+    clock.t += 120   # connected, but not a frame for two minutes
+    assert await engine._host_gone(db_session, station, show, now) is False      # 0 = never hand back
+    station.automation_config = {**station.automation_config, "live_host_gone_seconds": 15}
+    engine._host_gone_since.clear()
+    assert await engine._host_gone(db_session, station, show, now) is True
+    assert air.closed and [e.asset_id for e in await _playing(db_session, station)] == [song.id]
+
+
+@pytest.mark.asyncio
+async def test_stream_server_is_told_a_second_before_the_host_is_heard(db_session, _quiet, monkeypatch):
+    from app.config import settings
+    from app.services import playout_engine
+
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 3})
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", str(station.id))
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "t")
+    said = []
+
+    async def live(station_id, on):
+        said.append((on, relay.airs[str(station.id)].buffered if str(station.id) in relay.airs else None))
+        return True
+
+    monkeypatch.setattr(playout_engine, "engine_live", live)
+    relay = live_shows_ws.live_relay
+    await relay.set_on_air(str(station.id), str(show.id), delay=3.0)
+    air = relay.airs[str(station.id)]
+    for _ in range(36):   # 1.8 s of host
+        await relay.audio(str(station.id), speech(0.05).tobytes())
+    await asyncio.sleep(0.15)
+    assert said == [] and not air.listening
+    for _ in range(6):    # 2.1 s: within a second of first air
+        await relay.audio(str(station.id), speech(0.05).tobytes())
+    await asyncio.sleep(0.15)
+    assert [on for on, _ in said] == [True] and not air.listening
+    # Ended before anyone heard it: the stream gets its sound back
+    await relay.set_on_air(str(station.id), None)
+    await asyncio.sleep(0.1)
+    assert [on for on, _ in said] == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_a_time_check_cut_by_the_show_does_not_come_back_after_it(db_session, _quiet):
+    station, show, song, clock_asset, _w = await _station(db_session, {"live_delay_seconds": 0})
+    now = datetime.now(UTC)
+    for e in await _playing(db_session, station):
+        e.status = "played"
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=clock_asset.id, position=0,
+                              status="playing", source="scheduler", started_at=now - timedelta(seconds=2),
+                              preempt_at=now - timedelta(seconds=2), timing_mode="hard"))
+    await db_session.commit()
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    left = (await db_session.execute(select(QueueEntry).where(
+        QueueEntry.station_id == station.id, QueueEntry.status == "pending"))).scalars().all()
+    assert [e.asset_id for e in left if e.asset_id == clock_asset.id] == []
+
+
+@pytest.mark.asyncio
+async def test_a_time_check_cut_as_it_started_airs_over_the_delay(db_session, _quiet):
+    """The engine started the time check early just as the delay filled: the take-over
+    cut it after 0.8 s. It waits again, so the delay airs it whole at its time."""
+    from app.services import live_inserts
+
+    station, show, song, clock_asset, weather = await _station(db_session, {"live_delay_seconds": 15})
+    now = datetime.now(UTC)
+    for e in await _playing(db_session, station):
+        e.status = "played"
+    cut = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=clock_asset.id, position=0,
+                     status="playing", source="scheduler", started_at=now - timedelta(seconds=0.8),
+                     preempt_at=now + timedelta(seconds=6), timing_mode="hard")
+    db_session.add(cut)
+    await db_session.commit()
+    live_inserts._preparing.add(str(cut.id))
+    await live_show_service.take_over_station(db_session, station, show, now)
+    await db_session.commit()
+    await db_session.refresh(cut)
+    assert cut.status == "pending" and cut.started_at is None
+    assert str(cut.id) not in live_inserts._preparing
+
+    # Heard more than half: not said twice. And weather is not aired over the delay by default.
+    for asset, heard in ((clock_asset, 5.0), (weather, 0.8)):
+        station.automation_config = {"live_delay_seconds": 15}
+        entry = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=asset.id, position=0,
+                           status="playing", source="scheduler", started_at=now - timedelta(seconds=heard),
+                           preempt_at=now, timing_mode="hard")
+        db_session.add(entry)
+        await db_session.commit()
+        await live_show_service.take_over_station(db_session, station, show, now)
+        await db_session.commit()
+        await db_session.refresh(entry)
+        assert entry.status == "played", asset.title
+
+
+@pytest.mark.asyncio
+async def test_host_gone_is_counted_from_the_last_frame_not_from_the_end_of_the_delay(db_session, _quiet, monkeypatch):
+    """The host's page closes with 8 s in the delay and a limit of 8 s: when the delay
+    has played out the station goes back at once, not 8 s of silence later."""
+    from app.services import bug_report_service
+    from app.services.scheduler_engine import SchedulerEngine
+
+    async def push(message, title, **_):
+        return True
+
+    monkeypatch.setattr(bug_report_service, "send_ntfy", push)
+    station, show, song, *_ = await _station(db_session, {"live_delay_seconds": 8, "live_host_gone_seconds": 8})
+    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.take_over_station(db_session, station, show, datetime.now(UTC))
+    await db_session.commit()
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    await relay.set_on_air(sid, str(show.id), delay=8.0, heard_now=True)
+    air = relay.airs[sid]
+    engine = SchedulerEngine()
+    now = datetime.now(UTC)
+    await relay.audio(sid, speech(0.05).tobytes())
+    assert await engine._host_gone(db_session, station, show, now) is False
+    air.count = max(air.count, 1)            # something is still in the delay
+    air.last_input = air.clock() - 9.0       # the last frame came 9 s ago
+    air.finishing, air.finish_reason = True, "host left"
+    # The words still in the delay play out: not handed back yet, but the count runs
+    assert await engine._host_gone(db_session, station, show, now) is False
+    assert time.monotonic() - engine._host_gone_since[sid] >= 8.9
+    await air.stop()
+    relay.airs.pop(sid, None)
+    assert await engine._host_gone(db_session, station, show, now) is True
+    await db_session.refresh(station)
+    assert "live_show_id" not in station.automation_config
+    assert [e.asset_id for e in await _playing(db_session, station)] == [song.id]
+
+
+# ---------- the stream carries the show (engine proto 5) ----------
+
+@pytest.mark.asyncio
+async def test_pages_are_told_when_the_stream_carries_the_show_and_can_decline_the_audio(db_session, _quiet, monkeypatch):
+    from app.config import settings
+    from app.services import playout_engine
+
+    class Sock:
+        def __init__(self):
+            self.frames, self.texts = 0, []
+
+        async def send_bytes(self, data):
+            self.frames += 1
+
+        async def send_text(self, text):
+            self.texts.append(text)
+
+    relay = live_shows_ws.live_relay
+    station = str(uuid.uuid4())
+    assert relay.state(station)["on_stream"] is False                 # browser-player station
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", station)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "t")
+    monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", True)
+    monkeypatch.setattr(settings, "ICECAST_STREAM_URL", "https://stream.invalid/live")
+    playout_engine.reset_state(station)
+    assert settings.public_stream_url(station)
+    assert relay.state(station)["on_stream"] is False                 # an older engine: pages play the frames
+    playout_engine.get_state(station).engine_proto = playout_engine.ENGINE_PROTO_LIVE_AUDIO
+    assert relay.state(station)["on_stream"] is True
+
+    stream_page, other_page = Sock(), Sock()
+    relay.listeners[station] = {stream_page, other_page}
+    relay.no_audio.add(stream_page)                                   # it sent {"type":"audio","on":false}
+    try:
+        await relay._send_frame(station, b"\x00\x00" * 10)
+        await relay.broadcast_state(station)
+        assert (stream_page.frames, other_page.frames) == (0, 1)      # no show audio for the stream's page
+        assert len(stream_page.texts) == 1 and len(other_page.texts) == 1   # both still learn the state
+    finally:
+        relay.listeners.pop(station, None)
+        relay.no_audio.discard(stream_page)
+        playout_engine.reset_state(station)
+
+
+@pytest.mark.asyncio
+async def test_engine_quieted_for_a_show_about_to_be_heard_is_not_told_the_show_is_over(db_session, _quiet, monkeypatch):
+    """The stream goes quiet a second before the host is heard. The engine then asks for
+    its next item with live=1 while the station is not the show's yet: answering "the
+    show is over" brought the song back for 2 s where the show should start."""
+    from app.config import settings
+    from app.services import playout_engine
+
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 6})
+    for name, value in (("PLAYOUT_ENGINE_ENABLED", True), ("PLAYOUT_ENGINE_STATION_ID", str(station.id)),
+                        ("PLAYOUT_ENGINE_URL", "http://engine.test/control"), ("PLAYOUT_ENGINE_TOKEN", "t")):
+        monkeypatch.setattr(settings, name, value)
+    told = []
+
+    async def live(station_id, on):
+        told.append(on)
+        return True
+
+    monkeypatch.setattr(playout_engine, "engine_live", live)
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    relay.quieted_early.discard(sid)
+    assert playout_engine._show_about_to_be_heard(sid) is False
+    await relay.set_on_air(sid, str(show.id), delay=6.0)
+    relay.quieted_early.add(sid)                      # what on_soon does
+    try:
+        assert playout_engine._show_about_to_be_heard(sid) is True
+        playout_engine.get_state(station.id).engine_proto = 5
+        got = await playout_engine.handle_next(db_session, station.id, [], proto=5, engine_live_on=True)
+        await asyncio.sleep(0)
+        assert got is None and told == []             # nothing handed out, and no "live off"
+        # Nor from the pass that keeps the engine in step (harness live_show_host_gone:
+        # a pass in that second sent "live off", a song started and was cut 0.9 s later)
+        state = playout_engine.get_state(station.id)
+        state.live_sent, state.live_tried = True, 0.0
+        await db_session.refresh(station)
+        await playout_engine.tick(db_session, station)
+        assert told == []
+        # The show ended in its pre-roll: now the engine is told
+        await relay.airs[sid].stop()
+        assert playout_engine._show_about_to_be_heard(sid) is False
+    finally:
+        relay.quieted_early.discard(sid)
+
+
+# ---------- PC live check after PR 340 (2026-11-18) ----------
+
+@pytest.mark.asyncio
+async def test_the_wait_for_a_gone_host_counts_from_their_leaving_without_a_scheduler_pass(db_session, _quiet, monkeypatch):
+    """KBR Jerusalem, delay 15 and limit 15: the count began when the delay had played
+    out, 17.5 s of silence after the host's last words."""
+    from app.services import scheduler_engine
+
+    engine = scheduler_engine.SchedulerEngine()
+    monkeypatch.setattr(scheduler_engine, "_scheduler_instance", engine)
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 2, "live_host_gone_seconds": 2})
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    await relay.set_on_air(sid, str(show.id), delay=2.0)
+    await relay.audio(sid, speech(0.05).tobytes())
+    air = relay.airs[sid]
+    air.last_input = air.clock() - 1.0          # the last frame came a second before the socket closed
+    await relay.host_left(sid, str(show.id))
+    since = engine._host_gone_since[sid]
+    assert 0.9 <= time.monotonic() - since <= 1.5
+    # Back before anything looked: the next leaving is counted afresh
+    await relay.set_on_air(sid, str(show.id), delay=2.0)
+    assert sid not in engine._host_gone_since
+    await relay.airs[sid].stop()
+
+
+@pytest.mark.asyncio
+async def test_live_mp3_is_open_in_the_second_before_the_show_is_heard(client, db_session, _quiet, monkeypatch):
+    """The engine is told of the show a second before first air and connects at once:
+    204 then meant it connected only after the show had begun. The answer stays open
+    and empty until the first words (the engine plays its music until audio comes)."""
+    import shutil
+
+    from app.config import settings
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "engine-secret")
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 3})
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    await relay.set_on_air(sid, str(show.id), delay=3.0)
+    air = relay.airs[sid]
+    url = f"/api/v1/playout/{station.id}/live.mp3"
+    token = {"X-Playout-Token": "engine-secret"}
+    assert (await client.get(url, headers=token)).status_code == 204          # filling, not about to be heard
+    air.told_soon = True
+
+    async def end_soon():
+        await asyncio.sleep(1.0)
+        await air.stop()
+
+    ending = asyncio.ensure_future(end_soon())
+    r = await asyncio.wait_for(client.get(url, headers=token), 15)
+    await ending
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg"
+    assert len(r.content) < 2000                                # no silence sent ahead of the show
+    assert air.taps == set()
+
+
+def test_timed_items_enter_the_show_early_by_the_stream_lag_on_stream_stations(monkeypatch):
+    """The stream server plays the show about 2 s behind: the time check goes into the
+    show that much early there, and on time where listener pages hear the delay itself."""
+    from types import SimpleNamespace
+
+    from app.config import settings
+    from app.services import playout_engine
+
+    station = SimpleNamespace(id=uuid.uuid4(), automation_config={})
+    assert live_inserts.stream_lead(station) == 0.0              # browser player
+    monkeypatch.setattr(type(settings), "engine_drives", lambda self, sid: True)
+    monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", False)
+    assert live_inserts.stream_lead(station) == 0.0              # engine, but pages play the queue
+    monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", True)
+    playout_engine.reset_state(station.id)
+    assert live_inserts.stream_lead(station) == 0.0              # an engine too old to carry the show
+    playout_engine.get_state(station.id).engine_proto = playout_engine.ENGINE_PROTO_LIVE_AUDIO
+    assert live_inserts.stream_lead(station) == live_inserts.STREAM_LAG == 2.0
+    station.automation_config = {"live_stream_lag_seconds": 3.5}
+    assert live_inserts.stream_lead(station) == 3.5
+    station.automation_config = {"live_stream_lag_seconds": "x"}
+    assert live_inserts.stream_lead(station) == 2.0
+    station.automation_config = {"live_stream_lag_seconds": 99}
+    assert live_inserts.stream_lead(station) == 10.0
+    playout_engine.reset_state(station.id)

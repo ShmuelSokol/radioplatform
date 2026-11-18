@@ -53,6 +53,7 @@ EDGE = int(RATE * 0.01)     # 10 ms fades where a Dump cut the audio
 # (It was a fixed 3 minutes at up to 12 %: that takes back 21 s, so a 30 or 40 s delay,
 # or any show shorter than its delay plus 3 minutes, was cut with words still waiting.)
 WIND_RATE = 0.10
+SOON = 1.0                  # seconds before first air that `on_soon` is called
 WIND_MARGIN = 5.0
 CUSHION = int(RATE * 0.3)   # least audio waiting before it plays out (smooth, no stutter)
 STATUS_EVERY = 0.5
@@ -74,6 +75,14 @@ def settings_for(config: dict | None) -> tuple[float, float, str]:
     if rule not in ("time", "all", "none"):
         rule = "time"
     return max(0.0, min(MAX_DELAY, delay)), max(0.0, min(MAX_DELAY, dump)), rule
+
+
+def filler_asset(config: dict | None) -> str | None:
+    """The library item a station plays after a Dump while the delay refills
+    (`automation_config.live_dump_filler_asset_id`), or None: the delay then builds
+    back slowly by stretching the host's speech."""
+    value = (config or {}).get("live_dump_filler_asset_id")
+    return str(value) if value else None
 
 
 def stretch(x: np.ndarray, n: int) -> np.ndarray:
@@ -166,6 +175,7 @@ class Insert:
 class AirStats:
     dumps: int = 0
     dumped_seconds: float = 0.0
+    fills: int = 0
     inserts: list = field(default_factory=list)
 
 
@@ -180,6 +190,7 @@ class LiveAir:
         delay: float = 0.0,
         dump: float = 0.0,
         on_listening: Callable[[bool], Awaitable[None]] | None = None,
+        on_soon: Callable[[], Awaitable[None]] | None = None,
         on_status: Callable[[dict], Awaitable[None]] | None = None,
         on_done: Callable[[], Awaitable[None]] | None = None,
         clock: Callable[[], float] = time.time,
@@ -191,6 +202,12 @@ class LiveAir:
         self.target = self.configured     # what the delay is steering to now (0 = exiting)
         self.dump_size = max(0.0, dump)
         self.on_listening = on_listening
+        # Called once, SOON seconds before listeners first hear the show: a stream server
+        # needs that long to go quiet (it lagged the host by 2.5 s on Jerusalem)
+        self.on_soon = on_soon
+        self.told_soon = False
+        self.on_closed: Callable[[], Awaitable[None]] | None = None   # always runs at the end
+        self.ever_heard = False
         self.on_status = on_status
         self.on_done = on_done
         self.clock = clock
@@ -219,6 +236,11 @@ class LiveAir:
         self.taps: set[asyncio.Queue] = set()
         self.aired = np.zeros(0, dtype=np.int16)   # the last few seconds listeners heard
         self.last_dump: tuple[np.ndarray, np.ndarray] | None = None
+        # After a Dump: a jingle that plays while the delay refills at once. `fill_after`
+        # counts the samples still to air before it (what the Dump left in the delay).
+        self.filler: np.ndarray | None = None
+        self.filler_title = ""
+        self.fill_after: int | None = None
         self.debt = 0.0             # samples of stretching owed while speech passes untouched
         self._close_done = False
 
@@ -302,11 +324,15 @@ class LiveAir:
         self.stats.dumps += 1
         self.stats.dumped_seconds += cut
         logger.info("Live air %s: Dump cut %.1f s (%.1f s left in the delay)", self.station_id, cut, self.buffered)
+        if self.filler is not None and self.target > 0 and not self.finishing:
+            # What the Dump left airs first, then the filler exactly where the cut is
+            self.fill_after = self.count
         return cut
 
     def exit_delay(self) -> None:
         """Wind the delay down to zero (pauses shortened, speech a little faster)."""
         self.target = 0.0
+        self.fill_after = None
 
     def enter_delay(self, seconds: float | None = None) -> None:
         """Build the delay (back) up to `seconds`, or the station's setting."""
@@ -360,7 +386,7 @@ class LiveAir:
             shrink, build = self.count > 0, False
         else:
             shrink = drift > SHRINK_ABOVE * RATE
-            build = drift < -BUILD_BELOW * RATE
+            build = drift < -BUILD_BELOW * RATE and self.fill_after is None
         if self.target > 0 and self.count < CUSHION:
             # Too little waiting to play smoothly (just after a Dump of everything, or the
             # host's audio is late): a moment of silence while it gathers, never stutter
@@ -423,6 +449,24 @@ class LiveAir:
             return out
         return stretch(self._pop(want), n)
 
+    def _start_fill(self) -> None:
+        """Play the filler for as long as the delay is short: while it airs the host's
+        words gather, so the delay is whole again when it ends."""
+        self.fill_after = None
+        want = int(self.target * RATE) - self.count
+        if self.filler is None or self.finishing or want < RATE // 2:
+            return
+        pcm = self.filler[:want].copy()
+        fade = min(len(pcm), RATE // 3)
+        if fade and len(self.filler) > want:
+            # Cut short: fade it out, never a chopped jingle
+            pcm[-fade:] = (pcm[-fade:].astype(np.float32) * np.linspace(1.0, 0.0, fade)).astype(np.int16)
+        self.stats.fills += 1
+        self.current = Insert(key=f"fill:{self.stats.dumps}:{self.stats.fills}", title=self.filler_title or "Filler",
+                              pcm=pcm, air_at=self.clock(), kind="filler", started=self.clock())
+        logger.info("Live air %s: filler '%s' for %.1f s while the delay refills",
+                    self.station_id, self.filler_title, len(pcm) / RATE)
+
     def produce(self, n: int) -> np.ndarray | None:
         """The next `n` samples listeners hear (None while nothing airs yet)."""
         if self.end_at is not None and not self.finishing and self.target > 0:
@@ -436,10 +480,16 @@ class LiveAir:
             if self.count >= int(self.target * RATE) and (self.count > 0 or self.target == 0) \
                     and self.clock() >= self.hold_until:
                 self.listening = True
+                self.ever_heard = True
                 self.mode = "steady" if self.target > 0 else "no delay"
                 self._notify_listening(True)
             else:
                 self.mode = "pre-roll"
+                if not self.told_soon and self.on_soon is not None and self.count > 0 \
+                        and self.count >= int((self.target - SOON) * RATE) \
+                        and self.clock() >= self.hold_until - SOON:
+                    self.told_soon = True
+                    asyncio.ensure_future(self._safe(self.on_soon()))
                 return None
         out = np.zeros(0, dtype=np.int16)
         while len(out) < n:
@@ -459,7 +509,17 @@ class LiveAir:
                 self.mode = "insert"
                 out = np.concatenate((out, part.astype(np.int16, copy=False)))
                 continue
+            if self.fill_after is not None:
+                if self.fill_after <= 0 or self.count < CUSHION or self.target <= 0:
+                    self._start_fill()
+                    if self.current is not None:
+                        continue
+                else:
+                    need = min(need, self.fill_after)
+            had = self.count
             part = self._program(need)
+            if self.fill_after is not None:
+                self.fill_after -= max(1, had - self.count)
             out = np.concatenate((out, part))
             if len(part) < need:
                 break  # caught up, or the end of the show
@@ -547,6 +607,8 @@ class LiveAir:
             if self.on_listening is not None:
                 await self._safe(self.on_listening(False))
         await self._maybe_status(force=True)
+        if self.on_closed is not None:
+            await self._safe(self.on_closed())
         if self.on_done is not None:
             await self._safe(self.on_done())
 
@@ -597,6 +659,7 @@ class LiveAir:
                        if self.current else None),
             "next_insert": ({"title": nxt.title, "kind": nxt.kind, "in": round(nxt.air_at - now, 1)}
                             if nxt else None),
+            "filler": self.filler_title if self.filler is not None else None,
             "host_silent_for": round(now - self.last_input, 1),
         }
 

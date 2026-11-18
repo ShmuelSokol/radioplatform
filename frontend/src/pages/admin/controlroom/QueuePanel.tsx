@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useMayChange } from '../../../hooks/useMayChange';
-import { clockTime, isSponsorSpot, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, useMediaQuery, usePhoneLandscape, weekdayShort } from './shared';
+import { clockTime, isSponsorSpot, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, useMediaQuery, weekdayShort } from './shared';
 
 export interface QueueRow {
   id: string;
@@ -49,9 +49,11 @@ interface Props {
 // same with 50 items or 15,000. That needs every row to have a known height:
 // the classes on the row, the insert marker and the action bar below must
 // match these numbers.
+// Touch screens (phones, tablets, car screens) get one line per row too: the title
+// cut with an ellipsis, never wrapped, so many more rows fit (Shmuel, 2026-11-18:
+// "I can only see 3 songs at a time" in his Tesla; rows were 66 px, two lines).
 const ROW_DESKTOP = 26;   // lg:h-[26px]
-const ROW_PHONE = 66;     // h-[66px]
-const ROW_LANDSCAPE = 50; // h-[50px]: phone sideways, one line of title
+const ROW_TOUCH = 40;     // h-10
 const MARKER_H = 40;      // h-10
 const ACTIONS_H = 61;     // h-[61px]
 const OVERSCAN = 30;      // extra rows drawn above and below, so a fast fling rarely outruns the redraw
@@ -72,8 +74,7 @@ function QueuePanel(p: Props) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const landscape = usePhoneLandscape();
-  const rowH = isDesktop ? ROW_DESKTOP : landscape ? ROW_LANDSCAPE : ROW_PHONE;
+    const rowH = isDesktop ? ROW_DESKTOP : ROW_TOUCH;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [firstRow, setFirstRow] = useState(0);   // top of the window, in steps of STEP rows
   const [viewH, setViewH] = useState(800);
@@ -103,6 +104,14 @@ function QueuePanel(p: Props) {
     lastTop.current = el.scrollTop;
     setFirstRow(Math.floor(el.scrollTop / rowH / STEP) * STEP);
   }, [rowH]);
+
+  // A tapped row's buttons (Insert, move, Song, Remove) open under it: scroll them into
+  // view when the row was near the bottom of the list (they opened out of sight).
+  useEffect(() => {
+    if (!selectedId) return;
+    const bar = scrollRef.current?.querySelector<HTMLElement>('[data-testid=row-actions]');
+    bar?.scrollIntoView?.({ block: 'nearest' });
+  }, [selectedId]);
 
   // Back to the top when the day changes.
   useEffect(() => {
@@ -238,7 +247,7 @@ function QueuePanel(p: Props) {
                 } : undefined}
                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                 onClick={() => { if (!isCur && !readOnly) setSelectedId(isSel ? null : entry.id); else if (a && !isSilence) p.onSong?.(entry); }}
-                className={`relative flex items-center gap-2 lg:gap-0 pl-1.5 lg:pl-0.5 pr-2 lg:pr-3 ${landscape ? 'h-[50px]' : 'h-[66px]'} lg:h-[26px] overflow-hidden border-b border-[#222] lg:border-0 cursor-pointer group
+                className={`relative flex items-center gap-2 lg:gap-0 pl-1.5 lg:pl-0.5 pr-2 lg:pr-3 h-10 lg:h-[26px] overflow-hidden border-b border-[#222] lg:border-0 cursor-pointer group
                   ${tone}
                   ${isDragOver ? 'border-t-2 border-t-cyan-400' : ''}
                   ${dragId === entry.id ? 'opacity-40' : ''}`}
@@ -255,7 +264,7 @@ function QueuePanel(p: Props) {
                     onClick={(e) => { e.stopPropagation(); p.onArmInsert(isArmed ? null : entry.id); }}
                     title="Insert a song before this one"
                     aria-label={`Insert a song before ${title}`}
-                    className={`cr-tap w-11 h-11 lg:w-6 lg:h-[22px] lg:mr-1 shrink-0 flex items-center justify-center text-xl lg:text-base font-bold leading-none
+                    className={`cr-tap w-11 h-10 lg:w-6 lg:h-[22px] lg:mr-1 shrink-0 flex items-center justify-center text-xl lg:text-base font-bold leading-none
                       ${isArmed ? 'bg-[#00ffff] text-black' : 'text-[#00ffff] hover:bg-[#003838]'}`}
                   >
                     +
@@ -269,8 +278,9 @@ function QueuePanel(p: Props) {
                 <span className="hidden lg:block w-12 shrink-0 tabular-nums text-[13px]">{fmtDur(a?.duration)}</span>
 
                 <span className="flex-1 min-w-0 leading-tight">
-                  <span className={`${landscape ? 'line-clamp-1' : 'line-clamp-2'} lg:line-clamp-1 break-words text-[15px] lg:text-[13px] ${isSilence ? 'text-red-400' : ''}`}>
+                  <span data-testid="row-title" className={`block truncate text-[15px] lg:text-[13px] ${isSilence ? 'text-red-400' : ''}`}>
                     <span className="hidden lg:inline">{a?.artist ? `${a.artist}  ` : ''}</span>{title}
+                    {a?.artist && <span className="lg:hidden font-normal opacity-75"> · {a.artist}</span>}
                     {entry.source === 'ad_slot' && (
                       <span className="ml-2 align-middle text-[10px] bg-[#ffa64d] text-black px-1 py-px font-bold">SPONSOR</span>
                     )}
@@ -292,9 +302,6 @@ function QueuePanel(p: Props) {
                         BLOCK · {blockSize > 0 ? blockSize : p.entries.length - idx} ITEMS
                       </span>
                     )}
-                  </span>
-                  <span className="lg:hidden block truncate text-xs font-normal opacity-80">
-                    {a?.artist ? `${a.artist} · ` : ''}{a?.category || a?.asset_type}
                   </span>
                 </span>
 

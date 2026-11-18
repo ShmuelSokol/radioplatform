@@ -50,6 +50,9 @@ MISSED_SOFT_SECONDS = 3600.0
 # The computer's clock is this far behind the newest plan on disk: it was not set after a
 # power cut (no internet, flat clock battery). Nothing timed is trusted until it is right.
 CLOCK_BEHIND_SECONDS = 120.0
+# Live show audio with nothing new from the backend for this long ends the pass-through;
+# the engine's live lane goes quiet and opens it again.
+LIVE_STALL_SECONDS = 10.0
 DONE_KEEP = 5000
 URL_AT_END = re.compile(r'(?:^|(?<=":))(https?://\S+)$')
 
@@ -89,9 +92,16 @@ class Relay:
         self.done: list[str] = list(state.get("done", []))
         self.timed_sent: set[str] = set(state.get("timed_sent", []))
         self.online = True
+        # The engine's own run id (X-Playout-Instance), passed on to the backend with every
+        # call, so its one-engine-per-station rule also covers a box (a box set up with a
+        # copied station id is refused, not given half of that station's queue)
+        self.engine_instance: str | None = None
         self.last_plan_at = 0.0
         self.hello_owed = False
         self.spool_path = self.dir / "spool.jsonl"
+        # Emergency alert reports (engine proto 6) made while the line was down, sent when
+        # it is back: the alert itself never waits on us, the log on the site catches up
+        self.alert_spool_path = self.dir / "alert-spool.jsonl"
         self.answers: list[dict] = []  # engine answers not yet handed to the backend
         self.commands_done = 0
         self.started_at = time.monotonic()
@@ -152,9 +162,12 @@ class Relay:
     def _call(self, method: str, path: str, body: bytes | None = None, timeout: float = 5.0):
         """(status, bytes) from the backend. Raises Offline when it cannot be reached or
         fails on its side; a refusal (403, 404) is an answer and is passed on."""
+        headers = {"X-Playout-Token": self.token, "Content-Type": "application/json"}
+        if self.engine_instance:
+            headers["X-Playout-Instance"] = self.engine_instance
         req = urllib.request.Request(
             f"{self.upstream}/playout/{self.station_id}{path}", data=body, method=method,
-            headers={"X-Playout-Token": self.token, "Content-Type": "application/json"},
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -169,6 +182,42 @@ class Relay:
             raise Offline(str(e)) from None
         self._set_online(True)
         return result
+
+    def pass_live(self, handler) -> None:
+        """The live show for the engine's live lane (engine proto 5): the backend's
+        live.mp3 passed through as it arrives, never held back. 204 while no show is
+        heard and while the backend cannot be reached (the lane stays quiet and the
+        engine asks again); a refusal (403, 409) goes back to the engine as it came."""
+        headers = {"X-Playout-Token": self.token}
+        if self.engine_instance:
+            headers["X-Playout-Instance"] = self.engine_instance
+        req = urllib.request.Request(f"{self.upstream}/playout/{self.station_id}/live.mp3", headers=headers)
+        try:
+            resp = urllib.request.urlopen(req, timeout=LIVE_STALL_SECONDS)
+        except urllib.error.HTTPError as e:
+            return handler._send(e.code if e.code < 500 else 204, b"")
+        except (OSError, ValueError) as e:
+            log.info("live show audio: backend not reached (%s); lane stays quiet", e)
+            return handler._send(204, b"")
+        handler.close_connection = True
+        try:
+            if resp.status != 200:
+                return handler._send(204 if resp.status == 204 else resp.status, b"")
+            handler.send_response(200)
+            handler.send_header("Content-Type", resp.headers.get("Content-Type") or "audio/mpeg")
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            log.info("live show audio: passing through to the engine")
+            while True:
+                chunk = resp.read1(16384)
+                if not chunk:
+                    break
+                handler.wfile.write(chunk)
+                handler.wfile.flush()
+        except (OSError, ValueError) as e:  # engine closed it, or the backend stalled
+            log.info("live show audio ended: %s", e)
+        finally:
+            resp.close()
 
     def _set_online(self, value: bool) -> None:
         if value != self.online:
@@ -284,6 +333,46 @@ class Relay:
                     f.write(json.dumps(report) + "\n")
             return 200, b'{"ok":true,"relay":"kept"}'
 
+    def alert(self, body: bytes) -> tuple[int, bytes]:
+        """An emergency alert went on air or came off (its own alert line works with no
+        internet). Passed on, or kept on disk and sent in order when the line is back."""
+        try:
+            if self.alert_spool_path.is_file() and self.alert_spool_path.stat().st_size:
+                raise Offline("earlier alert reports still wait; keep the order")
+            return self._call("POST", "/alert", body, timeout=4.0)
+        except Offline:
+            try:
+                report = json.loads(body or b"{}")
+            except ValueError:
+                report = {}
+            with self.lock, open(self.alert_spool_path, "a") as f:
+                f.write(json.dumps(report) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            log.warning("alert report kept until the line is back: %s", report.get("phase"))
+            return 200, b'{"ok":true,"relay":"kept"}'
+
+    def send_kept_alerts(self) -> int:
+        if not self.alert_spool_path.is_file():
+            return 0
+        with self.lock:
+            lines = [ln for ln in self.alert_spool_path.read_text().splitlines() if ln.strip()]
+        sent = 0
+        for line in lines:
+            try:
+                self._call("POST", "/alert", line.encode(), timeout=6.0)
+            except Offline:
+                break
+            sent += 1
+        if sent:
+            with self.lock:
+                now_lines = [ln for ln in self.alert_spool_path.read_text().splitlines() if ln.strip()]
+                part = self.dir / "alert-spool.jsonl.part"
+                part.write_text("".join(ln + "\n" for ln in now_lines[sent:]))
+                os.replace(part, self.alert_spool_path)
+            log.info("sent %d kept alert reports", sent)
+        return sent
+
     # ── background work ─────────────────────────────────────────────────────
     def sync_plan(self) -> bool:
         try:
@@ -315,6 +404,7 @@ class Relay:
                 self.hello_owed = False
             except Offline:
                 return
+        self.send_kept_alerts()
         if not self.spool_path.is_file():
             return
         with self.lock:
@@ -609,6 +699,7 @@ class Relay:
                 "plan_entries": len(entries),
                 "plan_audio_missing": sum(1 for e in entries if not self.have(e["url"])),
                 "reports_kept": sum(1 for _ in open(self.spool_path)) if self.spool_path.is_file() else 0,
+                "alert_reports_kept": sum(1 for _ in open(self.alert_spool_path)) if self.alert_spool_path.is_file() else 0,
                 "in_blackout": self.in_blackout(self.now()),
                 "clock_ok": self.clock_ok(),
                 "commands_done": self.commands_done,
@@ -638,6 +729,8 @@ def make_handler(relay: Relay):
                 return self._send(403, b'{"ok":false,"error":"forbidden"}')
             if not parsed.path.startswith(prefix):
                 return self._send(404, b'{"ok":false}')
+            if self.headers.get("X-Playout-Instance"):
+                relay.engine_instance = self.headers["X-Playout-Instance"]
             tail = parsed.path[len(prefix):]
             if tail == "/next" and method == "GET":
                 return self._send(*relay.next(parsed.query))
@@ -645,6 +738,10 @@ def make_handler(relay: Relay):
                 return self._send(*relay.started(body))
             if tail == "/hello" and method == "POST":
                 return self._send(*relay.hello(body))
+            if tail == "/alert" and method == "POST":
+                return self._send(*relay.alert(body))
+            if tail == "/live.mp3" and method == "GET":
+                return relay.pass_live(self)
             return self._send(404, b'{"ok":false}')
 
         def do_GET(self):  # noqa: N802

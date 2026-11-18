@@ -431,6 +431,8 @@ function connectSocket() {
     try {
       const msg = JSON.parse(event.data);
       if (msg?.type === 'release' && msg.data) setPolicy(msg.data as ReleasePolicy);
+      // Emergency alert sent, on air, ended or stopped: staff screens refetch now
+      if (msg?.type === 'emergency') window.dispatchEvent(new Event('kbr-emergency-changed'));
     } catch { /* ignore */ }
   };
   ws.onclose = () => {

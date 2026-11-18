@@ -585,8 +585,9 @@ export default function SpotSchedules() {
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm border rounded-lg p-3">
                 <span className="font-medium">Unless a schedule says otherwise:</span>
                 {([
-                  ['on_the_hour', 'Spots on the hour play'],
-                  ['other', 'Other spots play'],
+                  ['on_the_hour', 'On the hour, time, weather and spots play'],
+                  ['half_hour', 'On the half hour they play'],
+                  ['other', 'At :15 and :45 spots play'],
                 ] as const).map(([key, label]) => (
                   <label key={key} className="flex items-center gap-2">
                     {label}
@@ -603,6 +604,16 @@ export default function SpotSchedules() {
                     </select>
                   </label>
                 ))}
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={timingDefaults.half_hour_time_check}
+                    disabled={timingMut.isPending}
+                    onChange={(e) => timingMut.mutate({ ...timingDefaults, half_hour_time_check: e.target.checked })}
+                    data-testid="half-hour-time-check"
+                  />
+                  Time check on the half hour ("The time is 10:30") before the weather
+                </label>
               </div>
             )}
             {plan?.spots_off && (

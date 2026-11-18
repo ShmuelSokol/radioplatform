@@ -184,6 +184,10 @@ class Settings(BaseSettings):
     BUG_REPORTS_REPO: str = "ShmuelSokol/kbr-bug-reports"
     NTFY_TOPIC: str = ""
     NTFY_SERVER: str = "https://ntfy.sh"
+    # Secret the station's EAS box (or its own tool) sends to POST /emergency/device/activate,
+    # in X-Emergency-Token or as the password of HTTP Basic auth. Empty = only staff can
+    # send an alert (see wiki/emergency-alerts.md). Never commit it.
+    EMERGENCY_API_TOKEN: str = ""
 
     # Sentry (optional — set DSN to enable error tracking)
     SENTRY_DSN: str = ""

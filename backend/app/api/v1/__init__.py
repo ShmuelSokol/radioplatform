@@ -41,9 +41,12 @@ from app.api.v1.mixer import router as mixer_router
 from app.api.v1.listeners import router as listeners_router
 from app.api.v1.crm import router as crm_router
 from app.api.v1.playout import router as playout_router
+from app.api.v1.emergency import router as emergency_router
+from app.api.v1.rds import admin_router as rds_admin_router
 from app.api.v1.rds import router as rds_router
 from app.api.v1.bug_reports import router as bug_reports_router
 from app.api.v1.call_in import router as call_in_router
+from app.api.v1.caller_profiles import router as caller_profiles_router
 from app.api.v1.playout_status import router as playout_status_router
 from app.api.v1.air_watch import router as air_watch_router
 from app.api.v1.site_release import router as site_release_router
@@ -92,9 +95,12 @@ router.include_router(mixer_router)
 router.include_router(listeners_router)
 router.include_router(crm_router)
 router.include_router(playout_router)
+router.include_router(emergency_router)
 router.include_router(rds_router)
+router.include_router(rds_admin_router)
 router.include_router(bug_reports_router)
 router.include_router(call_in_router)
+router.include_router(caller_profiles_router)
 router.include_router(playout_status_router)
 router.include_router(air_watch_router)
 router.include_router(site_release_router)
