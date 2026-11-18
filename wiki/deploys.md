@@ -58,8 +58,14 @@ threads cannot reach the API to look first, so the check is automatic:
 - Urgent fix: put `[deploy-now]` in the merge commit's message (the gate passes at
   once; CI still runs), or press Redeploy in Railway (waits for nothing).
 - The gate passes when the API does not answer: the deploy may be the fix.
-- Pushes to main share one CI concurrency group: while a gate waits, later merges'
-  runs queue behind it and the newest one deploys everything.
+- Each push to main has its own CI run (its own concurrency group), so a run waiting
+  at the gate is not cancelled by the next merge. When the show ends every waiting
+  commit passes and Railway deploys them; the newest wins.
+- A website-only merge also runs the gate, but Vercel does not wait for CI: the
+  website publishes at once. A wiki or docs-only merge runs no CI and deploys nothing.
+- A merge whose CI fails on main is not deployed, and nothing announces it. The next
+  backend merge with green CI deploys everything. If the backend looks old, look at
+  the last CI runs on main first.
 
 ## Checking it
 
