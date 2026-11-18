@@ -33,7 +33,8 @@
 
 /* ── Page title: a window title bar ── */
 .qn-site h1, .qn-site h1[class][class] {
-  background: linear-gradient(90deg, #000080, #1084d0);
+  /* the light end is darker than the control room's so white text keeps 4.5:1 across the bar */
+  background: #000080 linear-gradient(90deg, #000080, #0b5cad);
   color: #fff;
   font-size: 14px;
   line-height: 1.2;
