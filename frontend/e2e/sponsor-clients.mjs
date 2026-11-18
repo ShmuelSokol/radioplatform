@@ -84,7 +84,7 @@ for (const [name, device] of SIZES) {
   await noSideways('plays'); await shot('4-plays');
 
   await page.getByRole('tab', { name: 'Missed plays' }).click();
-  await page.getByText(/promised plays did not air/).waitFor();
+  await page.getByText(/promised plays? did not air/).waitFor();
   await noSideways('missed'); await shot('5-missed');
 
   await page.getByRole('tab', { name: 'Details' }).click();

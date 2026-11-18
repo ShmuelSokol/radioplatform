@@ -482,7 +482,7 @@ function PlaysTab({ account }: { account: ClientAccount }) {
         <p className="p-6 text-gray-500">Nothing played{filters.station_id || filters.asset_id || filters.date_from || filters.date_to ? ' that matches' : ' yet'}.</p>
       ) : (
         <>
-          <p className="px-4 pt-3 text-sm text-gray-600" data-testid="plays-total">{data.total} plays. Times are each station's own clock.</p>
+          <p className="px-4 pt-3 text-sm text-gray-600" data-testid="plays-total">{data.total} {data.total === 1 ? 'play' : 'plays'}. Times are each station's own clock.</p>
           <table className="w-full text-sm" data-testid="play-table">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -542,7 +542,7 @@ function MissedTab({ loading, data }: { loading: boolean; data?: Awaited<ReturnT
   return (
     <section className="bg-white rounded-lg shadow">
       <p className="px-4 py-3 border-b text-sm text-gray-700">
-        Last {data.days} days: {data.missed_past} promised plays did not air. Coming week: {data.missed_coming} have no room, {data.moved_coming} moved to a later time. The client sees the same in their portal.
+        Last {data.days} days: {data.missed_past} promised {data.missed_past === 1 ? 'play' : 'plays'} did not air. Coming week: {data.missed_coming} have no room, {data.moved_coming} moved to a later time. The client sees the same in their portal.
       </p>
       {!data.rows.length ? (
         <p className="p-6 text-gray-500">Nothing missed. Every promised play aired.</p>
