@@ -1958,6 +1958,103 @@ async def sc_live_show_delay_controls(h: Harness, restart: bool = False) -> None
             "the station is handed back after the show")
 
 
+async def sc_live_show_host_gone(h: Harness) -> None:
+    """LD-30 (PR 321): mid-show the host's page goes away (tab closed, connection lost).
+    Listeners hear what was waiting in the delay; then, `live_host_gone_seconds` after the
+    last frame, the station goes back to its queue and the engine's music returns with no
+    long silence. The show stays live: when the host's page comes back the host is on air
+    again through the delay and the engine is quiet again; End brings the music back."""
+    name = "live_show_host_gone"
+    delay, gone_after = 8.0, 8.0
+    before = set_live_settings(h, live_delay_seconds=int(delay), live_dump_seconds=0,
+                               live_timed_items="time", live_host_gone_seconds=int(gone_after))
+    listener, mic, mic2 = LiveListener(), None, None
+    t_end = None
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        now = datetime.now(UTC)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness host gone", "calls_enabled": False,
+            "scheduled_start": now.isoformat(), "scheduled_end": (now + timedelta(minutes=10)).isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        listener.task = asyncio.ensure_future(listener.run())
+        await asyncio.sleep(0.5)
+        t_start = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/start")
+        mic = HostMic(show["id"], h.token)
+        mic.task = asyncio.ensure_future(mic.run())
+        first = None
+        for _ in range(60):
+            first = next((t for t, _ in listener.frames if t >= t_start), None)
+            if first is not None:
+                break
+            await asyncio.sleep(0.25)
+        h.check(name, first is not None, "listeners hear the host")
+        if first is None:
+            return
+        await asyncio.sleep(max(0, first + 6 - time.time()))
+        mic.stop = True                     # the host's tab closes
+        t_gone = time.time()
+        released = None
+        while time.time() < t_gone + gone_after + delay + 20:
+            _, st = h.api("GET", f"/stations/{STATION_ID}")
+            if not ((st or {}).get("automation_config") or {}).get("live_show_id"):
+                released = time.time()
+                break
+            await asyncio.sleep(0.5)
+        await asyncio.sleep(10)
+        _, cur = h.api("GET", f"/live-shows/{show['id']}")
+        show_live = (cur or {}).get("status") in ("live", "LIVE")
+        t_back = time.time()                # the host's page comes back
+        mic2 = HostMic(show["id"], h.token, freq=440.0)
+        mic2.task = asyncio.ensure_future(mic2.run())
+        await asyncio.sleep(delay + 10)
+        _, st = h.api("GET", f"/stations/{STATION_ID}")
+        retaken = bool(((st or {}).get("automation_config") or {}).get("live_show_id"))
+        mic2.stop = True
+        t_end = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/end")
+        await asyncio.sleep(delay + 15)
+    finally:
+        for m in (mic, mic2):
+            if m is not None:
+                m.stop = True
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+        if listener.task:
+            listener.task.cancel()
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    wait = None if released is None else released - t_gone
+    h.check(name, wait is not None and gone_after - 1.0 <= wait <= gone_after + 4.0,
+            f"the station is handed back {gone_after:.0f} s after the host's last audio "
+            f"({'never' if wait is None else f'{wait:.1f} s'})")
+    last_host = max((t for t, _ in listener.frames if t < t_back), default=None)
+    music = [(t, n) for t, n in timeline([w for w in heard if t_gone <= w[0] <= t_back]) if n != "silence"]
+    if last_host is not None and music:
+        gap = music[0][0] - last_host
+        h.check(name, gap <= 1.5,
+                f"no long silence between the host's last delayed words and the music "
+                f"({gap:+.1f} s; host last heard {last_host - t_gone:+.1f} s, music {music[0][0] - t_gone:+.1f} s after the tab closed)")
+    else:
+        h.check(name, False, f"music came back after the host left ({[n for _, n in music]})")
+    h.check(name, show_live, "the show itself stays live while the host is away")
+    again = next((t for t, _ in listener.frames if t > t_back + 0.5), None)
+    h.check(name, again is not None and again - t_back <= delay + 4.0,
+            f"the host's page comes back and listeners hear the host again "
+            f"({'never' if again is None else f'{again - t_back:.1f} s'} after it reconnected)")
+    h.check(name, retaken, "the station is the show's again once the host is back")
+    if again is not None:
+        during = [w for w in heard if again + 2.0 <= w[0] <= t_end - 0.3]
+        loud = sum(WINDOW for w in during if w[1] >= -45)
+        h.check(name, bool(during) and loud <= 0.3,
+                f"the engine is quiet under the host again (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    after = [n for _, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    h.check(name, bool(after) and "EMERGENCY" not in after, f"station music after the show: {after}")
+
+
 async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> None:
     """LD-4b/11b/14b (PR 316): a live show with a 6 s broadcast delay on an engine station,
     with a real host microphone (440 Hz). The engine keeps the music through the pre-roll
