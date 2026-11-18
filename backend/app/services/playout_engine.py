@@ -1017,10 +1017,11 @@ async def handle_started(
     if entry.status != "playing":
         mark_started(entry, now)
 
-    # Keep positions compact: playing first, then pending in order
-    from app.services.queue_positions import compact_positions
+    # The item on air goes just before the first waiting one (one row, not a renumber
+    # of the whole queue: that took about 1 s of every start report)
+    from app.services.queue_positions import put_playing_first
 
-    await compact_positions(db, station_id)
+    await put_playing_first(db, station_id, entry)
     entry_pk = entry.id
     await db.commit()
     if clear_emergency:

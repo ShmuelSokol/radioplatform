@@ -699,11 +699,16 @@ async def test_an_item_running_past_its_end_raises_one_alert(client, db_session,
 
 
 @pytest.mark.asyncio
-async def test_start_report_renumbers_the_queue(client, db_session, engine_station):
+async def test_start_report_puts_the_item_on_air_first_without_renumbering(client, db_session, engine_station):
+    """The start report used to renumber the whole queue (about 900 rows with a 48 h
+    queue, 0.9 to 1.1 s of every report on production, 2026-11-18). Now only the item
+    on air moves, to just before the first waiting one; the waiting rows keep their
+    places and their order."""
     station, entries, sent = engine_station
     third = await db_session.get(QueueEntry, entries[2].id)
     third.position = 40
     await db_session.commit()
+    before = {e.id: (await db_session.get(QueueEntry, e.id)).position for e in entries[1:]}
     res = await client.post(
         f"/api/v1/playout/{station.id}/started",
         headers=HEADERS,
@@ -711,13 +716,39 @@ async def test_start_report_renumbers_the_queue(client, db_session, engine_stati
     )
     assert res.status_code == 200
     rows = (await db_session.execute(
-        select(QueueEntry.id, QueueEntry.position)
+        select(QueueEntry.id, QueueEntry.position, QueueEntry.status)
         .where(QueueEntry.station_id == station.id)
         .order_by(QueueEntry.position)
         .execution_options(populate_existing=True)
     )).all()
-    assert [p for _, p in rows] == [1, 2, 3, 4]
-    assert rows[0][0] == entries[0].id
+    assert rows[0][0] == entries[0].id and rows[0][2] == "playing"
+    waiting = [r for r in rows if r[2] == "pending"]
+    assert {r[0]: r[1] for r in waiting} == before
+    assert rows[0][1] == waiting[0][1] - 1
+
+
+@pytest.mark.asyncio
+async def test_an_item_started_out_of_order_goes_before_the_waiting_ones(client, db_session, engine_station):
+    """A timed item far down the queue goes on air: it comes first, and Play next still
+    lands right after it (Play next takes the place after the item on air)."""
+    station, entries, sent = engine_station
+    late = await db_session.get(QueueEntry, entries[-1].id)
+    late.position = 90
+    await db_session.commit()
+    res = await client.post(
+        f"/api/v1/playout/{station.id}/started",
+        headers=HEADERS,
+        json={"entry_id": str(entries[-1].id), "lane": "timed", "title": "x"},
+    )
+    assert res.status_code == 200
+    rows = (await db_session.execute(
+        select(QueueEntry.id, QueueEntry.position, QueueEntry.status)
+        .where(QueueEntry.station_id == station.id, QueueEntry.status.in_(["pending", "playing"]))
+        .order_by(QueueEntry.position)
+        .execution_options(populate_existing=True)
+    )).all()
+    assert rows[0][0] == entries[-1].id and rows[0][2] == "playing"
+    assert [r[0] for r in rows[1:]] == [e.id for e in entries[:-1]]
 
 
 @pytest.mark.asyncio

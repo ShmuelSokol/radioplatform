@@ -129,7 +129,9 @@ async function offeredWhileViewOnly(page) {
     if (!badge) return [];
     const out = [];
     for (const el of document.querySelectorAll('main button, main a[class*="bg-"], main input[type=submit]')) {
-      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      if (el.disabled || el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true') continue;
+      // A tab or pane switch named after a panel ("Go live" opens the go-live panel) changes nothing
+      if (el.getAttribute('role') === 'tab' || el.hasAttribute('aria-pressed')) continue;
       const r = el.getBoundingClientRect(); const st = getComputedStyle(el);
       if (r.width < 4 || r.height < 4 || st.visibility === 'hidden' || st.opacity === '0' || st.pointerEvents === 'none') continue;
       const name = (el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
@@ -161,7 +163,7 @@ async function controls(page) {
     const els = document.querySelectorAll('button, [role="button"], [role="tab"], select, input[type="checkbox"], input[type="radio"], summary');
     for (const el of els) {
       if (el.closest('nav, [data-testid="navbar"], [data-testid="site-nav"], header[role="banner"]')) continue;
-      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      if (el.disabled || el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true') continue;
       const r = el.getBoundingClientRect();
       if (r.width < 4 || r.height < 4) continue;
       const s = getComputedStyle(el);
@@ -297,7 +299,7 @@ async function tooSmall(page) {
     const out = [];
     for (const el of document.querySelectorAll('[data-walk]')) {
       const st = getComputedStyle(el);
-      if (st.opacity === '0' || st.pointerEvents === 'none' || el.disabled) continue;
+      if (st.opacity === '0' || st.pointerEvents === 'none' || el.disabled || el.matches(':disabled')) continue;
       let r = el.getBoundingClientRect();
       if (r.width < 4 || r.height < 4) continue;
       const lb = el.closest('label') || (el.labels && el.labels[0]);

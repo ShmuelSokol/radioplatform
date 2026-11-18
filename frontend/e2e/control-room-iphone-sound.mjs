@@ -330,7 +330,7 @@ async function travel(browser, stream, contextOpts, tag) {
     await listenBtn(page).tap();
     await page.waitForFunction(`(() => { const a = document.querySelector('[data-testid=station-stream]'); return a && !a.paused && a.currentTime > 0.3; })()`, null, { timeout: 8000 }).catch(() => {});
     const bar = page.getByTestId('player-bar');
-    for (const [label, path] of [['Program Guide', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives'], ['Requests', '/admin/requests']]) {
+    for (const [label, path] of [['Public Schedule', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives'], ['Requests', '/admin/requests']]) {
       const heard = await streamWhile(page, 1500, () => tapMenu(page, label));
       check(`${tag} stream: tapping "${label}" keeps the station on (no gap, no restart) with the bar`,
         new URL(page.url()).pathname === path && heard.silent === 0 && heard.restarts === 0 && (await bar.count()) === 1, JSON.stringify(heard));
@@ -369,7 +369,7 @@ async function travel(browser, stream, contextOpts, tag) {
     await sleep(600);
     await listenBtn(page).tap();
     await page.waitForFunction(HEARD, null, { timeout: 8000 }).catch(() => {});
-    await tapMenu(page, 'Program Guide');
+    await tapMenu(page, 'Public Schedule');
     const bar = page.getByTestId('player-bar');
     await bar.waitFor({ timeout: 5000 }).catch(() => {});
     const tapBtn = page.getByTestId('player-bar-tap');

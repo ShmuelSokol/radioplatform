@@ -241,12 +241,12 @@ def test_take_over_waits_for_the_timed_file():
     liq = _liq()
     assert 'request.queue(id="timed", interactive=false, timeout=90., prefetch=10)' in liq
     rec = liq.index("def rec attempt()")
-    body = liq[rec:liq.index("def schedule_timed", rec)]
+    body = liq[rec:liq.index("def timed_admit", rec)]
     assert "timed_queue.is_ready()" in body
     assert "thread.run(delay=0.25, attempt)" in body
     assert body.index("is_ready") < body.index("timed_take_over()")
     # counted before the push: the push can wait for the download
-    sched = liq[liq.index("def schedule_timed"):]
+    sched = liq[liq.index("def timed_admit"):]
     assert sched.index("timed_pending := timed_pending() + 1") < sched.index("timed_queue.push(r)")
     started = liq[liq.index("def send_started"):]
     assert 'was == "timed" and lane != "timed" and timed_pending() > 0 and not timed_waiting()' in started
@@ -411,8 +411,57 @@ def test_the_music_lane_stays_muted_until_the_next_item_starts_and_loads_it_ahea
     liq = _liq()
     back = liq[liq.index("elsif lane == \"main\" and main_interrupted() and entry == last_main_entry() then"):]
     back = back[:back.index("elsif lane == \"hold\"")]
-    assert "main.skip()" in back and "main_gain := 1." not in back and "main_interrupted := false" not in back
+    first = back[:back.index("def rec check")]
+    assert "main.skip()" in first and "main_gain := 1." not in first and "main_interrupted := false" not in first
     flush = liq[liq.index('control("/flush"'):]
     flush = flush[:flush.index("end)")]
     assert 'on_air_lane() != "main" and not live_on()' in flush
     assert "thread.run(fast=false, {ignore(main_requests.fetch())})" in flush
+
+
+def test_timed_items_loaded_ahead_wait_outside_the_lane_until_their_own_time():
+    """The timed lane's queue knows no times: it plays what is next. A time check loaded
+    45 s ahead followed a Play now item at once, early (V3-52l), and of two groups loaded
+    before the first started, the first lost its take-over and aired at the second's
+    time (harness, 2026-11-18). Items due later are downloaded and kept outside the lane
+    until shortly before their time, earlier than the hold lane looks for them."""
+    liq = _liq()
+    sched = liq[liq.index("def schedule_timed(~uri, ~at) ="):]
+    sched = sched[:sched.index("\nend\n")]
+    assert "request.resolve(" in sched
+    assert "timed_room := list.append(timed_room(), [x])" in sched
+    assert "thread.run(delay=at - time() - timed_room_lead, {timed_room_admit(at)})" in sched
+    # the group's entry does not wait for a slow download: the item is counted then and
+    # pushed when it arrives (harness block_with_very_slow_shiur)
+    assert sched.index("timed_room_admit(at)") < sched.index("request.resolve(")
+    assert "if x.admitted() then timed_room_push(r) end" in sched
+    room = liq[liq.index("def timed_room_admit(at) ="):]
+    room = room[:room.index("\nend\n")]
+    assert "timed_admit(x.r, x.at, push=false)" in room and "if x.done() then" in room
+    # due now (Play now) or its group already in the lane: straight in, as before
+    assert "timed_admit(r, at)" in sched
+    assert "timed_queue.push" not in sched
+    lead = float(liq.split("timed_room_lead = ")[1].split("\n")[0])
+    hold = liq[liq.index("def hold_open() ="):]
+    hold = hold[:hold.index("\nend\n")]
+    assert "left < 8." in hold and lead > 8.
+    # one take-over per group, set when the group enters the lane
+    admit = liq[liq.index("def timed_admit(r, at, ~push=true) ="):]
+    admit = admit[:admit.index("\nend\n")]
+    assert "timed_group_at := at" in admit and "timed_go_on_air(180, at)" in admit
+    assert admit.index("timed_pending := timed_pending() + 1") < admit.index("if push then timed_queue.push(r) end")
+
+
+def test_the_skip_back_to_music_is_checked_and_never_leaves_the_lane_muted():
+    """A timed item that took over during a song change: on the way back the skip only
+    ended cross's transition, the interrupted song played on muted to its end (silence
+    for the rest of the song) and no start was reported (harness, 2026-11-18)."""
+    liq = _liq()
+    back = liq[liq.index("elsif lane == \"main\" and main_interrupted() and entry == last_main_entry() then"):]
+    back = back[:back.index("elsif lane == \"hold\"")]
+    assert back.count("main.skip()") == 2
+    assert 'main_interrupted() and on_air_lane() == "main" and main_changed_at() < asked' in back
+    # not over an item already being read; and in the end sound rather than silence
+    assert "if main_fetched_at() < asked then" in back
+    give_up = back[back.index("would not go"):]
+    assert "main_gain := 1." in give_up and "main_interrupted := false" in give_up

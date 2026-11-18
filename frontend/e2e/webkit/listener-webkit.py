@@ -309,7 +309,7 @@ def bar(tag, args, mode, no_mse=False, hls=False):
             src = js(d, "return (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')) && (document.querySelector('[data-testid=station-stream]') || document.querySelector('audio')).src")
             check(f'{tag}: plays the HLS copy, as an iPhone does', bool(src) and src.endswith('/mp3.m3u8'), src)
         # every other move by the router; the last walk below by real clicks on the menu
-        for path, ready in (('/guide', 'Program Guide'), ('/hosts', 'DJs'), ('/stations', 'Stations')):
+        for path, ready in (('/guide', 'Schedule'), ('/hosts', 'DJs'), ('/stations', 'Stations')):
             t1 = js(d, clock)
             js(d, GO, path)
             shown = wait_for(d, "!!document.querySelector('[data-testid=\"player-bar\"]') && location.pathname === " + json.dumps(path), 4)
@@ -323,7 +323,7 @@ def bar(tag, args, mode, no_mse=False, hls=False):
             const label = arguments[0];
             const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
             return [...document.querySelectorAll('nav a')].find((a) => a.textContent.trim() === label && shown(a)) || null;"""
-        for label, path in (('Program Guide', '/guide'), ('Archives', '/archives'), ('DJs', '/hosts'), ('Stations', '/stations')):
+        for label, path in (('Schedule', '/guide'), ('Archives', '/archives'), ('DJs', '/hosts'), ('Stations', '/stations')):
             t1 = js(d, clock)
             link = js(d, find_link, label)
             if link is None:
@@ -370,7 +370,7 @@ def bar(tag, args, mode, no_mse=False, hls=False):
         else:
             card.click()
             back_on_station('a tap on it in the station list')
-        for label, path in (('DJs', '/hosts'), ('Program Guide', '/guide')):
+        for label, path in (('DJs', '/hosts'), ('Schedule', '/guide')):
             link = js(d, find_link, label)
             if link is None:
                 burger = js(d, "return document.querySelector('nav button[aria-label=\"Menu\"]')")
@@ -450,7 +450,7 @@ def stale_release(tag, args, mode, no_mse=False, hls=False):
         ctl('redeploy', {'keep': keep})
         js(d, 'window.__loads = performance.getEntriesByType("navigation").length; window.__mark = Math.random();')
         mark = js(d, 'return window.__mark')
-        for label, path in (('DJs', '/hosts'), ('Program Guide', '/guide')):
+        for label, path in (('DJs', '/hosts'), ('Schedule', '/guide')):
             t1 = js(d, clock)
             if not menu_click(d, label):
                 err = js(d, "return !!document.querySelector('[data-testid=\"error-boundary\"]')")

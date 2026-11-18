@@ -219,7 +219,7 @@ radioplatform/
 | bug_report_service.py | Copies bug reports to the private GitHub repo and sends ntfy pushes: "received" at once, then "fix ready" or "needs you" (see `wiki/bug-reports.md`) |
 | air_watch.py | On-air self-check every 5 s: hard timed items late or not started, no time check at hh:00, dead air, item shown past its end, engine vs site drift, skipped time/weather/sponsorship, a local FM box's clock, disk and missing audio; alerts + ntfy (see `wiki/air-watch.md`) |
 | station_modes.py | HS (hard start) and Spots mode switches: softens hard timed items while HS is off and restores them; Spots off plans no sponsorships (see `wiki/station-modes.md`) |
-| queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement; shared by the browser player's song change, the engine's start report and the blackout fill |
+| queue_positions.py | Renumbers a station's playing and pending queue entries from 1 in one statement (browser player's song change, blackout fill); `put_playing_first` moves only the item on air before the first waiting one (engine start report) |
 | playout_tunnel.py | Commands to an engine with no inbound line (a local FM box): its relay long-polls for them; used by playout_engine only while a relay is polling. Also keeps the box's health report and names its problems for air watch (see `wiki/local-fm-box.md`) |
 | playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay (see `wiki/local-fm-box.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
@@ -264,7 +264,7 @@ radioplatform/
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
 - Listen.tsx — Listen to a station (server stream or built-in player, song requests); keeps playing, with a bar, on every other page except call-in and the live host screens, and takes over sound the control room was giving
-- ProgramGuide.tsx — Public EPG with station/date picker and timeline
+- ProgramGuide.tsx — Public EPG ("Schedule" in the menu; "Public Schedule" in the staff menu) with station/date picker and timeline
 - Hosts.tsx — Public DJ/host profile cards
 - Archives.tsx — Public show archive browser with playback
 - CallIn.tsx — Call the live show from the browser: name and topic, mic, hear the show while waiting, on-air status, Hang up
