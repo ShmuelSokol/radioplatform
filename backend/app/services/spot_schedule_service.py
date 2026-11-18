@@ -533,6 +533,22 @@ async def load_station_schedules(db: AsyncSession, station_id) -> list[SpotSched
     return list(result.scalars().all())
 
 
+async def airable_schedules(db: AsyncSession, schedules: list[SpotSchedule]) -> list[SpotSchedule]:
+    """The schedules whose recording an automatic pick may use. One marked do-not-play
+    (one tap in the control room), a placeholder or one rejected in review is not
+    planned: the queue refill removes such entries (_purge_placeholders), so planning
+    them made and deleted every slot on every queue read, about 12 dead queue rows a
+    second (2026-11-18). It is planned again as soon as the mark is taken off."""
+    if not schedules:
+        return schedules
+    from app.models.asset import Asset, not_placeholder
+
+    ok = set((await db.execute(
+        select(Asset.id).where(Asset.id.in_({s.asset_id for s in schedules}), not_placeholder())
+    )).scalars().all())
+    return [s for s in schedules if s.asset_id in ok]
+
+
 async def lapsed_contract_assets(
     db: AsyncSession, station: Station, now: datetime | None = None
 ) -> set[str]:
@@ -624,7 +640,7 @@ async def plan_for_station(
     if not spots_on(station):
         # Spots mode off (control room): no sponsorship goes in the queue
         return [], []
-    schedules = await load_station_schedules(db, station.id)
+    schedules = await airable_schedules(db, await load_station_schedules(db, station.id))
     tz = station_tz(station.timezone)
     minutes = (station.automation_config or {}).get("ad_slot_minutes") or DEFAULT_SLOT_MINUTES
     blackouts = await load_blackouts(
