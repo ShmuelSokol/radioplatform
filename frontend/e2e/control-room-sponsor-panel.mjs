@@ -177,9 +177,10 @@ async function desktop(browser, sid) {
   check(`${tag}: the play due in a minute has no Skip, the later one has`, await today.getByTestId('sponsor-play').nth(0).getByTestId('sponsor-skip').count() === 0 && await today.getByTestId('sponsor-play').nth(1).getByTestId('sponsor-skip').count() === 1);
   check(`${tag}: coming days lists tomorrow's play`, /Tomorrow/.test(await page.getByTestId('sponsor-coming').innerText()));
   check(`${tag}: missed plays show day, time of day, and how many aired`, /Tue Nov 17, morning: 1 of 2 aired/.test(await page.getByTestId('sponsor-missed').innerText()));
-  check(`${tag}: links go to Spot Schedule (this station), Sponsors, Campaigns (this sponsor), Schedule Check`,
+  check(`${tag}: links go to Spot Schedule (this station), the sponsor's own page (contracts), Campaigns (this sponsor), Schedule Check`,
     await page.getByTestId('link-spot-schedule').getAttribute('href') === `/admin/spot-schedule?station=${sid}`
-      && await page.getByTestId('link-sponsors').getAttribute('href') === '/admin/sponsors'
+      && await page.getByTestId('link-sponsors').getAttribute('href') === '/admin/sponsors/sp27?tab=contracts'
+      && await page.getByTestId('link-sponsor-missed').getAttribute('href') === '/admin/sponsors/sp27?tab=missed'
       && await page.getByTestId('link-campaigns').getAttribute('href') === '/admin/campaigns?sponsor=sp27'
       && await page.getByTestId('link-schedule-check').getAttribute('href') === '/admin/schedule-check');
   check(`${tag}: opening the panel moved nothing in the queue`, station.pending().map((e) => e.id).join() === order && airCalls(station).length === 0);
