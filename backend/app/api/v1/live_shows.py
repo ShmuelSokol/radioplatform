@@ -856,7 +856,17 @@ async def twilio_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     except Exception:
         pass
 
-    twiml = generate_hold_twiml(str(show.id))
+    # The caller's sound joins the show's own mixer over a media stream. Without a
+    # public https address for it, the old hold line (nobody hears that caller on air)
+    from app.services.call_in import call_token
+    from app.services.twilio_voice_service import generate_stream_twiml, phone_stream_url
+    stream_url = phone_stream_url(settings.BACKEND_PUBLIC_URL, str(call_request.id))
+    if stream_url:
+        twiml = generate_stream_twiml(stream_url, call_token(call_request.id))
+    else:
+        logger.warning("Phone call %s: BACKEND_PUBLIC_URL is not an https address, caller cannot go on air",
+                       call_request.id)
+        twiml = generate_hold_twiml(str(show.id))
     return Response(content=twiml, media_type="application/xml")
 
 

@@ -72,8 +72,15 @@ need a valid `X-Twilio-Signature` (403 otherwise). The URL checked is the one th
 with https (Railway's proxy), and `BACKEND_PUBLIC_URL` + path, so `BACKEND_PUBLIC_URL` must be the
 address the Twilio number's webhook is set to. Without the token nothing is checked (local use).
 Test: `tests/test_auth_security.py::test_unsigned_twilio_webhook_is_refused`.
-Phone callers on air are still not heard by anyone (V2-70, strict xfail
-`tests/test_live_shows_websockets.py::test_phone_caller_on_air_is_heard`).
+
+## Phone callers are in the show's own mixer (2026-11-18)
+A phone caller used to wait in a Twilio conference and, on air, was moved to another conference that nothing was joined to: nobody heard them (V2-70). Now `/twilio/inbound` answers with `<Say>` then `<Connect><Stream url="wss://<BACKEND_PUBLIC_URL>/api/v1/ws/live/phone/{call id}">` (the call's token as a `<Parameter>`) then `<Hangup/>`. Twilio opens a two-way media stream to `websocket_phone_caller`, and from there a phone caller is a `CallerLine` like a web caller:
+- they hear the show (before the delay) while they wait, the staff can Talk off air with them, Hold and Lock work, on air they are mixed for listeners and the host and hear everyone but themselves;
+- `services/phone_audio.py` (`PhoneSocket`) converts: the phone is 8 kHz mu-law in base64 JSON, the show is 24 kHz PCM. Going on air plays a short tone in the caller's ear only;
+- End call or Reject closes the stream and the TwiML's `<Hangup/>` ends the call (no Twilio REST call needed); the caller hanging up stops the stream and the call is closed at once (no reconnect grace);
+- `put_caller_on_air` skips the old conference redirect when the call has a line (the redirect would cut the stream);
+- without an https `BACKEND_PUBLIC_URL` the old hold conference is answered and a warning logged: that caller cannot go on air.
+Tests: `tests/test_live_shows_websockets.py` (`test_phone_caller_on_air_is_heard` and the two after it) play Twilio's side of the stream. Not yet tried with a real phone call: it needs the Twilio number's voice webhook pointing at `/api/v1/live-shows/twilio/inbound` and `TWILIO_AUTH_TOKEN` set.
 
 ## Web call-ins (2026-11-16, Shmuel chose these over phone lines for now)
 A listener calls from `/call/<station id>` (linked from the Listen page's live banner when the show takes calls). No Twilio.
