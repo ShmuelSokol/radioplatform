@@ -1125,7 +1125,7 @@ export default function Dashboard() {
               <div className="flex flex-col gap-1" role="tablist" aria-label="Lower pane">
                 {SIDE_TABS.map(t => (
                   <button key={t.id} type="button" role="tab" aria-selected={sideTab === t.id} onClick={() => setSideTab(t.id)}
-                    className={`qn-btn h-8 [@media(max-height:1000px)]:h-[26px] text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
+                    className={`qn-btn h-8 [@media(max-height:1000px)]:h-6 text-sm ${t.id === 'live' && liveShow ? '!text-red-700' : ''}`}>
                     {t.id === 'live' && liveShow ? '● Live' : t.label}
                   </button>
                 ))}
