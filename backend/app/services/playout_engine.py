@@ -78,6 +78,8 @@ class EngineState:
     last_contact: float = 0.0
     last_alert: float = 0.0
     on_emergency: bool = False
+    # Counts the spells of emergency music, so a delayed alert knows its spell is over
+    emergency_spell: int = 0
     # True once open emergency alerts were cleared after a start from the queue
     emergency_cleared: bool = False
     # Asset of each entry handed to the engine (newest last), so a start report for an
@@ -232,17 +234,25 @@ async def close_client() -> None:
             pass
 
 
-async def _command(path: str, payload: dict | None = None, *, station_id) -> bool:
+async def _command(
+    path: str, payload: dict | None = None, *, station_id, wait: float = 4.0, slow_is_ok: bool = False
+) -> bool:
+    """`slow_is_ok`: the engine got the command and is still working on it when `wait` runs
+    out (a /timed answers only once the file is downloaded). That counts as taken."""
     url = settings.engine_control_url(station_id) + path
     try:
         resp = await _client().post(
             url, json=payload or {}, headers={"X-Playout-Token": settings.PLAYOUT_ENGINE_TOKEN},
-            timeout=4.0,
+            timeout=wait,
         )
         if resp.status_code != 200:
             logger.warning("Playout engine %s -> HTTP %s", path, resp.status_code)
             return False
         return True
+    except httpx.ReadTimeout:
+        logger.warning("Playout engine %s: no answer after %.0f s%s", path, wait,
+                       " (still loading; taken)" if slow_is_ok else "")
+        return slow_is_ok
     except Exception as e:
         logger.warning("Playout engine %s failed: %s", path, e)
         return False
@@ -294,7 +304,8 @@ async def engine_flush(station_id) -> bool:
 
 
 async def engine_timed(
-    station_id, uri: str, at_epoch: float, entry_id: str = "", *, seq: int = 0, of: int = 1
+    station_id, uri: str, at_epoch: float, entry_id: str = "", *, seq: int = 0, of: int = 1,
+    wait: float = 4.0, slow_is_ok: bool = False,
 ) -> bool:
     """Load an item now and put it on air at `at_epoch` (music fades under it).
 
@@ -306,7 +317,7 @@ async def engine_timed(
     payload = {"uri": uri, "at": at_epoch, "id": entry_id}
     if of > 1:
         payload.update(seq=seq, of=of)
-    return await _command("/timed", payload, station_id=station_id)
+    return await _command("/timed", payload, station_id=station_id, wait=wait, slow_is_ok=slow_is_ok)
 
 
 async def engine_timed_drop(station_id, entry_ids: list[str]) -> bool:
@@ -869,17 +880,13 @@ async def handle_started(
         # show that is expected (/next hands it nothing then), so no alert.
         if not state.on_emergency and not await _live_show_on(db, station_id):
             state.on_emergency = True
-            await _alert(
-                db,
-                station_id,
-                state,
-                force=True,
-                title=EMERGENCY_ALERT_TITLE,
-                message=(
-                    "The engine could not get a track from the backend and is playing "
-                    "its local emergency files."
-                ),
-            )
+            state.emergency_spell += 1
+            if EMERGENCY_ALERT_AFTER <= 0:
+                await _emergency_alert(db, station_id, state)
+            else:
+                task = asyncio.create_task(_emergency_alert_later(station_id, state.emergency_spell))
+                _background.add(task)
+                task.add_done_callback(_background.discard)
         return {"ok": True, "known": False}
 
     if state.on_emergency or not state.emergency_cleared:
@@ -925,6 +932,38 @@ async def handle_started(
 
 
 EMERGENCY_ALERT_TITLE = "Playout engine is on its emergency playlist"
+# A critical alert (and its push) only when the emergency music lasts: a second of it
+# while an item loads after a Next raised one on Main (03:46Z 2026-11-18) and cleared it
+# half a second later.
+EMERGENCY_ALERT_AFTER = 5.0
+
+
+async def _emergency_alert(db, station_id, state: EngineState) -> None:
+    await _alert(
+        db,
+        station_id,
+        state,
+        force=True,
+        title=EMERGENCY_ALERT_TITLE,
+        message=(
+            "The engine could not get a track from the backend and is playing "
+            "its local emergency files."
+        ),
+    )
+
+
+async def _emergency_alert_later(station_id, spell: int) -> None:
+    await asyncio.sleep(EMERGENCY_ALERT_AFTER)
+    state = get_state(station_id)
+    if not state.on_emergency or state.emergency_spell != spell:
+        return  # back on the queue meanwhile
+    try:
+        from app.db.session import async_session_factory
+
+        async with async_session_factory() as own:
+            await _emergency_alert(own, station_id, state)
+    except Exception as e:
+        logger.warning("Could not raise the emergency alert: %s", e)
 
 
 async def _alert(
@@ -1225,6 +1264,53 @@ async def take_operator_change(db: AsyncSession, station_id, *, before_next: boo
         state.cued_entry_id, desired.id if desired else None,
     )
     state.last_auto_flush = state.operator_flush_at = time.monotonic()
+    await engine_flush(station_id)
+    return True
+
+
+async def head_the_engine_does_not_hold(db: AsyncSession, station_id) -> QueueEntry | None:
+    """The queue's next item, when the engine has pre-loaded a different one; else None.
+
+    For Next. Taking the pre-loaded song back and skipping a moment later lost the item:
+    on Main (03:46Z 2026-11-18) a sponsorship waiting behind the song was handed over,
+    the skip came 0.8 s later while its file was still downloading, the engine's skip
+    ran over it and it was closed as "aired without a start report". Next sends this
+    item through the timed lane instead (loaded first, then on air), as Play now does."""
+    state = get_state(station_id)
+    if not state.cued_entry_id:
+        return None
+    exclude = set(state.timed_sent) | (state.given - {state.cued_entry_id})
+    desired = await pick_next(db, station_id, exclude)
+    if desired is None or str(desired.id) == state.cued_entry_id or desired.asset is None:
+        return None
+    return desired
+
+
+# How long Next waits for the engine to load the item it sends down the timed lane.
+NEXT_LOAD_WAIT = 6.0
+
+
+async def next_goes_to(station_id, entry: QueueEntry) -> bool:
+    """Next, when the engine holds a different song than the queue's head: the head is
+    loaded and then put on air (the song on air plays until then), and the pre-loaded
+    song is taken back so the engine asks for what follows. False if the engine did not
+    take it (the caller falls back to an ordinary skip)."""
+    uri = build_uri(entry, "timed")
+    if not uri:
+        return False
+    state = get_state(station_id)
+    entry_id = str(entry.id)
+    state.timed_sent.add(entry_id)
+    state.skip_requested = True
+    # The engine answers once the file is loaded. A big or slow file takes longer than the
+    # answer is waited for: the engine has it all the same and airs it when it is loaded,
+    # so that is not a refusal (a skip then would end the song with nothing ready).
+    if not await engine_timed(station_id, uri, time.time(), entry_id, wait=NEXT_LOAD_WAIT, slow_is_ok=True):
+        state.timed_sent.discard(entry_id)
+        state.skip_requested = False
+        return False
+    logger.info("Next: %s goes on air through the timed lane (the engine held %s)", entry_id, state.cued_entry_id)
+    state.last_auto_flush = time.monotonic()
     await engine_flush(station_id)
     return True
 

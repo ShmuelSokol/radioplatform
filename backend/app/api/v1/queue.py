@@ -1913,9 +1913,18 @@ async def skip_current(
             await playout_engine.engine_flush(station_id)
         else:
             # The engine may hold a song the queue no longer has next (Play next, a delete
-            # or a move seconds ago): Next must play what the queue shows
-            await playout_engine.take_operator_change(db, station_id, before_next=True)
-            # ...and the engine needs a moment to load an item it was handed just now
+            # or a move seconds ago, a sponsorship that became due): Next must play what
+            # the queue shows. That item is loaded first and then put on air; taking the
+            # song back and skipping at once lost the item while its file was loading.
+            state = playout_engine.get_state(station_id)
+            head = None
+            if on_air is None or str(on_air.id) not in state.timed_sent:
+                head = await playout_engine.head_the_engine_does_not_hold(db, station_id)
+            if head is not None and await playout_engine.next_goes_to(station_id, head):
+                from app.services import activity_log
+                activity_log.note("Sent to the playout engine", [on_air.asset_id if on_air else None])
+                return {"message": "Skipped", "now_playing": None, "fade_seconds": fade_seconds}
+            # The engine needs a moment to load an item it was handed just now
             await playout_engine.settle_before_next(station_id)
         if await playout_engine.engine_skip(station_id, fade_seconds):
             from app.services import activity_log

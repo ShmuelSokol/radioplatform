@@ -183,7 +183,7 @@ class Stack:
                     "Content-Type": "application/json",
                 })
                 try:
-                    with urllib.request.urlopen(req, timeout=4) as resp:
+                    with urllib.request.urlopen(req, timeout=30) as resp:
                         data, code = resp.read(), resp.status
                 except Exception as e:  # engine down
                     data, code = json.dumps({"ok": False, "error": str(e)}).encode(), 502
