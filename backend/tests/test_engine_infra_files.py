@@ -36,7 +36,7 @@ def test_engine_says_hello_before_asking_for_tracks():
     assert "if resp.status_code == 200 then" in liq[hello:]
     first_call = liq.index("send_hello()", liq.index("def send_hello()") + 20)
     assert first_call < liq.index("request.dynamic(")
-    assert "thread.run.recurrent(delay=5." in liq[first_call:liq.index("request.dynamic(")]
+    assert "thread.run.recurrent(fast=false, delay=5." in liq[first_call:liq.index("request.dynamic(")]
 
 
 def test_main_lane_request_settings():
@@ -373,3 +373,17 @@ def test_sound_card_output_is_off_unless_named_and_asks_before_using_the_card():
     # No engine setting file of the stream server names a card
     for name in ("kbr-engine.env.example", "setup.sh"):
         assert "KBR_ALSA_DEVICE" not in (INFRA / name).read_text()
+
+
+def test_quick_steps_have_task_queues_the_backend_calls_cannot_fill():
+    """Jerusalem 2026-11-18: with the backend answering in 3 to 4 s, the engine's start
+    report and its ask for the next item filled Liquidsoap's two task queues and the
+    "level back up" step after Next waited behind them: up to 3.8 s of digital silence
+    (harness slow_backend_no_gap). The quick steps need queues of their own, and every
+    call to the backend made from a task must be marked slow so it stays off them."""
+    liq = _liq()
+    fast = int(re.search(r"settings\.scheduler\.fast_queues\s*:=\s*(\d+)", liq).group(1))
+    generic = int(re.search(r"settings\.scheduler\.generic_queues\s*:=\s*(\d+)", liq).group(1))
+    assert fast >= 4 and generic >= 4
+    assert "thread.run(fast=false, post)" in liq
+    assert "thread.run.recurrent(fast=false, delay=5., fun () -> begin\n    send_hello()" in liq
