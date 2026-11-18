@@ -100,6 +100,8 @@ class Stack:
         self.wav_t0: float | None = None
         # seconds the engine's POST .../started waits before it reaches the backend
         self.slow_started = 0.0
+        # Every call from the engine to the backend takes this long (a busy backend)
+        self.slow_backend = 0.0
         # true = the backend cannot be reached from the engine (every call answers 502)
         self.backend_down = False
         # true = the backend's commands do not reach the engine (with backend_down: no line at all)
@@ -226,6 +228,8 @@ class Stack:
                     return
                 if method == "POST" and self.path.rstrip("/").endswith("/started") and stack.slow_started:
                     time.sleep(stack.slow_started)
+                if stack.slow_backend:
+                    time.sleep(stack.slow_backend)
                 headers = {k: v for k, v in self.headers.items()
                            if k.lower() in ("x-playout-token", "content-type", "accept")}
                 req = urllib.request.Request(f"http://127.0.0.1:{BACKEND_PORT}{self.path}", data=body,
@@ -1716,6 +1720,34 @@ async def sc_slow_started(h: Harness) -> None:
     h.check(name, len(playing) == 1, f"one item on air at the end ({len(playing)})")
 
 
+async def sc_slow_backend_no_gap(h: Harness) -> None:
+    """Jerusalem, 2026-11-18 05:30Z to 06:02Z: 2.6 to 3.8 s of digital silence after Next
+    and when a paused shiur came back, each time while the backend answered the engine
+    in 3 to 4 s. The engine brings its level back up from short tasks, and those waited
+    behind its calls to the backend (start report, next item, hello), which filled its
+    two task queues. Here every call to the backend takes 4 s: Next twice, then a Play
+    Now, and no gap over 1 s."""
+    name = "slow_backend_no_gap"
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("song5", {}), ("song6", {}), ("song1", {}), ("song2", {}), ("song3", {})])
+    await asyncio.sleep(8)
+    h.stack.slow_backend = 4.0
+    try:
+        await asyncio.sleep(6)
+        t_start = time.time()
+        for _ in range(3):
+            h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=fade")
+            await asyncio.sleep(9)
+    finally:
+        h.stack.slow_backend = 0.0
+    await asyncio.sleep(6)
+    heard = h.heard(t_start - 1, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    gap, gap_at = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s" + (f" at {_fmt(gap_at)}" if gap_at else ""))
+
+
 async def sc_three_item_group(h: Harness) -> None:
     """V1-9: a hard group of three (time, weather, announcement) takes over on the
     second, plays all three in order, then music comes back with the NEXT song: the
@@ -2771,6 +2803,7 @@ SCENARIOS = {
     "rapid_next": sc_rapid_next,
     "empty_queue": sc_empty_queue,
     "slow_started": sc_slow_started,
+    "slow_backend_no_gap": sc_slow_backend_no_gap,
     "three_item_timed_group": sc_three_item_group,
     "two_groups_0.3s_apart": lambda h: sc_two_groups(h, 0.3),
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
