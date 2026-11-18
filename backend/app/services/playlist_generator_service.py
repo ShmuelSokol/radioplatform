@@ -55,6 +55,46 @@ class Settings:
     min_vote: int = 0
 
 
+# Station IDs between songs (automation_config.station_ids): a short jingle
+# ("You're listening to Kol B'ramah ...") sprinkled after a song every few minutes,
+# never close to a timed break (time check, weather, sponsorships). See
+# wiki/playlist-generation.md "Station IDs between songs".
+IDS_KEY = "station_ids"
+IDS_CATEGORY = "station_id"
+
+
+@dataclass
+class IdSettings:
+    enabled: bool = False
+    category: str = IDS_CATEGORY
+    min_minutes: float = 12.0
+    max_minutes: float = 20.0
+    # Not within this long of a timed item, before or after it
+    clear_minutes: float = 3.0
+
+
+def id_settings_for(automation_config: dict | None) -> IdSettings:
+    raw = (automation_config or {}).get(IDS_KEY) or {}
+    if not isinstance(raw, dict):
+        return IdSettings()
+
+    def num(name: str, default: float, lo: float, hi: float) -> float:
+        value = raw.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return default
+        return min(hi, max(lo, float(value)))
+
+    low = num("min_minutes", 12.0, 3.0, 240.0)
+    high = max(low, num("max_minutes", 20.0, 3.0, 240.0))
+    return IdSettings(
+        enabled=bool(raw.get("enabled", False)),
+        category=str(raw.get("category") or IDS_CATEGORY).strip() or IDS_CATEGORY,
+        min_minutes=low,
+        max_minutes=high,
+        clear_minutes=num("clear_minutes", 3.0, 0.0, 15.0),
+    )
+
+
 def settings_for(automation_config: dict | None) -> Settings:
     raw = (automation_config or {}).get(CONFIG_KEY) or {}
     return Settings(
@@ -118,11 +158,28 @@ class Clock:
     def __init__(self, at: datetime, timed: list[TimedItem] | None = None):
         self.at = at
         self.timed = sorted(timed or [], key=lambda t: t.at)
+        # When the last timed item that went by ended (None: none yet)
+        self.last_timed_end: datetime | None = None
 
     def _due(self) -> None:
         while self.timed and self.timed[0].at <= self.at:
             item = self.timed.pop(0)
             self.at = max(self.at, item.at) + timedelta(seconds=item.seconds)
+            self.last_timed_end = self.at
+
+    def clear_of_timed(self, at: datetime, seconds: float, margin: timedelta) -> bool:
+        """True when an item of `seconds` starting at `at` is at least `margin`
+        from the timed items on both sides (the one before has ended `margin`
+        earlier, the next starts `margin` after it ends)."""
+        if self.last_timed_end is not None and at - self.last_timed_end < margin:
+            return False
+        upcoming = next((t for t in self.timed if t.at + timedelta(seconds=t.seconds) > at), None)
+        if upcoming is not None:
+            if upcoming.at <= at:
+                return False
+            if upcoming.at - (at + timedelta(seconds=seconds)) < margin:
+                return False
+        return True
 
     def start(self) -> datetime:
         """When the next ordinary item goes on air."""
@@ -410,9 +467,13 @@ async def generate(
     busy_ids: set | None = None,
     queued: list | None = None,
     timed: list[TimedItem] | None = None,
+    timed_ended: datetime | None = None,
+    after_type: str | None = "music",
 ) -> Plan:
     """`timed`: items already queued for set times after `start`, so each pick's
-    expected start (and so its block) allows for them."""
+    expected start (and so its block) allows for them. `timed_ended`: when the
+    last timed item before `start` ends, and `after_type` the type of the item
+    the new picks follow (both for station IDs between songs)."""
     start = as_utc(start)
     end = start + timedelta(hours=hours)
     cursor = dict(cursor or {})
@@ -446,7 +507,52 @@ async def generate(
 
     picks: list[Pick] = []
     clock = Clock(start, timed)
+    if timed_ended is not None:
+        clock.last_timed_end = as_utc(timed_ended)
     misses = 0
+
+    ids = id_settings_for(station.automation_config)
+    id_due: datetime | None = None
+    if ids.enabled:
+        id_rows = await library.pool("jingle", ids.category)
+        if not id_rows:
+            note(f'Station IDs between songs are on, but no jingle has the category "{ids.category}".')
+        else:
+            if library.last_used is None:
+                await library._load_last_used()
+            last_id = max((library.last_used.get(str(r.id), _EPOCH) for r in id_rows), default=_EPOCH)
+            # The next one comes a random min..max after the last one aired or
+            # was queued; never aired: within the first stretch of the fill
+            gap = timedelta(minutes=random.uniform(ids.min_minutes, ids.max_minutes))
+            id_due = last_id + gap if last_id > _EPOCH else start + gap / 2
+    previous_type = (after_type or "music").lower()
+
+    async def maybe_station_id() -> None:
+        """After a song: a station ID when one is due and the air is clear of timed items."""
+        nonlocal id_due, previous_type
+        if id_due is None or previous_type != "music":
+            return
+        at = clock.start()
+        if at < id_due or at >= end or any(b.covers(at) for b in blackouts):
+            return
+        rows = library.pools.get(("jingle", ids.category)) or []
+        longest = max((float(r.duration or 10.0) for r in rows), default=10.0)
+        if not clock.clear_of_timed(at, longest, timedelta(minutes=ids.clear_minutes)):
+            return  # tried again after the next song
+        row, _ = await library.draw("jingle", ids.category, set(), at)
+        if row is None:
+            id_due = None
+            return
+        picks.append(
+            Pick(
+                at=at, block_id="", block_name="Station ID", asset_type="jingle", category=ids.category,
+                asset_id=row.id, title=row.title, artist=row.artist,
+                duration=float(row.duration or 10.0),
+            )
+        )
+        previous_type = "jingle"
+        clock.play(await library.on_air(row))
+        id_due = at + timedelta(minutes=random.uniform(ids.min_minutes, ids.max_minutes))
     while clock.start() < end and len(picks) < MAX_PICKS:
         # Let the players' requests in between picks: nothing below waits on
         # the database any more, and a long fill would hold them all up.
@@ -501,6 +607,8 @@ async def generate(
             if artist and artist_distance:
                 recent.append(artist)
             clock.play(await library.on_air(row))
+            previous_type = (picks[-1].asset_type or "music").lower()
+            await maybe_station_id()
             continue
         template = block.playlist_template if block is not None and block.playlist_template_id else None
         slots = list(template.slots) if template and template.is_active else []
@@ -529,6 +637,8 @@ async def generate(
             if artist and artist_distance:
                 recent.append(artist)
             clock.play(await library.on_air(row))
+            previous_type = (picks[-1].asset_type or "music").lower()
+            await maybe_station_id()
             continue
 
         key = str(block.id)
@@ -566,6 +676,8 @@ async def generate(
         if artist and artist_distance:
             recent.append(artist)
         clock.play(await library.on_air(row))
+        previous_type = (picks[-1].asset_type or "music").lower()
+        await maybe_station_id()
 
     for asset_type, category in sorted(library.below_vote, key=str):
         name = f"{asset_type} / {category}" if category else asset_type
