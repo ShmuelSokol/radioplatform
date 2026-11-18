@@ -20,7 +20,7 @@ Setup (Ubuntu 24.04, once):
   pip install selenium
 Run:
   cd frontend && npm run build && (npx vite preview --port 4183 --strictPort &)
-  xvfb-run -a python3 e2e/webkit/listener-webkit.py        # ONLY=listen,stream,bar,callin,release,pages
+  xvfb-run -a python3 e2e/webkit/listener-webkit.py        # ONLY=listen,stream,bar,stale,callin,release,pages
 
 Exits non-zero if a check fails. KNOWN_BUGS lists checks expected to fail (XFAIL); a pass
 there prints XPASS and fails, like pytest's xfail(strict=True).
@@ -53,9 +53,13 @@ ALLOW = ['--autoplay-policy=allow']
 _PLAIN = ('plain <audio> fallback for browsers without MSE: WebKitGTK (GStreamer) starts a 128 kbps MP3 stream '
           'only after about 2.1 s, every run. iPhone Safari takes the HLS copy instead (liveStream.ts hlsStream), '
           'which WebKitGTK cannot play (no native HLS), so this is the fallback path only, not the iPhone default')
+_RELEASE = ('a screen whose code file is gone after a release throws into RouteErrorBoundary (App.tsx), which '
+            'wraps the whole layout: the error screen replaces the menu and the player, the sound stops, and '
+            'reloadForStaleCode reloads the page; an iPhone cannot play again without a new tap (Shmuel, 2026-11-18)')
 KNOWN_BUGS = {
     'no MSE (iPhone path): stream heard within 2 s': _PLAIN,
     'no MSE (iPhone path): Listen again plays within 2 s': _PLAIN,
+    'after a new release,': _RELEASE,
 }
 state = {'passed': 0, 'failed': 0, 'xfail': 0}
 
@@ -82,7 +86,7 @@ def ctl(name, body=None):
         return json.loads(r.read() or b'null')
 
 
-def browser(args=(), no_mse=False):
+def browser(args=(), no_mse=False, native_hls=False):
     o = webdriver.WebKitGTKOptions()
     o.binary_location = MINIBROWSER
     o.add_argument('--automation')
@@ -92,11 +96,13 @@ def browser(args=(), no_mse=False):
     d.set_window_size(WIDTH, 900)
     d.set_script_timeout(30)
     d.no_mse = no_mse
+    d.native_hls = native_hls
     return d
 
 
 def open_page(d, path):
-    d.get(BASE + path + ('?kbr_no_mse=1' if d.no_mse else ''))
+    q = [x for x, on in (('kbr_no_mse=1', d.no_mse), ('kbr_native_hls=1', getattr(d, 'native_hls', False))) if on]
+    d.get(BASE + path + ('?' + '&'.join(q) if q else ''))
     if d.no_mse:
         check(f'(setup) {path}: MediaSource removed for this tab', js(d, 'return window.MediaSource === undefined'))
 
@@ -285,12 +291,14 @@ def listen_stream(tag, args, expect_mode, no_mse=False):
 GO = "history.pushState({}, '', arguments[0]); dispatchEvent(new PopStateEvent('popstate'));"
 
 
-def bar(tag, args, mode, no_mse=False):
+def bar(tag, args, mode, no_mse=False, hls=False):
     """One tap on Listen Live, then the guide, the DJs and the station list with no
-    further tap: WebKit refuses sound a tap did not start, so a player that was rebuilt
-    on the way would be silent here."""
-    np = ctl('reset', {'mode': mode, 'show': False})
-    d = browser(args, no_mse)
+    further tap, and back to the station page: WebKit refuses sound a tap did not start,
+    so a player that was rebuilt on the way would be silent here. `hls`: the tab says it
+    plays HLS natively, as iPhone Safari does, so the site takes the engine's HLS copy
+    (the path a real iPhone takes on a server-stream station such as Main)."""
+    np = ctl('reset', {'mode': mode, 'show': False, **({'stream': 'hls'} if hls else {})})
+    d = browser(args, no_mse, native_hls=hls)
     stream = mode == 'server'
     clock = ("return document.querySelector('audio') ? +document.querySelector('audio').currentTime.toFixed(2) : null"
              if stream else 'return window.__audible()[0]?.t ?? null')
@@ -300,6 +308,9 @@ def bar(tag, args, mode, no_mse=False):
             wait_for(d, "document.body.innerText.includes('Server stream')", 8)
         ms = press(d, STREAM_PLAYING if stream else AUDIBLE, button(d, 'Listen Live'), 8)
         check(f'{tag}: Listen Live heard on the station page', ms >= 0, f'{ms} ms')
+        if hls:
+            src = js(d, "return document.querySelector('audio') && document.querySelector('audio').src")
+            check(f'{tag}: plays the HLS copy, as an iPhone does', bool(src) and src.endswith('/mp3.m3u8'), src)
         # every other move by the router; the last walk below by real clicks on the menu
         for path, ready in (('/guide', 'Program Guide'), ('/hosts', 'DJs'), ('/stations', 'Stations')):
             t1 = js(d, clock)
@@ -333,6 +344,54 @@ def bar(tag, args, mode, no_mse=False):
             t2 = js(d, clock)
             check(f'{tag}: a real click on "{label}" in the menu: bar shown, still playing, no restart',
                   shown >= 0 and t1 is not None and t2 is not None and t2 - t1 > 2.0, f'{shown} ms, {t1} -> {t2} in 3 s')
+        # Back to where listening started, as a person does: tap the station in the list,
+        # then the guide from the menu and the browser's Back. Found by Shmuel on his iPhone
+        # 2026-11-18: the sound stopped on the DJs page or the guide and did not come back
+        # on the station page. No new tap here either, so a player rebuilt on the way back
+        # (or stopped by the station page as it opens) is silent in WebKit as on an iPhone.
+        here = f'/listen/{np["sid"]}'
+        on_station = "location.pathname === " + json.dumps(here)
+        not_offering_listen = "![...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Listen Live')"
+
+        def back_on_station(how):
+            shown = wait_for(d, on_station, 4)
+            time.sleep(3.0)
+            t2 = js(d, clock)
+            offers = not js(d, 'return ' + not_offering_listen)
+            check(f'{tag}: back on the station page by {how}: still playing with no new tap, no restart',
+                  shown >= 0 and t1 is not None and t2 is not None and t2 - t1 > 2.0, f'{shown} ms, {t1} -> {t2} in 3 s')
+            check(f'{tag}: back on the station page by {how}: it shows the station as playing (no "Listen Live" offered)',
+                  not offers, body_text(d)[:160].replace('\n', ' | ') if offers else '')
+            if not stream:
+                n = js(d, 'return window.__audible().length')
+                check(f'{tag}: back on the station page by {how}: one player heard, not two', n == 1, n)
+
+        t1 = js(d, clock)
+        card = js(d, "return document.querySelector('a[href=\"' + arguments[0] + '\"]')", here)
+        if card is None:
+            check(f'{tag}: the station list links to the station', False, 'no link to ' + here)
+        else:
+            card.click()
+            back_on_station('a tap on it in the station list')
+        for label, path in (('DJs', '/hosts'), ('Program Guide', '/guide')):
+            link = js(d, find_link, label)
+            if link is None:
+                burger = js(d, "return document.querySelector('nav button[aria-label=\"Menu\"]')")
+                if burger is not None:
+                    burger.click()
+                    time.sleep(0.3)
+                    link = js(d, find_link, label)
+            if link is None:
+                check(f'{tag}: menu link "{label}" found from the station page', False, 'no visible link')
+                continue
+            t1 = js(d, clock)
+            link.click()
+            wait_for(d, "location.pathname === " + json.dumps(path), 4)
+            time.sleep(2.0)
+            d.back()
+            back_on_station(f'the browser\'s Back from {path}')
+        js(d, GO, '/stations')
+        wait_for(d, "!!document.querySelector('[data-testid=\"player-bar\"]')", 4)
         bar_text = js(d, "return document.querySelector('[data-testid=\"player-bar\"]').innerText")
         check(f'{tag}: the bar names the station', np.get('name', "Kol B'ramah") in bar_text or "Kol B'ramah" in bar_text, bar_text)
         js(d, "document.querySelector('[data-testid=\"player-bar\"] button').click()")
@@ -344,6 +403,84 @@ def bar(tag, args, mode, no_mse=False):
         check(f'{tag}: Stop in the bar stops the sound and the bar goes',
               st and not js(d, "return !!document.querySelector('[data-testid=\"player-bar\"]')"), st)
         check(f'{tag}: no script errors', not errors(d), ' | '.join(errors(d)))
+    finally:
+        d.quit()
+
+
+FIND_LINK = """
+    const label = arguments[0];
+    const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    return [...document.querySelectorAll('nav a')].find((a) => a.textContent.trim() === label && shown(a)) || null;"""
+
+
+def menu_click(d, label):
+    """Tap `label` in the site's menu as a person does (opening the burger menu when the
+    window is narrow). False when there is no such visible link."""
+    link = js(d, FIND_LINK, label)
+    if link is None:
+        burger = js(d, "return document.querySelector('nav button[aria-label=\"Menu\"]')")
+        if burger is not None:
+            burger.click()
+            time.sleep(0.3)
+            link = js(d, FIND_LINK, label)
+    if link is None:
+        return False
+    link.click()
+    return True
+
+
+def stale_release(tag, args, mode, no_mse=False, hls=False):
+    """A new release goes out while a listener plays the station (a merge does that
+    many times a day). The old release's code files are gone, so the first visit to the
+    guide or the DJs page cannot load that screen's code. The station must keep playing
+    all the same, there and back on the station page, with no new tap: a reload or a
+    player taken down by the error screen is silent for good on an iPhone. Found by
+    Shmuel on his iPhone 2026-11-18 (sound stopped on the DJs page or the guide and did
+    not come back on the station page)."""
+    np = ctl('reset', {'mode': mode, 'show': False, **({'stream': 'hls'} if hls else {})})
+    d = browser(args, no_mse, native_hls=hls)
+    stream = mode == 'server'
+    clock = ("return document.querySelector('audio') && !document.querySelector('audio').paused ? +document.querySelector('audio').currentTime.toFixed(2) : null"
+             if stream else 'return window.__audible ? (window.__audible()[0]?.t ?? null) : null')
+    try:
+        open_page(d, f'/listen/{np["sid"]}')
+        if stream:
+            wait_for(d, "document.body.innerText.includes('Server stream')", 8)
+        wait_for(d, "[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Listen Live')", 8)
+        ms = press(d, STREAM_PLAYING if stream else AUDIBLE, button(d, 'Listen Live'), 8)
+        check(f'{tag}: Listen Live heard', ms >= 0, f'{ms} ms')
+        keep = js(d, "return performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname).filter((p) => p.startsWith('/assets/'))")
+        ctl('redeploy', {'keep': keep})
+        js(d, 'window.__loads = performance.getEntriesByType("navigation").length; window.__mark = Math.random();')
+        mark = js(d, 'return window.__mark')
+        for label, path in (('DJs', '/hosts'), ('Program Guide', '/guide')):
+            t1 = js(d, clock)
+            if not menu_click(d, label):
+                err = js(d, "return !!document.querySelector('[data-testid=\"error-boundary\"]')")
+                check(f'{tag}: after a new release, the menu is still there for "{label}"', False,
+                      'the error screen covers the whole page, menu included' if err else 'no visible link')
+                continue
+            time.sleep(3.5)
+            same_tab = js(d, 'return window.__mark === arguments[0]', mark)
+            t2 = js(d, clock)
+            err = js(d, "return !!document.querySelector('[data-testid=\"error-boundary\"]')")
+            check(f'{tag}: after a new release, "{label}" from the menu: the station still plays (no reload, no new tap)',
+                  same_tab and t1 is not None and t2 is not None and t2 - t1 > 2.0,
+                  f'{"same page" if same_tab else "the page reloaded"}, clock {t1} -> {t2} in 3.5 s'
+                  + (', error screen shown' if err else '') + f', at {js(d, "return location.pathname")}')
+        t1 = js(d, clock)
+        here = f'/listen/{np["sid"]}'
+        for _ in range(3):
+            if js(d, 'return location.pathname') == here:
+                break
+            d.back()
+            wait_for(d, "location.pathname === " + json.dumps(here), 3)
+        time.sleep(3.0)
+        t2 = js(d, clock)
+        check(f'{tag}: after a new release, back on the station page: still playing with no new tap',
+              t1 is not None and t2 is not None and t2 - t1 > 2.0, f'{t1} -> {t2} in 3 s at {js(d, "return location.pathname")}')
+        m = ctl('missed')
+        info(f'{tag}: old code files asked for after the release: {m["missed"]}; the page reloaded: {m["reloaded"]}')
     finally:
         d.quit()
 
@@ -506,6 +643,10 @@ def main():
         if run('bar'):
             bar('bar WebKit', SAFARI, 'browser')
             bar('bar WebKit no MSE (iPhone path), server stream', SAFARI, 'server', no_mse=True)
+            bar('bar WebKit as iPhone (no MSE, native HLS), server stream', SAFARI, 'server', no_mse=True, hls=True)
+        if run('stale'):
+            stale_release('stale WebKit, built-in player', SAFARI, 'browser')
+            stale_release('stale WebKit as iPhone (no MSE, native HLS), server stream', SAFARI, 'server', no_mse=True, hls=True)
         if run('callin'):
             call_in('call-in WebKit', SAFARI + ['--enable-media-stream=true', '--enable-mock-capture-devices=true'])
         if run('release'):

@@ -116,7 +116,8 @@ def test_idle_connection_is_pinged_and_replaced_when_dead(monkeypatch):
     assert pings == [True]
     with pytest.raises(DisconnectionError):
         engine_mod._ping_if_idle(Conn(False), SimpleNamespace(info={"idle_since": now - 600}), None)
-    assert engine_mod.engine.pool._recycle == 300
+    # Kept half an hour: a replaced connection pays for the type lookups again (0.6 to 2 s)
+    assert engine_mod.engine.pool._recycle == 1800
 
 
 def test_slow_query_log_hides_personal_parameters(monkeypatch, app_log):
