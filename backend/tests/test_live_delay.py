@@ -1183,6 +1183,13 @@ async def test_engine_quieted_for_a_show_about_to_be_heard_is_not_told_the_show_
         got = await playout_engine.handle_next(db_session, station.id, [], proto=5, engine_live_on=True)
         await asyncio.sleep(0)
         assert got is None and told == []             # nothing handed out, and no "live off"
+        # Nor from the pass that keeps the engine in step (harness live_show_host_gone:
+        # a pass in that second sent "live off", a song started and was cut 0.9 s later)
+        state = playout_engine.get_state(station.id)
+        state.live_sent, state.live_tried = True, 0.0
+        await db_session.refresh(station)
+        await playout_engine.tick(db_session, station)
+        assert told == []
         # The show ended in its pre-roll: now the engine is told
         await relay.airs[sid].stop()
         assert playout_engine._show_about_to_be_heard(sid) is False

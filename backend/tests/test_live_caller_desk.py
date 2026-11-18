@@ -3,6 +3,7 @@ See wiki/live-shows.md, "Caller desk"."""
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 import pytest
 
 from app.api.v1 import live_shows_ws
@@ -165,3 +166,48 @@ async def test_callers_on_air_together_hear_each_other_and_not_themselves():
     assert set(samples(listener.bytes[-1])) == {1123}                    # host + all three
     assert set(samples(host.bytes[-1])) == {123}                         # the host hears the three callers
     assert [int(np.unique(samples(c.ws.bytes[-1]))[0]) for c in lines] == [1023, 1103, 1120]   # everyone but themselves
+
+
+@pytest.mark.asyncio
+async def test_a_locked_call_is_left_alone_by_end_hold_reject_and_next(client, db_session):
+    _s, show, (guest, a, b, w) = await _show_with_callers(db_session, [
+        ("Guest", CallStatus.ON_AIR), ("Avi", CallStatus.ON_AIR), ("Berel", CallStatus.APPROVED), ("Wolf", CallStatus.WAITING)])
+    headers = await _admin_headers(db_session)
+    base = f"/api/v1/live-shows/{show.id}/calls"
+    r = await client.post(f"{base}/{guest.id}/lock", json={"locked": True}, headers=headers)
+    assert r.status_code == 200 and r.json()["locked"] is True
+    listed = {c["id"]: c["locked"] for c in (await client.get(base, headers=headers)).json()["calls"]}
+    assert listed[str(guest.id)] is True and listed[str(a.id)] is False
+    for action in ("end-call", "hold"):
+        r = await client.post(f"{base}/{guest.id}/{action}", headers=headers)
+        assert r.status_code == 409 and r.json()["detail"] == "This call is locked. Unlock it first."
+    await client.post(f"{base}/{w.id}/lock", json={"locked": True}, headers=headers)
+    assert (await client.post(f"{base}/{w.id}/reject", headers=headers)).status_code == 409
+    # Next ends the unlocked caller only; the guest stays on air with the next caller
+    r = await client.post(f"{base}/next", headers=headers)
+    assert r.status_code == 200 and r.json() == {"ended": str(a.id), "on_air": str(b.id)}
+    assert await _statuses(db_session, [guest, a, b, w]) == ["on_air", "completed", "on_air", "waiting"]
+    await client.post(f"{base}/{b.id}/end-call", headers=headers)
+    r = await client.post(f"{base}/next", headers=headers)
+    assert r.status_code == 409 and "locked" in r.json()["detail"]
+    # Unlocked: everything works again
+    r = await client.post(f"{base}/{guest.id}/lock", json={"locked": False}, headers=headers)
+    assert r.json()["locked"] is False
+    assert (await client.post(f"{base}/{guest.id}/end-call", headers=headers)).status_code == 200
+    assert (await client.post(f"{base}/{guest.id}/lock", json={"locked": True})).status_code in (401, 403)
+    assert (await client.post(f"{base}/{guest.id}/lock", json={}, headers=headers)).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_dump_and_drop_takes_a_locked_caller_off_too(client, db_session):
+    station, show, (guest,) = await _show_with_callers(db_session, [("Guest", CallStatus.ON_AIR)], {"live_delay_seconds": 2})
+    headers = await _admin_headers(db_session)
+    await client.post(f"/api/v1/live-shows/{show.id}/calls/{guest.id}/lock", json={"locked": True}, headers=headers)
+    relay = live_shows_ws.live_relay
+    await relay.set_on_air(str(station.id), str(show.id), delay=2.0)
+    air = relay.airs[str(station.id)]
+    air.feed(np.zeros(RATE * 2, dtype=np.int16) + 1000)
+    r = await client.post(f"/api/v1/live-shows/{show.id}/dump", json={"drop_caller": True}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert await _statuses(db_session, [guest]) == ["completed"]
+    await air.stop()

@@ -381,3 +381,4 @@ INGEST 2026-11-18 live-shows.md up to four callers on air together (Next ends th
 INGEST 2026-11-18 live-shows.md staff chat between host and screener: LiveChatMessage, GET/POST /live-shows/{id}/chat, `chat` socket event, ChatPanel on both screens; never on air
 INGEST 2026-11-18 live-shows.md caller history: caller_key (tel:/web: id kept by the call-in page), CallerProfile priority/blocked/note, history on every call row, /caller-profiles list; a web block is per browser, not a wall
 INGEST 2026-11-18 live-shows.md live.mp3 opens with silence a second before first air (was 204: 2.3 s of silence at take-over); host-gone wait noted at the socket close, not at a scheduler pass (17.5 s of silence on Jerusalem)
+INGEST 2026-11-18 live-shows.md lock a call (End Call, Hold, Reject, Next leave it; Dump-and-drop does not); skin greys disabled coloured buttons; engine tick no longer sends live off in the second before first air (song blip at take-over)

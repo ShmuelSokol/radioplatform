@@ -203,6 +203,7 @@ async def _add_missing_columns(engine):
         "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS download_count INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE show_archives ADD COLUMN IF NOT EXISTS live_show_id UUID REFERENCES live_shows(id) ON DELETE SET NULL",
         "ALTER TABLE call_in_requests ADD COLUMN IF NOT EXISTS caller_key VARCHAR(120)",
+        "ALTER TABLE call_in_requests ADD COLUMN IF NOT EXISTS locked BOOLEAN NOT NULL DEFAULT false",
         "CREATE INDEX IF NOT EXISTS ix_call_in_requests_caller_key ON call_in_requests (caller_key)",
         # Link library assets to sponsors
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS sponsor_id UUID REFERENCES sponsors(id) ON DELETE SET NULL",

@@ -88,7 +88,10 @@
 .qn-site :is(button, a, label)[class*="bg-"]:is([class*=" bg-red-"], [class^="bg-red-"], [class*=" bg-rose-"], [class^="bg-rose-"]):not([class~="rounded-full"]):not(.qn-plain),
 .qn-site :is(button, a, label)[class*="bg-"]:is([class*=" bg-red-"], [class^="bg-red-"], [class*=" bg-rose-"], [class^="bg-rose-"]):not([class~="rounded-full"]):not(.qn-plain):hover:not(:disabled) { color: #a00000; font-weight: 700; }
 .qn-site :is(button, a, label)[class*="bg-"]:not([class~="rounded-full"]) * { color: inherit; }
-.qn-site button:disabled:not([class~="rounded-full"]) { color: #808080; text-shadow: 1px 1px 0 #fff; opacity: 1; }
+/* A button that cannot be pressed is greyed whatever its colour. Without !important the
+   red and main-action rules above (more specific) kept their red or bold black label, so
+   a disabled End Call or Dump looked ready to press (Host Console, 2026-11-18). */
+.qn-site button:disabled:not([class~="rounded-full"]) { color: #808080 !important; font-weight: 400 !important; text-shadow: 1px 1px 0 #fff; opacity: 1; }
 .qn-site :is(button, a):focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
 /* Buttons and links written as plain coloured words */
 .qn-site :is(button, a):not([class*="bg-"]) { text-underline-offset: 2px; }

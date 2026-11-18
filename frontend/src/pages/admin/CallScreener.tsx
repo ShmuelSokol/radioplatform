@@ -7,6 +7,7 @@ import type { CallInRequest } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
 import CallerHistory from './live/CallerHistory';
+import LockButton from './live/LockButton';
 import MarkedCallers from './live/MarkedCallers';
 import ChatPanel from './live/ChatPanel';
 import TalkButton, { TalkNote } from './live/TalkButton';
@@ -217,8 +218,13 @@ export default function CallScreener() {
                   <span className="text-red-300 font-bold text-lg">
                     {onAirCaller.caller_name || onAirCaller.caller_phone}
                   </span>
-                  <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse">
-                    ON AIR
+                  <span className="flex items-center gap-1 shrink-0">
+                    {onAirCaller.locked && (
+                      <span className="text-[10px] bg-yellow-600 text-white px-2 py-0.5 rounded-full font-bold" data-testid="locked-badge">LOCKED</span>
+                    )}
+                    <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse">
+                      ON AIR
+                    </span>
                   </span>
                 </div>
                 <div className="text-[11px] text-gray-500 mb-3">
@@ -235,17 +241,22 @@ export default function CallScreener() {
                   <button
                     onClick={() => handleHold(onAirCaller.id)}
                     data-testid="hold-button"
-                    title="Off the air, still connected: back to Approved"
-                    className="flex-1 bg-amber-800 hover:bg-amber-700 text-amber-200 px-3 py-2 rounded text-sm transition"
+                    disabled={!!onAirCaller.locked}
+                    title={onAirCaller.locked ? 'This call is locked. Unlock it first.' : "Off the air, still connected: back to Approved"}
+                    className="flex-1 bg-amber-800 hover:bg-amber-700 text-amber-200 px-3 py-2 rounded text-sm transition disabled:opacity-40"
                   >
                     Hold
                   </button>
                   <button
                     onClick={() => handleEndCall(onAirCaller.id)}
-                    className="flex-1 bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
+                    data-testid="end-call-button"
+                    disabled={!!onAirCaller.locked}
+                    title={onAirCaller.locked ? 'This call is locked. Unlock it first.' : undefined}
+                    className="flex-1 bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition disabled:opacity-40"
                   >
                     End Call
                   </button>
+                  <LockButton showId={showId} caller={onAirCaller} />
                 </div>
               </div>
               ))}
@@ -261,7 +272,7 @@ export default function CallScreener() {
               <button
                 onClick={handleNext}
                 data-testid="next-caller-button"
-                title="Ends every call on air and puts the caller who waited longest on air"
+                title="Ends every call on air that is not locked and puts the caller who waited longest on air"
                 className="bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1.5 rounded text-[11px] font-bold transition"
               >
                 Next caller

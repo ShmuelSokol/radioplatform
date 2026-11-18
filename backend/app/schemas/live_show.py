@@ -72,6 +72,7 @@ class CallInRequestInDB(BaseModel):
     updated_at: datetime
     # Earlier calls and the staff's standing for this caller (caller_history.with_history)
     history: dict | None = None
+    locked: bool = False
 
 
 class CallInRequestListResponse(BaseModel):
