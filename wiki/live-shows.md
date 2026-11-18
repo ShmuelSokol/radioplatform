@@ -97,3 +97,19 @@ A listener calls from `/call/<station id>` (linked from the Listen page's live b
 - Off until the microphone is open (the audio context exists only then).
 - Buttons are edited in the control room, not here.
 - Check: `ONLY=carts node e2e/live-delay.cjs <station id>` (recordings are served by the test; listeners must get the cart's tone 3 s later, also with the mic muted).
+
+## Talkback (talking to a caller off the air)
+
+The screener (Call Screener) or the host (Host Console) presses **Talk off air** on a waiting or approved web caller. `hooks/useTalkback.ts` opens a second microphone capture and its own socket, `/ws/live/{show}/talk/{call}` (same sign-in rule as the host's microphone). The server sets `CallerLine.talk`:
+
+- what the staff member says goes to that caller's socket only; the caller's microphone frames go back to the staff socket instead of the mix. Nothing passes `StationLiveRelay.audio`, so nothing can reach listeners or the delay.
+- while it is set the caller does not get the show (two streams in one player would stutter); the caller's page is told `{"type":"talk","on":true}` and shows "You are not on the air".
+- it ends when the staff member presses End talk, the caller goes **on air** (`caller_status` ends it first, staff socket closed with 4000), the caller leaves (4004), or someone else starts talking to the same caller (the first is closed with 4000 and goes back silently). A caller on air cannot be taken into a talk (4009): Hold first.
+- on the Host Console the host's on-air microphone is muted for the length of the talk (`setMuted(micOff || coughing || talking)`), the screen says TALKING OFF AIR, and a mute set before the talk stays.
+- Phone (Twilio) callers have no page socket, so they get the "not connected from the website" message.
+- Checks: `tests/test_live_talkback.py`, `ONLY=talk node e2e/live-delay.cjs <station id>` (listeners must receive nothing of the screener's 1000 Hz or the caller's 700 Hz).
+
+The show also waits (`hold_for_timed_items`) for a hard timed item due up to 8 s after its delay fills, not only 2 s: the player may start such an item early, and a take-over at that moment left 0.8 s of the time check on the stream.
+
+Without ffmpeg on the machine `live_recording.start` records nothing and says so in the log (the GitHub runner has none).
+

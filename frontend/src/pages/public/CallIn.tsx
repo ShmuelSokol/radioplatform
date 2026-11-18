@@ -38,6 +38,7 @@ export default function CallIn() {
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
+  const [talk, setTalk] = useState(false); // the show's staff are talking to this caller off the air
   const [lookupFailed, setLookupFailed] = useState(false);
   const hangUpRef = useRef<() => void>(() => {});
 
@@ -139,6 +140,7 @@ export default function CallIn() {
         if (e.data instanceof ArrayBuffer) { show.push(e.data); return; }
         try {
           const msg = JSON.parse(e.data);
+          if (msg.type === 'talk') { setTalk(!!msg.on); return; }
           if (msg.type !== 'call_status') return;
           if (msg.status === 'completed' || msg.status === 'abandoned') finish('ended');
           else if (msg.status === 'rejected') finish('rejected');
@@ -205,6 +207,11 @@ export default function CallIn() {
                   {status === 'on_air' && <span className="inline-block w-3 h-3 bg-red-500 rounded-full animate-pulse mr-2 align-middle" />}
                   {STATUS_TEXT[status]}
                 </div>
+                {talk && status !== 'on_air' && (
+                  <div className="rounded-lg p-4 font-medium bg-yellow-50 text-yellow-900 border border-yellow-300" role="status" data-testid="talk-note">
+                    The show's staff are talking to you now. You are not on the air: only they can hear you.
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-gray-500 w-20">Your mic</span>
                   <div className="flex-1 h-2 bg-gray-200 rounded">
