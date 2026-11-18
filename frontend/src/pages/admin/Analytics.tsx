@@ -12,8 +12,9 @@ import { useStations } from '../../hooks/useStations';
 function Bar({ value, max, label, sublabel }: { value: number; max: number; label: string; sublabel?: string }) {
   const pct = max > 0 ? (value / max) * 100 : 0;
   return (
-    <div className="flex items-center gap-2 sm:gap-3 text-sm min-w-0">
-      <div className="w-20 sm:w-32 shrink-0 truncate text-right text-gray-600" title={label}>{label}</div>
+    <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 sm:gap-3 text-sm min-w-0">
+      {/* Phone: the name takes the whole width above its bar and wraps, so titles can be told apart */}
+      <div className="w-full sm:w-32 shrink-0 break-words sm:truncate sm:text-right text-gray-600" title={label}>{label}</div>
       <div className="flex-1 min-w-0 bg-gray-100 rounded-full h-5 overflow-hidden">
         <div className="bg-blue-500 h-full rounded-full transition-all" style={{ width: `${pct}%` }} />
       </div>
@@ -21,6 +22,14 @@ function Bar({ value, max, label, sublabel }: { value: number; max: number; labe
       {sublabel && <div className="hidden sm:block w-24 shrink-0 truncate text-xs text-gray-400">{sublabel}</div>}
     </div>
   );
+}
+
+/** A row of "By Category": items with no category are told apart by their type, and
+ *  do_not_play (items staff blocked, which only air when played by hand) says so. */
+export function categoryLabel(category: string, assetType: string): string {
+  if (category === 'uncategorized') return `No category (${assetType || 'no type'})`;
+  if (category === 'do_not_play') return 'do_not_play (blocked, played by hand)';
+  return category;
 }
 
 export default function Analytics() {
@@ -138,7 +147,7 @@ export default function Analytics() {
           <div className="space-y-1.5">
             {categories?.map((c, i) => (
               <Bar key={i} value={c.play_count} max={maxCatPlays}
-                label={c.category} sublabel={c.asset_type} />
+                label={categoryLabel(c.category, c.asset_type)} sublabel={c.asset_type} />
             ))}
             {(!categories || categories.length === 0) && (
               <p className="text-gray-400 text-center py-4">No data</p>

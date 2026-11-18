@@ -14,6 +14,12 @@ Every admin and sponsor page fills the window. The rule lives in one place: `fro
 
 Table cells cut their content (`truncate`), so a drop-down drawn inside a cell is cut too (the Library sponsor search box was). Draw cell menus with `components/FloatingMenu.tsx`: it puts the menu on `document.body` at the button's place, keeps it inside the window and closes on scroll. A chip in a cell gets `block max-w-full truncate` and a `title` with the full name. Check: `frontend/e2e/library-display.mjs`.
 
+## Tables on the phone
+
+A table with more columns than a phone holds gets `className="phone-cards ..."` and a `data-label` on each cell that needs its column's name. Under 640 px the skin (`styles/qnet-site.css`) shows each row as a card: one line per cell, columns that were hidden on small screens come back, and the last cell (the actions) is a row of buttons in sight. Used by Blackouts, Show Archives, Users, Rules and Manage Stations. Do not give such tables a sideways scroll on the phone: the action buttons end up out of sight.
+
+The staff layouts leave room under each page on the phone (`pb-36`) so the last controls scroll clear of the floating bug button. Page headings (`h1`) are as wide as their words on every page. Check: `frontend/e2e/display-findings.mjs`.
+
 ## Checking it
 
 `frontend/e2e/admin-layout-audit.mjs` logs in to a running site and backend, opens every admin page at 1920x1080 and iPhone size, and fails on: sideways page scroll, content using under 90% of a desktop window, nav not staying at the top, script errors, failed API calls. It runs at 1920, iPhone 13 (390) and iPhone SE (320). A phone browser widens its layout viewport to fit content that sticks out, so `innerWidth` hides the overflow: the script compares against the device width. (The first version compared against `innerWidth` and passed pages that real Safari showed scrolling sideways.) `SHOTS_DIR=...` saves screenshots; look at them, the checks do not catch ugly.

@@ -256,7 +256,7 @@ export default function Holidays() {
       ) : (
         <div className="bg-white rounded-lg shadow-md overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="phone-cards w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Reason</th>
@@ -274,16 +274,16 @@ export default function Holidays() {
                   const reasonClass = REASON_COLORS[h.reason || 'Manual'] || REASON_COLORS['Manual'];
                   return (
                     <tr key={h.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2.5">
+                      <td data-label="Reason" className="px-4 py-2.5">
                         <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${reasonClass}`}>
                           {h.reason || 'Manual'}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 font-medium text-gray-900">{h.name}</td>
-                      <td className="px-4 py-2.5 text-gray-600">{formatDt(h.start_datetime)}</td>
-                      <td className="px-4 py-2.5 text-gray-600">{formatDt(h.end_datetime)}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-600">{durationHours(h.start_datetime, h.end_datetime)}</td>
-                      <td className="px-4 py-2.5 text-center">
+                      <td data-label="Music off" className="px-4 py-2.5 text-gray-600">{formatDt(h.start_datetime)}</td>
+                      <td data-label="Music on" className="px-4 py-2.5 text-gray-600">{formatDt(h.end_datetime)}</td>
+                      <td data-label="Duration" className="px-4 py-2.5 text-right text-gray-600">{durationHours(h.start_datetime, h.end_datetime)}</td>
+                      <td data-label="Status" className="px-4 py-2.5 text-center">
                         {status === 'active' && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
