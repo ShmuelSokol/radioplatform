@@ -1,19 +1,18 @@
 """When each item last aired on a station, kept in memory.
 
 The rotation pickers (playlists, program blocks) and the control room library ask
-"when did each item last air here?" with a GROUP BY over the station's whole play
-history. That read grows with every play and took 1.3 s at startup and 3.3 s in
-the burst after a deploy. Here it is read in full once per station per process,
-then only the plays since the last read are fetched (the (station_id, start_utc)
-index answers that in milliseconds) and merged in. A full re-read every
-FULL_RELOAD_SECONDS picks up anything written with an older start time.
+"when did each item last air here?". Answering from the station's whole play
+history is a GROUP BY that grows with every play: 16 to 17 s for one station on
+the live database (2026-11-18), and it ran inside requests (a Regenerate, a
+queue refill at the top of the hour).
 
-No request waits for the full read any more (2026-11-18: it took 7.35 s inside a
-Regenerate three minutes after a restart, and once an hour whichever request
-came first paid for it, a song change's top-up included). `warm_all` reads every
-active station in the background at startup, and the hourly re-read runs in the
-background in its own session while requests keep using what is known. Only a
-request that arrives before the warm-up has reached its station reads in full.
+So no request reads the whole history. The first call for a station reads the
+last FIRST_READ_DAYS as plain rows, later calls only the plays since the last
+read (both use the (station_id, start_utc) index and take milliseconds). The
+whole history is read in the background, in its own session, one station at a
+time: once after a station's first read, then daily. `warm_all` makes the first
+read at startup, so the background read has usually finished before any picker
+asks.
 """
 import asyncio
 import time
@@ -24,7 +23,22 @@ from sqlalchemy import func, select
 # Plays are written when they start, a little after their start_utc; re-read this
 # much before the last read so none fall between two reads.
 OVERLAP = timedelta(minutes=10)
-FULL_RELOAD_SECONDS = 3600.0
+# The whole history is read in the background only: once after the first read
+# of a station, then daily. It took 16 to 17 s for one station on the live
+# database (2026-11-18), so no request may wait for it, and stations take turns.
+FULL_RELOAD_SECONDS = 24 * 3600.0
+# What the first read of a station covers. Enough to rank every song that has
+# aired lately; anything older counts as "not aired" until the background read
+# has filled it in a few seconds later.
+FIRST_READ_DAYS = 30
+# False in the tests (conftest): the first read is then the whole history, in
+# the caller's session, so a test sees every play at once.
+BACKGROUND_FULL_READ = True
+# A failed whole-history read is tried again after this long, a failed warm-up read after that long
+RETRY_SECONDS = 600.0
+WARM_RETRY_SECONDS = 2.0
+# A whole-history read slower than this logs the database's plan for it, once per process
+EXPLAIN_OVER_SECONDS = 3.0
 
 
 class _Entry:
@@ -33,7 +47,7 @@ class _Entry:
     def __init__(self) -> None:
         self.last: dict[str, datetime] = {}
         self.read_at: datetime | None = None
-        self.full_at = 0.0
+        self.full_at: float | None = None
 
 
 _cache: dict[str, _Entry] = {}
@@ -45,8 +59,10 @@ def _utc(t: datetime) -> datetime:
 
 
 def reset() -> None:
+    global _reload_lock
     _cache.clear()
     _locks.clear()
+    _reload_lock = None
 
 
 def _full_query(station_id):
@@ -61,39 +77,65 @@ def _full_query(station_id):
 
 def _merge(last: dict, rows) -> None:
     for asset_id, when in rows:
-        if when is None:
+        if when is None or asset_id is None:
             continue
         key, t = str(asset_id), _utc(when)
         if key not in last or last[key] < t:
             last[key] = t
 
 
-async def last_played(db, station_id) -> dict[str, datetime]:
-    """asset id (str) -> last start time on this station. A copy; callers may change it."""
+def _recent_query(station_id, since: datetime):
+    """Plays since `since`, one row each. No GROUP BY on purpose: with it the
+    planner may walk the station's whole (station, asset, start) index to get
+    the groups in order, which is the 16 s read; plain rows by start time use
+    the (station_id, start_utc) index and come back in milliseconds."""
     from app.models.play_log import PlayLog
 
+    return select(PlayLog.asset_id, PlayLog.start_utc).where(
+        PlayLog.station_id == station_id, PlayLog.start_utc >= since
+    )
+
+
+async def last_played(db, station_id) -> dict[str, datetime]:
+    """asset id (str) -> last start time on this station. A copy; callers may change it.
+
+    Never reads the whole history: the first call for a station reads the last
+    FIRST_READ_DAYS, later calls the plays since the last read. Older plays are
+    filled in by the background read (`_reload`), started by the first call."""
     sid = str(station_id)
     lock = _locks.setdefault(sid, asyncio.Lock())
     async with lock:
         entry = _cache.get(sid)
         now = datetime.now(timezone.utc)
-        stmt = _full_query(station_id)
-        if entry is not None:
-            stmt = stmt.where(PlayLog.start_utc >= entry.read_at - OVERLAP)
-        rows = (await db.execute(stmt)).all()
-        if entry is None:
+        if entry is None and not BACKGROUND_FULL_READ:
+            rows = (await db.execute(_full_query(station_id))).all()
             entry = _Entry()
             entry.full_at = time.monotonic()
+        else:
+            since = now - timedelta(days=FIRST_READ_DAYS) if entry is None else entry.read_at - OVERLAP
+            rows = (await db.execute(_recent_query(station_id, since))).all()
+            if entry is None:
+                entry = _Entry()  # full_at None: the whole history has not been read yet
         _merge(entry.last, rows)
         entry.read_at = now
         _cache[sid] = entry
-        if time.monotonic() - entry.full_at > FULL_RELOAD_SECONDS:
+        if entry.full_at is None or time.monotonic() - entry.full_at > FULL_RELOAD_SECONDS:
             entry.full_at = time.monotonic()  # one re-read at a time
             _in_background(_reload(station_id))
         return dict(entry.last)
 
 
 _tasks: set[asyncio.Task] = set()
+_reload_lock: asyncio.Lock | None = None
+
+
+def _reload_turn() -> asyncio.Lock:
+    """One whole-history read at a time, so three stations starting together
+    do not run three 16 s queries side by side."""
+    global _reload_lock
+    if _reload_lock is None:
+        _reload_lock = asyncio.Lock()
+    return _reload_lock
 
 
 def _in_background(coro) -> None:
@@ -104,16 +146,23 @@ def _in_background(coro) -> None:
 
 async def _reload(station_id) -> None:
     """The whole history again, in its own session; then swapped in, keeping any
-    play that was merged in while the read ran."""
+    play that was merged in while the read ran. A failed read (the live database
+    drops connections now and then) is tried again after RETRY_SECONDS."""
     import logging
 
     from app.db.engine import async_session_factory
 
+    log = logging.getLogger(__name__)
     sid = str(station_id)
     try:
-        began = datetime.now(timezone.utc)
-        async with async_session_factory() as session:
-            rows = (await session.execute(_full_query(station_id))).all()
+        async with _reload_turn():
+            began = datetime.now(timezone.utc)
+            started = time.monotonic()
+            async with async_session_factory() as session:
+                rows = (await session.execute(_full_query(station_id))).all()
+                took = time.monotonic() - started
+                if took > EXPLAIN_OVER_SECONDS:
+                    await _explain(session, station_id, took)
         fresh: dict[str, datetime] = {}
         _merge(fresh, rows)
         async with _locks.setdefault(sid, asyncio.Lock()):
@@ -127,21 +176,83 @@ async def _reload(station_id) -> None:
             entry.last = fresh
             entry.full_at = time.monotonic()
     except Exception:
-        logging.getLogger(__name__).warning("Last-played re-read failed for station %s", sid, exc_info=True)
+        log.warning("Last-played whole-history read failed for station %s", sid, exc_info=True)
+        entry = _cache.get(sid)
+        if entry is not None:
+            entry.full_at = time.monotonic() - FULL_RELOAD_SECONDS + RETRY_SECONDS
+
+
+_explained = False
+
+
+async def _explain(session, station_id, took: float) -> None:
+    """Once per process, when the whole-history read was slow: log the
+    database's own account of it (plan, rows, buffers) and the table's indexes.
+    Nobody has SQL access to the live database, and 9 to 19 s for 145,000 rows
+    (2026-11-18) is far more than the query should cost."""
+    global _explained
+    if _explained:
+        return
+    _explained = True
+    import logging
+
+    from sqlalchemy import text
+
+    log = logging.getLogger(__name__)
+    try:
+        if session.bind.dialect.name != "postgresql":
+            return
+        indexes = (await session.execute(text(
+            "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'play_logs'"
+        ))).all()
+        size = (await session.execute(text(
+            "SELECT pg_size_pretty(pg_table_size('play_logs')), pg_size_pretty(pg_indexes_size('play_logs')),"
+            " (SELECT reltuples::bigint FROM pg_class WHERE relname = 'play_logs')"
+        ))).first()
+        plan = (await session.execute(text(
+            "EXPLAIN (ANALYZE, BUFFERS) SELECT asset_id, max(start_utc) FROM play_logs"
+            " WHERE station_id = :sid AND asset_id IS NOT NULL GROUP BY asset_id"
+        ), {"sid": station_id})).all()
+        log.warning(
+            "LAST-PLAYED DIAGNOSIS: the whole-history read took %.1f s. Table %s, indexes %s, about %s rows. "
+            "Indexes: %s. Plan: %s",
+            took, size[0], size[1], size[2],
+            "; ".join(f"{name}: {definition}" for name, definition in indexes),
+            " / ".join(row[0] for row in plan),
+        )
+    except Exception:
+        log.warning("Last-played diagnosis failed", exc_info=True)
 
 
 async def warm_all() -> None:
-    """At startup: read every active station's history before a request needs it."""
+    """At startup: the first (bounded) read of every active station, which also
+    starts its whole-history read in the background. Each station on its own, so
+    one failure does not leave the others for a request to read."""
     import logging
 
     from app.db.engine import async_session_factory
     from app.models.station import Station
 
+    log = logging.getLogger(__name__)
     try:
         async with async_session_factory() as session:
             ids = (await session.execute(select(Station.id).where(Station.is_active.is_(True)))).scalars().all()
-            for station_id in ids:
-                if str(station_id) not in _cache:
-                    await last_played(session, station_id)
     except Exception:
-        logging.getLogger(__name__).warning("Last-played warm-up failed", exc_info=True)
+        log.warning("Last-played warm-up could not list the stations", exc_info=True)
+        return
+    for station_id in ids:
+        if str(station_id) in _cache:
+            continue
+        for attempt in (1, 2, 3):
+            try:
+                async with async_session_factory() as session:
+                    await last_played(session, station_id)
+                break
+            except Exception:
+                # "connection was closed in the middle of operation" left every
+                # station unread after the 08:35Z restart on 2026-11-18
+                log.warning(
+                    "Last-played warm-up failed for station %s (attempt %d of 3)",
+                    station_id, attempt, exc_info=True,
+                )
+                await asyncio.sleep(WARM_RETRY_SECONDS)

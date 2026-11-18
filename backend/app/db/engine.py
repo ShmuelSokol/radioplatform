@@ -65,11 +65,31 @@ def _after_cursor_execute(conn, cursor, statement, parameters, context, executem
         # Parameter values are left out: they hold emails and phone numbers, and bug
         # reports copy this log. Only how many there were is kept.
         logger.warning(
-            "SLOW QUERY (%.3fs): %s | params=%s",
+            "SLOW QUERY (%.3fs): %s | params=%s | for %s",
             elapsed,
-            statement[:500],
+            _shown(statement),
             _redacted_params(parameters, executemany),
+            _asked_by(),
         )
+
+
+def _shown(statement: str) -> str:
+    """The start and the end of a statement. The start alone (the column list)
+    did not say which query it was: the WHERE and ORDER BY are at the end."""
+    statement = " ".join(statement.split())
+    if len(statement) <= 800:
+        return statement
+    return f"{statement[:500]} ... {statement[-300:]}"
+
+
+def _asked_by() -> str:
+    """The request the query ran for, or "background"."""
+    try:
+        from app.core.log_buffer import request_path_var
+
+        return request_path_var.get() or "background"
+    except Exception:
+        return "unknown"
 
 
 def _redacted_params(parameters, executemany: bool) -> str | None:
