@@ -1835,7 +1835,8 @@ async def sc_live_show_no_host(h: Harness) -> None:
                 break
             await asyncio.sleep(0.5)
         late = None if t_end is None else t_end - planned_end.timestamp()
-        h.check(name, late is not None and -1.0 <= late <= 5.0,
+        # PR 320 checks every 10 s; the music plays on meanwhile, so a few seconds late is harmless
+        h.check(name, late is not None and -1.0 <= late <= 13.0,
                 f"the scheduler ends the show at its planned end even though nobody heard it "
                 f"({'still live 15 s after it' if late is None else f'{late:+.1f} s'})")
         if t_end is None:
@@ -2010,8 +2011,11 @@ async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> N
     first = next((t for t, _ in listener.frames if t >= t_start), None)
     last = max((t for t, _ in listener.frames), default=None)
     heard_at = None if first is None else first - t_start
-    h.check(name, heard_at is not None and delay - 0.8 <= heard_at <= delay + 1.5,
-            f"listeners hear the host one delay later ({'never' if heard_at is None else f'{heard_at:.1f} s'}, delay {delay:.0f} s)")
+    # Since PR 320 the pre-roll also waits for a time check on air, so the host comes in after it
+    latest = delay + (6.0 if preroll_item else 0.0) + 1.5
+    h.check(name, heard_at is not None and delay - 0.8 <= heard_at <= latest,
+            f"listeners hear the host one delay later, or after a time check in the pre-roll "
+            f"({'never' if heard_at is None else f'{heard_at:.1f} s'}, delay {delay:.0f} s)")
     live_on = next((t for t, on in listener.states if on and t >= t_start), None)
     h.check(name, live_on is not None and first is not None and abs(live_on - first) <= 1.0,
             f"listener pages are told LIVE when the host is first heard, not at Start "
