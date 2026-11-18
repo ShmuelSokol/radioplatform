@@ -142,6 +142,38 @@ export const putCallerOnAirAsking = async (showId: string, callId: string): Prom
   }
 };
 
+/** Off the air without hanging up: back to Approved, still connected */
+export const holdCall = async (showId: string, callId: string): Promise<CallInRequest> => {
+  const res = await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/hold`);
+  return res.data;
+};
+
+/**
+ * Next caller in one press: the call on air ends and the approved caller who waited
+ * longest goes on air. Asks first when the delay could not cut the new caller.
+ * Returns an error text to show, or null.
+ */
+export const nextCallerAsking = async (showId: string): Promise<string | null> => {
+  const go = (force: boolean) => apiClient.post(`/live-shows/${showId}/calls/next`, null, force ? { params: { force: true } } : undefined);
+  try {
+    await go(false);
+    return null;
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail;
+    if (detail?.code === 'delay_not_safe') {
+      if (!window.confirm(`${detail.message}\n\nPut the next caller on air anyway?`)) return null;
+      try {
+        await go(true);
+        return null;
+      } catch (again: any) {
+        const d = again?.response?.data?.detail;
+        return typeof d === 'string' ? d : 'Could not go to the next caller';
+      }
+    }
+    return typeof detail === 'string' ? detail : 'Could not go to the next caller';
+  }
+};
+
 export const endCall = async (showId: string, callId: string): Promise<CallInRequest> => {
   const res = await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/end-call`);
   return res.data;
