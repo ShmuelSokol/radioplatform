@@ -737,6 +737,48 @@ async def test_show_end_on_engine_station_leaves_start_to_the_engine(client, db_
     assert playing == []
 
 
+@pytest.mark.asyncio
+async def test_a_timed_item_lost_to_a_live_show_is_closed_when_the_show_ends(client, db_session, eng):
+    """V3-52 (stream harness live_show_over_hard_item, 2026-11-18): a hard item the engine
+    already held came due while the host was on air. It rightly did not air, but no start
+    report ever came, so it stayed "pending" and could air at some later moment."""
+    from app.services import live_show_service
+
+    station, entries, engine, _ = eng
+    now = datetime.now(UTC)
+    lost = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=entries[0].asset_id, position=90,
+                      status="pending", source="auto", timing_mode="hard", preempt_at=now - timedelta(seconds=12))
+    ahead = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=entries[1].asset_id, position=91,
+                       status="pending", source="auto", timing_mode="hard", preempt_at=now + timedelta(seconds=30))
+    # ...and one that was never handed over, or whose hand-over a backend restart forgot
+    unsent = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=entries[2].asset_id, position=92,
+                        status="pending", source="auto", timing_mode="hard", preempt_at=now - timedelta(seconds=40))
+    db_session.add_all([lost, ahead, unsent])
+    await db_session.commit()
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    state = playout_engine.get_state(station.id)
+    state.timed_sent.update({str(lost.id), str(ahead.id)})  # both handed over before the show
+    engine.sent.clear()
+    await live_show_service.end_show(db_session, show.id)
+    await db_session.commit()
+    assert (await _fresh(db_session, lost.id)).status == "skipped"
+    assert (await _fresh(db_session, unsent.id)).status == "skipped"
+    assert str(lost.id) not in state.timed_sent
+    dropped = [p["ids"] for path, p in engine.sent if path == "/timed_drop"]
+    assert len(dropped) == 1 and set(dropped[0]) == {str(lost.id), str(unsent.id)}
+    # The next hand-over takes only what is still ahead: nothing old rides along
+    engine.sent.clear()
+    state.timed_sent.clear()
+    st = await db_session.get(Station, station.id)
+    await db_session.refresh(st)
+    await playout_engine.tick(db_session, st)
+    assert [p["id"] for p in engine.timed()] == [str(ahead.id)]
+    # One still ahead is the engine's to air on its second
+    assert (await _fresh(db_session, ahead.id)).status == "pending" and str(ahead.id) in state.timed_sent
+
+
 # ── Long items (shiur) and the timed lane (B-JOB-87, B-MODE-13) ──────────────
 
 

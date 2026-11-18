@@ -658,6 +658,21 @@ class Harness:
                 return e
         return None
 
+    async def drop_leftover_timed(self) -> list[str]:
+        """Delete timed entries still pending and say what they were (run between scenarios)."""
+        from sqlalchemy import delete
+
+        from app.db.engine import async_session_factory
+        from app.models.queue_entry import QueueEntry
+
+        left = [e for e in await self.rows() if e.status == "pending" and e.preempt_at is not None]
+        if not left:
+            return []
+        async with async_session_factory() as db:
+            await db.execute(delete(QueueEntry).where(QueueEntry.id.in_([e.id for e in left])))
+            await db.commit()
+        return [f"{e.asset.title if e.asset else e.asset_id} ({e.timing_mode or 'soft'}, due {e.preempt_at:%H:%M:%S})" for e in left]
+
     async def clear_pending(self) -> None:
         from sqlalchemy import delete
 
@@ -919,14 +934,16 @@ async def sc_two_sources_same_second(h: Harness) -> None:
     await h.queue([(n, {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}) for n in ("time", "weather")])
     await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8 + 6 + 12)
     items = ("time", "weather", "announce")
-    starts = {n: await h.started_times(n, t1.timestamp() - 5) for n in items}
+    # A song that ends 1 to 8 s before a hard item lets it start early instead of being
+    # chopped (PR 232), so the group may begin up to 8 s before its second
+    starts = {n: await h.started_times(n, t1.timestamp() - 10) for n in items}
     h.check(name, all(len(starts[n]) == 1 for n in items),
             f"each aired once: { {n: len(starts[n]) for n in items} }")
     first = min((starts[n][0][0] for n in items if starts[n]), default=None)
     late = None if first is None else first - t1.timestamp()
-    h.check(name, late is not None and -1.0 <= late <= 2.0,
+    h.check(name, late is not None and -8.5 <= late <= 2.0,
             f"the first of them {'never' if late is None else f'{late:+.1f} s'} from the due second")
-    heard = h.heard(t1.timestamp() - 3, t1.timestamp() + 32)
+    heard = h.heard(t1.timestamp() - 10, t1.timestamp() + 32)
     h.print_timeline(heard, t1.timestamp())
     names = [n for _, n in timeline(heard)]
     runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
@@ -2832,8 +2849,16 @@ async def main_async(names: list[str], keep: bool, local_box: bool = False) -> i
             stack.start_relay()
         stack.start_engine()
         log("engine on air")
+        prev = None
         for n in names:
             log(f"=== {n}")
+            # A timed item one scenario leaves waiting airs in the middle of the next one and
+            # reads there as "aired twice" (2026-11-18). Say whose it was, loudly, and remove it.
+            if prev:
+                left = await h.drop_leftover_timed()
+                if left:
+                    h.check(prev, False, f"left timed items waiting in the queue for the next scenario: {left}")
+            prev = n
             try:
                 await SCENARIOS[n](h)
             except Exception as e:

@@ -40,6 +40,28 @@ function recordAxios(config: unknown, status?: number, error?: string) {
   });
 }
 
+/**
+ * One sign-in renewal at a time: when several requests fail with 401 together
+ * (a page loading five lists), they all wait for the same /auth/refresh call
+ * instead of each sending its own.
+ */
+let renewing: Promise<string> | null = null;
+function renewSession(refreshToken: string): Promise<string> {
+  if (!renewing) {
+    renewing = axios
+      .post(`${API_BASE}/auth/refresh`, { refresh_token: refreshToken })
+      .then((res) => {
+        localStorage.setItem('access_token', res.data.access_token);
+        localStorage.setItem('refresh_token', res.data.refresh_token);
+        return res.data.access_token as string;
+      })
+      .finally(() => {
+        renewing = null;
+      });
+  }
+  return renewing;
+}
+
 /** Fired on window when the server refuses an action this login may not take. */
 export const FORBIDDEN_EVENT = 'kbr:forbidden';
 
@@ -51,17 +73,17 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     recordAxios(originalRequest, error.response?.status, error.response ? undefined : String(error.message || error));
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true;
+      // Sent with a token that has since been renewed by another request: just retry
+      const current = localStorage.getItem('access_token');
+      const sent = originalRequest.headers?.Authorization;
+      if (current && sent && sent !== `Bearer ${current}`) return apiClient(originalRequest);
       const refreshToken = localStorage.getItem('refresh_token');
       if (refreshToken) {
         try {
-          const res = await axios.post(`${API_BASE}/auth/refresh`, {
-            refresh_token: refreshToken,
-          });
-          localStorage.setItem('access_token', res.data.access_token);
-          localStorage.setItem('refresh_token', res.data.refresh_token);
-          originalRequest.headers.Authorization = `Bearer ${res.data.access_token}`;
+          const accessToken = await renewSession(refreshToken);
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
           return apiClient(originalRequest);
         } catch {
           localStorage.removeItem('access_token');

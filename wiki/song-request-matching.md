@@ -66,3 +66,5 @@ never writes `Asset.category`, so a staff edit is never overwritten. The tag is 
 not `true`: Postgres `->>` gives 'true' for a JSON true but SQLite gives 1.
 The old version replaced the category with "requested" and kept the real one in
 `metadata_extra["original_category"]`; the refresh puts those back.
+
+Daily request caps (auto-approve `max_requests_per_day`) count plays and requests from the station's own local midnight (`song_request_service.station_day_start`), not UTC midnight. Test: `backend/tests/test_song_request_station_day.py`.

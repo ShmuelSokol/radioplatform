@@ -91,7 +91,7 @@ def _ids(value) -> list[uuid.UUID]:
 
 def station_write_guard(*, path: dict[str, Resolver] | None = None, body: dict[str, Resolver] | None = None):
     """Router-level dependency. `path` maps path parameter names, and `body`
-    maps JSON body or query field names, to the resolver that turns that id
+    maps JSON or form body or query field names, to the resolver that turns that id
     into a station id. `station_id` in the query or body is always checked."""
     path = path or {}
     fields = {"station_id": station, **(body or {})}
@@ -112,9 +112,16 @@ def station_write_guard(*, path: dict[str, Resolver] | None = None, body: dict[s
             if name in request.path_params:
                 found += [(resolver, k) for k in _ids(request.path_params[name])]
         payload = {}
-        if "json" in request.headers.get("content-type", ""):
+        content_type = request.headers.get("content-type", "")
+        if "json" in content_type:
             try:
                 payload = await request.json()
+            except Exception:
+                payload = {}
+        elif "form" in content_type:  # multipart or url-encoded: a form write names the station too
+            try:
+                form = await request.form()
+                payload = {k: (form.getlist(k) if len(form.getlist(k)) > 1 else form.get(k)) for k in form.keys()}
             except Exception:
                 payload = {}
         for name, resolver in fields.items():

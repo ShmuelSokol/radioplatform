@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useUpdateAsset } from '../hooks/useAssets';
 import { useCategories } from '../hooks/useCategories';
+import FloatingMenu from './FloatingMenu';
 
 const PALETTE = [
   { color: 'bg-red-100 text-red-700', darkColor: 'text-red-300' },
@@ -26,6 +27,9 @@ interface Props {
 export default function AssetCategoryBadge({ assetId, category, dark, compact }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback(() => setOpen(false), []);
   const updateAsset = useUpdateAsset();
   const { data: dynamicCategories } = useCategories();
 
@@ -42,7 +46,8 @@ export default function AssetCategoryBadge({ assetId, category, dark, compact }:
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && !menuRef.current?.contains(t)) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -58,23 +63,23 @@ export default function AssetCategoryBadge({ assetId, category, dark, compact }:
   };
 
   const badgeClass = dark
-    ? `cursor-pointer ${current?.darkColor ?? 'text-gray-600'} hover:underline`
-    : `cursor-pointer inline-block text-xs px-1.5 py-0.5 rounded-full ${current?.color ?? 'bg-gray-100 text-gray-600'} hover:ring-1 hover:ring-gray-300`;
+    ? `cursor-pointer block max-w-full truncate ${current?.darkColor ?? 'text-gray-600'} hover:underline`
+    : `cursor-pointer block max-w-full truncate text-xs px-1.5 py-0.5 rounded-full ${current?.color ?? 'bg-gray-100 text-gray-600'} hover:ring-1 hover:ring-gray-300`;
 
   return (
-    <div ref={ref} className="relative inline-block">
+    <div ref={ref} className="relative inline-block max-w-full align-middle">
       <button
+        ref={buttonRef}
         onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
         className={badgeClass}
-        title="Change category"
+        title={category ? `${label} (change category)` : 'Set category'}
       >
         {compact ? (category === 'do_not_play' ? 'DNP' : label) : label}
         {updateAsset.isPending && <span className="ml-1 animate-pulse">...</span>}
       </button>
       {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className={`absolute z-20 mt-1 ${dark ? 'right-0' : 'left-0'} w-36 rounded shadow-lg py-1 border ${dark ? 'bg-[#1a1a4e] border-[#3a3a7e]' : 'bg-white border-gray-200'}`}>
+        <FloatingMenu anchor={buttonRef} width={160} onClose={closeMenu} menuRef={menuRef}
+          className={`rounded shadow-lg py-1 border ${dark ? 'bg-[#1a1a4e] border-[#3a3a7e]' : 'bg-white border-gray-200'}`}>
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.value}
@@ -97,8 +102,7 @@ export default function AssetCategoryBadge({ assetId, category, dark, compact }:
                 Clear category
               </button>
             )}
-          </div>
-        </>
+        </FloatingMenu>
       )}
     </div>
   );

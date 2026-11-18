@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import apiClient from '../../api/client';
 import { listAllStations } from '../../api/stations';
+import { listenerStation, rememberListenerStation } from '../../lib/lastStation';
 import type { StationListResponse, Station } from '../../types';
 
 interface EpgBlock {
@@ -114,10 +115,11 @@ export default function ProgramGuide() {
     if (!datePicked && stationTz) setSelectedDate(now.date);
   }, [stationTz, datePicked, now.date]);
 
-  // Auto-select first station
+  // Open on the station the link names (?station=), else the one this listener chose
+  // before, else Kol B'ramah Main (not the first name in the alphabet)
   useMemo(() => {
     if (!selectedStation && stations.length > 0) {
-      setSelectedStation(stations[0].id);
+      setSelectedStation(listenerStation(stations, new URLSearchParams(window.location.search).get('station')));
     }
   }, [stations, selectedStation]);
 
@@ -152,7 +154,7 @@ export default function ProgramGuide() {
           {/* Station selector */}
           <select
             value={selectedStation}
-            onChange={(e) => setSelectedStation(e.target.value)}
+            onChange={(e) => { setSelectedStation(e.target.value); rememberListenerStation(e.target.value); }}
             aria-label="Station"
             className="kbr-select flex-1 h-11 bg-[#12123a] border border-[#2a2a5e] text-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-cyan-500 transition"
           >

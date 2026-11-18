@@ -234,3 +234,50 @@ async def test_queue_actions_on_one_station_leave_the_other_alone(client, auth_h
     assert not failed, "\n".join(failed)
     assert not said, "an action on station A mentioned station B, or warned without cause:\n" + "\n".join(said)
     assert await b_state() == before, "an action on station A changed station B"
+
+
+@pytest.mark.asyncio
+async def test_not_on_this_station_stays_on_that_station(client, auth_headers, db_session, monkeypatch):
+    """"Not on this station" pressed in station B's control room (PR 257): the song leaves
+    B's waiting queue only. Station A's copy stays, A does not report it blocked, and A
+    can still queue it; allowing it again on B changes nothing on A either."""
+    import app.api.v1.queue as queue_module
+
+    async def no_replenish(db, station_id):
+        return None
+
+    monkeypatch.setattr(queue_module, "_replenish_queue", no_replenish)
+    a, b = await _two_stations(db_session)
+    song = Asset(id=uuid.uuid4(), title="shared song", duration=180.0,
+                 file_path="https://cdn.example.com/shared.mp3", asset_type="music")
+    db_session.add(song)
+    db_session.add_all([
+        QueueEntry(id=uuid.uuid4(), station_id=a.id, asset_id=song.id, position=9, status="pending", source="auto"),
+        QueueEntry(id=uuid.uuid4(), station_id=b.id, asset_id=song.id, position=9, status="pending", source="auto"),
+    ])
+    await db_session.commit()
+
+    async def waiting(station):
+        rows = (await db_session.execute(
+            select(QueueEntry).where(QueueEntry.station_id == station.id, QueueEntry.asset_id == song.id,
+                                     QueueEntry.status == "pending").execution_options(populate_existing=True))).scalars().all()
+        return len(rows)
+
+    res = await client.post(f"/api/v1/assets/{song.id}/station-block", headers=auth_headers,
+                            json={"station_id": str(b.id), "on": True})
+    assert res.status_code == 200, res.text
+    assert await waiting(b) == 0, "the blocked station still has the song waiting"
+    assert await waiting(a) == 1, "blocking a song on one station took it out of another station's queue"
+    for station, want in ((a, False), (b, True)):
+        got = await client.get(f"/api/v1/assets/{song.id}/station-block", params={"station_id": str(station.id)},
+                               headers=auth_headers)
+        assert got.status_code == 200 and got.json()["blocked"] is want, got.text
+    added = await client.post(f"/api/v1/stations/{a.id}/queue/add", headers=auth_headers, json={"asset_id": str(song.id)})
+    assert added.status_code < 400, added.text
+    assert await waiting(a) == 2
+    # the library still shows it as an ordinary song: nothing global changed
+    await db_session.refresh(song)
+    assert (song.category or "") != "do_not_play"
+    res = await client.post(f"/api/v1/assets/{song.id}/station-block", headers=auth_headers,
+                            json={"station_id": str(b.id), "on": False})
+    assert res.status_code == 200 and await waiting(a) == 2

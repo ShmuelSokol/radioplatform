@@ -56,7 +56,9 @@ async def main() -> None:
         user.hashed_password = hash_password(password)
         user.role, user.is_active = UserRole.ADMIN, True
         for name, tag, tz, wants in STATIONS:
-            st = Station(id=uuid.uuid4(), name=name, timezone=tz)
+            # Every mode has an explicit value, so the walk's end-of-run check sees a switch left changed
+            st = Station(id=uuid.uuid4(), name=name, timezone=tz, automation_config={
+                "spots_on": True, "hard_start": True, "hourly_time_announcement": False, "weather_enabled": False})
             db.add(st)
             await db.flush()
             kind = "story" if wants == "story" else "music"

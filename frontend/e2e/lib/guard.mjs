@@ -64,7 +64,7 @@ const IN_PAGE = () => {
 const DEFAULT_ALLOW = [
   [/net::ERR_ABORTED/, 'a request the page itself cancelled (navigation, a newer request)'],
   [/Failed to load resource: net::ERR_ABORTED/, 'same'],
-  [/Failed to read the 'localStorage' property from 'Window'/, 'a start-up script running on the blank page before the site loads'],
+  [(rec) => rec.kind === 'uncaught error' && /about:blank/.test(rec.url || ''), "a test's start-up script running on the blank page before the site loads"],
 ];
 
 // Every guard made in this process, and what the whole test expects, for guardReport()

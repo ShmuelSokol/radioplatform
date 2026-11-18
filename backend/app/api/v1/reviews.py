@@ -1,7 +1,8 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_manager, require_staff
@@ -26,6 +27,10 @@ router = APIRouter(prefix="/reviews", tags=["reviews"])
 # leave the item's status as it was.
 DECIDING = ("approved", "rejected")
 
+# A claim from /next that sees no save for this long is given up (the reviewer closed
+# the tab or walked away): the item is offered again by the next /next.
+CLAIM_EXPIRES = timedelta(minutes=30)
+
 
 async def _set_asset_review_status(db: AsyncSession, asset_id, status: str | None) -> None:
     if status not in DECIDING:
@@ -45,6 +50,11 @@ async def create_queue(
         asset_uuids = [uuid.UUID(str(a)) for a in body.asset_ids]
     except ValueError:
         raise HTTPException(status_code=400, detail="One of the library item ids is not valid")
+    if asset_uuids:
+        found = set((await db.execute(select(Asset.id).where(Asset.id.in_(asset_uuids)))).scalars())
+        missing = [str(a) for a in asset_uuids if a not in found]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"{len(missing)} of these items are not in the library: {', '.join(missing[:5])}")
     queue = ReviewQueue(
         name=body.name,
         description=body.description,
@@ -118,10 +128,18 @@ async def get_next_item(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_staff),
 ):
-    """Get the next unreviewed item and assign to current user."""
+    """Get the next unreviewed item and assign to current user. An item claimed
+    earlier but not saved for CLAIM_EXPIRES counts as unreviewed again."""
+    now = datetime.now(UTC)
     result = await db.execute(
         select(ReviewItem)
-        .where(ReviewItem.queue_id == queue_id, ReviewItem.status == "pending")
+        .where(
+            ReviewItem.queue_id == queue_id,
+            or_(
+                ReviewItem.status == "pending",
+                and_(ReviewItem.status == "in_review", ReviewItem.updated_at < now - CLAIM_EXPIRES),
+            ),
+        )
         .order_by(ReviewItem.position)
         .limit(1)
     )
@@ -130,6 +148,7 @@ async def get_next_item(
         return None
     item.status = "in_review"
     item.assigned_to = user.id
+    item.updated_at = now  # the claim's clock
     await db.commit()
     await db.refresh(item)
     return item
@@ -200,11 +219,15 @@ async def batch_update(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
+    try:
+        item_uuids = [uuid.UUID(str(i)) for i in body.item_ids]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="One of the item ids is not valid")
     updated = 0
-    for item_id_str in body.item_ids:
+    for item_uuid in item_uuids:
         result = await db.execute(
             select(ReviewItem).where(
-                ReviewItem.id == uuid.UUID(item_id_str),
+                ReviewItem.id == item_uuid,
                 ReviewItem.queue_id == queue_id,
             )
         )
@@ -278,6 +301,8 @@ async def add_comment(
     user: User = Depends(require_staff),
 ):
     from app.models.review_action import ReviewAction
+    if await db.get(Asset, asset_id) is None:
+        raise HTTPException(status_code=404, detail="Library item not found")
     action = ReviewAction(
         asset_id=asset_id,
         user_id=user.id,

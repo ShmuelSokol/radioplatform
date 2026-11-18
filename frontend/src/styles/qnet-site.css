@@ -153,8 +153,10 @@ nav.qn-site [class*="absolute"][class*="top-full"] { border: 0; box-shadow: var(
 nav.qn-site .qn-brand { color: #000080; }
 nav.qn-site .qn-brand:hover { background: transparent; color: #000080; }
 
-/* Phones: fingers need the room, so buttons and boxes keep a tall enough face */
+/* Phones: fingers need the room, so buttons and boxes keep a tall enough face.
+   A control that sets its own height (min-h-[44px]) keeps it: this rule used to pull a
+   44 px tap target down to 36 px (song request match results). */
 @media (pointer: coarse) and (max-width: 767px) {
-  .qn-site main :is(button, a, label)[class*="bg-"]:not([class~="rounded-full"]):not(.qn-plain), .qn-site main select,
+  .qn-site main :is(button, a, label)[class*="bg-"]:not([class~="rounded-full"]):not(.qn-plain):not([class*="min-h-"]), .qn-site main select,
   .qn-site main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]) { min-height: 36px; }
 }

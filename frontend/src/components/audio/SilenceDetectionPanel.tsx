@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useDetectSilence, useTrimAsset, useRestoreOriginal } from '../../hooks/useAssets';
 import Spinner from '../Spinner';
+import { useEscape } from '../../hooks/useEscape';
 import type { WaveformPlayerHandle } from './WaveformPlayer';
 import type { SilenceRegion } from '../../types';
 
@@ -19,6 +20,7 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
   const [showConfirm, setShowConfirm] = useState<'auto' | 'region' | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [trimPending, setTrimPending] = useState(false);
+  useEscape(showConfirm !== null && !trimPending, () => setShowConfirm(null));
 
   const detectMutation = useDetectSilence();
   const trimMutation = useTrimAsset();
@@ -325,7 +327,7 @@ export default function SilenceDetectionPanel({ assetId, waveformRef, onRegionsD
       {/* Confirmation modal */}
       {showConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md mx-4">
+          <div role="dialog" aria-modal="true" aria-label="Confirm trim" className="bg-white rounded-lg p-6 max-w-md mx-4">
             <h4 className="text-lg font-bold mb-2">
               {showConfirm === 'auto' ? 'Confirm Auto-Clip' : 'Confirm Region Trim'}
             </h4>

@@ -60,6 +60,7 @@ async def create_alert(
         escalated = _SEVERITY_ORDER.get(a_sev.value, 0) > _SEVERITY_ORDER.get(existing.severity.value, 0)
         if escalated:
             existing.severity = a_sev
+            existing.message = message
         await db.flush()
         if escalated:
             # A worse repeat (warning -> critical) texts and pushes again, once per new
