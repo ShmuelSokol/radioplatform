@@ -16,6 +16,8 @@ interface UseHostAudioReturn {
   stopCart: () => void;
   /** The cart sounding now, or loading; null when none. */
   cartPlaying: string | null;
+  /** The connection dropped and is being opened again; the microphone is kept. */
+  reconnecting: boolean;
 }
 
 /**
@@ -27,6 +29,9 @@ interface UseHostAudioReturn {
  */
 // The format and resampler are shared with web callers (lib/pcm.ts). The server
 // sends the callers on air back down this socket, so the host hears them.
+const RECONNECT_EVERY_MS = 1000;
+const RECONNECT_FOR_MS = 60000;   // then the host is told and must press Start Broadcasting
+
 export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -46,6 +51,9 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   const busRef = useRef<GainNode | null>(null);
   const cartRef = useRef<{ id: string; source: AudioBufferSourceNode | null } | null>(null);
   const [cartPlaying, setCartPlaying] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const authedRef = useRef<WebSocket | null>(null);
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setMuted = useCallback((on: boolean) => {
     mutedRef.current = on;
     setMutedState(on);
@@ -149,52 +157,73 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
       analyserRef.current = analyser;
       rafRef.current = requestAnimationFrame(updateLevel);
 
-      // Connect audio WebSocket
-      const ws = connectAudioWS();
-      if (!ws) return;
-
-      ws.onopen = () => {
-        // The server reads a text auth message first, then audio. The token used to go
-        // in the address instead: the server dropped the socket at once (no host
-        // audio ever arrived) and the address, token included, was written to the logs.
-        ws.send(JSON.stringify({ type: 'auth', token: localStorage.getItem('access_token') || '' }));
-        // About 85 ms of microphone per frame
-        const processor = ctx.createScriptProcessor(4096, 1, 1);
-        const resample = makeResampler(ctx.sampleRate);
-        processor.onaudioprocess = (e) => {
-          // Muted: frames still go (they are the clock that carries the callers and
-          // the carts); the microphone's gain is closed, so they hold no microphone
-          const pcm = resample(e.inputBuffer.getChannelData(0));
-          if (ws.readyState === WebSocket.OPEN && pcm.length) ws.send(pcm.buffer);
-        };
-        const micGain = ctx.createGain();
-        micGain.gain.value = mutedRef.current ? 0 : 1;
-        const bus = ctx.createGain();
-        source.connect(micGain);
-        micGain.connect(bus);
-        bus.connect(processor);
-        micGainRef.current = micGain;
-        busRef.current = bus;
-        processor.connect(ctx.destination); // runs only when connected; its output is silent
-        processorRef.current = processor;
-        setIsRecording(true);
+      // The microphone and the carts meet in `bus`; a processor turns the bus into
+      // frames for whichever socket is open (about 85 ms each). Built once: the
+      // socket can be opened again without touching the microphone.
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const resample = makeResampler(ctx.sampleRate);
+      processor.onaudioprocess = (e) => {
+        // Muted: frames still go (they are the clock that carries the callers and
+        // the carts); the microphone's gain is closed, so they hold no microphone
+        const pcm = resample(e.inputBuffer.getChannelData(0));
+        const ws = wsRef.current;
+        if (ws && authedRef.current === ws && ws.readyState === WebSocket.OPEN && pcm.length) ws.send(pcm.buffer);
       };
+      const micGain = ctx.createGain();
+      micGain.gain.value = mutedRef.current ? 0 : 1;
+      const bus = ctx.createGain();
+      source.connect(micGain);
+      micGain.connect(bus);
+      bus.connect(processor);
+      micGainRef.current = micGain;
+      busRef.current = bus;
+      processor.connect(ctx.destination); // runs only when connected; its output is silent
+      processorRef.current = processor;
 
       // Callers on air, heard by the host (use headphones, or they go out again on the mic)
       const callers = new PcmPlayer(ctx);
-      ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) callers.push(e.data); };
 
-      ws.onerror = () => setError('Audio WebSocket connection failed');
-      ws.onclose = () => {
-        // Closed by the server or the network, not by Stop Broadcasting: the page must
-        // not go on showing "on air" (the station goes back to music when the host is lost)
-        if (wsRef.current === ws) {
+      let lostAt = 0;       // when the connection was lost (0 = it is up)
+      let everOpen = false;
+      const open = () => {
+        if (audioContextRef.current !== ctx) return;   // stopped meanwhile
+        const ws = connectAudioWS();
+        if (!ws) return;
+        wsRef.current = ws;
+        ws.onopen = () => {
+          // The server reads a text auth message first, then audio. The token used to go
+          // in the address instead: the server dropped the socket at once (no host
+          // audio ever arrived) and the address, token included, was written to the logs.
+          ws.send(JSON.stringify({ type: 'auth', token: localStorage.getItem('access_token') || '' }));
+          authedRef.current = ws;
+          everOpen = true;
+          lostAt = 0;
+          setReconnecting(false);
+          setError(null);
+          setIsRecording(true);
+        };
+        ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) callers.push(e.data); };
+        ws.onclose = (e) => {
+          if (wsRef.current !== ws) return;   // Stop Broadcasting, or a newer socket
+          // The server restarted or the network dropped: keep the microphone and try
+          // again for a while, so the host is back on air without pressing anything
+          // (a deploy during a show left 11 s of silence until End, 2026-11-18).
+          // Not when the server said why: 4000 the station went back to music after
+          // no sound came, 4001/4003 not signed in, 4004 no such show.
+          const told = [4000, 4001, 4003, 4004].includes(e.code);
+          if (!lostAt) lostAt = Date.now();
+          if (everOpen && !told && Date.now() - lostAt < RECONNECT_FOR_MS) {
+            setReconnecting(true);
+            retryRef.current = setTimeout(open, RECONNECT_EVERY_MS);
+            return;
+          }
           stopRef.current();
-          setError('The connection to the station was lost. Press Start Broadcasting to go back on air.');
-        }
+          setError(everOpen
+            ? 'The connection to the station was lost. Press Start Broadcasting to go back on air.'
+            : 'Audio WebSocket connection failed');
+        };
       };
-
-      wsRef.current = ws;
+      open();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to access microphone');
     }
@@ -216,6 +245,9 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
       mediaStreamRef.current = null;
     }
 
+    if (retryRef.current) { clearTimeout(retryRef.current); retryRef.current = null; }
+    authedRef.current = null;
+    setReconnecting(false);
     if (wsRef.current) {
       const ws = wsRef.current;
       wsRef.current = null;   // first: its onclose then knows this was meant
@@ -248,5 +280,5 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     };
   }, [stopRecording]);
 
-  return { isRecording, startRecording, stopRecording, audioLevel, error, muted, setMuted, playCart, stopCart, cartPlaying };
+  return { isRecording, startRecording, stopRecording, audioLevel, error, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting };
 }

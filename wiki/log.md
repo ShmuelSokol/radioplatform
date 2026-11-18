@@ -373,3 +373,4 @@ UPDATE 2026-11-18 live-shows.md host gone is counted from the last frame (was: f
 INGEST 2026-11-18 live-shows.md live shows are recorded from the delay line's output (what listeners heard, no dumped audio) and land in Archives as drafts; live_record_shows setting
 UPDATE 2026-11-18 air-watch.md hour_missing also checks hh:30 when the station plays a half-hour time check on the second and one was queued for that minute
 INGEST 2026-11-18 live-shows.md talkback: staff talk to a web caller off the air on /ws/live/{show}/talk/{call}; ends when the caller goes on air; host mic to listeners muted meanwhile. Show waits for a hard item due within fill + 10 s. No recorder without ffmpeg
+INGEST 2026-11-18 live-shows.md a backend restart during a show: the host page reconnects by itself for 60 s and is heard at once (was: stopped with an error, silence until the host pressed Start again)

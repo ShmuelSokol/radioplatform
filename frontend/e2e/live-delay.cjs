@@ -11,6 +11,7 @@
  * Part F (ONLY=callers): the caller desk (the caller's topic and notes, Hold, Next caller).
  * Part H (ONLY=carts): carts on the Host Console (jingles played into the show).
  * Part I (ONLY=talk): talkback, the screener or host talking to a caller off the air.
+ * Part J (ONLY=restart, with BACKEND_RESTART=<command>): the server restarts during a show.
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
  * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
@@ -487,7 +488,8 @@ function hostMic(showId, token) {
           if (!(st.automation_config || {}).live_show_id) back = (Date.now() - gone) / 1000;
         }
         // 6 s of delay play out, then 5 s without a host
-        check('E4 host gone: the station is handed back to its music by itself', back !== null && back > 8 && back < 20, `${back} s after the page closed`);
+        check('E4 host gone: the station is handed back to its music by itself', back !== null && back > 5.5 && back < 10, // the 6 s delay plays out, then at once (the 5 s limit counts from the last frame)
+          `${back} s after the page closed`);
         const s2 = (await api('GET', `/live-shows/${show.id}`)).json;
         check('E5 the show stays open for the host to come back', s2.status === 'live' && !l.live(), s2.status);
         const alerts = (await api('GET', '/alerts?limit=20')).json;
@@ -915,6 +917,63 @@ function hostMic(showId, token) {
       } finally {
         if (mic) mic.close();
         if (caller) caller.close();
+        await browser.close();
+      }
+    }
+    // ---------- Part J: the server restarts during a show (needs BACKEND_RESTART, a command that restarts the backend) ----------
+    if (ONLY === 'restart') {
+      if (!process.env.BACKEND_RESTART) { console.error('ONLY=restart needs BACKEND_RESTART="<command that restarts the backend and returns when it answers>"'); process.exit(2); }
+      await setConfig({ live_delay_seconds: 3, live_dump_seconds: 0, live_host_gone_seconds: 15 });
+      const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'restart-'));
+      { const rate = 48000, n = rate * 30, buf = Buffer.alloc(44 + n * 2);
+        buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+        buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+        for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 440 * i / rate)), 44 + i * 2);
+        fs.writeFileSync(path.join(DIR, 'host.wav'), buf); }
+      const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.join(DIR, 'host.wav')}`, '--autoplay-policy=no-user-gesture-required'] });
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      try {
+        const show = await newShow('Delay test J');
+        const l = listener();
+        const host = await (await browser.newContext({ permissions: ['microphone'], viewport: { width: 1440, height: 900 } })).newPage();
+        await host.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        const dialogs = [];
+        host.on('dialog', (d) => { dialogs.push(d.message()); d.dismiss(); });
+        await host.goto(`${SITE}/admin/live/${show.id}/host`);
+        await host.getByText('Start Broadcasting').click();
+        await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 9000 });
+        await sleep(2000);
+        const t0 = Date.now();
+        check('J1 before the restart listeners hear the host', power(l.since(t0 - 1200), 440) > 0.004);
+
+        // The server goes away and comes back (a deploy)
+        const { exec } = require('child_process');
+        const restarted = new Promise((res) => exec(process.env.BACKEND_RESTART, (err) => res(!err)));
+        await T(host, 'reconnecting-note').waitFor({ timeout: 8000 });
+        check('J2 the host is told the connection is lost and that it is reconnecting', /Reconnecting/.test(await T(host, 'reconnecting-note').innerText()) && await host.getByText('Stop Broadcasting').count() === 1, await T(host, 'reconnecting-note').innerText());
+        await shot(host, 'host-reconnecting');
+        const down = Date.now();
+        check('J3 the backend came back', await restarted);
+        const up = Date.now();
+        await T(host, 'reconnecting-note').waitFor({ state: 'detached', timeout: 8000 });
+        const back = Date.now();
+        check('J4 the host page is connected again within 4 s of the server answering, with nothing pressed', back - up < 4000, `${back - up} ms after the server answered (${back - down} ms after the drop was seen)`);
+        const l2 = listener();
+        await sleep(3500);
+        const t1 = Date.now();
+        const st = (await api('GET', `/stations/${STATION}`)).json;
+        check('J5 the station is still the show\'s and listeners hear the host again at once (no second pre-roll)', (st.automation_config || {}).live_show_id === show.id && l2.live() && power(l2.since(t1 - 1500), 440) > 0.004, `live ${l2.live()} power ${power(l2.since(t1 - 1500), 440).toFixed(4)}`);
+        const a = await air(show.id);
+        check('J6 the delay is building back', a && a.on_air && a.target === 3, JSON.stringify(a).slice(0, 160));
+        check('J7 no error on the screen, no dialog, still broadcasting', dialogs.length === 0 && await host.getByText(/connection to the station was lost/).count() === 0 && await T(host, 'mute-button').count() === 1, dialogs.join(' | '));
+        await sleep(16000);
+        const t2 = Date.now();
+        check('J8 20 s later the show is still on air (not handed back as "host gone")', ((await api('GET', `/stations/${STATION}`)).json.automation_config || {}).live_show_id === show.id && power(l2.since(t2 - 1500), 440) > 0.004);
+        await api('POST', `/live-shows/${show.id}/end`);
+      } finally {
         await browser.close();
       }
     }
