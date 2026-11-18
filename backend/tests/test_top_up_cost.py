@@ -7,7 +7,6 @@ playout engine's start report. Round trips are counted here, so the test does
 not depend on the machine.
 """
 
-from datetime import time
 
 import pytest
 from httpx import AsyncClient
