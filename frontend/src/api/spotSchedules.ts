@@ -6,7 +6,11 @@ export type TimingMode = 'hard' | 'soft';
 
 export interface TimingDefaults {
   on_the_hour: TimingMode;
+  // The half hour (:30): the time check, weather and sponsorships there
+  half_hour: TimingMode;
   other: TimingMode;
+  // Play the recorded half-hour time check ("The time is 10:30 ...") before the :30 weather
+  half_hour_time_check: boolean;
 }
 
 export interface SpotSchedule {
