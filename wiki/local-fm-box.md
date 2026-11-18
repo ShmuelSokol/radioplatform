@@ -240,12 +240,21 @@ song had 25 s left the restart came 23 s later. Not tested: the real systemd tim
 Open: the box follows `main` by default, so every merge that touches `infra/` reaches
 the transmitter the next night. Pin a tag before FM is fed from it.
 
-## Blocker before FM is fed from the engine: live shows
+## Live shows on the box
 
-During a live show the engine's output is silent by design (the host's microphone goes to
-listeners through the site, PR 112; measured 2026-11-18: 89.8 s of silence in a 90 s
-show). FM would be silent for the whole show. The host's audio has to be mixed into the
-engine's output first; the engine thread builds the engine side when this stage is reached.
+Since engine proto 5 (PR 319) the engine plays a live show from the backend's
+`/playout/{station}/live.mp3` (the show as listeners hear it, after the broadcast delay).
+On a box the engine's backend is the relay, which answered that path with 404 until
+2026-11-18, so FM would have been silent for the whole show. The relay now passes
+live.mp3 through as it arrives (`Relay.pass_live`, no buffering): 204 while no show is
+heard or the backend cannot be reached (the engine's live lane stays quiet and asks
+again), a refusal (403, 409) back to the engine as it came, and a stall of
+`LIVE_STALL_SECONDS` (10 s) ends the pass-through. A live show needs the internet line:
+with the line down the lane is quiet, never music under the host.
+
+Checked with the real engine: harness `--local-box live_show_on_the_stream` 7 of 7 (host
+heard through the relay, quiet during a stall, music back 0.9 s after); on the old relay
+the same run failed with 0.0 s of host heard.
 
 ## Known gaps (next stages; nothing is installed at BMG yet)
 

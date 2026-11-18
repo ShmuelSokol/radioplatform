@@ -364,6 +364,7 @@ INGEST 2026-11-18 streaming-architecture.md engine proto 5: live lane plays /liv
 INGEST 2026-11-18 live-shows.md a show's pre-roll waits for a timed item on air (hold_until) instead of cutting it at take-over; a live show that never took the station over is hard-stopped too (live_show_id is set only at first air)
 INGEST 2026-11-18 live-shows.md host gone: station back to music after live_host_gone_seconds with alert; engine told live-on 1 s before first air; control room badge NO HOST / FILLING / LIVE with delay; cut timed item not resumed after a show
 INGEST 2026-11-18 streaming-architecture.md One engine per station: engines send X-Playout-Instance; a second engine with the same station id gets 409 and an alert (relay passes the id on); local-fm-box.md updated
+UPDATE 2026-11-18 local-fm-box.md live shows on a box: the relay passes the engine's live.mp3 through (was 404, so FM would be silent during a show); live-show blocker closed
 INGEST 2026-11-18 hourly-slots.md half hour on the second as a setting: spot_timing.half_hour (falls back to other), half_hour_time_check plays uploaded :30 clips (?minute=30) then the :30 weather, _put_first puts a new time check ahead of a :30 block queued earlier; saving re-times queued time/weather
 INGEST 2026-11-18 live-shows.md caller desk: the caller's topic/notes shown and editable on both screens (was stored, never shown), Hold, Next caller
 INGEST 2026-11-18 rds-feed.md RDS manager: rotation, sponsor lines, PS, Latin-only text, encoder pickup log; Magic RDS reads a URL or file, no TCP
