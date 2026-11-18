@@ -229,3 +229,9 @@ On an engine station the entry is taken out of the timed lane (`playout_engine.t
 Same test show, second fault: the story's same minutes aired again after each show. The long-item rule had queued `resume@277` for after the sponsorship; the take-over queued its own `resume@…`; a second show cut the first resume and queued a third. `_pause_automation` now deletes the pending `resume@` entries of the item it pauses before queuing the one true second part.
 
 Tests: `test_engine_backend.py` (`test_a_sponsorship_made_hard_for_a_story_waits_for_the_show_and_plays_first_after`, `test_a_hard_sponsorship_due_during_a_show_is_kept_and_the_time_check_is_not`), `test_live_delay.py::test_a_sponsorship_due_during_the_show_plays_first_after_it` (browser player). A test spot must not be titled like the placeholders ("Kol B'ramah sponsor"): those never auto-air.
+
+### The engine can hold two items during a show (live repeat, 21:14Z 2026-11-18)
+
+In the live repeat the sponsorship aired first after the show, but the story never resumed. At take-over the engine asked `/next` twice within 80 ms and held the story's second part and the song after it. When the sponsorship came due, the flush emptied the engine's whole queue, but `/flush` in radio.liq forgets only the newest entry of its `given` list. The second part came back in `given`, so it was never handed out again, and the next ask closed it as "aired without a start report".
+
+Backend fix, no engine change: `EngineState.show_preloaded` lists what was handed out during the show; a flush moves it to `flushed_unplayed`, and `_not_dropped_by_a_flush` takes those ids out of the engine's `given` until they are handed out again or reported started. Also `_reconcile_given` no longer closes the newest entry when it is in `given` twice (handed out, flushed, handed out again). Test: `test_the_paused_story_still_resumes_after_a_sponsorship_held_for_the_show`.
