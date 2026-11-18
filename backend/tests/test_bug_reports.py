@@ -94,6 +94,30 @@ def test_issue_body_has_summary_and_files():
     body = svc.issue_body(R(), {"context.json": "https://x/context.json", "screenshot": "https://x/s.jpg"})
     assert "Left channel only" in body and "decode failed" in body and "/queue -> 500" in body
     assert "![screenshot](https://x/s.jpg?raw=true)" in body
+    assert "None came with this report" not in body
+
+
+def test_issue_body_says_when_no_screenshot_came_and_why():
+    """Bug 8: Safari sent reports with no picture for days and the issues said nothing."""
+    class R:
+        number = 8
+        reporter_name = "admin"
+        created_at = None
+        page_url = "https://kbrlive.com/admin/activity"
+        station_id = None
+        user_agent = "iPhone Safari"
+        description = "no picture"
+        expected = None
+        client_context = {"screenshot": {"how": "none", "failed": ["modern-screenshot: took over 8 s", "html2canvas: boom"]}}
+    body = svc.issue_body(R(), {"context.json": "https://x/context.json"})
+    assert "**None came with this report.** Why: modern-screenshot: took over 8 s; html2canvas: boom" in body
+
+    R.client_context = {}
+    assert "The page sent none" in svc.issue_body(R(), {})
+
+    R.client_context = {"screenshot": {"how": "none", "failed": ["a", "b"], "picked_by_person": True}}
+    body = svc.issue_body(R(), {"screenshot": "https://x/s.jpg"})
+    assert "the reporter added this picture" in body and "None came" not in body
 
 
 @pytest.mark.asyncio

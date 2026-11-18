@@ -509,6 +509,9 @@ cd frontend && for s in control-room-actions listen-page call-in release-timing 
 # Listener pages in real WebKit (Safari's engine, WebKitGTK + Selenium; setup in the script's docstring and wiki/audio-engine.md)
 cd frontend && (npx vite preview --port 4183 --strictPort &) && xvfb-run -a python3 e2e/webkit/listener-webkit.py
 
+# The bug reporter's screenshot in real WebKit: each way of taking it, not blank, no-picture path, picture added by hand (same setup as above)
+cd frontend && xvfb-run -a python3 e2e/webkit/bug-screenshot-webkit.py
+
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 
