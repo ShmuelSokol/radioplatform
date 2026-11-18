@@ -12,6 +12,7 @@ import type { BulkAutoTrimStatus } from '../../api/assets';
 import Spinner from '../../components/Spinner';
 import { useAuth } from '../../hooks/useAuth';
 import { isManager } from '../../auth/access';
+import { useEscape } from '../../hooks/useEscape';
 
 const EXPORT_FORMATS = ['original', 'mp2', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
@@ -82,6 +83,8 @@ function DownloadButton({ assetId, title }: { assetId: string; title: string }) 
       setDownloading(false);
     }
   };
+
+  useEscape(open, () => setOpen(false));
 
   return (
     <span className="relative inline-block">
@@ -223,6 +226,15 @@ export default function Assets() {
   const [showBulkCategory, setShowBulkCategory] = useState(false);
   // Bulk download picker
   const [showBulkDownload, setShowBulkDownload] = useState(false);
+  useEscape(showBulkCategory, () => setShowBulkCategory(false));
+  useEscape(showBulkDownload, () => setShowBulkDownload(false));
+  // The clip-silence box closes only once its job is over (as a click beside it does)
+  const closeTrimModal = useCallback(() => {
+    setShowTrimModal(false);
+    setTrimJobId(null);
+    setTrimStatus(null);
+  }, []);
+  useEscape(showTrimModal && (trimStatus?.status === 'completed' || trimStatus?.status === 'failed'), closeTrimModal);
   const [bulkDownloading, setBulkDownloading] = useState(false);
 
   // Debounce per-field searches
@@ -516,7 +528,7 @@ export default function Assets() {
             }
           }} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <div role="dialog" aria-modal="true" aria-label="Auto-Clip Silence" className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
               <h3 className="text-lg font-semibold mb-4">Auto-Clip Silence</h3>
               {!trimStatus || trimStatus.status === 'queued' || trimStatus.status === 'running' ? (
                 <div>
@@ -590,8 +602,8 @@ export default function Assets() {
               <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase md:w-[22%]">Title</th>
               <th className="hidden md:table-cell px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase md:w-[14%]">Artist</th>
               <th className="hidden lg:table-cell px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase lg:w-[12%]">Album</th>
-              <th className="hidden md:table-cell w-20 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-              <th className="hidden md:table-cell w-16 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+              <th className="hidden md:table-cell w-20 lg:w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+              <th className="hidden md:table-cell w-16 lg:w-24 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="w-14 md:w-28 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase"><span className="md:hidden">Len</span><span className="hidden md:inline">Duration</span></th>
               <th className="hidden lg:table-cell w-14 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Format</th>
               <th className="hidden lg:table-cell w-12 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase" title="Staff vote. Playlist generation can ask for a minimum.">Vote</th>
@@ -612,7 +624,7 @@ export default function Assets() {
               <th className="hidden lg:table-cell px-2 py-1 lg:w-[12%]">
                 <ColumnFilter value={albumSearch} onChange={setAlbumSearch} options={albumOptions} placeholder="Search album..." />
               </th>
-              <th className="hidden md:table-cell w-20 px-2 py-1">
+              <th className="hidden md:table-cell w-20 lg:w-28 px-2 py-1">
                 <select
                   value={categoryFilter}
                   onChange={(e) => setCategoryFilter(e.target.value)}
@@ -624,7 +636,7 @@ export default function Assets() {
                   ))}
                 </select>
               </th>
-              <th className="hidden md:table-cell w-16 px-2 py-1">
+              <th className="hidden md:table-cell w-16 lg:w-24 px-2 py-1">
                 <select
                   value={typeFilter}
                   onChange={(e) => setTypeFilter(e.target.value)}
@@ -680,13 +692,13 @@ export default function Assets() {
                 </td>
                 <td className="hidden md:table-cell px-2 py-2 text-sm text-gray-500 truncate" title={asset.artist ?? ''}>{asset.artist ?? '--'}</td>
                 <td className="hidden lg:table-cell px-2 py-2 text-sm text-gray-500 truncate" title={asset.album ?? ''}>{asset.album ?? '--'}</td>
-                <td className="hidden md:table-cell px-2 py-2 text-sm truncate">
+                <td className="hidden md:table-cell px-2 py-2 text-sm">
                   <AssetCategoryBadge assetId={asset.id} category={asset.category} />
                 </td>
-                <td className="hidden md:table-cell px-2 py-2 text-xs text-gray-500 truncate">
-                  {asset.asset_type}
+                <td className="hidden md:table-cell px-2 py-2 text-xs text-gray-500">
+                  <span className="block truncate" title={asset.asset_type}>{asset.asset_type}</span>
                   {asset.asset_type === 'spot' && (
-                    <span className="ml-1">
+                    <span className="block mt-0.5">
                       <AssetSponsorBadge assetId={asset.id} sponsorId={asset.sponsor_id} sponsorName={asset.sponsor_name} />
                     </span>
                   )}

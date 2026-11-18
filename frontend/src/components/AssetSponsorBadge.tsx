@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useUpdateAsset } from '../hooks/useAssets';
 import { listSponsors } from '../api/sponsors';
+import FloatingMenu from './FloatingMenu';
 
 interface Props {
   assetId: string;
@@ -13,6 +14,9 @@ export default function AssetSponsorBadge({ assetId, sponsorId, sponsorName }: P
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback(() => setOpen(false), []);
   const updateAsset = useUpdateAsset();
 
   const { data: sponsors } = useQuery({
@@ -25,7 +29,8 @@ export default function AssetSponsorBadge({ assetId, sponsorId, sponsorName }: P
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && !menuRef.current?.contains(t)) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -45,21 +50,21 @@ export default function AssetSponsorBadge({ assetId, sponsorId, sponsorName }: P
   };
 
   return (
-    <div ref={ref} className="relative inline-block">
+    <div ref={ref} className="relative inline-block max-w-full align-middle">
       <button
+        ref={buttonRef}
         onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
-        className={`cursor-pointer inline-block text-xs px-1.5 py-0.5 rounded-full hover:ring-1 hover:ring-gray-300 ${
+        className={`cursor-pointer block max-w-full truncate text-xs px-1.5 py-0.5 rounded-full hover:ring-1 hover:ring-gray-300 ${
           sponsorId ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'
         }`}
-        title={sponsorId ? 'Change sponsor' : 'Set sponsor'}
+        title={sponsorId ? `${sponsorName ?? 'Sponsor'} (change sponsor)` : 'Set sponsor'}
       >
         {sponsorName || 'Set sponsor'}
         {updateAsset.isPending && <span className="ml-1 animate-pulse">...</span>}
       </button>
       {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 left-0 w-48 bg-white border border-gray-200 rounded shadow-lg py-1">
+        <FloatingMenu anchor={buttonRef} width={192} onClose={closeMenu} menuRef={menuRef}
+          className="bg-white border border-gray-200 rounded shadow-lg py-1">
             <div className="px-2 pb-1">
               <input
                 type="text"
@@ -93,8 +98,7 @@ export default function AssetSponsorBadge({ assetId, sponsorId, sponsorName }: P
                 Clear sponsor
               </button>
             )}
-          </div>
-        </>
+        </FloatingMenu>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useEscape } from '../../hooks/useEscape';
 import { useArchives, useCreateArchive, useUpdateArchive, useDeleteArchive } from '../../hooks/useArchives';
 import { useStations } from '../../hooks/useStations';
 import type { ShowArchive } from '../../api/archives';
@@ -49,6 +50,7 @@ const emptyForm: ArchiveFormState = {
 
 export default function AdminArchives() {
   const [showModal, setShowModal] = useState(false);
+  useEscape(showModal, () => setShowModal(false));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ArchiveFormState>(emptyForm);
   const [stationFilter, setStationFilter] = useState<string>('');
@@ -249,7 +251,8 @@ export default function AdminArchives() {
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+          <div role="dialog" aria-modal="true" aria-label={editingId ? 'Edit Archive' : 'New Archive'}
+            className="bg-[#12123a] border border-[#2a2a5e] rounded-lg shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="px-5 py-4 border-b border-[#2a2a5e] flex items-center justify-between">
               <h2 className="text-lg font-bold text-cyan-300">
                 {editingId ? 'Edit Archive' : 'New Archive'}
