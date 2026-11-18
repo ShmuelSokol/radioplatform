@@ -74,7 +74,7 @@ radioplatform/
 ├── frontend/
 │   └── src/
 │       ├── api/                  # 14 API client modules + Axios client with JWT interceptor
-│       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer = the bar on listener pages, ListenHost keeps the Listen page playing across them; see `wiki/listener-player-bar.md`)
+│       ├── components/           # layout (Navbar, Layout), audio (AudioPlayer = the bar while a station plays, ListenHost keeps the Listen page playing across pages; the server stream plays through one shared element, `lib/stationStream.ts`; see `wiki/listener-player-bar.md`)
 │       ├── pages/admin/          # Dashboard, Stations, Assets, AssetUpload, Schedules, Rules, Users, Login, SongRequests, Archives
 │       ├── pages/public/         # StationList, Listen, ProgramGuide, Hosts, Archives
 │       ├── hooks/                # 21 custom hooks
@@ -263,7 +263,7 @@ radioplatform/
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
-- Listen.tsx — Listen to a station (server stream or built-in player, song requests); keeps playing, with a bar, on the other listener pages
+- Listen.tsx — Listen to a station (server stream or built-in player, song requests); keeps playing, with a bar, on every other page except call-in and the live host screens, and takes over sound the control room was giving
 - ProgramGuide.tsx — Public EPG with station/date picker and timeline
 - Hosts.tsx — Public DJ/host profile cards
 - Archives.tsx — Public show archive browser with playback

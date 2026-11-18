@@ -190,11 +190,11 @@ async function serverStream(browser, stream) {
     station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.url(station.SID) }; };
     const { ctx, page, errors } = await openRoom(browser, PHONE, station, { storage: { 'kbr-cr-listen': start === 'remembered' ? '1' : null, radio_muted: null } });
     await sleep(800);
-    const streamEl = () => page.evaluate(() => { const a = document.querySelector('[data-testid=control-room] audio'); return { src: a.currentSrc || a.src, paused: a.paused, muted: a.muted, t: a.currentTime }; });
+    const streamEl = () => page.evaluate(() => { const a = document.querySelector('[data-testid=station-stream]'); return { src: a.currentSrc || a.src, paused: a.paused, muted: a.muted, t: a.currentTime }; });
     const before = await streamEl();
     check(`${tag} (${start}): silent before any tap`, before.paused || before.t === 0, JSON.stringify(before));
     if (await buttonChecks(page, `${tag} (${start})`)) {
-      const ms = await timeClick(page, listenBtn(page), `() => { const a = document.querySelector('[data-testid=control-room] audio'); return !a.paused && !a.muted && a.currentTime > 0.05; }`, 8000, 'tap');
+      const ms = await timeClick(page, listenBtn(page), `() => { const a = document.querySelector('[data-testid=station-stream]'); return !a.paused && !a.muted && a.currentTime > 0.05; }`, 8000, 'tap');
       check(`${tag} (${start}): the stream is heard within ${LIMIT} ms of tapping Listen`, ms >= 0 && ms <= LIMIT, `${ms} ms`);
       await sleep(1500);
       const el = await streamEl();
@@ -211,9 +211,9 @@ async function serverStream(browser, stream) {
 // stayed on "Starting…")
 async function streamStarting(browser, stream, contextOpts, tag) {
   const mk = () => { const station = makeStation(); const base = station.nowPlaying; station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.url(station.SID) }; }; return station; };
-  const el = (page) => page.evaluate(() => { const a = document.querySelector('[data-testid=control-room] audio'); return { paused: a.paused, muted: a.muted, t: a.currentTime }; });
+  const el = (page) => page.evaluate(() => { const a = document.querySelector('[data-testid=station-stream]'); return { paused: a.paused, muted: a.muted, t: a.currentTime }; });
   const vis = (page, id) => page.getByTestId(id).locator('visible=true').count();
-  const PLAYS = `() => { const a = document.querySelector('[data-testid=control-room] audio'); return !a.paused && !a.muted && a.currentTime > 0.05; }`;
+  const PLAYS = `() => { const a = document.querySelector('[data-testid=station-stream]'); return !a.paused && !a.muted && a.currentTime > 0.05; }`;
   const press = (page, loc) => (contextOpts.hasTouch ? loc.tap() : loc.click());
   {
     // Listen, Mute, then the stream stalls and comes back while muted, then Unmute
@@ -265,6 +265,133 @@ async function streamStarting(browser, stream, contextOpts, tag) {
   }
 }
 
+// ── Leaving the control room and coming back (Shmuel's iPhone, 2026-11-18) ──
+// "Dj page stops the audio", "When in guide music stops. And when navigating back to
+// dashboard music doesn't continue". The sound must carry on through the menu, the
+// back button and the way back, with no new tap and no restart.
+function travelStation(stream) {
+  const station = makeStation({
+    extra: (method, path) => {
+      if (path === '/users/public/hosts') return { hosts: [{ id: 'h1', display_name: 'Reb Moshe', title: 'Morning host', bio: null, photo_url: null, social_links: {} }], total: 1 };
+      if (path === '/archives' && method === 'GET') return { archives: [], total: 0 };
+      if (/^\/schedules\/epg\//.test(path)) return { station_id: station.SID, date: new Date().toISOString().slice(0, 10), blocks: [] };
+      return undefined;
+    },
+  });
+  if (stream) {
+    const base = station.nowPlaying;
+    station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.url(station.SID) }; };
+  }
+  return station;
+}
+
+async function tapMenu(page, label) {
+  const nav = page.locator('nav').first();
+  // A phone taps; a desktop clicks (its menu groups open on hover and close when a tap moves away)
+  const press = (loc) => ((page.viewportSize()?.width ?? 0) < 768 ? loc.tap() : loc.click());
+  const link = () => nav.getByRole('link', { name: label, exact: true }).locator('visible=true').first();
+  if (!(await link().count())) {
+    const burger = nav.getByRole('button', { name: /menu/i }).locator('visible=true').first();
+    if (await burger.count()) await press(burger);
+    await sleep(150);
+  }
+  if (!(await link().count())) {
+    for (const group of ['Audience', 'Content', 'Broadcast']) {
+      const g = nav.getByRole('button', { name: new RegExp(`^\\s*${group}`) }).locator('visible=true').first();
+      if (await g.count()) { await press(g); await sleep(150); }
+      if (await link().count()) break;
+    }
+  }
+  await press(link());
+}
+
+const STREAM_EL = `(() => { const a = document.querySelector('[data-testid=station-stream]'); return a ? { paused: a.paused, muted: a.muted, t: a.currentTime, src: a.currentSrc || a.src } : null; })()`;
+/** Sample the stream element every 100 ms while `during` runs and `ms` after it. */
+async function streamWhile(page, ms, during) {
+  const samples = [];
+  let running = true;
+  const sampler = (async () => { while (running) { samples.push(await page.evaluate(STREAM_EL).catch(() => null)); await sleep(100); } })();
+  await during();
+  await sleep(ms);
+  running = false;
+  await sampler;
+  const silent = samples.filter((x) => !x || x.paused || x.muted).length;
+  let restarts = 0;
+  for (let i = 1; i < samples.length; i++) if (samples[i] && samples[i - 1] && samples[i].t < samples[i - 1].t - 0.3) restarts++;
+  return { silent, restarts, n: samples.length };
+}
+
+async function travel(browser, stream, contextOpts, tag) {
+  // Server stream (Main, Jerusalem)
+  {
+    const station = travelStation(stream);
+    const { ctx, page, errors } = await openRoom(browser, contextOpts, station, { storage: { 'kbr-cr-listen': null, radio_muted: null } });
+    await sleep(600);
+    await listenBtn(page).tap();
+    await page.waitForFunction(`(() => { const a = document.querySelector('[data-testid=station-stream]'); return a && !a.paused && a.currentTime > 0.3; })()`, null, { timeout: 8000 }).catch(() => {});
+    const bar = page.getByTestId('player-bar');
+    for (const [label, path] of [['Program Guide', '/guide'], ['DJs', '/hosts'], ['Archives', '/archives'], ['Requests', '/admin/requests']]) {
+      const heard = await streamWhile(page, 1500, () => tapMenu(page, label));
+      check(`${tag} stream: tapping "${label}" keeps the station on (no gap, no restart) with the bar`,
+        new URL(page.url()).pathname === path && heard.silent === 0 && heard.restarts === 0 && (await bar.count()) === 1, JSON.stringify(heard));
+    }
+    {
+      const heard = await streamWhile(page, 2000, () => tapMenu(page, 'Dashboard'));
+      check(`${tag} stream: back to the Dashboard by the menu, the sound carries on with no tap`, new URL(page.url()).pathname === '/admin/dashboard' && heard.silent === 0 && heard.restarts === 0, JSON.stringify(heard));
+      check(`${tag} stream: the control room shows the sound as on (no Listen button)`, await listenBtn(page).count() === 0);
+      check(`${tag} stream: no bar on the control room (it has its own sound controls)`, (await bar.count()) === 0);
+    }
+    {
+      const heard = await streamWhile(page, 1500, () => page.goBack());
+      check(`${tag} stream: the back button to a listener page keeps it on`, heard.silent === 0 && heard.restarts === 0 && (await bar.count()) === 1, JSON.stringify(heard));
+      const fwd = await streamWhile(page, 1500, () => page.goForward());
+      check(`${tag} stream: forward to the Dashboard keeps it on`, fwd.silent === 0 && fwd.restarts === 0 && await listenBtn(page).count() === 0, JSON.stringify(fwd));
+    }
+    await tapMenu(page, 'DJs');
+    await sleep(800);
+    await bar.getByRole('button', { name: 'Stop' }).tap();
+    await sleep(600);
+    const after = await page.evaluate(STREAM_EL);
+    check(`${tag} stream: Stop in the bar silences it`, !after || after.paused, JSON.stringify(after));
+    await tapMenu(page, 'Dashboard');
+    await page.getByTestId('queue-row').first().waitFor();
+    await sleep(800);
+    const back = await page.evaluate(STREAM_EL);
+    check(`${tag} stream: after Stop the Dashboard stays quiet and offers Listen`, (!back || back.paused) && await listenBtn(page).count() === 1, JSON.stringify(back));
+    check(`${tag} stream: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+  // The built-in player (All Day Stories): an iPhone cannot carry it to a new page
+  // without a tap, so the bar offers one
+  {
+    const station = travelStation(null);
+    const { ctx, page, errors } = await openRoom(browser, contextOpts, station, { storage: { 'kbr-cr-listen': null, radio_muted: null } });
+    await sleep(600);
+    await listenBtn(page).tap();
+    await page.waitForFunction(HEARD, null, { timeout: 8000 }).catch(() => {});
+    await tapMenu(page, 'Program Guide');
+    const bar = page.getByTestId('player-bar');
+    await bar.waitFor({ timeout: 5000 }).catch(() => {});
+    const tapBtn = page.getByTestId('player-bar-tap');
+    await tapBtn.waitFor({ timeout: 6000 }).catch(() => {});
+    check(`${tag} built-in: on the guide the bar shows the station and offers "Tap to listen"`, (await bar.count()) === 1 && (await tapBtn.count()) === 1);
+    if (await tapBtn.count()) {
+      await tapBtn.tap();
+      await page.waitForFunction(() => window.__audible && window.__audible().length > 0, null, { timeout: 6000 }).catch(() => {});
+      await sleep(500);
+      check(`${tag} built-in: one tap on the bar gives the sound`, (await page.evaluate(() => window.__audible().length)) >= 1 && (await tapBtn.count()) === 0);
+      const samples = await watchDecks(page, 1500, 100);
+      const silent = samples.filter((x) => !x.decks.some((d) => d.playing && d.gain > 0.05)).length;
+      await tapMenu(page, 'DJs');
+      const s2 = await watchDecks(page, 1500, 100);
+      const silent2 = s2.filter((x) => !x.decks.some((d) => d.playing && d.gain > 0.05)).length;
+      check(`${tag} built-in: then the guide and DJs keep it on`, silent === 0 && silent2 === 0, `${silent} / ${silent2} silent samples`);
+    }
+    check(`${tag} built-in: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+}
+
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 const browser = await chromium.launch();
 const stream = await startStreamServer(STREAM_PORT);
@@ -280,6 +407,7 @@ try {
   if (run('next')) await nextItems(browser);
   if (run('mute')) await mute(browser);
   if (run('stream')) await serverStream(browser, stream);
+  if (run('travel')) { await travel(browser, stream, PHONE, 'travel iPhone'); await travel(browser, stream, { viewport: { width: 1366, height: 900 }, hasTouch: true }, 'travel desktop'); }
   if (run('starting')) { await streamStarting(browser, stream, PHONE, 'stream starting iPhone'); await streamStarting(browser, stream, { viewport: { width: 1366, height: 900 } }, 'stream starting desktop'); }
 } finally {
   await browser.close();
