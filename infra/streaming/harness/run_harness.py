@@ -278,7 +278,7 @@ class Stack:
         return env
 
     def start_backend(self) -> None:
-        out = open(self.dir / "backend.log", "w")
+        out = open(self.dir / "backend.log", "a")
         p = subprocess.Popen(
             ["uv", "run", "uvicorn", "app.main:app", "--port", str(BACKEND_PORT)],
             cwd=BACKEND, env=self.backend_env(), stdout=out, stderr=subprocess.STDOUT,
@@ -748,6 +748,138 @@ async def sc_block_shiur_spans_hour(h: Harness, policy: str = "pause") -> None:
     await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
                    ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
     await _expect_hour(h, name, policy, t1, shiur_start, "shiur")
+
+
+async def sc_operator_queue_then_next(h: Harness) -> None:
+    """Everything through the site, as an operator does it, with the engine already holding
+    its next song: Play next then Next plays that item; Play next, delete it, Next plays
+    the one after and never the deleted one; three such changes inside 15 s (automatic
+    flushes are held back 15 s, an operator's must not be)."""
+    name = "operator_queue_then_next"
+    await wait_music(h)
+    await asyncio.sleep(8)  # the engine holds its next automatic song by now
+    t_start = time.time()
+    base = f"/stations/{STATION_ID}/queue"
+
+    def play_next(asset: str) -> str:
+        code, body = h.api("POST", f"{base}/play-next", {"asset_id": str(h.assets[asset])})
+        return body.get("id", "") if code == 201 else ""
+
+    async def next_expect(expect: str, why: str) -> None:
+        h.api("POST", f"{base}/skip?fade=hard")
+        t = await h.wait_on_air(expect, 6)
+        cur = await h.on_air()
+        h.check(name, t is not None, f"{why}: {expect} on air (site shows {cur.asset.title if cur else None})")
+
+    h.check(name, bool(play_next("story")), "Play next accepted")
+    await asyncio.sleep(1.0)
+    await next_expect("story", "Play next, then Next 1 s later")
+    await asyncio.sleep(3)
+    play_next("shiur")
+    deleted = play_next("song6")           # song6 is next, the shiur after it
+    await asyncio.sleep(2.5)                # long enough for the engine to load song6
+    code, _ = h.api("DELETE", f"{base}/{deleted}")
+    h.check(name, code == 204, f"queued item deleted ({code})")
+    await asyncio.sleep(0.5)
+    await next_expect("shiur", "Play next, delete it, Next")
+    await asyncio.sleep(3)
+    play_next("song5")
+    await asyncio.sleep(0.2)
+    await next_expect("song5", "a third change inside 15 s, Next 0.2 s after Play next")
+    await asyncio.sleep(5)
+    heard = h.heard(t_start, time.time() - 1)
+    names = [n for _, n in timeline(heard)]
+    h.check(name, tone_name(TONES["song6"][0]) not in names, f"the deleted item was never heard: {sorted(set(names))}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
+async def sc_operator_next_slow_file(h: Harness) -> None:
+    """Play next of an item whose file takes 5 s to arrive, then Next 0.3 s later. The
+    engine has dropped its pre-loaded song for the new item and is still downloading it:
+    the item airs next (not the automatic song), with no silence over 1 s. What fills the
+    seconds the download still needs is printed (the station's emergency music)."""
+    name = "operator_next_slow_file"
+    await wait_music(h)
+    await asyncio.sleep(8)
+    base = f"/stations/{STATION_ID}/queue"
+    h.stack.slow_files["story.mp3"] = 5.0
+    t0 = time.time()
+    try:
+        code, _ = h.api("POST", f"{base}/play-next", {"asset_id": str(h.assets["story"])})
+        h.check(name, code == 201, "Play next accepted")
+        await asyncio.sleep(0.3)
+        pressed = time.time()
+        h.api("POST", f"{base}/skip?fade=hard")
+        t = await h.wait_on_air("story", 20)
+    finally:
+        h.stack.slow_files.pop("story.mp3", None)
+    h.check(name, t is not None, f"the slow item went on air after Next ({'never' if t is None else f'{t - pressed:.1f} s after the press'})")
+    await asyncio.sleep(4)
+    heard = h.heard(t0 - 2, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    names = [n for _, n in timeline(heard)]
+    tl = timeline(heard)
+    on_air_before = next((n for ts, n in reversed(tl) if ts <= pressed), None)
+    first_new = next((n for ts, n in tl
+                      if ts > pressed and n not in ("EMERGENCY", "silence", on_air_before)), None)
+    h.check(name, first_new == tone_name(TONES["story"][0]),
+            f"after the press the next library item heard is the queued one: {names}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
+async def sc_resume_without_old_song(h: Harness) -> None:
+    """KBR Jerusalem 2026-11-18 01:00Z: Main's Daf Yomi block cut a song at 00:45; at
+    01:00 the shiur paused for the time check, and before it resumed 2.8 s of the song cut
+    15 minutes earlier were heard. Here a long item (the story, 150 s) is on air when the
+    block's shiur takes over; 40 s later the time check pauses the shiur. Nothing of the
+    story may be heard between the block's start and the shiur's resume."""
+    name = "resume_without_old_song"
+    await h.set_config(timed_during_long_items="pause")
+    await wait_music(h)
+    await h.clear_pending()
+    await h.queue([("story", {}), ("song5", {}), ("song6", {})])
+    await asyncio.sleep(16)  # let the engine drop the song it held before the queue changed
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    if await h.wait_on_air("story", 60) is None:
+        h.check(name, False, "the story never went on air")
+        return
+    t0 = at(20)
+    block = str(uuid.uuid4())
+    await h.queue([
+        ("announce", {"preempt_at": t0, "timing_mode": "hard", "source": "block", "block_id": block}),
+        ("shiur", {"preempt_at": t0, "timing_mode": "hard", "source": "block", "block_id": block}),
+    ])
+    shiur_start = await h.wait_on_air("shiur", 60)
+    if shiur_start is None:
+        h.check(name, False, "the block's shiur never went on air")
+        return
+    t1 = at(40)
+    await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
+                   ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 30)
+    times = await h.started_times("time", t1.timestamp() - 5)
+    late = times[0][0] - t1.timestamp() if times else None
+    h.check(name, late is not None and abs(late) <= 1.0,
+            f"time check {'never' if late is None else f'{late:+.1f} s'}")
+    windows = h.heard(shiur_start + 2, t1.timestamp() + 28)
+    h.print_timeline(windows, t1.timestamp())
+    story = tone_name(TONES["story"][0])
+    old = sum(1 for _, db, f in windows if db > -45 and tone_name(f) == story)
+    step = (windows[1][0] - windows[0][0]) if len(windows) > 1 else 0.0
+    at_ = [round(t - t1.timestamp(), 1) for t, db, f in windows if db > -45 and tone_name(f) == story]
+    h.check(name, old == 0, f"nothing of the interrupted story after the block took over "
+                            f"(heard for about {old * step:.1f} s, at {at_[:8]} s from the time check)")
+    names = [n for _, n in timeline(h.heard(t1.timestamp() - 3, t1.timestamp() + 28))]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    h.check(name, runs[:4] == ["shiur", "time", "weather", "shiur"],
+            f"heard shiur -> time -> weather -> shiur: {runs}")
+    gap, _ = longest_silence(windows)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 
 async def sc_music_lane_shiur_spans_hour(h: Harness, policy: str = "pause") -> None:
@@ -1775,7 +1907,12 @@ async def sc_next_skips_one(h: Harness) -> None:
     airs, never the one after that."""
     name = "next_skips_one"
     await wait_music(h)
+    # Not in the second of a song change: the refill that runs then is still writing, and
+    # this test's direct queue writes landed among its songs (2026-11-18, run right after
+    # next_twice's last Next: automatic songs aired between the queued ones)
+    await asyncio.sleep(5)
     await h.clear_pending()
+    await asyncio.sleep(1.5)
     order = ["song2", "song3", "song4", "song5", "song6", "story", "shiur"]
     ids = await h.queue([(n, {}) for n in order])
     await asyncio.sleep(3)
@@ -2177,6 +2314,9 @@ SCENARIOS = {
     "next_after_idle": sc_next_after_idle,
     "next_right_after_change": sc_next_right_after_change,
     "site_matches_stream": sc_site_matches_stream,
+    "operator_queue_then_next": sc_operator_queue_then_next,
+    "operator_next_slow_file": sc_operator_next_slow_file,
+    "resume_without_old_song": sc_resume_without_old_song,
     "next_twice": sc_next_twice,
     "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,
