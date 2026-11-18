@@ -386,3 +386,90 @@ async def test_a_song_due_to_end_seconds_before_the_hour_is_not_left_alone(db_se
     assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=2)) is True
     await db_session.commit()
     assert (await _order(db_session, station_id))[0] == "Runs past"
+
+
+def _analysed(asset: Asset, *, cue_in: float = 0.0, cue_out: float | None = None) -> None:
+    from app.models.asset import ANALYSIS_VERSION
+
+    end = cue_out if cue_out is not None else asset.duration
+    asset.metadata_extra = {"audio_analysis": {
+        "version": ANALYSIS_VERSION, "loudness_lufs": -16.0, "replay_gain_db": -2.0,
+        "cue_in_seconds": cue_in, "cue_out_seconds": end, "cross_start_seconds": end - 3.0,
+    }}
+
+
+@pytest.mark.asyncio
+async def test_on_the_stream_server_a_song_is_counted_to_its_analysed_end(db_session: AsyncSession, monkeypatch):
+    """F-HOURFIT-12: live, Jerusalem 02:00Z: a 523.4 s file held the air for 512.4 s
+    on the stream server (it plays from its analysed start to its analysed end, and
+    the next song starts 3 s before that). Counted by file length it was chosen to run
+    8 s past the hour and ended 0.2 s before it; a 20-minute song was started and cut
+    after 4.3 s. Counted the engine's way it is not chosen."""
+    from app.config import settings
+
+    monkeypatch.setattr(type(settings), "engine_drives", lambda self, station_id: True)
+    station = await _station(db_session)
+    station_id = station.id
+    ends = HOUR - timedelta(seconds=512.6)
+    await _queue(db_session, station, ends, [("Far too long", 1189.0), ("Medley", 523.4), ("Really past", 531.0)])
+    for title, cue_in, cue_out in (("Medley", 0.0, 515.4), ("Really past", 0.5, 529.0), ("Far too long", 0.0, 1189.0)):
+        _analysed((await db_session.execute(select(Asset).where(Asset.title == title))).scalar_one(),
+                  cue_in=cue_in, cue_out=cue_out)
+    await db_session.commit()
+    assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=2)) is True
+    await db_session.commit()
+    # "Medley" would hand over 0.2 s before the hour; "Really past" 12.9 s after it
+    assert (await _order(db_session, station_id))[0] == "Really past"
+
+
+def test_the_stream_servers_length_of_a_song():
+    from types import SimpleNamespace
+
+    from app.services.hour_fit import _seconds
+
+    asset = _asset("Medley", 523.4)
+    _analysed(asset, cue_in=0.0, cue_out=515.4)
+    entry = SimpleNamespace(asset=asset, preempt_at=None, source="auto", station_id=None)
+    assert _seconds(entry, engine=True) == pytest.approx(512.4)
+    _analysed(asset, cue_in=6.0, cue_out=515.4)  # leading silence is skipped too
+    assert _seconds(entry, engine=True) == pytest.approx(506.4)
+    asset.metadata_extra = None  # not analysed yet: the file's length less the overlap
+    assert _seconds(entry, engine=True) == pytest.approx(520.4)
+
+
+@pytest.mark.asyncio
+async def test_songs_that_decide_the_fit_are_analysed_first(db_session: AsyncSession, monkeypatch):
+    """F-HOURFIT-13: the players analyse a song just before it airs, so 20 minutes
+    ahead its end point is unknown. The fit asks for the analysis of the songs it
+    depends on and waits for it; with little time left it goes ahead on what it has."""
+    from app.services import hour_fit, upcoming_analysis
+
+    asked: list[str] = []
+    monkeypatch.setattr(upcoming_analysis, "ENABLED", True)
+    monkeypatch.setattr(hour_fit, "_ask_for_analysis", lambda entries, engine: asked.extend(e.asset.title for e in entries))
+    station = await _station(db_session)
+    station_id = station.id
+    ends = HOUR - timedelta(seconds=300)
+    await _queue(db_session, station, ends, [("Far too long", 500.0), ("To spare", 312.0)])
+    spare = (await db_session.execute(select(Asset).where(Asset.title == "To spare"))).scalar_one()
+    await db_session.commit()
+
+    # Twenty minutes ahead: nothing is moved yet, the song before the hour is asked for
+    assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=15)) is False
+    assert "Far too long" in asked
+    assert (await _order(db_session, station_id))[0] == "Far too long"
+
+    # Its analysis arrived; the candidate's has not: asked for, not chosen blind
+    asked.clear()
+    for title in ("Far too long", "On air"):
+        _analysed((await db_session.execute(select(Asset).where(Asset.title == title))).scalar_one())
+    await db_session.commit()
+    assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=14), force=True) is False
+    assert asked == ["To spare"]
+
+    # Both measured: the fit goes ahead
+    _analysed(spare)
+    await db_session.commit()
+    assert await fit_before_hard_item(db_session, station_id, ends - timedelta(minutes=13), force=True) is True
+    await db_session.commit()
+    assert (await _order(db_session, station_id))[0] == "To spare"
