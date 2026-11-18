@@ -237,6 +237,8 @@ export interface AirStatus {
   auto_exit?: boolean;
   insert?: { title: string; kind: string; remaining: number } | null;
   next_insert?: { title: string; kind: string; in: number } | null;
+  /** Title of the station's filler (plays after a Dump while the delay refills), if one is ready */
+  filler?: string | null;
   host_silent_for?: number;
 }
 
