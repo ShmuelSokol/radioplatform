@@ -2396,11 +2396,16 @@ async def sc_live_show_on_the_stream(h: Harness) -> None:
     await asyncio.sleep(14)
     heard = h.heard(t_start - 3, time.time() - 1)
     h.print_timeline(heard, t_start)
-    first = [w for w in heard if t_start + 4.0 <= w[0] <= t_stall]
+    # Since PR 347 the music plays on until the show's audio is ready (about 3 s with
+    # this feed), so the take-over has no dead air; the show's window starts after that
+    take_over = [w for w in heard if t_start <= w[0] <= t_start + 8.5]
+    gap, _ = longest_silence(take_over)
+    h.check(name, gap <= 1.0, f"no dead air while the show takes over: longest silence {gap:.1f} s")
+    first = [w for w in heard if t_start + 8.5 <= w[0] <= t_stall]
     host = sum(WINDOW for w in first if w[1] >= -45 and tone_name(w[2]) == "HOST")
     h.check(name, bool(first) and host >= len(first) * WINDOW - 0.5,
-            f"the host is heard on the stream from 4 s after the start ({host:.1f} s of {len(first) * WINDOW:.0f} s)")
-    show_names = [n for t, n in timeline([w for w in heard if t_start + 2.0 <= w[0] <= t_end])]
+            f"the host is heard on the stream from 8.5 s after the start ({host:.1f} s of {len(first) * WINDOW:.0f} s)")
+    show_names = [n for t, n in timeline([w for w in heard if t_start + 8.5 <= w[0] <= t_end])]
     h.check(name, not [n for n in show_names if n not in ("HOST", "silence", "mix")],
             f"nothing but the host or quiet during the show, also while its audio stalled: {show_names}")
     back = [w for w in heard if t_stall + 9.0 <= w[0] <= t_end]
