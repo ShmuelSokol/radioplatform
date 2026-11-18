@@ -14,6 +14,8 @@ What it reports, per active station (none during a live show):
 | engine_drift | engine station: the engine's /status entry differs from the site's playing entry for 20 s, or the engine does not answer | critical + push |
 | overrun | the item shown on air is 30 s past its length (site and air parted) | warning |
 | timed_skipped | a time check, weather or block/sponsorship entry marked skipped with no twin (same asset and time) that aired | warning |
+| box_clock | a local FM box reports its clock behind its plan (it plays music only until set); also during a live show | critical + push |
+| box_disk, box_audio | a local FM box has under 5 GB free, or items of its plan are not on its disk for 15 min (see [local-fm-box](local-fm-box.md)) | warning |
 
 Soft items are never "late" (they wait for the song by design), and the long-item `wait`
 policy turns hard items soft before their time, so it does not fire either. Early starts are

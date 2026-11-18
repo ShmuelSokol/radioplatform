@@ -37,6 +37,8 @@ class _Tunnel:
     seen_at: float = 0.0
     polling: int = 0
     routed: bool = False  # last routing reported in the log
+    health: dict = field(default_factory=dict)  # the box's last report about itself
+    health_at: float = 0.0
 
 
 _tunnels: dict[str, _Tunnel] = {}
@@ -91,6 +93,64 @@ async def send(station_id, path: str, payload: dict, timeout: float = 4.0) -> tu
     finally:
         t.waiting.pop(cid, None)
         t.fetched.discard(cid)
+
+
+# What a box may report about itself, and the type each value is kept as
+_HEALTH_FIELDS = {
+    "clock_ok": bool, "engine_ok": bool, "plan_age_seconds": float, "plan_entries": int,
+    "plan_audio_missing": int, "reports_kept": int, "disk_free_gb": float, "up_seconds": int,
+}
+# Free disk below this is reported: the library copy and new uploads need room
+DISK_LOW_GB = 5.0
+# Audio of the plan still not on the box after this long (a new upload takes a moment)
+AUDIO_MISSING_SECONDS = 15 * 60.0
+
+
+def report_health(station_id, health: dict | None) -> None:
+    """Keep what the box's relay said about itself with its poll (known fields only)."""
+    if not isinstance(health, dict):
+        return
+    clean: dict = {}
+    for name, kind in _HEALTH_FIELDS.items():
+        value = health.get(name)
+        if value is None:
+            continue
+        try:
+            clean[name] = bool(value) if kind is bool else kind(value)
+        except (TypeError, ValueError):
+            continue
+    t = _tunnel(station_id)
+    t.health, t.health_at = clean, time.monotonic()
+
+
+def box_health(station_id) -> dict | None:
+    """The box's last report with its age, or None when this station has no box or it
+    has not reported since this process started."""
+    t = _tunnels.get(str(station_id))
+    if t is None or not allowed(station_id) or not t.health_at:
+        return None
+    return {**t.health, "seen_seconds_ago": round(time.monotonic() - t.health_at, 1)}
+
+
+def box_problems(health: dict) -> list[tuple[str, str, str]]:
+    """(kind, title, detail) for what is wrong on a box, from its own report."""
+    out = []
+    if health.get("clock_ok") is False:
+        out.append(("box_clock", "The FM box's clock is wrong",
+                    "Its clock is behind its own schedule (flat clock battery, or it started "
+                    "with no internet). It plays music only, with no time checks, until the "
+                    "clock is set."))
+    free = health.get("disk_free_gb")
+    if free is not None and free < DISK_LOW_GB:
+        out.append(("box_disk", "The FM box's disk is nearly full",
+                    f"{free:.1f} GB free. New songs cannot be copied to it once it is full, "
+                    "and it could not play them without internet."))
+    missing = health.get("plan_audio_missing") or 0
+    if missing > 0:
+        out.append(("box_audio", "The FM box is missing audio",
+                    f"{missing} of the next items are not on its disk yet. Without internet "
+                    "it would skip them."))
+    return out
 
 
 def answer(station_id, cid: str, status: int, body: dict | None) -> None:
