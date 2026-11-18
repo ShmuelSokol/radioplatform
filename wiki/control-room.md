@@ -173,13 +173,32 @@ Shmuel, 2026-11-18: he wants to fix a song where he sees it, not in the Library.
   pre-loaded song) or a timed copy, so audio is never interrupted; the answer counts
   them in `still_to_play` and the toast says so. It does not go through the queue's
   own delete/Next paths and sends the engine nothing.
+- **Not on this station** is `POST /assets/{id}/station-block` with the control room's
+  station (`services/station_blocks.py`, table `station_blocked_assets`). The library is
+  shared, so do-not-play takes a song off all three stations; this takes it off one.
+  Shmuel was unsure which he wants (2026-11-18), so both are offered, this one first,
+  each naming its reach on the button ("Only <station>" / "Every station") and each with
+  its own undo. It removes that station's waiting copies with the same routine as
+  do-not-play (`asset_service.drop_waiting_copies`), so the on air, engine-held and timed
+  copies stay. Enforced where do-not-play is: every draw with a station (playlist
+  generation, refill rule and fill draws, template slots, program block pools, last
+  resort pick, request matching), the refill purge, and the play-time checks of both
+  players (`_skip_placeholders`, `playout_engine.pick_next`, `playout_plan`). An
+  operator's own queue entry still plays. A new pick path must add
+  `Asset.id.notin_(blocked_asset_ids(station_id))` or it will draw blocked songs (they
+  would still be skipped at play time). To drop the choice later: remove the button;
+  rows in the table then only need deleting.
 - Managers and admins change; DJs and viewers get the panel read-only (`isManager`).
 - The transport's Song button spans the on air and next lines so it is a 44 px tap
   target on phones (the lines are 32 and 28 px); `e2e/control-room-landscape.mjs`
   fails any control under 44 x 44.
 - The phone row action bar is fixed at 61 px (`ACTIONS_H`) and now holds five buttons;
   under 360 px "+ Insert before" shows as "+ Insert" (its aria-label stays).
-- Checked by `e2e/control-room-song-actions.mjs` and `backend/tests/test_song_quick_actions.py`.
+- Checked by `e2e/control-room-song-actions.mjs`, `backend/tests/test_song_quick_actions.py`
+  and `backend/tests/test_station_block.py`.
+- The right-hand button column fits a 900 px high window (buttons below Soft fade are
+  28 px under 1000 px of height); shorter windows scroll and a sticky "▼ more" strip
+  (`cr-controls-more`) says so until the end is reached.
 - The desktop row strip (Song, ▲, ▼, ✕) shows on hover, on a selected row and always on
   the playing row (Song only). Hover-only made it unreachable for a live browser check.
 - The right-hand column (`aside[aria-label=Controls]`) is taller than the window at

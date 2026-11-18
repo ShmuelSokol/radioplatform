@@ -649,7 +649,11 @@ class QueueReplenishService:
         logger.debug("Fixed-time rule '%s': skipping (real-time engine)", rule.name)
 
     def _apply_oldies_filter(self, query):
-        """If station has oldies_only config, restrict to old release dates."""
+        """This station's own limits on a draw: never an item it was told not to play
+        ("Not on this station"), and with oldies_only config only old release dates."""
+        from app.services.station_blocks import blocked_asset_ids
+
+        query = query.where(Asset.id.notin_(blocked_asset_ids(self.station_id)))
         if self.automation_config.get("oldies_only"):
             min_years = self.automation_config.get("oldies_min_years", 10)
             cutoff = date.today() - timedelta(days=min_years * 365)
@@ -1300,7 +1304,11 @@ class QueueReplenishService:
     async def _purge_placeholders(self, keep_ad_slots: bool) -> None:
         """Take placeholder items (NEVER_AUTO_TITLES) out of the queue wherever an
         automatic pick put them; only entries not yet on air, never an operator's own."""
+        from app.services.station_blocks import blocked_asset_ids
+
         ids = (await self.db.execute(select(Asset.id).where(~not_placeholder()))).scalars().all()
+        # and what this station alone was told not to play ("Not on this station")
+        ids = list(ids) + list((await self.db.execute(blocked_asset_ids(self.station_id))).scalars().all())
         if not ids:
             return
         # What an operator or listener chose stays; everything automatic goes.

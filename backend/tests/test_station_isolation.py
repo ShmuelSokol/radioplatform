@@ -49,6 +49,7 @@ SHARED_ON_PURPOSE = {
 NEEDS_MORE = {
     "/api/v1/playout/{station_id}/next": "engine only, guarded by the playout token",
     "/api/v1/weather-readouts/template-preview": "needs a template text",
+    "/api/v1/assets/{asset_id}/station-block": "needs a song; answers only for the station asked (tests/test_station_block.py)",
 }
 
 
