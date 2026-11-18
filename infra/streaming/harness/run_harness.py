@@ -1058,16 +1058,18 @@ async def sc_engine_starts_every_time(h: Harness, times: int = 6) -> None:
     h.check(name, not bad, f"station music 8 s after every start, no emergency files: {bad or 'all'}")
 
 
-async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False) -> None:
+async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False, restart: bool = False) -> None:
     """V3-52: a live show starts while a hard time check is on air, and a second time
     check comes due during the show. The stream goes quiet for the host, the time check
     that came due during the show is not aired late after it, and music is back after.
     `hard_stop` (V3-52b): nobody presses End; the scheduler ends the show at its
-    planned end time."""
-    name = "live_show_over_hard_item" + ("_hard_stop" if hard_stop else "")
+    planned end time. `restart` (V3-52c): the backend restarts (a deploy) 6 s into the
+    show, before the second item is due, so what it kept in memory about the show and
+    about what it handed to the engine is lost."""
+    name = "live_show_over_hard_item" + ("_hard_stop" if hard_stop else "") + ("_restart" if restart else "")
     await wait_music(h)
     t1 = at(20)
-    t2 = t1 + timedelta(seconds=20)
+    t2 = t1 + timedelta(seconds=45 if restart else 20)
     await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
                    ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
     second = await h.queue([("announce", {"preempt_at": t2, "timing_mode": "hard", "source": "auto"})])
@@ -1084,6 +1086,14 @@ async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False) -> No
     t_start = time.time()
     code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
     h.check(name, code == 200, f"show started 3 s into the time check ({code})")
+    if restart:
+        await asyncio.sleep(3)
+        r0 = time.time()
+        await asyncio.to_thread(h.stack.restart_backend)
+        h.check(name, time.time() < t2.timestamp() - 3,
+                f"the backend was back {time.time() - r0:.0f} s later, before the second item was due")
+        _, cur_show = h.api("GET", f"/live-shows/{show['id']}")
+        h.check(name, (cur_show or {}).get("status") == "live", f"the show is still live after the restart ({(cur_show or {}).get('status')})")
     if hard_stop:
         t_end = None
         deadline = planned_end.timestamp() + 15
@@ -3201,6 +3211,7 @@ SCENARIOS = {
     "operator_next_slow_file": sc_operator_next_slow_file,
     "next_twice_slow_file": sc_next_twice_slow_file,
     "live_show_over_hard_item_hard_stop": lambda h: sc_live_show_over_hard_item(h, hard_stop=True),
+    "live_show_over_hard_item_restart": lambda h: sc_live_show_over_hard_item(h, restart=True),
     "operator_next_overtakes_commit": sc_operator_next_overtakes_commit,
     "two_sources_same_second": sc_two_sources_same_second,
     "hard_group_overruns_next_hard": sc_hard_group_overruns_next_hard,
