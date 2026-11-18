@@ -85,6 +85,7 @@ class Relay:
         self.last_plan_at = 0.0
         self.hello_owed = False
         self.spool_path = self.dir / "spool.jsonl"
+        self.answers: list[dict] = []  # engine answers not yet handed to the backend
         self.commands_done = 0
         self.stop = threading.Event()
 
@@ -243,6 +244,7 @@ class Relay:
         except Offline:
             if report.get("entry_id"):  # an emergency or silence file is not in the queue
                 report.setdefault("at", self.clock())
+                report["kept"] = True  # the backend records it at `at`, not on arrival
                 with self.lock, open(self.spool_path, "a") as f:
                     f.write(json.dumps(report) + "\n")
             return 200, b'{"ok":true,"relay":"kept"}'
@@ -358,33 +360,47 @@ class Relay:
     def run_commands(self, wait: float = 25.0) -> None:
         """Fetch the backend's commands for the engine (Next, Play Now, flush, timed
         hand-over) over a call this box makes itself, so nothing has to reach in from
-        outside. The call is held open until a command is made; each answer goes back
-        with the next call."""
-        answers: list[dict] = []
+        outside. The call is held open until a command is made. Each command runs on
+        its own thread and its answer goes back at once in a short call of its own, so
+        a /timed that waits for a big file does not hold a flush or a Next behind it."""
         while not self.stop.is_set():
-            try:
-                status, data = self._call(
-                    "POST", "/commands/poll", json.dumps({"wait": wait, "answers": answers}).encode(),
-                    timeout=wait + 10.0,
-                )
-            except Offline:
-                answers = []
+            got = self._poll(wait)
+            if got is None:
                 self.stop.wait(2.0)
-                continue
-            answers = []
-            if status != 200:
-                # 404: this station is not on the engine yet; nothing to fetch
+            elif got is False:
+                # 403/404: this station's commands do not go by relay; nothing to fetch
                 self.stop.wait(15.0)
-                continue
-            try:
-                commands = json.loads(data).get("commands", [])
-            except (ValueError, AttributeError):
-                commands = []
-            for cmd in commands:
-                code, body = self._engine_call(
-                    cmd.get("path", ""), cmd.get("payload") or {}, wait=cmd.get("wait") or 4.0)
-                answers.append({"id": cmd.get("id", ""), "status": code, "body": body})
-                self.commands_done += 1
+
+    def _poll(self, wait: float):
+        """One call: hands in the answers that are ready, starts the commands it brings.
+        None when the backend cannot be reached, False when it refuses."""
+        with self.lock:
+            answers, self.answers = self.answers, []
+        try:
+            status, data = self._call(
+                "POST", "/commands/poll", json.dumps({"wait": wait, "answers": answers}).encode(),
+                timeout=wait + 10.0,
+            )
+        except Offline:
+            # The backend gave up on these long ago by the time the line is back
+            return None
+        if status != 200:
+            return False
+        try:
+            commands = json.loads(data).get("commands", [])
+        except (ValueError, AttributeError):
+            commands = []
+        for cmd in commands:
+            threading.Thread(target=self._run_command, args=(cmd,), daemon=True).start()
+        return True
+
+    def _run_command(self, cmd: dict) -> None:
+        code, body = self._engine_call(
+            cmd.get("path", ""), cmd.get("payload") or {}, wait=cmd.get("wait") or 4.0)
+        with self.lock:
+            self.answers.append({"id": cmd.get("id", ""), "status": code, "body": body})
+            self.commands_done += 1
+        self._poll(0)
 
     def _engine_call(self, path: str, payload: dict, wait: float = 4.0) -> tuple[int, dict | None]:
         """`wait`: how long the backend waits for this answer. 202 = the engine took the

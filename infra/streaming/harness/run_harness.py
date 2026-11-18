@@ -1918,6 +1918,10 @@ async def sc_local_box_offline(h: Harness) -> None:
     await asyncio.sleep(20)
     times = await h.started_times("time", cut)
     h.check(name, len(times) == 1, f"the site recorded the time check as aired: {times}")
+    # Recorded when it aired (the kept report carries its time), not when the line came back
+    h.check(name, bool(times) and abs(times[0][0] - due) <= 2.0,
+            f"the site has it at its real time ({times[0][0] - due:+.1f} s from due, "
+            f"reported {back - due:.0f} s later)" if times else "no time recorded")
     late = [n for _, n in timeline(h.heard(back, time.time() - 1))]
     h.check(name, "time" not in late and "EMERGENCY" not in late, f"after the return: {sorted(set(late))}")
     st = await h.on_air()

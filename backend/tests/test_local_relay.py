@@ -388,6 +388,8 @@ async def test_command_nobody_fetched_is_withdrawn_not_delivered_late(client, tu
 
 
 def test_relay_fetches_commands_gives_them_to_the_engine_and_answers(rig):
+    import time as _time
+
     fake, relay, _ = rig
     polls = []
 
@@ -399,18 +401,77 @@ def test_relay_fetches_commands_gives_them_to_the_engine_and_answers(rig):
                 {"id": "c1", "path": "/timed", "payload": {"uri": "u", "at": 5.0, "id": "x"}},
                 {"id": "c2", "path": "/../etc", "payload": {}},
             ]}).encode()
-        relay.stop.set()
+        if sum(len(p["answers"]) for p in polls) >= 2:
+            relay.stop.set()
         return 200, b'{"commands": []}'
 
     relay._call = call
     relay.run_commands(wait=1.0)
+    deadline = _time.time() + 5
+    while relay.status()["commands_done"] < 2 and _time.time() < deadline:
+        _time.sleep(0.02)
     assert fake.timed == [{"uri": "u", "at": 5.0, "id": "x"}]
     assert polls[0]["answers"] == []
-    assert polls[1]["answers"] == [
+    answers = sorted((a for p in polls for a in p["answers"]), key=lambda a: a["id"])
+    assert answers == [
         {"id": "c1", "status": 200, "body": {"ok": True}},
         {"id": "c2", "status": 400, "body": None},
     ]
+    # Each answer went back in a short call of its own, not held for the next long poll
+    assert all(p["wait"] == 0 for p in polls if p["answers"])
     assert relay.status()["commands_done"] == 2
+
+
+def test_slow_timed_does_not_hold_the_command_behind_it(tmp_path):
+    """A /timed waits for its file (up to the caller's wait); a flush or Next made
+    meanwhile reaches the engine at once and is answered first."""
+    import http.server
+    import time as _time
+
+    seen = []
+
+    class Engine(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            if self.path == "/timed":
+                _time.sleep(1.0)
+            seen.append((self.path, _time.monotonic()))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok": true}')
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Engine)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        relay = kbr_relay.Relay(
+            "http://127.0.0.1:9/api/v1", "s", "t", tmp_path,
+            f"http://127.0.0.1:{srv.server_address[1]}",
+        )
+        order = []
+
+        def call(method, path, body=None, timeout=5.0):
+            got = json.loads(body)
+            order.extend(a["id"] for a in got["answers"])
+            if got["wait"] and not order:
+                return 200, json.dumps({"commands": [
+                    {"id": "slow", "path": "/timed", "payload": {}, "wait": 6.0},
+                    {"id": "quick", "path": "/flush", "payload": {}, "wait": 4.0},
+                ]}).encode()
+            return 200, b'{"commands": []}'
+
+        relay._call = call
+        started = _time.monotonic()
+        assert relay._poll(1.0) is True
+        while len(order) < 2 and _time.monotonic() - started < 5:
+            _time.sleep(0.02)
+        assert order == ["quick", "slow"]
+        assert dict(seen)["/flush"] - started < 0.5
+    finally:
+        srv.shutdown()
 
 
 @pytest.mark.asyncio
