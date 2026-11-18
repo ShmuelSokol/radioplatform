@@ -282,6 +282,8 @@ class StationLiveRelay:
         """Listeners get the show through the station's delay (straight away when it has none)."""
         air = self.airs.get(station_id)
         if air is None or air.passthrough():
+            if air is not None:
+                air.passed(data)
             await self._send_frame(station_id, data)
         else:
             air.feed(data)
