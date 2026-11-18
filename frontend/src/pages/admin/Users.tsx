@@ -335,7 +335,7 @@ export default function Users() {
               <button onClick={() => setRowError(null)} aria-label="Close this message" className="text-red-200">✕</button>
             </div>
           )}
-          <table className="w-full text-sm">
+          <table className="phone-cards w-full text-sm">
             <thead>
               <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">
                 <th className="text-left px-3 py-2">Username</th>
@@ -354,8 +354,8 @@ export default function Users() {
               {users.map(u => (
                 <tr key={u.id} className="border-t border-[#1a1a3e] hover:bg-[#14143a]">
                   <td className="px-3 py-1.5 text-cyan-300">{u.email}</td>
-                  <td className="px-3 py-1.5 text-gray-300">{u.display_name ?? '\u2014'}</td>
-                  <td className="px-3 py-1.5">
+                  <td data-label="Name" className="px-3 py-1.5 text-gray-300">{u.display_name ?? '\u2014'}</td>
+                  <td data-label="Role" className="px-3 py-1.5">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                       u.role === 'admin' ? 'bg-red-900 text-red-300' :
                       u.role === 'manager' ? 'bg-blue-900 text-blue-300' :
@@ -364,16 +364,16 @@ export default function Users() {
                       'bg-gray-800 text-gray-400'
                     }`}>{u.role === 'dj' ? 'DJ / HOST' : u.role.toUpperCase()}</span>
                   </td>
-                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.phone_number ?? '\u2014'}</td>
-                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.title ?? '\u2014'}</td>
-                  <td className="px-3 py-1.5 hidden lg:table-cell">
+                  <td data-label="Phone" className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.phone_number ?? '\u2014'}</td>
+                  <td data-label="Title" className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">{u.title ?? '\u2014'}</td>
+                  <td data-label="Profile" className="px-3 py-1.5 hidden lg:table-cell">
                     {u.is_public ? (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-900 text-purple-300">PUBLIC</span>
                     ) : (
                       <span className="text-[11px] text-gray-600">Private</span>
                     )}
                   </td>
-                  <td className="px-3 py-1.5">
+                  <td data-label="Last online" className="px-3 py-1.5">
                     {(() => {
                       const { text, isOnline } = formatLastSeen(u.last_seen_at);
                       return (
@@ -384,10 +384,10 @@ export default function Users() {
                       );
                     })()}
                   </td>
-                  <td className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">
+                  <td data-label="Last action" className="px-3 py-1.5 text-gray-400 text-[11px] hidden lg:table-cell">
                     {u.last_action ?? '\u2014'}
                   </td>
-                  <td className="px-3 py-1.5">
+                  <td data-label="Status" className="px-3 py-1.5">
                     <span className={`text-[11px] ${u.is_active ? 'text-green-400' : 'text-red-400'}`}>
                       {u.is_active ? 'Active' : 'Disabled'}
                     </span>

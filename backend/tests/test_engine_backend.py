@@ -1553,3 +1553,35 @@ async def test_kept_start_reports_are_recorded_when_they_aired(client, db_sessio
     assert r.status_code == 200
     row = await _fresh(db_session, extra.id)
     assert abs((aware(row.started_at) - datetime.now(UTC)).total_seconds()) < 5
+
+
+async def test_a_resumed_item_is_logged_from_when_it_came_back(client, db_session, eng):
+    """A shiur that carries on after a time check has started_at shifted back by the
+    part already played (so its position lines up). Its play log row must begin when
+    it came back on air, or it overlaps the row of the first part and of the time
+    check (Jerusalem, 2026-11-18 06:00Z)."""
+    station, entries, _, _ = eng
+    rest = await _add(db_session, station, title="Shiur, rest", duration=3600, kind="shiur",
+                      source="resume@1500", position=0)
+    await _on_air(client, station, rest.id)
+    row = await _fresh(db_session, rest.id)
+    back_on_air = datetime.now(UTC) - timedelta(seconds=40)
+    row.started_at = back_on_air - timedelta(seconds=1500)
+    await db_session.commit()
+
+    await _on_air(client, station, entries[0].id)
+    logs = (await db_session.execute(select(PlayLog).where(PlayLog.asset_id == rest.asset_id))).scalars().all()
+    assert len(logs) == 1
+    start = logs[0].start_utc if logs[0].start_utc.tzinfo else logs[0].start_utc.replace(tzinfo=UTC)
+    assert abs((start - back_on_air).total_seconds()) < 1
+
+
+def test_aired_from_adds_the_part_already_played():
+    from types import SimpleNamespace
+
+    from app.models.queue_entry import aired_from
+
+    at = datetime(2026, 11, 18, 6, 0, 13, tzinfo=UTC)
+    assert aired_from(SimpleNamespace(started_at=at, source="resume@1500")) == at + timedelta(seconds=1500)
+    assert aired_from(SimpleNamespace(started_at=at, source="auto")) == at
+    assert aired_from(SimpleNamespace(started_at=None, source="resume@5")) is None

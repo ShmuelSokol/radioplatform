@@ -395,8 +395,8 @@ export default function Databank() {
             <span className="flex-1 min-w-0 leading-tight">
               <span className="block truncate text-[15px]" onClick={startEdit(it.id, 'title')}>{cell(it.id, 'title', it.title) ?? it.title}</span>
               <span className="block truncate text-xs font-normal text-[#d0d0d0]">
-                {it.artist ? `${it.artist} · ` : ''}<span onClick={startEdit(it.id, 'type')}>{cell(it.id, 'type', it.type ?? '', 'text', 'db-types') ?? (it.type ?? '')}</span>
-                {it.last_played ? ` · ${dmy(it.last_played, tz)} ${hm(it.last_played, tz)}` : ''}
+                {it.artist || ''}{it.artist && (it.type || canEdit) ? ' · ' : ''}<span onClick={startEdit(it.id, 'type')}>{cell(it.id, 'type', it.type ?? '', 'text', 'db-types') ?? (it.type || (canEdit ? 'no category' : ''))}</span>
+                {it.last_played ? `${it.artist || it.type || canEdit ? ' · ' : ''}${dmy(it.last_played, tz)} ${hm(it.last_played, tz)}` : ''}
               </span>
             </span>
             <span className="shrink-0 text-right text-xs tabular-nums">
