@@ -152,7 +152,7 @@ A web caller who clears their browser data is a new caller. The block is a conve
 
 ## Take-over and host-gone timing on the stream (PC check after PR 340, 2026-11-18)
 
-- `/playout/{station}/live.mp3` is open from the moment the engine is told to go quiet (`told_soon`, a second before first air) and sends silence in real time until the first words. It used to answer 204 until the show was heard, so the engine connected only on its next try: 2.3 s of silence on the stream at every take-over.
+- `/playout/{station}/live.mp3` is open from the moment the engine is told of the show (`told_soon`, a second before first air); the answer waits, empty, for the first words. (PR 343 sent silence meanwhile; taken out again, see "The stream goes quiet when the show's audio is here".) It used to answer 204 until the show was heard, so the engine connected only on its next try: 2.3 s of silence on the stream at every take-over.
 - The wait of `live_host_gone_seconds` is noted the moment the host's socket closes (`scheduler_engine.note_host_left`), not when a scheduler pass first sees it, and forgotten when a host sends again. On Jerusalem with delay 15 and limit 15 the count had begun only when the delay had played out: 17.5 s of silence after the host's last words. (Not reproduced locally, where the passes saw the leaving in time; the count no longer depends on them.)
 - The control room browser checks use a fake backend: a live show there is "on air, 15 s delay" (`station.air` overrides), so the badge reads "LIVE, 15 s delay: <title>".
 
@@ -165,3 +165,7 @@ The qnet skin greys every disabled button whatever its colour (`!important` in `
 ## A pass in the second before first air (harness, 2026-11-18)
 
 `playout_engine.tick` used to send "live off" whenever the station was not the show's, and in the second between the early quiet (`on_soon`) and the take-over it is not yet: a pass falling there started a song that the take-over cut 0.6 to 0.9 s later. The tick now leaves the engine alone while `_show_about_to_be_heard`.
+
+## The stream goes quiet when the show's audio is here (engine, 2026-11-18)
+
+On "live on" the engine used to go quiet at once and then open `live.mp3`: until that feed had connected and buffered (2 to 3.5 s) the stream was silent, at every take-over (KBR Jerusalem 17:34Z: quiet 3.5 s before the host's first words). Now `/live` in `radio.liq` only notes the wish (`live_asked`), starts the feed and lets the music play on; `go_live()` runs when `live_feed.is_ready()`, or after 5 s whatever is there. Until then the engine still says `live=1` to the backend (`live_wanted()`), so the item that follows the show is handed out and nothing new is started. A "live off" in that wait just drops the wish: the music never stopped. The show reaches the stream a feed-buffer later than the page players (about 2 to 3 s), with nothing lost. Needs the engines redeployed (`setup.sh`); an engine not yet redeployed behaves as before.
