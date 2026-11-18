@@ -18,6 +18,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [station-rules](station-rules.md) — Which schedule rules apply to a station (its own, else the global ones) and the one function every check must read them through
 - [lint-workflow](lint-workflow.md) — Wiki housekeeping procedure
 - [release-pickup](release-pickup.md) — open tabs reload themselves onto a new release, never while audio plays
+- [listener-player-bar](listener-player-bar.md) — the station keeps playing on the other listener pages: the Listen page stays mounted, hidden; bar with Stop
 - [live-listeners](live-listeners.md): when a listener counts as live, instant join/leave push to admin pages
 - [playlist-generation](playlist-generation.md) — queue generated ahead from sequences of song types, artist distance, longest-rested first
 - [rds-feed](rds-feed.md) — plain-text now-playing line for the FM RDS encoder (Magic RDS)

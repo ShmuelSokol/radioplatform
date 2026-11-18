@@ -16,7 +16,7 @@
  * print XFAIL; when one is fixed its check prints XPASS and fails until removed here.
  */
 import {
-  chromium, devices, checker, sleep, makeStation, routeApi, routeNowPlaying, AUDIO_PROBE, routeSiteSocket,
+  chromium, devices, checker, sleep, makeStation, routeApi, routeNowPlaying, AUDIO_PROBE, routeSiteSocket, watchDecks,
 } from './lib/fake-station.mjs';
 import { allowEverywhere } from './lib/guard.mjs';
 
@@ -145,38 +145,134 @@ async function a11y(browser, contextOpts, tag) {
   await ctx.close();
 }
 
-// ── Global AudioPlayer bar (playerStore) ─────────────
-// The bar (components/audio/AudioPlayer.tsx, in Layout) shows only once something calls
-// usePlayerStore().play(stationId, name, hlsUrl). Nothing in the site does: the public
-// Archives page plays with its own Audio element, the Listen page and the admin
-// library have their own players. So the check is that the bar is never shown on the
-// pages a listener can open (and that playing an archive does not need it).
+const DESKTOP = { viewport: { width: 1280, height: 900 } };
+const IPHONE = { ...devices['iPhone 13'] };
+
+// ── The station keeps playing on the other listener pages (player bar) ─────────────
+// A listener who pressed Listen Live and then opens the guide, the DJs, the archives or
+// the station list keeps hearing the station: the Listen page stays alive, hidden
+// (components/audio/ListenHost.tsx), and a bar at the bottom says what is on, with a way
+// back and Stop (components/audio/AudioPlayer.tsx). Listening standard: no silence and no
+// restart on a page change, no sound started outside a tap, and the listener's own choice
+// of station wins.
 async function globalPlayer(browser) {
-  const tag = 'global player bar';
-  const station = publicStation();
-  const ctx = await publicContext(browser, { viewport: { width: 1280, height: 900 } }, station);
-  const page = await ctx.newPage();
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(String(e)));
-  const bar = () => page.locator('div.fixed.bottom-0.bg-gray-900').count();
-  for (const path of ['/stations', `/listen/${station.SID}`, '/guide', '/hosts', '/archives']) {
-    await page.goto(`${BASE}${path}`);
+  for (const [size, opts] of [['desktop', DESKTOP], ['iPhone', IPHONE]]) {
+    const tag = `player bar ${size}`;
+    const station = publicStation();
+    const ctx = await publicContext(browser, opts, station);
+    // count every play() and whether a press was being handled (browsers allow sound only from a tap)
+    await ctx.addInitScript(() => {
+      window.__inClick = false; window.__playsOutsideClick = 0;
+      addEventListener('click', () => { window.__inClick = true; }, true);
+      addEventListener('click', () => { setTimeout(() => { window.__inClick = false; }, 0); });
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function (...a) { if (!window.__inClick && window.__countPlays) window.__playsOutsideClick++; return play.apply(this, a); };
+    });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    const bar = page.getByTestId('player-bar');
+    // move inside the site the way a link does (no reload): the page's own router
+    const go = (path) => page.evaluate((p) => { history.pushState({}, '', p); dispatchEvent(new PopStateEvent('popstate')); }, path);
+    const audible = () => page.evaluate(() => (window.__audible ? window.__audible() : []));
+    /** Sample the sound every 50 ms while `during` runs and for `ms` after: any silent sample, any restart? */
+    const listenWhile = async (ms, during) => {
+      const watching = watchDecks(page, ms, 50);
+      await during();
+      const samples = await watching;
+      const silent = samples.filter((s) => !s.decks.some((d) => d.playing && d.gain > 0.05)).length;
+      let restarts = 0; const last = {};
+      for (const s of samples) for (const d of s.decks) { if (d.src in last && d.t < last[d.src] - 0.2) restarts++; last[d.src] = d.t; }
+      return { silent, restarts, n: samples.length };
+    };
+
+    for (const path of ['/stations', '/guide', '/hosts', '/archives']) {
+      await page.goto(`${BASE}${path}`);
+      await sleep(500);
+      check(`${tag}: no bar on ${path} while nothing is playing`, (await bar.count()) === 0);
+    }
+
+    await page.goto(`${BASE}/listen/${station.SID}`);
+    await page.getByRole('button', { name: 'Listen Live' }).click();
+    await page.waitForFunction(() => window.__audible && window.__audible().length > 0, null, { timeout: 5000 }).catch(() => {});
+    const before = await audible();
+    check(`${tag}: Listen Live is heard on the station's page`, before.length >= 1, JSON.stringify(before));
+    check(`${tag}: no bar on the station's own page (it has its own Stop)`, (await bar.count()) === 0);
+    await page.evaluate(() => { window.__countPlays = true; });
+    const elements = () => page.evaluate(() => (window.__audios || []).length);
+    const els0 = await elements();
+
+    // every listener page in turn: never silent, never restarted, the bar says what is on
+    for (const [path, ready] of [['/guide', 'Program Guide'], ['/hosts', 'Reb Moshe'], ['/archives', 'Thursday Night Live'], ['/stations', "Kol B'ramah"]]) {
+      const heard = await listenWhile(1500, async () => { await go(path); await page.locator('main').getByText(ready).locator('visible=true').first().waitFor({ timeout: 5000 }); });
+      check(`${tag}: moving to ${path} is never silent (sampled every 50 ms)`, heard.silent === 0 && heard.n > 20, JSON.stringify(heard));
+      check(`${tag}: moving to ${path} does not restart the song`, heard.restarts === 0, JSON.stringify(heard));
+      check(`${tag}: ${path} shows the bar with the song and the station`, (await bar.count()) === 1 && /Song number|Nigun|Station ID|sponsor/.test(await page.getByTestId('player-bar-title').innerText()) && /Kol B'ramah/.test(await bar.innerText()), (await bar.count()) ? await bar.innerText() : 'no bar');
+      check(`${tag}: ${path} shows its own content, not the station page`, (await page.getByTestId('listen-host').count()) === 1 && !(await page.getByTestId('listen-host').getByRole('button', { name: 'Stop' }).first().isVisible().catch(() => false)));
+    }
+    check(`${tag}: no sound was started outside a tap while moving around (iPhone rule)`, (await page.evaluate(() => window.__playsOutsideClick)) === 0 || (await elements()) === els0, `plays outside a tap: ${await page.evaluate(() => window.__playsOutsideClick)}, players ${els0} -> ${await elements()}`);
+    const box = await bar.getByRole('button', { name: 'Stop' }).boundingBox();
+    check(`${tag}: the bar's Stop is thumb-sized`, !!box && box.height >= 44 && box.width >= 44, JSON.stringify(box));
+    check(`${tag}: the bar covers no control of the page`, await page.evaluate(() => {
+      scrollTo(0, document.documentElement.scrollHeight);
+      const b = document.querySelector('[data-testid="player-bar"]').getBoundingClientRect();
+      return [...document.querySelectorAll('main a, main button, main input, main select')].every((e) => { const r = e.getBoundingClientRect(); return !r.width || r.bottom <= b.top + 1 || r.top >= b.bottom; });
+    }));
+
+    // back to the station's page through the bar: still the same sound, the page shows Stop
+    const backHeard = await listenWhile(1200, async () => { await bar.getByRole('link').click(); await page.getByRole('button', { name: 'Stop' }).first().waitFor({ timeout: 5000 }); });
+    check(`${tag}: the bar leads back to the station's page without a gap or a restart`, new URL(page.url()).pathname === `/listen/${station.SID}` && backHeard.silent === 0 && backHeard.restarts === 0, JSON.stringify(backHeard));
+    check(`${tag}: and that page shows Stop, not Listen Live`, (await page.getByRole('button', { name: 'Listen Live' }).count()) === 0);
+
+    // Stop in the bar
+    await go('/guide');
+    await bar.waitFor({ timeout: 5000 });
+    await bar.getByRole('button', { name: 'Stop' }).click();
+    await sleep(600);
+    check(`${tag}: Stop in the bar silences the station within 0.6 s and the bar goes`, (await audible()).length === 0 && (await bar.count()) === 0, JSON.stringify(await audible()));
+    check(`${tag}: after Stop the station page is no longer kept alive`, (await page.getByTestId('listen-host').count()) === 0);
+    await sleep(1500);
+    check(`${tag}: and it stays silent`, (await audible()).length === 0);
+
+    // An archive recording takes over from the station
+    await go(`/listen/${station.SID}`);
+    await page.getByRole('button', { name: 'Listen Live' }).click();
+    await page.waitForFunction(() => window.__audible().length > 0, null, { timeout: 5000 }).catch(() => {});
+    await go('/archives');
+    await page.getByRole('button', { name: /^Play Motzei Shabbos/ }).click();
     await sleep(800);
-    check(`${tag}: not shown on ${path.replace(station.SID, ':id')} (nothing calls playerStore.play)`, (await bar()) === 0);
+    const playing = await page.evaluate(() => window.__audios.filter((a) => !a.paused).map((a) => a.src.split('/').pop()));
+    check(`${tag}: playing an archive stops the station (one sound, not two) and the bar goes`, playing.length === 1 && playing[0] === 'm1.wav' && (await bar.count()) === 0, playing.join());
+
+    // The listener's choice of station wins
+    await page.goto(`${BASE}/listen/${station.SID}`);
+    await page.getByRole('button', { name: 'Listen Live' }).click();
+    await page.waitForFunction(() => window.__audible().length > 0, null, { timeout: 5000 }).catch(() => {});
+    await go('/stations');
+    await bar.waitFor({ timeout: 5000 });
+    await go('/listen/st-2');
+    await sleep(800);
+    check(`${tag}: opening another station's page stops the first station`, (await audible()).length === 0, JSON.stringify(await audible()));
+    check(`${tag}: the other station waits for its own tap (Listen Live shown, nothing started by itself)`, (await page.getByRole('button', { name: 'Listen Live' }).count()) === 1 && (await page.getByTestId('listen-host').getAttribute('data-station')) === 'st-2');
+    await go('/guide');
+    await sleep(400);
+    check(`${tag}: and the first station does not come back on the next page`, (await bar.count()) === 0 && (await audible()).length === 0);
+
+    // Staff pages and the call-in page have their own sound: the station stops there
+    await page.goto(`${BASE}/listen/${station.SID}`);
+    await page.getByRole('button', { name: 'Listen Live' }).click();
+    await page.waitForFunction(() => window.__audible().length > 0, null, { timeout: 5000 }).catch(() => {});
+    await go('/admin/login');
+    await sleep(700);
+    check(`${tag}: leaving the listener pages (staff sign-in) stops the station`, (await audible()).length === 0 && (await bar.count()) === 0);
+
+    check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
   }
-  await page.getByText('Thursday Night Live').waitFor();
-  await page.getByRole('button', { name: /^Play Motzei Shabbos/ }).click();
-  await sleep(800);
-  const playing = await page.evaluate(() => window.__audios.filter((a) => !a.paused).map((a) => a.src.split('/').pop()));
-  check(`${tag}: an archive plays on the Archives page's own player, no global bar`, playing.length === 1 && playing[0] === 'm1.wav' && (await bar()) === 0, playing.join());
-  check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
-  await ctx.close();
 }
 
 // ── Station list, program guide, DJs, archives (F-STLIST, F-GUIDE, F-HOSTS, F-PARCH) ──
 
-const DESKTOP = { viewport: { width: 1280, height: 900 } };
-const IPHONE = { ...devices['iPhone 13'] };
 const sideways = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 /** Client-side navigation, as a click on a navbar link does (no page reload). */
 const goInApp = (page, path) => page.evaluate((p) => { history.pushState({}, '', p); dispatchEvent(new PopStateEvent('popstate')); }, path);

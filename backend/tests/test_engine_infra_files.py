@@ -400,3 +400,19 @@ def test_next_waits_for_the_next_file_instead_of_skipping_into_nothing():
     assert "skip_waiting" in skip
     assert re.search(r"skip_wait\s*=\s*(\d+)\.", liq) and float(re.search(r"skip_wait\s*=\s*(\d+)\.", liq).group(1)) >= 10
     assert "list.length(main_requests.queue()) > 0" in liq
+
+
+def test_the_music_lane_stays_muted_until_the_next_item_starts_and_loads_it_ahead():
+    """With a slow backend: after a live show the last second of the interrupted song
+    played, then 3 s of silence; after a timed group that had paused a shiur, 4 s of
+    emergency music (harness with every backend answer held 4 s, 2026-11-18). The level
+    came back on a timer after the skip, and the lane only asked for its next item when
+    it was back on air."""
+    liq = _liq()
+    back = liq[liq.index("elsif lane == \"main\" and main_interrupted() and entry == last_main_entry() then"):]
+    back = back[:back.index("elsif lane == \"hold\"")]
+    assert "main.skip()" in back and "main_gain := 1." not in back and "main_interrupted := false" not in back
+    flush = liq[liq.index('control("/flush"'):]
+    flush = flush[:flush.index("end)")]
+    assert 'on_air_lane() != "main" and not live_on()' in flush
+    assert "thread.run(fast=false, {ignore(main_requests.fetch())})" in flush

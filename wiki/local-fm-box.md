@@ -187,6 +187,30 @@ unchanged rerun (nothing restarted), adding a card (`pulse`), a script with a sy
 error (refused, nothing restarted), a script that hangs at start (old one put back).
 Not yet run on a real machine with real systemd.
 
+## Stage 4a (2026-11-18): the box reports its health
+
+With every command poll the relay sends `health` (`Relay.health()`, recomputed at most
+every 30 s): `clock_ok`, `plan_age_seconds`, `plan_entries`, `plan_audio_missing`,
+`reports_kept`, `disk_free_gb`, `engine_ok` (the engine beside it answers `/status`),
+`up_seconds`. `playout_tunnel.report_health` keeps the known fields in memory;
+`GET /playout-status` shows them as `box` for a relay station (`seen_seconds_ago` with
+it; `None` until the box has reported to this process). Air watch (`_check_box`, also
+during a live show) raises one alert per spell: `box_clock` (critical + push),
+`box_disk` (under 5 GB free), `box_audio` (items of the plan not on the disk for 15
+min). A box that stopped reporting is the existing `engine_drift` alert ("The local FM
+box does not answer"). Not in the report yet: whether the sound card is in use (the
+engine knows, its `/status` does not say; radio.liq is the engine thread's) and
+silence on the card itself. No page shows `box` yet; the alerts are the interface.
+
+## Updates on the box: decided 2026-11-18 (engine thread, via the coordinator)
+
+No standby engine for gap-free updates: a second engine sharing the sound card is one
+more way for two engines to play on the transmitter at once. A new radio.liq costs
+about 10 s of quiet on FM, so setup-box.sh should apply it only in a quiet window (a
+blackout within the next day, else 3 AM local) unless forced, and restart at a song
+boundary. Not built yet. If Shmuel says 10 s at 3 AM is not acceptable, the engine
+thread builds standby (flag, `/takeover`, relay stops the old engine at a song boundary).
+
 ## Blocker before FM is fed from the engine: live shows
 
 During a live show the engine's output is silent by design (the host's microphone goes to
@@ -206,10 +230,10 @@ engine's output first; the engine thread builds the engine side when this stage 
    delay. Fine while a box has a station of its own; look again before it carries Main.
 3. **Offline brain is simple:** the queue as it stood. No long-item rule (a shiur is cut
    by a hard item, not paused), no `hard_by`, no hour fitting, no refill past the plan.
-4. **Updates without a gap** (second engine started alongside, switch between songs;
-   today setup-box.sh restarts the engine and puts a bad script back), **alerts** (FM
-   silent, box offline, disk full, clock wrong), **RDS** (the encoder model is not known
-   yet), a way for us to reach the box for maintenance (it has no inbound line).
+4. **Updates in a quiet window** (see above; today setup-box.sh restarts the engine at
+   once and puts a bad script back), **alert for silence on the card** and the card's
+   state in the health report, **RDS** (the encoder model is not known yet), a way for
+   us to reach the box for maintenance (it has no inbound line).
 5. Waiting on Shmuel: photos of the room (audio path, RDS encoder), who has access, UPS.
    He believes the room has wired internet.
 

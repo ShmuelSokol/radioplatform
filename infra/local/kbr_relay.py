@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import urllib.error
@@ -93,6 +94,8 @@ class Relay:
         self.spool_path = self.dir / "spool.jsonl"
         self.answers: list[dict] = []  # engine answers not yet handed to the backend
         self.commands_done = 0
+        self.started_at = time.monotonic()
+        self._health: tuple[float, dict] | None = None
         self.stop = threading.Event()
 
     # ── disk ────────────────────────────────────────────────────────────────
@@ -418,7 +421,8 @@ class Relay:
             answers, self.answers = self.answers, []
         try:
             status, data = self._call(
-                "POST", "/commands/poll", json.dumps({"wait": wait, "answers": answers}).encode(),
+                "POST", "/commands/poll",
+                json.dumps({"wait": wait, "answers": answers, "health": self.health()}).encode(),
                 timeout=wait + 10.0,
             )
         except Offline:
@@ -571,6 +575,30 @@ class Relay:
 
         for target in (timed_loop, sync_loop, command_loop):
             threading.Thread(target=target, daemon=True, name=target.__name__).start()
+
+    def health(self, max_age: float = 30.0) -> dict:
+        """How the box is doing, sent to the site with every poll (it raises the alerts):
+        clock, plan, audio still to copy, start reports waiting, free disk, engine."""
+        hit = self._health
+        if hit and time.monotonic() - hit[0] < max_age:
+            return hit[1]
+        st = self.status()
+        try:
+            free = round(shutil.disk_usage(self.dir).free / 1e9, 1)
+        except OSError:
+            free = None
+        out = {
+            "clock_ok": st["clock_ok"],
+            "plan_age_seconds": st["plan_age_seconds"],
+            "plan_entries": st["plan_entries"],
+            "plan_audio_missing": st["plan_audio_missing"],
+            "reports_kept": st["reports_kept"],
+            "disk_free_gb": free,
+            "engine_ok": self._engine_call("/status", {}, wait=2.0)[0] == 200,
+            "up_seconds": int(time.monotonic() - self.started_at),
+        }
+        self._health = (time.monotonic(), out)
+        return out
 
     def status(self) -> dict:
         with self.lock:
