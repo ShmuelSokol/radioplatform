@@ -89,6 +89,10 @@ class Relay:
         self.done: list[str] = list(state.get("done", []))
         self.timed_sent: set[str] = set(state.get("timed_sent", []))
         self.online = True
+        # The engine's own run id (X-Playout-Instance), passed on to the backend with every
+        # call, so its one-engine-per-station rule also covers a box (a box set up with a
+        # copied station id is refused, not given half of that station's queue)
+        self.engine_instance: str | None = None
         self.last_plan_at = 0.0
         self.hello_owed = False
         self.spool_path = self.dir / "spool.jsonl"
@@ -152,9 +156,12 @@ class Relay:
     def _call(self, method: str, path: str, body: bytes | None = None, timeout: float = 5.0):
         """(status, bytes) from the backend. Raises Offline when it cannot be reached or
         fails on its side; a refusal (403, 404) is an answer and is passed on."""
+        headers = {"X-Playout-Token": self.token, "Content-Type": "application/json"}
+        if self.engine_instance:
+            headers["X-Playout-Instance"] = self.engine_instance
         req = urllib.request.Request(
             f"{self.upstream}/playout/{self.station_id}{path}", data=body, method=method,
-            headers={"X-Playout-Token": self.token, "Content-Type": "application/json"},
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -638,6 +645,8 @@ def make_handler(relay: Relay):
                 return self._send(403, b'{"ok":false,"error":"forbidden"}')
             if not parsed.path.startswith(prefix):
                 return self._send(404, b'{"ok":false}')
+            if self.headers.get("X-Playout-Instance"):
+                relay.engine_instance = self.headers["X-Playout-Instance"]
             tail = parsed.path[len(prefix):]
             if tail == "/next" and method == "GET":
                 return self._send(*relay.next(parsed.query))

@@ -103,6 +103,8 @@ class Fake:
         self.next_answer = None
         self.plan = {"entries": [], "blackouts": []}
         self.timed = []
+        self.instances = []
+        self.refuse_instance = None
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -118,6 +120,9 @@ class Fake:
                 if not fake.up:
                     return self._out(503, b"down")
                 fake.calls.append((self.command, path.split("/playout/sid", 1)[-1], body))
+                fake.instances.append(self.headers.get("X-Playout-Instance"))
+                if fake.refuse_instance and self.headers.get("X-Playout-Instance") == fake.refuse_instance:
+                    return self._out(409, b'{"detail":"Another playout engine plays this station"}')
                 if "/plan" in path:
                     return self._out(200, json.dumps(fake.plan).encode())
                 if "/next" in path:
@@ -184,6 +189,40 @@ def test_online_passes_through_and_plays_the_local_copy(rig):
     assert fake.calls[0][1].startswith("/next?given=&proto=2")
     fake.next_answer = None
     assert _next(relay) == (204, None)
+
+
+def test_the_engine_instance_id_reaches_the_backend_and_a_refusal_reaches_the_engine(rig):
+    """One engine per station also for a box: the relay passes the engine's run id on, and
+    the backend's 409 for a second engine goes back to that engine (no plan fallback)."""
+    import socket
+    import urllib.error
+    import urllib.request
+
+    fake, relay, _ = rig
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    server = kbr_relay.serve(relay, port)
+    try:
+        def call(path, instance, method="GET"):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/v1/playout/sid{path}", method=method,
+                data=b"{}" if method == "POST" else None,
+                headers={"X-Playout-Token": TOKEN, "X-Playout-Instance": instance})
+            try:
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    return r.status
+            except urllib.error.HTTPError as e:
+                return e.code
+
+        assert call("/hello", "box-1", "POST") == 200
+        assert call("/next?given=", "box-1") == 204
+        assert fake.instances == ["box-1", "box-1"]
+        fake.refuse_instance = "copied"
+        assert call("/hello", "copied", "POST") == 409
+        assert call("/next?given=", "copied") == 409
+    finally:
+        server.shutdown()
 
 
 def test_offline_plays_the_plan_in_order_and_nothing_twice(rig):

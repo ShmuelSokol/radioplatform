@@ -42,7 +42,14 @@ settings.harbor.bind_addrs := ["127.0.0.1"]
 settings.scheduler.fast_queues := 6
 settings.scheduler.generic_queues := 6
 
-auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")]
+# A random id of this engine run, sent with every call and in /status. The backend plays a
+# station to one engine only: another engine calling with this station's id (an FM box
+# set up with a copied id, one left running after a move) is refused while this one
+# answers on its control line, so the two never split the queue or both reach the air.
+engine_instance = "#{random.int(min=100000000, max=999999999)}-#{int_of_float(time())}"
+
+auth_headers = [("X-Playout-Token", token), ("X-Playout-Instance", engine_instance),
+                ("Content-Type", "application/json")]
 
 # What this engine understands, sent with /hello and every /next. 2 = timed groups handed
 # over in parallel (seq/of) and /timed_drop. 3 = the hold lane (quiet before a hard item
@@ -66,7 +73,9 @@ def send_hello() =
                      "#{backend_url}/playout/#{station_id}/hello")
     if resp.status_code == 200 then
       hello_done := true
-      log.important("hello: backend answered")
+      log.important("hello: backend answered (engine #{engine_instance})")
+    elsif resp.status_code == 409 then
+      log.important("hello: REFUSED, another engine plays this station (wrong station id?); trying again in 5 s")
     else
       log.important("hello: backend answered #{resp.status_code}; trying again in 5 s")
     end
@@ -827,7 +836,7 @@ control("/status", fun (_) -> begin
   left = if left >= 0. and left < 1000000. then left else -1. end
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
                   main_remaining=left, timed_waiting=timed_queue.length() + list.length(timed_room()),
-                  live=live_on()})
+                  live=live_on(), instance=engine_instance})
 end)
 
 # Optional: also write the output to a WAV file (testing only)
