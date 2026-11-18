@@ -8,6 +8,12 @@
  */
 const { chromium } = require('playwright');
 const fs = require('fs'), os = require('os'), path = require('path');
+
+// The host goes on air: microphone on (nothing goes out yet), then the one GO LIVE press
+async function goLive(page) {
+  await page.getByTestId('mic-on-button').click();
+  await page.getByTestId('go-live-button').click();
+}
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'callin-'));
 for (const [f, name] of [[440, 'host'], [880, 'caller']]) {
   const rate = 48000, n = rate * 30, buf = Buffer.alloc(44 + n * 2);
@@ -78,16 +84,13 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
     await host.addInitScript((t) => localStorage.setItem('access_token', t), token);
     await host.addInitScript(RECORD);
     await host.goto(`${SITE}/admin/live/${show.id}/host`);
-    await host.getByText('Start Broadcasting').click();
+    await goLive(host);
     await sleep(3000);
     let t = tones(lastHeard());
     check('listeners hear the host', t.host > 0.003 && t.caller < 0.001, fmt(t));
     // F-HOST-1: the VU meter moves with the microphone
-    const vu = await host.evaluate(() => {
-      const bar = [...document.querySelectorAll('div[style*="width"]')].find((d) => d.parentElement?.className.includes('rounded-full'));
-      return bar ? parseFloat(bar.style.width) : -1;
-    });
-    check('host VU meter moves', vu > 0, `${vu.toFixed(1)}%`);
+    const vu = Number(await host.getByTestId('level-meter').getAttribute('data-level'));
+    check('host level meter moves', vu > -40, `${vu} dB`);
 
     // F-SCREENER-1: the screener is open before the caller joins and lists them live
     const screener = await (await hostB.newContext()).newPage();
@@ -144,14 +147,14 @@ const recent = (page, key) => page.evaluate((k) => (window.__rx[k] || []).slice(
     await sleep(16000);
     const after = (await (await fetch(`${API}/live-shows/${show.id}/calls`, { headers: H })).json()).calls.find((c) => c.id === call.id);
     check('the call is closed after the caller leaves', after.status === 'completed', after.status);
-    // F-HOST-1: Stop Broadcasting takes the host off the air (listeners are told)
+    // F-HOST-1: leaving the air takes the host off the air (listeners are told)
     const offAir = new Promise((res) => {
       const f = (e) => { if (typeof e.data === 'string' && JSON.parse(e.data).live === false) { lws.removeEventListener('message', f); res(true); } };
       lws.addEventListener('message', f); setTimeout(() => res(false), 5000);
     });
-    await host.getByText('Stop Broadcasting').click();
-    check('Stop Broadcasting: listeners are told the host is off air', await offAir);
-    check('Start Broadcasting is back', await host.getByText('Start Broadcasting').isVisible());
+    await host.getByTestId('step-off-button').click();
+    check('Leave the air: listeners are told the host is off air', await offAir);
+    check('Turn on microphone is back', await host.getByTestId('mic-on-button').isVisible());
     await fetch(`${API}/live-shows/${show.id}/end`, { method: 'POST', headers: H });
   } finally {
     lws.close(); await hostB.close(); await callerB.close(); await restore();

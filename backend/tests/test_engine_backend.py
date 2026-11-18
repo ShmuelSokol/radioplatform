@@ -738,7 +738,7 @@ async def test_the_engine_goes_quiet_for_a_live_show_and_plays_again_after(clien
     await _on_air(client, station, entries[0].id)
     engine.sent.clear()
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     assert ("/live", {"on": True}) in engine.sent
     st = await db_session.get(Station, station.id)
@@ -791,7 +791,7 @@ async def test_engine_gets_no_music_during_a_live_show(client, db_session, eng):
     row.started_at = datetime.now(UTC) - timedelta(seconds=60)
     await db_session.commit()
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     r = await _next(client, station, str(entries[0].id))
     assert r.status_code == 204
@@ -812,7 +812,7 @@ async def test_a_quiet_engine_loads_the_item_after_the_show_during_the_show(clie
     row.started_at = datetime.now(UTC) - timedelta(seconds=60)
     await db_session.commit()
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     base = f"/api/v1/playout/{station.id}/next?given={entries[0].id}"
     assert (await client.get(f"{base}&proto=3&live=1", headers=HEADERS)).status_code == 204
@@ -837,7 +837,7 @@ async def test_show_end_on_engine_station_leaves_start_to_the_engine(client, db_
 
     station, entries, _, _ = eng
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     await live_show_service.end_show(db_session, show.id)
     await db_session.commit()
@@ -867,7 +867,7 @@ async def test_a_timed_item_lost_to_a_live_show_is_closed_when_the_show_ends(cli
     db_session.add_all([lost, ahead, unsent])
     await db_session.commit()
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     state = playout_engine.get_state(station.id)
     state.timed_sent.update({str(lost.id), str(ahead.id)})  # both handed over before the show
@@ -1563,7 +1563,7 @@ async def test_ending_a_show_takes_the_host_off_air_at_once(db_session, eng):
 
     station, _, _, _ = eng
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     live_relay.on_air[str(station.id)] = str(show.id)
     try:
@@ -1756,7 +1756,7 @@ async def test_a_sponsorship_made_hard_for_a_story_waits_for_the_show_and_plays_
     engine.sent.clear()
 
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     row = await _fresh(db_session, spot.id)
     assert (row.status, row.timing_mode) == ("pending", "soft")
@@ -1799,7 +1799,7 @@ async def test_a_hard_sponsorship_due_during_a_show_is_kept_and_the_time_check_i
     await _next(client, station)
     await _on_air(client, station, entries[0].id)
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     due = datetime.now(UTC) - timedelta(seconds=200)
     spot = await _add(db_session, station, title="Sponsor", duration=30.0, kind="spot", position=50,
@@ -1836,7 +1836,7 @@ async def test_the_paused_story_still_resumes_after_a_sponsorship_held_for_the_s
                       source="ad_slot", timing_mode="soft",
                       preempt_at=datetime.now(UTC) + timedelta(seconds=20))
     show = await _live_show(db_session, station)
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     played = str(entries[0].id)
     url = f"/api/v1/playout/{station.id}/next?proto=4&live=1&given="

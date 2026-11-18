@@ -115,7 +115,11 @@ def setup_middleware(app: FastAPI) -> None:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         # Every custom header the website sends must be listed here, or the
         # browser preflight fails (X-CRM-PIN: listener ratings, PR 188).
-        allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-CRM-PIN"],
+        # Cache-Control and Pragma: Safari adds them to the page's own requests after a
+        # reload; refused, an iPhone's Listen page got no station list and no
+        # now-playing (four OPTIONS 400 during the first real show, 2026-11-18).
+        allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-CRM-PIN",
+                       "Cache-Control", "Pragma"],
     )
 
     # Rate limiting on public endpoints

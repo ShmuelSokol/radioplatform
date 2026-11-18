@@ -1,7 +1,35 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { makeResampler, PcmPlayer } from '../lib/pcm';
 
+/** What the meter shows. Levels are dB below full scale (0 = the loudest a recording can hold). */
+export interface MicMeter {
+  /** Average level now, about -60 (silence) to 0 */
+  db: number;
+  /** Loudest moment of the last second and a half */
+  peakDb: number;
+  /** Hit full scale in the last 2 s: the voice is distorting */
+  clipping: boolean;
+  /** Seconds since the microphone last gave any sound (0 while it does) */
+  silentFor: number;
+}
+
+export type MicCheck = 'idle' | 'recording' | 'playing';
+export const MIC_CHECK_SECONDS = 5;
+
 interface UseHostAudioReturn {
+  /** The microphone is open in this page (the meter moves). Nothing is sent yet. */
+  micReady: boolean;
+  /** Open the microphone, inside a click. Listeners hear nothing until goLive. */
+  openMic: () => Promise<void>;
+  /** Start sending to the station: this is the moment of going on air. */
+  goLive: () => void;
+  meter: MicMeter;
+  /** Hear yourself in the headphones, as the station gets you (microphone and carts) */
+  monitor: boolean;
+  setMonitor: (on: boolean) => void;
+  /** Record a few seconds and play them back; only before going live */
+  micCheck: MicCheck;
+  runMicCheck: () => void;
   isRecording: boolean;
   startRecording: () => void;
   stopRecording: () => void;
@@ -30,7 +58,7 @@ interface UseHostAudioReturn {
 // The format and resampler are shared with web callers (lib/pcm.ts). The server
 // sends the callers on air back down this socket, so the host hears them.
 const RECONNECT_EVERY_MS = 1000;
-const RECONNECT_FOR_MS = 60000;   // then the host is told and must press Start Broadcasting
+const RECONNECT_FOR_MS = 60000;   // then the host is told and must press GO LIVE
 
 export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   const [isRecording, setIsRecording] = useState(false);
@@ -52,6 +80,17 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   const cartRef = useRef<{ id: string; source: AudioBufferSourceNode | null } | null>(null);
   const [cartPlaying, setCartPlaying] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [micReady, setMicReady] = useState(false);
+  const [meter, setMeter] = useState<MicMeter>({ db: -60, peakDb: -60, clipping: false, silentFor: 0 });
+  const meterRef = useRef({ peak: 0, peakAt: 0, clipAt: 0, soundAt: 0, shownAt: 0 });
+  const [monitor, setMonitorState] = useState(() => {
+    try { return localStorage.getItem('kbr_host_monitor') === '1'; } catch { return false; }
+  });
+  const monitorRef = useRef(monitor);
+  const monitorGainRef = useRef<GainNode | null>(null);
+  const [micCheck, setMicCheck] = useState<MicCheck>('idle');
+  const checkRef = useRef<{ chunks: Float32Array[]; length: number } | null>(null);
+  const openRef = useRef<(() => void) | null>(null);
   const authedRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setMuted = useCallback((on: boolean) => {
@@ -115,6 +154,22 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     }
     const rms = Math.sqrt(sum / data.length);
     setAudioLevel(Math.min(1, rms * 3));
+    let top = 0;
+    for (let i = 0; i < data.length; i++) top = Math.max(top, Math.abs(data[i] - 128) / 128);
+    const m = meterRef.current;
+    const now = performance.now();
+    if (top >= m.peak || now - m.peakAt > 1500) { m.peak = top; m.peakAt = now; }
+    if (top >= 0.98) m.clipAt = now;
+    if (rms > 0.004 || !m.soundAt) m.soundAt = now;
+    if (now - m.shownAt > 60) {   // about 16 times a second is plenty for the eye
+      m.shownAt = now;
+      const toDb = (v: number) => Math.max(-60, 20 * Math.log10(Math.max(v, 1e-6)));
+      setMeter({
+        db: toDb(rms), peakDb: toDb(m.peak),
+        clipping: !!m.clipAt && now - m.clipAt < 2000,
+        silentFor: Math.max(0, Math.floor((now - m.soundAt) / 1000)),
+      });
+    }
     rafRef.current = requestAnimationFrame(updateLevel);
   }, []);
 
@@ -139,17 +194,20 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     return ws;
   }, [showId]);
 
-  const startRecording = useCallback(async () => {
-    if (!showId) return;
+  const openMic = useCallback(async () => {
+    if (!showId || audioContextRef.current) return;
     setError(null);
 
+    // Made inside the click, before anything is awaited: Safari leaves an audio
+    // context made later suspended, and then nothing is captured and nothing heard
+    const ctx = new AudioContext();
+    ctx.resume().catch(() => {});
+    audioContextRef.current = ctx;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (audioContextRef.current !== ctx) { stream.getTracks().forEach(t => t.stop()); return; }
       mediaStreamRef.current = stream;
-
-      // Set up analyser for VU meter
-      const ctx = new AudioContext();
-      audioContextRef.current = ctx;
+      meterRef.current = { peak: 0, peakAt: 0, clipAt: 0, soundAt: 0, shownAt: 0 };
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
@@ -163,6 +221,12 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
       const processor = ctx.createScriptProcessor(4096, 1, 1);
       const resample = makeResampler(ctx.sampleRate);
       processor.onaudioprocess = (e) => {
+        const check = checkRef.current;
+        if (check) {   // the mic check keeps what the station would get
+          const input = e.inputBuffer.getChannelData(0);
+          check.chunks.push(new Float32Array(input));
+          check.length += input.length;
+        }
         // Muted: frames still go (they are the clock that carries the callers and
         // the carts); the microphone's gain is closed, so they hold no microphone
         const pcm = resample(e.inputBuffer.getChannelData(0));
@@ -175,6 +239,12 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
       source.connect(micGain);
       micGain.connect(bus);
       bus.connect(processor);
+      // Hear yourself: what goes to the station, in the headphones
+      const monitorGain = ctx.createGain();
+      monitorGain.gain.value = monitorRef.current ? 1 : 0;
+      bus.connect(monitorGain);
+      monitorGain.connect(ctx.destination);
+      monitorGainRef.current = monitorGain;
       micGainRef.current = micGain;
       busRef.current = bus;
       processor.connect(ctx.destination); // runs only when connected; its output is silent
@@ -204,7 +274,7 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
         };
         ws.onmessage = (e) => { if (e.data instanceof ArrayBuffer) callers.push(e.data); };
         ws.onclose = (e) => {
-          if (wsRef.current !== ws) return;   // Stop Broadcasting, or a newer socket
+          if (wsRef.current !== ws) return;   // the host left the air, or a newer socket
           // The server restarted or the network dropped: keep the microphone and try
           // again for a while, so the host is back on air without pressing anything
           // (a deploy during a show left 11 s of silence until End, 2026-11-18).
@@ -219,21 +289,76 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
           }
           stopRef.current();
           setError(everOpen
-            ? 'The connection to the station was lost. Press Start Broadcasting to go back on air.'
+            ? 'The connection to the station was lost. Press GO LIVE to go back on air.'
             : 'Audio WebSocket connection failed');
         };
       };
-      open();
+      openRef.current = open;
+      setMicReady(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to access microphone');
+      if (audioContextRef.current === ctx) audioContextRef.current = null;
+      ctx.close().catch(() => {});
+      const name = (err as { name?: string })?.name;
+      setError(name === 'NotAllowedError'
+        ? 'The browser did not allow the microphone. Allow it for this site (the icon by the address) and press again.'
+        : name === 'NotFoundError' ? 'No microphone was found on this computer.'
+        : err instanceof Error ? err.message : 'Failed to access microphone');
     }
   }, [showId, connectAudioWS, updateLevel]);
+
+  const goLive = useCallback(() => {
+    if (!openRef.current || wsRef.current) return;
+    checkRef.current = null;
+    setMicCheck('idle');
+    openRef.current();
+  }, []);
+
+  /** The old one-press path: microphone and on air together */
+  const startRecording = useCallback(async () => {
+    await openMic();
+    goLive();
+  }, [openMic, goLive]);
+
+  const setMonitor = useCallback((on: boolean) => {
+    monitorRef.current = on;
+    setMonitorState(on);
+    try { localStorage.setItem('kbr_host_monitor', on ? '1' : '0'); } catch { /* private mode */ }
+    if (monitorGainRef.current) monitorGainRef.current.gain.value = on ? 1 : 0;
+  }, []);
+
+  const runMicCheck = useCallback(() => {
+    const ctx = audioContextRef.current;
+    if (!ctx || wsRef.current || checkRef.current || micCheck !== 'idle') return;
+    const mine = { chunks: [] as Float32Array[], length: 0 };
+    checkRef.current = mine;
+    setMicCheck('recording');
+    setTimeout(() => {
+      if (checkRef.current !== mine) return;          // went live or stopped meanwhile
+      checkRef.current = null;
+      if (audioContextRef.current !== ctx || !mine.length) { setMicCheck('idle'); return; }
+      const audio = ctx.createBuffer(1, mine.length, ctx.sampleRate);
+      const data = audio.getChannelData(0);
+      let at = 0;
+      for (const chunk of mine.chunks) { data.set(chunk, at); at += chunk.length; }
+      const source = ctx.createBufferSource();
+      source.buffer = audio;
+      source.connect(ctx.destination);
+      source.onended = () => { source.disconnect(); setMicCheck('idle'); };
+      setMicCheck('playing');
+      source.start();
+    }, MIC_CHECK_SECONDS * 1000);
+  }, [micCheck]);
 
   const stopRef = useRef<() => void>(() => {});
   const stopRecording = useCallback(() => {
     stopCart();
     micGainRef.current = null;
     busRef.current = null;
+    monitorGainRef.current = null;
+    openRef.current = null;
+    checkRef.current = null;
+    setMicCheck('idle');
+    setMicReady(false);
     if (processorRef.current) {
       processorRef.current.onaudioprocess = null;
       processorRef.current.disconnect();
@@ -280,5 +405,8 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     };
   }, [stopRecording]);
 
-  return { isRecording, startRecording, stopRecording, audioLevel, error, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting };
+  return {
+    isRecording, startRecording, stopRecording, audioLevel, error, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting,
+    micReady, openMic, goLive, meter, monitor, setMonitor, micCheck, runMicCheck,
+  };
 }

@@ -8,7 +8,6 @@ import {
   useCreateLiveShow,
   useUpdateLiveShow,
   useDeleteLiveShow,
-  useStartLiveShow,
 } from '../../hooks/useLiveShows';
 import { formatInZone, fromZonedInput, toZonedInput } from '../../lib/stationTime';
 import type { LiveShow } from '../../api/liveShows';
@@ -49,7 +48,6 @@ export default function LiveShows() {
   const createMut = useCreateLiveShow();
   const updateMut = useUpdateLiveShow();
   const deleteMut = useDeleteLiveShow();
-  const startMut = useStartLiveShow();
 
   const resetForm = () => {
     setTitle('');
@@ -176,12 +174,21 @@ export default function LiveShows() {
               <div className="flex items-center gap-2 sm:ml-4 flex-shrink-0 flex-wrap">
                 {show.status === 'scheduled' && (
                   <>
-                    <button
-                      onClick={() => startMut.mutate(show.id)}
+                    {/* Opens the studio; the show goes on air there, with one GO LIVE press.
+                        This button used to mark the show live by itself, with no microphone open. */}
+                    <Link
+                      to={`/admin/live/${show.id}/host`}
+                      data-testid="open-studio"
                       className="text-[11px] bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1 rounded transition"
                     >
-                      Go Live
-                    </button>
+                      Open studio
+                    </Link>
+                    <Link
+                      to={`/admin/live/${show.id}/screen`}
+                      className="text-[11px] bg-purple-800 hover:bg-purple-700 text-purple-200 px-3 py-1 rounded transition"
+                    >
+                      Screener
+                    </Link>
                     <button
                       onClick={() => openEditModal(show)}
                       className="text-[11px] bg-[#2a2a5e] hover:bg-[#3a3a7e] text-cyan-300 px-3 py-1 rounded transition"

@@ -25,6 +25,8 @@ import type { AssetInfo } from '../../types';
 
 interface ActiveShowData {
   active: boolean;
+  /** The station's server stream, when it has one (known even while no item is on air) */
+  stream_url?: string | null;
   show: {
     id: string;
     title: string;
@@ -137,7 +139,10 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
   };
 
   // Icecast stream: direct MP3 stream via <audio> element
-  const streamUrl = wsNowPlaying?.stream_url || null;
+  // The address comes with the item on air. During a live show no item is on air, so
+  // a page opened then had no stream and stayed silent until the show ended (the
+  // first real show, 2026-11-18): the show lookup carries the address too.
+  const streamUrl = wsNowPlaying?.stream_url || activeShow?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
   const useStream = !!streamUrl && !streamFailed;
   // The tab's one stream player (lib/stationStream): it outlives this page, so the

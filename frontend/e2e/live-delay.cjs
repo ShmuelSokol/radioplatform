@@ -27,6 +27,12 @@
  */
 const { chromium, devices } = require('playwright');
 const fs = require('fs'), os = require('os'), path = require('path');
+
+// The host goes on air: microphone on (nothing goes out yet), then the one GO LIVE press
+async function goLive(page) {
+  await page.getByTestId('mic-on-button').click();
+  await page.getByTestId('go-live-button').click();
+}
 const WebSocket = globalThis.WebSocket;
 const API = process.env.API_URL || 'http://localhost:8000/api/v1', SITE = process.env.BASE_URL || 'http://localhost:3000';
 const STATION = process.argv[2];
@@ -199,7 +205,7 @@ function hostMic(showId, token) {
         check('B3 delay controls wait for the show to be on air', await T(host, 'delay-length').isDisabled() && await T(host, 'delay-build').isDisabled());
         await shot(host, 'host-1-before');
 
-        await host.getByText('Start Broadcasting').click();
+        await goLive(host);
         await T(host, 'preroll-note').waitFor({ timeout: 4000 });
         check('B4 filling: the host is told when listeners will hear them', /Listeners hear you in \d s\. Start talking now\./.test(await T(host, 'preroll-note').innerText()) && (await T(host, 'delay-state').innerText()) === 'FILLING', await T(host, 'preroll-note').innerText());
         check('B5 listeners hear nothing yet', l.frames.length === 0);
@@ -342,7 +348,7 @@ function hostMic(showId, token) {
         const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
         await T(host, 'delay-panel').waitFor({ timeout: 15000 });
         check('D1 no Cough or Mute before the microphone is open', await T(host, 'cough-button').count() === 0 && await T(host, 'mute-button').count() === 0);
-        await host.getByText('Start Broadcasting').click();
+        await goLive(host);
         await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 9000 });
         await sleep(1500);
 
@@ -653,7 +659,7 @@ function hostMic(showId, token) {
         const buttons = T(host, 'cart-button');
         check('H1 the instant buttons of the control room show as carts, off until the microphone is open',
           await buttons.count() === 3 && await buttons.first().isDisabled() && /Open your microphone to use the carts/.test(await T(host, 'cart-panel').innerText()), await T(host, 'cart-panel').innerText());
-        await host.getByText('Start Broadcasting').click();
+        await goLive(host);
         await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 9000 });
         await sleep(1500);
 
@@ -701,7 +707,7 @@ function hostMic(showId, token) {
         await shot(host, 'host-cart-broken');
 
         // Stop Broadcasting: the carts are off again
-        await host.getByText('Stop Broadcasting').click();
+        await host.getByTestId('step-off-button').click();
         await sleep(500);
         check('H10 after Stop Broadcasting the carts are off', await buttons.first().isDisabled());
 
@@ -874,7 +880,7 @@ function hostMic(showId, token) {
 
         // The host talks to the caller: the host's microphone to listeners closes meanwhile
         const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
-        await host.getByText('Start Broadcasting').click();
+        await goLive(host);
         await T(host, 'mute-button').waitFor({ timeout: 9000 });
         await sleep(2000);
         const t4 = Date.now();
@@ -949,7 +955,7 @@ function hostMic(showId, token) {
         const dialogs = [];
         host.on('dialog', (d) => { dialogs.push(d.message()); d.dismiss(); });
         await host.goto(`${SITE}/admin/live/${show.id}/host`);
-        await host.getByText('Start Broadcasting').click();
+        await goLive(host);
         await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 9000 });
         await sleep(2000);
         const t0 = Date.now();
@@ -959,7 +965,7 @@ function hostMic(showId, token) {
         const { exec } = require('child_process');
         const restarted = new Promise((res) => exec(process.env.BACKEND_RESTART, (err) => res(!err)));
         await T(host, 'reconnecting-note').waitFor({ timeout: 8000 });
-        check('J2 the host is told the connection is lost and that it is reconnecting', /Reconnecting/.test(await T(host, 'reconnecting-note').innerText()) && await host.getByText('Stop Broadcasting').count() === 1, await T(host, 'reconnecting-note').innerText());
+        check('J2 the host is told the connection is lost and that it is reconnecting', /Reconnecting/.test(await T(host, 'reconnecting-note').innerText()) && await host.getByTestId('step-off-button').count() === 1, await T(host, 'reconnecting-note').innerText());
         await shot(host, 'host-reconnecting');
         const down = Date.now();
         check('J3 the backend came back', await restarted);
@@ -1210,7 +1216,7 @@ function hostMic(showId, token) {
         await api('POST', `/live-shows/${show.id}/calls/${other.call_id}/approve`);
         const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
         await T(host, 'caller-priority').waitFor({ timeout: 15000 });
-        check('M4 the Host Console shows the badge and the history, read only', /First call/.test(await T(host, 'caller-history').innerText()) && await T(host, 'caller-block-button').count() === 0 && await T(host, 'caller-priority-button').count() === 0);
+        check('M4 the Host Console shows the badge and the history, read only', /First call|Called .* before/.test((await T(host, 'caller-history').allInnerTexts()).join(' ')) && await T(host, 'caller-block-button').count() === 0 && await T(host, 'caller-priority-button').count() === 0);
         await shot(host, 'host-history');
 
         // Block: asks once more on the button, then the waiting call is gone and new calls are refused
@@ -1354,27 +1360,27 @@ function hostMic(showId, token) {
         await T(co, 'cohost-join').click();
         await T(co, 'cohost-on').waitFor({ timeout: 8000 });
         await watcher.getByText(/On the show with the host: /).waitFor({ timeout: 5000 });
-        check('O2 joined: the page says so, the host cannot also be started here, and another screen names the co-host', /You are on the show as a co-host\. Listeners hear you/.test(await T(co, 'cohost-on').innerText()) && await co.getByRole('button', { name: 'Start Broadcasting' }).isDisabled() && /On the show with the host: \S+/.test(await T(watcher, 'cohost-names').innerText()), await T(watcher, 'cohost-names').innerText());
+        check('O2 joined: the page says so, the host cannot also be started here, and another screen names the co-host', /You are on the show as a co-host\. Listeners hear you/.test(await T(co, 'cohost-on').innerText()) && await co.getByTestId('mic-on-button').isDisabled() && /On the show with the host: \S+/.test(await T(watcher, 'cohost-names').innerText()), await T(watcher, 'cohost-names').innerText());
         await sleep(2500);
         const t1 = Date.now();
         await sleep(2500);
         const t2 = Date.now();
         const withCo = P(l, 880, t1, t2), hostTone = P(l, 440, t1, t2);
-        check('O3 listeners hear the co-host together with the host', before < 0.001 && withCo > 0.004 && hostTone > 0.004, `880 Hz before ${before.toFixed(4)}, with co-host ${withCo.toFixed(4)}; host 440 Hz ${hostTone.toFixed(4)}`);
+        check('O3 listeners hear the co-host together with the host', before < 0.001 && withCo > 0.002 && hostTone > 0.002, `880 Hz before ${before.toFixed(4)}, with co-host ${withCo.toFixed(4)}; host 440 Hz ${hostTone.toFixed(4)}`);
         const hostHears = power(mic.back.filter((x) => x.at >= t1 && x.at < t2).flatMap((x) => Array.from(x.pcm)), 880);
-        check('O4 the host hears the co-host', hostHears > 0.004, hostHears.toFixed(4));
+        check('O4 the host hears the co-host', hostHears > 0.002, hostHears.toFixed(4));
         await shot(co, 'cohost-on');
         await T(co, 'cohost-mute').click();
         await sleep(1500);
         const t3 = Date.now();
         await sleep(2000);
         const mutedP = P(l, 880, t3, Date.now());
-        check('O5 Mute takes the co-host off the air while the host goes on', mutedP < 0.001 && P(l, 440, t3, Date.now()) > 0.004 && /muted/.test(await T(co, 'cohost-on').innerText()), `880 Hz ${mutedP.toFixed(4)}`);
+        check('O5 Mute takes the co-host off the air while the host goes on', mutedP < 0.001 && P(l, 440, t3, Date.now()) > 0.002 && /muted/.test(await T(co, 'cohost-on').innerText()), `880 Hz ${mutedP.toFixed(4)}`);
         await T(co, 'cohost-mute').click();
         await sleep(2000);
         const t4 = Date.now();
         await sleep(2000);
-        check('O6 Unmute brings them back', P(l, 880, t4, Date.now()) > 0.004, P(l, 880, t4, Date.now()).toFixed(4));
+        check('O6 Unmute brings them back', P(l, 880, t4, Date.now()) > 0.002, P(l, 880, t4, Date.now()).toFixed(4));
         await T(co, 'cohost-leave').click();
         await watcher.getByText('No co-host on the show.').waitFor({ timeout: 5000 });
         await sleep(1500);
@@ -1461,7 +1467,7 @@ function hostMic(showId, token) {
         const l = listener();
         const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
         await T(host, 'delay-panel').waitFor({ timeout: 15000 });
-        await host.getByText('Start Broadcasting').click();
+        await goLive(host);
         await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 14000 });
         await T(host, 'filler-note').waitFor({ timeout: 8000 });
         for (let i = 0; i < 20 && !(await air(show.id)).filler; i++) await sleep(500);

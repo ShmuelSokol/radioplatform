@@ -16,6 +16,8 @@ import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
 import CallerHistory from './live/CallerHistory';
 import LockButton from './live/LockButton';
+import LevelMeter from './live/LevelMeter';
+import { MIC_CHECK_SECONDS } from '../../hooks/useHostAudio';
 
 const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AIR)
 
@@ -27,7 +29,10 @@ export default function HostConsole() {
   const cam = useHostVideo(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
-  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting } = useHostAudio(showId);
+  const {
+    isRecording, stopRecording, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting,
+    micReady, openMic, goLive, meter, monitor, setMonitor, micCheck, runMicCheck,
+  } = useHostAudio(showId);
   // Cough: silent while the button (or the C key) is held. Mute: stays silent until pressed again.
   const [micOff, setMicOff] = useState(false);
   const [coughing, setCoughing] = useState(false);
@@ -95,6 +100,16 @@ export default function HostConsole() {
   const onAirCallers = callers.filter(c => c.status === 'on_air');
   const anyOnAir = onAirCallers.length > 0;
   const approvedCallers = callers.filter(c => c.status === 'approved');
+  // Callers nobody has looked at yet. They used to show only on the screener's page:
+  // a host working alone never saw the caller and could not hear him (2026-11-18)
+  const waitingCallers = callers.filter(c => c.status === 'waiting' || c.status === 'screening');
+  // Where the host stands, in one word, for the banner
+  const preroll = isRecording && air?.mode === 'pre-roll';
+  const heard = isRecording && !!air?.on_air;
+  const airState: 'off' | 'ready' | 'connecting' | 'soon' | 'on' =
+    !micReady ? 'off' : !isRecording ? 'ready' : heard ? 'on' : preroll ? 'soon' : 'connecting';
+  const soonIn = preroll && air
+    ? Math.ceil(Math.max(air.hold ?? 0, Math.max(0, air.target - air.delay))) : 0;
 
   const formatTime = (seconds: number | null): string => {
     if (seconds === null) return '--:--:--';
@@ -108,7 +123,7 @@ export default function HostConsole() {
 
   const handleEndShow = () => {
     if (!showId) return;
-    if (confirm('End this live show?')) {
+    if (confirm(currentShow?.status === 'live' ? 'End this live show? The station goes back to its programme.' : 'Close this show without going on air?')) {
       stopRecording();
       endShowMut.mutate(showId, {
         onSuccess: () => navigate('/admin/live'),
@@ -177,8 +192,31 @@ export default function HostConsole() {
           onClick={handleEndShow}
           className="bg-red-800 hover:bg-red-700 text-red-200 px-3 sm:px-4 py-2 rounded text-sm font-bold transition flex-shrink-0 ml-2"
         >
-          End Show
+          {currentShow?.status === 'live' ? 'End Show' : 'Close show'}
         </button>
+      </div>
+
+      {/* One line that always says whether listeners hear you */}
+      <div
+        role="status" data-testid="air-banner" data-state={airState}
+        className={`rounded-lg px-4 py-3 mb-4 text-center font-bold text-lg sm:text-2xl border-2 ${
+          airState === 'on' ? 'bg-red-700 border-red-400 text-white'
+          : airState === 'soon' || airState === 'connecting' ? 'bg-yellow-500 border-yellow-300 text-black'
+          : 'bg-gray-800 border-gray-600 text-gray-200'}`}
+      >
+        {airState === 'on' && (muted ? 'ON AIR: your microphone is muted' : 'ON AIR: listeners hear you')}
+        {airState === 'soon' && `GOING ON AIR: listeners hear you in ${soonIn} s. Start talking now.`}
+        {airState === 'connecting' && 'GOING ON AIR…'}
+        {airState === 'ready' && 'NOT ON AIR: nobody hears you. The station is playing its programme.'}
+        {airState === 'off' && 'NOT ON AIR: your microphone is off. The station is playing its programme.'}
+        <div className="text-xs sm:text-sm font-normal mt-1">
+          {airState === 'on' && (air && air.delay > 0.5
+            ? `What you say goes out ${air.delay.toFixed(0)} s later (the broadcast delay). End Show takes you off.`
+            : 'End Show takes you off.')}
+          {airState === 'soon' && 'The music plays until then. Nothing you say is lost.'}
+          {airState === 'ready' && 'Check your level below. When you are ready, press GO LIVE: that press puts you on air.'}
+          {airState === 'off' && 'Step 1: turn on your microphone. Nothing goes out yet.'}
+        </div>
       </div>
 
       <TalkNote
@@ -186,6 +224,45 @@ export default function HostConsole() {
         name={talk.talkingTo ? (callers.find(c => c.id === talk.talkingTo)?.caller_name || "the caller") : null}
 
         error={talk.error} onStop={talk.stop} />
+
+      {/* Above everything: on a phone the right-hand column is far down the page */}
+      {waitingCallers.length > 0 && (
+        <div className="bg-[#12123a] border-2 border-yellow-500 rounded-lg p-4 mb-4" data-testid="waiting-callers">
+          <div className="text-[11px] text-yellow-300 uppercase mb-1 font-bold">
+            Calling now ({waitingCallers.length})
+          </div>
+          <div className="text-[11px] text-gray-400 mb-3">
+            They hear the show. You do not hear them, and neither do listeners, until you put them on air.
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {waitingCallers.map(caller => (
+              <div key={caller.id} className="bg-[#0a0a28] border border-[#2a2a5e] rounded p-3" data-testid="waiting-caller">
+                <div className="text-white text-sm font-medium mb-1">{caller.caller_name || caller.caller_phone}</div>
+                <CallerNote showId={showId} caller={caller} />
+                <CallerHistory showId={showId} caller={caller} readOnly />
+                <div className="flex gap-2 mt-2">
+                  <TalkButton callId={caller.id} talkingTo={talk.talkingTo} onStart={talk.start} onStop={talk.stop} />
+                  <button
+                    onClick={() => handlePutOnAir(caller.id)}
+                    disabled={onAirCallers.length >= MAX_ON_AIR || !isRecording}
+                    title={!isRecording ? 'Go live first' : undefined}
+                    data-testid="waiting-put-on-air"
+                    className="flex-1 bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1.5 rounded text-xs font-bold transition disabled:opacity-50"
+                  >
+                    Put On Air
+                  </button>
+                  <button
+                    onClick={() => handleEndCall(caller.id)}
+                    className="bg-red-900 hover:bg-red-800 text-red-200 px-3 py-1.5 rounded text-xs transition"
+                  >
+                    End
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left column: Countdown + Mic */}
@@ -206,25 +283,51 @@ export default function HostConsole() {
           {/* Microphone controls */}
           <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4">
             <div className="text-[11px] text-gray-400 uppercase mb-3">Microphone</div>
-            <div className="flex items-center gap-3 mb-3">
-              {!isRecording ? (
+            {!micReady && (
+              <button
+                onClick={openMic}
+                disabled={co.on}
+                data-testid="mic-on-button"
+                title={co.on ? 'You are on the show as a co-host. Leave it first to host.' : undefined}
+                className="w-full bg-cyan-800 hover:bg-cyan-700 text-white px-4 py-3 rounded text-base font-bold transition disabled:opacity-50 mb-3"
+              >
+                Turn on microphone
+                <span className="block text-[11px] font-normal">nothing goes on air yet</span>
+              </button>
+            )}
+            {micReady && !isRecording && (
+              <div className="mb-3 space-y-2">
                 <button
-                  onClick={startRecording}
-                  disabled={co.on}
-                  title={co.on ? 'You are on the show as a co-host. Leave it first to host.' : undefined}
-                  className="bg-green-800 hover:bg-green-700 text-green-200 px-4 py-2 rounded text-sm font-bold transition flex-1 disabled:opacity-50"
+                  onClick={goLive}
+                  data-testid="go-live-button"
+                  className="w-full bg-red-600 hover:bg-red-500 text-white px-4 py-5 rounded-lg text-2xl font-bold transition border-2 border-red-300"
                 >
-                  Start Broadcasting
+                  GO LIVE
+                  <span className="block text-xs font-normal">this press puts you on air</span>
                 </button>
-              ) : (
-                <button
-                  onClick={stopRecording}
-                  className="bg-red-800 hover:bg-red-700 text-red-200 px-4 py-2 rounded text-sm font-bold transition flex-1"
-                >
-                  Stop Broadcasting
-                </button>
-              )}
-            </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={runMicCheck}
+                    disabled={micCheck !== 'idle'}
+                    data-testid="mic-check-button"
+                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-100 px-3 py-2 rounded text-sm font-bold transition disabled:opacity-70"
+                  >
+                    {micCheck === 'recording' ? `Recording… talk for ${MIC_CHECK_SECONDS} s`
+                      : micCheck === 'playing' ? 'Playing it back…' : 'Mic check'}
+                    <span className="block text-[11px] font-normal">
+                      {micCheck === 'idle' ? `record ${MIC_CHECK_SECONDS} s and hear how you sound` : 'only you hear this'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={stopRecording}
+                    data-testid="mic-off-button"
+                    className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-2 rounded text-xs transition"
+                  >
+                    Turn microphone off
+                  </button>
+                </div>
+              </div>
+            )}
 
             {isRecording && (
               <div className="flex items-stretch gap-2 mb-3">
@@ -254,6 +357,16 @@ export default function HostConsole() {
                 </button>
               </div>
             )}
+            {isRecording && (
+              <button
+                onClick={stopRecording}
+                data-testid="step-off-button"
+                title="Your microphone stops. Listeners hear nothing from you; after 15 seconds of that the station goes back to its programme. To finish the show, use End Show."
+                className="mb-3 text-[11px] text-gray-400 hover:text-white underline"
+              >
+                Leave the air without ending the show
+              </button>
+            )}
             {isRecording && muted && (
               <div className="text-yellow-400 text-sm mb-2 font-bold" role="status" data-testid="mic-muted-note">
                 {talking
@@ -262,15 +375,18 @@ export default function HostConsole() {
               </div>
             )}
 
-            {/* VU Meter */}
-            <div className="h-4 bg-[#0a0a28] rounded-full overflow-hidden">
-              <div
-                className={`h-full transition-all duration-75 rounded-full ${
-                  audioLevel > 0.8 ? 'bg-red-500' : audioLevel > 0.5 ? 'bg-yellow-500' : 'bg-green-500'
-                }`}
-                style={{ width: `${(muted ? 0 : audioLevel) * 100}%` }}
-              />
-            </div>
+            <LevelMeter meter={meter} on={micReady} muted={muted} />
+            {micReady && (
+              <label className="flex items-start gap-2 mt-3 text-sm text-gray-200 cursor-pointer" data-testid="monitor-toggle">
+                <input type="checkbox" className="mt-1" checked={monitor} onChange={e => setMonitor(e.target.checked)} />
+                <span>
+                  Hear myself in my headphones
+                  <span className="block text-[11px] text-gray-400">
+                    What the station gets from you. Headphones only: through speakers it would feed back into the microphone.
+                  </span>
+                </span>
+              </label>
+            )}
 
             {reconnecting && (
               <div className="text-yellow-400 text-sm mt-2 font-bold" role="status" data-testid="reconnecting-note">

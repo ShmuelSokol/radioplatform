@@ -2484,3 +2484,9 @@ Seeds were the surprises of 2026-11-17: a song chopped when the previous one end
 - [ ] V3-55 The watchdog itself stops (backend down, lease lost): someone is told (a heartbeat from outside) | modes: n.a. | covered: NOT COVERED
 - [ ] V3-56 Public forms cannot be flooded: song requests, call-in, bug reports, member sign-up each have a limit that holds from many addresses | modes: n.a. | covered: partial (bug reports rate-limited; B-PUBLIC-13 open)
 
+- [x] V3-57 Going on air is one press: Open studio starts nothing, Turn on microphone sends nothing and the music plays on, GO LIVE puts the host on air and the banner says when listeners hear them | modes: both | covered: e2e live-go-live G1-G8, test_going_live_starts_a_scheduled_show_and_the_music_plays_on_until_the_host_is_heard
+- [x] V3-57a The level meter moves with the voice and says too loud, quiet or no sound; Hear myself; Mic check records 5 s and plays it back before going live | modes: both | covered: e2e live-go-live
+- [x] V3-57b A Listen page opened while a show is already on air plays it (stream station: the live show answer carries the stream address) | modes: engine | covered: test_a_page_opened_during_a_show_is_told_the_stream_address, e2e live-go-live; live check on Jerusalem owed
+- [x] V3-57c A caller who is waiting shows on the Host Console with Put On Air, with no screener open; both hear each other | modes: both | covered: e2e live-go-live, web-call-in
+- [x] V3-57d No delay: a host who keeps talking is not dropped after 15 s | modes: both | covered: test_a_host_with_no_delay_counts_as_sending, e2e web-call-in
+- [ ] V3-57e On a real iPhone: the Listen page plays a live show (silent switch on and off), and a caller is heard by the host | modes: both | covered: NOT COVERED (needs Shmuel's phone)

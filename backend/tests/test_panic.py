@@ -223,7 +223,7 @@ async def test_panic_during_a_live_show_starts_no_music(client, auth_headers, db
                     scheduled_start=now, scheduled_end=now + timedelta(hours=1))
     db_session.add(show)
     await db_session.commit()
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     assert await _playing(db_session, station.id) == []
 

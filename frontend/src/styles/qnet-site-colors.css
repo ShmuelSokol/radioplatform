@@ -31,6 +31,7 @@
 .qn-site [class~="bg-gray-900"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-gray-950"]{background-color:var(--qn-face)}
 .qn-site [class~="bg-green-900"]{background-color:#dcfce7}
+.qn-site [class~="bg-green-900/40"]{background-color:#dcfce7}
 .qn-site [class~="bg-green-900/60"]{background-color:#dcfce7}
 .qn-site [class~="bg-indigo-900"]{background-color:#e0e7ff}
 .qn-site [class~="bg-orange-900"]{background-color:#ffedd5}
@@ -38,12 +39,14 @@
 .qn-site [class~="bg-purple-900"]{background-color:#f3e8ff}
 .qn-site [class~="bg-purple-900/70"]{background-color:#f3e8ff}
 .qn-site [class~="bg-red-900"]{background-color:#fee2e2}
+.qn-site [class~="bg-red-900/50"]{background-color:#fee2e2}
 .qn-site [class~="bg-red-900/60"]{background-color:#fee2e2}
 .qn-site [class~="bg-red-900/70"]{background-color:#fee2e2}
 .qn-site [class~="bg-red-900/80"]{background-color:#fee2e2}
 .qn-site [class~="bg-red-950"]{background-color:#fee2e2}
 .qn-site [class~="bg-sky-900/70"]{background-color:#e0f2fe}
 .qn-site [class~="bg-yellow-900"]{background-color:#fef9c3}
+.qn-site [class~="bg-yellow-900/40"]{background-color:#fef9c3}
 .qn-site [class~="bg-yellow-900/70"]{background-color:#fef9c3}
 .qn-site [class~="border-[#12122e]"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-[#1a1a3e]"]{border-color:var(--qn-shadow)}
@@ -62,6 +65,7 @@
 .qn-site [class~="border-gray-100"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-200"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-300"]{border-color:var(--qn-shadow)}
+.qn-site [class~="border-gray-600"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-700"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-gray-700/50"]{border-color:var(--qn-shadow)}
 .qn-site [class~="border-green-200"]{border-color:#16a34a}

@@ -795,6 +795,14 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
                     from app.services.live_air import filler_asset
                     filler_id = filler_asset(station_row.automation_config)
                     taken_over = (station_row.automation_config or {}).get("live_show_id") == str(show.id)
+                    from app.models.live_show import LiveShowStatus as _Status
+                    if not taken_over and delay <= 0 and show.status == _Status.LIVE:
+                        # No broadcast delay: the host is heard from this moment, so the
+                        # station is his from this moment (with a delay: once it is full)
+                        from app.services.live_show_service import take_over_station
+                        await take_over_station(db, station_row, show, datetime.now(timezone.utc))
+                        await db.commit()
+                        taken_over = True
                 if show.scheduled_end is not None:
                     end = show.scheduled_end
                     end_at = (end if end.tzinfo else end.replace(tzinfo=timezone.utc)).timestamp()

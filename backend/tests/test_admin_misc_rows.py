@@ -773,6 +773,6 @@ async def test_rds_shows_the_station_name_during_a_live_show(client, db_session,
     await db_session.commit()
     url = f"{API}/stations/{st.id}/rds.txt"
     assert (await client.get(url)).text == "Singer - Song"
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     assert (await client.get(url)).text == "Kol B'ramah Live"

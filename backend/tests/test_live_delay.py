@@ -917,7 +917,7 @@ async def test_station_goes_back_to_music_when_the_host_is_gone(db_session, _qui
 
     monkeypatch.setattr(bug_report_service, "send_ntfy", push)
     station, show, song, *_ = await _station(db_session, {"live_delay_seconds": 0, "live_host_gone_seconds": 15})
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     await db_session.refresh(station)
     assert station.automation_config["live_show_id"] == str(show.id) and await _playing(db_session, station) == []
@@ -1302,7 +1302,7 @@ async def test_a_sponsorship_due_during_the_show_plays_first_after_it(db_session
                        status="pending", source="resume@120")
     db_session.add_all([entry, stale])
     await db_session.commit()
-    await live_show_service.start_show(db_session, show.id)
+    await live_show_service.start_show(db_session, show.id, heard_now=True)
     await db_session.commit()
     await db_session.refresh(entry)
     assert (entry.status, entry.timing_mode) == ("pending", "soft")
@@ -1316,3 +1316,49 @@ async def test_a_sponsorship_due_during_the_show_plays_first_after_it(db_session
     await db_session.commit()
     playing = await _playing(db_session, station)
     assert [e.asset_id for e in playing] == [spot.id]
+
+
+# ---------- what the real show of 2026-11-18 found ----------
+
+def test_a_host_with_no_delay_counts_as_sending():
+    """With no delay the frames go straight out. They did not count as the host
+    sending, so the station was taken back from a host in mid sentence after
+    `live_host_gone_seconds` (browser test, 2026-11-18)."""
+    clock = Clock()
+    air = LiveAir("st", "show", _nowhere, delay=0, clock=clock)
+    air.listening = True
+    clock.t += 20.0
+    assert air.passthrough() is True
+    air.passed(np.zeros(480, dtype="<i2").tobytes())
+    assert air.clock() - air.last_input == 0
+
+
+async def test_a_page_opened_during_a_show_is_told_the_stream_address(client, db_session, monkeypatch):
+    """The Listen page got the stream address only with the item on air, and during a
+    live show nothing is on air: a page opened in mid show stayed silent (the real
+    show on Main, 2026-11-18). The live show answer carries the address too."""
+    from app.config import settings
+    station = Station(id=uuid.uuid4(), name="Main", timezone="America/New_York", automation_config={})
+    db_session.add(station)
+    await db_session.commit()
+    sid = str(station.id)
+    r = await client.get(f"/api/v1/live-shows/station/{sid}/active")
+    assert r.status_code == 200 and r.json()["active"] is False and r.json()["stream_url"] is None
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_STATION_ID", sid)
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "t")
+    monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", True)
+    monkeypatch.setattr(settings, "ICECAST_STREAM_URL", "https://stream.invalid/live")
+    r = await client.get(f"/api/v1/live-shows/station/{sid}/active")
+    assert r.json()["stream_url"] == settings.public_stream_url(sid) and sid in r.json()["stream_url"]
+
+
+async def test_a_browser_may_send_cache_headers(client):
+    """Safari adds Cache-Control and Pragma to a reloaded request. The preflight was
+    refused (400 "Disallowed CORS headers"), so the request never went (the caller's
+    iPhone in the real show, 2026-11-18)."""
+    r = await client.options("/api/v1/stations", headers={
+        "Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization,cache-control,pragma"})
+    assert r.status_code == 200, r.text

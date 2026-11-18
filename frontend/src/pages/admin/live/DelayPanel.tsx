@@ -12,7 +12,7 @@ import type { AirStatus, DumpRecord } from '../../../api/liveShows';
 const LENGTHS = [0, 5, 7, 10, 15, 20, 30];
 
 const STATE: Record<string, { label: string; tone: string; help: string }> = {
-  off: { label: 'NOT ON AIR', tone: 'bg-gray-700 text-gray-200', help: 'Press the green button to go on air.' },
+  off: { label: 'NOT ON AIR', tone: 'bg-gray-700 text-gray-200', help: 'Press GO LIVE to go on air.' },
   'pre-roll': { label: 'FILLING', tone: 'bg-yellow-600 text-white', help: 'The music is still playing. Listeners hear you when the delay is full.' },
   steady: { label: 'SAFE', tone: 'bg-green-700 text-white', help: 'Dump cuts what was just said before listeners hear it.' },
   building: { label: 'BUILDING', tone: 'bg-yellow-600 text-white', help: 'The delay is filling back up while you talk. Until it is full, Dump cuts less.' },
