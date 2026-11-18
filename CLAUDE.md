@@ -84,6 +84,7 @@ radioplatform/
 ├── docker/                       # Dockerfiles, nginx.conf
 ├── infra/streaming/              # Playout engine server: radio.liq, setup.sh, Icecast, nginx, systemd
 ├── infra/local/                  # Local FM box: kbr_relay.py keeps the engine on air with no internet, setup-box.sh sets a box up (wiki/local-fm-box.md)
+├── infra/daf-yomi/             # Daf Yomi calendar and intro-clip words for the PC job that makes the clips (wiki/daf-yomi-intro.md)
 └── infra/terraform/              # Terraform IaC (Vercel frontend provisioning)
 ```
 

@@ -402,3 +402,4 @@ INGEST 2026-11-18 live-shows.md engine holds two items during a show; a flush em
 INGEST 2026-11-18 spot-schedules.md three-hour time slots beside the broad dayparts (planned narrowest first, reports stay broad) and least-full leveling over a slot's breaks: every break gets 3 before any gets a 4th
 UPDATE 2026-11-18 sponsor-accounts.md Sponsors got its own top menu (All Clients first); Campaigns points to the client page; Sponsor Portal link for sponsors only
 UPDATE 2026-11-18 sponsor-accounts.md contracts get an Edit dialog (ContractEditor) on the client page and Spot Schedule
+INGEST 2026-11-18 daf-yomi-intro.md intro clip before each Daf Yomi shiur: calendar + words in infra/daf-yomi/daf_intro.py, clip made on the PC and placed in the Shiur: Daf Yomi block right before the shiur (queue order keeps them back to back)
