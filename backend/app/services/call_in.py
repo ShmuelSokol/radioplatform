@@ -35,9 +35,11 @@ def call_token_ok(call_id: str, token: str) -> bool:
     return bool(token) and hmac.compare_digest(call_token(call_id), token)
 
 
-async def caller_left(call_id: str, show_id: str) -> None:
-    """The caller's socket closed: unless they come back soon, end the call."""
-    asyncio.get_running_loop().create_task(_end_if_gone(call_id, show_id, RECONNECT_GRACE_SECONDS))
+async def caller_left(call_id: str, show_id: str, wait: float | None = None) -> None:
+    """The caller's socket closed: unless they come back soon, end the call. A phone
+    caller who hung up does not come back (`wait` 0)."""
+    asyncio.get_running_loop().create_task(
+        _end_if_gone(call_id, show_id, RECONNECT_GRACE_SECONDS if wait is None else wait))
 
 
 async def _end_if_gone(call_id: str, show_id: str, wait: float) -> None:

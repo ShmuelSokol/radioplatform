@@ -168,7 +168,7 @@ radioplatform/
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
 | live_shows | live_shows.py | /live-shows (`GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `GET` and `POST /{id}/chat`: the staff chat; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold`, `calls/{id}/lock` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
-| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), `/ws/live/{show}/cohost` (a co-host joins from another place), `/ws/live/{show}/video` (the host's camera) and `/ws/live/station/{id}/watch` (pages watching it), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
+| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), `/ws/live/phone/{call}` (a phone caller's Twilio media stream), `/ws/live/{show}/cohost` (a co-host joins from another place), `/ws/live/{show}/video` (the host's camera) and `/ws/live/station/{id}/watch` (pages watching it), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
 | playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); one engine per station: hello/next/started from a second engine (other `X-Playout-Instance`) get 409 and an alert; /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report); `/live.mp3` (token only): the live show as listeners hear it, for the engine's live lane (see `wiki/live-shows.md`) |
@@ -218,7 +218,8 @@ radioplatform/
 | live_video.py | Live video for people on the website: the host's encoded camera frames pass the same delay as the sound, a Dump cuts them too (see `wiki/live-shows.md`) |
 | live_recording.py | Records every live show as listeners heard it (the delay's output, nothing dumped) and files it in Archives as a draft; station `automation_config.live_record_shows` (see `wiki/live-shows.md`) |
 | live_inserts.py | Hard timed items (the time check) that air on time during a live show, over the delay, while the host's words wait |
-| twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
+| twilio_voice_service.py | Twilio Voice call-in handling (TwiML that streams a caller's sound to the show, the old hold conference, hang up) |
+| phone_audio.py | A phone caller's sound between Twilio (8 kHz mu-law) and the show (24 kHz PCM), so phone callers are mixed like web callers (see `wiki/live-shows.md`) |
 | liquidsoap_client.py | Old telnet push client for Liquidsoap. Superseded by playout_engine.py; keep `LIQUIDSOAP_ENABLED` off |
 | duration_backfill.py | Measures the length of items that have none (they broke queue reads and restarts); runs once in the background after each start, and on demand via `POST /assets/backfill-durations` |
 | upcoming_analysis.py | Analyses the item on air and the next one in the background when their audio analysis is missing or older than `ANALYSIS_VERSION`, so song changes use real end and crossfade points; an item whose file is broken or missing goes off the air (do_not_play, alert, not deleted); after each start, items it took off whose file now measures come back (see `wiki/audio-engine.md`) |
@@ -440,7 +441,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `TWILIO_PHONE_NUMBER` | Twilio phone number | For SMS/WhatsApp alerts |
 | `TWILIO_VOICE_NUMBER` | Dedicated voice number for live call-ins | For live shows |
 | `LIVE_SHOW_HOLD_MUSIC_URL` | Public URL to hold music MP3 | For live shows |
-| `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks | For live shows |
+| `BACKEND_PUBLIC_URL` | Public backend URL for Twilio callbacks; must be https for phone callers to go on air (their media stream opens on it) | For live shows |
 | `EMERGENCY_FALLBACK_CATEGORY` | Unused since dead air restarts the queue instead (kept so old settings still load) | No |
 | `SILENCE_DETECTION_SECONDS` | Seconds of silence before alert (default: 30) | For silence detection |
 | `MAX_UPLOAD_MB` | Largest library upload in MB (default 600); bigger files get 413 | No |

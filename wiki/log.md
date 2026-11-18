@@ -391,3 +391,4 @@ INGEST 2026-11-18 live-shows.md live video for website listeners: WebCodecs fram
 INGEST 2026-11-18 live-shows.md timed items enter a live show 2 s early on stream stations (live_inserts.stream_lead, live_stream_lag_seconds): the stream plays live.mp3 that far behind
 INGEST 2026-11-18 live-shows.md filler after a Dump: station item (live_dump_filler_asset_id) plays for the seconds the delay is short, after what the Dump left, so the delay is whole at once; LiveAir.filler / fill_after / _start_fill
 INGEST 2026-11-18 sponsor-accounts.md Sponsors page is a client database (list with status/dates, client page: spots by stage, contracts, as-run log, missed); status worked out on read; GET /sponsors limit was 50 and cut pickers; delete refused with contracts/plays
+INGEST 2026-11-18 live-shows.md phone callers join the show's own mixer over a Twilio media stream (/ws/live/phone/{call}, services/phone_audio.py); the conference redirect is skipped for them; V2-70 fixed
