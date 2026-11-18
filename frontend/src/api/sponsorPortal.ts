@@ -64,3 +64,29 @@ export const getMySpots = async (): Promise<SponsorSpot[]> => {
   const res = await apiClient.get<SponsorSpot[]>('/sponsor-portal/spots');
   return res.data;
 };
+
+export interface MissedPlay {
+  when: 'past' | 'coming';
+  date: string;
+  daypart: string;
+  station_name: string;
+  asset_title: string;
+  promised: number;
+  played: number;
+  missed: number;
+  moved: number;
+  note: string;
+}
+
+export interface MissedPlaysResponse {
+  days: number;
+  missed_past: number;
+  missed_coming: number;
+  moved_coming: number;
+  rows: MissedPlay[];
+}
+
+export const getMissedPlays = async (): Promise<MissedPlaysResponse> => {
+  const res = await apiClient.get<MissedPlaysResponse>('/sponsor-portal/missed-plays');
+  return res.data;
+};

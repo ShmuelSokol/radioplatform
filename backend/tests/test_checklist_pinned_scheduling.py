@@ -80,6 +80,7 @@ READS = [
     ("B-SPONSORPOR-2", "/sponsor-portal/play-history", SPONSOR),
     ("B-SPONSORPOR-3", "/sponsor-portal/upcoming-schedule", SPONSOR),
     ("B-SPONSORPOR-5", "/sponsor-portal/stats", SPONSOR),
+    ("B-SPONSORPOR-6", "/sponsor-portal/missed-plays", SPONSOR),
     ("B-SPOTRECORD-1", "/spot-recordings", MANAGERS),
     ("B-SPOTRECORD-6", f"/spot-recordings/{_ID}/audio", MANAGERS),
     ("B-SPOTSCHEDU-1", "/spot-schedules", MANAGERS),
