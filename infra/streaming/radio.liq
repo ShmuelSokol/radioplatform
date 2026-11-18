@@ -451,7 +451,7 @@ def send_started(m) =
   elsif lane == "hold" then
     # Not reported: nothing from the queue is on air and it is not the emergency music
     left = timed_group_at() - time()
-    if left > 3. and timed_pending() > 0 and timed_queue.is_ready() then
+    if left > 1. and timed_pending() > 0 and timed_queue.is_ready() then
       # More than a moment to fill: the timed item starts now, a few seconds early,
       # as it does on the browser player (a timed item due within 8 s of a song
       # change starts at that change). Jerusalem 00:00Z 2026-11-18: 6.6 s to the

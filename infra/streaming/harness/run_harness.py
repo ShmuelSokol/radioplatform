@@ -955,7 +955,7 @@ async def _song_ends_before_hard(h: Harness, name: str, gap: float) -> None:
         await asyncio.sleep(max(0, due.timestamp() - time.time()) + 16)
         starts = await h.started_times("time", due.timestamp() - 12)
         late = starts[0][0] - due.timestamp() if starts else None
-        if gap <= 3:
+        if gap <= 1:
             h.check(name, late is not None and abs(late) <= 1.0,
                     f"time check on its second: {'never' if late is None else f'{late:+.1f} s'}")
         else:
@@ -977,7 +977,7 @@ async def _song_ends_before_hard(h: Harness, name: str, gap: float) -> None:
         h.check(name, bool(after) and after[0] == tone_name(TONES["song2"][0]),
                 f"the next song follows the time check: {after}")
         gap_s, gap_at = longest_silence(heard)
-        h.check(name, gap_s <= 3.5, f"longest silence {gap_s:.1f} s at {_fmt(gap_at)}")
+        h.check(name, gap_s <= 1.5, f"longest silence {gap_s:.1f} s at {_fmt(gap_at)}")
         # The 6 s time check must not be cut short when its own time arrives
         clock_secs = sum(WINDOW for t, n in ((w[0], "silence" if w[1] < -45 else tone_name(w[2])) for w in heard)
                          if n == clock)

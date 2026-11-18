@@ -336,6 +336,6 @@ def test_the_limiter_is_not_wrapped_in_mksafe_and_a_long_gap_starts_the_timed_it
     assert "radio = true_peak_limit(radio)" in liq
     assert "mksafe(true_peak_limit" not in liq
     assert "output.file(%wav, fallible=true, debug_wav, radio)" in liq
-    assert "if left > 3. and timed_pending() > 0 and timed_queue.is_ready() then" in liq
+    assert "if left > 1. and timed_pending() > 0 and timed_queue.is_ready() then" in liq
     assert "{if timed_early() != at then timed_go_on_air(180, at) end}" in liq
 
