@@ -426,6 +426,12 @@ export default function Listen() {
     }
   }, [volume, muted]);
 
+  // The server stream runs a few seconds behind: silence it the moment the host is on
+  // air, or the song is heard under the host's first words
+  useEffect(() => {
+    if (streamAudioRef.current && useStream) streamAudioRef.current.muted = live.onAir;
+  }, [live.onAir, useStream]);
+
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
   if (!station) {
     const status = httpStatus(stationError);

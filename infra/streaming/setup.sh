@@ -179,6 +179,33 @@ if ! cmp -s /etc/kbr-engine/radio.liq.new /etc/kbr-engine/radio.liq; then
     echo "The new engine script does not pass its check. Nothing was restarted; the engines keep running the old script."
     exit 1
   fi
+  # The check only reads the script. Start it once for real, beside the running engines
+  # (own control port, no backend, no Icecast, no HLS), and see that it answers: a
+  # script that passed the check has hung at start with no error (2026-11-17), which
+  # on a real engine would have meant a silent station.
+  echo "Starting the new script once on a spare port to see that it runs..."
+  TRIAL_PORT=8990
+  ( set -a; . "$ENV_FILE"; . "$STATION_DIR/$FIRST_SID.env"; set +a
+    export KBR_HLS_DIR= KBR_DEBUG_WAV= KBR_CONTROL_PORT=$TRIAL_PORT KBR_STATION_ID=trial
+    export KBR_BACKEND_URL=http://127.0.0.1:9/api/v1 KBR_ICECAST_PORT=9 KBR_ICECAST_MOUNT=/trial
+    exec nice -n 19 timeout 75 runuser -u liquidsoap -- liquidsoap /etc/kbr-engine/radio.liq.new ) >/tmp/kbr-trial.log 2>&1 &
+  TRIAL_PID=$!
+  TRIAL_OK=no
+  for _ in $(seq 1 30); do
+    sleep 2
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' -m 2 -X POST -H "X-Playout-Token: ${TOKEN}" \
+            -H 'Content-Type: application/json' -d '{}' "http://127.0.0.1:$TRIAL_PORT/status")" = 200 ]; then
+      TRIAL_OK=yes; break
+    fi
+    kill -0 "$TRIAL_PID" 2>/dev/null || break
+  done
+  pkill -f "liquidsoap /etc/kbr-engine/radio.liq.new" 2>/dev/null || true
+  wait "$TRIAL_PID" 2>/dev/null || true
+  if [ "$TRIAL_OK" != yes ]; then
+    rm -f /etc/kbr-engine/radio.liq.new
+    echo "The new engine script does not start (see /tmp/kbr-trial.log). Nothing was restarted; the engines keep running the old script."
+    exit 1
+  fi
   mv /etc/kbr-engine/radio.liq.new /etc/kbr-engine/radio.liq
 else
   rm -f /etc/kbr-engine/radio.liq.new

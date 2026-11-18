@@ -34,9 +34,10 @@ settings.harbor.bind_addrs := ["127.0.0.1"]
 auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")]
 
 # What this engine understands, sent with /hello and every /next. 2 = timed groups handed
-# over in parallel (seq/of) and /timed_drop. The backend keeps to the old serial hand-over
+# over in parallel (seq/of) and /timed_drop. 3 = the hold lane (quiet before a hard item
+# when no song is handed out). The backend keeps to the old serial hand-over
 # for an engine that sends nothing.
-engine_proto = 2
+engine_proto = 3
 
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
 # track is requested, so the two cannot cross. If the backend cannot be reached (or
@@ -75,11 +76,14 @@ last_main_entry = ref("")
 # for the next track. The backend never hands these out again, and closes the older ones
 # if a start report was lost while it was unreachable (so nothing is played twice).
 given = ref([])
+# A host is on air and the stream is quiet (see the live lane below). Sent with every
+# ask, so a backend that restarted while the show ended still learns of it.
+live_on = ref(false)
 def next_request() =
   try
     handed = string.concat(separator=",", given())
     resp = http.get(headers=auth_headers, timeout=8.,
-                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}")
+                    "#{backend_url}/playout/#{station_id}/next?given=#{handed}&proto=#{engine_proto}&live=#{if live_on() then 1 else 0 end}")
     if resp.status_code == 200 then
       let json.parse (data : {uri : string, entry_id : string}) = resp
       log.important("next: backend gave entry #{data.entry_id}")
@@ -99,15 +103,22 @@ end
 main_requests = request.dynamic(id="main", prefetch=1, retry_delay=2., timeout=120., next_request)
 # Per-track level from the library's audio analysis (backend sends liq_amplify)
 main = amplify(1., override="liq_amplify", main_requests)
-# Song-to-song: the outgoing song fades over 3s while the incoming one starts at full level.
+# Song-to-song: the outgoing song fades out under the incoming one, which starts at full
+# level. How long they overlap comes with each item from the backend (`kbr_overlap`, the
+# station's "Song crossfade" setting, 1 s by default; 0 = none). Anything spoken (a
+# sponsorship, a time check, a shiur) has overlap 0 and is never talked over: the next
+# item starts when it has ended (Shmuel 2026-11-17: sponsorships played in a row ran
+# into each other). `liq_cross_duration` tells `cross` how early to call transition().
 # After Next or a timed item the old song must not come back, so that change is a clean cut
 # (the music has already been faded out by then).
 hard_cut = ref(false)
 # When the music lane last changed song (`cross` calls transition() at that moment).
-# For up to 3 s after a change `cross` is still playing its transition, and a skip then
+# For the length of the overlap after a change `cross` is still playing its transition, and a skip then
 # only ends the transition: the song stays on air. skip_main() uses this to see whether
 # a skip really changed the song.
 main_changed_at = ref(0.)
+# Used when an item carries no overlap of its own (the emergency music)
+default_overlap = 1.
 def transition(ending, starting) =
   main_changed_at := time()
   if hard_cut() then
@@ -116,10 +127,16 @@ def transition(ending, starting) =
   else
     # The incoming song is listed first: `add` passes on the titles of its first source
     # only, and the start report to the backend is made from them.
-    add(normalize=false, [starting.source, fade.out(duration=3., ending.source)])
+    overlap = float_of_string(default=default_overlap, ending.metadata["kbr_overlap"])
+    if overlap < 0.05 then
+      # No overlap: the last moment of the ending item plays out, then the next starts
+      sequence([ending.source, starting.source])
+    else
+      add(normalize=false, [starting.source, fade.out(duration=overlap, ending.source)])
+    end
   end
 end
-main = cross(duration=3., transition, main)
+main = cross(duration=default_overlap, override_duration="liq_cross_duration", transition, main)
 
 # The music lane is muted while a timed item takes over, so nothing of it leaks through
 main_gain = ref(1.)
@@ -241,6 +258,11 @@ def timed_go_on_air(limit, group) =
   attempt()
 end
 
+# The group (its `at`) that went on air early because the music lane had run out a few
+# seconds before it: its own timer must not take over a second time (it would cut the
+# group's first item).
+timed_early = ref(-1.)
+
 # Load the item now; put it on air at `at` (unix seconds). The music fades under it.
 def schedule_timed(~uri, ~at) =
   r = request.create(uri)
@@ -252,7 +274,9 @@ def schedule_timed(~uri, ~at) =
   if abs(at - timed_group_at()) > 0.5 then
     timed_group_at := at
     wait = at - time() - skip_fade
-    thread.run(delay=(if wait > 0. then wait else 0. end), {timed_go_on_air(180, at)})
+    # (unless the group already went on air early: see the hold lane)
+    thread.run(delay=(if wait > 0. then wait else 0. end),
+               {if timed_early() != at then timed_go_on_air(180, at) end})
   end
 end
 
@@ -260,7 +284,30 @@ end
 emergency = playlist(id="emergency", mode="randomize", reload_mode="watch", emergency_dir)
 emergency = mksafe(emergency)
 
-radio = fallback(id="radio", track_sensitive=false, [timed, main, emergency])
+# ── Hold lane: a moment of quiet just before a hard timed item ───────────────
+# When a song ends a few seconds before a hard item (the hourly time check), the backend
+# hands out no new song: it would be chopped after two seconds (Jerusalem 23:00Z
+# 2026-11-17). With nothing in the music lane the emergency music would start instead,
+# so for those few seconds the stream is quiet until the timed item takes over. Open only
+# while a timed item is loaded and due within 8 s; never longer, so a timed item that
+# does not arrive still ends in emergency music, not dead air.
+# Also open for a few seconds after a live show ends, while the first item loads.
+live_release = ref(0.)
+def hold_open() =
+  left = timed_group_at() - time()
+  (timed_pending() > 0 and left < 8. and left > -2.) or time() < live_release()
+end
+hold = switch(id="hold_gate", track_sensitive=false, [(hold_open, blank(id="hold"))])
+
+# ── Live lane: the stream is quiet while a host is on air ────────────────────
+# The host's microphone reaches listeners through the site, not through this stream
+# (Shmuel's choice, PR 112), and automation pauses. Without this lane the song on the
+# engine played on under the host (Jerusalem 23:06Z 2026-11-17): the backend only
+# stopped handing out new items. While the lane is on air the lanes below stand still;
+# the backend switches it with /live.
+on_air_quiet = switch(id="host_gate", track_sensitive=false, [({live_on()}, blank(id="host_on_air"))])
+
+radio = fallback(id="radio", track_sensitive=false, [on_air_quiet, timed, main, hold, emergency])
 radio = amplify(override=null(), {master_gain()}, radio)
 # What is on air from the lanes above. Start reports and /status read this, so an item
 # mixed over the top (below) never counts as a change of track.
@@ -305,6 +352,22 @@ def skip_on_air(~seconds) =
   end)
 end
 
+# A live show starts: what is on air fades out and the live lane takes the stream.
+# (Defined here, beside the other skips: called straight from the /live handler, the
+# timed lane's skip kept the engine from starting.)
+def go_live() =
+  ramp_master(target=0., duration=skip_fade, fun () -> begin
+    if on_air_lane() == "main" then
+      main_gain := 0.
+      main_interrupted := true
+    elsif on_air_lane() == "timed" then
+      timed_queue.skip()
+    end
+    live_on := true
+    thread.run(delay=0.1, {master_gain := 1.})
+  end)
+end
+
 # ── Broadcast sound: gentle compression and a limiter on the whole output ────
 radio = compress(threshold=-14., ratio=3., attack=20., release=200., radio)
 # Brickwall limiter with look-ahead (FFmpeg alimiter): no peak gets past -3 dBFS, so
@@ -321,8 +384,13 @@ def true_peak_limit(s) =
   end
   ffmpeg.raw.decode.audio(ffmpeg.filter.create(graph_of))
 end
-# (an FFmpeg filter source counts as fallible; it never stops while radio plays)
-radio = mksafe(true_peak_limit(radio))
+# An FFmpeg filter source counts as fallible (it never stops while radio plays), and it
+# stays that way: the outputs below take a fallible source. It used to be wrapped in
+# mksafe(), and with that the engine could spin at 100% CPU at start and never play,
+# depending on nothing more than the number of definitions in this file: mksafe's switch
+# asked the filter whether it was ready before its input was set up, and the filter
+# ran its inner clock forever (gdb, 2026-11-18).
+radio = true_peak_limit(radio)
 
 # ── Tell the backend what really went on air ─────────────────────────────────
 def report_to_backend(entry, lane, title) =
@@ -358,7 +426,8 @@ timed_dropped = ref([])
 
 def send_started(m) =
   entry = m["kbr_entry"]
-  lane = if entry == "" then "emergency" else m["kbr_lane"] end
+  # No entry: an emergency file, or the quiet held just before a hard timed item
+  lane = if entry != "" then m["kbr_lane"] elsif live_on() then "live" elsif hold_open() then "hold" else "emergency" end
   was = on_air_lane()
   on_air_lane := lane
   if lane == "timed" and timed_pending() > 0 then timed_pending := timed_pending() - 1 end
@@ -379,6 +448,26 @@ def send_started(m) =
     hard_cut := true
     main.skip()
     thread.run(delay=0.15, {main_gain := 1.})
+  elsif lane == "hold" then
+    # Not reported: nothing from the queue is on air and it is not the emergency music
+    left = timed_group_at() - time()
+    if left > 1. and timed_pending() > 0 and timed_queue.is_ready() then
+      # More than a moment to fill: the timed item starts now, a few seconds early,
+      # as it does on the browser player (a timed item due within 8 s of a song
+      # change starts at that change). Jerusalem 00:00Z 2026-11-18: 6.6 s to the
+      # hour were filled with the start of a song that was then cut.
+      log.important("hold: timed item due in #{left} s starts now, after the song")
+      timed_early := timed_group_at()
+      # Opening the timed lane is all it takes: nothing is on air to fade or mute.
+      # (Not timed_take_over(): one more call into it from here and Liquidsoap spins
+      # at start, see wiki/streaming-architecture.md.)
+      timed_armed := true
+      thread.run(delay=1.5, {timed_armed := false})
+    else
+      log.important("hold: quiet until the timed item due in #{left} s")
+    end
+  elsif lane == "live" then
+    log.important("live: a host is on air; the stream is quiet")
   else
     if lane == "main" and main_interrupted() then
       # The music lane came back on a new track, not the interrupted song (after a long
@@ -388,7 +477,10 @@ def send_started(m) =
       main_interrupted := false
       main_gain := 1.
     end
-    if lane == "main" then last_main_entry := entry end
+    if lane == "main" then
+      last_main_entry := entry
+      live_release := 0.
+    end
     report_to_backend(entry, lane, m["title"])
     if lane == "main" and m["kbr_kind"] == "music" then keep_for_emergency(m["filename"]) end
   end
@@ -433,6 +525,24 @@ control("/skip", fun (req) -> begin
   let json.parse (body : {fade : float?}) = req.body()
   wanted = null.default(body.fade, {skip_fade})
   skip_on_air(seconds=max(0.02, wanted))
+  '{"ok":true}'
+end)
+
+# A live show starts ({"on": true}) or has ended ({"on": false}). Safe to repeat.
+# On: the item on air fades out and does not come back (the backend has queued it to
+# carry on afterwards where that applies); a timed item on air is dropped. Off: the
+# music lane moves to its next item; the stream stays quiet (hold lane, at most 12 s)
+# until that item is loaded, so no emergency music fills in.
+control("/live", fun (req) -> begin
+  let json.parse (body : {on : bool}) = req.body()
+  if body.on and not live_on() then
+    log.important("live: show starts")
+    go_live()
+  elsif not body.on and live_on() then
+    log.important("live: show ended")
+    live_release := time() + 12.
+    live_on := false
+  end
   '{"ok":true}'
 end)
 
@@ -505,14 +615,20 @@ end)
 
 control("/status", fun (_) -> begin
   m = program.last_metadata() ?? []
+  # Before the music lane's first track its remaining time is infinite, which JSON
+  # cannot carry: the handler failed and the connection closed with no answer (Main's
+  # engine while it had no station routed, 2026-11-17). -1 = no track.
+  left = main.remaining()
+  left = if left >= 0. and left < 1000000. then left else -1. end
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
-                  main_remaining=main.remaining(), timed_waiting=timed_queue.length()})
+                  main_remaining=left, timed_waiting=timed_queue.length(),
+                  live=live_on()})
 end)
 
 # Optional: also write the output to a WAV file (testing only)
 debug_wav = environment.get("KBR_DEBUG_WAV")
 if debug_wav != "" then
-  output.file(%wav, debug_wav, radio)
+  output.file(%wav, fallible=true, debug_wav, radio)
 end
 
 # ── One MP3 encode for both outputs ──────────────────────────────────────────

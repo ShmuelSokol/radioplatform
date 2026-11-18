@@ -437,6 +437,10 @@ async def websocket_live_audio(websocket: WebSocket, show_id: str):
     try:
         while True:
             data = await websocket.receive_bytes()
+            if live_relay.on_air.get(station_id) != show_id:
+                # The show was ended while the host's page stayed open: the host was
+                # heard for a minute over the returning music (Jerusalem 2026-11-17)
+                continue
             await live_relay.audio(station_id, data)
             if settings.icecast_enabled:
                 try:

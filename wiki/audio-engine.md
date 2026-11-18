@@ -282,8 +282,9 @@ weather), for short items and for timed ones. `handover_seconds` hands a non-son
   `useAudioEngine.playsToEnd()` treats overlap < 0.5 s like a short item (never
   crossfaded, `letFinish`, next item from its first word); otherwise the outgoing song
   fades over that many seconds.
-- The engine gets `kbr_overlap` on every track. radio.liq still overlaps 3 s for
-  everything in the main lane until its own change lands (after PR 224).
+- The engine gets `kbr_overlap` on every track. radio.liq overlaps by that much
+  (`liq_cross_duration` tells `cross` how early to prepare; at 0 the held-back 0.2 s
+  plays out and the next item follows, `sequence`). Needs a setup.sh rerun per station.
 - Checks: `tests/test_handover_rule.py`, `test_handover_agreement.py`; e2e
   `audio-engine.mjs` `sponsorship-after-sponsorship-no-overlap`,
   `sponsorship-not-talked-over-when-the-server-is-early`, `song-after-sponsorship-no-overlap`,
