@@ -36,3 +36,13 @@ Each pass asks every engine station's stream server for its status at once (`asy
 ## Soft items behind a shiur (2026-11-17)
 
 A soft item due while a shiur had more than 5 minutes left should have paused it (`long_items.SOFT_PAUSE_MIN_LEFT_SECONDS`, see `hourly-slots.md`). It is normally made hard 90 s ahead, so the hard-item check covers it. If it is still soft and waiting `SOFT_STUCK_SECONDS` (30 s) after its time, air watch reports a `late_timed` finding "<item> is waiting behind <shiur>". There is no report on a "wait" station, with HS off, or when the item belongs to the shiur's own block.
+
+## Cost of the read (2026-11-18)
+
+Each pass reads, per station, the entry on air plus what started or came due in the last
+10 minutes. `queue_entries` keeps every entry ever played, and there was no index on
+`started_at` or `preempt_at`, so each pass went through the station's whole history
+(2.4 to 3.9 s in the Railway log; 6,188 pages against 30 on a 400,000 row copy). Fixed
+with `ix_queue_entries_station_started` and `ix_queue_entries_station_preempt` (built in
+the background by `CONCURRENT_INDEXES` in `app/main.py`) and one statement that joins
+three indexed lookups. A new time-window read on `queue_entries` needs an index too.
