@@ -4,6 +4,7 @@ import { useLiveShow, useEndLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
 import { useHostAudio } from '../../hooks/useHostAudio';
 import CartPanel from './live/CartPanel';
+import ChatPanel from './live/ChatPanel';
 import TalkButton, { TalkNote } from './live/TalkButton';
 import { useTalkback } from '../../hooks/useTalkback';
 import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../../api/liveShows';
@@ -15,7 +16,7 @@ const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AI
 export default function HostConsole() {
   const { showId } = useParams<{ showId: string }>();
   const navigate = useNavigate();
-  const { show, callers, secondsRemaining, isConnected, air, lastDump } = useLiveShowWS(showId);
+  const { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
   const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting } = useHostAudio(showId);
@@ -346,6 +347,7 @@ export default function HostConsole() {
               </div>
             )}
           </div>
+          <ChatPanel showId={showId} lastChat={lastChat} />
         </div>
 
         {/* Right: Approved queue */}

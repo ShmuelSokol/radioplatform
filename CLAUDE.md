@@ -118,6 +118,7 @@ radioplatform/
 | EngineHandoff | engine_handoff.py | A queue entry handed to the playout engine and its asset, so a start report for an entry deleted meanwhile still shows what is on air after a backend restart (pruned after 6 h; see `wiki/streaming-architecture.md`) |
 | RdsSettings / RdsMessage / RdsPlay | rds.py | RDS: per-station PS and rotation settings, scheduled RadioText lines (slogan, time, weather, sponsor), and the log of lines the encoder fetched (see `wiki/rds-feed.md`) |
 | LiveDump | live_dump.py | One Dump of a live show: who, when, seconds cut, caller dropped, and the stored recording of what aired before and what was cut (see `wiki/live-shows.md`) |
+| LiveChatMessage | live_chat_message.py | One line of a live show's staff chat (host and screener, never on air; see `wiki/live-shows.md`) |
 | SiteRelease | site_release.py | One row: how open tabs take a new website release (auto/manual) and the admin's last push (see `wiki/release-pickup.md`) |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
 | ScheduleRule | schedule_rule.py | Schedule-specific rules |
@@ -164,7 +165,7 @@ radioplatform/
 | billing | billing.py | /billing |
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
-| live_shows | live_shows.py | /live-shows (`GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
+| live_shows | live_shows.py | /live-shows (`GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `GET` and `POST /{id}/chat`: the staff chat; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
@@ -265,7 +266,7 @@ radioplatform/
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
 - HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, Talk off air (a private word with a caller, `hooks/useTalkback.ts`), and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
-- CallScreener.tsx — Two-column call screener (waiting/approved/on-air management)
+- CallScreener.tsx — Two-column call screener (waiting/approved/on-air management), with the delay panel and the staff chat (`pages/admin/live/ChatPanel.tsx`, also on the Host Console)
 - SongRequests.tsx — Song request management (approve/reject/delete)
 - Archives.tsx — Show archive management (CRUD, publish/unpublish)
 

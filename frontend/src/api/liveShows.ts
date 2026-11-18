@@ -247,6 +247,19 @@ export interface DumpRecord {
   has_audio: boolean;
 }
 
+export interface ChatMessage { id: string; by: string; user_id: string | null; text: string; at: string | null }
+
+/** The show's staff chat (host and screener), oldest first */
+export const getShowChat = async (showId: string): Promise<ChatMessage[]> => {
+  const res = await apiClient.get<{ messages: ChatMessage[] }>(`/live-shows/${showId}/chat`);
+  return res.data.messages;
+};
+
+export const sayInShowChat = async (showId: string, text: string): Promise<ChatMessage> => {
+  const res = await apiClient.post<ChatMessage>(`/live-shows/${showId}/chat`, { text });
+  return res.data;
+};
+
 export const getShowDumps = async (showId: string): Promise<DumpRecord[]> => {
   const res = await apiClient.get<{ dumps: DumpRecord[] }>(`/live-shows/${showId}/dumps`);
   return res.data.dumps;

@@ -6,6 +6,7 @@ import { approveCall, rejectCall, putCallerOnAirAsking, endCall, holdCall, nextC
 import type { CallInRequest } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
+import ChatPanel from './live/ChatPanel';
 import TalkButton, { TalkNote } from './live/TalkButton';
 import { useTalkback } from '../../hooks/useTalkback';
 
@@ -13,7 +14,7 @@ const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AI
 
 export default function CallScreener() {
   const { showId } = useParams<{ showId: string }>();
-  const { show, callers, secondsRemaining, isConnected, air, lastDump } = useLiveShowWS(showId);
+  const { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [nameValue, setNameValue] = useState('');
@@ -99,8 +100,9 @@ export default function CallScreener() {
         )}
       </div>
 
-      <div className="mb-6 max-w-md">
+      <div className="mb-6 grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={anyOnAir} compact />
+        <ChatPanel showId={showId} lastChat={lastChat} />
       </div>
 
       <TalkNote

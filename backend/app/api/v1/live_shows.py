@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -285,6 +286,57 @@ async def list_dumps(
         "by": d.user_email, "cut_seconds": d.cut_seconds, "heard_seconds": d.heard_seconds,
         "caller_name": d.caller_name, "has_audio": bool(d.file_path),
     } for d in rows]}
+
+
+class ChatLine(BaseModel):
+    text: str
+
+
+def _chat_row(m) -> dict:
+    return {"id": str(m.id), "by": m.author, "user_id": str(m.user_id) if m.user_id else None,
+            "text": m.text, "at": m.created_at.isoformat() if m.created_at else None}
+
+
+@router.get("/{show_id}/chat")
+async def list_chat(
+    show_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """The show's staff chat (host and screener), oldest first, the last 200 lines."""
+    from app.models.live_chat_message import LiveChatMessage
+    await _show_or_404(db, show_id)
+    rows = (await db.execute(
+        select(LiveChatMessage).where(LiveChatMessage.live_show_id == show_id)
+        .order_by(LiveChatMessage.created_at.desc(), LiveChatMessage.id.desc()).limit(200)
+    )).scalars().all()
+    return {"messages": [_chat_row(m) for m in reversed(rows)]}
+
+
+@router.post("/{show_id}/chat")
+async def say_in_chat(
+    show_id: uuid.UUID,
+    body: ChatLine,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_dj_or_manager),
+):
+    """Write a line in the show's staff chat. Everyone with the Host Console or the Call
+    Screener open gets it at once; nothing of it goes on air."""
+    from app.models.live_chat_message import LiveChatMessage
+    await _show_or_404(db, show_id)
+    text = " ".join((body.text or "").split())
+    if not text:
+        raise HTTPException(status_code=422, detail="Write something first")
+    if len(text) > 500:
+        raise HTTPException(status_code=422, detail="Too long: a chat line holds 500 characters")
+    line = LiveChatMessage(id=uuid.uuid4(), live_show_id=show_id, user_id=user.id,
+                           author=user.display_name or user.email, text=text)
+    db.add(line)
+    await db.commit()
+    await db.refresh(line)
+    row = _chat_row(line)
+    await _say(str(show_id), "chat", row)
+    return row
 
 
 @router.get("/{show_id}/dumps/{dump_id}/audio")

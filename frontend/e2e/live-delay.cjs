@@ -13,6 +13,7 @@
  * Part I (ONLY=talk): talkback, the screener or host talking to a caller off the air.
  * Part J (ONLY=restart, with BACKEND_RESTART=<command>): the server restarts during a show.
  * Part K (ONLY=multi): several callers on air together (up to four).
+ * Part L (ONLY=chat): the staff chat between the host and the screener.
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
  * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
@@ -1076,6 +1077,64 @@ function hostMic(showId, token) {
       } finally {
         if (mic) mic.close();
         for (const c of lines) c.close();
+        await browser.close();
+      }
+    }
+    // ---------- Part L: staff chat between the host and the screener ----------
+    if (!ONLY || ONLY === 'chat') {
+      await setConfig({ live_delay_seconds: 0, live_host_gone_seconds: 0 });
+      const show = await newShow('Delay test L');
+      await api('POST', `/live-shows/${show.id}/start`);
+      const browser = await chromium.launch();
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const open = async (url, opts = {}) => {
+        const page = await (await browser.newContext(opts)).newPage();
+        await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409|422|dynamically imported module|MIME type/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        page.on('dialog', (d) => { problems.push(`${url}: dialog "${d.message()}"`); d.dismiss(); });
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      try {
+        const screener = await open(`/admin/live/${show.id}/screen`, { viewport: { width: 1440, height: 900 } });
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await T(host, 'chat-panel').waitFor({ timeout: 15000 });
+        await T(screener, 'chat-panel').waitFor({ timeout: 15000 });
+        check('L1 both screens have the staff chat, empty and saying what it is for', /No messages yet/.test(await T(host, 'chat-lines').innerText()) && /off the air/.test(await T(screener, 'chat-panel').innerText()) && await T(host, 'chat-send').isDisabled());
+        await sleep(800);
+        await screener.getByLabel("Message to the show's staff").fill('Caller 2 is ready, good line');
+        await screener.keyboard.press('Enter');
+        await T(host, 'chat-line').filter({ hasText: 'Caller 2 is ready, good line' }).waitFor({ timeout: 4000 });
+        check('L2 the screener writes (Enter sends) and the host sees it within moments, with who and when', /admin/i.test(await T(host, 'chat-line').first().innerText()) && await screener.getByLabel("Message to the show's staff").inputValue() === '' && await T(screener, 'chat-line').count() === 1, await T(host, 'chat-line').first().innerText());
+        await shot(host, 'host-chat');
+        await host.getByLabel("Message to the show's staff").fill('Thanks. Wrap up after this one.');
+        await T(host, 'chat-send').click();
+        await T(screener, 'chat-line').filter({ hasText: 'Wrap up after this one.' }).waitFor({ timeout: 4000 });
+        check('L3 the host answers with the Send button and the screener sees both lines in order', (await T(screener, 'chat-line').allInnerTexts()).map((t) => (/Caller 2/.test(t) ? 'a' : 'b')).join('') === 'ab');
+        await shot(screener, 'screener-chat');
+
+        // A page opened later gets the lines that were written before
+        const late = await open(`/admin/live/${show.id}/host`, { ...devices['iPhone 13'] });
+        await T(late, 'chat-line').nth(1).waitFor({ timeout: 15000 });
+        const m = await late.evaluate(() => ({ scroll: document.documentElement.scrollWidth - window.innerWidth, send: document.querySelector('[data-testid="chat-send"]').getBoundingClientRect().height }));
+        check('L4 a phone opened later shows the earlier lines, nothing scrolls sideways, Send is a full tap target', await T(late, 'chat-line').count() === 2 && m.scroll <= 0 && m.send >= 44, JSON.stringify(m));
+        await shot(late, 'host-chat-phone');
+
+        // A very long word wraps instead of widening the page; spaces only cannot be sent
+        await host.getByLabel("Message to the show's staff").fill('W'.repeat(300));
+        await T(host, 'chat-send').click();
+        await T(host, 'chat-line').nth(2).waitFor({ timeout: 4000 });
+        await host.getByLabel("Message to the show's staff").fill('    ');
+        check('L5 a long unbroken line wraps and an empty one cannot be sent', await host.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0 && await T(host, 'chat-send').isDisabled());
+        const listed = (await api('GET', `/live-shows/${show.id}/chat`)).json.messages;
+        const anon = await fetch(`${API}/live-shows/${show.id}/chat`);
+        check('L6 the lines are stored with the show and not public', listed.length === 3 && anon.status === 401, `${listed.length} lines, anonymous ${anon.status}`);
+        check('L7 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        await api('POST', `/live-shows/${show.id}/end`);
+      } finally {
         await browser.close();
       }
     }

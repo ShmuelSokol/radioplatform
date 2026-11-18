@@ -134,3 +134,7 @@ Up to four callers can be on air together (`live_show_service.MAX_CALLERS_ON_AIR
 
 When the last words of a host who left have played out, `_host_gone_now` runs the host-gone check at once (from the air's `on_closed`) instead of waiting for the scheduler's 3 s pass.
 
+
+## Staff chat (host and screener)
+
+A short text line between the people working a show, never heard on air: `ChatPanel` (`pages/admin/live/ChatPanel.tsx`) on the Host Console and the Call Screener. `POST /live-shows/{id}/chat` (DJ and up) stores a `LiveChatMessage` and sends a `chat` event on the show's socket; `GET /live-shows/{id}/chat` gives the last 200, so a page opened later (or a show with the socket down, polled every 10 s) still has them. Lines are 1 to 500 characters after trimming. Another person's new line is lit for 8 s. The lines stay with the show. Browser check: `ONLY=chat` in `e2e/live-delay.cjs`.
