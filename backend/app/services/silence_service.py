@@ -1,7 +1,10 @@
 """Silence detection and audio trimming via FFmpeg."""
 import logging
+import os
 import re
 import subprocess
+import tempfile
+from contextlib import contextmanager
 from typing import Any
 
 from app.config import settings
@@ -9,18 +12,43 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def get_audio_duration(file_data: bytes) -> float:
-    """Length of the audio in seconds, from decoding it to the end.
+# Audio to measure: the bytes themselves, or the path of a file holding them
+AudioSource = bytes | str
 
-    The file arrives on a pipe, where ffmpeg usually cannot read a length from the
-    header ("Duration: N/A" for MP3), so the decoder's last "time=" is the length.
-    Before this, every analysed item got the 180 s fallback as its length.
-    """
-    cmd = [
-        settings.FFMPEG_PATH, "-i", "pipe:0",
-        "-f", "null", "-",
-    ]
-    result = subprocess.run(cmd, input=file_data, capture_output=True, timeout=120)
+
+def ffmpeg_input(src: AudioSource) -> tuple[list[str], bytes | None]:
+    """FFmpeg's input arguments and stdin for `src`."""
+    if isinstance(src, str):
+        return ["-i", src], None
+    return ["-i", "pipe:0"], src
+
+
+@contextmanager
+def audio_file(data: bytes, suffix: str = ".mp3"):
+    """The bytes in a temporary file, for FFmpeg to read as a file and not a pipe.
+
+    On a pipe FFmpeg cannot seek, so it gives up on a file whose audio starts after
+    something it does not expect (stray bytes after the tags): "Invalid data found
+    when processing input". The same file read from disk, or by ffprobe from its
+    URL, plays and measures fine. Two good Carlebach stories (35 and 15 min) were
+    taken off the air on 2026-11-18 because their length "could not be measured"
+    from a pipe."""
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _decoded_length(src: AudioSource) -> float:
+    args, stdin = ffmpeg_input(src)
+    cmd = [settings.FFMPEG_PATH, *args, "-f", "null", "-"]
+    result = subprocess.run(cmd, input=stdin, capture_output=True, timeout=300)
     stderr = result.stderr.decode("utf-8", errors="replace")
     times = re.findall(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", stderr)
     if times:
@@ -35,8 +63,47 @@ def get_audio_duration(file_data: bytes) -> float:
     return 0.0
 
 
+def _probed_length(path: str) -> float:
+    """The length ffprobe reads from a file (its header or a scan), 0 when none."""
+    probe = os.path.join(os.path.dirname(settings.FFMPEG_PATH), "ffprobe") if os.sep in settings.FFMPEG_PATH else "ffprobe"
+    try:
+        result = subprocess.run(
+            [probe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+            capture_output=True, timeout=120,
+        )
+        value = float(result.stdout.decode().strip() or 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0
+    return value if value == value and value > 0 else 0.0
+
+
+def get_audio_duration(file_data: AudioSource) -> float:
+    """Length of the audio in seconds, from decoding it to the end.
+
+    On a pipe ffmpeg usually cannot read a length from the header ("Duration: N/A"
+    for MP3), so the decoder's last "time=" is the length. (Before this, every
+    analysed item got the 180 s fallback as its length.) When the pipe gives
+    nothing, the bytes are measured again from a file, and last by ffprobe, so a
+    playable file is never called unmeasurable (see audio_file).
+    """
+    length = _decoded_length(file_data)
+    if length > 0:
+        return length
+    if isinstance(file_data, str):
+        return _probed_length(file_data)
+    if not file_data:
+        return 0.0
+    with audio_file(file_data) as path:
+        length = _decoded_length(path)
+        if length <= 0:
+            length = _probed_length(path)
+    if length > 0:
+        logger.info("Length read from a file after the pipe gave none: %.2f s", length)
+    return length
+
+
 def detect_silence(
-    file_data: bytes,
+    file_data: AudioSource,
     threshold_db: float = -30,
     min_duration: float = 0.5,
 ) -> list[dict[str, Any]]:
@@ -44,12 +111,13 @@ def detect_silence(
 
     Returns a list of dicts: [{"start": float, "end": float, "duration": float}, ...]
     """
+    args, stdin = ffmpeg_input(file_data)
     cmd = [
-        settings.FFMPEG_PATH, "-i", "pipe:0",
+        settings.FFMPEG_PATH, *args,
         "-af", f"silencedetect=noise={threshold_db}dB:d={min_duration}",
         "-f", "null", "-",
     ]
-    result = subprocess.run(cmd, input=file_data, capture_output=True, timeout=120)
+    result = subprocess.run(cmd, input=stdin, capture_output=True, timeout=300)
     stderr = result.stderr.decode("utf-8", errors="replace")
 
     regions: list[dict[str, Any]] = []
