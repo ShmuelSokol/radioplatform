@@ -151,7 +151,7 @@ radioplatform/
 | channels | channels.py | /channels |
 | icecast | icecast.py | /icecast |
 | analytics | analytics.py | /analytics |
-| playlists | playlists.py | /playlists (the list and one playlist are readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
+| playlists | playlists.py | /playlists (the list is readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
 | spot_schedules | spot_schedules.py | /spot-schedules |
 | spot_recordings | spot_recordings.py | /spot-recordings |

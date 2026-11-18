@@ -364,7 +364,7 @@ Generated 2026-11-17 from backend/app (read-only). All API paths are under `/api
 - [x] B-NOWPLAYING-7 ↳ DEAD CODE removed: app/api/v1/nowplaying.py deleted in PR 218 (live now-playing is /ws via websocket.py) | modes: n.a. | covered: tests/test_controls_streams_scheduler.py::test_old_nowplaying_socket_is_not_mounted (confirmed not mounted)
 
 ### playlists.py (prefix `/playlists`) — router guard: station_write_guard(template/slot)
-- [x] B-PLAYLISTS-1 `GET /playlists` [require_manager] list templates | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
+- [x] B-PLAYLISTS-1 `GET /playlists` [require_staff] list templates (every staff role: a schedule's blocks name their playlist) | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots, tests/test_role_access.py::test_role_matrix
 - [x] B-PLAYLISTS-2 `POST /playlists` [require_manager] create template | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
 - [x] B-PLAYLISTS-3 `GET /playlists/asset-types` [require_manager] Return distinct asset_type + category combinations from the assets table. | modes: both | covered: tests/test_admin_crud.py::test_playlist_templates_and_slots
 - [x] B-PLAYLISTS-4 `GET /playlists/generation` [require_manager] Settings, plus a dry run of what generation would queue next. Changes nothing. | modes: both | covered: tests/test_checklist_pinned_scheduling.py::test_generation_settings_include_a_dry_run_that_changes_nothing, tests/test_playlist_generation.py::test_settings_endpoints_and_queue_fill, ::test_read_routes_follow_their_guard

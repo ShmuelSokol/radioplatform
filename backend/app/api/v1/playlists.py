@@ -247,7 +247,7 @@ async def regenerate(
 async def get_template(
     template_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_staff),
+    _=Depends(require_manager),
 ):
     stmt = (
         select(PlaylistTemplate)
