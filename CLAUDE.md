@@ -510,6 +510,9 @@ cd frontend && (npx vite preview --port 4183 --strictPort &) && xvfb-run -a pyth
 # The bug reporter's screenshot in real WebKit: each way of taking it, not blank, no-picture path, picture added by hand (same setup as above)
 cd frontend && xvfb-run -a python3 e2e/webkit/bug-screenshot-webkit.py
 
+# Leaving pages in real WebKit logs no version.json console error (reads WebKit's own console via MiniBrowser)
+cd frontend && xvfb-run -a python3 e2e/webkit/version-check-webkit.py
+
 # Check every admin page at desktop and iPhone size (needs the site and a backend running; see wiki/admin-page-layout.md)
 cd frontend && BASE_URL=http://localhost:3000 node e2e/admin-layout-audit.mjs
 

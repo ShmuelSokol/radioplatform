@@ -354,3 +354,4 @@ UPDATE 2026-11-18 look-at-the-screen-tests.md stale-release.mjs: provoked stale-
 INGEST 2026-11-18 streaming-architecture.md engine start report no longer renumbers the queue: put_playing_first moves only the item on air (positions climb, holes allowed)
 INGEST 2026-11-18 streaming-architecture.md engine start stays quiet (hold lane) until the first item loads; backend fresh_start after /hello ignores the cut entry in the hold rule
 INGEST 2026-11-18 bug-reports.md screenshot: modern-screenshot then html2canvas (html2canvas gave nothing on Apple Safari, bug 8), reasons carried in client_context.screenshot and the issue body, Add a picture fallback
+INGEST 2026-11-18 release-pickup.md WebKit 'version.json due to access control checks' = check cut off by leaving the page; no check after pagehide; WebKit console readable via MiniBrowser --enable-write-console-messages-to-stdout
