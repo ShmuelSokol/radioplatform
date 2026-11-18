@@ -16,7 +16,7 @@ export default function HostConsole() {
   const { show, callers, secondsRemaining, isConnected, air, lastDump } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
-  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying } = useHostAudio(showId);
+  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting } = useHostAudio(showId);
   // Cough: silent while the button (or the C key) is held. Mute: stays silent until pressed again.
   const [micOff, setMicOff] = useState(false);
   const [coughing, setCoughing] = useState(false);
@@ -254,6 +254,11 @@ export default function HostConsole() {
               />
             </div>
 
+            {reconnecting && (
+              <div className="text-yellow-400 text-sm mt-2 font-bold" role="status" data-testid="reconnecting-note">
+                Connection lost. Reconnecting… keep talking; you are back on air as soon as it returns.
+              </div>
+            )}
             {audioError && (
               <div className="text-red-400 text-[11px] mt-2">{audioError}</div>
             )}
