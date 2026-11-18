@@ -267,6 +267,61 @@ async def test_stop_tells_the_engine(client, db_session, auth_headers, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_shown_on_air_before_the_engine_answers_and_stop_works_then(
+        client, db_session, auth_headers, monkeypatch, _setup):
+    """Live test 2026-11-18: the banner and Stop showed 5 s after Send, because the screens
+    waited for the engine's answer (it loads the file first). Now the alert shows before
+    the engine is asked, and Stop pressed while it loads still takes it off."""
+    s = await _station(db_session)
+    _engine(monkeypatch, s)
+    from app.services import playout_engine
+    seen = {}
+    stopped = []
+
+    async def slow_engine(path, payload=None, *, station_id, wait=4.0, slow_is_ok=False):
+        if path == "/alert":
+            seen["active_when_asked"] = emergency_alerts.all_active()
+            seen["nudged_when_asked"] = list(_setup["nudges"])
+            # Stop pressed while the engine is still loading: the row is not saved yet
+            alert_id = payload["id"]
+            stopped.append(await emergency_alerts.stop_unsaved(alert_id, "manager@x"))
+        _setup["sent"].append((str(station_id), path, payload))
+        return True
+    monkeypatch.setattr(playout_engine, "_command", slow_engine)
+    r = await client.post("/api/v1/emergency/activate", headers=auth_headers,
+                          files={"file": ("t.wav", speech_like(), "audio/wav")}, data={"station_ids": str(s.id)})
+    assert r.status_code == 201
+    assert str(s.id) in seen["active_when_asked"]
+    await asyncio.sleep(0.05)
+    assert "emergency" in _setup["nudges"]
+    assert stopped == [True]
+    # The engine is told to stop once more after it has loaded the alert, the row says so
+    stops = [p for sid, p, _ in _setup["sent"] if p == "/alert_stop"]
+    assert len(stops) == 2
+    assert r.json()["alerts"][0]["status"] == "cancelled"
+    assert emergency_alerts.all_active() == {}
+
+
+@pytest.mark.asyncio
+async def test_each_alert_gets_its_own_alerts_row(client, db_session, auth_headers, monkeypatch, _setup):
+    """Two tests in a row: the second's ON AIR folded into the first's open alert (same title)."""
+    from app.models.alert import Alert
+    s = await _station(db_session)
+    _engine(monkeypatch, s)
+    ids = []
+    for _ in range(2):
+        r = await client.post("/api/v1/emergency/activate", headers=auth_headers,
+                              files={"file": ("t.wav", speech_like(), "audio/wav")}, data={"station_ids": str(s.id)})
+        ids.append(r.json()["alerts"][0]["id"])
+    for i in ids:
+        r = await client.post(f"/api/v1/playout/{s.id}/alert", headers={"X-Playout-Token": PLAYOUT},
+                              json={"phase": "started", "alert_id": i, "source": "api"})
+        assert r.status_code == 200, r.text
+    titles = [a.title for a in (await db_session.execute(select(Alert))).scalars().all() if "ON AIR" in a.title]
+    assert len(titles) == 2 and len(set(titles)) == 2
+
+
+@pytest.mark.asyncio
 async def test_engine_not_answering_is_a_failure_and_pushes(client, db_session, auth_headers, monkeypatch, _setup):
     s = await _station(db_session)
     _engine(monkeypatch, s)
