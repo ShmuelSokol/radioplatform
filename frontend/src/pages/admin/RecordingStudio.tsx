@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import AudioMixer from './AudioMixer';
 import { useStations } from '../../hooks/useStations';
+import { rememberStation, stationToShow } from '../../lib/lastStation';
 import {
   useWeatherReadouts,
   useCreateWeatherReadout,
@@ -332,7 +333,10 @@ function TemplateConfig({ stationId }: { stationId: string }) {
 export default function RecordingStudio() {
   const { data: stationData } = useStations();
   const stations = stationData?.stations ?? [];
-  const [selectedStation, setSelectedStation] = useState('');
+  // Opens on the station last worked on (lib/lastStation), like the other staff pages
+  const [chosenStation, setChosenStation] = useState('');
+  const selectedStation = chosenStation || (stations.length ? stationToShow(stations, null, '') : '');
+  const setSelectedStation = (id: string) => { setChosenStation(id); rememberStation(id); };
   const [dateFilter, setDateFilter] = useState(() => new Date().toISOString().slice(0, 10));
   const [showTemplate, setShowTemplate] = useState(false);
   const [recordingReadoutId, setRecordingReadoutId] = useState<string | null>(null);
