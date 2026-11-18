@@ -499,8 +499,12 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
   // The server stream runs a few seconds behind: silence it the moment the host is on
   // air, or the song is heard under the host's first words
   useEffect(() => {
-    if (streamAudioRef.current && useStream) streamAudioRef.current.muted = live.onAir;
-  }, [live.onAir, useStream]);
+    // ...unless the stream carries the show itself (stream server proto 5): then the
+    // stream is what plays the host, and this page's own copy stays silent
+    if (streamAudioRef.current && useStream) streamAudioRef.current.muted = live.onAir && !live.onStream;
+  }, [live.onAir, live.onStream, useStream]);
+  const setUsesStream = live.setUsesStream;
+  useEffect(() => { setUsesStream(useStream); }, [setUsesStream, useStream]);
 
   if (isLoading) return <div className="text-center py-10">Loading...</div>;
   if (!station) {
