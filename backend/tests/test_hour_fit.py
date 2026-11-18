@@ -422,19 +422,35 @@ async def test_on_the_stream_server_a_song_is_counted_to_its_analysed_end(db_ses
     assert (await _order(db_session, station_id))[0] == "Really past"
 
 
-def test_the_stream_servers_length_of_a_song():
+def test_the_stream_servers_length_of_a_song(monkeypatch):
+    """F-HOURFIT-12/15: analysed start to analysed end, less the overlap the engine is
+    given with the song: the station's crossfade (1 s unless set), not a fixed 3 s.
+    Live 2026-11-18 04:00Z on Main: counted with 3 s while the engine used 1 s, each
+    song aired 2 s longer than planned; "loses 5 s" became 17 s."""
     from types import SimpleNamespace
 
+    import app.api.v1.queue as queue_module
     from app.services.hour_fit import _seconds
+    from app.services.playout_engine import build_uri
 
     asset = _asset("Medley", 523.4)
+    asset.file_path = "https://cdn.example.com/medley.mp3"
     _analysed(asset, cue_in=0.0, cue_out=515.4)
-    entry = SimpleNamespace(asset=asset, preempt_at=None, source="auto", station_id=None)
-    assert _seconds(entry, engine=True) == pytest.approx(512.4)
+    entry = SimpleNamespace(id=uuid.uuid4(), asset=asset, asset_id=asset.id, preempt_at=None, source="auto",
+                            station_id="st-1", resume_seconds=None)
+    assert _seconds(entry, engine=True) == pytest.approx(514.4)  # the default crossfade, 1 s
+    monkeypatch.setitem(queue_module._station_crossfade, "st-1", 3.0)
+    assert _seconds(entry, engine=True) == pytest.approx(512.4)  # 02:00Z, when the engine used 3 s
+    monkeypatch.setitem(queue_module._station_crossfade, "st-1", 0.0)
+    assert _seconds(entry, engine=True) == pytest.approx(515.2)  # no crossfade: the engine still holds back 0.2 s
+    monkeypatch.setitem(queue_module._station_crossfade, "st-1", 1.0)
+    # The same figure the engine is handed with the song
+    uri = build_uri(entry, "main")
+    assert 'liq_cross_duration="1.00"' in uri and 'liq_cue_out="515.400"' in uri
     _analysed(asset, cue_in=6.0, cue_out=515.4)  # leading silence is skipped too
-    assert _seconds(entry, engine=True) == pytest.approx(506.4)
+    assert _seconds(entry, engine=True) == pytest.approx(508.4)
     asset.metadata_extra = None  # not analysed yet: the file's length less the overlap
-    assert _seconds(entry, engine=True) == pytest.approx(520.4)
+    assert _seconds(entry, engine=True) == pytest.approx(522.4)
 
 
 @pytest.mark.asyncio

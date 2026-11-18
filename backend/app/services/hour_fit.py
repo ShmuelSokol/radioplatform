@@ -79,9 +79,9 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-# The stream server starts the next song this long before the one on air reaches its
-# end point (radio.liq: cross(duration=3.))
-ENGINE_CROSS = 3.0
+# Used when the engine's own figure cannot be read (it never is 0 there: radio.liq
+# always holds back a moment to make the change in)
+ENGINE_MIN_CROSS = 0.2
 # Songs whose end point is asked for per look (each is one short background job)
 ANALYSE_PER_LOOK = 12
 
@@ -92,9 +92,14 @@ def _seconds(entry, engine: bool = False) -> float | None:
 
     On the stream server a song plays from its analysed start to its analysed end
     point (liq_cue_in / liq_cue_out: leading silence and the trailing fade are
-    dropped) and the next one starts ENGINE_CROSS before that. Live 2026-11-18 02:00Z:
+    dropped) and the next one starts the item's own overlap before that: the very
+    figures the engine is given with the song (playout_engine.build_uri: kbr_overlap,
+    liq_cross_duration), so the two cannot drift apart again. Live 2026-11-18 02:00Z:
     a 523.4 s file held the air for 512.4 s; counted as 520.6 s, the fit planned it
-    to run 8 s past the hour and it ended 0.2 s before."""
+    to run 8 s past the hour and it ended 0.2 s before. 04:00Z on Main: the engine
+    had moved from a fixed 3 s overlap to the station's crossfade (1 s) while this
+    still took off 3 s, so every song aired 2 s longer than counted and the last one
+    started 9.5 s later than planned (said "loses 5 s", lost 17 s)."""
     asset = entry.asset
     value = getattr(asset, "duration", None) if asset is not None else None
     if not value or value <= 0:
@@ -104,6 +109,7 @@ def _seconds(entry, engine: bool = False) -> float | None:
     if engine and entry.preempt_at is None:
         from app.models.asset import stored_analysis
         from app.models.queue_entry import resume_offset
+        from app.services.playout_engine import _overlap
 
         analysis = stored_analysis(getattr(asset, "metadata_extra", None)) or {}
         cue_in = analysis.get("cue_in_seconds")
@@ -111,7 +117,7 @@ def _seconds(entry, engine: bool = False) -> float | None:
         cue_in = max(cue_in, resume_offset(entry))
         cue_out = analysis.get("cue_out_seconds")
         end = float(cue_out) if isinstance(cue_out, (int, float)) and 0 < cue_out <= value else float(value)
-        return max(1.0, end - cue_in - ENGINE_CROSS)
+        return max(1.0, end - cue_in - max(_overlap(entry), ENGINE_MIN_CROSS))
     return max(1.0, float(value) - handover_seconds(entry))
 
 
