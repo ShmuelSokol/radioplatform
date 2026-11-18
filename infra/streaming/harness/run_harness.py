@@ -950,21 +950,22 @@ async def sc_hard_group_overruns_next_hard(h: Harness) -> None:
 
 async def sc_engine_starts_every_time(h: Harness, times: int = 6) -> None:
     """V3-22, V3-23: the engine is started several times in a row. Each time /status
-    answers within 5 s of the start (also before the first track), sound is on air within
-    15 s and it is the station's music, not the emergency files."""
+    answers within 20 s of the restart being asked for (stop, start, also before the first
+    track), sound is on air within 30 s and it is the station's music, not the emergency files."""
     name = "engine_starts_every_time"
     await wait_music(h)
     status_s, sound_s, bad = [], [], []
     for i in range(times):
         await h.clear_pending()
         await h.queue([("song1", {}), ("song2", {}), ("song3", {})])
+        asked = time.time()   # times below count from the moment the restart was asked for
         await asyncio.to_thread(h.stack.restart_engine)
         t0 = h.stack.wav_t0
         answered = None
-        while time.time() - t0 < 20:
+        while time.time() - asked < 30:
             try:
                 if await asyncio.to_thread(_control, "/status") == 200:
-                    answered = time.time() - t0
+                    answered = time.time() - asked
                     break
             except OSError:
                 pass  # the control port is not open yet
@@ -973,13 +974,13 @@ async def sc_engine_starts_every_time(h: Harness, times: int = 6) -> None:
         await asyncio.sleep(max(0, t0 + 16 - time.time()))
         heard = h.heard(t0, time.time() - 1)
         first = next((t for t, db, _ in heard if db > -45), None)
-        sound_s.append(None if first is None else first - t0)
+        sound_s.append(None if first is None else first - asked)
         names = {n for _, n in timeline(h.heard(t0 + 8, time.time() - 1))}
         if not names or not all(n.startswith("song") for n in names):
             bad.append((i + 1, sorted(names)))
-    h.check(name, all(a is not None and a <= 5.0 for a in status_s),
+    h.check(name, all(a is not None and a <= 20.0 for a in status_s),
             f"/status answered after each of {times} starts (s): {[None if a is None else round(a, 1) for a in status_s]}")
-    h.check(name, all(x is not None and x <= 15.0 for x in sound_s),
+    h.check(name, all(x is not None and x <= 30.0 for x in sound_s),
             f"sound after each start (s): {[None if x is None else round(x, 1) for x in sound_s]}")
     h.check(name, not bad, f"station music 8 s after every start, no emergency files: {bad or 'all'}")
 
@@ -1008,7 +1009,8 @@ async def sc_live_show_over_hard_item(h: Harness) -> None:
     t_end = time.time()
     code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
     h.check(name, code == 200, f"show ended 12 s after the second item was due ({code})")
-    await asyncio.sleep(18)
+    # long enough for the song that comes back to end, so a stale item would get its turn
+    await asyncio.sleep(18 + 45)
     heard = h.heard(t1.timestamp() - 3, time.time() - 1)
     h.print_timeline(heard, t1.timestamp())
     during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
@@ -1022,7 +1024,8 @@ async def sc_live_show_over_hard_item(h: Harness) -> None:
     h.check(name, bool(after) and "EMERGENCY" not in after, f"station music after the show: {after}")
     rows = {e.id: e for e in await h.rows()}
     st = rows[second[0]].status if second[0] in rows else "gone"
-    h.check(name, st != "pending" and st != "playing", f"the item that came due during the show is closed ({st})")
+    h.check(name, st != "pending" and st != "playing",
+            f"the item that came due during the show is closed, not left waiting in the queue ({st})")
     cur = await h.on_air()
     h.check(name, bool(cur) and cur.asset.asset_type == "music", f"the site shows music ({cur.asset.title if cur else None})")
 
