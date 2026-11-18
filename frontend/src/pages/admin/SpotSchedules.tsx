@@ -15,6 +15,10 @@ import {
   previewSpotPlan,
   updateSpotSchedule,
   Daypart,
+  DEFAULT_SLOTS,
+  TIME_SLOTS,
+  WIDE_DAYPARTS,
+  daypartText,
   PlannedSpot,
   SpotSchedule,
 } from '../../api/spotSchedules';
@@ -23,18 +27,12 @@ import Spinner from '../../components/Spinner';
 import type { Asset } from '../../types';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const DAYPARTS: { key: Daypart; label: string; hours: string }[] = [
-  { key: 'morning', label: 'Morning', hours: '6 AM to 12 PM' },
-  { key: 'afternoon', label: 'Afternoon', hours: '12 PM to 6 PM' },
-  { key: 'evening', label: 'Evening', hours: '6 PM to 12 AM' },
-  { key: 'overnight', label: 'Overnight', hours: '12 AM to 6 AM' },
-];
 
 const emptyForm = {
   sponsor_id: '',
   station_id: '',
   days: [0, 1, 2, 3, 4, 5, 6] as number[],
-  dayparts: ['morning', 'afternoon', 'evening'] as Daypart[],
+  dayparts: [...DEFAULT_SLOTS] as Daypart[],
   plays_per_daypart: 1,
   when: 'spread' as 'spread' | 'exact',
   times: [] as string[], // "HH:MM" station time
@@ -78,7 +76,7 @@ function describe(s: SpotSchedule): string {
   const dayText = days.length === 7 ? 'Every day' : days.map((d) => DAYS[d]).join(', ');
   const parts = s.dayparts
     .split(',')
-    .map((p) => DAYPARTS.find((d) => d.key === p)?.label.toLowerCase() ?? p)
+    .map((p) => daypartText(p))
     .join(', ');
   const how = s.timing_mode ? `, ${TIMING_LABEL[s.timing_mode].toLowerCase()}` : '';
   if (s.fixed_times) return `${dayText} at ${s.fixed_times.split(',').map(clock).join(', ')}${how}`;
@@ -431,9 +429,12 @@ export default function SpotSchedules() {
           ) : (
             <>
           <div>
-            <label className="block text-sm font-medium mb-1">Times of day (station time)</label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {DAYPARTS.map((p) => (
+            <label className="block text-sm font-medium mb-1">Time slots (station time)</label>
+            <p className="text-xs text-gray-500 mb-2">
+              Plays go anywhere in the slot, to the break with the fewest sponsorships so far.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="time-slots">
+              {[...TIME_SLOTS, ...WIDE_DAYPARTS.filter((w) => form.dayparts.includes(w.key))].map((p) => (
                 <button
                   type="button"
                   key={p.key}
@@ -449,7 +450,7 @@ export default function SpotSchedules() {
             </div>
           </div>
               <div className="max-w-xs">
-              <label className="block text-sm font-medium mb-1">Plays in each time of day</label>
+              <label className="block text-sm font-medium mb-1">Plays in each slot</label>
               <input
                 type="number"
                 min={1}

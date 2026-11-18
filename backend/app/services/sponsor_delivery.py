@@ -33,7 +33,14 @@ PAST_DAYS = 14
 # A soft play waits for the song on air, so one due late in a time of day may
 # start a little after it; it still counts for the time of day it was due in.
 LATE_START_GRACE = timedelta(minutes=15)
-DAYPART_ORDER = ["overnight", "morning", "afternoon", "evening"]
+# Narrow time slots before the broad part of the day they sit in, so a play is
+# counted for the slot that promised it first.
+DAYPART_ORDER = [
+    "overnight",
+    "early_morning", "late_morning", "morning",
+    "early_afternoon", "late_afternoon", "afternoon",
+    "early_evening", "late_evening", "evening",
+]
 
 
 @dataclass

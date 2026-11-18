@@ -1766,22 +1766,22 @@ section('spot-schedule', async () => {
   }
   {
     const page = await newPage('manager');
-    await step('F-SPOTSCHED-1 dayparts: no daypart chosen is refused; Morning + Evening with plays per daypart saves', async () => {
+    await step('F-SPOTSCHED-1 time slots: no slot chosen is refused; Early morning + Late evening with plays per slot saves', async () => {
       await page.goto(`${BASE}/admin/spot-schedule`);
       await page.getByRole('button', { name: 'Schedule a spot' }).click();
       const form = page.locator('form');
       await field(form, 'Sponsor').selectOption(FX.sponsor.id);
       await form.getByPlaceholder("Type part of the spot's title").fill(spot.title.slice(0, 12));
       await form.locator('li', { hasText: spot.title }).getByRole('button', { name: spot.title }).click();
-      for (let i = 0; i < 6 && await form.locator('.grid button.bg-blue-600').count(); i++) await form.locator('.grid button.bg-blue-600').first().click();
+      for (let i = 0; i < 12 && await form.locator('.grid button.bg-blue-600').count(); i++) await form.locator('.grid button.bg-blue-600').first().click();
       await form.getByRole('button', { name: 'Save schedule' }).click();
       await form.getByText(/Choose at least one (time of day|day)/).waitFor({ timeout: 2000 });
-      await form.getByRole('button', { name: /^Morning/ }).click();
-      await form.getByRole('button', { name: /^Evening/ }).click();
-      await field(form, 'Plays in each time of day').fill('3');
+      await form.getByRole('button', { name: /^Early morning/ }).click();
+      await form.getByRole('button', { name: /^Late evening/ }).click();
+      await field(form, 'Plays in each slot').fill('3');
       const { resp } = await timedSave(page, 'save daypart schedule', (m, p) => m === 'POST' && p.startsWith('/spot-schedules'), () => form.getByRole('button', { name: 'Save schedule' }).click());
       const sent = resp.request().postDataJSON();
-      assert(sent.dayparts === 'morning,evening' && sent.plays_per_daypart === 3, `sent ${JSON.stringify(sent).slice(0, 200)}`);
+      assert(sent.dayparts === 'early_morning,late_evening' && sent.plays_per_daypart === 3, `sent ${JSON.stringify(sent).slice(0, 200)}`);
       await api('DELETE', `/spot-schedules/${(await resp.json()).id}`, { token: USERS.admin.token });
     }, page);
     await step('F-SPOTSCHED-3 timing defaults per daypart: changing "Spots on the hour play" saves', async () => {

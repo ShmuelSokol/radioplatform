@@ -398,4 +398,5 @@ INGEST 2026-11-18 control-room.md finding the Sponsor panel: SPONSOR › tag on 
 INGEST 2026-11-18 streaming-architecture.md start reports taken one at a time per station and an exact repeat ignored: two at once wrote the previous item's play log twice (Main 20:31Z sponsorship counted twice)
 UPDATE 2026-11-18 control-room.md sponsorship rule tightened (weather report no longer tagged), station-day query uses indexes, panel shows today's not-aired plays at once
 INGEST 2026-11-18 live-shows.md engine holds two items during a show; a flush empties both but its given list forgets one, so the paused story's second part was closed unplayed after a held sponsorship (show_preloaded, flushed_unplayed, _not_dropped_by_a_flush)
+INGEST 2026-11-18 spot-schedules.md three-hour time slots beside the broad dayparts (planned narrowest first, reports stay broad) and least-full leveling over a slot's breaks: every break gets 3 before any gets a 4th
 UPDATE 2026-11-18 sponsor-accounts.md Sponsors got its own top menu (All Clients first); Campaigns points to the client page; Sponsor Portal link for sponsors only

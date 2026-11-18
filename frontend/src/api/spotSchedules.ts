@@ -1,6 +1,36 @@
 import apiClient from './client';
 
-export type Daypart = 'morning' | 'afternoon' | 'evening' | 'overnight';
+export type Daypart =
+  | 'early_morning' | 'late_morning' | 'early_afternoon' | 'late_afternoon' | 'early_evening' | 'late_evening'
+  | 'morning' | 'afternoon' | 'evening' | 'overnight';
+
+/** When a contract may play. The three-hour slots come first; the planner spreads
+ * plays evenly over the breaks inside a slot (every break gets 3 before any gets 4). */
+export const TIME_SLOTS: { key: Daypart; label: string; hours: string }[] = [
+  { key: 'early_morning', label: 'Early morning', hours: '6 AM to 9 AM' },
+  { key: 'late_morning', label: 'Late morning', hours: '9 AM to 12 PM' },
+  { key: 'early_afternoon', label: 'Early afternoon', hours: '12 PM to 3 PM' },
+  { key: 'late_afternoon', label: 'Late afternoon', hours: '3 PM to 6 PM' },
+  { key: 'early_evening', label: 'Early evening', hours: '6 PM to 9 PM' },
+  { key: 'late_evening', label: 'Late evening', hours: '9 PM to 12 AM' },
+  { key: 'overnight', label: 'Overnight', hours: '12 AM to 6 AM' },
+];
+/** Wider choices, kept for contracts made before the slots */
+export const WIDE_DAYPARTS: { key: Daypart; label: string; hours: string }[] = [
+  { key: 'morning', label: 'Morning', hours: '6 AM to 12 PM' },
+  { key: 'afternoon', label: 'Afternoon', hours: '12 PM to 6 PM' },
+  { key: 'evening', label: 'Evening', hours: '6 PM to 12 AM' },
+];
+/** New contracts start in the six daytime slots */
+export const DEFAULT_SLOTS: Daypart[] = TIME_SLOTS.filter((s) => s.key !== 'overnight').map((s) => s.key);
+
+/** "late morning (9 AM to 12 PM)" */
+export function daypartText(key: string, capital = false): string {
+  const d = [...TIME_SLOTS, ...WIDE_DAYPARTS].find((x) => x.key === key);
+  if (!d) return key;
+  const label = capital ? d.label : d.label.toLowerCase();
+  return `${label} (${d.hours})`;
+}
 
 export type TimingMode = 'hard' | 'soft';
 
