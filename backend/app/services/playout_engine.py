@@ -64,6 +64,10 @@ HOLD_BEFORE_HARD_SECONDS = 8.0
 class EngineState:
     # Entry handed to the engine as "next" that has not been reported started yet
     cued_entry_id: str | None = None
+    # When the engine was last handed its next track, and when an operator's change last
+    # took one back (monotonic): Next waits a moment for a track handed over just now
+    cued_at: float = 0.0
+    operator_flush_at: float = 0.0
     # Hard-timed entries already handed to the engine's timed lane
     timed_sent: set[str] = field(default_factory=set)
     # A manual skip is in flight: the outgoing entry is logged as skipped
@@ -668,6 +672,7 @@ async def handle_next(
         if uri:
             entry_id, asset_id = str(entry.id), str(entry.asset_id)
             state.cued_entry_id = entry_id
+            state.cued_at = time.monotonic()
             _note_handed(state, entry)
             await _record_handed(db, station_id, [(entry_id, asset_id)])
             logger.info("Engine next -> %s", entry_id)
@@ -1180,6 +1185,73 @@ async def _flush_if_head_changed(db: AsyncSession, station_id, state: EngineStat
         desired.id if desired else None,
     )
     await engine_flush(station_id)
+
+
+async def take_operator_change(db: AsyncSession, station_id, *, before_next: bool = False) -> bool:
+    """An operator changed the head of the queue (Play next, delete, reorder) or is
+    pressing Next: if the engine holds a different song as its next, take it back now so
+    it asks again and gets what the queue says. True if it was flushed.
+
+    Without this, Play next followed by Next within a few seconds played the automatic
+    song the engine already held and the operator's item one Next later: the automatic
+    swap runs on the 3 s tick and at most once in 15 s (harness operator_queue_then_next,
+    2026-11-18, 3 runs of 3).
+
+    `before_next`: a Next follows at once, so the item on air ends now anyway and the
+    last-seconds rule does not apply. Otherwise the pre-loaded song is kept when the item
+    on air ends within KEEP_CUED_LAST_SECONDS (a flush then would leave nothing ready)."""
+    state = get_state(station_id)
+    if not state.cued_entry_id:
+        return False
+    exclude = set(state.timed_sent) | (state.given - {state.cued_entry_id})
+    desired = await pick_next(db, station_id, exclude)
+    if desired is not None and str(desired.id) == state.cued_entry_id:
+        return False
+    if desired is None and before_next:
+        return False  # nothing else to give: keep what it holds rather than fall to emergency music
+    if not before_next:
+        res = await db.execute(
+            select(QueueEntry)
+            .options(joinedload(QueueEntry.asset))
+            .where(QueueEntry.station_id == station_id, QueueEntry.status == "playing")
+            .order_by(QueueEntry.started_at.desc().nullslast())
+        )
+        current = res.unique().scalars().first()
+        end = _airs_until(current) if current is not None else None
+        if end is not None and (end - datetime.now(UTC)).total_seconds() < KEEP_CUED_LAST_SECONDS:
+            return False
+    logger.info(
+        "Operator changed the queue head (%s -> %s): flushing the engine's pre-loaded track",
+        state.cued_entry_id, desired.id if desired else None,
+    )
+    state.last_auto_flush = state.operator_flush_at = time.monotonic()
+    await engine_flush(station_id)
+    return True
+
+
+# After an operator's change took back the pre-loaded song, the engine asks again and has
+# to download the new one. A Next in that moment would end the song on air with nothing
+# ready (emergency music until the download is done), so Next waits: for the engine to
+# ask, then this long for the file. Only within OPERATOR_SETTLE_WINDOW of such a change;
+# an ordinary Next is not delayed.
+OPERATOR_SETTLE_WINDOW = 4.0
+OPERATOR_ASK_WAIT = 2.0
+OPERATOR_LOAD_SECONDS = 0.8
+
+
+async def settle_before_next(station_id) -> float:
+    """Called just before a Next. Returns the seconds waited (0 for an ordinary Next)."""
+    state = get_state(station_id)
+    began = time.monotonic()
+    if not state.operator_flush_at or began - state.operator_flush_at > OPERATOR_SETTLE_WINDOW:
+        return 0.0
+    while not state.cued_entry_id and time.monotonic() - began < OPERATOR_ASK_WAIT:
+        await asyncio.sleep(0.05)
+    if state.cued_entry_id:
+        left = OPERATOR_LOAD_SECONDS - (time.monotonic() - state.cued_at)
+        if left > 0:
+            await asyncio.sleep(left)
+    return time.monotonic() - began
 
 
 async def _take_back_before_hard_item(db: AsyncSession, station_id, state: EngineState) -> None:

@@ -225,3 +225,92 @@ async def test_mix_over_plays_on_top_and_leaves_the_queue_alone(
     assert res.status_code == 200 and len(sent) == 1
     assert commands[0][0] == "/overlay" and commands[0][1]["uri"].endswith(":https://files.example/jingle.mp3")
     assert 'kbr_lane="overlay"' in commands[0][1]["uri"]
+
+
+async def _engine_station(db_session, monkeypatch, elapsed_seconds=20.0):
+    """A station on the playout engine that already holds its next (automatic) song."""
+    from app.services import playout_engine
+
+    station, playing, pending = await _station_with_two_tracks(db_session, elapsed_seconds=elapsed_seconds)
+    commands = []
+
+    async def fake_command(path, payload=None, **_kw):
+        commands.append(path)
+        return True
+
+    monkeypatch.setattr(playout_engine, "_command", fake_command)
+    monkeypatch.setattr(queue_module.settings, "PLAYOUT_ENGINE_ENABLED", True)
+    monkeypatch.setattr(queue_module.settings, "PLAYOUT_ENGINE_STATION_ID", str(station.id))
+    monkeypatch.setattr(queue_module.settings, "PLAYOUT_ENGINE_URL", "http://engine.invalid")
+    monkeypatch.setattr(queue_module.settings, "PLAYOUT_ENGINE_TOKEN", "test-token")
+    monkeypatch.setattr(playout_engine, "OPERATOR_ASK_WAIT", 0.1)
+    monkeypatch.setattr(playout_engine, "OPERATOR_LOAD_SECONDS", 0.0)
+    playout_engine._states.pop(str(station.id), None)
+    state = playout_engine.get_state(station.id)
+    state.cued_entry_id = str(pending.id)
+    state.given = {str(pending.id)}
+    return station, playing, pending, state, commands
+
+
+@pytest.mark.asyncio
+async def test_play_next_takes_back_the_song_the_engine_holds(client, auth_headers, db_session, monkeypatch):
+    """Harness operator_queue_then_next, 2026-11-18: Play next then Next played the
+    automatic song the engine already held; the operator's item came one Next later."""
+    station, playing, pending, state, commands = await _engine_station(db_session, monkeypatch)
+    res = await client.post(
+        f"/api/v1/stations/{station.id}/queue/play-next", headers=auth_headers,
+        json={"asset_id": str(playing.asset_id)},
+    )
+    assert res.status_code == 201
+    assert commands == ["/flush"] and state.cued_entry_id is None
+    # The engine asks again and gets the operator's item
+    from app.services import playout_engine
+    state.given = set()
+    got = await playout_engine.handle_next(db_session, station.id, given=[])
+    assert got["entry_id"] == res.json()["id"]
+    # Nothing changed since: Next is a plain skip, no second flush
+    commands.clear()
+    res = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade=hard", headers=auth_headers)
+    assert res.json()["message"] == "Skipped" and commands == ["/skip"]
+    # The song that was taken back is not lost: it is handed out again after the item
+    state.cued_entry_id = None
+    again = await playout_engine.handle_next(db_session, station.id, given=[got["entry_id"]])
+    assert again["entry_id"] == str(pending.id)
+
+
+@pytest.mark.asyncio
+async def test_play_next_in_a_songs_last_seconds_keeps_the_held_song_until_next(
+    client, auth_headers, db_session, monkeypatch
+):
+    """A flush seconds before a song ends leaves the engine with nothing ready, so Play
+    next alone keeps the pre-loaded song then; a Next still plays the operator's item."""
+    station, playing, pending, state, commands = await _engine_station(
+        db_session, monkeypatch, elapsed_seconds=160.0  # 20 s of 180 left
+    )
+    res = await client.post(
+        f"/api/v1/stations/{station.id}/queue/play-next", headers=auth_headers,
+        json={"asset_id": str(playing.asset_id)},
+    )
+    assert res.status_code == 201 and commands == [] and state.cued_entry_id == str(pending.id)
+    res = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade=hard", headers=auth_headers)
+    assert res.json()["message"] == "Skipped" and commands == ["/flush", "/skip"]
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_item_the_engine_holds_takes_it_back(client, auth_headers, db_session, monkeypatch):
+    station, playing, pending, state, commands = await _engine_station(db_session, monkeypatch)
+    res = await client.delete(f"/api/v1/stations/{station.id}/queue/{pending.id}", headers=auth_headers)
+    assert res.status_code == 204
+    assert commands == ["/flush"] and state.cued_entry_id is None
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_next_is_not_flushed_or_delayed(client, auth_headers, db_session, monkeypatch):
+    import time as _time
+
+    station, playing, pending, state, commands = await _engine_station(db_session, monkeypatch)
+    t0 = _time.monotonic()
+    res = await client.post(f"/api/v1/stations/{station.id}/queue/skip", headers=auth_headers)
+    assert res.json()["message"] == "Skipped" and commands == ["/skip"]
+    assert _time.monotonic() - t0 < 1.0
+    assert state.cued_entry_id == str(pending.id)
