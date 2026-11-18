@@ -38,6 +38,9 @@ class CallInRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     air_start: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
     air_end: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Who is calling, the same on every call of theirs ("tel:<number>" or "web:<id>"):
+    # the key of their history and standing (app/services/caller_history.py)
+    caller_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     screened_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

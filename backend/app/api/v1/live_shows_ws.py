@@ -566,7 +566,8 @@ async def websocket_live_events(websocket: WebSocket, show_id: str):
         try:
             from app.db.session import get_async_session
             from app.services.live_show_service import get_show, get_show_calls, get_seconds_until_hard_stop
-            from app.schemas.live_show import LiveShowInDB, CallInRequestInDB
+            from app.schemas.live_show import LiveShowInDB
+            from app.services.caller_history import with_history
 
             async for db in get_async_session():
                 show = await get_show(db, show_id)
@@ -576,10 +577,7 @@ async def websocket_live_events(websocket: WebSocket, show_id: str):
                         "type": "show_state",
                         "data": {
                             "show": LiveShowInDB.model_validate(show).model_dump(mode="json"),
-                            "callers": [
-                                CallInRequestInDB.model_validate(c).model_dump(mode="json")
-                                for c in calls
-                            ],
+                            "callers": await with_history(db, calls),
                             "seconds_remaining": get_seconds_until_hard_stop(show),
                         },
                     })
