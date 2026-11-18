@@ -24,5 +24,8 @@ class Sponsor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The person to deal with at the client, and the station's own notes on them
+    contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     user = relationship("User", lazy="noload")

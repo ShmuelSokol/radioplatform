@@ -174,3 +174,22 @@ export const skipSponsorshipPlay = async (stationId: string, entryId: string, re
   (await apiClient.post<{ entry_id: string; status: string }>(
     `/stations/${stationId}/queue/${entryId}/skip-sponsorship`, null, { params: restore ? { restore: true } : undefined },
   )).data;
+
+/** The control room's Sponsors list: today's sponsorship plays on one station. */
+export interface StationDayPlay {
+  entry_id: string;
+  status: string;
+  status_text: string;
+  source: string;
+  at: string;
+  local_time: string;
+  asset: { id: string; title: string; artist: string | null; asset_type: string; category: string | null; duration: number | null };
+  sponsor_name: string | null;
+}
+export interface StationDay {
+  station: { id: string; name: string; timezone: string };
+  date: string;
+  plays: StationDayPlay[];
+}
+export const getStationDay = async (stationId: string): Promise<StationDay> =>
+  (await apiClient.get<StationDay>('/spot-schedules/station-day', { params: { station_id: stationId } })).data;

@@ -179,6 +179,8 @@ async def _add_missing_columns(engine):
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(50)",
         "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS company_name VARCHAR(255)",
+        "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255)",
+        "ALTER TABLE sponsors ADD COLUMN IF NOT EXISTS notes TEXT",
         # User notification fields
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS title VARCHAR(100)",

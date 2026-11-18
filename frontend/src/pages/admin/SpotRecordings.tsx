@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listSponsors } from "../../api/sponsors";
 import {
@@ -288,8 +288,10 @@ export default function SpotRecordings() {
     queryKey: ["spot-recordings"],
     queryFn: listSpotRecordings,
   });
+  // "Record a spot" on a client's page arrives with that client chosen
+  const [params] = useSearchParams();
   const [form, setForm] = useState({
-    sponsor_id: "",
+    sponsor_id: params.get("sponsor") || "",
     title: "",
     script_text: "",
   });

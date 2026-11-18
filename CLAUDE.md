@@ -107,7 +107,7 @@ radioplatform/
 | RuleSet | rule_set.py | Scheduling rules |
 | HolidayWindow | holiday_window.py | Sabbath/holiday blackouts |
 | ChannelStream | channel_stream.py | Stream configuration |
-| Sponsor | sponsor.py | Sponsor/ad management (linked to User via user_id) |
+| Sponsor | sponsor.py | A client: name on air, company, contact, notes; portal login via user_id |
 | SpotSchedule | spot_schedule.py | When a sponsor's spot airs: days, dayparts (morning/afternoon/evening/overnight), plays per daypart, date range |
 | SpotRecording | spot_recording.py | A sponsorship spot in the making: script, wording review, audio, status (draft/ready/approved/rejected) |
 | BugReport | bug_report.py | Report from the 🐞 button: words, screenshot, browser state, server log slice, GitHub issue and fix link (see `wiki/bug-reports.md`) |
@@ -152,13 +152,13 @@ radioplatform/
 | websocket | websocket.py | /ws |
 | scheduler | scheduler.py | /scheduler |
 | holidays | holidays.py | /holidays |
-| sponsors | sponsors.py | /sponsors |
+| sponsors | sponsors.py | /sponsors (CRUD; `/clients`, `/{id}/account`, `/{id}/plays`, `/{id}/missed-plays`: the client database, see `wiki/sponsor-accounts.md`; delete refused with contracts or plays) |
 | channels | channels.py | /channels |
 | icecast | icecast.py | /icecast |
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists (the list is readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
-| spot_schedules | spot_schedules.py | /spot-schedules (`GET /for-asset/{asset_id}?station_id=`: the control room's Sponsor panel, any staff role) |
+| spot_schedules | spot_schedules.py | /spot-schedules (`GET /for-asset/{asset_id}?station_id=`: the control room's Sponsor panel, any staff role; `GET /station-day?station_id=`: today's sponsorship plays on one station, the control room's Sponsors tab) |
 | spot_recordings | spot_recordings.py | /spot-recordings |
 | program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
 | databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, every type of a table, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
@@ -238,6 +238,7 @@ radioplatform/
 | playout_tunnel.py | Commands to an engine with no inbound line (a local FM box): its relay long-polls for them; used by playout_engine only while a relay is polling. Also keeps the box's health report and names its problems for air watch (see `wiki/local-fm-box.md`) |
 | playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay (see `wiki/local-fm-box.md`) |
 | rds_service.py | RDS line now: clock-based weighted rotation, sponsor line while their spot airs, Latin-only text (Hebrew dropped), 8/64 limits, play log of encoder fetches (see `wiki/rds-feed.md`) |
+| sponsor_accounts.py | Sponsors as clients: status from contract dates, spots by stage of the flow, plays per contract, the as-run log (see `wiki/sponsor-accounts.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
 | emergency_alerts.py | The emergency override: sends an alert to each station (engine `/alert`, or WS `emergency_alert` to browser players), takes the engine's start/end reports into the log, drops hard items due during it, alert + ntfy on each (see `wiki/emergency-alerts.md`) |
@@ -248,7 +249,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), Sponsors tab (today's sponsorships on the station; rows carry a SPONSOR tag) and a Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
@@ -258,7 +259,8 @@ radioplatform/
 - Users.tsx — User management
 - Login.tsx — Authentication
 - Holidays.tsx — Sabbath/holiday blackout management
-- Sponsors.tsx — Sponsor/ad management
+- Sponsors.tsx — Sponsors as a client list: on the air / starting soon / paused / ended / no contract, active dates, contracts, plays; filters and search (see `wiki/sponsor-accounts.md`)
+- SponsorDetail.tsx — One client: spots by stage of the flow, contracts with their settings (pause, end date), play history with CSV, missed plays, details
 - Campaigns.tsx — Sponsorship campaigns across sponsors: sponsor and status filters, New Campaign for a chosen sponsor (managers/admins; DJs and viewers view only)
 - CampaignDetail.tsx — One campaign for staff: drafts, comments, Save Status. Drafts and comments panels are shared with the sponsor portal (`components/campaigns/CampaignParts.tsx`)
 - ScheduleCheck.tsx — Look-ahead of schedule conflicts: what was settled automatically, what needs a choice
@@ -346,6 +348,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/schedules/:scheduleId/blocks` → ScheduleBlocks (protected)
 - `/admin/holidays` → Holidays (protected)
 - `/admin/sponsors` → Sponsors (protected)
+- `/admin/sponsors/:sponsorId` → SponsorDetail (protected; `?tab=contracts|plays|missed|details`)
 - `/admin/campaigns` → AdminCampaigns (staff; managers/admins change, DJs/viewers view only)
 - `/admin/campaigns/:id` → AdminCampaignDetail (same roles)
 - `/admin/schedule-check` → ScheduleCheck (protected)
@@ -521,6 +524,9 @@ cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMI
 
 # Queue rows and level meters on car screens, tablets, phones and desktop (rows on screen, one-line titles, meters move)
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-compact.mjs
+
+# The Sponsors client list and client page at desktop and phone sizes (real backend with clients that have a running contract and plays)
+cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMIN_PASSWORD=... node e2e/sponsor-clients.mjs
 
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs

@@ -261,3 +261,72 @@ async def sponsor_item(
         "upcoming": loose + upcoming,
         "missed": missed,
     }
+
+
+NOT_SPONSOR_CATEGORIES = ("weather", "time", "zmanim")
+
+
+async def station_day(db: AsyncSession, station: Station, now: datetime | None = None) -> dict:
+    """Today's sponsorship plays on one station, for the control room's Sponsors list:
+    each queue row of a sponsorship spot due or started today, with its sponsor."""
+    now = now or datetime.now(UTC)
+    tz = station_tz(station.timezone)
+    today = now.astimezone(tz).date()
+    midnight = datetime(today.year, today.month, today.day, tzinfo=tz).astimezone(UTC)
+    tomorrow = (datetime(today.year, today.month, today.day, tzinfo=tz) + timedelta(days=1)).astimezone(UTC)
+    when = func.coalesce(QueueEntry.started_at, QueueEntry.preempt_at)
+    rows = (
+        await db.execute(
+            select(QueueEntry, Asset)
+            .join(Asset, Asset.id == QueueEntry.asset_id)
+            .where(
+                QueueEntry.station_id == station.id,
+                when >= midnight,
+                when < tomorrow,
+                or_(
+                    QueueEntry.source == "ad_slot",
+                    (func.lower(Asset.asset_type) == "spot")
+                    & func.lower(func.coalesce(Asset.category, "")).notin_(NOT_SPONSOR_CATEGORIES),
+                ),
+            )
+        )
+    ).all()
+    asset_ids = {a.id for _, a in rows}
+    sponsor_of: dict[str, str] = {}
+    if asset_ids:
+        for asset_id, name in (
+            await db.execute(
+                select(SpotSchedule.asset_id, Sponsor.name)
+                .join(Sponsor, Sponsor.id == SpotSchedule.sponsor_id)
+                .where(SpotSchedule.asset_id.in_(asset_ids))
+            )
+        ).all():
+            sponsor_of.setdefault(str(asset_id), name)
+        owners = {a.sponsor_id for _, a in rows if a.sponsor_id}
+        if owners:
+            names = dict((await db.execute(select(Sponsor.id, Sponsor.name).where(Sponsor.id.in_(owners)))).all())
+            for _, a in rows:
+                if a.sponsor_id and str(a.id) not in sponsor_of:
+                    sponsor_of[str(a.id)] = names.get(a.sponsor_id)
+
+    plays = []
+    for e, a in sorted(rows, key=lambda r: as_utc(r[0].started_at or r[0].preempt_at)):
+        at = as_utc(e.started_at or e.preempt_at)
+        plays.append({
+            "entry_id": str(e.id),
+            "status": e.status,
+            "status_text": STATUS_TEXT.get(e.status, e.status),
+            "source": e.source,
+            "at": at.isoformat(),
+            "local_time": _local(at, tz),
+            "asset": {
+                "id": str(a.id), "title": a.title, "artist": a.artist, "asset_type": a.asset_type,
+                "category": a.category, "duration": a.duration,
+            },
+            "sponsor_name": sponsor_of.get(str(a.id)),
+        })
+    return {
+        "station": {"id": str(station.id), "name": station.name, "timezone": station.timezone},
+        "date": today.isoformat(),
+        "plays": plays,
+    }

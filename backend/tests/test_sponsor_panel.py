@@ -158,3 +158,35 @@ async def test_staff_limited_to_one_station_see_only_that_station(client: AsyncC
     r = await client.get(f"{API}/spot-schedules/for-asset/{spot_id}", params={"station_id": str(other_id)},
                          headers=headers)
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_station_day_lists_todays_sponsorships_only(client: AsyncClient, db_session: AsyncSession):
+    station, other, sponsor, spot, song, _ = await _setup(db_session)
+    weather = Asset(id=uuid.uuid4(), title="Weather", file_path="w.mp3", duration=20.0, asset_type="spot",
+                    category="weather")
+    db_session.add(weather)
+    await db_session.flush()
+    now = datetime.now(UTC)
+    db_session.add_all([
+        QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=1, status="pending",
+                   source="ad_slot", preempt_at=now + timedelta(minutes=5)),
+        QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=2, status="pending",
+                   source="ad_slot", preempt_at=now + timedelta(days=2)),
+        QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=weather.id, position=3, status="pending",
+                   source="block", preempt_at=now + timedelta(minutes=6)),
+        QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id, position=4, status="pending",
+                   source="auto", preempt_at=now + timedelta(minutes=7)),
+        QueueEntry(id=uuid.uuid4(), station_id=other.id, asset_id=spot.id, position=1, status="pending",
+                   source="ad_slot", preempt_at=now + timedelta(minutes=5)),
+    ])
+    await db_session.commit()
+    station_id = station.id
+    _, headers = await _login(client, db_session, UserRole.VIEWER)
+    r = await client.get(f"{API}/spot-schedules/station-day", params={"station_id": str(station_id)}, headers=headers)
+    assert r.status_code == 200, r.text
+    plays = r.json()["plays"]
+    # today's play on this station only (tomorrow's, the weather, the song and the other station's are left out),
+    # unless the clock is within minutes of midnight
+    assert [p["sponsor_name"] for p in plays] in (["TEST SPONSOR 27"], [])
+    assert all(p["asset"]["title"].startswith("TEST SPONSOR 27") for p in plays)

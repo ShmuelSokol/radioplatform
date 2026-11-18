@@ -279,11 +279,19 @@ function QueuePanel(p: Props) {
 
                 <span className="flex-1 min-w-0 leading-tight">
                   <span data-testid="row-title" className={`block truncate text-[15px] lg:text-[13px] ${isSilence ? 'text-red-400' : ''}`}>
+                    {isSponsor && a && (p.onSong ? (
+                      <button type="button" data-testid="row-sponsor"
+                        onClick={(e) => { e.stopPropagation(); p.onSong?.(entry); }}
+                        title="Sponsorship: tap for its sponsor, contract and plays"
+                        aria-label={`Sponsorship: open the sponsor panel for ${title}`}
+                        className="relative mr-1.5 inline !min-h-0 px-1 py-px text-[10px] bg-[#ffa64d] hover:bg-[#ffc285] text-black font-bold border border-black/40 before:absolute before:-inset-x-1 before:-inset-y-3 before:content-['']">
+                        SPONSOR ›
+                      </button>
+                    ) : (
+                      <span className="mr-1.5 align-middle text-[10px] bg-[#ffa64d] text-black px-1 py-px font-bold" data-testid="row-sponsor">SPONSOR</span>
+                    ))}
                     <span className="hidden lg:inline">{a?.artist ? `${a.artist}  ` : ''}</span>{title}
                     {a?.artist && <span className="lg:hidden font-normal opacity-75"> · {a.artist}</span>}
-                    {entry.source === 'ad_slot' && (
-                      <span className="ml-2 align-middle text-[10px] bg-[#ffa64d] text-black px-1 py-px font-bold">SPONSOR</span>
-                    )}
                     {entry.source?.startsWith('resume@') && (
                       <span className="ml-2 align-middle text-[10px] bg-[#8fd18f] text-black px-1 py-px font-bold"
                         title="Paused for a timed item; carries on from here">

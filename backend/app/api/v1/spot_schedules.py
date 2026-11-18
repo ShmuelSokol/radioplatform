@@ -183,6 +183,22 @@ async def list_spot_schedules(
     return (await db.execute(stmt)).scalars().all()
 
 
+@router.get("/station-day")
+async def sponsorships_today(
+    station_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_staff),
+):
+    """The control room's Sponsors list: today's sponsorship plays on one station."""
+    from app.core.dependencies import may_operate_station
+    from app.services.sponsor_item import station_day
+
+    station = await _get_or_404(db, Station, station_id, "Station")
+    if not may_operate_station(user, station):
+        raise HTTPException(status_code=403, detail="You are not set up for this station")
+    return await station_day(db, station)
+
+
 @router.get("/for-asset/{asset_id}")
 async def sponsorship_of_asset(
     asset_id: UUID,
