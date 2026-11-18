@@ -1,0 +1,482 @@
+station,title,status,source,preempt_at,timing_mode,updated_at
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh (stand-in),played,ad_slot,2026-11-17T19:30:00+00:00,hard,2026-11-17T19:30:28.706957+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers (stand-in),played,ad_slot,2026-11-17T19:45:00+00:00,soft,2026-11-17T19:49:34.564536+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 20 - Ice Cream House Lakewood (stand-in),played,ad_slot,2026-11-17T20:15:00+00:00,hard,2026-11-17T20:15:30.614051+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh (stand-in),played,ad_slot,2026-11-17T20:30:00+00:00,hard,2026-11-17T20:30:28.681291+00:00
+KBR Jerusalem,TEST SPONSOR 01 - Authentic Kosher Chinese,played,ad_slot,2026-11-17T20:30:00+00:00,soft,2026-11-17T20:37:57.436422+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,played,ad_slot,2026-11-17T21:15:00+00:00,soft,2026-11-17T21:17:05.42349+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 13 - Gourmet Glatt North,played,ad_slot,2026-11-17T21:30:00+00:00,soft,2026-11-17T21:32:59.446494+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-17T21:45:00+00:00,soft,2026-11-17T21:47:08.563458+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-17T22:30:00+00:00,hard,2026-11-17T22:30:20.992505+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,played,block,2026-11-17T23:30:00+00:00,soft,2026-11-17T23:34:34.703395+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-17T23:30:00+00:00,soft,2026-11-17T23:31:36.782357+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,played,ad_slot,2026-11-17T23:30:00+00:00,soft,2026-11-17T23:32:10.509087+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,played,ad_slot,2026-11-17T23:45:00+00:00,soft,2026-11-17T23:51:13.377846+00:00
+Kol B'ramah Main,TEST SPONSOR 01 - Authentic Kosher Chinese,played,block,2026-11-18T00:30:00+00:00,soft,2026-11-18T00:33:31.268707+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T00:30:00+00:00,hard,2026-11-18T00:30:20.987321+00:00
+KBR Jerusalem,TEST SPONSOR 17 - Lakewood Gingerbread House,played,ad_slot,2026-11-18T01:15:00+00:00,hard,2026-11-18T01:15:28.691746+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,played,block,2026-11-18T01:30:00+00:00,hard,2026-11-18T01:31:04.806316+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T01:30:00+00:00,hard,2026-11-18T01:30:20.995306+00:00
+Kol B'ramah Main,TEST SPONSOR 17 - Lakewood Gingerbread House,played,block,2026-11-18T02:15:00+00:00,soft,2026-11-18T02:20:50.834342+00:00
+Kol B'ramah Main,TEST SPONSOR 16 - Bagel Nosh,played,block,2026-11-18T02:15:00+00:00,soft,2026-11-18T02:20:22.728945+00:00
+Kol B'ramah Main,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,played,block,2026-11-18T02:15:00+00:00,soft,2026-11-18T02:20:01.53087+00:00
+Kol B'ramah Main,TEST SPONSOR 14 - Evergreen Kosher Market,played,block,2026-11-18T02:15:00+00:00,soft,2026-11-18T02:19:33.07925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 02 - Glatt Bite,played,ad_slot,2026-11-18T02:15:00+00:00,soft,2026-11-18T02:16:00.117981+00:00
+Kol B'ramah Main,TEST SPONSOR 13 - Gourmet Glatt North,played,block,2026-11-18T02:15:00+00:00,soft,2026-11-18T02:19:05.618048+00:00
+Kol B'ramah Main,TEST SPONSOR 02 - Glatt Bite,played,block,2026-11-18T02:15:00+00:00,soft,2026-11-18T02:18:32.677643+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,played,ad_slot,2026-11-18T02:30:00+00:00,hard,2026-11-18T02:30:28.418863+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,played,block,2026-11-18T02:30:00+00:00,soft,2026-11-18T02:32:09.962928+00:00
+Kol B'ramah Main,TEST SPONSOR 18 - Judaica Square North,played,block,2026-11-18T02:30:00+00:00,soft,2026-11-18T02:32:38.868013+00:00
+Kol B'ramah Main,TEST SPONSOR 19 - Israel Bookshop Publications,played,block,2026-11-18T02:30:00+00:00,soft,2026-11-18T02:33:14.638+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,played,ad_slot,2026-11-18T02:30:00+00:00,soft,2026-11-18T02:34:03.377997+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T02:45:00+00:00,hard,2026-11-18T02:45:20.996588+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 20 - Ice Cream House Lakewood,played,ad_slot,2026-11-18T03:15:00+00:00,hard,2026-11-18T03:15:25.122492+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T03:30:00+00:00,hard,2026-11-18T03:30:20.982717+00:00
+Kol B'ramah Main,TEST SPONSOR 01 - Authentic Kosher Chinese,played,block,2026-11-18T03:30:00+00:00,soft,2026-11-18T03:31:13.619891+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,played,ad_slot,2026-11-18T03:45:00+00:00,soft,2026-11-18T03:46:34.115617+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,played,block,2026-11-18T04:30:00+00:00,soft,2026-11-18T04:32:46.96532+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T04:30:00+00:00,hard,2026-11-18T04:30:20.985351+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,played,ad_slot,2026-11-18T05:30:00+00:00,soft,2026-11-18T05:30:57.265344+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T05:30:00+00:00,hard,2026-11-18T05:30:20.992021+00:00
+KBR Jerusalem,TEST SPONSOR 09 - Cafotteria Modern Eatery,played,ad_slot,2026-11-18T06:15:00+00:00,soft,2026-11-18T06:18:30.920288+00:00
+Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,played,block,2026-11-18T06:30:00+00:00,soft,2026-11-18T06:38:45.632941+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,played,ad_slot,2026-11-18T06:30:00+00:00,hard,2026-11-18T06:30:28.072125+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T06:45:00+00:00,hard,2026-11-18T06:45:21.040709+00:00
+KBR Jerusalem,TEST SPONSOR 14 - Evergreen Kosher Market,played,ad_slot,2026-11-18T07:15:00+00:00,soft,2026-11-18T07:19:49.609202+00:00
+KBR Jerusalem,TEST SPONSOR 17 - Lakewood Gingerbread House,played,ad_slot,2026-11-18T07:30:00+00:00,soft,2026-11-18T07:30:33.52586+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T07:30:00+00:00,hard,2026-11-18T07:30:20.988944+00:00
+Kol B'ramah Main,TEST SPONSOR 14 - Evergreen Kosher Market,played,block,2026-11-18T07:45:00+00:00,soft,2026-11-18T07:51:45.237132+00:00
+Kol B'ramah Main,TEST SPONSOR 18 - Judaica Square North,played,block,2026-11-18T07:45:00+00:00,soft,2026-11-18T07:53:32.531555+00:00
+Kol B'ramah Main,TEST SPONSOR 13 - Gourmet Glatt North,played,block,2026-11-18T07:45:00+00:00,soft,2026-11-18T07:51:17.599682+00:00
+Kol B'ramah Main,TEST SPONSOR 16 - Bagel Nosh,played,block,2026-11-18T07:45:00+00:00,soft,2026-11-18T07:52:35.092903+00:00
+Kol B'ramah Main,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,played,block,2026-11-18T07:45:00+00:00,soft,2026-11-18T07:52:13.863849+00:00
+Kol B'ramah Main,TEST SPONSOR 17 - Lakewood Gingerbread House,played,block,2026-11-18T07:45:00+00:00,soft,2026-11-18T07:53:03.304953+00:00
+Kol B'ramah Main,TEST SPONSOR 19 - Israel Bookshop Publications,played,block,2026-11-18T08:30:00+00:00,soft,2026-11-18T08:37:06.910427+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,played,ad_slot,2026-11-18T08:30:00+00:00,soft,2026-11-18T08:36:28.457188+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T08:30:00+00:00,hard,2026-11-18T08:30:20.983874+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,played,ad_slot,2026-11-18T09:30:00+00:00,soft,2026-11-18T09:34:28.40403+00:00
+Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,played,block,2026-11-18T09:30:00+00:00,soft,2026-11-18T09:36:57.379463+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T09:45:00+00:00,hard,2026-11-18T09:45:21.101175+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T10:30:00+00:00,hard,2026-11-18T10:30:20.981525+00:00
+KBR Jerusalem,TEST SPONSOR 03 - Bun Burger Kitchen,played,ad_slot,2026-11-18T10:45:00+00:00,soft,2026-11-18T10:52:02.761351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T11:30:00+00:00,soft,2026-11-18T11:30:44.694225+00:00
+KBR Jerusalem,TEST SPONSOR 10 - Pizzaleh,played,ad_slot,2026-11-18T12:00:00+00:00,hard,2026-11-18T12:00:32.336538+00:00
+Kol B'ramah Main,TEST SPONSOR 04 - Estreia,played,block,2026-11-18T12:30:00+00:00,soft,2026-11-18T12:30:43.546507+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,played,ad_slot,2026-11-18T12:30:00+00:00,soft,2026-11-18T12:34:50.584759+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T12:45:00+00:00,soft,2026-11-18T12:45:18.894505+00:00
+KBR Jerusalem,TEST SPONSOR 03 - Bun Burger Kitchen,played,ad_slot,2026-11-18T12:45:00+00:00,soft,2026-11-18T12:48:21.068431+00:00
+KBR Jerusalem,TEST SPONSOR 14 - Evergreen Kosher Market,played,ad_slot,2026-11-18T13:15:00+00:00,soft,2026-11-18T13:18:15.974861+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,played,ad_slot,2026-11-18T13:15:00+00:00,soft,2026-11-18T13:17:05.755021+00:00
+KBR Jerusalem,TEST SPONSOR 17 - Lakewood Gingerbread House,played,ad_slot,2026-11-18T13:30:00+00:00,soft,2026-11-18T13:31:35.326228+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,played,ad_slot,2026-11-18T13:30:00+00:00,soft,2026-11-18T13:32:40.863223+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-18T14:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 02 - Glatt Bite,pending,ad_slot,2026-11-18T14:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 10 - Pizzaleh,pending,block,2026-11-18T14:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 02 - Glatt Bite,pending,block,2026-11-18T14:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 21 - Cedar Lane Shoe Repair (stand-in),pending,block,2026-11-18T14:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 11 - Pizza Plus,pending,block,2026-11-18T14:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 11 - Pizza Plus,pending,ad_slot,2026-11-18T14:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 30 - Oak Tree Pharmacy (stand-in),pending,block,2026-11-18T14:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 34 - Little Sprouts Playgroup (stand-in),pending,block,2026-11-18T14:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 23 - Pine Street Tutoring Center (stand-in),pending,block,2026-11-18T14:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-18T14:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 03 - Bun Burger Kitchen,pending,ad_slot,2026-11-18T14:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T14:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 39 - Simcha Floral Design (stand-in),pending,block,2026-11-18T15:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 40 - Rosewood Furniture Gallery (stand-in),pending,block,2026-11-18T15:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-18T15:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 45 - Parkside Pediatrics (stand-in),pending,block,2026-11-18T15:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-18T15:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 09 - Cafotteria Modern Eatery,pending,ad_slot,2026-11-18T15:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T15:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 27 - Kesher Moving and Storage (stand-in),pending,block,2026-11-18T15:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 04 - Estreia,pending,block,2026-11-18T15:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),pending,block,2026-11-18T15:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in),pending,block,2026-11-18T15:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-18T16:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 21 - Cedar Lane Shoe Repair (stand-in),pending,block,2026-11-18T16:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 36 - Shefa Organic Produce (stand-in),pending,block,2026-11-18T16:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-18T16:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T16:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-18T16:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-18T16:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-18T16:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-18T17:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T17:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-18T18:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 13 - Gourmet Glatt North,pending,ad_slot,2026-11-18T18:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 24 - Shalom Home Appliances (stand-in),pending,block,2026-11-18T18:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-18T18:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-18T18:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),pending,block,2026-11-18T18:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 09 - Cafotteria Modern Eatery,pending,block,2026-11-18T18:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T18:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),pending,block,2026-11-18T18:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-18T18:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 17 - Lakewood Gingerbread House,pending,ad_slot,2026-11-18T19:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T19:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-18T19:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 46 - Royal Linen Rentals (stand-in),pending,block,2026-11-18T19:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-18T19:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-18T20:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 20 - Ice Cream House Lakewood,pending,ad_slot,2026-11-18T20:15:00+00:00,hard,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T20:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 11 - Pizza Plus,pending,block,2026-11-18T20:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 24 - Shalom Home Appliances (stand-in),pending,block,2026-11-18T20:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 23 - Pine Street Tutoring Center (stand-in),pending,block,2026-11-18T20:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 34 - Little Sprouts Playgroup (stand-in),pending,block,2026-11-18T20:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-18T20:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 39 - Simcha Floral Design (stand-in),pending,block,2026-11-18T20:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 43 - Harmony Music School (stand-in),pending,block,2026-11-18T20:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 37 - Keter Torah Judaica (stand-in),pending,block,2026-11-18T20:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-18T21:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 13 - Gourmet Glatt North,pending,ad_slot,2026-11-18T21:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-18T21:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-18T21:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),pending,block,2026-11-18T21:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),pending,block,2026-11-18T21:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T21:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 09 - Cafotteria Modern Eatery,pending,block,2026-11-18T21:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-18T22:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah Main,TEST SPONSOR 46 - Royal Linen Rentals (stand-in),pending,block,2026-11-18T22:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-18T22:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-18T22:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 24 - Shalom Home Appliances (stand-in),pending,block,2026-11-18T22:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T22:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-18T22:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-18T23:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,pending,ad_slot,2026-11-18T23:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,pending,block,2026-11-18T23:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,pending,block,2026-11-18T23:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T00:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T00:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 25 - Riverside Fresh Fish (stand-in),pending,block,2026-11-19T00:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in),pending,block,2026-11-19T00:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-19T00:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),pending,block,2026-11-19T00:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 38 - Elm Avenue Physical Therapy (stand-in),pending,block,2026-11-19T00:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-19T01:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,pending,block,2026-11-19T01:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T01:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 17 - Lakewood Gingerbread House,pending,block,2026-11-19T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 13 - Gourmet Glatt North,pending,block,2026-11-19T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 02 - Glatt Bite,pending,block,2026-11-19T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 16 - Bagel Nosh,pending,block,2026-11-19T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 14 - Evergreen Kosher Market,pending,block,2026-11-19T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,pending,block,2026-11-19T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 02 - Glatt Bite,pending,ad_slot,2026-11-19T02:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,pending,ad_slot,2026-11-19T02:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,pending,ad_slot,2026-11-19T02:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 23 - Pine Street Tutoring Center (stand-in),pending,block,2026-11-19T02:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 19 - Israel Bookshop Publications,pending,block,2026-11-19T02:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,pending,block,2026-11-19T02:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 18 - Judaica Square North,pending,block,2026-11-19T02:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 25 - Riverside Fresh Fish (stand-in),pending,block,2026-11-19T02:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 39 - Simcha Floral Design (stand-in),pending,block,2026-11-19T02:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 40 - Rosewood Furniture Gallery (stand-in),pending,block,2026-11-19T02:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T02:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T02:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 20 - Ice Cream House Lakewood,pending,ad_slot,2026-11-19T03:15:00+00:00,hard,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),pending,block,2026-11-19T03:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in),pending,block,2026-11-19T03:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-19T03:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 38 - Elm Avenue Physical Therapy (stand-in),pending,block,2026-11-19T03:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T03:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,pending,block,2026-11-19T03:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,pending,block,2026-11-19T03:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T03:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 25 - Riverside Fresh Fish (stand-in),pending,block,2026-11-19T03:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T04:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-19T04:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 43 - Harmony Music School (stand-in),pending,block,2026-11-19T04:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 47 - Greenfield Landscaping (stand-in),pending,block,2026-11-19T04:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,pending,ad_slot,2026-11-19T05:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T05:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 09 - Cafotteria Modern Eatery,pending,ad_slot,2026-11-19T06:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,pending,block,2026-11-19T06:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-19T06:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T06:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 14 - Evergreen Kosher Market,pending,ad_slot,2026-11-19T07:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T07:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,pending,block,2026-11-19T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 16 - Bagel Nosh,pending,block,2026-11-19T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 13 - Gourmet Glatt North,pending,block,2026-11-19T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 17 - Lakewood Gingerbread House,pending,block,2026-11-19T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 03 - Bun Burger Kitchen,pending,block,2026-11-19T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 14 - Evergreen Kosher Market,pending,block,2026-11-19T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,pending,ad_slot,2026-11-19T08:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T08:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 30 - Oak Tree Pharmacy (stand-in),pending,block,2026-11-19T08:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 18 - Judaica Square North,pending,block,2026-11-19T08:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 19 - Israel Bookshop Publications,pending,block,2026-11-19T08:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,pending,ad_slot,2026-11-19T08:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,pending,block,2026-11-19T09:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-19T09:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T09:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T10:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T11:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-19T12:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-19T12:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T12:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 21 - Cedar Lane Shoe Repair (stand-in),pending,block,2026-11-19T12:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-19T12:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 27 - Kesher Moving and Storage (stand-in),pending,block,2026-11-19T12:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in),pending,block,2026-11-19T12:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 04 - Estreia,pending,block,2026-11-19T12:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),pending,block,2026-11-19T12:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T12:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 14 - Evergreen Kosher Market,pending,ad_slot,2026-11-19T12:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-19T13:15:00+00:00,soft,2026-11-18T13:00:00.40108+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-19T13:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-19T13:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 36 - Shefa Organic Produce (stand-in),pending,block,2026-11-19T13:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T13:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-19T14:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,pending,ad_slot,2026-11-19T14:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 11 - Pizza Plus,pending,ad_slot,2026-11-19T14:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 03 - Bun Burger Kitchen,pending,block,2026-11-19T14:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 10 - Pizzaleh,pending,block,2026-11-19T14:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 21 - Cedar Lane Shoe Repair (stand-in),pending,block,2026-11-19T14:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 11 - Pizza Plus,pending,block,2026-11-19T14:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 30 - Oak Tree Pharmacy (stand-in),pending,block,2026-11-19T14:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 23 - Pine Street Tutoring Center (stand-in),pending,block,2026-11-19T14:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T14:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 34 - Little Sprouts Playgroup (stand-in),pending,block,2026-11-19T14:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 31 - Blue Ribbon Car Wash (stand-in),pending,block,2026-11-19T14:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-19T15:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-19T15:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 39 - Simcha Floral Design (stand-in),pending,block,2026-11-19T15:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 40 - Rosewood Furniture Gallery (stand-in),pending,block,2026-11-19T15:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T15:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),pending,block,2026-11-19T15:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in),pending,block,2026-11-19T15:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 04 - Estreia,pending,block,2026-11-19T15:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 27 - Kesher Moving and Storage (stand-in),pending,block,2026-11-19T15:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 09 - Cafotteria Modern Eatery,pending,ad_slot,2026-11-19T15:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T15:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T16:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 36 - Shefa Organic Produce (stand-in),pending,block,2026-11-19T16:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T16:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 21 - Cedar Lane Shoe Repair (stand-in),pending,block,2026-11-19T16:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-19T16:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-19T16:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-19T16:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 45 - Parkside Pediatrics (stand-in),pending,block,2026-11-19T16:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-19T16:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-19T17:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T17:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-19T18:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-19T18:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 13 - Gourmet Glatt North,pending,ad_slot,2026-11-19T18:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 24 - Shalom Home Appliances (stand-in),pending,block,2026-11-19T18:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T18:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T18:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 09 - Cafotteria Modern Eatery,pending,block,2026-11-19T18:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),pending,block,2026-11-19T18:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-19T18:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),pending,block,2026-11-19T18:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 46 - Royal Linen Rentals (stand-in),pending,block,2026-11-19T19:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 32 - Tova's Simcha Hall (stand-in),pending,block,2026-11-19T19:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-19T19:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T19:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-19T19:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-19T20:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,pending,ad_slot,2026-11-19T20:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T20:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 23 - Pine Street Tutoring Center (stand-in),pending,block,2026-11-19T20:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 24 - Shalom Home Appliances (stand-in),pending,block,2026-11-19T20:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 11 - Pizza Plus,pending,block,2026-11-19T20:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 03 - Bun Burger Kitchen,pending,block,2026-11-19T20:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 20 - Ice Cream House Lakewood,pending,ad_slot,2026-11-19T20:45:00+00:00,hard,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 37 - Keter Torah Judaica (stand-in),pending,block,2026-11-19T20:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 34 - Little Sprouts Playgroup (stand-in),pending,block,2026-11-19T20:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T20:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 39 - Simcha Floral Design (stand-in),pending,block,2026-11-19T20:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-19T21:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 13 - Gourmet Glatt North,pending,ad_slot,2026-11-19T21:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-19T21:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),pending,block,2026-11-19T21:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 09 - Cafotteria Modern Eatery,pending,block,2026-11-19T21:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T21:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),pending,block,2026-11-19T21:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-19T21:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-19T22:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T22:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-19T22:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-19T22:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 24 - Shalom Home Appliances (stand-in),pending,block,2026-11-19T22:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 32 - Tova's Simcha Hall (stand-in),pending,block,2026-11-19T22:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 46 - Royal Linen Rentals (stand-in),pending,block,2026-11-19T22:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-19T22:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,pending,ad_slot,2026-11-19T23:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-19T23:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,pending,block,2026-11-19T23:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,pending,block,2026-11-19T23:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-20T00:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-20T00:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 25 - Riverside Fresh Fish (stand-in),pending,block,2026-11-20T00:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-20T00:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),pending,block,2026-11-20T00:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in),pending,block,2026-11-20T00:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 38 - Elm Avenue Physical Therapy (stand-in),pending,block,2026-11-20T00:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-20T01:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-20T01:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,pending,block,2026-11-20T01:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-20T01:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 13 - Gourmet Glatt North,pending,block,2026-11-20T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 03 - Bun Burger Kitchen,pending,block,2026-11-20T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 14 - Evergreen Kosher Market,pending,block,2026-11-20T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,pending,block,2026-11-20T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 17 - Lakewood Gingerbread House,pending,block,2026-11-20T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 16 - Bagel Nosh,pending,block,2026-11-20T02:15:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,pending,ad_slot,2026-11-20T02:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,pending,ad_slot,2026-11-20T02:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 23 - Pine Street Tutoring Center (stand-in),pending,block,2026-11-20T02:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 19 - Israel Bookshop Publications,pending,block,2026-11-20T02:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,pending,block,2026-11-20T02:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 18 - Judaica Square North,pending,block,2026-11-20T02:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,pending,ad_slot,2026-11-20T02:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-20T02:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 39 - Simcha Floral Design (stand-in),pending,block,2026-11-20T02:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 40 - Rosewood Furniture Gallery (stand-in),pending,block,2026-11-20T02:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 25 - Riverside Fresh Fish (stand-in),pending,block,2026-11-20T02:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-20T02:45:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 20 - Ice Cream House Lakewood,pending,ad_slot,2026-11-20T03:15:00+00:00,hard,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 38 - Elm Avenue Physical Therapy (stand-in),pending,block,2026-11-20T03:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-20T03:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in),pending,block,2026-11-20T03:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-20T03:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in),pending,block,2026-11-20T03:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 25 - Riverside Fresh Fish (stand-in),pending,block,2026-11-20T03:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-20T03:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,pending,block,2026-11-20T03:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,pending,block,2026-11-20T03:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 16 - Bagel Nosh,pending,ad_slot,2026-11-20T04:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-20T04:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 47 - Greenfield Landscaping (stand-in),pending,block,2026-11-20T04:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,pending,ad_slot,2026-11-20T05:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,pending,block,2026-11-20T06:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-20T06:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-20T07:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 12 - Goldstar Caterers,pending,block,2026-11-20T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 03 - Bun Burger Kitchen,pending,block,2026-11-20T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 30 - Oak Tree Pharmacy (stand-in),pending,block,2026-11-20T07:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,pending,ad_slot,2026-11-20T08:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 19 - Israel Bookshop Publications,pending,ad_slot,2026-11-20T08:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,pending,block,2026-11-20T09:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-20T09:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-20T12:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-20T12:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 21 - Cedar Lane Shoe Repair (stand-in),pending,block,2026-11-20T12:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 35 - Main Street Hardware (stand-in),pending,block,2026-11-20T12:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 44 - Clearview Window Cleaning (stand-in),pending,block,2026-11-20T12:30:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 22 - Golden Challah Bakery (stand-in),pending,block,2026-11-20T12:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 36 - Shefa Organic Produce (stand-in),pending,block,2026-11-20T12:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 29 - Maple Grove Seforim (stand-in),pending,block,2026-11-20T12:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah Main,TEST SPONSOR 48 - Chessed Home Health Aides (stand-in),pending,block,2026-11-20T12:45:00+00:00,soft,2026-11-18T13:36:19.627351+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,pending,ad_slot,2026-11-20T14:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 11 - Pizza Plus,pending,ad_slot,2026-11-20T14:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-20T17:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 13 - Gourmet Glatt North,pending,ad_slot,2026-11-20T18:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,pending,ad_slot,2026-11-20T19:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 20 - Ice Cream House Lakewood,pending,ad_slot,2026-11-20T19:30:00+00:00,hard,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 13 - Gourmet Glatt North,pending,ad_slot,2026-11-20T20:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-21T16:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-21T18:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-21T19:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-21T19:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-21T21:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-22T01:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 04 - Estreia,pending,ad_slot,2026-11-22T02:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-22T06:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-22T07:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-22T09:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-22T12:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-22T13:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 07 - Pita Hut,pending,ad_slot,2026-11-22T13:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-22T14:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 11 - Pizza Plus,pending,ad_slot,2026-11-22T14:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 18 - Judaica Square North,pending,ad_slot,2026-11-22T14:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-22T16:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-22T17:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-22T18:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-22T19:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 07 - Pita Hut,pending,ad_slot,2026-11-22T19:30:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-22T19:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-22T20:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 18 - Judaica Square North,pending,ad_slot,2026-11-22T20:15:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-22T21:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-22T22:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-23T01:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-23T06:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-23T07:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-23T09:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-23T12:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-23T12:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-23T13:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 11 - Pizza Plus,pending,ad_slot,2026-11-23T14:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-23T14:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 18 - Judaica Square North,pending,ad_slot,2026-11-23T14:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-23T15:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-23T16:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-23T17:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-23T18:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 05 - Kepshuto,pending,ad_slot,2026-11-23T19:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-23T19:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 18 - Judaica Square North,pending,ad_slot,2026-11-23T20:15:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-23T20:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-23T21:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-23T22:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-24T06:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 08 - Southside Smokehouse,pending,ad_slot,2026-11-24T09:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-24T12:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-24T12:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 11 - Pizza Plus,pending,ad_slot,2026-11-24T14:15:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-24T14:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 18 - Judaica Square North,pending,ad_slot,2026-11-24T14:30:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-24T15:30:00+00:00,soft,2026-11-18T13:00:05.777925+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-24T16:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-24T17:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-24T18:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-24T19:45:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in),pending,ad_slot,2026-11-24T20:15:00+00:00,soft,2026-11-18T13:35:56.172828+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 18 - Judaica Square North,pending,ad_slot,2026-11-24T20:15:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,pending,ad_slot,2026-11-24T21:15:00+00:00,soft,2026-11-18T13:00:00.408241+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-24T22:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,pending,ad_slot,2026-11-25T02:15:00+00:00,soft,2026-11-18T13:32:19.778058+00:00
+Kol B'ramah Main,TEST SPONSOR 41 - Tzedek Accounting Services (stand-in),pending,ad_slot,2026-11-25T12:15:00+00:00,soft,2026-11-18T13:35:53.478747+00:00
+Kol B'ramah - All Day Stories,TEST SPONSOR 06 - Taquito,pending,ad_slot,2026-11-25T12:30:00+00:00,soft,2026-11-18T13:32:40.863223+00:00
+Kol B'ramah Main,TEST SPONSOR 02 - Glatt Bite,played,manual,,,2026-11-17T22:44:19.969974+00:00
+KBR Jerusalem,TEST SPONSOR 11 - Pizza Plus,played,manual,,,2026-11-18T03:26:43.703591+00:00
+Kol B'ramah Main,TEST SPONSOR 19 - Israel Bookshop Publications,played,manual,,,2026-11-17T22:37:28.101732+00:00
+Kol B'ramah Main,TEST SPONSOR 18 - Judaica Square North,played,manual,,,2026-11-17T22:37:54.228682+00:00
+Kol B'ramah Main,TEST SPONSOR 14 - Evergreen Kosher Market,played,manual,,,2026-11-17T22:39:28.388624+00:00
+Kol B'ramah Main,TEST SPONSOR 13 - Gourmet Glatt North,played,manual,,,2026-11-17T22:39:58.611452+00:00
+Kol B'ramah Main,TEST SPONSOR 11 - Pizza Plus,played,manual,,,2026-11-17T22:40:44.86745+00:00
+Kol B'ramah Main,TEST SPONSOR 07 - Pita Hut,played,manual,,,2026-11-17T22:42:22.933009+00:00
+Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,played,manual,,,2026-11-18T03:47:26.642807+00:00
+Kol B'ramah Main,TEST SPONSOR 04 - Estreia,played,manual,,,2026-11-17T22:43:34.773081+00:00
+Kol B'ramah Main,TEST SPONSOR 03 - Bun Burger Kitchen,played,manual,,,2026-11-17T22:44:00.089004+00:00
+KBR Jerusalem,TEST SPONSOR 03 - Bun Burger Kitchen,played,manual,,,2026-11-18T05:40:31.675038+00:00
+Kol B'ramah Main,TEST SPONSOR 03 - Bun Burger Kitchen,played,manual,,,2026-11-17T23:21:49.404579+00:00
+Kol B'ramah Main,TEST SPONSOR 01 - Authentic Kosher Chinese,skipped,manual,,,2026-11-17T22:44:38.227019+00:00
+KBR Jerusalem,TEST SPONSOR 20 - Ice Cream House Lakewood,played,manual,,,2026-11-18T04:49:11.994484+00:00
+KBR Jerusalem,TEST SPONSOR 04 - Estreia,played,manual,,,2026-11-18T03:12:32.980895+00:00
+KBR Jerusalem,TEST SPONSOR 10 - Pizzaleh,played,manual,,,2026-11-18T03:25:46.817794+00:00
+KBR Jerusalem,TEST SPONSOR 09 - Cafotteria Modern Eatery,played,manual,,,2026-11-18T03:13:02.973127+00:00
+KBR Jerusalem,TEST SPONSOR 12 - Goldstar Caterers,played,manual,,,2026-11-18T03:27:27.854156+00:00
+KBR Jerusalem,TEST SPONSOR 20 - Ice Cream House Lakewood,played,manual,,,2026-11-18T03:24:53.591902+00:00
+KBR Jerusalem,TEST SPONSOR 11 - Pizza Plus,played,manual,,,2026-11-18T07:31:38.727347+00:00
+KBR Jerusalem,TEST SPONSOR 06 - Taquito,played,manual,,,2026-11-18T03:25:21.096667+00:00
+Kol B'ramah Main,TEST SPONSOR 17 - Lakewood Gingerbread House,played,manual,,,2026-11-17T22:38:19.589119+00:00
+Kol B'ramah Main,TEST SPONSOR 16 - Bagel Nosh,played,manual,,,2026-11-17T22:38:37.906614+00:00
+Kol B'ramah Main,TEST SPONSOR 20 - Ice Cream House Lakewood,played,manual,,,2026-11-17T22:36:55.128893+00:00
+KBR Jerusalem,TEST SPONSOR 07 - Pita Hut,played,manual,,,2026-11-18T06:09:53.226227+00:00
+Kol B'ramah Main,TEST SPONSOR 10 - Pizzaleh,played,manual,,,2026-11-17T22:41:07.672169+00:00
+Kol B'ramah Main,TEST SPONSOR 09 - Cafotteria Modern Eatery,played,manual,,,2026-11-17T22:41:34.825884+00:00
+Kol B'ramah Main,TEST SPONSOR 12 - Goldstar Caterers,played,manual,,,2026-11-17T22:40:23.644625+00:00
+Kol B'ramah Main,TEST SPONSOR 08 - Southside Smokehouse,played,manual,,,2026-11-17T22:42:00.287541+00:00
+Kol B'ramah Main,TEST SPONSOR 06 - Taquito,played,manual,,,2026-11-17T22:42:47.509652+00:00
+Kol B'ramah Main,TEST SPONSOR 05 - Kepshuto,played,manual,,,2026-11-17T22:43:10.923556+00:00
+Kol B'ramah Main,TEST SPONSOR 05 - Kepshuto,played,manual,,,2026-11-17T23:22:15.455312+00:00
+Kol B'ramah Main,TEST SPONSOR 15 - Gelbstein's Bakery and Cafe,played,manual,,,2026-11-17T22:39:03.649408+00:00
