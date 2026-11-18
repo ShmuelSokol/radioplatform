@@ -1,5 +1,6 @@
 import { useLayoutEffect, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { useEscape } from '../hooks/useEscape';
 
 interface Props {
   /** The button the menu hangs from */
@@ -15,7 +16,7 @@ interface Props {
 /**
  * A drop-down drawn on top of the page (fixed, in <body>), so a table cell that clips its
  * content (truncate / overflow-hidden) cannot cut the menu off. It stays inside the window
- * and opens upward when there is no room below. Scrolling or resizing closes it.
+ * and opens upward when there is no room below. Scrolling, resizing or Esc closes it.
  */
 export default function FloatingMenu({ anchor, width, onClose, menuRef, className = '', children }: Props) {
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null);
@@ -44,6 +45,8 @@ export default function FloatingMenu({ anchor, width, onClose, menuRef, classNam
       window.removeEventListener('resize', close);
     };
   }, [anchor, width, onClose, menuRef]);
+
+  useEscape(true, onClose);
 
   if (!pos) return null;
   return createPortal(

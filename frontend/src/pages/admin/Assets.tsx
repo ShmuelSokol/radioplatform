@@ -12,6 +12,7 @@ import type { BulkAutoTrimStatus } from '../../api/assets';
 import Spinner from '../../components/Spinner';
 import { useAuth } from '../../hooks/useAuth';
 import { isManager } from '../../auth/access';
+import { useEscape } from '../../hooks/useEscape';
 
 const EXPORT_FORMATS = ['original', 'mp2', 'mp3', 'wav', 'flac', 'ogg', 'aac'] as const;
 const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
@@ -82,6 +83,8 @@ function DownloadButton({ assetId, title }: { assetId: string; title: string }) 
       setDownloading(false);
     }
   };
+
+  useEscape(open, () => setOpen(false));
 
   return (
     <span className="relative inline-block">
@@ -223,6 +226,15 @@ export default function Assets() {
   const [showBulkCategory, setShowBulkCategory] = useState(false);
   // Bulk download picker
   const [showBulkDownload, setShowBulkDownload] = useState(false);
+  useEscape(showBulkCategory, () => setShowBulkCategory(false));
+  useEscape(showBulkDownload, () => setShowBulkDownload(false));
+  // The clip-silence box closes only once its job is over (as a click beside it does)
+  const closeTrimModal = useCallback(() => {
+    setShowTrimModal(false);
+    setTrimJobId(null);
+    setTrimStatus(null);
+  }, []);
+  useEscape(showTrimModal && (trimStatus?.status === 'completed' || trimStatus?.status === 'failed'), closeTrimModal);
   const [bulkDownloading, setBulkDownloading] = useState(false);
 
   // Debounce per-field searches
@@ -516,7 +528,7 @@ export default function Assets() {
             }
           }} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <div role="dialog" aria-modal="true" aria-label="Auto-Clip Silence" className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
               <h3 className="text-lg font-semibold mb-4">Auto-Clip Silence</h3>
               {!trimStatus || trimStatus.status === 'queued' || trimStatus.status === 'running' ? (
                 <div>

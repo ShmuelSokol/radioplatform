@@ -24,7 +24,7 @@ const SIZES = [
 const { check, done } = checker({});
 
 const asset = (id, title, asset_type, category, sponsor) => ({
-  id, title, artist: 'Artist', album: null, duration: 31, file_path: `${id}.mp3`, album_art_path: null,
+  id, title, artist: 'Artist', album: null, duration: 31, file_path: `assets/${id}.mp3`, album_art_path: null,
   metadata_extra: {}, created_by: null, asset_type, category, created_at: '2026-11-01T00:00:00Z',
   last_played_at: null, release_date: null, sponsor_id: sponsor ? sponsor.id : null, sponsor_name: sponsor ? sponsor.name : null,
 });
@@ -183,6 +183,26 @@ try {
       check(`${name}: picking a category from the menu saves it`, patches.some((p) => p.id === 'a3' && p.body.category === 'relax'), JSON.stringify(patches));
       check(`${name}: the category menu closes afterwards`, (await page.locator('[data-floating-menu]').count()) === 0);
     }
+
+    // ── Esc closes every dialog and menu (one shared check) ───────────────────
+    const escCloses = async (what, open, shown) => {
+      await open();
+      await shown.first().waitFor({ timeout: 5000 });
+      await page.keyboard.press('Escape');
+      await sleep(250);
+      check(`${name}: Esc closes ${what}`, (await shown.count()) === 0);
+    };
+    if (wide) {
+      const row = page.locator('tbody tr', { hasText: 'Announcement' });
+      await escCloses('the sponsor search box', () => page.locator('tbody tr', { hasText: 'Last row spot' }).getByRole('button', { name: 'Glatt Bite' }).click(), page.getByPlaceholder('Search sponsors...'));
+      await escCloses('the category menu of a row', () => row.getByRole('button', { name: 'lively' }).click(), page.locator('[data-floating-menu]'));
+      await escCloses('the Download menu of a row', () => row.getByRole('button', { name: 'Download' }).click(), row.getByRole('button', { name: /^MP3/i }));
+      await row.locator('input[type=checkbox]').check();
+      await escCloses('the Set Category menu of chosen rows', () => page.getByRole('button', { name: 'Set Category' }).click(), page.locator('div.absolute.w-40', { hasText: 'do_not_play' }));
+    }
+    await page.goto(`${BASE}/admin/archives`);
+    await escCloses('the New Archive dialog', () => page.getByRole('button', { name: '+ New Archive' }).click(), page.getByRole('dialog', { name: 'New Archive' }));
+    await escCloses('the bug report dialog', () => page.locator('button[aria-label="Report a bug"]').click(), page.getByRole('dialog', { name: 'Report a bug' }));
 
     // ── 3. Live Shows: Esc closes the New Show dialog ─────────────────────────
     await page.goto(`${BASE}/admin/live`);
