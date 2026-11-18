@@ -51,6 +51,7 @@ NEEDS_MORE = {
     "/api/v1/weather-readouts/template-preview": "needs a template text",
     "/api/v1/assets/{asset_id}/station-block": "needs a song; answers only for the station asked (tests/test_station_block.py)",
     "/api/v1/sponsors/{sponsor_id}/plays": "needs a client; the station is only a filter of its plays (tests/test_sponsor_accounts.py)",
+    "/api/v1/spot-schedules/for-asset/{asset_id}": "needs a spot; other stations' contracts only for staff on every station (tests/test_sponsor_panel.py)",
 }
 
 

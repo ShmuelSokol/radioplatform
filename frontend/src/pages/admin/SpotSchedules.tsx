@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { rememberStation, stationToShow } from '../../lib/lastStation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -122,7 +122,10 @@ export default function SpotSchedules() {
   const [showForm, setShowForm] = useState(!!forSponsor);
   const [spotSearch, setSpotSearch] = useState('');
   const [spot, setSpot] = useState<Asset | null>(null);
-  const [previewStation, setPreviewStation] = useState('');
+  // Opened from the control room's Sponsor panel: ?station= shows that station's
+  // look-ahead, ?contract= points at that contract in the list
+  const linkedContract = params.get('contract') || '';
+  const [previewStation, setPreviewStation] = useState(params.get('station') || '');
   const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
 
   // The look-ahead opens on a station that has sponsorships: opening on the first
@@ -186,6 +189,11 @@ export default function SpotSchedules() {
     },
   });
   const deleteMut = useMutation({ mutationFn: deleteSpotSchedule, onSuccess: refresh });
+
+  useEffect(() => {
+    if (!linkedContract || !schedules?.length) return;
+    document.getElementById(`contract-${linkedContract}`)?.scrollIntoView({ block: 'center' });
+  }, [linkedContract, schedules]);
 
   const sponsorName = (id: string) => sponsors?.find((s) => s.id === id)?.name ?? 'Unknown sponsor';
   const stationName = (id: string | null) =>
@@ -513,7 +521,8 @@ export default function SpotSchedules() {
         ) : (
           <ul className="divide-y">
             {schedules.map((s) => (
-              <li key={s.id} className="px-6 py-4 flex flex-wrap items-center gap-3">
+              <li key={s.id} id={`contract-${s.id}`} data-testid="spot-contract"
+                className={`px-6 py-4 flex flex-wrap items-center gap-3 ${s.id === linkedContract ? 'bg-yellow-100 outline outline-2 outline-yellow-500' : ''}`}>
                 <div className="flex-1 min-w-[16rem]">
                   <p className="font-medium">
                     <Link to={`/admin/sponsors/${s.sponsor_id}`} className="hover:underline">

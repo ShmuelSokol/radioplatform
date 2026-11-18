@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useMayChange } from '../../../hooks/useMayChange';
-import { clockTime, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, useMediaQuery, weekdayShort } from './shared';
+import { clockTime, isSponsorSpot, clockTimeSec, dayKey, fmtAgo, fmtDur, fmtHMS, useMediaQuery, weekdayShort } from './shared';
 
 export interface QueueRow {
   id: string;
@@ -210,6 +210,7 @@ function QueuePanel(p: Props) {
           const isDragOver = dragOverId === entry.id && dragId !== entry.id;
           const start = fmtStart(entry.estimated_start, today, p.stationTz);
           const isSilence = a?.asset_type === 'silence';
+          const isSponsor = isSponsorSpot(entry.source, a);
           const title = isSilence && entry.blackout_name
             ? `Scheduled silence: ${entry.blackout_name}`
             : a?.title ?? 'Unknown item';
@@ -313,8 +314,8 @@ function QueuePanel(p: Props) {
                 {/* Desktop quick actions */}
                 <span className={`hidden lg:flex absolute right-28 top-1/2 -translate-y-1/2 gap-0.5 px-0.5 bg-[#c0c0c0] text-black shadow-lg ${isSel || isCur ? '' : 'opacity-0 pointer-events-none [@media(hover:hover)]:pointer-events-auto'} group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto`} data-testid="row-quick" onClick={(e) => e.stopPropagation()}>
                   {a && !isSilence && p.onSong && (
-                    <button type="button" onClick={() => p.onSong?.(entry)} title="Song: category, do not play, details"
-                      aria-label={`Song actions for ${title}`} data-testid="row-song" className="qn-btn px-1 h-5 text-[10px]">Song</button>
+                    <button type="button" onClick={() => p.onSong?.(entry)} title={isSponsor ? 'Sponsorship: sponsor, contract, plays' : 'Song: category, do not play, details'}
+                      aria-label={`${isSponsor ? 'Sponsorship' : 'Song actions'} for ${title}`} data-testid="row-song" className="qn-btn px-1 h-5 text-[10px]">{isSponsor ? 'Spot' : 'Song'}</button>
                   )}
                   {!isCur && !readOnly && (
                     <>
@@ -340,7 +341,7 @@ function QueuePanel(p: Props) {
                     className="qn-btn w-11 shrink-0 h-11 text-base">▼</button>
                   {a && !isSilence && p.onSong && (
                     <button type="button" onClick={() => p.onSong?.(entry)} data-testid="row-song-touch"
-                      aria-label={`Song actions for ${title}`} className="qn-btn px-2 sm:px-2.5 shrink-0 h-11 text-sm">Song</button>
+                      aria-label={`${isSponsor ? 'Sponsorship' : 'Song actions'} for ${title}`} className="qn-btn px-2 sm:px-2.5 shrink-0 h-11 text-sm">{isSponsor ? 'Spot' : 'Song'}</button>
                   )}
                   <button type="button" onClick={() => { p.onRemove(entry.id); setSelectedId(null); }}
                     className="qn-btn px-2 sm:px-2.5 shrink-0 h-11 text-sm !text-red-700">

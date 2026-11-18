@@ -231,6 +231,8 @@ async def dump(
             status_code=409,
             detail="Nothing is waiting in the delay right now, so there is nothing to cut. It is still building back.")
     cut = air.dump()
+    from app.api.v1.live_shows_ws import live_relay as _relay
+    await _relay.video_cut(str(show.station_id))
     dropped = []
     dropped_name = None
     if body is not None and body.drop_caller:

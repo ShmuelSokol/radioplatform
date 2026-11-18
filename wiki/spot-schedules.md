@@ -82,3 +82,7 @@ sponsor's Missed Plays still lists the plays that did not air. Taking the mark o
 it again on the next refill. Test: `backend/tests/test_spot_slot_churn.py`.
 
 Tests and the clock: a slot due within the 2-minute safety margin is left alone by every replan (edit, pause, Spots off), so it still airs. Tests that count slots therefore depend on the minute they run (a run at hh:13 to hh:15 saw the hh:15 slot stay); `test_spot_schedules.py` and `test_spot_slot_churn.py` pin "now" to minute 5 of the hour with the `clock_off_the_slots` fixture in `tests/conftest.py`. Use it for any new slot-counting test.
+
+## Plays skipped by staff (2026-11-18)
+
+The control room's Sponsor panel can skip one coming `ad_slot` play: the queue row becomes status `cancelled` and `reconcile_spot_slots` treats a cancelled row at that minute for that recording as kept, so the play is not planned again. Put back sets it to `pending`. See [control-room](control-room.md#sponsor-panel-tapping-a-sponsorship-spot-2026-11-18).

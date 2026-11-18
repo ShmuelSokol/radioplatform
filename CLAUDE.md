@@ -145,7 +145,7 @@ radioplatform/
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
-| queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `fire-now`, `insert`, `loop`, `mix-over`, `panic`, `modes` (HS / Spots mode); see `wiki/operator-actions.md`, `wiki/station-modes.md`) |
+| queue | queue.py | /stations/{id}/queue (operator actions in one call each: `skip?fade=hard\|fade\|soft`, `{entry_id}/skip-sponsorship` (skip or put back one coming sponsorship play; the row stays as `cancelled`), `fire-now`, `insert`, `loop`, `mix-over`, `panic`, `modes` (HS / Spots mode); see `wiki/operator-actions.md`, `wiki/station-modes.md`) |
 | rules | rules.py | /rules |
 | schedules | schedules.py | /schedules |
 | now_playing | now_playing.py | /now-playing |
@@ -158,7 +158,7 @@ radioplatform/
 | analytics | analytics.py | /analytics |
 | playlists | playlists.py | /playlists (the list is readable by every staff role, so a schedule's blocks can name their playlist; everything else manager only) |
 | sponsor_portal | sponsor_portal.py | /sponsor-portal |
-| spot_schedules | spot_schedules.py | /spot-schedules |
+| spot_schedules | spot_schedules.py | /spot-schedules (`GET /for-asset/{asset_id}?station_id=`: the control room's Sponsor panel, any staff role) |
 | spot_recordings | spot_recordings.py | /spot-recordings |
 | program_blocks | program_blocks.py | /program-blocks (CRUD + /preview) |
 | databank | databank.py | /databank: KBR Studio style tables (items sorted by any column, every type of a table, spots with schedule end dates + PATCH end-date, one day's play log); see `wiki/databank.md` |
@@ -168,7 +168,7 @@ radioplatform/
 | ai_emails | ai_emails.py | /ai-emails |
 | alerts | alerts.py | /alerts (list pages with skip/limit; POST /alerts/resolve-all; repeats of an open alert fold into it) |
 | live_shows | live_shows.py | /live-shows (`GET /{id}/air`, `POST /{id}/dump`, `POST /{id}/delay`: the broadcast delay; `GET /{id}/dumps` and `/dumps/{dump_id}/audio`: the dump log; `GET` and `POST /{id}/chat`: the staff chat; `calls/{id}/on-air` answers 409 `delay_not_safe` unless `?force=true`; `calls/{id}/hold`, `calls/{id}/lock` and `calls/next`: the caller desk (up to four callers on air together); see `wiki/live-shows.md`) |
-| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), `/ws/live/{show}/cohost` (a co-host joins from another place), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
+| live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, `/ws/live/{show}/talk/{call}` (staff talk to a caller off the air), `/ws/live/{show}/cohost` (a co-host joins from another place), `/ws/live/{show}/video` (the host's camera) and `/ws/live/station/{id}/watch` (pages watching it), and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
 | playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); one engine per station: hello/next/started from a second engine (other `X-Playout-Instance`) get 409 and an alert; /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report); `/live.mp3` (token only): the live show as listeners hear it, for the engine's live lane (see `wiki/live-shows.md`) |
@@ -199,6 +199,7 @@ radioplatform/
 | queue_replenish_service.py | Auto-replenish playback queue |
 | schedule_refresh_service.py | After a schedule, block or playlist change, replaces the unplayed automatic songs so the change takes over on time, and redraws them 15 min before a block's playlist takes over so it starts on time, not early; drops dated weather/time queued as songs (see `wiki/playlist-generation.md`) |
 | schedule_lookahead_service.py | 7-day look-ahead of block overlaps, gaps, off-air windows and unplaced spots, using the engine's resolver (see `wiki/schedule-look-ahead.md`) |
+| sponsor_item.py | What the control room's Sponsor panel shows for one spot on one station: sponsor, contracts, today's and coming plays, missed plays |
 | spot_schedule_service.py | Plans sponsor spots into clock slots or block places and keeps pending `ad_slot` queue entries in step; when blocks are over-booked it shares the room fairly, rolls plays to a later block and warns (see `wiki/spot-schedules.md`, `wiki/program-blocks.md`) |
 | spot_voice_service.py | Makes spot audio from a script; Shprach call is a stub, placeholder tones until wired (see `wiki/spot-recordings.md`) |
 | program_block_service.py | Expands program blocks into timed queue entries (`source="block"`) and replaces the built-in hourly time and weather (see `wiki/program-blocks.md`) |
@@ -214,6 +215,7 @@ radioplatform/
 | sms_service.py | Twilio SMS and WhatsApp notification delivery |
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
 | live_air.py | A live show's broadcast (profanity) delay: listeners hear the show `live_delay_seconds` late, Dump cuts the newest audio, the delay builds back at the voice's own pitch, winds down before the hard stop and plays out at End show; a station's filler (a jingle) plays after a Dump while the delay refills at once (see `wiki/live-shows.md`) |
+| live_video.py | Live video for people on the website: the host's encoded camera frames pass the same delay as the sound, a Dump cuts them too (see `wiki/live-shows.md`) |
 | live_recording.py | Records every live show as listeners heard it (the delay's output, nothing dumped) and files it in Archives as a draft; station `automation_config.live_record_shows` (see `wiki/live-shows.md`) |
 | live_inserts.py | Hard timed items (the time check) that air on time during a live show, over the delay, while the host's words wait |
 | twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
@@ -246,7 +248,7 @@ radioplatform/
 
 ### Pages
 **Admin** (`frontend/src/pages/admin/`):
-- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
+- Dashboard.tsx — Control room (operator screen): frozen transport bar, queue with insert-at-point, instant buttons, server-side library search, go-live panel, Song panel (quick actions on the song on air or a queue row: category, not on this station, do not play on any station, details), Sponsor panel instead for a sponsorship spot (sponsor, contracts, today's and coming plays with Skip, missed plays, Pause contract, links). Panels in `pages/admin/controlroom/`; live actions go through `api/liveControl.ts`. See `wiki/control-room.md`
 - Stations.tsx — Station management
 - Assets.tsx — Audio asset management
 - AssetUpload.tsx — File upload
@@ -275,14 +277,14 @@ radioplatform/
 - EmergencyAlerts.tsx — Emergency alerts (EAS override): what is on air per station with Stop, a spoken test of the override (managers), how the EAS box connects, the log. `components/layout/EmergencyBanner.tsx` shows a red bar on every staff page while an alert is on air
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
-- HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, Talk off air (a private word with a caller, `hooks/useTalkback.ts`), Join as co-host (`pages/admin/live/CohostPanel.tsx`), the staff chat, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
+- HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, Talk off air (a private word with a caller, `hooks/useTalkback.ts`), Join as co-host (`pages/admin/live/CohostPanel.tsx`), Start camera (live video for the website, `pages/admin/live/CameraPanel.tsx`), the staff chat, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
 - CallScreener.tsx — Two-column call screener (waiting/approved/on-air management), each caller's history with Priority and Block (`pages/admin/live/CallerHistory.tsx`), the list of marked callers, with the delay panel and the staff chat (`pages/admin/live/ChatPanel.tsx`, also on the Host Console)
 - SongRequests.tsx — Song request management (approve/reject/delete)
 - Archives.tsx — Show archive management (CRUD, publish/unpublish)
 
 **Public** (`frontend/src/pages/public/`):
 - StationList.tsx — Browse stations
-- Listen.tsx — Listen to a station (server stream or built-in player, song requests); keeps playing, with a bar, on every other page except call-in and the live host screens, and takes over sound the control room was giving
+- Listen.tsx — Listen to a station (server stream or built-in player, song requests; "Watch the show live" when a live show has video); keeps playing, with a bar, on every other page except call-in and the live host screens, and takes over sound the control room was giving
 - ProgramGuide.tsx — Public EPG ("Schedule" in the menu; "Public Schedule" in the staff menu) with station/date picker and timeline
 - Hosts.tsx — Public DJ/host profile cards
 - Archives.tsx — Public show archive browser with playback
@@ -322,6 +324,8 @@ radioplatform/
 | useArchives.ts | Show archive CRUD queries/mutations |
 | useTalkback.ts | Talk to one web caller off the air: own microphone capture and socket, nothing reaches listeners |
 | useCohost.ts | Join a live show as a co-host: own microphone and socket, hears the host and callers |
+| useHostVideo.ts | The host's camera: encoded in the browser (WebCodecs) and sent frame by frame for people watching on the website |
+| useLiveVideo.ts | Watch a station's live show on the Listen page: decodes the frames and draws them |
 | useEscape.ts | Esc closes an open dialog (New Archive, Live show, bug report) |
 | useMayChange.ts | May the signed-in person change things on this screen? The one rule for hiding or disabling change controls (see `wiki/view-only-screens.md`) |
 
@@ -526,6 +530,9 @@ cd frontend && BASE_URL=http://localhost:3000 API=http://localhost:8000 KBR_ADMI
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
 
+# The control room's Sponsor panel (tapping a sponsorship spot) on three stations, roles, desktop and phone sizes
+cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-sponsor-panel.mjs
+
 # Display findings of the page walk-through: Library cells and menus, Esc on dialogs, phone tables as cards, headings, labels
 cd frontend && for s in library-display display-findings; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
 
@@ -534,6 +541,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound
 
 # A new release published under an open page, then every late-loading screen opened (builds the site twice itself)
 cd frontend && node e2e/stale-release.mjs
+
+# Live video against a real backend (Chromium's fake camera; host page + Listen page, Dump cuts the picture; see wiki/live-shows.md)
+cd frontend && KBR_ADMIN_EMAIL=... KBR_ADMIN_PASSWORD=... node e2e/live-video.cjs <station id>
 
 # Every control room button, the Listen page, call-in and release-pickup timings, same fake backend (ONLY=<part> for one part; see wiki/audio-engine.md)
 cd frontend && for s in control-room-actions listen-page call-in release-timing admin-misc; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done

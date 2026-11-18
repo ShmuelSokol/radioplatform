@@ -257,6 +257,7 @@ WRITE_POLICY = {
     ("PATCH", "/databank/spots/{asset_id}/end-date"): MANAGERS,
     ("POST", "/stations/{station_id}/queue/start"): ON_AIR,
     ("DELETE", "/stations/{station_id}/queue/{entry_id}"): ON_AIR,
+    ("POST", "/stations/{station_id}/queue/{entry_id}/skip-sponsorship"): ON_AIR,
     ("POST", "/studio/mix"): MANAGERS,
     ("PUT", "/time-announcements/{hour}"): MANAGERS,
     ("POST", "/users"): ADMIN,
