@@ -313,3 +313,16 @@ def clock_off_the_slots(monkeypatch):
         if name.split(".")[0] in ("app", "tests") and getattr(mod, "datetime", None) is real:
             monkeypatch.setattr(mod, "datetime", Pinned)
     return pinned
+
+
+@pytest.fixture(autouse=True)
+def _no_live_recording_without_ffmpeg(monkeypatch):
+    """A live show is recorded with ffmpeg (live_recording.py). Where there is none (the
+    GitHub runner), the recorder failed and wrote its alert through the test's shared
+    database session in the middle of another request, which then answered 500."""
+    import shutil
+
+    if shutil.which("ffmpeg") is None:
+        from app.services import live_recording
+
+        monkeypatch.setattr(live_recording, "start", lambda *a, **k: None)
