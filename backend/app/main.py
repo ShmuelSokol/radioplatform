@@ -197,6 +197,7 @@ async def _add_missing_columns(engine):
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_action VARCHAR(255)",
         # Per-station staff permissions and the protected (FM) station
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS station_ids JSONB",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE stations ADD COLUMN IF NOT EXISTS protected BOOLEAN NOT NULL DEFAULT false",
         # A listener who stops leaves the live count at once
         "ALTER TABLE listener_sessions ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ",

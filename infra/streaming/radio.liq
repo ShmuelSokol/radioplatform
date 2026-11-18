@@ -369,15 +369,53 @@ def skip_main() =
 end
 
 # Next: fade out quickly, skip whatever is on air, come back at full level on the new track
+# In the music lane it waits until the next item's file is here (at most skip_wait): the
+# item on air plays on meanwhile. Skipping at once with nothing loaded put a second of
+# emergency music on air before a shiur (Jerusalem 05:55:39Z 2026-11-18: the file needed
+# 3 s) and when Next came while the backend was holding back the next song before a
+# hard item (it hands one out at the engine's next ask, at most 2 s later).
+# 12 s: a file that was never analysed is read once by the backend (for its level) and
+# then by the engine, so a slow one takes twice its download (harness
+# operator_next_slow_file: 11 s). After that the skip goes ahead whatever is there.
+skip_wait = 12.
+def main_loaded() =
+  list.length(main_requests.queue()) > 0
+end
+# A Next that is waiting for the file: a second press meanwhile is the same wish, not a
+# second skip (it would skip the awaited item the moment it started)
+skip_waiting = ref(false)
 def skip_on_air(~seconds) =
-  ramp_master(target=0., duration=seconds, fun () -> begin
-    if on_air_lane() == "timed" then
-      timed_queue.skip()
-      thread.run(delay=0.1, {master_gain := 1.})
+  def go() =
+    ramp_master(target=0., duration=seconds, fun () -> begin
+      if on_air_lane() == "timed" then
+        timed_queue.skip()
+        thread.run(delay=0.1, {master_gain := 1.})
+      else
+        skip_main()
+      end
+    end)
+  end
+  asked = time()
+  def rec wait() =
+    if on_air_lane() != "main" or main_loaded() or time() - asked > skip_wait then
+      if time() - asked > 0.05 then
+        log.important("skip: waited #{time() - asked} s for the next item's file")
+      end
+      skip_waiting := false
+      go()
     else
-      skip_main()
+      thread.run(delay=0.1, wait)
     end
-  end)
+  end
+  if skip_waiting() then
+    log.important("skip: already waiting for the next item's file; this press is the same one")
+  else
+    if on_air_lane() == "main" and not main_loaded() then
+      log.important("skip: the next item is not loaded yet; the item on air plays on until it is")
+      skip_waiting := true
+    end
+    wait()
+  end
 end
 
 # A live show starts: what is on air fades out and the live lane takes the stream.

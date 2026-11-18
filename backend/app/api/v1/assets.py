@@ -278,6 +278,13 @@ async def upload_asset(
     target = "mp3" if format == "mp2" else format
     if target != "original" and target not in CONVERT_FORMATS:
         raise HTTPException(status_code=422, detail=f"Unknown format: {format}")
+    if target == "original":
+        # "Keep Original" keeps every format except MP2, which nothing here can
+        # play (decided 2026-11-18); the upload screen says so next to the choice.
+        from app.services.audio_convert_service import probe_codec
+        ext = ("." + original_filename.rsplit(".", 1)[-1].lower()) if "." in original_filename else ".bin"
+        if await asyncio.to_thread(probe_codec, file_data, ext) == "mp2":
+            target = "mp3"
 
     logger.info(
         "UPLOAD endpoint: filename='%s', content_type='%s', size=%d, hash_4k=%s, format='%s'",
