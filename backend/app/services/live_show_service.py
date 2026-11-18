@@ -582,3 +582,35 @@ async def update_call_info(
     await db.flush()
     await db.refresh(call)
     return call
+
+
+# --- Dump log (models/live_dump.py) ---
+
+def dump_wav(heard, cut) -> bytes:
+    """What listeners heard just before the Dump, half a second of silence, then
+    what was cut, as a WAV file (16-bit mono)."""
+    import io
+    import wave
+
+    import numpy as np
+
+    from app.services.live_air import RATE
+
+    gap = np.zeros(RATE // 2, dtype=np.int16)
+    pcm = np.concatenate((np.asarray(heard, dtype=np.int16), gap, np.asarray(cut, dtype=np.int16)))
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(pcm.astype("<i2").tobytes())
+    return out.getvalue()
+
+
+async def save_dump_audio(key: str, heard, cut) -> None:
+    from app.services.storage_service import upload_file
+
+    try:
+        await upload_file(dump_wav(heard, cut), key, content_type="audio/wav")
+    except Exception:
+        logger.exception("Could not save the dump recording %s", key)

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useLiveShow, useEndLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
 import { useHostAudio } from '../../hooks/useHostAudio';
-import { endCall, putCallerOnAir } from '../../api/liveShows';
+import { endCall, putCallerOnAirAsking } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 
 export default function HostConsole() {
@@ -12,7 +12,32 @@ export default function HostConsole() {
   const { show, callers, secondsRemaining, isConnected, air, lastDump } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
-  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError } = useHostAudio(showId);
+  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted } = useHostAudio(showId);
+  // Cough: silent while the button (or the C key) is held. Mute: stays silent until pressed again.
+  const [micOff, setMicOff] = useState(false);
+  const [coughing, setCoughing] = useState(false);
+  useEffect(() => { setMuted(micOff || coughing); }, [micOff, coughing, setMuted]);
+  useEffect(() => { if (!isRecording) { setMicOff(false); setCoughing(false); } }, [isRecording]);
+  useEffect(() => {
+    if (!isRecording) return;
+    const typing = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'c' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e)) setCoughing(true);
+    };
+    const up = (e: KeyboardEvent) => { if (e.key.toLowerCase() === 'c') setCoughing(false); };
+    const away = () => setCoughing(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', away);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', away);
+    };
+  }, [isRecording]);
 
   // Local countdown timer (decremented every 1s, re-synced via WS every 10s)
   const [localSeconds, setLocalSeconds] = useState<number | null>(null);
@@ -75,11 +100,8 @@ export default function HostConsole() {
 
   const handlePutOnAir = async (callId: string) => {
     if (!showId) return;
-    try {
-      await putCallerOnAir(showId, callId);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed to put caller on air');
-    }
+    const problem = await putCallerOnAirAsking(showId, callId);
+    if (problem) alert(problem);
   };
 
   if (hardStopped) {
@@ -162,13 +184,47 @@ export default function HostConsole() {
               )}
             </div>
 
+            {isRecording && (
+              <div className="flex items-stretch gap-2 mb-3">
+                <button
+                  onPointerDown={e => { e.preventDefault(); setCoughing(true); }}
+                  onPointerUp={() => setCoughing(false)}
+                  onPointerLeave={() => setCoughing(false)}
+                  onPointerCancel={() => setCoughing(false)}
+                  onContextMenu={e => e.preventDefault()}
+                  data-testid="cough-button"
+                  title="Hold C"
+                  className={`flex-1 px-3 py-3 rounded text-sm font-bold transition select-none touch-none ${
+                    coughing ? 'bg-yellow-500 text-black' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+                >
+                  Cough
+                  <span className="block text-[11px] font-normal">hold (or hold C)</span>
+                </button>
+                <button
+                  onClick={() => setMicOff(v => !v)}
+                  aria-pressed={micOff}
+                  data-testid="mute-button"
+                  className={`flex-1 px-3 py-3 rounded text-sm font-bold transition ${
+                    micOff ? 'bg-yellow-500 text-black' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+                >
+                  {micOff ? 'Unmute mic' : 'Mute mic'}
+                  <span className="block text-[11px] font-normal">{micOff ? 'you are not heard' : 'stays off until pressed again'}</span>
+                </button>
+              </div>
+            )}
+            {isRecording && muted && (
+              <div className="text-yellow-400 text-sm mb-2 font-bold" role="status" data-testid="mic-muted-note">
+                MIC OFF: listeners do not hear you. Callers on air are still heard.
+              </div>
+            )}
+
             {/* VU Meter */}
             <div className="h-4 bg-[#0a0a28] rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-75 rounded-full ${
                   audioLevel > 0.8 ? 'bg-red-500' : audioLevel > 0.5 ? 'bg-yellow-500' : 'bg-green-500'
                 }`}
-                style={{ width: `${audioLevel * 100}%` }}
+                style={{ width: `${(muted ? 0 : audioLevel) * 100}%` }}
               />
             </div>
 
@@ -247,7 +303,7 @@ export default function HostConsole() {
                       <span className="text-white text-sm font-medium">
                         {caller.caller_name || caller.caller_phone}
                       </span>
-                      <span className="text-[10px] bg-green-800 text-green-200 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] bg-green-700 text-white px-2 py-0.5 rounded-full">
                         Approved
                       </span>
                     </div>

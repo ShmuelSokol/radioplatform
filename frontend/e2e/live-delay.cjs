@@ -5,6 +5,8 @@
  * ever receive it. Part B presses every control of the delay panel on the Host
  * Console and the Call Screener in a browser with a fake microphone and reads what
  * the screen says, on a desktop and a phone size. Part C is the station's settings.
+ * Part D (ONLY=desk): Cough and Mute, the dump log and its recording, Put On Air while
+ * the delay is not safe, and with PLAYOUT_TOKEN the engine's copy of the show (live.mp3).
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
  *   KBR_ADMIN_EMAIL=admin KBR_ADMIN_PASSWORD=... node e2e/live-delay.cjs <station id>
  * API_URL / BASE_URL default to :8000 and :3000; SHOTS_DIR keeps screenshots.
@@ -293,6 +295,152 @@ function hostMic(showId, token) {
         check('C3 other settings are kept', Object.keys(before).every((k) => k.startsWith('live_') || JSON.stringify(saved[k]) === JSON.stringify(before[k])));
         const a = await air((await newShow('Delay test C')).id);
         check('C4 a new show takes the saved settings', a.configured === 20 && a.dump_size === 8, JSON.stringify(a));
+      } finally {
+        await browser.close();
+      }
+    }
+    // ---------- Part D: cough button, dump log, callers and the delay, the engine's copy ----------
+    if (!ONLY || ONLY === 'desk') {
+      await setConfig({ live_delay_seconds: 3, live_dump_seconds: 0 });
+      const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-'));
+      { const rate = 48000, n = rate * 30, buf = Buffer.alloc(44 + n * 2);
+        buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+        buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+        for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * 440 * i / rate)), 44 + i * 2);
+        fs.writeFileSync(path.join(DIR, 'host.wav'), buf); }
+      const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.join(DIR, 'host.wav')}`, '--autoplay-policy=no-user-gesture-required'] });
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const open = async (url, opts = {}) => {
+        const page = await (await browser.newContext({ permissions: ['microphone'], ...opts })).newPage();
+        await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      const loud = (l, from, to) => power(l.frames.filter((f) => f.at >= from && f.at < to).flatMap((f) => Array.from(f.pcm)), 440);
+      try {
+        const show = await newShow('Delay test D');
+        const l = listener();
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await T(host, 'delay-panel').waitFor({ timeout: 15000 });
+        check('D1 no Cough or Mute before the microphone is open', await T(host, 'cough-button').count() === 0 && await T(host, 'mute-button').count() === 0);
+        await host.getByText('Start Broadcasting').click();
+        await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 9000 });
+        await sleep(1500);
+
+        // Cough: held for 2 s. Listeners get that stretch as silence, 3 s later.
+        const box = await T(host, 'cough-button').boundingBox();
+        await host.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await host.mouse.down();
+        const down = Date.now();
+        await T(host, 'mic-muted-note').waitFor({ timeout: 1500 });
+        check('D2 holding Cough: the screen says the mic is off', /MIC OFF: listeners do not hear you/.test(await T(host, 'mic-muted-note').innerText()), await T(host, 'mic-muted-note').innerText());
+        await sleep(1800 - (Date.now() - down));
+        const held = await T(host, 'mic-muted-note').count() === 1;
+        await sleep(2000 - (Date.now() - down));
+        await host.mouse.up();
+        const up = Date.now();
+        await sleep(300);
+        check('D3 it stays off while held; letting go: the note is gone', held && await T(host, 'mic-muted-note').count() === 0);
+        await sleep(5200);
+        const before = loud(l, down + 1500, down + 2700), during = loud(l, down + 3600, up + 2700), after = loud(l, up + 3700, up + 4700);
+        check('D4 listeners heard the host before, silence for the cough, the host again after', before > 0.005 && after > 0.005 && during < before / 50, `before ${before.toFixed(4)} cough ${during.toFixed(5)} after ${after.toFixed(4)}`);
+        check('D5 the show stayed on air through the cough', l.live() && l.frames.filter((f) => f.at >= down + 3600 && f.at < up + 2700).length > 5);
+
+        // The C key does the same while held
+        await host.locator('body').click({ position: { x: 5, y: 5 } });
+        await host.keyboard.down('c');
+        const keyOn = await T(host, 'mic-muted-note').waitFor({ timeout: 1500 }).then(() => true, () => false);
+        await host.keyboard.up('c');
+        await sleep(300);
+        check('D6 holding the C key coughs too', keyOn && await T(host, 'mic-muted-note').count() === 0);
+
+        // Mute stays until pressed again
+        await T(host, 'mute-button').click();
+        await T(host, 'mic-muted-note').waitFor({ timeout: 1500 });
+        const muteAt = Date.now();
+        check('D7 Mute mic: the button turns into Unmute mic', /Unmute mic/.test(await T(host, 'mute-button').innerText()) && (await T(host, 'mute-button').getAttribute('aria-pressed')) === 'true');
+        await shot(host, 'host-muted');
+        await sleep(5500);
+        check('D8 muted: listeners get silence, the show stays on air', loud(l, muteAt + 3700, muteAt + 5300) < 0.0005 && l.live(), loud(l, muteAt + 3700, muteAt + 5300).toFixed(5));
+        await T(host, 'mute-button').click();
+        await sleep(300);
+        check('D9 Unmute: the note is gone and the button says Mute mic', await T(host, 'mic-muted-note').count() === 0 && /^Mute mic/.test(await T(host, 'mute-button').innerText()));
+        await sleep(4500);
+        check('D10 unmuted: listeners hear the host again', loud(l, Date.now() - 1000, Date.now()) > 0.005);
+
+        // A caller waits, approved
+        const call = await fetch(`${API}/call-in/${STATION}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Dovid from Lakewood', note: 'A question' }) }).then((r) => r.json());
+        const callId = call.call?.id || call.id || call.call_id;
+        await api('POST', `/live-shows/${show.id}/calls/${callId}/approve`);
+        await host.getByRole('button', { name: 'Put On Air' }).waitFor({ timeout: 5000 });
+
+        // Dump, then the dump log
+        check('D11 no dump log before the first Dump', await T(host, 'dump-log').count() === 0);
+        await T(host, 'dump-button').click();
+        await T(host, 'dump-row').first().waitFor({ timeout: 5000 });
+        const row = await T(host, 'dump-row').first().innerText();
+        check('D12 the dump log lists the Dump: time, seconds cut, who', /\d+:\d\d.*· [23]\.\d s cut · admin/.test(row.replace(/\n/g, ' ')), row.replace(/\n/g, ' | '));
+        await sleep(1800);
+        const audio = host.waitForResponse((r) => /\/dumps\/[^/]+\/audio/.test(r.url()), { timeout: 6000 });
+        await T(host, 'dump-play').first().click();
+        const got = await audio.then((r) => r, () => null);
+        const bytes = got ? (await got.body()).length : 0;
+        // 6 s heard + 0.5 s gap + about 3 s cut, 24 kHz 16-bit mono
+        check('D13 Play fetches the recording: what aired before, then what was cut', !!got && got.status() === 200 && bytes > 24000 * 2 * 6 && bytes < 24000 * 2 * 11, `${got && got.status()} ${bytes} bytes`);
+        const stopShown = await T(host, 'dump-play').first().getByText('Stop').waitFor({ timeout: 3000 }).then(() => true, () => false);
+        check('D14 while it plays the button says Stop, and pressing it stops', stopShown);
+        await shot(host, 'host-dump-log');
+        await T(host, 'dump-play').first().click();
+        await T(host, 'dump-play').first().getByText('Play').waitFor({ timeout: 2000 });
+        const noLogin = await fetch(`${API}/live-shows/${show.id}/dumps`);
+        check('D15 the dump log is not public', noLogin.status === 401 || noLogin.status === 403, noLogin.status);
+
+        // The delay was just dumped: a caller put on air now could not be cut
+        const asked = [];
+        host.once('dialog', (d) => { asked.push(d.message()); d.dismiss(); });
+        await host.getByRole('button', { name: 'Put On Air' }).click();
+        await sleep(1200);
+        check('D16 Put On Air right after a Dump: the host is told the delay is not safe', asked.length === 1 && /The delay is not safe yet: \d+ s of 3 s\..*could not be fully dumped\.\s+Put the caller on air anyway\?/s.test(asked[0]), asked[0]);
+        let calls = (await api('GET', `/live-shows/${show.id}/calls`)).json.calls;
+        check('D17 Cancel leaves the caller waiting', calls.find((c) => c.id === callId)?.status === 'approved', calls.find((c) => c.id === callId)?.status);
+        host.once('dialog', (d) => { asked.push(d.message()); d.accept(); });
+        await host.getByRole('button', { name: 'Put On Air' }).click();
+        await host.getByText('ON AIR', { exact: true }).waitFor({ timeout: 4000 }).catch(() => {});
+        calls = (await api('GET', `/live-shows/${show.id}/calls`)).json.calls;
+        check('D18 OK puts the caller on air anyway', asked.length === 2 && calls.find((c) => c.id === callId)?.status === 'on_air', calls.find((c) => c.id === callId)?.status);
+        check('D19 with a caller on air the panel offers "Dump and drop the caller"', await T(host, 'dump-drop-button').isVisible());
+        await shot(host, 'host-caller-on-air');
+
+        // The engine's copy of the show
+        if (process.env.PLAYOUT_TOKEN) {
+          const url = `${API}/playout/${STATION}/live.mp3`;
+          const refused = await fetch(`${url}?token=${process.env.PLAYOUT_TOKEN}`);
+          check('D20 live.mp3 needs the token in the header', refused.status === 403, refused.status);
+          const ctl = new AbortController();
+          const r = await fetch(url, { headers: { 'X-Playout-Token': process.env.PLAYOUT_TOKEN }, signal: ctl.signal });
+          const reader = r.body.getReader(); let n = 0; const t0 = Date.now(); let first = null;
+          while (Date.now() - t0 < 4000) { const { value, done } = await reader.read(); if (done) break; if (!first) first = value; n += value.length; }
+          ctl.abort();
+          // 192 kbps = 24,000 bytes a second
+          check('D21 live.mp3 streams the show as MP3 at 192 kbps in real time', r.status === 200 && r.headers.get('content-type') === 'audio/mpeg' && first && first[0] === 0xff && (first[1] & 0xe0) === 0xe0 && n > 70000 && n < 125000, `${r.status} ${n} bytes in 4 s`);
+        }
+
+        host.on('dialog', (d) => d.accept());
+        await host.getByRole('button', { name: 'End Show' }).click();
+        await host.waitForURL(/\/admin\/live$/, { timeout: 8000 });
+        await sleep(5000);
+        if (process.env.PLAYOUT_TOKEN) {
+          const r = await fetch(`${API}/playout/${STATION}/live.mp3`, { headers: { 'X-Playout-Token': process.env.PLAYOUT_TOKEN } });
+          check('D22 after the show live.mp3 answers 204', r.status === 204, r.status);
+        }
+        check('D23 no errors on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        l.ws.close();
       } finally {
         await browser.close();
       }

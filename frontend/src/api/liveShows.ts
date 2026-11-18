@@ -111,9 +111,35 @@ export const rejectCall = async (showId: string, callId: string): Promise<CallIn
   return res.data;
 };
 
-export const putCallerOnAir = async (showId: string, callId: string): Promise<CallInRequest> => {
-  const res = await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/on-air`);
+export const putCallerOnAir = async (showId: string, callId: string, force = false): Promise<CallInRequest> => {
+  const res = await apiClient.post<CallInRequest>(
+    `/live-shows/${showId}/calls/${callId}/on-air`, null, force ? { params: { force: true } } : undefined);
   return res.data;
+};
+
+/**
+ * Put a caller on air from a button. While the show's delay is too short to dump
+ * the caller the server refuses; the person is told why and may go ahead anyway.
+ * Returns an error text to show, or null.
+ */
+export const putCallerOnAirAsking = async (showId: string, callId: string): Promise<string | null> => {
+  try {
+    await putCallerOnAir(showId, callId);
+    return null;
+  } catch (err: any) {
+    const detail = err?.response?.data?.detail;
+    if (detail?.code === 'delay_not_safe') {
+      if (!window.confirm(`${detail.message}\n\nPut the caller on air anyway?`)) return null;
+      try {
+        await putCallerOnAir(showId, callId, true);
+        return null;
+      } catch (again: any) {
+        const d = again?.response?.data?.detail;
+        return typeof d === 'string' ? d : 'Could not put the caller on air';
+      }
+    }
+    return typeof detail === 'string' ? detail : 'Could not put the caller on air. Another caller may be on air.';
+  }
 };
 
 export const endCall = async (showId: string, callId: string): Promise<CallInRequest> => {
@@ -174,4 +200,26 @@ export const setShowDelay = async (
 ): Promise<AirStatus> => {
   const res = await apiClient.post<AirStatus>(`/live-shows/${showId}/delay`, { action, seconds });
   return res.data;
+};
+
+export interface DumpRecord {
+  id: string;
+  dumped_at: string | null;
+  by: string | null;
+  cut_seconds: number;
+  /** Seconds of what listeners heard just before the cut, at the start of the recording */
+  heard_seconds: number;
+  caller_name: string | null;
+  has_audio: boolean;
+}
+
+export const getShowDumps = async (showId: string): Promise<DumpRecord[]> => {
+  const res = await apiClient.get<{ dumps: DumpRecord[] }>(`/live-shows/${showId}/dumps`);
+  return res.data.dumps;
+};
+
+/** The recording of one Dump (staff only, so it is fetched with the sign-in, not linked) */
+export const getDumpAudio = async (showId: string, dumpId: string): Promise<Blob> => {
+  const res = await apiClient.get(`/live-shows/${showId}/dumps/${dumpId}/audio`, { responseType: 'blob' });
+  return res.data as Blob;
 };

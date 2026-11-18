@@ -666,3 +666,153 @@ async def test_dump_exit_and_build_buttons(client, db_session, _quiet):
     air.count = 0
     r = await client.post(f"{base}/dump", headers=headers)
     assert r.status_code == 409 and "already heard" in r.json()["detail"]
+
+
+# ---------- round 2: the dump log, and callers kept off air until the delay is safe ----------
+
+@pytest.mark.asyncio
+async def test_every_dump_is_logged_with_a_recording_of_what_was_cut(client, db_session, _quiet, monkeypatch, tmp_path):
+    import io
+    import wave
+
+    from app.api.v1 import live_shows as live_shows_api
+    from app.services import storage_service
+
+    monkeypatch.setattr(storage_service, "LOCAL_STORAGE_DIR", str(tmp_path))
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 10})
+    headers = await _admin_headers(db_session)
+    base = f"/api/v1/live-shows/{show.id}"
+    show.status = LiveShowStatus.LIVE
+    await db_session.commit()
+    assert (await client.get(f"{base}/dumps", headers=headers)).json() == {"dumps": []}
+
+    clock = Clock()
+    air = LiveAir(str(station.id), str(show.id), _nowhere, delay=10, clock=clock)
+    live_shows_ws.live_relay.airs[str(station.id)] = air
+    run(air, clock, 30.0, talker())  # said 0..30 s; listeners have heard 0..20 s
+
+    r = await client.post(f"{base}/dump", headers=headers)
+    assert r.status_code == 200 and r.json()["dump_id"]
+    await asyncio.gather(*list(live_shows_api._dump_saves))
+
+    log = (await client.get(f"{base}/dumps", headers=headers)).json()["dumps"]
+    assert len(log) == 1
+    entry = log[0]
+    assert entry["id"] == r.json()["dump_id"] and entry["has_audio"] is True
+    assert entry["cut_seconds"] == pytest.approx(10.0, abs=0.1) and entry["heard_seconds"] == pytest.approx(6.0, abs=0.1)
+    assert entry["by"].endswith("@t.com") and entry["caller_name"] is None
+
+    r = await client.get(f"{base}/dumps/{entry['id']}/audio", headers=headers)
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/wav"
+    with wave.open(io.BytesIO(r.content)) as w:
+        assert (w.getframerate(), w.getnchannels(), w.getsampwidth()) == (RATE, 1, 2)
+        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
+    heard, gap, cut = pcm[: 6 * RATE], pcm[6 * RATE: int(6.5 * RATE)], pcm[int(6.5 * RATE):]
+    # First what listeners heard just before (said at 14..20 s), a gap, then what was cut (20..30 s)
+    assert spoken_at(heard)[0] == pytest.approx(14.0, abs=0.1) and spoken_at(heard)[-1] == pytest.approx(20.0, abs=0.1)
+    assert not gap.any()
+    assert spoken_at(cut)[0] == pytest.approx(20.0, abs=0.1) and spoken_at(cut)[-1] == pytest.approx(30.0, abs=0.1)
+
+    # Not for the public, not another show's
+    assert (await client.get(f"{base}/dumps")).status_code in (401, 403)
+    assert (await client.get(f"{base}/dumps/{entry['id']}/audio")).status_code in (401, 403)
+    assert (await client.get(f"/api/v1/live-shows/{uuid.uuid4()}/dumps/{entry['id']}/audio", headers=headers)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_caller_cannot_go_on_air_until_the_delay_is_safe(client, db_session, _quiet):
+    from app.models.call_in_request import CallInRequest, CallStatus
+
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 10})
+    headers = await _admin_headers(db_session)
+    show.status = LiveShowStatus.LIVE
+    caller = CallInRequest(id=uuid.uuid4(), live_show_id=show.id, caller_phone="Web caller",
+                           caller_name="Moshe", status=CallStatus.APPROVED)
+    db_session.add(caller)
+    await db_session.commit()
+    url = f"/api/v1/live-shows/{show.id}/calls/{caller.id}/on-air"
+
+    clock = Clock()
+    air = LiveAir(str(station.id), str(show.id), _nowhere, delay=10, clock=clock)
+    live_shows_ws.live_relay.airs[str(station.id)] = air
+    run(air, clock, 20.0, talker())
+    air.dump()
+    run(air, clock, 20.0, talker(), t0=20.0)   # building: well under 10 s
+
+    r = await client.post(url, headers=headers)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "delay_not_safe"
+    assert "not safe yet" in r.json()["detail"]["message"] and "of 10 s" in r.json()["detail"]["message"]
+    await db_session.refresh(caller)
+    assert caller.status == CallStatus.APPROVED
+
+    # The host may decide to take the caller anyway
+    r = await client.post(url + "?force=true", headers=headers)
+    assert r.status_code == 200
+    await db_session.refresh(caller)
+    assert caller.status == CallStatus.ON_AIR
+
+    # Safe delay, or a station with no delay at all: no question asked
+    caller.status = CallStatus.APPROVED
+    await db_session.commit()
+    air.count = int(10 * RATE)
+    assert (await client.post(url, headers=headers)).status_code == 200
+    caller.status = CallStatus.APPROVED
+    await db_session.commit()
+    air.configured = air.target = 0.0
+    air.count = 0
+    assert (await client.post(url, headers=headers)).status_code == 200
+
+
+# ---------- the show for the playout engine: /playout/{station}/live.mp3 ----------
+
+@pytest.mark.asyncio
+async def test_engine_pulls_the_delayed_show_as_mp3(client, db_session, _quiet, monkeypatch, tmp_path):
+    import shutil
+    import subprocess
+
+    from app.config import settings
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    monkeypatch.setattr(settings, "PLAYOUT_ENGINE_TOKEN", "engine-secret")
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 1})
+    url = f"/api/v1/playout/{station.id}/live.mp3"
+    token = {"X-Playout-Token": "engine-secret"}
+
+    assert (await client.get(url)).status_code == 403                        # no token
+    assert (await client.get(url + "?token=engine-secret")).status_code == 403  # never from the address
+    r = await client.get(url, headers=token)
+    assert r.status_code == 204 and r.headers["cache-control"] == "no-store"  # no show heard
+
+    relay = live_shows_ws.live_relay
+    await relay.set_on_air(str(station.id), str(show.id), delay=1.0)
+    air = relay.airs[str(station.id)]
+    assert (await client.get(url, headers=token)).status_code == 204          # delay still filling
+
+    async def host():
+        for i in range(80):  # 4 s of a 440 Hz "voice", then the show ends
+            n0 = i * STEP
+            await relay.audio(str(station.id), (8000 * np.sin(2 * np.pi * 440 * (n0 + np.arange(STEP)) / RATE)).astype("<i2").tobytes())
+            await asyncio.sleep(0.05)
+        await relay.set_on_air(str(station.id), None)
+
+    talking = asyncio.ensure_future(host())
+    while not air.listening:
+        await asyncio.sleep(0.02)
+    r = await asyncio.wait_for(client.get(url, headers=token), 15)             # ends by itself with the show
+    await talking
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg"
+    assert r.headers["cache-control"] == "no-store" and r.headers["x-accel-buffering"] == "no"
+    assert r.headers["content-encoding"] == "identity"   # not gzipped: gzip delivers it in lumps
+    assert air.taps == set()
+
+    assert r.content[0] == 0xFF and r.content[1] & 0xE0 == 0xE0   # starts with audio, no tag before it
+    mp3 = tmp_path / "live.mp3"
+    mp3.write_bytes(r.content)
+    info = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_name,sample_rate,channels,bit_rate",
+                           "-of", "default=nw=1", str(mp3)], capture_output=True, text=True).stdout
+    assert "codec_name=mp3" in info and "sample_rate=44100" in info and "channels=2" in info and "bit_rate=192000" in info
+    pcm = np.frombuffer(subprocess.run(["ffmpeg", "-v", "error", "-i", str(mp3), "-f", "s16le", "-ac", "1", "-ar", str(RATE), "-"],
+                                       capture_output=True).stdout, dtype="<i2")
+    assert 2.0 * RATE <= len(pcm) <= 4.6 * RATE          # what was heard from the moment the engine joined
+    assert _tone_power(pcm, 440) > 1000 and _tone_power(pcm, 440) > 20 * _tone_power(pcm, 620)

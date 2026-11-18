@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
-import { approveCall, rejectCall, putCallerOnAir, endCall, updateCallInfo } from '../../api/liveShows';
+import { approveCall, rejectCall, putCallerOnAirAsking, endCall, updateCallInfo } from '../../api/liveShows';
 import type { CallInRequest } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 
@@ -31,11 +31,8 @@ export default function CallScreener() {
 
   const handlePutOnAir = async (callId: string) => {
     if (!showId) return;
-    try {
-      await putCallerOnAir(showId, callId);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Failed — another caller may be on air');
-    }
+    const problem = await putCallerOnAirAsking(showId, callId);
+    if (problem) alert(problem);
   };
 
   const handleEndCall = async (callId: string) => {

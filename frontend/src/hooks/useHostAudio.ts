@@ -7,6 +7,9 @@ interface UseHostAudioReturn {
   stopRecording: () => void;
   audioLevel: number;
   error: string | null;
+  /** Cough button: while true the microphone is sent as silence (callers still go out) */
+  muted: boolean;
+  setMuted: (on: boolean) => void;
 }
 
 /**
@@ -29,6 +32,9 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const [muted, setMutedState] = useState(false);
+  const mutedRef = useRef(false);
+  const setMuted = useCallback((on: boolean) => { mutedRef.current = on; setMutedState(on); }, []);
 
   const updateLevel = useCallback(() => {
     if (!analyserRef.current) return;
@@ -97,6 +103,8 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
         const resample = makeResampler(ctx.sampleRate);
         processor.onaudioprocess = (e) => {
           const pcm = resample(e.inputBuffer.getChannelData(0));
+          // Muted: keep sending frames (they are the clock that carries the callers), but silent
+          if (mutedRef.current) pcm.fill(0);
           if (ws.readyState === WebSocket.OPEN && pcm.length) ws.send(pcm.buffer);
         };
         source.connect(processor);
@@ -152,6 +160,8 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     analyserRef.current = null;
     setIsRecording(false);
     setAudioLevel(0);
+    mutedRef.current = false;
+    setMutedState(false);
   }, []);
 
   // Cleanup on unmount
@@ -161,5 +171,5 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     };
   }, [stopRecording]);
 
-  return { isRecording, startRecording, stopRecording, audioLevel, error };
+  return { isRecording, startRecording, stopRecording, audioLevel, error, muted, setMuted };
 }

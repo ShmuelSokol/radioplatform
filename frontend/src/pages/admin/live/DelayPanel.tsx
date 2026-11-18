@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { dumpShow, getAirStatus, setShowDelay } from '../../../api/liveShows';
-import type { AirStatus } from '../../../api/liveShows';
+import { dumpShow, getAirStatus, getDumpAudio, getShowDumps, setShowDelay } from '../../../api/liveShows';
+import type { AirStatus, DumpRecord } from '../../../api/liveShows';
 
 /**
  * The broadcast delay of a live show: how many seconds are waiting between the
@@ -41,6 +41,48 @@ export default function DelayPanel({ showId, air: pushed, lastDump, callerOnAir,
   const [length, setLength] = useState<number | null>(null);
   const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // The dump log: every Dump of this show, with a recording of what was cut
+  const [dumps, setDumps] = useState<DumpRecord[]>([]);
+  const [playing, setPlaying] = useState<string | null>(null);
+  const [logNote, setLogNote] = useState<string | null>(null);
+  const player = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
+  const loadDumps = useCallback(() => {
+    if (showId) getShowDumps(showId).then(setDumps).catch(() => {});
+  }, [showId]);
+  const dumpAt = lastDump?.at;
+  useEffect(() => {
+    loadDumps();
+    // The recording is stored a moment after the cut
+    const id = setTimeout(loadDumps, 1500);
+    return () => clearTimeout(id);
+  }, [loadDumps, dumpAt]);
+  const stopPlaying = useCallback(() => {
+    if (player.current) {
+      player.current.audio.pause();
+      URL.revokeObjectURL(player.current.url);
+      player.current = null;
+    }
+    setPlaying(null);
+  }, []);
+  useEffect(() => stopPlaying, [stopPlaying]);
+  const playDump = async (d: DumpRecord) => {
+    if (!showId) return;
+    if (playing === d.id) { stopPlaying(); return; }
+    stopPlaying();
+    setLogNote(null);
+    try {
+      const url = URL.createObjectURL(await getDumpAudio(showId, d.id));
+      const audio = new Audio(url);
+      player.current = { audio, url };
+      audio.onended = stopPlaying;
+      setPlaying(d.id);
+      await audio.play();
+    } catch {
+      stopPlaying();
+      setLogNote('That recording could not be played. Try again in a moment.');
+    }
+  };
+
   // The server pushes while on air; before that (and if a push is missed) ask
   useEffect(() => {
     if (!showId) return;
@@ -77,13 +119,15 @@ export default function DelayPanel({ showId, air: pushed, lastDump, callerOnAir,
       setFetched(r.air);
       setFlash(true);
       setTimeout(() => setFlash(false), 1200);
+      loadDumps();
+      setTimeout(loadDumps, 1500);
       say(`Dumped ${r.dumped_seconds.toFixed(1)} s. Listeners never heard it.${r.dropped_callers.length ? ' The caller was taken off.' : ''}`);
     } catch (err: any) {
       say(err?.response?.data?.detail || 'Dump failed', true);
     } finally {
       setBusy(false);
     }
-  }, [showId, busy, say]);
+  }, [showId, busy, say, loadDumps]);
 
   // Shift+D dumps from anywhere on the page (not while typing in a box)
   useEffect(() => {
@@ -195,6 +239,36 @@ export default function DelayPanel({ showId, air: pushed, lastDump, callerOnAir,
       {lastDump && !message && (
         <div className="mt-2 text-[11px] text-gray-400" data-testid="last-dump">
           Last dump: {lastDump.seconds.toFixed(1)} s by {lastDump.by} at {new Date(lastDump.at).toLocaleTimeString()}
+        </div>
+      )}
+
+      {dumps.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-[#2a2a5e]" data-testid="dump-log">
+          <div className="text-[11px] text-gray-400 uppercase mb-1">Dump log ({dumps.length})</div>
+          <ul className="space-y-1 max-h-40 overflow-y-auto">
+            {dumps.map(d => (
+              <li key={d.id} className="flex items-center gap-2 text-[11px] text-gray-300" data-testid="dump-row">
+                <button
+                  onClick={() => playDump(d)}
+                  disabled={!d.has_audio}
+                  data-testid="dump-play"
+                  aria-label={playing === d.id ? 'Stop the recording' : 'Play what was cut'}
+                  title={`Private: ${d.heard_seconds.toFixed(0)} s that listeners heard, a pause, then the ${d.cut_seconds.toFixed(1)} s that were cut`}
+                  className="bg-cyan-800 hover:bg-cyan-700 text-cyan-200 px-2 py-1 rounded min-w-[52px] transition disabled:opacity-50"
+                >
+                  {playing === d.id ? 'Stop' : 'Play'}
+                </button>
+                <span className="min-w-0 flex-1 truncate">
+                  {d.dumped_at ? new Date(d.dumped_at).toLocaleTimeString() : ''} · {d.cut_seconds.toFixed(1)} s cut · {d.by || 'someone'}
+                  {d.caller_name ? ` · dropped ${d.caller_name}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="text-[11px] text-gray-500 mt-1">
+            Play is private to this computer. You hear the last seconds that aired, then what was cut.
+          </div>
+          {logNote && <div className="text-[11px] text-red-400 mt-1" role="status">{logNote}</div>}
         </div>
       )}
 

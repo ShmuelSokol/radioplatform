@@ -50,7 +50,8 @@ QUIET_SHARE = 0.15          # ... and so is anything under 15 % of the recent sp
 EDGE = int(RATE * 0.01)     # 10 ms fades where a Dump cut the audio
 EXIT_BEFORE_END = 180.0     # seconds before a show's hard stop the delay winds down
 CUSHION = int(RATE * 0.3)   # least audio waiting before it plays out (smooth, no stutter)
-STATUS_EVERY = 0.5          # seconds between status messages
+STATUS_EVERY = 0.5
+HEARD_KEPT = int(RATE * 6)    # what aired just before a Dump, kept for the dump log          # seconds between status messages
 
 
 def settings_for(config: dict | None) -> tuple[float, float, str]:
@@ -126,6 +127,19 @@ def _join(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.clip(out, -32768, 32767).astype(np.int16)
 
 
+def _end_tap(tap: asyncio.Queue) -> None:
+    """Tell a tap's reader the show is over, making room for the word if it is full."""
+    while True:
+        try:
+            tap.put_nowait(None)
+            return
+        except asyncio.QueueFull:
+            try:
+                tap.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+
+
 @dataclass
 class Insert:
     """A clip that airs at a clock time (epoch seconds), the host waiting meanwhile."""
@@ -194,6 +208,9 @@ class LiveAir:
         self.stats = AirStats()
         self.task: asyncio.Task | None = None
         self._status_at = 0.0
+        self.taps: set[asyncio.Queue] = set()
+        self.aired = np.zeros(0, dtype=np.int16)   # the last few seconds listeners heard
+        self.last_dump: tuple[np.ndarray, np.ndarray] | None = None
         self.debt = 0.0             # samples of stretching owed while speech passes untouched
         self._close_done = False
 
@@ -263,6 +280,9 @@ class LiveAir:
         k = min(self.count, int(size * RATE))
         if k <= 0:
             return 0.0
+        # Kept for the dump log: what was cut, and what listeners heard just before
+        idx = (self.read + self.count - k + np.arange(k)) % CAPACITY
+        self.last_dump = (self.aired.copy(), self.ring[idx].copy())
         self.count -= k
         # A short fade on the end of what stays, and on the start of what comes next
         tail = min(EDGE, self.count)
@@ -433,7 +453,36 @@ class LiveAir:
             out = np.concatenate((out, part))
             if len(part) < need:
                 break  # caught up, or the end of the show
+        self._remember(out)
         return out
+
+    def _remember(self, out: np.ndarray) -> None:
+        self.aired = np.concatenate((self.aired, out))[-HEARD_KEPT:]
+        if self.taps and len(out):
+            data = out.astype("<i2").tobytes()
+            for tap in list(self.taps):
+                try:
+                    tap.put_nowait(data)
+                except asyncio.QueueFull:
+                    self.taps.discard(tap)   # a reader that fell 20 s behind is let go
+                    _end_tap(tap)
+
+    def tap(self) -> asyncio.Queue:
+        """A copy of everything listeners hear from now on, as PCM chunks; None = over.
+        (The playout engine's stream takes the show from here: /playout/{id}/live.mp3.)"""
+        queue: asyncio.Queue = asyncio.Queue(maxsize=400)
+        if self.closed:
+            queue.put_nowait(None)
+        else:
+            self.taps.add(queue)
+        return queue
+
+    def untap(self, queue: asyncio.Queue) -> None:
+        self.taps.discard(queue)
+
+    def passed(self, frame: bytes) -> None:
+        """A frame that went straight to listeners (no delay): remembered like the rest."""
+        self._remember(np.frombuffer(frame[: len(frame) // 2 * 2], dtype="<i2"))
 
     def drained(self) -> bool:
         return self.finishing and self.count == 0 and self.current is None
@@ -479,6 +528,9 @@ class LiveAir:
             return
         self._close_done = True
         self.closed = True
+        for tap in list(self.taps):
+            _end_tap(tap)
+        self.taps.clear()
         self.mode = "off"
         if self.listening:
             self.listening = False
