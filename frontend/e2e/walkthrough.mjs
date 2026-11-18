@@ -113,9 +113,35 @@ function finding(station, route, step, kind, text, shot) {
   console.log(`FINDING [${station} ${route} / ${step}] ${kind}: ${text}${shot ? '  (' + shot + ')' : ''}`);
 }
 
+// ROLE=manager|dj|viewer|sponsor walks as that role (the seed makes one sign-in per role).
+// A page closed to the role may send it away; a page that opens must work for it: a
+// control that is offered and then refused, or change buttons beside "View only", are
+// findings (PC, 2026-11-18: a viewer's schedule blocks page showed New Block, Edit, Delete).
+const ROLE = (process.env.ROLE || 'admin').toLowerCase();
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || '';
+const ROLE_EMAIL = ROLE === 'admin' ? ADMIN_EMAIL : (ADMIN_EMAIL.includes('admin') ? ADMIN_EMAIL.replace('admin', ROLE) : `${ROLE}-${ADMIN_EMAIL}`);
+const SPONSOR_ROUTES = ['/sponsor/dashboard', '/sponsor/campaigns', '/sponsor/billing', '/sponsor/wording'];
+
+/** Change buttons in the page body while the page says "View only". */
+async function offeredWhileViewOnly(page) {
+  return page.evaluate(() => {
+    const badge = [...document.querySelectorAll('main *, [data-testid]')].some((el) => el.children.length === 0 && /^\s*View only\s*$/i.test(el.textContent || ''));
+    if (!badge) return [];
+    const out = [];
+    for (const el of document.querySelectorAll('main button, main a[class*="bg-"], main input[type=submit]')) {
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      const r = el.getBoundingClientRect(); const st = getComputedStyle(el);
+      if (r.width < 4 || r.height < 4 || st.visibility === 'hidden' || st.opacity === '0' || st.pointerEvents === 'none') continue;
+      const name = (el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
+      if (/^(\+ ?)?(new|add|edit|del|delete|remove|save|upload|create|rename|approve|reject|resolve|disable|enable|publish|turn (on|off)|go live)\b/i.test(name)) out.push(name.slice(0, 30));
+    }
+    return [...new Set(out)];
+  });
+}
+
 async function loginApi() {
   const r = await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: process.env.E2E_ADMIN_EMAIL, password: process.env.E2E_ADMIN_PASS }) });
+    body: JSON.stringify({ email: ROLE_EMAIL, password: process.env.E2E_ADMIN_PASS }) });
   if (!r.ok) throw new Error(`login failed: ${r.status}`);
   return r.json();
 }
@@ -319,12 +345,17 @@ async function restore(page, route) {
 async function walkPage(page, guard, st, route) {
   await open(page, route);
   if (new URL(page.url()).pathname !== route) {
+    if (ROLE !== 'admin') { console.log(`     ${st.tag} ${route}: closed to ${ROLE} (sent to ${new URL(page.url()).pathname})`); return { pressed: 0, skipped: [], total: 0, closed: true }; }
     finding(st.tag, route, 'open', 'did not open', `landed on ${new URL(page.url()).pathname}`, await shoot(page, `${st.tag}${route}-redirect`));
     return { pressed: 0, skipped: [], total: 0 };
   }
   await lookAt(page, guard, st, route, 'open');
+  if (ROLE !== 'admin') {
+    const offered = await offeredWhileViewOnly(page);
+    if (offered.length) finding(st.tag, route, `open as ${ROLE}`, 'says "View only" but offers change buttons', offered.slice(0, 10).join('; '), await shoot(page, `${st.tag}${route}-view-only-${ROLE}`));
+  }
   await reachAt(page, st, route, `${WALK_SIZE.width}x${WALK_SIZE.height}`);
-  for (const size of SIZES) {
+  for (const size of (ROLE === 'admin' ? SIZES : [])) {
     await page.setViewportSize({ width: size.width, height: size.height });
     await touch(page, true);   // the site's phone rules are for touch screens (pointer: coarse)
     await open(page, route);
@@ -462,8 +493,8 @@ async function main() {
     guard.allow(/warning toast: (HS|Spots mode) is off/, 'switching a station mode off says so in amber on purpose');
     guard.allow(/You cannot disable your own account|PUT .*\/users\/[0-9a-f-]+$|status of 400 .*\/users\//, 'the walk is signed in as the only admin: Disable on itself is refused, and the page says so');
     guard.allow(/preview-weather|Could not load the weather preview/, 'no voice service on the test server');
-    await dragInQueue(page, guard, st).catch((e) => finding(st.tag, '/admin/dashboard', 'drag', 'test error', e.message, ''));
-    for (const route of ROUTES) {
+    if (ROLE === 'admin') await dragInQueue(page, guard, st).catch((e) => finding(st.tag, '/admin/dashboard', 'drag', 'test error', e.message, ''));
+    for (const route of (ROLE === 'sponsor' ? [...SPONSOR_ROUTES, '/admin/dashboard'] : ROUTES)) {
       if (ONLY.length && !ONLY.includes(route)) continue;
       const before = findings.length;
       let res;

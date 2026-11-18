@@ -74,12 +74,60 @@ async def ensure_tables():
         logger.exception("DATABASE SETUP FAILED: tables were not created; /health will report 'starting'")
 
 
+def model_enum_labels() -> dict[str, list[str]]:
+    """Every enum type of the models with the labels SQLAlchemy sends (member NAMES)."""
+    from sqlalchemy import Enum as SAEnum
+
+    from app.db.base import Base
+
+    labels: dict[str, list[str]] = {}
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            kind = column.type
+            if isinstance(kind, SAEnum) and kind.name:
+                known = labels.setdefault(kind.name, [])
+                known += [label for label in kind.enums if label not in known]
+    return labels
+
+
+async def add_missing_enum_labels(raw_conn) -> list[str]:
+    """Adds the labels a database's enum types lack (asyncpg connection, autocommit).
+
+    A member added to a Python enum after its type was created is missing from the
+    database until this runs: 'DJ' was once added as 'dj', so creating a DJ user
+    failed on production only (the tests' SQLite has no enum types). Returns what
+    it added, as "type.LABEL".
+    """
+    added = []
+    for name, wanted in sorted(model_enum_labels().items()):
+        rows = await raw_conn.fetch(
+            "SELECT enumlabel FROM pg_enum WHERE enumtypid = to_regtype($1)::oid", name)
+        have = {r["enumlabel"] for r in rows}
+        if not have:
+            continue  # the type does not exist yet: create_all makes it whole
+        for label in wanted:
+            if label in have:
+                continue
+            safe = label.replace("'", "''")
+            try:
+                await raw_conn.execute(f"ALTER TYPE {name} ADD VALUE IF NOT EXISTS '{safe}'")
+                added.append(f"{name}.{label}")
+            except Exception as e:
+                logger.warning(f"Enum label {name}.{label} not added: {e}")
+    if added:
+        logger.info("Enum labels added: %s", ", ".join(added))
+    return added
+
+
 async def _add_missing_columns(engine):
     """Add columns that were added to models but missing from existing DB tables."""
 
     # ALTER TYPE ADD VALUE cannot run inside a transaction — use autocommit
     enum_migrations = [
         "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'SPONSOR'",
+        # The model stores a role by its NAME. The DJ role was first added as 'dj', which
+        # the code never writes, so creating a DJ user failed (production, 2026-11-18).
+        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'DJ'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'LIVE_SHOW'",
         "ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'SILENCE'",
         # Live show enum types (created by create_all, but safe to re-run)
@@ -103,6 +151,10 @@ async def _add_missing_columns(engine):
                     await raw_conn.execute(sql)
                 except Exception as e:
                     logger.warning(f"Enum migration skipped ({sql[:50]}...): {e}")
+            try:
+                await add_missing_enum_labels(raw_conn)
+            except Exception as e:
+                logger.warning(f"Enum labels not checked: {e}")
         finally:
             await raw_conn.close()
     except Exception as e:
@@ -189,8 +241,6 @@ async def _add_missing_columns(engine):
         # Listener sessions index for fast heartbeat lookups
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_heartbeat ON listener_sessions (last_heartbeat)",
         "CREATE INDEX IF NOT EXISTS ix_listener_sessions_started ON listener_sessions (started_at)",
-        # DJ role enum value
-        "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'dj'",
         # User activity tracking
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS intro_seconds DOUBLE PRECISION",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
