@@ -55,13 +55,11 @@ async def _connect(*args, **kwargs):
     return conn
 
 
-# The first statement that touches an enum or JSON column on a connection makes
-# asyncpg ask the database what those types are (one big catalog query). The
-# planner prices that query high enough for JIT compilation, which costs far
-# more than running it: 0.6 to 2 s for "SELECT role FROM users LIMIT 1" on a new
-# connection (2026-11-18) while SELECT 1 took 3 ms. Nothing this app runs is
-# long enough to gain from JIT, so it is off for the app's connections.
-_SERVER_SETTINGS = {"jit": "off"}
+# No server_settings at connect: the Supabase pooler refuses any startup
+# parameter it does not know ("unsupported startup parameter: jit" stopped every
+# connection of the 11:14Z deploy on 2026-11-18). A session SET would not stick
+# either, since the pooler hands each transaction to any database connection.
+# tests/test_pooler_startup.py keeps it that way.
 
 # The pool keeps this many connections open. With the default (5) every request
 # beyond five at once opened a connection of its own, about 2 s each, and threw it
@@ -77,7 +75,7 @@ engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.APP_DEBUG,
     # A replaced connection pays for looking up the enum and JSON types again
-    # (see _SERVER_SETTINGS), so connections are kept half an hour, not 5 minutes.
+    # (0.6 to 2 s on the live database), so connections are kept half an hour.
     # One that went stale meanwhile is caught by the ping after idle below.
     pool_recycle=1800,
     # Reuse the most recently used connection so it stays warm and the rest age out.
@@ -86,7 +84,7 @@ engine = create_async_engine(
     connect_args={
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
-        **({"async_creator_fn": _connect, "server_settings": _SERVER_SETTINGS} if _POSTGRES else {}),
+        **({"async_creator_fn": _connect} if _POSTGRES else {}),
     },
 )
 
