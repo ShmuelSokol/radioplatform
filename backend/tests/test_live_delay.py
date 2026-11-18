@@ -1150,3 +1150,41 @@ async def test_pages_are_told_when_the_stream_carries_the_show_and_can_decline_t
         relay.listeners.pop(station, None)
         relay.no_audio.discard(stream_page)
         playout_engine.reset_state(station)
+
+
+@pytest.mark.asyncio
+async def test_engine_quieted_for_a_show_about_to_be_heard_is_not_told_the_show_is_over(db_session, _quiet, monkeypatch):
+    """The stream goes quiet a second before the host is heard. The engine then asks for
+    its next item with live=1 while the station is not the show's yet: answering "the
+    show is over" brought the song back for 2 s where the show should start."""
+    from app.config import settings
+    from app.services import playout_engine
+
+    station, show, *_ = await _station(db_session, {"live_delay_seconds": 6})
+    for name, value in (("PLAYOUT_ENGINE_ENABLED", True), ("PLAYOUT_ENGINE_STATION_ID", str(station.id)),
+                        ("PLAYOUT_ENGINE_URL", "http://engine.test/control"), ("PLAYOUT_ENGINE_TOKEN", "t")):
+        monkeypatch.setattr(settings, name, value)
+    told = []
+
+    async def live(station_id, on):
+        told.append(on)
+        return True
+
+    monkeypatch.setattr(playout_engine, "engine_live", live)
+    relay = live_shows_ws.live_relay
+    sid = str(station.id)
+    relay.quieted_early.discard(sid)
+    assert playout_engine._show_about_to_be_heard(sid) is False
+    await relay.set_on_air(sid, str(show.id), delay=6.0)
+    relay.quieted_early.add(sid)                      # what on_soon does
+    try:
+        assert playout_engine._show_about_to_be_heard(sid) is True
+        playout_engine.get_state(station.id).engine_proto = 5
+        got = await playout_engine.handle_next(db_session, station.id, [], proto=5, engine_live_on=True)
+        await asyncio.sleep(0)
+        assert got is None and told == []             # nothing handed out, and no "live off"
+        # The show ended in its pre-roll: now the engine is told
+        await relay.airs[sid].stop()
+        assert playout_engine._show_about_to_be_heard(sid) is False
+    finally:
+        relay.quieted_early.discard(sid)

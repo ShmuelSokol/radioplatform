@@ -361,7 +361,9 @@ async def hold_for_timed_items(station_id: str, air) -> None:
                 within = max(0.0, air.target - air.buffered) + 2.0 + EARLY_START
                 end = await timed_item_ends(db, uuid.UUID(str(station_id)), now, within)
                 await db.rollback()
-                if end is not None:
+                if end is not None and not air.told_soon:
+                    # (Not once the stream server was told to go quiet: holding the
+                    # show longer then would leave the stream silent over the item)
                     # The stream server is told to go quiet SOON before the show is
                     # heard, so that word leaves as the item ends, not during it
                     from app.services.live_air import SOON
@@ -616,27 +618,30 @@ async def reject_call(
     return call
 
 
+MAX_CALLERS_ON_AIR = 4
+
+
 async def put_caller_on_air(
     db: AsyncSession,
     show_id: UUID | str,
     call_id: UUID | str,
 ) -> CallInRequest | None:
-    """Put an approved caller on air. Only one caller can be on_air at a time."""
+    """Put an approved caller on air. Up to MAX_CALLERS_ON_AIR can be on air together
+    (the mix carries them all and each hears the host and the others); it was one."""
     from app.core.exceptions import ConflictError
-
-    # Check if another caller is already on air
-    existing = await db.execute(
-        select(CallInRequest).where(
-            CallInRequest.live_show_id == show_id,
-            CallInRequest.status == CallStatus.ON_AIR,
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise ConflictError("Another caller is already on air")
 
     call = await get_call(db, call_id)
     if not call:
         return None
+    on_air = (await db.execute(
+        select(CallInRequest.id).where(
+            CallInRequest.live_show_id == show_id,
+            CallInRequest.status == CallStatus.ON_AIR,
+            CallInRequest.id != call.id,
+        )
+    )).scalars().all()
+    if len(on_air) >= MAX_CALLERS_ON_AIR:
+        raise ConflictError(f"{MAX_CALLERS_ON_AIR} callers are on air already. Hold or end one first.")
 
     now = datetime.now(timezone.utc)
     call.status = CallStatus.ON_AIR

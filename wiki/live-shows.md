@@ -124,3 +124,13 @@ A deploy restarts the backend: every socket drops and the delay line (in memory)
 - Listener pages and caller pages reconnect by themselves (they did before).
 - Check: `ONLY=restart BACKEND_RESTART=<command> node e2e/live-delay.cjs <station id>` (local; measured 0.8 s from the server answering to the host being connected again).
 
+## Several callers on air
+
+Up to four callers can be on air together (`live_show_service.MAX_CALLERS_ON_AIR`; it was one, refused with 409). The mix in `StationLiveRelay.audio` always carried any number: listeners get host + all callers, the host hears the callers, each caller hears the host and the others but not themselves. Both screens list one card per caller on air, each with Hold and End Call. Put On Air stays enabled until four are on. **Next caller ends everyone on air** and brings on the approved caller who waited longest. Checks: `tests/test_live_caller_desk.py`, `ONLY=multi node e2e/live-delay.cjs <station id>`.
+
+## The second before the host is heard (engine stations)
+
+`on_soon` quiets the stream 1 s before first air (`quieted_early`). The engine then asks `/next` with `live=1` while the station is not the show's yet. `handle_next` used to answer that with "the show is over", which brought the song back for about 2 s where the show should start; now it hands out nothing while `_show_about_to_be_heard`. `hold_for_timed_items` no longer lengthens the hold once the stream was quieted.
+
+When the last words of a host who left have played out, `_host_gone_now` runs the host-gone check at once (from the air's `on_closed`) instead of waiting for the scheduler's 3 s pass.
+

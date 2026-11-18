@@ -12,6 +12,7 @@
  * Part H (ONLY=carts): carts on the Host Console (jingles played into the show).
  * Part I (ONLY=talk): talkback, the screener or host talking to a caller off the air.
  * Part J (ONLY=restart, with BACKEND_RESTART=<command>): the server restarts during a show.
+ * Part K (ONLY=multi): several callers on air together (up to four).
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
  * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
@@ -974,6 +975,107 @@ function hostMic(showId, token) {
         check('J8 20 s later the show is still on air (not handed back as "host gone")', ((await api('GET', `/stations/${STATION}`)).json.automation_config || {}).live_show_id === show.id && power(l2.since(t2 - 1500), 440) > 0.004);
         await api('POST', `/live-shows/${show.id}/end`);
       } finally {
+        await browser.close();
+      }
+    }
+    // ---------- Part K: several callers on air together ----------
+    if (!ONLY || ONLY === 'multi') {
+      await setConfig({ live_delay_seconds: 0, live_host_gone_seconds: 0 });
+      const browser = await chromium.launch();
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const open = async (url, opts = {}) => {
+        const page = await (await browser.newContext(opts)).newPage();
+        await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409|dynamically imported module|MIME type/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        page.on('dialog', (d) => { problems.push(`${url}: dialog "${d.message()}"`); d.dismiss(); });
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      const scriptCaller = async (name, f) => {
+        const r = await fetch(`${API}/call-in/${STATION}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, note: '' }) }).then((x) => x.json());
+        const c = { id: r.call_id || r.id, frames: [], sent: 0, ws: new WebSocket(`${API.replace(/^http/, 'ws')}/ws/live/call/${r.call_id || r.id}`) };
+        c.ws.binaryType = 'arraybuffer';
+        await new Promise((res) => { c.ws.onopen = () => { c.ws.send(JSON.stringify({ type: 'auth', token: r.token })); res(); }; });
+        c.ws.onmessage = (e) => { if (typeof e.data !== 'string') c.frames.push({ at: Date.now(), pcm: new Int16Array(e.data) }); };
+        const t0 = Date.now();
+        c.timer = setInterval(() => { if (c.ws.readyState !== 1) return; const due = Math.floor((Date.now() - t0) / 1000 * RATE) - c.sent; if (due > 0) { c.ws.send(tone(f, due, c.sent).buffer); c.sent += due; } }, 40);
+        c.close = () => { clearInterval(c.timer); c.ws.close(); };
+        return c;
+      };
+      const heard = (l, f, from, to) => power(l.frames.filter((x) => x.at >= from && x.at < to).flatMap((x) => Array.from(x.pcm)), f);
+      let mic; const lines = [];
+      try {
+        const show = await newShow('Delay test K');
+        await api('POST', `/live-shows/${show.id}/start`);
+        const statusOf = async (id) => ((await api('GET', `/live-shows/${show.id}/calls`)).json.calls.find((c) => c.id === id) || {}).status;
+        const l = listener();
+        mic = hostMic(show.id, token);
+        await mic.ready;
+        const a = await scriptCaller('Avi from Lakewood', 700); lines.push(a);
+        const b = await scriptCaller('Berel from Jerusalem', 900); lines.push(b);
+        const screener = await open(`/admin/live/${show.id}/screen`, { viewport: { width: 1440, height: 900 } });
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        for (const name of ['Avi from Lakewood', 'Berel from Jerusalem']) {
+          await screener.locator('div.rounded-lg').filter({ hasText: name }).last().getByRole('button', { name: 'Approve' }).click();
+          await sleep(500);
+        }
+        const approved = (page, name) => page.locator('div.rounded, div.rounded-lg').filter({ hasText: name }).last();
+        await approved(screener, 'Avi from Lakewood').getByRole('button', { name: 'Put On Air' }).click();
+        await T(screener, 'on-air-card').first().waitFor({ timeout: 5000 });
+        const second = approved(screener, 'Berel from Jerusalem').getByRole('button', { name: 'Put On Air' });
+        check('K1 with one caller on air, Put On Air for a second is not greyed out', await second.isEnabled() && /together with the caller already there/.test(await second.getAttribute('title') || ''), await second.getAttribute('title'));
+        await second.click();
+        await screener.getByText('On Air (2 together)').waitFor({ timeout: 5000 });
+        await host.getByText('Caller On Air (2 together)').waitFor({ timeout: 5000 });
+        check('K2 both screens show two callers on air, each with its own Hold and End Call', await T(screener, 'on-air-card').count() === 2 && await T(host, 'on-air-card').count() === 2 && await T(host, 'hold-button').count() === 2 && await host.getByRole('button', { name: 'End Call' }).count() === 2);
+        await shot(host, 'host-two-callers');
+        await shot(screener, 'screener-two-callers');
+        await sleep(2500);
+        const t1 = Date.now();
+        const lv = [440, 700, 900].map((f) => heard(l, f, t1 - 1500, t1));
+        check('K3 listeners hear the host and both callers', lv.every((v) => v > 0.004), lv.map((v) => v.toFixed(4)).join(' / '));
+        check('K4 each caller hears the host and the other caller, not themselves', heard(a, 440, t1 - 1500, t1) > 0.004 && heard(a, 900, t1 - 1500, t1) > 0.004 && heard(a, 700, t1 - 1500, t1) < 0.001 && heard(b, 700, t1 - 1500, t1) > 0.004 && heard(b, 900, t1 - 1500, t1) < 0.001,
+          `A hears 440 ${heard(a, 440, t1 - 1500, t1).toFixed(4)} 900 ${heard(a, 900, t1 - 1500, t1).toFixed(4)} own ${heard(a, 700, t1 - 1500, t1).toFixed(4)}`);
+
+        // Hold one of the two from the Host Console: the other stays on air
+        await T(host, 'on-air-card').filter({ hasText: 'Avi from Lakewood' }).getByTestId('hold-button').click();
+        await host.getByText('Caller On Air (2 together)').waitFor({ state: 'detached', timeout: 5000 });
+        await sleep(2000);
+        const t2 = Date.now();
+        check('K5 Hold on one: that caller is off the air, the other is still heard', await statusOf(a.id) === 'approved' && await statusOf(b.id) === 'on_air' && heard(l, 700, t2 - 1200, t2) < 0.001 && heard(l, 900, t2 - 1200, t2) > 0.004 && await T(host, 'on-air-card').count() === 1);
+
+        // The limit is four
+        const more = [];
+        for (const [n, f] of [['Chaim', 1100], ['Dovid', 1300], ['Eli', 1500]]) { const c = await scriptCaller(n, f); lines.push(c); more.push(c); await api('POST', `/live-shows/${show.id}/calls/${c.id}/approve`); }
+        await api('POST', `/live-shows/${show.id}/calls/${a.id}/on-air`);
+        await api('POST', `/live-shows/${show.id}/calls/${more[0].id}/on-air`);
+        await api('POST', `/live-shows/${show.id}/calls/${more[1].id}/on-air`);
+        await host.getByText('Caller On Air (4 together)').waitFor({ timeout: 6000 });
+        const fifth = approved(host, 'Eli').getByRole('button', { name: 'Put On Air' });
+        const refused = await api('POST', `/live-shows/${show.id}/calls/${more[2].id}/on-air`);
+        check('K6 four on air: a fifth is refused and its button is off, saying why', await fifth.isDisabled() && /4 callers are on air already/.test(await fifth.getAttribute('title') || '') && refused.status === 409, `${refused.status} ${await fifth.getAttribute('title')}`);
+        check('K7 only the last card carries Next caller', await T(host, 'next-caller-button').count() === 1 && /Next caller: Eli/.test(await T(host, 'next-caller-button').innerText()));
+        await shot(host, 'host-four-callers');
+        const phone = await open(`/admin/live/${show.id}/host`, { ...devices['iPhone 13'] });
+        await phone.getByText('Caller On Air (4 together)').waitFor({ timeout: 15000 });
+        check('K8 phone: four callers on air and nothing scrolls sideways', await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0 && await T(phone, 'on-air-card').count() === 4);
+        await shot(phone, 'host-four-callers-phone');
+
+        // Next caller ends everyone on air and brings the next one on
+        await T(host, 'next-caller-button').click();
+        await host.getByText('Caller On Air (4 together)').waitFor({ state: 'detached', timeout: 6000 });
+        await sleep(800);
+        const sts = [];
+        for (const c of [a, b, more[0], more[1], more[2]]) sts.push(await statusOf(c.id));
+        check('K9 Next caller ends all four and puts the next caller on air', sts.join(',') === 'completed,completed,completed,completed,on_air' && await T(host, 'on-air-card').count() === 1, sts.join(','));
+        check('K10 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        await api('POST', `/live-shows/${show.id}/end`);
+      } finally {
+        if (mic) mic.close();
+        for (const c of lines) c.close();
         await browser.close();
       }
     }

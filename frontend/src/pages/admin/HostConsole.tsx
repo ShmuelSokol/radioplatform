@@ -10,6 +10,8 @@ import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../..
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
 
+const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AIR)
+
 export default function HostConsole() {
   const { showId } = useParams<{ showId: string }>();
   const navigate = useNavigate();
@@ -77,7 +79,9 @@ export default function HostConsole() {
   }, [show?.status, hardStopped]);
 
   const currentShow = show || showData;
-  const onAirCaller = callers.find(c => c.status === 'on_air');
+  // Up to MAX_ON_AIR callers can be on air together; each hears the host and the others
+  const onAirCallers = callers.filter(c => c.status === 'on_air');
+  const anyOnAir = onAirCallers.length > 0;
   const approvedCallers = callers.filter(c => c.status === 'approved');
 
   const formatTime = (seconds: number | null): string => {
@@ -283,15 +287,15 @@ export default function HostConsole() {
               live={isRecording} playing={cartPlaying} onPlay={playCart} onStop={stopCart} />
           )}
 
-          <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={!!callers.find(c => c.status === 'on_air')} />
+          <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={anyOnAir} />
         </div>
 
         {/* Center: On-air caller */}
         <div className="space-y-4">
           <div className="bg-[#12123a] border border-[#2a2a5e] rounded-lg p-4">
-            <div className="text-[11px] text-gray-400 uppercase mb-3">Caller On Air</div>
-            {onAirCaller ? (
-              <div className="bg-red-950 border border-red-800 rounded-lg p-4" data-testid="on-air-card">
+            <div className="text-[11px] text-gray-400 uppercase mb-3">Caller On Air{onAirCallers.length > 1 ? ` (${onAirCallers.length} together)` : ''}</div>
+            {anyOnAir ? onAirCallers.map((onAirCaller, i) => (
+              <div key={onAirCaller.id} className="bg-red-950 border border-red-800 rounded-lg p-4 mb-2" data-testid="on-air-card">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-red-300 font-bold text-lg">
                     {onAirCaller.caller_name || onAirCaller.caller_phone}
@@ -325,18 +329,18 @@ export default function HostConsole() {
                     End Call
                   </button>
                 </div>
-                {approvedCallers.length > 0 && (
+                {i === onAirCallers.length - 1 && approvedCallers.length > 0 && (
                   <button
                     onClick={handleNext}
                     data-testid="next-caller-button"
-                    title="Ends this call and puts the caller who waited longest on air"
+                    title="Ends every call on air and puts the caller who waited longest on air"
                     className="mt-2 w-full bg-green-800 hover:bg-green-700 text-green-200 px-3 py-3 rounded text-sm font-bold transition"
                   >
                     Next caller: {approvedCallers[0].caller_name || approvedCallers[0].caller_phone}
                   </button>
                 )}
               </div>
-            ) : (
+            )) : (
               <div className="text-gray-600 text-center py-8 text-sm">
                 No caller on air
               </div>
@@ -373,7 +377,8 @@ export default function HostConsole() {
                     </div>
                     <button
                       onClick={() => handlePutOnAir(caller.id)}
-                      disabled={!!onAirCaller}
+                      disabled={onAirCallers.length >= MAX_ON_AIR}
+                      title={anyOnAir ? (onAirCallers.length >= MAX_ON_AIR ? `${MAX_ON_AIR} callers are on air already` : 'Goes on air together with the caller already there') : undefined}
                       className="w-full bg-green-800 hover:bg-green-700 text-green-200 px-3 py-1.5 rounded text-[11px] transition disabled:opacity-50"
                     >
                       Put On Air
