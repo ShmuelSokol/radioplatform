@@ -6,6 +6,8 @@ import { useHostAudio } from '../../hooks/useHostAudio';
 import CartPanel from './live/CartPanel';
 import ChatPanel from './live/ChatPanel';
 import CohostPanel from './live/CohostPanel';
+import CameraPanel from './live/CameraPanel';
+import { useHostVideo } from '../../hooks/useHostVideo';
 import { useCohost } from '../../hooks/useCohost';
 import TalkButton, { TalkNote } from './live/TalkButton';
 import { useTalkback } from '../../hooks/useTalkback';
@@ -22,6 +24,7 @@ export default function HostConsole() {
   const navigate = useNavigate();
   const { show, callers, secondsRemaining, isConnected, air, lastDump, lastChat, cohosts } = useLiveShowWS(showId);
   const co = useCohost(showId);
+  const cam = useHostVideo(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
   const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying, reconnecting } = useHostAudio(showId);
@@ -33,6 +36,9 @@ export default function HostConsole() {
   const talk = useTalkback(showId, setTalking);
   useEffect(() => { setMuted(micOff || coughing || talking); }, [micOff, coughing, talking, setMuted]);
   useEffect(() => { if (!isRecording) { setMicOff(false); setCoughing(false); } }, [isRecording]);
+  // No picture without the sound: the camera stops with the microphone
+  const stopCam = cam.stop;
+  useEffect(() => { if (!isRecording) stopCam(); }, [isRecording, stopCam]);
   useEffect(() => {
     if (!isRecording) return;
     const typing = (e: KeyboardEvent) => {
@@ -367,6 +373,7 @@ export default function HostConsole() {
           </div>
           <ChatPanel showId={showId} lastChat={lastChat} />
           <CohostPanel showId={showId} co={co} named={cohosts} hosting={isRecording} />
+          <CameraPanel cam={cam} hosting={isRecording} delay={air?.delay ?? 0} />
         </div>
 
         {/* Right: Approved queue */}

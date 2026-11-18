@@ -175,3 +175,16 @@ The qnet skin greys every disabled button whatever its colour (`!important` in `
 - The co-host's microphone uses echo cancellation (they hear the show from the same page); a steady test tone comes through about ten times quieter than a scripted host's, a voice does not.
 - A page that is co-hosting cannot also start broadcasting as the host, and the other way round.
 - Tests `tests/test_live_cohost.py`, browser check `ONLY=cohost`.
+
+## Live video for people on the website
+
+The host can turn a camera on (**Start camera** on the Host Console, `pages/admin/live/CameraPanel.tsx`, `hooks/useHostVideo.ts`); people on the Listen page get **Watch the show live** (`hooks/useLiveVideo.ts`). The radio and the stream stay audio only.
+
+- The browser encodes the camera with WebCodecs (VP8, else H.264 Annex B; 640x360, 15 frames a second, about 500 kbit/s, a keyframe every 2 s) and sends one frame per message on `/ws/live/{show}/video` (sign-in as for the microphone; first byte 1 = keyframe). The server never decodes video.
+- **Same delay as the sound** (`services/live_video.py`): each frame is stamped with `LiveAir.fed` (samples written to the delay, less what Dumps took back) and let out when listeners hear that place (`fed - count`), on the pump's own send. So the picture stays with the voice while the delay builds, shrinks, or holds for a time check or the filler (the picture stands still meanwhile).
+- **Dump cuts the picture too**: `video.cut(air)` drops the frames of the cut seconds, and the camera page is asked for a keyframe (`{"type":"keyframe"}`); nothing is taken until one comes.
+- Pages watch on `/ws/live/station/{id}/watch` (public): `{"type":"video","on",codec,width,height}`, then frames. A page that joins waits for the next keyframe. At most 300 watchers a station. `live_state` on `/listen` has `video`, which is what makes the Listen page offer Watch; no video is loaded before it is pressed.
+- **Sound while watching** comes from the page's own live socket, not the station's stream, which runs seconds behind the picture (`useLiveAudio.setWatching`).
+- The camera needs the microphone on the show (4009 otherwise) and stops with it. One camera a show: a second page takes it over.
+- Not recorded: the archive keeps the sound only.
+- Tests `tests/test_live_video.py`; browser check `node e2e/live-video.cjs <station>` (Chromium's fake camera). Not yet seen on a real iPhone: Safari must decode VP8 through WebCodecs (16.4 or later); a browser that cannot says so and plays the sound as usual.

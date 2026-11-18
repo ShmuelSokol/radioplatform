@@ -206,6 +206,9 @@ class LiveAir:
         self.ring = np.zeros(CAPACITY, dtype=np.int16)
         self.read = 0
         self.count = 0
+        # Samples ever written, less what Dumps took back: `fed - count` is the place
+        # listeners hear now. The show's video rides on it (services/live_video.py).
+        self.fed = 0
         self.listening = False      # listeners hear this show now
         # A timed item (the time check) is on air on the station: the show waits for it
         # to end before listeners hear the host, and the host's words wait in the delay
@@ -236,6 +239,7 @@ class LiveAir:
         n = len(pcm)
         if n == 0:
             return
+        self.fed += n
         if n > CAPACITY:
             pcm = pcm[-CAPACITY:]
             n = CAPACITY
@@ -300,6 +304,7 @@ class LiveAir:
         idx = (self.read + self.count - k + np.arange(k)) % CAPACITY
         self.last_dump = (self.aired.copy(), self.ring[idx].copy())
         self.count -= k
+        self.fed -= k
         # A short fade on the end of what stays, and on the start of what comes next
         tail = min(EDGE, self.count)
         if tail:
