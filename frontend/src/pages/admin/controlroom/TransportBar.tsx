@@ -10,7 +10,11 @@ import type { CtlAsset } from './shared';
 interface StationOption { id: string; name: string }
 
 export interface TransportAudio {
+  /** Sound really comes out of this device (Listen was pressed and the browser lets it play). */
   audioReady: boolean;
+  /** Listen was pressed and the sound is on its way (the server stream is connecting). */
+  starting?: boolean;
+  /** The Listen button: switch sound on here. Must run inside the tap. */
   initAudio: () => void;
   volume: number;
   setVolume: (v: number) => void;
@@ -199,22 +203,38 @@ export default function TransportBar(p: Props) {
     </div>
   );
 
-  const sound = !audio.audioReady ? (
-    <button type="button" onClick={audio.initAudio} title="Hear the station in this browser"
-      className="qn-btn h-8 px-2.5 text-xs shrink-0">
-      🔊<span className="hidden sm:inline"> Listen</span>
-    </button>
-  ) : (
-    <div className="flex items-center gap-1.5 shrink-0">
-      <button type="button" onClick={audio.toggleMute} aria-label={audio.muted ? 'Unmute' : 'Mute'}
-        className="qn-btn h-8 w-8 flex items-center justify-center text-base">
-        {audio.muted ? '🔇' : audio.volume > 0.5 ? '🔊' : '🔉'}
-      </button>
-      <input type="range" min="0" max="1" step="0.01" value={audio.volume} aria-label="Monitor volume"
-        onChange={e => audio.setVolume(parseFloat(e.target.value))}
-        className="hidden 2xl:block w-24 h-1 accent-cyan-400 cursor-pointer" />
-    </div>
-  );
+  // Sound on this device. Off (or remembered but not yet allowed by the browser): one
+  // big button that says Listen, on a phone too. It used to be a 32 px speaker icon
+  // with no word on a phone, and with listening remembered the Mute control showed
+  // over silence (Shmuel, 2026-11-17: "where do I hit play?").
+  const soundControl = (size: 'desk' | 'phone' | 'land') => {
+    const big = size !== 'desk';
+    if (!audio.audioReady) {
+      return (
+        <button type="button" onClick={audio.initAudio} title="Hear the station on this device"
+          data-testid={audio.starting ? 'listen-starting' : 'listen-here'} data-listen-button
+          className={`qn-btn cr-listen shrink-0 font-bold ${big ? 'h-11 min-w-[128px] px-3 text-base' : 'h-8 px-2.5 text-xs'}`}>
+          {audio.starting ? <>🔊 Starting…<span className="sr-only"> Listen</span></> : '🔊 Listen'}
+        </button>
+      );
+    }
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        <button type="button" onClick={audio.toggleMute} aria-label={audio.muted ? 'Unmute' : 'Mute'}
+          data-testid="sound-control"
+          title={audio.muted ? 'Muted on this device. Press to hear the station again.' : 'The station is playing on this device. Press to mute it here.'}
+          className={`qn-btn flex items-center justify-center gap-1 ${big ? 'h-11 px-2.5 text-sm font-bold' : 'h-8 w-8 text-base'} ${audio.muted && big ? 'cr-listen' : ''}`}>
+          <span aria-hidden="true">{audio.muted ? '🔇' : audio.volume > 0.5 ? '🔊' : '🔉'}</span>
+          {big && <span>{audio.muted ? 'Muted' : 'Sound on'}</span>}
+        </button>
+        {!big && (
+          <input type="range" min="0" max="1" step="0.01" value={audio.volume} aria-label="Monitor volume"
+            onChange={e => audio.setVolume(parseFloat(e.target.value))}
+            className="hidden 2xl:block w-24 h-1 accent-cyan-400 cursor-pointer" />
+        )}
+      </div>
+    );
+  };
 
   const nowType = p.nowAsset?.category || p.nowAsset?.asset_type || '';
   const nextType = p.nextAsset?.category || p.nextAsset?.asset_type || '';
@@ -275,17 +295,7 @@ export default function TransportBar(p: Props) {
           </div>
           {p.pflDeck}
           <div className="flex items-center gap-1">
-            {!audio.audioReady ? (
-              <button type="button" onClick={audio.initAudio} title="Hear the station in this browser"
-                className="qn-btn h-11 px-2.5 text-xs shrink-0">
-                🔊 Listen
-              </button>
-            ) : (
-              <button type="button" onClick={audio.toggleMute} aria-label={audio.muted ? 'Unmute' : 'Mute'}
-                className="qn-btn h-11 w-11 flex items-center justify-center text-base shrink-0">
-                {audio.muted ? '🔇' : audio.volume > 0.5 ? '🔊' : '🔉'}
-              </button>
-            )}
+            {soundControl('land')}
             {p.liveShow && (
               <Link to={`/admin/live/${p.liveShow.id}/host`}
                 className="inline-flex items-center gap-1 h-11 px-2 bg-red-700 text-white text-xs font-bold shrink-0 max-w-[110px]"
@@ -356,7 +366,7 @@ export default function TransportBar(p: Props) {
           <div className="qn-digits text-xl lg:text-[34px]"><Clock tz={p.stationTz} /></div>
         </div>
         <div className="hidden lg:flex items-center gap-1.5 shrink-0">
-          {sound}
+          {soundControl('desk')}
           <FullscreenButton />
         </div>
       </div>
@@ -392,7 +402,7 @@ export default function TransportBar(p: Props) {
 
       {/* Phones and tablets: buttons and sound under the titles */}
       <div className="lg:hidden flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#c0c0c0]">
-        {sound}
+        {soundControl('phone')}
         <PlayoutBadge stationId={p.stationId} className="!text-black" />
         <div className="flex-1" />
         <TransportButtons p={p} stacked={false} />

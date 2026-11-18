@@ -335,6 +335,38 @@ scenario('stale', async (browser) => {
   await t.ctx.close();
 });
 
+// The real host answers a missing code file with the site's own page (200, text/html),
+// not a 404, and Safari words the failure "'text/html' is not a valid JavaScript MIME
+// type." (Shmuel's iPhone 2026-11-17: "Something went wrong" and a Reload button).
+for (const [how, answer] of [
+  ['the host answers with the site page (200 text/html)', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>KBR</title>' })],
+  ["Safari's wording of that failure", (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: `throw new TypeError("'text/html' is not a valid JavaScript MIME type.");` })],
+]) {
+  scenario('stale', async (browser) => {
+    const t = await openTab(browser, '/stations');
+    await t.page.route(/\/assets\/Archives-[^/]+\.js$/, answer);
+    await t.page.evaluate(() => { window.history.pushState({}, '', '/archives'); window.dispatchEvent(new PopStateEvent('popstate')); });
+    const reloaded = await t.waitReload(1, 3000);
+    const wrong = await t.page.getByText('Something went wrong').count();
+    check(`F-ACCESS-17 missing code file, ${how}: reloads onto the new release by itself, never "Something went wrong"`, reloaded && wrong === 0, `loads=${t.loads} box=${wrong}`);
+    await t.ctx.close();
+  });
+  scenario('stale', async (browser) => {
+    const t = await openTab(browser, '/stations');
+    // Sound stopped a moment ago: the error box shows first, and it must be the "site was updated" one
+    await t.page.evaluate(() => { const a = new Audio('/__tone/m1.wav'); a.muted = true; a.play().catch(() => {}); a.pause(); });
+    await t.page.route(/\/assets\/Archives-[^/]+\.js$/, answer);
+    await t.page.clock.pauseAt(await t.page.evaluate(() => Date.now() + 1000));
+    await t.page.evaluate(() => { window.history.pushState({}, '', '/archives'); window.dispatchEvent(new PopStateEvent('popstate')); });
+    const shown = await t.page.getByText('The site was updated while this tab was open').waitFor({ timeout: 5000 }).then(() => true, () => false);
+    const wrong = await t.page.getByText('Something went wrong').count();
+    await t.page.clock.runFor(400);
+    const reloaded = await t.waitReload(1, 3000);
+    check(`F-ACCESS-17 missing code file just after audio, ${how}: "The site was updated", then reloads by itself`, shown && wrong === 0 && reloaded, `shown=${shown} box=${wrong} loads=${t.loads}`);
+    await t.ctx.close();
+  });
+}
+
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 try {
   const queue = [...scenarios];
