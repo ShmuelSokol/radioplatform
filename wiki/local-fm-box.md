@@ -101,7 +101,9 @@ A start report the relay kept while the line was down goes up with `kept: true` 
 own `at`. `handle_started` then uses `at` as the time (only 2 s to 7 days in the past;
 a box with a wrong clock is not believed), so start times and the play log of an outage
 are the real ones. The engine's own reports also carry `at`; it is NOT used for them
-(no `kept`), so nothing changes on the stream server. Harness `local_box_offline`
+(no `kept`), so nothing changes on the stream server. When several kept reports go up
+together, all but the newest carry `more: true`: they are recorded (queue, play log)
+without a now-playing broadcast or a refill, so pages do not flick through the outage. Harness `local_box_offline`
 checks the time check is recorded at its second although it was reported later.
 
 ## Known gaps (next stages; nothing is installed at BMG yet)

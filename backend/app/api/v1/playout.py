@@ -32,6 +32,8 @@ class StartedReport(BaseModel):
     # Set by a local FM box's relay on a report it kept while its line was down: `at` is
     # then when the item really went on air
     kept: bool = False
+    # More kept reports follow at once: record this one quietly (no now-playing change)
+    more: bool = False
 
 
 def _require_engine(
@@ -145,4 +147,7 @@ async def started(
     db: AsyncSession = Depends(get_db),
 ):
     """The engine reports what just went on air."""
-    return await playout_engine.handle_started(db, station_id, body.entry_id, body.lane, at=body.at if body.kept else None)
+    return await playout_engine.handle_started(
+        db, station_id, body.entry_id, body.lane, at=body.at if body.kept else None,
+        quiet=body.kept and body.more,
+    )

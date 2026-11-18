@@ -840,13 +840,16 @@ async def _live_show_on(db: AsyncSession, station_id) -> bool:
 
 
 async def handle_started(
-    db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None
+    db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
+    quiet: bool = False,
 ) -> dict:
     """The engine reports what just went on air.
 
     `at` (epoch seconds) is passed only for a report a local FM box's relay kept while
     its line was down (`kept` in the report): the item went on air then, not now. The
-    engine's own reports also carry a time, which is not used: they arrive at once. Start times and the
+    engine's own reports also carry a time, which is not used: they arrive at once.
+    `quiet`: more kept reports follow at once; this one is recorded (queue, play log)
+    without telling the pages, so they do not flick through an outage's items. Start times and the
     play log use it, so what aired offline is recorded when it aired."""
     state = get_state(station_id)
     _touch(state)
@@ -974,6 +977,8 @@ async def handle_started(
     entry_pk = entry.id
     await db.commit()
 
+    if quiet:
+        return {"ok": True, "known": True}
     # Tell every client right away, then top the queue up
     try:
         from app.api.v1.queue import _broadcast_now_playing_entry, _is_blacked_out, _replenish_queue

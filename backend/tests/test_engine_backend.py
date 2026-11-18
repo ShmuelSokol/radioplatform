@@ -1471,13 +1471,15 @@ async def test_kept_start_reports_are_recorded_when_they_aired(client, db_sessio
     each with the time the item went on air (`at`). Start times and the play log use
     that time, not the time the report arrived; a time in the future or absurdly old
     is not believed. The engine's own reports carry no `at` and are unchanged."""
-    station, entries, _, _ = eng
+    station, entries, _, calls = eng
     base = datetime.now(UTC) - timedelta(minutes=10)
     url = f"/api/v1/playout/{station.id}/started"
     for i in range(3):
         at = (base + timedelta(seconds=180 * i)).timestamp()
-        r = await client.post(url, headers=HEADERS, json={"entry_id": str(entries[i].id), "lane": "main", "at": at, "kept": True})
+        r = await client.post(url, headers=HEADERS, json={"entry_id": str(entries[i].id), "lane": "main", "at": at, "kept": True, "more": i < 2})
         assert r.status_code == 200
+    # Only the newest is told to the pages: they do not flick through the outage
+    assert calls["broadcast"] == [str(entries[2].id)]
 
     def aware(t):
         return t if t.tzinfo else t.replace(tzinfo=UTC)

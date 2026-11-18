@@ -292,6 +292,9 @@ def test_start_reports_are_kept_and_sent_in_order_when_the_line_returns(rig):
     assert posts[0][0] == "/hello"
     assert [p[1]["entry_id"] for p in posts[1:]] == ["a", "b", "c"]
     assert all(p[1]["at"] == clock["now"] for p in posts[1:])
+    # Marked as kept (recorded at their own time); all but the newest go up quietly
+    assert all(p[1]["kept"] for p in posts[1:])
+    assert [bool(p[1].get("more")) for p in posts[1:]] == [True, True, False]
     assert relay.status()["reports_kept"] == 0
     # and they are played from nowhere again
     assert set(relay.done) >= {"a", "b", "c"}

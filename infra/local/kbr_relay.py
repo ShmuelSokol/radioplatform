@@ -285,7 +285,13 @@ class Relay:
         with self.lock:
             lines = [ln for ln in self.spool_path.read_text().splitlines() if ln.strip()]
         sent = 0
-        for line in lines:
+        for i, line in enumerate(lines):
+            if i < len(lines) - 1:
+                # Not the newest: recorded without a now-playing change on the pages
+                try:
+                    line = json.dumps({**json.loads(line), "more": True})
+                except (ValueError, TypeError):
+                    pass
             try:
                 self._call("POST", "/started", line.encode(), timeout=6.0)
             except Offline:
