@@ -235,10 +235,13 @@ async def regenerate(
     """
     from app.services.playlist_generator_service import settings_for
 
+    from app.services.schedule_refresh_service import replace_automatic_songs, uses_block_playlists
+
     station = await _station(db, station_id)
-    if not settings_for(station.automation_config).enabled:
+    # A station whose schedule blocks have playlists fills from them whatever the
+    # switch says (see QueueReplenishService.replenish), so it can be redrawn too.
+    if not settings_for(station.automation_config).enabled and not await uses_block_playlists(db, station_id):
         raise HTTPException(status_code=409, detail="Playlist generation is switched off")
-    from app.services.schedule_refresh_service import replace_automatic_songs
 
     removed = await replace_automatic_songs(db, station_id)
     return {"removed": removed, "queued_hours": round(await _queued_seconds(db, station_id) / 3600, 1)}

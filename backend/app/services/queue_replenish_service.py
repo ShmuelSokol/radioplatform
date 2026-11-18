@@ -474,6 +474,7 @@ class QueueReplenishService:
             cursor=saved.get("cursor") or {},
             recent_artists=[row[1] for row in pending][-20:],
             busy_ids=set(self.queued_ids),
+            queued=[row[0] for row in pending],
             timed=timed,
         )
         if not plan.picks:
