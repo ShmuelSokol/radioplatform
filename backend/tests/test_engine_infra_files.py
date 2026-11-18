@@ -369,7 +369,7 @@ def test_sound_card_output_is_off_unless_named_and_asks_before_using_the_card():
     assert "if card_there() then" in block
     assert "card = buffer(buffer=0.2, max=0.6, fallible=true, radio)" in block
     assert 'bufferize=false, fallible=true, card)' in block
-    assert "shutdown()" in block and "every=10." in block
+    assert "shutdown()" in block and "thread.run(fast=false, delay=10., every=10.," in block
     # No engine setting file of the stream server names a card
     for name in ("kbr-engine.env.example", "setup.sh"):
         assert "KBR_ALSA_DEVICE" not in (INFRA / name).read_text()

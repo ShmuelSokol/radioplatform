@@ -674,7 +674,9 @@ if alsa_device != "" then
     output.alsa(id="sound_card", device=alsa_device, bufferize=false, fallible=true, card)
   else
     log(level=2, "sound card #{alsa_device}: not there, stream only; looking for it every 10 s")
-    thread.run(delay=10., every=10., fun () -> begin
+    # fast=false: the probe runs aplay for up to 4 s and must never sit in the queue of
+    # the quick steps (level back up after Next, a time check taking over)
+    thread.run(fast=false, delay=10., every=10., fun () -> begin
       if card_there() then
         log(level=2, "sound card #{alsa_device}: back, restarting to use it")
         shutdown()
