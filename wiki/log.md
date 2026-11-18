@@ -339,3 +339,4 @@ UPDATE 2026-11-18 air-watch.md background index build retries and logs 'Indexes 
 INGEST 2026-11-18 look-at-the-screen-tests.md backend tests reading caplog depended on test order (the 'app' logger does not propagate); conftest now attaches caplog to it; every test file passes alone
 UPDATE 2026-11-18 streaming-architecture.md start report: emergency alert cleared in the background; every start report logs its answer time at INFO
 INGEST 2026-11-18 look-at-the-screen-tests.md iPhone sound stop on DJs/guide = a release mid-listen: RouteErrorBoundary wraps the whole layout, a missing screen chunk unmounts the player, then reloadForStaleCode reloads; WebKit test ONLY=stale (fake server: ctl redeploy, ?kbr_native_hls=1)
+UPDATE 2026-11-18 look-at-the-screen-tests.md stale-release.mjs: provoked stale-code console lines and fake-backend data gaps (13 admin screens + /archives) listed with reasons; suite back to 0 unexpected
