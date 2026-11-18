@@ -1484,8 +1484,14 @@ async def _song_ends_before_hard(h: Harness, name: str, gap: float) -> None:
                        ("song2", {"source": "auto"}), ("song4", {"source": "auto"})])
         # Time for the backend to take back the song the engine already held
         await asyncio.sleep(8)
-        h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
-        t0 = await h.wait_on_air("song6", 12)
+        cur = await h.on_air()
+        if cur and cur.asset_id == h.assets["song6"] and cur.started_at:
+            # song6 already followed the song on air by itself meanwhile: skipping now
+            # would skip song6 and throw the timings off (harness run 2026-11-18)
+            t0 = cur.started_at.timestamp()
+        else:
+            h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+            t0 = await h.wait_on_air("song6", 12)
         if t0 is None:
             # Right after the engine starts it can still hold an older song: once more
             h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
@@ -1892,9 +1898,16 @@ async def sc_two_groups(h: Harness, apart: float) -> None:
     t2 = t1 + timedelta(seconds=apart)
     await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
                    ("weather", {"preempt_at": t2, "timing_mode": "hard", "source": "auto"})])
-    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8 + 12)
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8 + 12 + (apart if apart > 5 else 0))
     a = await h.started_times("time", t1.timestamp() - 5)
     b = await h.started_times("weather", t1.timestamp() - 5)
+    if apart > 8:
+        # Both groups are loaded in the engine before the first starts (hand-over is 45 s
+        # ahead). The first lost its start to the second and aired at the second's time
+        # (2026-11-18); each keeps its own second.
+        late2 = b[0][0] - t2.timestamp() if b else None
+        h.check(name, late2 is not None and -1 <= late2 <= 2.0,
+                f"second group on its own time ({'never' if late2 is None else f'{late2:+.1f} s'})")
     late = a[0][0] - t1.timestamp() if a else None
     h.check(name, late is not None and -1 <= late <= 2.0, f"first group {'never' if late is None else f'{late:+.1f} s'}")
     h.check(name, len(a) == 1 and len(b) == 1, f"each item played once ({len(a)}, {len(b)})")
@@ -1906,10 +1919,45 @@ async def sc_two_groups(h: Harness, apart: float) -> None:
             f"time check played whole before the weather ({played:.1f} s of {TONES['time'][1]} s)")
     cur = await h.on_air()
     h.check(name, bool(cur) and cur.asset.asset_type == "music", f"music back on air ({cur.asset.title if cur else None})")
-    heard = h.heard(t1.timestamp() - 3, t1.timestamp() + 22)
+    heard = h.heard(t1.timestamp() - 3, t1.timestamp() + 22 + (apart if apart > 5 else 0))
     h.print_timeline(heard, t1.timestamp())
     gap, _ = longest_silence(heard)
     h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    if apart > 8:
+        names = [n for _, n in timeline(heard)]
+        h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+
+
+async def sc_play_now_before_hard_item(h: Harness) -> None:
+    """V3-52l: a hard time check is loaded in the engine (it is handed over 45 s ahead)
+    when the operator presses Play now on a short item. The engine's timed lane played
+    its items back to back, so the time check followed the Play now item at once,
+    seconds early. It stays in the waiting room until its own time."""
+    name = "play_now_before_hard_item"
+    await wait_music(h)
+    t1 = at(34)
+    await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, t1.timestamp() - 22 - time.time()))
+    t_fire = time.time()
+    code, _ = h.api("POST", f"/stations/{STATION_ID}/queue/fire-now", {"asset_id": str(h.assets["announce"])})
+    h.check(name, code in (200, 201), f"Play now 22 s before the time check ({code})")
+    await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 10)
+    a = await h.started_times("announce", t_fire - 2)
+    b = await h.started_times("time", t_fire - 2)
+    took = a[0][0] - t_fire if a else None
+    h.check(name, took is not None and took <= 3.0, f"Play now item on air {'never' if took is None else f'after {took:.1f} s'}")
+    late = b[0][0] - t1.timestamp() if b else None
+    h.check(name, late is not None and -1 <= late <= 2.0,
+            f"time check on its own second, not behind the Play now item ({'never' if late is None else f'{late:+.1f} s'})")
+    h.check(name, len(b) == 1, f"time check played once ({len(b)})")
+    heard = h.heard(t_fire - 2, t1.timestamp() + 12)
+    h.print_timeline(heard, t1.timestamp())
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.5, f"longest silence {gap:.1f} s")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"music back on air ({cur.asset.title if cur else None})")
 
 
 
@@ -3175,6 +3223,8 @@ SCENARIOS = {
     "three_item_timed_group": sc_three_item_group,
     "two_groups_0.3s_apart": lambda h: sc_two_groups(h, 0.3),
     "two_groups_1s_apart": lambda h: sc_two_groups(h, 1.0),
+    "two_groups_20s_apart": lambda h: sc_two_groups(h, 20.0),
+    "play_now_before_hard_item": sc_play_now_before_hard_item,
     "backend_unreachable": sc_backend_unreachable,
     "local_box_commands": sc_local_box_commands,
     "local_box_offline": sc_local_box_offline,

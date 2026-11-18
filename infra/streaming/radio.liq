@@ -288,13 +288,14 @@ end
 # group's first item).
 timed_early = ref(-1.)
 
-# Load the item now; put it on air at `at` (unix seconds). The music fades under it.
-def schedule_timed(~uri, ~at) =
-  r = request.create(uri)
-  # Pushed here, not in a thread, so a group keeps the order it was handed over in
+# Into the timed lane: the item is queued and its group gets its take-over.
+# Into the timed lane: the item counts as pending and its group gets its take-over.
+# `push=false` when its file is still downloading: the download pushes it when done.
+def timed_admit(r, at, ~push=true) =
   # Counted before the push: with prefetch the push itself can wait for the download
   timed_pending := timed_pending() + 1
-  timed_queue.push(r)
+  # Pushed here, not in a thread, so a group keeps the order it was handed over in
+  if push then timed_queue.push(r) end
   # One take-over per group: the rest of the group follows from the queue
   if abs(at - timed_group_at()) > 0.5 then
     timed_group_at := at
@@ -302,6 +303,72 @@ def schedule_timed(~uri, ~at) =
     # (unless the group already went on air early: see the hold lane)
     thread.run(delay=(if wait > 0. then wait else 0. end),
                {if timed_early() != at then timed_go_on_air(180, at) end})
+  end
+end
+
+# ── Waiting room: timed items loaded ahead of their time ─────────────────────
+# The backend hands a hard item over up to 45 s ahead, so its file is here in time. It
+# used to go straight into the timed lane's queue, and that queue knows no times: it
+# plays whatever is next. So with a time check loaded for the hour,
+#   - a Play now (or a Next that went through this lane) in those 45 s was followed at
+#     once by the time check, early;
+#   - a second group handed over before the first had started took over the lane's one
+#     "group time", the first group's take-over gave up, and it aired at the second
+#     group's time (harness live_show_over_hard_item: a second of emergency music at
+#     the first time check, 2026-11-18).
+# Now an item due later waits here while it downloads, and its group enters the lane
+# `timed_room_lead` seconds before its time: before the hold lane's 8 s, so everything
+# that looks at the lane (the hold, the early start after a song that ends a few
+# seconds before) finds the group there as before. An item still downloading when its
+# group enters counts as pending at once (so the lane waits for it, as it did for a
+# slow file in the queue) and is pushed the moment its download ends.
+timed_room = ref([])
+timed_room_lead = 9.
+# Pushed once: the group's entry and the end of the download can meet at the same moment
+timed_room_pushed = ref([])
+def timed_room_push(r) =
+  rid = request.id(r)
+  if not list.mem(rid, timed_room_pushed()) then
+    timed_room_pushed := list.prefix(50, rid :: timed_room_pushed())
+    timed_queue.push(r)
+  end
+end
+def timed_room_admit(at) =
+  mine = list.filter(fun (x) -> abs(x.at - at) <= 0.5, timed_room())
+  timed_room := list.filter(fun (x) -> abs(x.at - at) > 0.5, timed_room())
+  log.important("timed: #{list.length(mine)} item(s) due in #{at - time()} s enter the lane")
+  list.iter(fun (x) -> begin
+    x.admitted := true
+    timed_admit(x.r, x.at, push=false)
+    if x.done() then
+      timed_room_push(x.r)
+    else
+      log.important("timed: an item of the group is still downloading; it follows when it is here")
+    end
+  end, mine)
+end
+
+# Load the item now; put it on air at `at` (unix seconds). The music fades under it.
+def schedule_timed(~uri, ~at) =
+  r = request.create(uri)
+  if at - time() > timed_room_lead + 0.5 and abs(at - timed_group_at()) > 0.5 then
+    first = not list.exists(fun (x) -> abs(x.at - at) <= 0.5, timed_room())
+    x = {at=at, r=r, done=ref(false), admitted=ref(false)}
+    timed_room := list.append(timed_room(), [x])
+    if first then
+      thread.run(delay=at - time() - timed_room_lead, {timed_room_admit(at)})
+    end
+    # Downloaded now, in this handler (as the queue's push did); the items of a group
+    # are handed in one after another, so they arrive in order
+    ignore(request.resolve(content_type=timed_queue, timeout=90., r))
+    x.done := true
+    log.important("timed: item due in #{at - time()} s loaded (first of its group: #{first}, in the lane already: #{x.admitted()})")
+    # Its group went into the lane while it downloaded: it was counted then, push it now
+    if x.admitted() then timed_room_push(r) end
+  else
+    # Due now or within seconds (a Play now, a late hand-over), or its group is in the
+    # lane already
+    timed_admit(r, at)
   end
 end
 
@@ -515,7 +582,33 @@ def send_started(m) =
     # next item was not loaded yet (a slow backend), the last second of the interrupted
     # song played, then silence (after a live show and after a timed group, 2026-11-18).
     hard_cut := true
+    asked = time()
     main.skip()
+    # The skip is checked, as Next's is (skip_main). When the timed item had taken over
+    # during a song change, the skip only ended cross's transition and the interrupted
+    # song played on, muted, to its end: up to minutes of silence, and the backend never
+    # heard of a start (harness timed_and_mix_over_levels then duplicate_timed_id,
+    # 2026-11-18). Before the lane stayed muted this was the "old song comes back after
+    # the time check" fault. Given again up to 3 times; if the old song still will not
+    # go, it is let through rather than leaving the stream silent.
+    def rec check(n) =
+      if main_interrupted() and on_air_lane() == "main" and main_changed_at() < asked then
+        if n < 3 then
+          # (not over an item that is already being read: see skip_main)
+          if main_fetched_at() < asked then
+            log.important("back to music: the interrupted song is still there after the skip; skipping again")
+            hard_cut := true
+            main.skip()
+          end
+          thread.run(delay=0.5, {check(n + 1)})
+        else
+          log.important("back to music: the interrupted song would not go; letting it play")
+          main_gain := 1.
+          main_interrupted := false
+        end
+      end
+    end
+    thread.run(delay=0.5, {check(0)})
   elsif lane == "hold" then
     # Not reported: nothing from the queue is on air and it is not the emergency music
     left = timed_group_at() - time()
@@ -696,7 +789,7 @@ control("/status", fun (_) -> begin
   left = main.remaining()
   left = if left >= 0. and left < 1000000. then left else -1. end
   json.stringify({ok=true, entry_id=m["kbr_entry"], title=m["title"],
-                  main_remaining=left, timed_waiting=timed_queue.length(),
+                  main_remaining=left, timed_waiting=timed_queue.length() + list.length(timed_room()),
                   live=live_on()})
 end)
 
