@@ -18,6 +18,10 @@
 import {
   chromium, devices, checker, sleep, makeStation, routeApi, routeNowPlaying, AUDIO_PROBE, routeSiteSocket,
 } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/This recording could not be played/, 'a broken recording is played to see the message');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4311';
 const ONLY = process.env.ONLY || '';

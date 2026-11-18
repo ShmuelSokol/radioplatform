@@ -7,6 +7,12 @@
  *   BASE_URL=http://localhost:4182 node e2e/modes-match.mjs        # optional: ONLY=modes,panic,fit,errors,match
  */
 import { chromium, devices, checker, sleep, makeStation, adminContext, newPage } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/warning toast: (HS is off|Spots mode is off|Panic: cut what was on air)/, 'amber on purpose: each says what the switch just did');
+allowEverywhere(/not set up to operate this station|is not allowed to do that|Station not found|That did not go through|Panic did not go through|error toast: Server error/, 'modes and Panic are made to fail (403, 404, 500, offline) to see each message');
+allowEverywhere(/Song not found in the library|You are not assigned to this station/, 'a request match is made to fail to see the message');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4182';
 const ONLY = process.env.ONLY || '';

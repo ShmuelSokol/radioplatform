@@ -14,6 +14,10 @@
 import {
   chromium, devices, checker, sleep, makeStation, adminContext, newPage,
 } from './lib/fake-station.mjs';
+import { allowEverywhere } from './lib/guard.mjs';
+
+// Provoked on purpose; anything else the screen or console shows fails the run (e2e/lib/guard.mjs)
+allowEverywhere(/The end date is before the schedule starts|Choose a station first/, 'wrong entries made to see each message');
 
 const BASE = process.env.BASE_URL || 'http://localhost:4312';
 const ONLY = (process.env.ONLY || '').split(',').map((s) => s.trim()).filter(Boolean);
