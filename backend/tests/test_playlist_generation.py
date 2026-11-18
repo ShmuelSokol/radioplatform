@@ -404,18 +404,27 @@ async def test_a_song_drawn_for_one_type_waits_its_turn_in_every_type(db_session
     at = MONDAY_7AM
     await library.draw("music", "1 Relax", set(), at)  # both lists are in order now
     await library.draw("music", None, set(), at)
-    drawn: list[str] = []
-    for _ in range(40):
+    # No bound on how soon a song may return here: with nine songs in two
+    # overlapping lists that distance is luck (3 to 9, the same before and after
+    # the lists were kept in order). What must hold exactly: the song just drawn
+    # is last in line in every list that holds it, and each list stays in order.
+    seen_in_both = 0
+    for n in range(60):
         at += timedelta(minutes=4)
-        kind = (None, "1 Relax")[len(drawn) % 2]
+        kind = (None, "1 Relax")[n % 2]
         row, _relaxed = await library.draw("music", kind, set(), at)
-        if str(row.id) in relax:
-            drawn.append(str(row.id))
-    # a relax song comes back only after the other eight have had their turn
-    assert _closest_repeat(drawn) >= 6, _closest_repeat(drawn)
-    for key, order in library.orders.items():
-        assert order == sorted(order), key
-        assert len(order) == len(library.pools[key])
+        sid = str(row.id)
+        holding = [key for key, cards in library.cards.items() if sid in cards]
+        assert ("music", None) in holding
+        assert (("music", "1 Relax") in holding) == (sid in relax)
+        seen_in_both += len(holding) == 2
+        for key in holding:
+            assert library.orders[key][-1][3] == sid, (n, key)
+        for key, order in library.orders.items():
+            assert order == sorted(order), (n, key)
+            assert len(order) == len(library.pools[key])
+            assert [c[3] for c in order].count(sid) <= 1
+    assert seen_in_both >= 30  # every relax draw, at least
 
 
 @pytest.mark.asyncio
