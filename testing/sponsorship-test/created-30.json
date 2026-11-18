@@ -7,10 +7,10 @@
    "business": "Cedar Lane Shoe Repair",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "30a608ae-2e6c-47b3-9a08-1cf25be29d46",
-   "asset_title": "TEST SPONSOR 21 - Cedar Lane Shoe Repair (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 25.79,
+   "asset_id": "3c8cc984-8759-4ee0-9424-8e9e7210a3ba",
+   "asset_title": "TEST SPONSOR 21 - Cedar Lane Shoe Repair",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 26.67,
    "sponsor_id": "20c7f70d-5456-431b-bf63-78a0cbde92cb",
    "schedule_id": "b0b74755-b8e1-4390-8c13-aa6a1139c0f9",
    "contract": {
@@ -26,7 +26,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "busy morning: 3 per morning"
-   }
+   },
+   "standin_asset_id": "30a608ae-2e6c-47b3-9a08-1cf25be29d46"
   },
   {
    "n": "N22",
@@ -34,10 +35,10 @@
    "business": "Golden Challah Bakery",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "b29c9054-2196-4836-8b93-f69634e6e8f3",
-   "asset_title": "TEST SPONSOR 22 - Golden Challah Bakery (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 25.29,
+   "asset_id": "7d1a4c1c-c42f-44f2-b826-8cd1ca3ac718",
+   "asset_title": "TEST SPONSOR 22 - Golden Challah Bakery",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 23.39,
    "sponsor_id": "2afd17a4-cf89-416f-a456-20abb9f62c2c",
    "schedule_id": "99c29111-683e-46b6-b0b8-f6c7aad35189",
    "contract": {
@@ -53,7 +54,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "b29c9054-2196-4836-8b93-f69634e6e8f3"
   },
   {
    "n": "N23",
@@ -61,10 +63,10 @@
    "business": "Pine Street Tutoring Center",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "2e2e4ff7-fa1a-43bf-9227-f65c918620c7",
-   "asset_title": "TEST SPONSOR 23 - Pine Street Tutoring Center (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 27.2,
+   "asset_id": "655be218-74ef-4462-aba7-7e7ef5f3eba5",
+   "asset_title": "TEST SPONSOR 23 - Pine Street Tutoring Center",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 26.87,
    "sponsor_id": "db34633a-a1ef-4b2c-b8b9-14b9035ac637",
    "schedule_id": "849b9483-beb4-44bd-a078-f98463979c61",
    "contract": {
@@ -80,7 +82,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "2e2e4ff7-fa1a-43bf-9227-f65c918620c7"
   },
   {
    "n": "N24",
@@ -88,10 +91,10 @@
    "business": "Shalom Home Appliances",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "bab7d620-c8cf-4b04-934d-ba0e22389d58",
-   "asset_title": "TEST SPONSOR 24 - Shalom Home Appliances (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 24.63,
+   "asset_id": "6114a3ce-40ef-44da-ac90-23463c7f69d2",
+   "asset_title": "TEST SPONSOR 24 - Shalom Home Appliances",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 23.39,
    "sponsor_id": "33d9e47b-1992-42e7-af91-1e264610a8df",
    "schedule_id": "805cd708-d88a-4b6b-b8af-2ed34a184d0b",
    "contract": {
@@ -107,7 +110,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "busy afternoon"
-   }
+   },
+   "standin_asset_id": "bab7d620-c8cf-4b04-934d-ba0e22389d58"
   },
   {
    "n": "N25",
@@ -115,10 +119,10 @@
    "business": "Riverside Fresh Fish",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "ec0af19a-f8b2-4cfa-a810-0859f454c247",
-   "asset_title": "TEST SPONSOR 25 - Riverside Fresh Fish (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 24.68,
+   "asset_id": "3c377daf-8b49-4b62-bc35-82cc7becd0e9",
+   "asset_title": "TEST SPONSOR 25 - Riverside Fresh Fish",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 23.75,
    "sponsor_id": "9bad254e-6629-4340-8fc3-cab0f34a10a4",
    "schedule_id": "708afc1c-0155-442a-af05-b721cb3ba49d",
    "contract": {
@@ -134,7 +138,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "busy evening"
-   }
+   },
+   "standin_asset_id": "ec0af19a-f8b2-4cfa-a810-0859f454c247"
   },
   {
    "n": "N26",
@@ -142,10 +147,10 @@
    "business": "Bright Smile Pediatric Dental",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "3aa327da-093c-441b-9bae-f31db4b6e992",
-   "asset_title": "TEST SPONSOR 26 - Bright Smile Pediatric Dental (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.42,
+   "asset_id": "0565b16e-75da-4664-ad12-eb3a8bc7f64a",
+   "asset_title": "TEST SPONSOR 26 - Bright Smile Pediatric Dental",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 24.51,
    "sponsor_id": "376c1404-c912-4113-9c27-72d15fd45992",
    "schedule_id": "ec6ddda2-46b5-4281-91ec-0fb6fd2292b6",
    "contract": {
@@ -161,7 +166,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "Sunday to Thursday only"
-   }
+   },
+   "standin_asset_id": "3aa327da-093c-441b-9bae-f31db4b6e992"
   },
   {
    "n": "N27",
@@ -169,10 +175,10 @@
    "business": "Kesher Moving and Storage",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "e0258e3c-bcc2-4e49-9a37-91230bc52eaa",
-   "asset_title": "TEST SPONSOR 27 - Kesher Moving and Storage (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 23.25,
+   "asset_id": "fe3be035-8836-49af-b2eb-e3f396e14d50",
+   "asset_title": "TEST SPONSOR 27 - Kesher Moving and Storage",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 23.99,
    "sponsor_id": "06afbc71-3a7a-4958-8ba2-b0d861d28aa7",
    "schedule_id": "868ea898-57aa-4a5a-828d-e2ec959fa828",
    "contract": {
@@ -188,7 +194,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "Sunday to Thursday only"
-   }
+   },
+   "standin_asset_id": "e0258e3c-bcc2-4e49-9a37-91230bc52eaa"
   },
   {
    "n": "N28",
@@ -196,10 +203,10 @@
    "business": "Yaffa's Sheitel Studio",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "3b3219de-64dc-4c0d-9bcb-2b3c3a1eac64",
-   "asset_title": "TEST SPONSOR 28 - Yaffa's Sheitel Studio (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.57,
+   "asset_id": "594b9c68-b994-462c-a61b-3f1c76d75e3c",
+   "asset_title": "TEST SPONSOR 28 - Yaffa's Sheitel Studio",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 20.35,
    "sponsor_id": "5d9be8db-04b4-45b8-a96b-beda8f5ac724",
    "schedule_id": "1caad842-5e5a-43a1-a809-a4ac3fd60cae",
    "contract": {
@@ -215,7 +222,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "3b3219de-64dc-4c0d-9bcb-2b3c3a1eac64"
   },
   {
    "n": "N29",
@@ -223,10 +231,10 @@
    "business": "Maple Grove Seforim",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "e9d96142-5d3c-462e-9fb0-74bcb70111d3",
-   "asset_title": "TEST SPONSOR 29 - Maple Grove Seforim (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 23.77,
+   "asset_id": "2c8643c2-540f-4790-8604-dfb8428c3082",
+   "asset_title": "TEST SPONSOR 29 - Maple Grove Seforim",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.03,
    "sponsor_id": "b4125b66-217e-498f-9bcb-24927ff7aad4",
    "schedule_id": "7139afe8-640d-4eaf-813d-7838fa11e5c8",
    "contract": {
@@ -242,7 +250,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "short contract, ends Friday"
-   }
+   },
+   "standin_asset_id": "e9d96142-5d3c-462e-9fb0-74bcb70111d3"
   },
   {
    "n": "N30",
@@ -250,10 +259,10 @@
    "business": "Oak Tree Pharmacy",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "cfcb23ef-2969-4acb-bbff-f936e632e293",
-   "asset_title": "TEST SPONSOR 30 - Oak Tree Pharmacy (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.43,
+   "asset_id": "2d186be5-c01c-4bb9-8c70-be6da07add42",
+   "asset_title": "TEST SPONSOR 30 - Oak Tree Pharmacy",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 24.31,
    "sponsor_id": "52b8d927-5656-4c71-ab3b-f024fc80434d",
    "schedule_id": "34fedec4-b61b-497a-a2cb-7a7c5ca957cf",
    "contract": {
@@ -269,7 +278,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "includes overnight"
-   }
+   },
+   "standin_asset_id": "cfcb23ef-2969-4acb-bbff-f936e632e293"
   },
   {
    "n": "N31",
@@ -277,10 +287,10 @@
    "business": "Blue Ribbon Car Wash",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "be705296-4535-42f4-855b-78ea339c3998",
-   "asset_title": "TEST SPONSOR 31 - Blue Ribbon Car Wash (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.84,
+   "asset_id": "11f7b24e-2ad3-4d29-9b4e-35bc373773ca",
+   "asset_title": "TEST SPONSOR 31 - Blue Ribbon Car Wash",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 23.47,
    "sponsor_id": "4a1d2a67-f130-40b4-9cae-38bdb9274823",
    "schedule_id": "190f7f50-9d33-4736-92c6-14f41a20121f",
    "contract": {
@@ -296,7 +306,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "starts TOMORROW: nothing on 11-18"
-   }
+   },
+   "standin_asset_id": "be705296-4535-42f4-855b-78ea339c3998"
   },
   {
    "n": "N32",
@@ -304,10 +315,10 @@
    "business": "Tova's Simcha Hall",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "d7451e00-a088-4d69-8349-cabbad194c3a",
-   "asset_title": "TEST SPONSOR 32 - Tova's Simcha Hall (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.85,
+   "asset_id": "959892f9-655a-4240-ad1c-dfe9875feebe",
+   "asset_title": "TEST SPONSOR 32 - Tova's Simcha Hall",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 21.91,
    "sponsor_id": "d687c5e4-33c5-49b1-84cf-c8e7bfa80371",
    "schedule_id": "b9c60875-6a51-47ff-93d4-ae0e05a6806d",
    "contract": {
@@ -323,7 +334,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "starts TOMORROW"
-   }
+   },
+   "standin_asset_id": "d7451e00-a088-4d69-8349-cabbad194c3a"
   },
   {
    "n": "N33",
@@ -331,10 +343,10 @@
    "business": "Beacon Hill Insurance Agency",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "d5b6fdab-065e-451a-9384-d430f366c54a",
-   "asset_title": "TEST SPONSOR 33 - Beacon Hill Insurance Agency (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.93,
+   "asset_id": "1c074fa0-17dd-4ca1-acad-8e19fe3729bd",
+   "asset_title": "TEST SPONSOR 33 - Beacon Hill Insurance Agency",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.63,
    "sponsor_id": "0ce1945d-bc62-4a70-b886-0d1cfd97d75d",
    "schedule_id": "f365296e-5060-4d2e-befd-16300d44aea9",
    "contract": {
@@ -350,7 +362,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "Sundays only"
-   }
+   },
+   "standin_asset_id": "d5b6fdab-065e-451a-9384-d430f366c54a"
   },
   {
    "n": "N34",
@@ -358,10 +371,10 @@
    "business": "Little Sprouts Playgroup",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "abb71492-06c1-426a-9992-3b364ab9d532",
-   "asset_title": "TEST SPONSOR 34 - Little Sprouts Playgroup (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 23.33,
+   "asset_id": "4dc1bca7-8e42-46a9-9862-b7da722c1b5a",
+   "asset_title": "TEST SPONSOR 34 - Little Sprouts Playgroup",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.95,
    "sponsor_id": "e82af97a-7227-41bc-9bf2-9c4fdaf5b594",
    "schedule_id": "3a94ea84-7b63-4a75-b223-d5719507cff6",
    "contract": {
@@ -377,7 +390,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "ends TOMORROW"
-   }
+   },
+   "standin_asset_id": "abb71492-06c1-426a-9992-3b364ab9d532"
   },
   {
    "n": "N35",
@@ -385,10 +399,10 @@
    "business": "Main Street Hardware",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "5c48ac16-6914-4a35-9a4d-f8b1633f78f3",
-   "asset_title": "TEST SPONSOR 35 - Main Street Hardware (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 23.2,
+   "asset_id": "acea7a14-f391-40ad-9f13-7365e375f140",
+   "asset_title": "TEST SPONSOR 35 - Main Street Hardware",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.19,
    "sponsor_id": "618a4635-7e78-4099-890a-1c07c95736e0",
    "schedule_id": "6d276bf9-18b8-47ed-81b6-f7af51c118ab",
    "contract": {
@@ -404,7 +418,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "heavy: 9 a day"
-   }
+   },
+   "standin_asset_id": "5c48ac16-6914-4a35-9a4d-f8b1633f78f3"
   },
   {
    "n": "N36",
@@ -412,10 +427,10 @@
    "business": "Shefa Organic Produce",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "7f86c08a-1123-45c9-ae9f-2ca06e634350",
-   "asset_title": "TEST SPONSOR 36 - Shefa Organic Produce (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.18,
+   "asset_id": "253ada40-80da-4b32-b64b-83e23f4b215b",
+   "asset_title": "TEST SPONSOR 36 - Shefa Organic Produce",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.55,
    "sponsor_id": "590e06f3-c8f1-4938-861d-fa772820ed4c",
    "schedule_id": "9a6d78c2-bc2a-4f21-9ccf-d3481436d380",
    "contract": {
@@ -431,7 +446,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "7f86c08a-1123-45c9-ae9f-2ca06e634350"
   },
   {
    "n": "N37",
@@ -439,10 +455,10 @@
    "business": "Keter Torah Judaica",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "78dc7b48-2a4c-4a43-ae91-7c7553b48c93",
-   "asset_title": "TEST SPONSOR 37 - Keter Torah Judaica (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 23.05,
+   "asset_id": "47580276-df44-443b-b615-24497c95fbbd",
+   "asset_title": "TEST SPONSOR 37 - Keter Torah Judaica",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 23.59,
    "sponsor_id": "12b9d1f1-a991-4274-b8cb-1adc84ca6899",
    "schedule_id": "64339cbe-1232-41e2-84d2-d34621bad4aa",
    "contract": {
@@ -458,7 +474,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "78dc7b48-2a4c-4a43-ae91-7c7553b48c93"
   },
   {
    "n": "N38",
@@ -466,10 +483,10 @@
    "business": "Elm Avenue Physical Therapy",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "5bc851a1-ea08-4f3d-bdfd-f6527db38297",
-   "asset_title": "TEST SPONSOR 38 - Elm Avenue Physical Therapy (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 25.58,
+   "asset_id": "6fd928c4-719f-4e12-a9e3-7ead77077ff0",
+   "asset_title": "TEST SPONSOR 38 - Elm Avenue Physical Therapy",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 24.55,
    "sponsor_id": "3aeef5ca-a350-4ca7-8280-3b09c984e0ec",
    "schedule_id": "59e4bc59-926e-4c7b-a4f7-583d7f2015ea",
    "contract": {
@@ -485,7 +502,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "5bc851a1-ea08-4f3d-bdfd-f6527db38297"
   },
   {
    "n": "N39",
@@ -493,10 +511,10 @@
    "business": "Simcha Floral Design",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "1f7c6b7d-6853-4229-b4c2-c649f44e8718",
-   "asset_title": "TEST SPONSOR 39 - Simcha Floral Design (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 21.94,
+   "asset_id": "ca19ef6a-99b6-4a30-94ab-3bb5f4172cb6",
+   "asset_title": "TEST SPONSOR 39 - Simcha Floral Design",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 21.43,
    "sponsor_id": "fffd086d-9fe5-497c-a499-74be6f64b67e",
    "schedule_id": "1da2de29-fd1c-45f5-a27b-11ba17b239b6",
    "contract": {
@@ -512,7 +530,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "1f7c6b7d-6853-4229-b4c2-c649f44e8718"
   },
   {
    "n": "N40",
@@ -520,10 +539,10 @@
    "business": "Rosewood Furniture Gallery",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "56300c40-4ace-437e-914b-554ea2825d42",
-   "asset_title": "TEST SPONSOR 40 - Rosewood Furniture Gallery (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.88,
+   "asset_id": "6e80d071-749f-4db1-a92b-29dd89c2ab99",
+   "asset_title": "TEST SPONSOR 40 - Rosewood Furniture Gallery",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.87,
    "sponsor_id": "c5685c3d-7fdb-4bf7-8b9d-39b308891b91",
    "schedule_id": "2f651b40-07a6-4441-93d3-03326598f61e",
    "contract": {
@@ -539,7 +558,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "56300c40-4ace-437e-914b-554ea2825d42"
   },
   {
    "n": "N41",
@@ -547,10 +567,10 @@
    "business": "Tzedek Accounting Services",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "6818bd27-382f-41f6-abdd-57d746282dcd",
-   "asset_title": "TEST SPONSOR 41 - Tzedek Accounting Services (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 23.58,
+   "asset_id": "cb6771a8-b86d-4170-b64a-09d50d7a135d",
+   "asset_title": "TEST SPONSOR 41 - Tzedek Accounting Services",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 23.75,
    "sponsor_id": "f7726de1-b5f4-4a72-9e73-c9b8cbbca7f2",
    "schedule_id": "47656800-6c6a-4b18-862f-4558762a6d45",
    "contract": {
@@ -566,7 +586,8 @@
     "fixed_times": "07:15,12:15,17:15",
     "timing_mode": "soft",
     "checks": "fixed times (soft) at :15"
-   }
+   },
+   "standin_asset_id": "6818bd27-382f-41f6-abdd-57d746282dcd"
   },
   {
    "n": "N42",
@@ -574,10 +595,10 @@
    "business": "Sunrise Kosher Pizza",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "af9794b1-eae9-40bb-899b-fe5cb2dea7ac",
-   "asset_title": "TEST SPONSOR 42 - Sunrise Kosher Pizza (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 24.12,
+   "asset_id": "1d25b5d7-c4f1-47de-babf-9322db31cf79",
+   "asset_title": "TEST SPONSOR 42 - Sunrise Kosher Pizza",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.39,
    "sponsor_id": "d498e804-6826-419a-b814-b95ece5b81ae",
    "schedule_id": "e0db2e78-f7ef-4f70-afbd-204f2172309f",
    "contract": {
@@ -593,7 +614,8 @@
     "fixed_times": "09:15,15:15",
     "timing_mode": "soft",
     "checks": "fixed times, Sunday to Thursday"
-   }
+   },
+   "standin_asset_id": "af9794b1-eae9-40bb-899b-fe5cb2dea7ac"
   },
   {
    "n": "N43",
@@ -601,10 +623,10 @@
    "business": "Harmony Music School",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "e01cf36b-64d8-44d5-b78c-1ebe43b25ba1",
-   "asset_title": "TEST SPONSOR 43 - Harmony Music School (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 23.36,
+   "asset_id": "92b4722e-f022-419d-9d60-ffdde31d3232",
+   "asset_title": "TEST SPONSOR 43 - Harmony Music School",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.35,
    "sponsor_id": "f4ec2c97-ffd6-4822-aa35-54035326aaad",
    "schedule_id": "1497232c-5619-4ebe-9716-65cfa604d892",
    "contract": {
@@ -620,7 +642,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "Mondays and Wednesdays only"
-   }
+   },
+   "standin_asset_id": "e01cf36b-64d8-44d5-b78c-1ebe43b25ba1"
   },
   {
    "n": "N44",
@@ -628,10 +651,10 @@
    "business": "Clearview Window Cleaning",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "9260b1c2-92a4-4983-b166-aea34dacb884",
-   "asset_title": "TEST SPONSOR 44 - Clearview Window Cleaning (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 21.37,
+   "asset_id": "8b15b66a-25e9-46a3-a4fa-53f070fae81f",
+   "asset_title": "TEST SPONSOR 44 - Clearview Window Cleaning",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 20.51,
    "sponsor_id": "0d32ac96-f3ff-4e60-ba0b-df735d79ae55",
    "schedule_id": "c3174649-8d03-491a-98a3-68f4b8c4fb41",
    "contract": {
@@ -647,7 +670,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "heavy"
-   }
+   },
+   "standin_asset_id": "9260b1c2-92a4-4983-b166-aea34dacb884"
   },
   {
    "n": "N45",
@@ -655,10 +679,10 @@
    "business": "Parkside Pediatrics",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "a106a56e-82e3-4e7a-962e-52da0af0d9ec",
-   "asset_title": "TEST SPONSOR 45 - Parkside Pediatrics (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.66,
+   "asset_id": "9e5e4159-77fe-4b7f-b35a-e5672e26d032",
+   "asset_title": "TEST SPONSOR 45 - Parkside Pediatrics",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 21.79,
    "sponsor_id": "033b84f2-30d7-4443-9169-bb32a39e4d71",
    "schedule_id": "7b194192-23b9-4255-8c0a-9698f33da9fc",
    "contract": {
@@ -674,7 +698,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "a106a56e-82e3-4e7a-962e-52da0af0d9ec"
   },
   {
    "n": "N46",
@@ -682,10 +707,10 @@
    "business": "Royal Linen Rentals",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "70d3e7e3-1ac9-45b1-a6ea-116d09434755",
-   "asset_title": "TEST SPONSOR 46 - Royal Linen Rentals (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 20.92,
+   "asset_id": "82f804a1-8386-4fef-964f-dcbb7863f154",
+   "asset_title": "TEST SPONSOR 46 - Royal Linen Rentals",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 22.31,
    "sponsor_id": "b6fb9dc4-2900-4978-9c77-feeb48e04286",
    "schedule_id": "4c6935e8-45cd-43b9-91d8-4e2a39854ae8",
    "contract": {
@@ -701,7 +726,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "70d3e7e3-1ac9-45b1-a6ea-116d09434755"
   },
   {
    "n": "N47",
@@ -709,10 +735,10 @@
    "business": "Greenfield Landscaping",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "dd896659-91da-4574-b4b6-cf97846996d3",
-   "asset_title": "TEST SPONSOR 47 - Greenfield Landscaping (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.72,
+   "asset_id": "b95692f5-d4ce-48d6-8289-71d10ffe99c2",
+   "asset_title": "TEST SPONSOR 47 - Greenfield Landscaping",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 23.75,
    "sponsor_id": "7cf689b0-4847-44fd-ab37-72f266cb1f2a",
    "schedule_id": "86d2b77d-c58b-4fb6-8491-957e4d8d3bc4",
    "contract": {
@@ -728,7 +754,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "dd896659-91da-4574-b4b6-cf97846996d3"
   },
   {
    "n": "N48",
@@ -736,10 +763,10 @@
    "business": "Chessed Home Health Aides",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "debed3d6-4ad7-460b-9195-d3b6906dccc1",
-   "asset_title": "TEST SPONSOR 48 - Chessed Home Health Aides (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 22.76,
+   "asset_id": "f011aee6-991a-4f23-ba8b-fcc4701aea8a",
+   "asset_title": "TEST SPONSOR 48 - Chessed Home Health Aides",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 24.47,
    "sponsor_id": "738ad8bf-7695-401c-adbd-64bd282c09fd",
    "schedule_id": "20f0359d-b8df-4fce-95d4-6d85bf7dd035",
    "contract": {
@@ -755,7 +782,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": ""
-   }
+   },
+   "standin_asset_id": "debed3d6-4ad7-460b-9195-d3b6906dccc1"
   },
   {
    "n": "N49",
@@ -763,10 +791,10 @@
    "business": "Lakeview Optical",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "40afd998-482c-485c-ad4b-f07c908c8473",
-   "asset_title": "TEST SPONSOR 49 - Lakeview Optical (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 20.81,
+   "asset_id": "4bc9f24b-7cb3-469b-beb9-a337062cd2c5",
+   "asset_title": "TEST SPONSOR 49 - Lakeview Optical",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 21.15,
    "sponsor_id": "74520177-e112-422f-8f20-323872dbfee1",
    "schedule_id": "74b670f3-1764-4367-9aea-dd0e14ed098c",
    "contract": {
@@ -782,7 +810,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "Fridays only (before Shabbos)"
-   }
+   },
+   "standin_asset_id": "40afd998-482c-485c-ad4b-f07c908c8473"
   },
   {
    "n": "N50",
@@ -790,10 +819,10 @@
    "business": "Hadar Shabbos Gift Baskets",
    "station": "Kol B'ramah Main",
    "station_id": "95358e09-1260-48d5-85b5-f851000773c0",
-   "asset_id": "1522d759-421c-4f7b-8367-028580e48305",
-   "asset_title": "TEST SPONSOR 50 - Hadar Shabbos Gift Baskets (stand-in)",
-   "audio": "stand-in (Windows voice)",
-   "length_seconds": 23.61,
+   "asset_id": "1e5255e7-f218-4ad3-85e7-54e41d3f8b4e",
+   "asset_title": "TEST SPONSOR 50 - Hadar Shabbos Gift Baskets",
+   "audio": "voiced (Kol Berama voice)",
+   "length_seconds": 25.67,
    "sponsor_id": "1d2865ec-be01-455f-b991-00eb5fe18b1c",
    "schedule_id": "09df5ed4-f3ea-4e35-b490-e6ddd8dc0fe3",
    "contract": {
@@ -809,7 +838,8 @@
     "fixed_times": null,
     "timing_mode": null,
     "checks": "starts Friday 11-20"
-   }
+   },
+   "standin_asset_id": "1522d759-421c-4f7b-8367-028580e48305"
   }
  ],
  "block": {
