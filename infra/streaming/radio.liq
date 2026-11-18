@@ -833,9 +833,21 @@ last_reported = ref("-")
 # has none and must still be reported on every change.
 last_started_entry = ref("")
 last_started_at = ref(0.)
+# The entry on air before the current one, and when the current one came on. A crossfade
+# can show the outgoing track's tags once more right after the incoming one's: the item
+# that just ended would be reported as started again, and the new one a second time.
+previous_reported = ref("-")
+reported_at = ref(0.)
 def report_started(m) =
   entry = m["kbr_entry"]
-  if entry != last_reported() then
+  # Same lane only: a song coming back after a timed item that was dropped at once is a
+  # real return (the interrupted-song handling in send_started must run for it)
+  if entry != "" and entry != last_reported() and entry == previous_reported()
+     and m["kbr_lane"] == on_air_lane() and time() - reported_at() < 1.5 then
+    log.important("started: #{entry} (the item that just ended) showed again for a moment; ignored")
+  elsif entry != last_reported() then
+    previous_reported := last_reported()
+    reported_at := time()
     last_reported := entry
     if entry != "" and entry == last_started_entry() and time() - last_started_at() < 3. then
       # Back on the item: the lane is its lane again, but nothing is reported or counted

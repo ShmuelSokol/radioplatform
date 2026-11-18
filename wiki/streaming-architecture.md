@@ -435,4 +435,9 @@ or a crossfade's metadata) is not a new start: it is logged as "came back within
 not a new start", its lane is restored, and nothing is reported or counted. This followed
 two start reports for one sponsorship at Main's 20:30Z break (2026-11-18), which wrote two
 play log rows; the backend also ignores exact repeats within 10 s since PR 364. Emergency
-files (no entry id) are still reported on every change.
+files (no entry id) are still reported on every change. Also ignored: the item that
+just ended showing again within 1.5 s in the same lane (a crossfade can show the
+outgoing track's tags once more), logged as "showed again for a moment; ignored". Main's
+journal for that break showed one plain crossfade and no hold or timed line, so this
+crossfade path is the likely cause. Start reports are not logged by the engine unless the
+backend is unreachable.
