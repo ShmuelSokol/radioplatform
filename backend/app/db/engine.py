@@ -59,8 +59,11 @@ async def _connect(*args, **kwargs):
 # beyond five at once opened a connection of its own, about 2 s each, and threw it
 # away afterwards: three stations' engines, the scheduler, air watch and a few
 # open pages are more than five.
-POOL_SIZE = 12
-MAX_OVERFLOW = 8
+# The database allows 60 connections in all (max_connections, 2026-11-18), shared
+# with Supabase's own services, and during a deploy the old and the new process
+# run side by side: 10 + 4 + about 3 one-off connections each stays well inside.
+POOL_SIZE = 10
+MAX_OVERFLOW = 4
 
 engine = create_async_engine(
     settings.DATABASE_URL,
@@ -78,7 +81,7 @@ engine = create_async_engine(
 
 
 def pool_state() -> str:
-    """"pool 7 of 12 in use, 0 extra" for log lines."""
+    """"pool 7 in use of 10, 0 extra" for log lines."""
     try:
         pool = engine.pool
         return f"pool {pool.checkedout()} in use of {pool.size()}, {max(pool.overflow(), 0)} extra"
