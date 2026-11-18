@@ -188,15 +188,21 @@ async def sponsorship_of_asset(
     asset_id: UUID,
     station_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_staff),
+    user=Depends(require_staff),
 ):
     """The control room's Sponsor panel: the sponsor and contracts that use this
     recording, today's and coming plays on the station, and recent missed plays."""
     from app.services.sponsor_item import sponsor_item
 
+    from app.core.dependencies import may_operate_station
+
     asset = await _get_or_404(db, Asset, asset_id, "Spot")
     station = await _get_or_404(db, Station, station_id, "Station")
-    return await sponsor_item(db, asset, station)
+    if not may_operate_station(user, station):
+        raise HTTPException(status_code=403, detail="You are not set up for this station")
+    # Other stations' contracts only for staff who may see every station
+    every = await may_operate_every_station(db, user)
+    return await sponsor_item(db, asset, station, show_elsewhere=every)
 
 
 @router.get("/preview", response_model=SpotPlanPreview)

@@ -143,3 +143,18 @@ async def test_sponsors_cannot_read_the_panel(client: AsyncClient, db_session: A
     r = await client.get(f"{API}/spot-schedules/for-asset/{spot.id}", params={"station_id": str(station.id)},
                          headers=headers)
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_staff_limited_to_one_station_see_only_that_station(client: AsyncClient, db_session: AsyncSession):
+    station, other, _, spot, *_ = await _setup(db_session)
+    station_id, other_id, spot_id = station.id, other.id, spot.id
+    _, headers = await _login(client, db_session, UserRole.DJ, station_ids=[str(station_id)])
+    r = await client.get(f"{API}/spot-schedules/for-asset/{spot_id}", params={"station_id": str(station_id)},
+                         headers=headers)
+    assert r.status_code == 200, r.text
+    assert [c["name"] for c in r.json()["contracts"]] == ["Kesher weekday mornings"]
+    assert "KBR Jerusalem" not in r.text
+    r = await client.get(f"{API}/spot-schedules/for-asset/{spot_id}", params={"station_id": str(other_id)},
+                         headers=headers)
+    assert r.status_code == 403

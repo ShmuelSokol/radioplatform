@@ -68,7 +68,9 @@ def _local(at: datetime, tz) -> str:
     return clock_12(local.hour, local.minute)
 
 
-async def sponsor_item(db: AsyncSession, asset: Asset, station: Station, now: datetime | None = None) -> dict:
+async def sponsor_item(
+    db: AsyncSession, asset: Asset, station: Station, now: datetime | None = None, show_elsewhere: bool = True
+) -> dict:
     now = now or datetime.now(UTC)
     tz = station_tz(station.timezone)
     today = now.astimezone(tz).date()
@@ -86,7 +88,7 @@ async def sponsor_item(db: AsyncSession, asset: Asset, station: Station, now: da
     )
     # This station's contracts first; others are listed so nothing is hidden
     here = [s for s in schedules if s.station_id is None or str(s.station_id) == str(station.id)]
-    elsewhere = [s for s in schedules if s not in here]
+    elsewhere = [s for s in schedules if s not in here] if show_elsewhere else []
     sponsor_ids = {s.sponsor_id for s in schedules}
     if asset.sponsor_id:
         sponsor_ids.add(asset.sponsor_id)
