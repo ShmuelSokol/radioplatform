@@ -51,7 +51,7 @@ provoked(/\b(401|429)\b.*\/api\/v1\/auth\/login/, /\/(admin|sponsor)\/login/, 's
 provoked(/\b409\b.*\/api\/v1\/users\b/, /\/admin\/users/, 'F-USERS creates a user whose email is taken to see the message');
 provoked(/example\.com\/p\.jpg/, /\/hosts/, 'the test DJ has a photo address that does not exist');
 provoked(/alert:? (Pick at least one day for a weekly block\.|Give the block a name\.|Add at least one time of day\.)/, null, 'the block forms are sent empty to see each message');
-provoked(/\b503\b.*weather-readouts|alert:? Could not (show the template preview|make the readout): Weather is not set up/, /\/admin\/studio/, 'no weather key in the test setup; the checks read these messages');
+provoked(/\b503\b.*weather-readouts|alert:? Could not (show the template preview|make the readout): [Ww]eather is not set up/, /\/admin\/studio/, 'no weather key in the test setup; the checks read these messages');
 provoked(/\b400\b.*\/crm\/raffles\/[0-9a-f-]+\/draw/, /\/admin\/crm/, 'F-CRM draws a raffle with no entries');
 provoked(/\b400\b.*\/billing\/invoices\/[0-9a-f-]+\/checkout/, /\/sponsor\/billing/, 'Stripe is off in the test setup; F-SPBILL-1 reads the refusal');
 provoked(/e2e page crash/, null, 'F-GLOBAL: a page is made to crash to see the error page');
@@ -958,7 +958,7 @@ section('stations', async () => {
       return `saved in ${ms} ms`;
     }, page);
     await step(`F-STATIONS-5 ${view}: expand row, search location, Save Location updates coordinates and timezone`, async () => {
-      await rowOf(page, name).click();
+      await rowOf(page, name).getByText(name, { exact: true }).first().click();   // the name, as a person taps it: the card's middle holds the Protected box on a phone
       const panel = page.getByTestId('station-panel');
       await panel.getByPlaceholder('Search for a city...').fill('Lakewood');
       await panel.getByRole('button', { name: /Lakewood, New Jersey/ }).click();
@@ -981,7 +981,7 @@ section('stations', async () => {
       const cfg = resp.request().postDataJSON().automation_config;
       assert(cfg.hourly_station_id && cfg.hourly_time_announcement && cfg.weather_enabled && cfg.weather_interval_minutes === 45 && cfg.timed_during_long_items === 'cut', `sent ${JSON.stringify(cfg)}`);
       await page.reload();
-      await rowOf(page, name).click();
+      await rowOf(page, name).getByText(name, { exact: true }).first().click();
       const p2 = page.getByTestId('station-panel');
       assert(await p2.getByTestId('timed-during-long-items').inputValue() === 'cut', 'long-items choice lost');
       assert(await p2.locator('input[type=number]:not([data-testid])').inputValue() === '45', 'interval lost');
