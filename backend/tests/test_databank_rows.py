@@ -494,9 +494,16 @@ async def test_day_log_lines_on_air_deleted_and_today(client, auth_headers, db_s
     r = await client.get(f"/api/v1/databank/log?station_id={station.id}", headers=auth_headers)  # today
     body = r.json()
     assert body["day"] == now.date().isoformat() and body["timezone"] == "UTC"
-    assert [(x["title"], x["artist"], x["end_utc"] is None) for x in body["logs"]] == [
-        ("Unknown", None, False), ("Still on", "Abie", True)]
-    assert body["logs"][0]["file"] == "" and body["logs"][1]["file"] == "Still on.mp3"
+    # In the first ten minutes of the UTC day the earlier play belongs to yesterday's
+    # log (this failed in CI at 00:06Z), and in the first minute so does the one on air.
+    expected = [
+        row for row, minutes_ago in (
+            (("Unknown", None, False), 10), (("Still on", "Abie", True), 1),
+        ) if (now - timedelta(minutes=minutes_ago)).date() == now.date()
+    ]
+    assert [(x["title"], x["artist"], x["end_utc"] is None) for x in body["logs"]] == expected
+    files = {x["title"]: x["file"] for x in body["logs"]}
+    assert files.get("Unknown", "") == "" and files.get("Still on", "Still on.mp3") == "Still on.mp3"
 
 
 # ── F-DATABANK-46: API errors ──
