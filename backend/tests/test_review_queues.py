@@ -134,14 +134,30 @@ async def test_next_claims_first_pending(client, auth_headers, db_session, admin
     assert (await client.get(f"{API}/queues/{q['id']}/next", headers=auth_headers)).json() is None
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: an item claimed by /next and then abandoned stays in_review and is never offered again")
 @pytest.mark.asyncio
 async def test_abandoned_claim_is_offered_again(client, auth_headers, db_session):
+    """A claim with no save for 30 minutes expires and the item is offered again;
+    a fresh claim is not handed to anyone else."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.models.review_queue import ReviewItem
+
     (a,) = await _assets(db_session, 1)
     q, items = await _queue(client, auth_headers, [a])
     await client.get(f"{API}/queues/{q['id']}/next", headers=auth_headers)  # reviewer closes the tab
+    assert (await client.get(f"{API}/queues/{q['id']}/next", headers=auth_headers)).json() is None  # 0 min: still held
+
+    item = await db_session.get(ReviewItem, uuid.UUID(items[0]["id"]))
+    item.updated_at = datetime.now(UTC) - timedelta(minutes=29)
+    await db_session.commit()
+    assert (await client.get(f"{API}/queues/{q['id']}/next", headers=auth_headers)).json() is None  # 29 min: still held
+
+    item.updated_at = datetime.now(UTC) - timedelta(minutes=31)
+    await db_session.commit()
     again = (await client.get(f"{API}/queues/{q['id']}/next", headers=auth_headers)).json()
-    assert again is not None and again["id"] == items[0]["id"]
+    assert again is not None and again["id"] == items[0]["id"] and again["status"] == "in_review"
+    # the new claim starts its own 30 minutes
+    assert (await client.get(f"{API}/queues/{q['id']}/next", headers=auth_headers)).json() is None
 
 
 @pytest.mark.asyncio

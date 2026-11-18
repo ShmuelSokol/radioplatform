@@ -83,7 +83,7 @@ export default function SponsorBilling() {
         {invoicesLoading ? (
           <div className="p-8 text-center"><Spinner /></div>
         ) : !invoices?.length ? (
-          <div className="p-8 text-center text-gray-400">No invoices yet</div>
+          <div className="p-8 text-center text-gray-600">No invoices yet</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

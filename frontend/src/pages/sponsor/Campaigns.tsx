@@ -65,7 +65,7 @@ export default function SponsorCampaigns() {
       {isLoading ? (
         <div className="text-center py-10"><Spinner /></div>
       ) : !campaigns?.length ? (
-        <div className="bg-white rounded-xl shadow p-8 text-center text-gray-400">
+        <div className="bg-white rounded-xl shadow p-8 text-center text-gray-600">
           No campaigns yet. Create your first campaign to get started.
         </div>
       ) : (
