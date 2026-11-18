@@ -8,6 +8,9 @@ and nothing told us. This checks, on a public page and a staff page:
   - with both switched off the form still opens at once, says why there is no picture,
     offers "Add a picture", and the report carries the reasons (client_context.screenshot)
   - a picture added by hand shows in the form and goes with the report
+  - each picture looks like the screen: compared with WebKit's own screenshot of the moment
+    before the 🐞 (WebKitGTK counts as Safari here, so the bevels are drawn as borders as on
+    an iPhone: Shmuel's picture had the qnet button edges shifted off their buttons)
   - no console errors, and the capture takes under 8 s
 
 WebKitGTK is not Apple Safari: html2canvas works here but did not on Shmuel's iPhone, so
@@ -79,6 +82,26 @@ img.src = arguments[0];
 """
 
 
+# How far the capture is from the real screen (same method as e2e/lib/shot-compare.mjs)
+COMPARE_JS = """
+const [a, b, done] = arguments; const W = 225;
+const load = (src) => new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = src; });
+Promise.all([load(a), load(b)]).then(([ia, ib]) => {
+  const H = Math.round(W * ia.naturalHeight / ia.naturalWidth);
+  const px = (img) => { const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0, W, H); return g.getImageData(0, 0, W, H).data; };
+  const da = px(ia), db = px(ib); let off = 0, sum = 0;
+  for (let i = 0; i < da.length; i += 4) {
+    const v = Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]);
+    sum += v; if (v > 60) off++;
+  }
+  const n = da.length / 4;
+  done({ off: Math.round(off / n * 1000) / 10, mean: Math.round(sum / n * 10) / 10 });
+}, (e) => done({ off: 100, error: String(e) }));
+"""
+LIMIT = 16  # % of pixels; see LIMIT in e2e/bug-screenshot-faithful.mjs for the known small differences
+
+
 def open_reporter(d, path, skip):
     d.get(BASE + path)
     d.execute_script("localStorage.setItem('access_token','test');localStorage.setItem('refresh_token','test')")
@@ -88,6 +111,7 @@ def open_reporter(d, path, skip):
                      "const f = window.fetch; const x = XMLHttpRequest.prototype.send;"
                      "XMLHttpRequest.prototype.send = function (b) { try { if (String(this.__url||'').includes('/bug-reports')) window.__posted = JSON.parse(b); } catch (e) {} return x.call(this, b); };"
                      "const o = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (m, u) { this.__url = u; return o.apply(this, arguments); };")
+    d.real = 'data:image/png;base64,' + d.get_screenshot_as_base64()  # the screen just before the 🐞
     t0 = time.time()
     d.execute_script("window.dispatchEvent(new CustomEvent('kbr:report-bug', {detail: {delay: 0}}))")
     while time.time() - t0 < 25:
@@ -125,6 +149,8 @@ def run(path, label):
                 pic = d.execute_async_script(COLOURS_JS, src)
                 check(f'{label} {how}: the picture is not blank', pic['colours'] >= 8, json.dumps(pic))
                 check(f'{label} {how}: the picture is the window, not the whole page', abs(pic['h'] / max(pic['w'], 1) - 2.0) < 0.35, json.dumps(pic))
+                cmp = d.execute_async_script(COMPARE_JS, src, d.real)
+                check(f'{label} {how}: the picture looks like the screen (at most {LIMIT}% of pixels differ)', cmp['off'] <= LIMIT, json.dumps(cmp))
             body = send(d)
             if os.environ.get('SAVE_DIR') and body and body.get('screenshot'):  # to look at the pictures
                 name = f"{label.replace(' ', '-')}-{how}.jpg"
