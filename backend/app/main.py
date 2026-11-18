@@ -461,6 +461,13 @@ CONCURRENT_INDEXES = {
     # history each time (2.4 to 3.9 s on production, 2026-11-18).
     "ix_queue_entries_station_started": "queue_entries (station_id, started_at)",
     "ix_queue_entries_station_preempt": "queue_entries (station_id, preempt_at)",
+    # queue_entries keeps every entry ever played (about 255k rows) and only about
+    # 1,850 wait. The next due timed item (GET /now-playing, the timed-groups check)
+    # and the row on air walked that history: 0.94 s, 0.95 s and 3.6 s on production,
+    # 2026-11-18. These hold only the waiting / playing rows: 0.01 to 0.06 ms locally
+    # on 250k history rows (a full read without them).
+    "ix_qe_pending_preempt": "queue_entries (station_id, preempt_at, position) WHERE status = 'pending'",
+    "ix_qe_playing_started": "queue_entries (station_id, started_at) WHERE status = 'playing'",
     # Deleting a library item makes Postgres look in every table that points at it
     # (cascade / set null). Without these each delete read the whole of queue_entries
     # (it keeps every entry ever played) and the other tables, row by row.
