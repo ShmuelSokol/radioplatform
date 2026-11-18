@@ -797,6 +797,11 @@ async def handle_next(
     during_show = await _live_show_on(db, station_id)
     if during_show and not (engine_live_on and state.engine_proto >= ENGINE_PROTO_LIVE_PRELOAD):
         return None
+    if engine_live_on and not during_show and _show_about_to_be_heard(station_id):
+        # Told to go quiet a second before the host is heard; the take-over follows.
+        # Telling it "the show is over" here brought the song back for 2 s where the
+        # show should start (harness, 2026-11-18)
+        return None
     if engine_live_on and not during_show:
         # The engine is still quiet for a show that is over (its end never reached it:
         # we restarted, or the command failed). Told in the background; it asks again.
@@ -967,6 +972,18 @@ async def _hold_before_hard_item(
             room, due.strftime("%H:%M:%S"), getattr(current, "id", None), getattr(held, "id", None),
         )
     return hold
+
+
+def _show_about_to_be_heard(station_id) -> bool:
+    """The stream was quieted for a show whose delay is in its last second (on_soon)."""
+    try:
+        from app.api.v1.live_shows_ws import live_relay
+
+        sid = str(station_id)
+        air = live_relay.airs.get(sid)
+        return sid in live_relay.quieted_early and air is not None and not air.closed and not air.finishing
+    except Exception:
+        return False
 
 
 async def _live_show_on(db: AsyncSession, station_id) -> bool:

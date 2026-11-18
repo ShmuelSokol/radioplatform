@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, Set
 
 import numpy as np
@@ -274,6 +274,15 @@ class StationLiveRelay:
                     # over, so nothing else would give the stream its sound back
                     from app.services import playout_engine
                     await playout_engine.engine_live(_station, False)
+            from app.services import scheduler_engine as _sched
+            if _air.finish_reason == "host left" and _air.ever_heard \
+                    and _sched._scheduler_instance is not None and _sched._scheduler_instance.running:
+                # The last words of a host who left have played out: look now whether
+                # the station goes back to music, not on the scheduler's next pass
+                # (up to 3 s more silence; harness measured 3.6 to 3.9 s)
+                task = asyncio.ensure_future(_host_gone_now(_station, _air.show_id))
+                _holds.add(task)
+                task.add_done_callback(_holds.discard)
 
         new.on_closed = closed
 
@@ -400,6 +409,24 @@ class StationLiveRelay:
                 await line.ws.close(code=1000)
             except Exception:
                 pass
+
+
+async def _host_gone_now(station_id: str, show_id: str) -> None:
+    from app.models.live_show import LiveShow, LiveShowStatus
+    from app.models.station import Station
+    from app.services.scheduler_engine import get_scheduler
+
+    try:
+        async for db in get_async_session():
+            station = await db.get(Station, uuid.UUID(station_id))
+            show = await db.get(LiveShow, uuid.UUID(show_id))
+            if station is not None and show is not None and show.status == LiveShowStatus.LIVE \
+                    and (station.automation_config or {}).get("live_show_id") == show_id:
+                await get_scheduler()._host_gone(db, station, show, datetime.now(timezone.utc))
+            await db.rollback()
+            break
+    except Exception:
+        logger.warning("Could not look for a gone host on station %s", station_id, exc_info=True)
 
 
 _holds: set = set()  # watchers that keep a show from cutting a timed item (kept from collection)

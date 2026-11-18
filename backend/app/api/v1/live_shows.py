@@ -413,7 +413,7 @@ async def put_on_air(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_dj_or_manager),
 ):
-    """Push an approved caller on air. Only one caller can be on_air at a time (409 if attempted).
+    """Push an approved caller on air. Up to four callers can be on air together (409 beyond that).
     While the show's delay is not full enough to Dump a caller, 409 as well unless `force`."""
     await _refuse_while_not_safe(db, show_id, force)
     call = await live_show_service.put_caller_on_air(db, show_id, call_id)
@@ -484,17 +484,19 @@ async def next_caller(
     delay could not cut the new caller, unless `force`; nothing is ended then."""
     from app.models.call_in_request import CallInRequest, CallStatus
 
-    current = (await db.execute(select(CallInRequest).where(
+    # Several callers can be on air together: Next ends them all
+    on_air_now = (await db.execute(select(CallInRequest).where(
         CallInRequest.live_show_id == show_id, CallInRequest.status == CallStatus.ON_AIR,
-    ))).scalars().first()
+    ).order_by(CallInRequest.air_start))).scalars().all()
     coming = await live_show_service.next_approved_call(db, show_id)
-    if current is None and coming is None:
+    if not on_air_now and coming is None:
         raise HTTPException(status_code=409, detail="No caller is on air and none is approved")
     if coming is not None:
         await _refuse_while_not_safe(db, show_id, force)
     ended = None
-    if current is not None:
-        ended = await live_show_service.end_call(db, current.id)
+    for current in on_air_now:
+        done = await live_show_service.end_call(db, current.id)
+        ended = ended or done
         await _tell_web_caller(current.id, "completed")
         await _say(show_id, "caller_removed", {"call_id": str(current.id), "reason": "ended"})
     on_air = None
