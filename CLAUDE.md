@@ -406,7 +406,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `RESEND_FROM_EMAIL` | Sender email (default: noreply@kolbramah.com) | For emails |
 | `ANTHROPIC_API_KEY` | Claude API key for AI email drafting | For AI emails |
 | `TWILIO_ACCOUNT_SID` | Twilio account SID (empty to disable) | For SMS/WhatsApp alerts |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token | For SMS/WhatsApp alerts |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token; when set, Twilio webhooks must carry a valid X-Twilio-Signature (403 otherwise) | For SMS/WhatsApp alerts |
 | `TWILIO_PHONE_NUMBER` | Twilio phone number | For SMS/WhatsApp alerts |
 | `TWILIO_VOICE_NUMBER` | Dedicated voice number for live call-ins | For live shows |
 | `LIVE_SHOW_HOLD_MUSIC_URL` | Public URL to hold music MP3 | For live shows |

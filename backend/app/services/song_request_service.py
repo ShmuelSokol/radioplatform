@@ -147,6 +147,33 @@ async def fuzzy_match_asset(
     return None, 0.0
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+async def station_day_start(db: AsyncSession, station_id, now: datetime | None = None) -> datetime:
+    """Midnight of the station's own day, in UTC. Daily request caps count from here:
+    counting from UTC midnight reset a New York station's day at 7-8 PM local."""
+    from zoneinfo import ZoneInfo
+
+    from app.models.station import Station
+
+    now = now or _now()
+    tz_name = None
+    try:
+        tz_name = (await db.execute(
+            select(Station.timezone).where(Station.id == uuid.UUID(str(station_id)))
+        )).scalar_one_or_none()
+    except (ValueError, TypeError):
+        pass
+    try:
+        tz = ZoneInfo(tz_name or "UTC")
+    except Exception:
+        tz = timezone.utc
+    local_midnight = now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_midnight.astimezone(timezone.utc)
+
+
 async def check_auto_approve(
     db: AsyncSession,
     asset: Asset,
@@ -166,9 +193,7 @@ async def check_auto_approve(
         return False
 
     max_per_day = extra.get("max_requests_per_day", 3)
-    today_start = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    today_start = await station_day_start(db, station_id)
 
     # Count today's PlayLog entries for this asset+station
     play_count_result = await db.execute(
