@@ -488,6 +488,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions
 # Sound in the control room on an iPhone: the Listen button and tap-to-sound time, in Chromium made to follow Safari's tap rule
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound.mjs
 
+# A new release published under an open page, then every late-loading screen opened (builds the site twice itself)
+cd frontend && node e2e/stale-release.mjs
+
 # Every control room button, the Listen page, call-in and release-pickup timings, same fake backend (ONLY=<part> for one part; see wiki/audio-engine.md)
 cd frontend && for s in control-room-actions listen-page call-in release-timing; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
 

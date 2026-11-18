@@ -206,6 +206,65 @@ async function serverStream(browser, stream) {
   }
 }
 
+// ── Server stream: Mute, a stall, and a stream that does not start ──
+// (the PC's walk-through 2026-11-18: after Listen on and off on Jerusalem the header
+// stayed on "Starting…")
+async function streamStarting(browser, stream, contextOpts, tag) {
+  const mk = () => { const station = makeStation(); const base = station.nowPlaying; station.nowPlaying = (extra) => { const d = base(extra); return d && { ...d, stream_url: stream.url(station.SID) }; }; return station; };
+  const el = (page) => page.evaluate(() => { const a = document.querySelector('[data-testid=control-room] audio'); return { paused: a.paused, muted: a.muted, t: a.currentTime }; });
+  const vis = (page, id) => page.getByTestId(id).locator('visible=true').count();
+  const PLAYS = `() => { const a = document.querySelector('[data-testid=control-room] audio'); return !a.paused && !a.muted && a.currentTime > 0.05; }`;
+  const press = (page, loc) => (contextOpts.hasTouch ? loc.tap() : loc.click());
+  {
+    // Listen, Mute, then the stream stalls and comes back while muted, then Unmute
+    const { ctx, page, errors } = await openRoom(browser, contextOpts, mk(), { storage: { 'kbr-cr-listen': null, radio_muted: null } });
+    await timeClick(page, listenBtn(page), PLAYS, 8000, contextOpts.hasTouch ? 'tap' : 'click');
+    await sleep(800);
+    const ctl = page.getByTestId('sound-control').locator('visible=true').first();
+    await press(page, ctl);
+    await sleep(300);
+    check(`${tag}: Mute keeps the mute control (not "Starting…", not Listen)`, await vis(page, 'sound-control') === 1 && await vis(page, 'listen-starting') === 0 && await vis(page, 'listen-here') === 0);
+    stream.stall(2500);
+    let wrong = 0;
+    for (let i = 0; i < 12; i++) { await sleep(500); if (await vis(page, 'listen-starting')) wrong++; }
+    check(`${tag}: a stall while muted never puts "Starting…" in the header`, wrong === 0 && await vis(page, 'sound-control') === 1, `${wrong} of 12 looks`);
+    await press(page, page.getByTestId('sound-control').locator('visible=true').first());
+    const back = await timeUntil(page, PLAYS, 4000);
+    check(`${tag}: Unmute brings the stream back, the header says so`, back >= 0 && await vis(page, 'sound-control') === 1 && await vis(page, 'listen-starting') === 0, `${back} ms ${JSON.stringify(await el(page))}`);
+    // on, off, on a few times quickly
+    for (let i = 0; i < 6; i++) { await press(page, page.getByTestId('sound-control').locator('visible=true').first()); await sleep(150); }
+    await sleep(1500);
+    check(`${tag}: Mute and Unmute six times in a row ends on the mute control, sound on`, await vis(page, 'sound-control') === 1 && await vis(page, 'listen-starting') === 0 && !(await el(page)).muted && !(await el(page)).paused, JSON.stringify(await el(page)));
+    check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+  {
+    // The stream gives no data: "Starting…" may show for a while, never for good
+    // (the stream request is held, unanswered, until `open` is called)
+    let open; const held = new Promise((ok) => { open = ok; });
+    let holding = true;
+    const { ctx, page, errors } = await openRoom(browser, contextOpts, mk(), { storage: { 'kbr-cr-listen': null, radio_muted: null } });
+    await ctx.route(/\/live-st-1$/, async (route) => { if (holding) await held; await route.continue().catch(() => {}); });
+    await press(page, listenBtn(page));
+    await sleep(1000);
+    const early = await vis(page, 'listen-starting');
+    await sleep(8500);
+    check(`${tag}: a stream that does not start shows "Starting…" at first, and Listen again within 10 s`, early === 1 && await vis(page, 'listen-starting') === 0 && await vis(page, 'listen-here') === 1, `starting at 1 s: ${early}`);
+    const asked0 = stream.stats.connects; let asks = 0;
+    page.on('request', (r) => { if (/\/live-st-1$/.test(r.url())) asks++; });
+    await press(page, listenBtn(page));
+    await sleep(600);
+    check(`${tag}: tapping Listen again asks for the stream afresh and says "Starting…"`, asks >= 1 && await vis(page, 'listen-starting') === 1, `${asks} new requests`);
+    holding = false; open();
+    const ms = await timeUntil(page, PLAYS, 8000);
+    check(`${tag}: once the stream answers it is heard`, ms >= 0 && ms <= 3000 && stream.stats.connects > asked0, `${ms} ms`);
+    await sleep(500);
+    check(`${tag}: then the header shows the mute control`, await vis(page, 'sound-control') === 1 && await vis(page, 'listen-starting') === 0);
+    check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+}
+
 const run = (name) => !ONLY || ONLY.split(',').includes(name);
 const browser = await chromium.launch();
 const stream = await startStreamServer(STREAM_PORT);
@@ -221,6 +280,7 @@ try {
   if (run('next')) await nextItems(browser);
   if (run('mute')) await mute(browser);
   if (run('stream')) await serverStream(browser, stream);
+  if (run('starting')) { await streamStarting(browser, stream, PHONE, 'stream starting iPhone'); await streamStarting(browser, stream, { viewport: { width: 1366, height: 900 } }, 'stream starting desktop'); }
 } finally {
   await browser.close();
   await stream.close?.();

@@ -69,6 +69,10 @@ const SPLIT_MIN = 0.15;
 const SPLIT_MAX = 0.85;
 
 const LISTEN_KEY = 'kbr-cr-listen';
+// How long the header may say "Starting…" for the server stream, and after how long
+// without sound a tap starts the stream afresh
+const STREAM_STARTING_MAX_MS = 8000;
+const STREAM_RESTART_AFTER_MS = 4000;
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -273,7 +277,14 @@ export default function Dashboard() {
   // It is started inside the tap (takeSound): Safari refuses a stream that an
   // effect starts, and the page then fell back to the built-in player.
   const [streamSounding, setStreamSounding] = useState(false);
-  const streamRef = useRef<{ url: string; stream: LiveStream } | null>(null);
+  const streamRef = useRef<{ url: string; stream: LiveStream; startedAt: number } | null>(null);
+  const streamSoundingRef = useRef(false);
+  streamSoundingRef.current = streamSounding;
+  // "Starting…" is shown for a stream on its way, and only for so long: after that the
+  // button says Listen again and a tap starts the stream afresh (it must never stay
+  // on "Starting…").
+  const [streamStarting, setStreamStarting] = useState(false);
+  const startingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopStream = useCallback(() => {
     streamRef.current?.stream.stop();
     streamRef.current = null;
@@ -282,8 +293,12 @@ export default function Dashboard() {
     const audio = dashStreamAudioRef.current;
     if (!audio) return;
     stopStream();
-    streamRef.current = { url, stream: startLiveStream(audio, url, () => { streamRef.current = null; setStreamFailed(true); }) };
+    streamRef.current = { url, startedAt: Date.now(), stream: startLiveStream(audio, url, () => { streamRef.current = null; setStreamFailed(true); }) };
+    setStreamStarting(true);
+    if (startingTimer.current) clearTimeout(startingTimer.current);
+    startingTimer.current = setTimeout(() => setStreamStarting(false), STREAM_STARTING_MAX_MS);
   }, [stopStream]);
+  useEffect(() => () => { if (startingTimer.current) clearTimeout(startingTimer.current); }, []);
   useEffect(() => {
     const audio = dashStreamAudioRef.current;
     if (!audio || !dashUseStream) return;
@@ -416,7 +431,10 @@ export default function Dashboard() {
     const el = dashStreamAudioRef.current;
     const url = streamUrlRef.current;
     if (url && isPlayingRef.current) {
-      if (streamRef.current?.url !== url || el?.paused) startStream(url);
+      // (again when it was started a while ago and still gives no sound)
+      const cur = streamRef.current;
+      const stuck = !!cur && !streamSoundingRef.current && Date.now() - cur.startedAt > STREAM_RESTART_AFTER_MS;
+      if (cur?.url !== url || el?.paused || stuck) startStream(url);
     } else if (el && !streamRef.current && !el.getAttribute('src')) {
       el.src = SILENT_WAV;
       el.play().then(() => { if (!streamRef.current) el.pause(); }).catch(() => {});
@@ -806,7 +824,7 @@ export default function Dashboard() {
     looping: looping,
     onLoop: toggleLoop,
     loopBusy: loopBusy,
-    audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
+    audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive && streamStarting, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
     stationTz: stationTz,
     liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
   };
@@ -912,7 +930,7 @@ export default function Dashboard() {
     <div className="qn cr-root h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
       {resume.asking && <ResumePrompt onTap={resume.tap} />}
       <audio ref={dashStreamAudioRef} className="hidden"
-        onPlaying={(e) => setStreamSounding(!!streamRef.current && !e.currentTarget.muted)}
+        onPlaying={() => setStreamSounding(!!streamRef.current)}
         onPause={() => setStreamSounding(false)}
         onEmptied={() => setStreamSounding(false)}
         onEnded={() => setStreamSounding(false)}

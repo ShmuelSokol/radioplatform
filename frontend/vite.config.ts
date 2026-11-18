@@ -7,11 +7,16 @@ import fs from 'fs'
 // newer release has been published (see src/lib/appUpdate.ts).
 const APP_VERSION = process.env.VERCEL_GIT_COMMIT_SHA || `build-${Date.now()}`
 
+let outDir = path.resolve(__dirname, 'dist')
 const versionFile = () => ({
   name: 'kbr-version-file',
   apply: 'build' as const,
+  // (the folder actually built into: a check that builds two releases uses --outDir)
+  configResolved(config: { root: string; build: { outDir: string } }) {
+    outDir = path.resolve(config.root, config.build.outDir)
+  },
   closeBundle() {
-    const out = path.resolve(__dirname, 'dist')
+    const out = outDir
     if (fs.existsSync(out)) {
       fs.writeFileSync(path.join(out, 'version.json'), JSON.stringify({ version: APP_VERSION }))
     }
