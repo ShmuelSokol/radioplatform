@@ -39,6 +39,34 @@ Branch previews stay off (the script skips anything that is not production), as
 they were in the Vercel project's settings before; `vercel.json` now overrides
 that setting.
 
+## No backend restart during a live show (deploy gate, 2026-11-18)
+
+A backend restart takes a live show's host off the air for as long as the backend
+is down (about 20 s of quiet; the host's sound passes through the backend, and the
+Host Console reconnects by itself afterwards). Threads merge all day and cloud
+threads cannot reach the API to look first, so the check is automatic:
+
+- CI's last job on a push to main, `deploy-gate` (`infra/deploy/deploy_gate.py`),
+  waits while any station's `GET /live-shows/station/{id}/active` says a show is on
+  air, and during minutes :55 to :05 and :27 to :33 (the time checks). It looks every
+  30 s and gives up after 4 hours.
+- Railway's service setting **Wait for CI** must be ON: then Railway deploys a commit
+  only when its CI has finished, so the gate holds the restart. With the setting off
+  the job changes nothing. A commit whose CI fails is not deployed at all.
+- So the backend restarts about 8 minutes after a merge (CI's length), not at once.
+  Count from there when a restart must miss a moment.
+- Urgent fix: put `[deploy-now]` in the merge commit's message (the gate passes at
+  once; CI still runs), or press Redeploy in Railway (waits for nothing).
+- The gate passes when the API does not answer: the deploy may be the fix.
+- Each push to main has its own CI run (its own concurrency group), so a run waiting
+  at the gate is not cancelled by the next merge. When the show ends every waiting
+  commit passes and Railway deploys them; the newest wins.
+- A website-only merge also runs the gate, but Vercel does not wait for CI: the
+  website publishes at once. A wiki or docs-only merge runs no CI and deploys nothing.
+- A merge whose CI fails on main is not deployed, and nothing announces it. The next
+  backend merge with green CI deploys everything. If the backend looks old, look at
+  the last CI runs on main first.
+
 ## Checking it
 
 On the merge commit's status list (`gh api repos/ShmuelSokol/radioplatform/commits/<sha>/status`):

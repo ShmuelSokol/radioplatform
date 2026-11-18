@@ -410,3 +410,4 @@ INGEST 2026-11-18 daf-yomi-intro.md intro clip before each Daf Yomi shiur: calen
 UPDATE 2026-11-18 spot-schedules.md one sponsor's plays kept an hour apart after levelling; settle_today fits today's plan to the play log after a mid-day edit (no double airs, no plays lost on gone breaks)
 UPDATE 2026-11-18 daf-yomi-intro.md speech check uses whisper_prompt() (all masechta names); Arachin also matches 'arachan'
 UPDATE 2026-11-18 spot-schedules.md spread sponsorships skip soft breaks inside a timed shiur/story (talk_windows); hard :00/:30 breaks stay usable
+INGEST 2026-11-18 deploys.md deploy gate: CI's last job on main waits while a live show is on air and around :00/:30; needs Railway Wait for CI; [deploy-now] skips it
