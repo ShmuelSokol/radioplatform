@@ -21,6 +21,9 @@ from app.models.station import Station
 from app.services.queue_replenish_service import QueueReplenishService
 from app.services.spot_schedule_service import reconcile_spot_slots
 
+# Slot counts depend on the minute; see clock_off_the_slots in conftest.py
+pytestmark = pytest.mark.usefixtures("clock_off_the_slots")
+
 
 async def _station_with_contract(db: AsyncSession, **asset_fields):
     station = Station(id=uuid.uuid4(), name=f"Main {uuid.uuid4().hex[:6]}", timezone="America/New_York",
