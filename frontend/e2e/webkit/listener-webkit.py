@@ -300,6 +300,7 @@ def bar(tag, args, mode, no_mse=False):
             wait_for(d, "document.body.innerText.includes('Server stream')", 8)
         ms = press(d, STREAM_PLAYING if stream else AUDIBLE, button(d, 'Listen Live'), 8)
         check(f'{tag}: Listen Live heard on the station page', ms >= 0, f'{ms} ms')
+        # every other move by the router; the last walk below by real clicks on the menu
         for path, ready in (('/guide', 'Program Guide'), ('/hosts', 'DJs'), ('/stations', 'Stations')):
             t1 = js(d, clock)
             js(d, GO, path)
@@ -309,6 +310,29 @@ def bar(tag, args, mode, no_mse=False):
             check(f'{tag}: {path} shows the bar', shown >= 0, f'{shown} ms')
             check(f'{tag}: still playing on {path} with no new tap (clock moved, no restart)',
                   t1 is not None and t2 is not None and t2 - t1 > 2.0, f'{t1} -> {t2} in 3 s')
+        # the same moves by real clicks on the site's own menu (the burger menu when the window is narrow)
+        find_link = """
+            const label = arguments[0];
+            const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+            return [...document.querySelectorAll('nav a')].find((a) => a.textContent.trim() === label && shown(a)) || null;"""
+        for label, path in (('Program Guide', '/guide'), ('Archives', '/archives'), ('DJs', '/hosts'), ('Stations', '/stations')):
+            t1 = js(d, clock)
+            link = js(d, find_link, label)
+            if link is None:
+                burger = js(d, "return document.querySelector('nav button[aria-label=\"Menu\"]')")
+                if burger is not None:
+                    burger.click()
+                    time.sleep(0.3)
+                    link = js(d, find_link, label)
+            if link is None:
+                check(f'{tag}: menu link "{label}" found', False, 'no visible link')
+                continue
+            link.click()
+            shown = wait_for(d, "!!document.querySelector('[data-testid=\"player-bar\"]') && location.pathname === " + json.dumps(path), 4)
+            time.sleep(3.0)
+            t2 = js(d, clock)
+            check(f'{tag}: a real click on "{label}" in the menu: bar shown, still playing, no restart',
+                  shown >= 0 and t1 is not None and t2 is not None and t2 - t1 > 2.0, f'{shown} ms, {t1} -> {t2} in 3 s')
         bar_text = js(d, "return document.querySelector('[data-testid=\"player-bar\"]').innerText")
         check(f'{tag}: the bar names the station', np.get('name', "Kol B'ramah") in bar_text or "Kol B'ramah" in bar_text, bar_text)
         js(d, "document.querySelector('[data-testid=\"player-bar\"] button').click()")
