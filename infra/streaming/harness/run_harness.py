@@ -934,14 +934,16 @@ async def sc_two_sources_same_second(h: Harness) -> None:
     await h.queue([(n, {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}) for n in ("time", "weather")])
     await asyncio.sleep(max(0, t1.timestamp() - time.time()) + 6 + 8 + 6 + 12)
     items = ("time", "weather", "announce")
-    starts = {n: await h.started_times(n, t1.timestamp() - 5) for n in items}
+    # A song that ends 1 to 8 s before a hard item lets it start early instead of being
+    # chopped (PR 232), so the group may begin up to 8 s before its second
+    starts = {n: await h.started_times(n, t1.timestamp() - 10) for n in items}
     h.check(name, all(len(starts[n]) == 1 for n in items),
             f"each aired once: { {n: len(starts[n]) for n in items} }")
     first = min((starts[n][0][0] for n in items if starts[n]), default=None)
     late = None if first is None else first - t1.timestamp()
-    h.check(name, late is not None and -1.0 <= late <= 2.0,
+    h.check(name, late is not None and -8.5 <= late <= 2.0,
             f"the first of them {'never' if late is None else f'{late:+.1f} s'} from the due second")
-    heard = h.heard(t1.timestamp() - 3, t1.timestamp() + 32)
+    heard = h.heard(t1.timestamp() - 10, t1.timestamp() + 32)
     h.print_timeline(heard, t1.timestamp())
     names = [n for _, n in timeline(heard)]
     runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]

@@ -23,3 +23,29 @@ export function stationToShow(stations: { id: string }[], chosen?: string | null
   if (last && stations.some((s) => String(s.id) === last)) return last;
   return fallback || stations[0]?.id || '';
 }
+
+/**
+ * Listener pages with a station choice open on Kol B'ramah Main, not on whichever name
+ * sorts first (the list is alphabetical, so that was KBR Jerusalem). There is no "main"
+ * flag on a station; Main is the one with "Main" in its name. Falls back to the first.
+ */
+export function mainStationId(stations: { id: string; name?: string }[]): string {
+  return (stations.find((s) => /\bmain\b/i.test(s.name || '')) || stations[0])?.id || '';
+}
+
+const LISTENER_KEY = 'kbr_listener_station';
+
+/** The station a listener page shows: the one the link names (?station=<id>), else the
+ *  one this listener chose before, else Main. */
+export function listenerStation(stations: { id: string; name?: string }[], fromLink?: string | null): string {
+  const has = (id: string | null | undefined) => !!id && stations.some((s) => String(s.id) === id);
+  if (has(fromLink)) return fromLink as string;
+  let chosen = '';
+  try { chosen = localStorage.getItem(LISTENER_KEY) || ''; } catch { /* private mode */ }
+  return has(chosen) ? chosen : mainStationId(stations);
+}
+
+export function rememberListenerStation(id: string): void {
+  if (!id) return;
+  try { localStorage.setItem(LISTENER_KEY, id); } catch { /* private mode */ }
+}
