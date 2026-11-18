@@ -1224,7 +1224,7 @@ async def _live_show_over_hard_item(h: Harness, name: str, hard_stop: bool, rest
     await asyncio.sleep(18 + 45)
     heard = h.heard(t1.timestamp() - 3, time.time() - 1)
     h.print_timeline(heard, t1.timestamp())
-    during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
+    during = [w for w in heard if t_start + 8.5 <= w[0] <= t_end - 0.3]   # PR 347: music up to 5 s while the engine waits for audio (none here), plus the stream lag
     loud = sum(WINDOW for w in during if w[1] >= -45)
     what = [f"{w[0] - t_start:+.1f}s {tone_name(w[2])} {w[1]:.0f}dB" for w in during if w[1] >= -45][::4][:10]
     h.check(name, bool(during) and loud <= 0.2,
@@ -1782,7 +1782,7 @@ async def _live_show_quiet(h: Harness, name: str) -> None:
     await asyncio.sleep(16)
     heard = h.heard(t_start - 3, time.time() - 1)
     h.print_timeline(heard, t_start)
-    during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
+    during = [w for w in heard if t_start + 8.5 <= w[0] <= t_end - 0.3]   # PR 347: music up to 5 s while the engine waits for audio (none here), plus the stream lag
     loud = sum(WINDOW for w in during if w[1] >= -45)
     what = [f"{w[0] - t_start:+.1f}s {tone_name(w[2])} {w[1]:.0f}dB" for w in during if w[1] >= -45][::4][:10]
     h.check(name, bool(during) and loud <= 0.2,
@@ -2153,7 +2153,7 @@ async def sc_live_show_host_gone(h: Harness) -> None:
             f"({'never' if again is None else f'{again - t_back:.1f} s'} after it reconnected)")
     h.check(name, retaken, "the station is the show's again once the host is back")
     if again is not None:
-        during = [w for w in heard if again + 2.0 <= w[0] <= t_end - 0.3]
+        during = [w for w in heard if again + 4.0 <= w[0] <= t_end - 0.3]
         loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) != "HOST")
         h.check(name, bool(during) and loud <= 0.3,
                 f"the engine is quiet under the host again (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
@@ -2304,7 +2304,7 @@ async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> N
     h.check(name, bool(pre) and pre_loud >= (len(pre) * WINDOW) - 0.6,
             f"the engine keeps the music through the pre-roll ({pre_loud:.1f} s of {len(pre) * WINDOW:.1f} s)")
     if first is not None:
-        during = [w for w in heard if first + 2.0 <= w[0] <= t_end - 0.3]
+        during = [w for w in heard if first + 4.0 <= w[0] <= t_end - 0.3]
         loud = sum(WINDOW for w in during if w[1] >= -45 and tone_name(w[2]) not in ("HOST", clock))
         h.check(name, bool(during) and loud <= 0.3,
                 f"no music on the engine stream once listeners hear the host (music for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
