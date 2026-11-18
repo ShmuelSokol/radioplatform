@@ -71,6 +71,7 @@ action worked **and** the screen, console and network showed nothing a person wo
 - [x] L-33 A user of every role can be saved on Postgres: every label the models send exists in the database's enum types after start-up, also on an old database where the DJ label had been added in lower case (creating a DJ user gave a 500 on production only, 2026-11-18) | covered: tests/test_enum_labels_postgres.py (CI Postgres), tests/test_enum_labels.py
 - [ ] L-34 ↳ live: create a DJ user on the site, sign in as it, delete it | covered: NOT COVERED (live check, asked of the PC 09:40Z)
 - [x] L-35 The on-air self-check reads only recent rows through indexes (station + started_at, station + preempt_at) and stays within its query budget; it had scanned the whole queue table every tick (SLOW QUERY lines on production) | covered: tests/test_air_watch.py::test_recent_starts_and_due_items_have_indexes, query budget test
+- [x] L-36 The index build after start tries again when the database refuses the connection or a build fails (5 tries, 30 s apart), rebuilds an index left unusable, and the log of every start says "Indexes in place: ..." or "INDEXES MISSING"; the enum check also logs its outcome every start | covered: tests/test_index_build.py
 
 ## I. One station never shows, warns about or changes another
 

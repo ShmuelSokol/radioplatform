@@ -114,8 +114,7 @@ async def add_missing_enum_labels(raw_conn) -> list[str]:
                 added.append(f"{name}.{label}")
             except Exception as e:
                 logger.warning(f"Enum label {name}.{label} not added: {e}")
-    if added:
-        logger.info("Enum labels added: %s", ", ".join(added))
+    logger.info("Enum labels added: %s", ", ".join(added) or "none, every label the models send is there")
     return added
 
 
@@ -476,36 +475,67 @@ CONCURRENT_INDEXES = {
 }
 
 
-async def _build_concurrent_indexes() -> None:
+INDEX_BUILD_TRIES = 5
+INDEX_BUILD_WAIT = 30.0  # seconds between tries
+
+
+async def _build_indexes_once(conn, names) -> list[str]:
+    """Builds the named indexes that are missing or unusable. Returns those still missing."""
+    missing = []
+    for name in names:
+        target = CONCURRENT_INDEXES[name]
+        try:
+            valid = await conn.fetchval(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "WHERE c.relname = $1", name,
+            )
+            if valid:
+                continue
+            if valid is False:  # a build that was interrupted leaves an unusable index
+                await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+            started = asyncio.get_running_loop().time()
+            await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
+            logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+        except Exception as e:
+            logger.warning("Index %s not built: %s", name, e)
+            missing.append(name)
+    return missing
+
+
+async def _build_concurrent_indexes(dsn: str | None = None, wait: float = INDEX_BUILD_WAIT) -> list[str]:
+    """Builds CONCURRENT_INDEXES in the background; a failed connection or build is
+    tried again, and the outcome is logged once either way (so the log of any start
+    says which indexes exist). Returns the names still missing."""
     import asyncpg
 
-    if not settings.DATABASE_URL.startswith("postgresql"):
-        return
-    dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-    try:
-        conn = await asyncpg.connect(dsn, statement_cache_size=0)
-    except Exception as e:
-        logger.warning("Could not connect to build indexes: %s", e)
-        return
-    try:
-        await conn.execute("SET statement_timeout = '10min'")
-        for name, target in CONCURRENT_INDEXES.items():
+    if dsn is None:
+        if not settings.DATABASE_URL.startswith("postgresql"):
+            return []
+        dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    missing = list(CONCURRENT_INDEXES)
+    for attempt in range(1, INDEX_BUILD_TRIES + 1):
+        try:
+            conn = await asyncpg.connect(dsn, statement_cache_size=0)
+        except Exception as e:
+            logger.warning("Could not connect to build indexes (try %d of %d): %s", attempt, INDEX_BUILD_TRIES, e)
+        else:
             try:
-                valid = await conn.fetchval(
-                    "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
-                    "WHERE c.relname = $1", name,
-                )
-                if valid:
-                    continue
-                if valid is False:  # a build that was interrupted leaves an unusable index
-                    await conn.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
-                started = asyncio.get_running_loop().time()
-                await conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON {target}")
-                logger.info("Built index %s in %.1f s", name, asyncio.get_running_loop().time() - started)
+                await conn.execute("SET statement_timeout = '10min'")
+                missing = await _build_indexes_once(conn, missing)
             except Exception as e:
-                logger.warning("Index %s not built: %s", name, e)
-    finally:
-        await conn.close()
+                logger.warning("Index build stopped (try %d of %d): %s", attempt, INDEX_BUILD_TRIES, e)
+            finally:
+                await conn.close()
+            if not missing:
+                break
+        if attempt < INDEX_BUILD_TRIES:
+            await asyncio.sleep(wait)
+    if missing:
+        logger.error("INDEXES MISSING after %d tries: %s", INDEX_BUILD_TRIES, ", ".join(missing))
+    else:
+        logger.info("Indexes in place: %s", ", ".join(CONCURRENT_INDEXES))
+    return missing
+
 
 async def _seed_default_categories():
     """Insert default categories if the categories table is empty."""
