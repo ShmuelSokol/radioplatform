@@ -301,6 +301,9 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         e = slot_or_entry
         if e.source != "auto" or e.preempt_at is not None or e.id in held:
             return False
+        # Songs only: a station ID between songs stays where it was drawn, clear of the break
+        if e.asset is not None and (e.asset.asset_type or "music").lower() != "music":
+            return False
         if start is None:
             return True
         frozen = PRELOADED_FROZEN if e.id == preloaded else FROZEN

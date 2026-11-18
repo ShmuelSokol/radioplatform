@@ -434,6 +434,11 @@ function AutomationConfig({ config, onSave, saving }: {
   const [weatherInterval, setWeatherInterval] = useState(config.weather_interval_minutes ?? 30);
   const [longItems, setLongItems] = useState<string>(config.timed_during_long_items ?? 'pause');
   const [crossfade, setCrossfade] = useState<string>(String(config.crossfade_seconds ?? 1));
+  const ids = (config.station_ids ?? {}) as Record<string, any>;
+  const [idsOn, setIdsOn] = useState<boolean>(ids.enabled === true);
+  const [idsMin, setIdsMin] = useState<string>(String(ids.min_minutes ?? 12));
+  const [idsMax, setIdsMax] = useState<string>(String(ids.max_minutes ?? 20));
+  const [idsCategory, setIdsCategory] = useState<string>(String(ids.category ?? 'station_id'));
   const [liveDelay, setLiveDelay] = useState<string>(String(config.live_delay_seconds ?? 15));
   const [liveDump, setLiveDump] = useState<string>(String(config.live_dump_seconds ?? 0));
   const [liveTimed, setLiveTimed] = useState<string>(config.live_timed_items ?? 'time');
@@ -444,6 +449,8 @@ function AutomationConfig({ config, onSave, saving }: {
       : null);
 
   const handleSave = () => {
+    const minutes = (v: string, d: number) => Math.min(240, Math.max(3, Number.isFinite(parseFloat(v)) ? parseFloat(v) : d));
+    const idsLow = minutes(idsMin, 12);
     onSave({
       ...config, // keep settings made elsewhere (program clock, weather region)
       timed_during_long_items: longItems,
@@ -454,6 +461,13 @@ function AutomationConfig({ config, onSave, saving }: {
       live_record_shows: liveRecord,
       live_dump_filler_asset_id: filler?.id ?? null,
       live_dump_filler_title: filler?.title ?? null,
+      station_ids: {
+        ...ids, // keep anything set elsewhere (clear_minutes)
+        enabled: idsOn,
+        min_minutes: idsLow,
+        max_minutes: Math.max(idsLow, minutes(idsMax, 20)),
+        category: idsCategory.trim() || 'station_id',
+      },
       hourly_station_id: hourlyId,
       hourly_time_announcement: hourlyTime,
       weather_enabled: weatherOn,
@@ -504,6 +518,34 @@ function AutomationConfig({ config, onSave, saving }: {
           Sponsorships, time checks, weather, shiurim and stories never overlap, whatever is set here.
         </span>
       </label>
+      <div className="mt-4 max-w-lg text-sm">
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={idsOn} onChange={e => setIdsOn(e.target.checked)}
+            className="mt-1" data-testid="station-ids-on" />
+          <span>
+            <span className="block font-medium text-gray-700">Station IDs between songs</span>
+            <span className="block mt-1 text-xs text-gray-500">
+              A station ID jingle plays after a song now and then, taking turns so each one is used before any repeats.
+              Never within 3 minutes of a time check, weather or sponsorship break, never right after anything spoken,
+              never on Shabbos or Yom Tov. Applies to stations that fill from playlists.
+            </span>
+          </span>
+        </label>
+        <div className="mt-2 ml-6 flex flex-wrap items-center gap-2">
+          <span>Every</span>
+          <input type="number" value={idsMin} min={3} max={240} step={1} disabled={!idsOn}
+            onChange={e => setIdsMin(e.target.value)} aria-label="Fewest minutes between station IDs"
+            className="w-16 px-2 py-1 border rounded" data-testid="station-ids-min" />
+          <span>to</span>
+          <input type="number" value={idsMax} min={3} max={240} step={1} disabled={!idsOn}
+            onChange={e => setIdsMax(e.target.value)} aria-label="Most minutes between station IDs"
+            className="w-16 px-2 py-1 border rounded" data-testid="station-ids-max" />
+          <span>minutes, from jingles of category</span>
+          <input type="text" value={idsCategory} disabled={!idsOn}
+            onChange={e => setIdsCategory(e.target.value)} aria-label="Category of the station ID jingles"
+            className="w-44 px-2 py-1 border rounded" data-testid="station-ids-category" />
+        </div>
+      </div>
       <h4 className="text-sm font-bold text-gray-700 uppercase mt-6 mb-2">Live shows</h4>
       <label className="block max-w-lg text-sm">
         <span className="block font-medium text-gray-700">Broadcast delay (seconds)</span>
