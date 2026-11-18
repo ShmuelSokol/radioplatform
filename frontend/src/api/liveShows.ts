@@ -37,6 +37,8 @@ export interface CallInRequest {
   updated_at: string;
   /** Earlier calls of the same person and what the staff decided about them; null when the call does not say who is calling */
   history?: CallerHistoryInfo | null;
+  /** End Call, Hold and Next leave a locked call alone */
+  locked?: boolean;
 }
 
 export type CallerStanding = 'normal' | 'priority' | 'blocked';
@@ -196,6 +198,9 @@ export const endCall = async (showId: string, callId: string): Promise<CallInReq
   const res = await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/end-call`);
   return res.data;
 };
+
+export const lockCall = async (showId: string, callId: string, locked: boolean): Promise<CallInRequest> =>
+  (await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/lock`, { locked })).data;
 
 export const updateCallInfo = async (
   showId: string,

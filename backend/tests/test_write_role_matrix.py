@@ -150,6 +150,7 @@ WRITE_POLICY = {
     ("PATCH", "/live-shows/{show_id}"): ON_AIR,
     ("PATCH", "/live-shows/{show_id}/calls/{call_id}"): ON_AIR,
     ("PUT", "/live-shows/{show_id}/calls/{call_id}/caller"): ON_AIR,
+    ("POST", "/live-shows/{show_id}/calls/{call_id}/lock"): ON_AIR,
     ("POST", "/live-shows/{show_id}/chat"): ON_AIR,
     ("PUT", "/caller-profiles/{profile_id}"): ON_AIR,
     ("POST", "/live-shows/{show_id}/calls/{call_id}/approve"): ON_AIR,

@@ -11,6 +11,7 @@ import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../..
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
 import CallerHistory from './live/CallerHistory';
+import LockButton from './live/LockButton';
 
 const MAX_ON_AIR = 4; // the server's limit (live_show_service.MAX_CALLERS_ON_AIR)
 
@@ -302,8 +303,13 @@ export default function HostConsole() {
                   <span className="text-red-300 font-bold text-lg">
                     {onAirCaller.caller_name || onAirCaller.caller_phone}
                   </span>
-                  <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse">
-                    ON AIR
+                  <span className="flex items-center gap-1 shrink-0">
+                    {onAirCaller.locked && (
+                      <span className="text-[10px] bg-yellow-600 text-white px-2 py-0.5 rounded-full font-bold" data-testid="locked-badge">LOCKED</span>
+                    )}
+                    <span className="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full animate-pulse">
+                      ON AIR
+                    </span>
                   </span>
                 </div>
                 <div className="text-[11px] text-gray-500 mb-3">
@@ -320,23 +326,28 @@ export default function HostConsole() {
                   <button
                     onClick={() => handleHold(onAirCaller.id)}
                     data-testid="hold-button"
-                    title="Off the air, still connected: back to the approved queue"
-                    className="flex-1 bg-amber-800 hover:bg-amber-700 text-amber-200 px-3 py-2 rounded text-sm transition"
+                    disabled={!!onAirCaller.locked}
+                    title={onAirCaller.locked ? 'This call is locked. Unlock it first.' : "Off the air, still connected: back to the approved queue"}
+                    className="flex-1 bg-amber-800 hover:bg-amber-700 text-amber-200 px-3 py-2 rounded text-sm transition disabled:opacity-40"
                   >
                     Hold
                   </button>
                   <button
                     onClick={() => handleEndCall(onAirCaller.id)}
-                    className="flex-1 bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition"
+                    data-testid="end-call-button"
+                    disabled={!!onAirCaller.locked}
+                    title={onAirCaller.locked ? 'This call is locked. Unlock it first.' : undefined}
+                    className="flex-1 bg-red-800 hover:bg-red-700 text-red-200 px-3 py-2 rounded text-sm transition disabled:opacity-40"
                   >
                     End Call
                   </button>
+                  <LockButton showId={showId} caller={onAirCaller} />
                 </div>
                 {i === onAirCallers.length - 1 && approvedCallers.length > 0 && (
                   <button
                     onClick={handleNext}
                     data-testid="next-caller-button"
-                    title="Ends every call on air and puts the caller who waited longest on air"
+                    title="Ends every call on air that is not locked and puts the caller who waited longest on air"
                     className="mt-2 w-full bg-green-800 hover:bg-green-700 text-green-200 px-3 py-3 rounded text-sm font-bold transition"
                   >
                     Next caller: {approvedCallers[0].caller_name || approvedCallers[0].caller_phone}

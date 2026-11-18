@@ -1,7 +1,7 @@
 import enum
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,6 +41,9 @@ class CallInRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Who is calling, the same on every call of theirs ("tel:<number>" or "web:<id>"):
     # the key of their history and standing (app/services/caller_history.py)
     caller_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    # Locked by the host or screener: End Call, Hold, Reject and Next leave this call
+    # alone until it is unlocked (a guest who must not be dropped by a slip of the hand)
+    locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     screened_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

@@ -391,6 +391,13 @@ async def set_delay(
 
 # --- Call management ---
 
+async def _refuse_if_locked(db: AsyncSession, call_id) -> None:
+    """End Call, Hold and Reject leave a locked call alone (409)."""
+    call = await live_show_service.get_call(db, call_id)
+    if call is not None and call.locked:
+        raise HTTPException(status_code=409, detail="This call is locked. Unlock it first.")
+
+
 async def _tell_web_caller(call_id, status: str) -> None:
     """A web caller's page and audio follow the screener (on air = mixed in)."""
     try:
@@ -486,6 +493,7 @@ async def reject_call(
     user: User = Depends(require_dj_or_manager),
 ):
     """Reject a caller."""
+    await _refuse_if_locked(db, call_id)
     call = await live_show_service.reject_call(db, call_id, screened_by=user.id)
     if not call:
         raise NotFoundError("Call not found")
@@ -560,6 +568,7 @@ async def hold_call(
 ):
     """Take the caller on air off the air without hanging up (back to Approved). They
     stay connected, hear the show, and can be put on air again. 409 if not on air."""
+    await _refuse_if_locked(db, call_id)
     call = await live_show_service.hold_caller(db, call_id)
     if not call or str(call.live_show_id) != str(show_id):
         raise NotFoundError("Call not found")
@@ -581,13 +590,21 @@ async def next_caller(
     delay could not cut the new caller, unless `force`; nothing is ended then."""
     from app.models.call_in_request import CallInRequest, CallStatus
 
-    # Several callers can be on air together: Next ends them all
+    # Several callers can be on air together: Next ends them all, except a locked
+    # call (a guest), which stays on air with the caller who comes
     on_air_now = (await db.execute(select(CallInRequest).where(
         CallInRequest.live_show_id == show_id, CallInRequest.status == CallStatus.ON_AIR,
+        CallInRequest.locked == False,  # noqa: E712
     ).order_by(CallInRequest.air_start))).scalars().all()
     coming = await live_show_service.next_approved_call(db, show_id)
     if not on_air_now and coming is None:
-        raise HTTPException(status_code=409, detail="No caller is on air and none is approved")
+        locked = (await db.execute(select(CallInRequest.id).where(
+            CallInRequest.live_show_id == show_id, CallInRequest.status == CallStatus.ON_AIR,
+            CallInRequest.locked == True,  # noqa: E712
+        ).limit(1))).first()
+        raise HTTPException(status_code=409, detail=(
+            "The call on air is locked and no caller is approved" if locked
+            else "No caller is on air and none is approved"))
     if coming is not None:
         await _refuse_while_not_safe(db, show_id, force)
     ended = None
@@ -607,6 +624,30 @@ async def next_caller(
     return {"ended": str(ended.id) if ended else None, "on_air": str(on_air.id) if on_air else None}
 
 
+class LockRequest(BaseModel):
+    locked: bool
+
+
+@router.post("/{show_id}/calls/{call_id}/lock", response_model=CallInRequestInDB)
+async def lock_call(
+    show_id: uuid.UUID,
+    call_id: uuid.UUID,
+    body: LockRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_dj_or_manager),
+):
+    """Lock or unlock a call. While locked, End Call, Hold, Reject and Next leave it
+    alone. Dump with "drop the caller" still drops it, and the caller can hang up."""
+    call = await live_show_service.get_call(db, call_id)
+    if not call or str(call.live_show_id) != str(show_id):
+        raise NotFoundError("Call not found")
+    call.locked = body.locked
+    await db.commit()
+    await db.refresh(call)
+    await _say(show_id, "caller_updated", {"call_id": str(call_id), "locked": call.locked})
+    return call
+
+
 @router.post("/{show_id}/calls/{call_id}/end-call", response_model=CallInRequestInDB)
 async def end_active_call(
     show_id: uuid.UUID,
@@ -615,6 +656,7 @@ async def end_active_call(
     _user: User = Depends(require_dj_or_manager),
 ):
     """End an active call."""
+    await _refuse_if_locked(db, call_id)
     call = await live_show_service.end_call(db, call_id)
     if not call:
         raise NotFoundError("Call not found")
