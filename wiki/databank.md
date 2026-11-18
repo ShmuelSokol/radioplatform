@@ -20,3 +20,23 @@ Mpeg / Prsnt filters and 123 (go to record): see [station-modes](station-modes.m
 Tests: `frontend/e2e/databank-ui.mjs` against the built site and a fake backend (every checklist row, desktop, iPhone 13/SE, landscape, iPad; `ONLY=<part>`), `frontend/e2e/databank-screen.mjs` (fake backend: end-date clear and no-station cases, phone tap sizes incl. iPhone SE), `frontend/e2e/databank.mjs` against a running site with data, `backend/tests/test_databank.py` `test_databank_rows.py` and `test_databank_more.py`.
 
 Find matches what is typed: `%` and `_` (file names like track_01) are escaped, not LIKE wildcards. The Log tab follows a station change: if today was shown it moves to the new station's today (time zones differ), an earlier day is kept when the new list has it, and the highlighted line is cleared.
+
+## Speed: "last played" is never joined in (2026-11-18)
+
+`GET /databank/items` used to join a GROUP BY over the whole `play_logs` table into every
+page. On production (9,046 items) one page took 7 to 12 s and the Databank sat on
+"Loading... Rec 0 Tot 0". It could not be reproduced on a local Postgres with 1.5 million
+plays (0.1 s there), so the exact production plan is not known; the play history was the only
+thing the slow calls had and the fast `/databank/types` did not. Now the times come from
+`services/last_played` (in memory per station, only new plays read), merged over the stations
+when none is chosen; a last-played sort is worked out from that map and only the page's rows
+are read, and only the columns the table shows. Do not join `play_logs` back in.
+The page says "Still loading" after 4 s and shows a failure with "Try again".
+Tests: `tests/test_databank_speed.py`, `e2e/display-findings.mjs` check 17.
+
+## Tidy names
+
+`Asset` trims title, artist and album on every write (`tidy_text` in `models/asset.py`):
+tabs and line breaks become a space, ends trimmed, an empty artist or album becomes NULL.
+Old rows: `backend/scripts/sql/tidy_asset_text.sql` (count first, then the update; by hand
+after a backup).

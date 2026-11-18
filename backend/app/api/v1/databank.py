@@ -82,12 +82,11 @@ async def list_items(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_staff),
 ):
-    """One page of the library, sorted by any column, with when each item last played."""
-    lp = select(PlayLog.asset_id.label("asset_id"), func.max(PlayLog.start_utc).label("last_played"))
-    if station_id:
-        lp = lp.where(PlayLog.station_id == station_id)
-    lp = lp.group_by(PlayLog.asset_id).subquery()
+    """One page of the library, sorted by any column, with when each item last played.
 
+    "Last played" comes from services/last_played (kept in memory, only new plays read):
+    this used to join a GROUP BY over the whole play history into every page, which took
+    7 to 12 s on the real library and left the Databank on "Loading" (2026-11-18)."""
     conditions = [Asset.asset_type == asset_type]
     for prefix in GENERATED_TITLE_PREFIXES:
         conditions.append(~Asset.title.like(f"{prefix}%"))
@@ -107,35 +106,60 @@ async def list_items(
         ))
 
     total = (await db.execute(select(func.count(Asset.id)).where(*conditions))).scalar() or 0
+    last = await _last_played(db, station_id)
 
-    col = lp.c.last_played if sort == "last_played" else SORTS.get(sort, Asset.artist)
-    order = [col.desc().nulls_last() if desc else col.asc().nulls_last(), Asset.title.asc(), Asset.id.asc()]
-    rows = (await db.execute(
-        select(Asset, lp.c.last_played)
-        .outerjoin(lp, lp.c.asset_id == Asset.id)
-        .where(*conditions)
-        .order_by(*order)
-        .offset(skip).limit(limit)
-    )).all()
+    # Only the columns the table shows: whole Asset rows carry analysis data nobody reads here
+    cols = (Asset.id, Asset.artist, Asset.title, Asset.category, Asset.asset_type, Asset.vote,
+            Asset.duration, Asset.intro_seconds, Asset.file_path)
+    if sort == "last_played":
+        # The times live in memory, so the order is worked out here: ids and titles of
+        # every match (two small columns), sorted, then only the page's rows are read.
+        ids = (await db.execute(select(Asset.id, Asset.title).where(*conditions))).all()
+        never = [(t or "", str(i), i) for i, t in ids if str(i) not in last]
+        played = [(last[str(i)], t or "", str(i), i) for i, t in ids if str(i) in last]
+        played.sort(key=lambda r: (r[1], r[2]))
+        played.sort(key=lambda r: r[0], reverse=desc)   # stable: ties keep title order
+        never.sort()
+        page_ids = ([r[3] for r in played] + [r[2] for r in never])[skip:skip + limit]
+        found = {r.id: r for r in (await db.execute(select(*cols).where(Asset.id.in_(page_ids)))).all()} if page_ids else {}
+        rows = [found[i] for i in page_ids if i in found]
+    else:
+        col = SORTS.get(sort, Asset.artist)
+        order = [col.desc().nulls_last() if desc else col.asc().nulls_last(), Asset.title.asc(), Asset.id.asc()]
+        rows = (await db.execute(select(*cols).where(*conditions).order_by(*order).offset(skip).limit(limit))).all()
 
     return {
         "total": total,
         "items": [
             {
-                "id": str(a.id),
-                "artist": a.artist,
-                "title": a.title,
-                "type": a.category,
-                "asset_type": a.asset_type,
-                "vote": a.vote,
-                "length": a.duration,
-                "intro": a.intro_seconds,
-                "file": file_name(a.file_path),
-                "last_played": last.isoformat() if last else None,
+                "id": str(r.id),
+                "artist": r.artist,
+                "title": r.title,
+                "type": r.category,
+                "asset_type": r.asset_type,
+                "vote": r.vote,
+                "length": r.duration,
+                "intro": r.intro_seconds,
+                "file": file_name(r.file_path),
+                "last_played": last[str(r.id)].isoformat() if str(r.id) in last else None,
             }
-            for a, last in rows
+            for r in rows
         ],
     }
+
+
+async def _last_played(db: AsyncSession, station_id) -> dict:
+    """asset id -> when it last aired, on one station or (none given) on any."""
+    from app.services.last_played import last_played
+
+    if station_id:
+        return await last_played(db, station_id)
+    merged: dict = {}
+    for (sid,) in (await db.execute(select(Station.id))).all():
+        for key, when in (await last_played(db, sid)).items():
+            if key not in merged or merged[key] < when:
+                merged[key] = when
+    return merged
 
 
 @router.get("/types")
