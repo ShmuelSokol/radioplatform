@@ -189,7 +189,7 @@ async def test_start_only_playlists_hand_over_like_the_studio_program(
     # A start-only block runs only from starts after it was made: these were
     # made long ago
     for block in (mix, night, candle, motzei, shiur):
-        block.created_at = datetime.now(UTC) - timedelta(days=60)
+        block.created_at = datetime(2026, 1, 1, tzinfo=UTC)  # fixed: see test_block_resolution.LONG_AGO
     await db_session.commit()
     svc = SchedulingService(db_session)
 

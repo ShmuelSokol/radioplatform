@@ -90,6 +90,13 @@ async def test_new_station_settings_saved_and_it_goes_on_air(client, auth_header
     station_id = uuid.UUID(got["id"])
     from app.models.station import Station
     station = await db_session.get(Station, station_id)
+    # The new station got its Shabbos windows; run on a Shabbos, the blackout (rightly)
+    # keeps the silence timer from starting. This test is about going on air.
+    from sqlalchemy import delete
+
+    from app.models.holiday_window import HolidayWindow
+    await db_session.execute(delete(HolidayWindow))
+    await db_session.commit()
     engine = SchedulerEngine()
     await engine._check_station(db_session, station)                     # first pass: silence timer starts
     engine._silence_start[str(station_id)] -= timedelta(seconds=settings.SILENCE_DETECTION_SECONDS + 1)

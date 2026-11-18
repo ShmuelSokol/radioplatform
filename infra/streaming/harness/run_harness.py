@@ -831,6 +831,53 @@ async def sc_operator_next_slow_file(h: Harness) -> None:
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 
+async def sc_operator_next_overtakes_commit(h: Harness) -> None:
+    """KBR Jerusalem 2026-11-18 03:23Z: Play next and Next sent 0.1 s apart. On production
+    a commit takes 50 to 150 ms, so the Next ran before Play next was committed, saw the
+    old queue head and played the automatic song the engine held. Here a database trigger
+    holds every manual queue insert for 250 ms inside its transaction, and Next is sent
+    0.1 s after Play next: the queued item must be what airs."""
+    name = "operator_next_overtakes_commit"
+    from sqlalchemy import text
+
+    from app.db.engine import async_session_factory
+
+    await wait_music(h)
+    await asyncio.sleep(8)
+    base = f"/stations/{STATION_ID}/queue"
+    async with async_session_factory() as db:
+        await db.execute(text(
+            "CREATE OR REPLACE FUNCTION kbr_slow_insert() RETURNS trigger AS $$ "
+            "BEGIN PERFORM pg_sleep(0.25); RETURN NEW; END $$ LANGUAGE plpgsql"))
+        await db.execute(text("DROP TRIGGER IF EXISTS kbr_slow_manual ON queue_entries"))
+        await db.execute(text(
+            "CREATE TRIGGER kbr_slow_manual BEFORE INSERT ON queue_entries FOR EACH ROW "
+            "WHEN (NEW.source = 'manual') EXECUTE FUNCTION kbr_slow_insert()"))
+        await db.commit()
+    t_start = time.time()
+    try:
+        for asset in ("story", "shiur", "song6"):
+            body = {"asset_id": str(h.assets[asset])}
+            queued = asyncio.create_task(asyncio.to_thread(h.api, "POST", f"{base}/play-next", body))
+            await asyncio.sleep(0.1)
+            pressed = asyncio.create_task(asyncio.to_thread(h.api, "POST", f"{base}/skip?fade=hard"))
+            (code, _), (skip_code, _) = await queued, await pressed
+            t = await h.wait_on_air(asset, 6)
+            cur = await h.on_air()
+            h.check(name, code == 201 and skip_code == 200 and t is not None,
+                    f"Play next ({code}) and Next ({skip_code}) 0.1 s apart, commit held 250 ms: "
+                    f"{asset} on air (site shows {cur.asset.title if cur else None})")
+            await asyncio.sleep(6)
+    finally:
+        async with async_session_factory() as db:
+            await db.execute(text("DROP TRIGGER IF EXISTS kbr_slow_manual ON queue_entries"))
+            await db.commit()
+    heard = h.heard(t_start, time.time() - 1)
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
 async def sc_resume_without_old_song(h: Harness) -> None:
     """KBR Jerusalem 2026-11-18 01:00Z: Main's Daf Yomi block cut a song at 00:45; at
     01:00 the shiur paused for the time check, and before it resumed 2.8 s of the song cut
@@ -2316,6 +2363,7 @@ SCENARIOS = {
     "site_matches_stream": sc_site_matches_stream,
     "operator_queue_then_next": sc_operator_queue_then_next,
     "operator_next_slow_file": sc_operator_next_slow_file,
+    "operator_next_overtakes_commit": sc_operator_next_overtakes_commit,
     "resume_without_old_song": sc_resume_without_old_song,
     "next_twice": sc_next_twice,
     "next_skips_one": sc_next_skips_one,
