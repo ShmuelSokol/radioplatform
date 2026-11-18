@@ -462,6 +462,7 @@ async function main() {
     guard.allow(/warning toast: (HS|Spots mode) is off/, 'switching a station mode off says so in amber on purpose');
     guard.allow(/You cannot disable your own account|PUT .*\/users\/[0-9a-f-]+$|status of 400 .*\/users\//, 'the walk is signed in as the only admin: Disable on itself is refused, and the page says so');
     guard.allow(/preview-weather|Could not load the weather preview/, 'no voice service on the test server');
+    guard.allow(/weather-readouts|Weather is not set up/, 'no weather key on the test server; the page says so');
     await dragInQueue(page, guard, st).catch((e) => finding(st.tag, '/admin/dashboard', 'drag', 'test error', e.message, ''));
     for (const route of ROUTES) {
       if (ONLY.length && !ONLY.includes(route)) continue;
