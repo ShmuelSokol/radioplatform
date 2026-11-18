@@ -543,6 +543,19 @@ async function queueActions(browser) {
   const dnd = writes(station, /reorder-dnd$/).pop();
   check(`${tag}: drag a row onto another reorders it`, dnd?.body.entry_id === p[6].id && order()[1] === p[6].asset_id, JSON.stringify(dnd?.body));
   check(`${tag}: drag warnings shown as a toast`, (await toastText(page)).includes('Category transition conflict'));
+  // The arrows show the same reminder as a drag (a rule conflict on the Stories station
+  // showed on drag only, 2026-11-18)
+  station.reorderWarnings = ['Daypart rule "All Day Stories" expects stories during 0:00-24:00, but this asset is music'];
+  const r8 = rowOf(page, station.pending()[7].id);
+  await r8.hover();
+  await r8.getByRole('button', { name: 'Move up' }).click();
+  await sleep(SLOW + 400);
+  check(`${tag}: ▲ shows the same warning as a drag`, (await toastText(page)).includes('Daypart rule "All Day Stories"'), await toastText(page));
+  await r8.hover();
+  await r8.getByRole('button', { name: 'Move down' }).click();
+  await sleep(SLOW + 400);
+  check(`${tag}: ▼ shows the same warning as a drag`, (await toastText(page)).includes('Daypart rule "All Day Stories"'), await toastText(page));
+  station.reorderWarnings = [];
   // Insert from an instant button while the marker is armed
   const target = station.pending()[3];
   await rowOf(page, target.id).getByTestId('insert-here').click();

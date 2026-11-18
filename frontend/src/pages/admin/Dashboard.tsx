@@ -691,8 +691,12 @@ export default function Dashboard() {
     });
   }, [stationId, initAudio, startMut]);
 
-  const moveUp = useCallback((id: string) => moveUpMut.mutate(id, { onError: onMutError }), [moveUpMut, onMutError]);
-  const moveDown = useCallback((id: string) => moveDownMut.mutate(id, { onError: onMutError }), [moveDownMut, onMutError]);
+  // Arrows show the same reminders as drag-and-drop (rule and category conflicts)
+  const onMoved = useCallback((data: { warnings?: string[] } | undefined) => {
+    if (data?.warnings?.length) setToast({ text: data.warnings.join(' | '), type: 'warn' });
+  }, []);
+  const moveUp = useCallback((id: string) => moveUpMut.mutate(id, { onSuccess: onMoved, onError: onMutError }), [moveUpMut, onMoved, onMutError]);
+  const moveDown = useCallback((id: string) => moveDownMut.mutate(id, { onSuccess: onMoved, onError: onMutError }), [moveDownMut, onMoved, onMutError]);
   const remove = useCallback((id: string) => removeMut.mutate(id, { onError: onMutError }), [removeMut, onMutError]);
   const reorder = useCallback((entryId: string, newPosition: number) => {
     reorderMut.mutate({ entryId, newPosition }, {

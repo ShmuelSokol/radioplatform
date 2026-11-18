@@ -379,7 +379,7 @@ export function makeStation(opts = {}) {
       const i = list.findIndex((x) => x.id === body.entry_id);
       const j = path.endsWith('up') ? i - 1 : i + 1;
       if (i >= 0 && j >= 0 && j < list.length) { const p = list[i].position; list[i].position = list[j].position; list[j].position = p; }
-      return { message: 'Moved' };
+      return { message: 'Moved', warnings: s.reorderWarnings || [] };
     }
     if (path === `${q}/reorder-dnd`) {
       const e = queue.find((x) => x.id === body.entry_id);
