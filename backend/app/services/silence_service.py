@@ -173,3 +173,54 @@ def trim_audio(
         raise RuntimeError(f"FFmpeg trim failed: {result.stderr[:500]}")
 
     return result.stdout, duration
+
+
+def merge_regions(regions: list[dict], length: float | None = None) -> list[tuple[float, float]]:
+    """Sorted, merged (start, end) spans, clipped to [0, length]; empty spans dropped."""
+    spans = []
+    for r in regions:
+        try:
+            a, b = float(r["start"]), float(r["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        a = max(0.0, a)
+        if length:
+            b = min(b, length)
+        if b - a > 0.001:
+            spans.append((a, b))
+    spans.sort()
+    merged: list[tuple[float, float]] = []
+    for a, b in spans:
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def remove_regions(file_data: bytes, regions: list[dict]) -> tuple[bytes, float]:
+    """Cut every region out of the audio and join what is left, into an MP3.
+
+    "Remove all found silence" in the Library (Shmuel 2026-11-18: "I like what it
+    found. I want to delete it."). Gaps in the middle are removed too, not only at the
+    start and end. Read from a file, not a pipe (see audio_file).
+    Returns (new_bytes, new_duration). Raises ValueError when nothing would be left."""
+    with audio_file(file_data) as path:
+        length = get_audio_duration(path)
+        spans = merge_regions(regions, length or None)
+        if not spans:
+            raise ValueError("No silence to remove")
+        removed = sum(b - a for a, b in spans)
+        if length and length - removed < 0.5:
+            raise ValueError("That would remove the whole recording")
+        expr = "+".join(f"between(t\\,{a:.3f}\\,{b:.3f})" for a, b in spans)
+        cmd = [
+            settings.FFMPEG_PATH, "-v", "error", "-i", path, "-vn",
+            "-af", f"aselect='not({expr})',asetpts=N/SR/TB",
+            "-c:a", "libmp3lame", "-b:a", "256k", "-ar", "44100",
+            "-f", "mp3", "pipe:1",
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=600)
+        if result.returncode != 0 or not result.stdout:
+            raise RuntimeError(f"FFmpeg could not remove the silence: {result.stderr[:500]!r}")
+    return result.stdout, get_audio_duration(result.stdout)

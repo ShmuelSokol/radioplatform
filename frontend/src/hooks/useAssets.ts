@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, restoreOriginal, bulkSetCategory, bulkAutoTrim, getEnhancePresets, enhanceAsset, enhancePreview, autoEnhanceAsset, detectAudience } from '../api/assets';
+import { listAssets, uploadAsset, updateAsset, deleteAsset, getAsset, getAssetAudioUrl, detectSilence, trimAsset, removeSilence, restoreOriginal, bulkSetCategory, bulkAutoTrim, getEnhancePresets, enhanceAsset, enhancePreview, autoEnhanceAsset, detectAudience } from '../api/assets';
 import type { ListAssetsParams, BulkCategoryParams, BulkAutoTrimParams, EnhanceRequest, EnhancePreviewRequest } from '../api/assets';
 import type { AssetListResponse } from '../types';
 
@@ -91,6 +91,19 @@ export function useTrimAsset() {
   return useMutation({
     mutationFn: ({ id, trimStart, trimEnd }: { id: string; trimStart: number; trimEnd: number }) =>
       trimAsset(id, trimStart, trimEnd),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset'] });
+      queryClient.invalidateQueries({ queryKey: ['asset-audio-url'] });
+    },
+  });
+}
+
+export function useRemoveSilence() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, regions }: { id: string; regions: Array<{ start: number; end: number }> }) =>
+      removeSilence(id, regions),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] });
       queryClient.invalidateQueries({ queryKey: ['asset'] });
