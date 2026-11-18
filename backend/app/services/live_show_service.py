@@ -227,8 +227,11 @@ async def start_show(
             # under the host's first words
             try:
                 from app.services import playout_engine
-                await playout_engine.engine_flush(station.id)
+                # Quiet first, then the flush: under the live lane the engine loads the
+                # item that follows the show at once (the paused item's resume entry),
+                # so music is back the moment the show ends
                 await playout_engine.engine_live(station.id, True)
+                await playout_engine.engine_flush(station.id)
             except Exception as e:
                 logger.warning("Could not quiet the engine for the live show: %s", e)
 
@@ -286,6 +289,15 @@ async def end_show(db: AsyncSession, show_id: UUID | str) -> LiveShow | None:
         config.pop("live_show_id", None)
         station.automation_config = config
         await _resume_automation(db, station.id, now)
+        from app.config import settings as _settings
+        if _settings.engine_drives(station.id):
+            # At once, not on the scheduler's next pass (up to a second or two of
+            # quiet more): the item that follows the show is already loaded
+            try:
+                from app.services import playout_engine
+                await playout_engine.engine_live(station.id, False)
+            except Exception as e:
+                logger.warning("Could not tell the engine the live show is over: %s", e)
         # The host is off air from this moment, even if the host's page stays open
         try:
             from app.api.v1.live_shows_ws import live_relay

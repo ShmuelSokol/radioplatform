@@ -260,7 +260,7 @@ def test_the_engine_holds_quiet_before_a_hard_item_instead_of_emergency_music():
     assert "[on_air_quiet, timed, main, hold, emergency]" in liq
     assert "(timed_pending() > 0 and left < 8. and left > -2.)" in liq
     assert 'elsif hold_open() then "hold" else "emergency"' in liq
-    assert "engine_proto = 3" in liq
+    assert "engine_proto = 4" in liq
 
 
 def test_speech_is_never_overlapped_and_the_song_crossfade_comes_from_the_backend():
@@ -415,7 +415,7 @@ def test_the_music_lane_stays_muted_until_the_next_item_starts_and_loads_it_ahea
     assert "main.skip()" in first and "main_gain := 1." not in first and "main_interrupted := false" not in first
     flush = liq[liq.index('control("/flush"'):]
     flush = flush[:flush.index("end)")]
-    assert 'on_air_lane() != "main" and not live_on()' in flush
+    assert 'on_air_lane() != "main" or live_on()' in flush
     assert "thread.run(fast=false, {ignore(main_requests.fetch())})" in flush
 
 
@@ -481,3 +481,30 @@ def test_the_engine_starts_quiet_until_its_first_item_instead_of_an_emergency_so
     started = liq[liq.index("def send_started"):]
     first_main = started[started.index('if lane == "main" then\n      last_main_entry := entry'):]
     assert "start_quiet_until := 0." in first_main[:200]
+
+
+def test_a_skip_holds_quiet_until_the_next_item_has_audio_instead_of_emergency_music():
+    """Main 13:27:42Z 2026-11-18: Next by hand onto an item "prepared" with nothing decoded
+    yet put 1.7 s of the emergency lane on air. Every skip of the music lane opens the
+    hold lane for up to 6 s; the next start from the music lane closes it."""
+    liq = _liq()
+    skip = liq[liq.index("def skip_main() ="):]
+    skip = skip[:skip.index("main.skip()")]
+    assert "start_quiet_until := time() + 6." in skip
+
+
+def test_the_item_after_a_live_show_loads_during_the_show():
+    """About 5 s of quiet after a show on Main: the music lane only asked for its next item
+    once the show was over. /flush now asks under the live lane too (proto 4), and the
+    backend quiets the engine before it flushes, so the flush loads that item."""
+    liq = _liq()
+    assert "engine_proto = 4" in liq
+    flush = liq[liq.index('control("/flush"'):]
+    flush = flush[:flush.index("end)")]
+    assert 'on_air_lane() != "main" or live_on()' in flush
+    live = liq[liq.index('control("/live"'):]
+    live = live[:live.index("end)")]
+    assert "main_requests.fetch()" not in live   # one ask only: the flush's
+    svc = (Path(__file__).resolve().parents[1] / "app/services/live_show_service.py").read_text()
+    assert svc.index("engine_live(station.id, True)") < svc.index("engine_flush(station.id)")
+    assert "engine_live(station.id, False)" in svc

@@ -46,9 +46,10 @@ auth_headers = [("X-Playout-Token", token), ("Content-Type", "application/json")
 
 # What this engine understands, sent with /hello and every /next. 2 = timed groups handed
 # over in parallel (seq/of) and /timed_drop. 3 = the hold lane (quiet before a hard item
-# when no song is handed out). The backend keeps to the old serial hand-over
-# for an engine that sends nothing.
-engine_proto = 3
+# when no song is handed out). 4 = the next item is loaded while a host is on air (the
+# live lane keeps it off the stream until the show ends). The backend keeps to the old
+# serial hand-over for an engine that sends nothing.
+engine_proto = 4
 
 # On start-up tell the backend we hold nothing of its queue any more. Done before any
 # track is requested, so the two cannot cross. If the backend cannot be reached (or
@@ -424,6 +425,11 @@ radio = add(normalize=false, [program, overlay])
 def skip_main() =
   asked = time()
   hard_cut := true
+  # Quiet, not emergency music, while the next item gets its first audio. An item can
+  # be "prepared" with nothing decoded yet: Main 13:27:42Z 2026-11-18, Next pressed by
+  # hand, the crossfade had 0.00 s of the next item to cross into and the emergency
+  # lane played for 1.7 s. The next start from the music lane closes it.
+  start_quiet_until := time() + 6.
   main.skip()
   thread.run(delay=0.1, {if main_changed_at() >= asked then master_gain := 1. end})
   thread.run(delay=0.3, {
@@ -632,7 +638,7 @@ def send_started(m) =
       thread.run(delay=1.5, {timed_armed := false})
     else
       if time() < live_release() or time() < start_quiet_until() then
-        log.important("hold: quiet while the first item loads (engine start or end of a live show)")
+        log.important("hold: quiet while the next item loads (engine start, Next or end of a live show)")
       else
         log.important("hold: quiet until the timed item due in #{left} s")
       end
@@ -710,6 +716,10 @@ control("/live", fun (req) -> begin
   if body.on and not live_on() then
     log.important("live: show starts")
     go_live()
+    # The item that follows the show loads during it: the backend sends /flush right
+    # after this (it takes back a track pre-loaded before the show), and /flush asks
+    # again under the live lane. (A second ask from here crossed that one with a slow
+    # backend: two items loaded, and the backend flushed both at the show's end.)
   elsif not body.on and live_on() then
     log.important("live: show ended")
     live_release := time() + 12.
@@ -729,7 +739,8 @@ control("/flush", fun (_) -> begin
   # when it comes back: with a slow backend that left 4 s of emergency music after a
   # timed group whose shiur had just been paused (harness, 2026-11-18). Ask now, so the
   # item is loaded by then. On air, the lane asks by itself.
-  if on_air_lane() != "main" and not live_on() then
+  # During a live show too: the item that follows the show loads under the live lane.
+  if on_air_lane() != "main" or live_on() then
     thread.run(fast=false, {ignore(main_requests.fetch())})
   end
   '{"ok":true}'
