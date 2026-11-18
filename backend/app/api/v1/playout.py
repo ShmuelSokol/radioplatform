@@ -178,6 +178,34 @@ async def started(
     return result
 
 
+class AlertReport(BaseModel):
+    phase: str  # "started" or "ended"
+    alert_id: str | None = None  # "" for the alert line
+    source: str | None = None  # "api" or "line"
+    at: float | None = None
+    started_at: float | None = None
+
+
+@router.post("/{station_id}/alert")
+async def alert_report(
+    body: AlertReport,
+    station_id: uuid.UUID = Depends(_one_engine),
+    db: AsyncSession = Depends(get_db),
+):
+    """The engine reports an emergency alert going on air or coming off (engine proto 6,
+    wiki/emergency-alerts.md)."""
+    from app.services import emergency_alerts
+
+    if body.phase not in ("started", "ended"):
+        return {"ok": False, "error": "phase must be started or ended"}
+    alert = await emergency_alerts.engine_report(
+        db, station_id, phase=body.phase, alert_id=body.alert_id or None, source=body.source,
+        at=body.at, started_at=body.started_at,
+    )
+    await db.commit()
+    return {"ok": alert is not None, "alert_id": str(alert.id) if alert else None}
+
+
 # The show goes out as MP3 for the engine's live lane (agreed with the engine thread
 # 2026-11-18: CBR 192 kbps, 44.1 kHz stereo; engine proto 5 plays it)
 LIVE_MP3_ARGS = ("-f", "mp3", "-codec:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", "-ac", "2",
@@ -188,7 +216,7 @@ LIVE_MP3_ARGS = ("-f", "mp3", "-codec:a", "libmp3lame", "-b:a", "192k", "-ar", "
 async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
     """The station's live show as listeners hear it (after the broadcast delay, Dumps
     applied, time checks included), for the playout engine's live lane and a local FM
-    box's relay. 204 while no show is heard; otherwise an MP3 stream that ends when the
+    box's relay. 204 while no show is heard or about to be; otherwise an MP3 stream that ends when the
     show's delay has played out. Header token only, so it never lands in an access log."""
     import asyncio
 
@@ -198,7 +226,13 @@ async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
     from app.services.live_air import RATE
 
     air = live_relay.airs.get(str(station_id))
-    if air is None or not air.listening or air.closed:
+    # Open too in the last second before the show is first heard (the engine is told
+    # to go quiet then, `on_soon`): silence is sent until the first words. Answering
+    # 204 until then made the engine come back a second later and connect only after
+    # the show had begun: 2.3 s of silence on the stream at every take-over
+    # (KBR Jerusalem, 2026-11-18).
+    about_to = air is not None and air.told_soon and not air.finishing
+    if air is None or air.closed or not (air.listening or about_to):
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
     tap = air.tap()
 
@@ -213,8 +247,20 @@ async def live_audio(station_id: uuid.UUID = Depends(_require_token)):
 
         async def feed():
             try:
+                started = False
                 while True:
-                    data = await tap.get()
+                    if started:
+                        data = await tap.get()
+                    else:
+                        try:
+                            data = await asyncio.wait_for(tap.get(), 0.1)
+                        except asyncio.TimeoutError:
+                            # Not heard yet: silence in real time keeps the reader connected
+                            # and decoding, so the first words follow without a gap
+                            proc.stdin.write(bytes(int(RATE * 0.1) * 2))
+                            await proc.stdin.drain()
+                            continue
+                        started = True
                     if data is None:
                         break
                     proc.stdin.write(data)

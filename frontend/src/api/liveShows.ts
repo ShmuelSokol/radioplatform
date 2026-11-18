@@ -35,7 +35,27 @@ export interface CallInRequest {
   screened_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Earlier calls of the same person and what the staff decided about them; null when the call does not say who is calling */
+  history?: CallerHistoryInfo | null;
+  /** End Call, Hold and Next leave a locked call alone */
+  locked?: boolean;
 }
+
+export type CallerStanding = 'normal' | 'priority' | 'blocked';
+export interface CallerHistoryInfo { calls: number; on_air: number; last_at: string | null; standing: CallerStanding; note: string | null }
+export interface MarkedCaller { id: string; name: string | null; standing: CallerStanding; note: string | null; kind: 'phone' | 'web'; phone: string | null; updated_at: string | null }
+
+/** Mark the person behind a call (it holds for their later calls on every show). Blocking takes their waiting calls out of the queue. */
+export const setCallerStanding = async (
+  showId: string, callId: string, data: { standing?: CallerStanding; note?: string },
+): Promise<{ standing: CallerStanding; note: string | null; removed: number }> =>
+  (await apiClient.put(`/live-shows/${showId}/calls/${callId}/caller`, data)).data;
+
+export const getMarkedCallers = async (): Promise<MarkedCaller[]> =>
+  (await apiClient.get('/caller-profiles')).data.callers;
+
+export const changeMarkedCaller = async (id: string, data: { standing?: CallerStanding; note?: string }): Promise<MarkedCaller> =>
+  (await apiClient.put(`/caller-profiles/${id}`, data)).data;
 
 export interface LiveShowListResponse {
   shows: LiveShow[];
@@ -179,6 +199,9 @@ export const endCall = async (showId: string, callId: string): Promise<CallInReq
   return res.data;
 };
 
+export const lockCall = async (showId: string, callId: string, locked: boolean): Promise<CallInRequest> =>
+  (await apiClient.post<CallInRequest>(`/live-shows/${showId}/calls/${callId}/lock`, { locked })).data;
+
 export const updateCallInfo = async (
   showId: string,
   callId: string,
@@ -246,6 +269,19 @@ export interface DumpRecord {
   caller_name: string | null;
   has_audio: boolean;
 }
+
+export interface ChatMessage { id: string; by: string; user_id: string | null; text: string; at: string | null }
+
+/** The show's staff chat (host and screener), oldest first */
+export const getShowChat = async (showId: string): Promise<ChatMessage[]> => {
+  const res = await apiClient.get<{ messages: ChatMessage[] }>(`/live-shows/${showId}/chat`);
+  return res.data.messages;
+};
+
+export const sayInShowChat = async (showId: string, text: string): Promise<ChatMessage> => {
+  const res = await apiClient.post<ChatMessage>(`/live-shows/${showId}/chat`, { text });
+  return res.data;
+};
 
 export const getShowDumps = async (showId: string): Promise<DumpRecord[]> => {
   const res = await apiClient.get<{ dumps: DumpRecord[] }>(`/live-shows/${showId}/dumps`);

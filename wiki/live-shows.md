@@ -134,3 +134,34 @@ Up to four callers can be on air together (`live_show_service.MAX_CALLERS_ON_AIR
 
 When the last words of a host who left have played out, `_host_gone_now` runs the host-gone check at once (from the air's `on_closed`) instead of waiting for the scheduler's 3 s pass.
 
+
+## Staff chat (host and screener)
+
+A short text line between the people working a show, never heard on air: `ChatPanel` (`pages/admin/live/ChatPanel.tsx`) on the Host Console and the Call Screener. `POST /live-shows/{id}/chat` (DJ and up) stores a `LiveChatMessage` and sends a `chat` event on the show's socket; `GET /live-shows/{id}/chat` gives the last 200, so a page opened later (or a show with the socket down, polled every 10 s) still has them. Lines are 1 to 500 characters after trimming. Another person's new line is lit for 8 s. The lines stay with the show. Browser check: `ONLY=chat` in `e2e/live-delay.cjs`.
+
+## Caller history (repeat, priority and blocked callers)
+
+A caller is known by `CallInRequest.caller_key`: `tel:<number>` for a phone call, `web:<id>` for a browser, where the id is a random value the call-in page keeps in that browser (`kbr_caller_id` in localStorage; older pages send none and such a call has no history). `services/caller_history.py` adds `history` to every call the screens get (the calls list, `show_state`, `caller_queued`): earlier calls, times on air, last call, and the staff's standing and note from `CallerProfile`.
+
+- **Priority**: a badge, and first in Waiting on the Call Screener.
+- **Blocked**: `PUT /live-shows/{show}/calls/{call}/caller` with `blocked` also rejects that person's waiting and approved calls in the show; one on air stays (End Call and Dump are the tools there). Later calls get 403 "This show cannot take your call." (a phone caller hears the no-show message), and a refused call does not count against the rate limit.
+- The note "about the caller" belongs to the person, not the call, and shows on their later calls.
+- `GET /caller-profiles` and `PUT /caller-profiles/{id}`: the list at the foot of the Call Screener, where a block is lifted when the person is not calling.
+
+A web caller who clears their browser data is a new caller. The block is a convenience for the screener, who still sees every call; it is not a wall. The Host Console shows the history read only. Browser check: `ONLY=history` in `e2e/live-delay.cjs`; tests in `tests/test_caller_history.py`.
+
+## Take-over and host-gone timing on the stream (PC check after PR 340, 2026-11-18)
+
+- `/playout/{station}/live.mp3` is open from the moment the engine is told to go quiet (`told_soon`, a second before first air) and sends silence in real time until the first words. It used to answer 204 until the show was heard, so the engine connected only on its next try: 2.3 s of silence on the stream at every take-over.
+- The wait of `live_host_gone_seconds` is noted the moment the host's socket closes (`scheduler_engine.note_host_left`), not when a scheduler pass first sees it, and forgotten when a host sends again. On Jerusalem with delay 15 and limit 15 the count had begun only when the delay had played out: 17.5 s of silence after the host's last words. (Not reproduced locally, where the passes saw the leaving in time; the count no longer depends on them.)
+- The control room browser checks use a fake backend: a live show there is "on air, 15 s delay" (`station.air` overrides), so the badge reads "LIVE, 15 s delay: <title>".
+
+## Locking a call
+
+**Lock** on an on-air caller's card (both screens) sets `CallInRequest.locked` (`POST /live-shows/{show}/calls/{call}/lock`). While locked, End Call, Hold and Reject answer 409 "This call is locked. Unlock it first." and their buttons are greyed; **Next caller** ends only the unlocked callers, so a guest stays on air with the caller who comes. Dump with "drop the caller" still drops a locked call, and the caller can always hang up. Browser check `ONLY=lock`.
+
+The qnet skin greys every disabled button whatever its colour (`!important` in `qnet-site.css`): before, a disabled red or main-action button kept its red or bold label and looked ready to press (seen on the locked card and on DUMP while not on air).
+
+## A pass in the second before first air (harness, 2026-11-18)
+
+`playout_engine.tick` used to send "live off" whenever the station was not the show's, and in the second between the early quiet (`on_soon`) and the take-over it is not yet: a pass falling there started a song that the take-over cut 0.6 to 0.9 s later. The tick now leaves the engine alone while `_show_about_to_be_heard`.

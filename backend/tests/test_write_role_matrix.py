@@ -58,6 +58,9 @@ PUBLIC_WRITES = {
     ("POST", "/playout/{station_id}/started"),
     ("POST", "/playout/{station_id}/hello"),
     ("POST", "/playout/{station_id}/commands/poll"),
+    ("POST", "/playout/{station_id}/alert"),  # playout token
+    ("POST", "/emergency/device/activate"),  # EMERGENCY_API_TOKEN (the EAS box)
+    ("POST", "/emergency/device/{alert_id}/stop"),  # EMERGENCY_API_TOKEN
 }
 
 # Allowed roles are not sent to these: with no input they would really run
@@ -82,6 +85,8 @@ WRITE_POLICY = {
     ("POST", "/ai-emails/draft"): MANAGERS,
     ("POST", "/ai-emails/send"): MANAGERS,
     ("POST", "/alerts/resolve-all"): MANAGERS,
+    ("POST", "/emergency/activate"): MANAGERS,
+    ("POST", "/emergency/{alert_id}/stop"): MANAGERS,
     ("DELETE", "/alerts/{alert_id}"): ADMIN,
     ("PATCH", "/alerts/{alert_id}/reopen"): MANAGERS,
     ("PATCH", "/alerts/{alert_id}/resolve"): MANAGERS,
@@ -149,6 +154,10 @@ WRITE_POLICY = {
     ("DELETE", "/live-shows/{show_id}"): ADMIN,
     ("PATCH", "/live-shows/{show_id}"): ON_AIR,
     ("PATCH", "/live-shows/{show_id}/calls/{call_id}"): ON_AIR,
+    ("PUT", "/live-shows/{show_id}/calls/{call_id}/caller"): ON_AIR,
+    ("POST", "/live-shows/{show_id}/calls/{call_id}/lock"): ON_AIR,
+    ("POST", "/live-shows/{show_id}/chat"): ON_AIR,
+    ("PUT", "/caller-profiles/{profile_id}"): ON_AIR,
     ("POST", "/live-shows/{show_id}/calls/{call_id}/approve"): ON_AIR,
     ("POST", "/live-shows/{show_id}/dump"): ON_AIR,
     ("POST", "/live-shows/{show_id}/calls/{call_id}/hold"): ON_AIR,

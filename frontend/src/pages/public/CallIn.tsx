@@ -30,6 +30,22 @@ const STATUS_TEXT: Record<Status, string> = {
 
 const KNOWN_CALL_STATUS: string[] = ['waiting', 'screening', 'approved', 'on_air'];
 
+/** A random id kept in this browser, so the show's screener can see that the same
+ *  person called before. Nothing else is stored; without storage every call is a new caller. */
+function callerId(): string | null {
+  try {
+    let id = localStorage.getItem('kbr_caller_id');
+    if (!id || !/^[A-Za-z0-9_-]{16,64}$/.test(id)) {
+      const bytes = crypto.getRandomValues(new Uint8Array(18));
+      id = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('kbr_caller_id', id);
+    }
+    return id;
+  } catch {
+    return null;
+  }
+}
+
 export default function CallIn() {
   const { stationId } = useParams<{ stationId: string }>();
   const [active, setActive] = useState<ActiveShow | null>(null);
@@ -75,7 +91,7 @@ export default function CallIn() {
     }
     let call: { call_id: string; token: string };
     try {
-      call = (await apiClient.post(`/call-in/${stationId}`, { name: name.trim(), note: note.trim() || null })).data;
+      call = (await apiClient.post(`/call-in/${stationId}`, { name: name.trim(), note: note.trim() || null, caller: callerId() })).data;
     } catch (e: unknown) {
       mic.getTracks().forEach((t) => t.stop());
       ctx.close().catch(() => {});

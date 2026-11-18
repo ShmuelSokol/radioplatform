@@ -1825,6 +1825,11 @@ async def tick(db: AsyncSession, station) -> None:
         # restart during the show (the engine would play its emergency music).
         await _tell_live(station_id, state, True)
         return
+    if _show_about_to_be_heard(station_id):
+        # Quieted a second before the host is heard; the take-over follows. A pass that
+        # fell into that second told the engine "the show is over": a song started and
+        # was cut 0.9 s later (harness live_show_host_gone, 2026-11-18)
+        return
     # The show is over (or we do not know what the engine was told): music again
     await _tell_live(station_id, state, False)
 

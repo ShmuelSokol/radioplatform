@@ -172,6 +172,14 @@ export const useNowPlayingWS = (stationId: string) => {
               // A jingle to play on top of what is on air; the audio engine picks it up
               window.dispatchEvent(new CustomEvent('kbr-mix-over', { detail: message.data }));
             }
+            if ((message.type === 'emergency_alert' || message.type === 'emergency_alert_stop') && message.data) {
+              // An emergency alert takes over the station's own player (browser-player
+              // stations; on server-stream stations it is in the stream itself)
+              window.dispatchEvent(new CustomEvent(
+                message.type === 'emergency_alert' ? 'kbr-emergency-alert' : 'kbr-emergency-alert-stop',
+                { detail: message.data },
+              ));
+            }
             if (message.type === 'modes' && message.data) {
               // HS / Spots mode changed in some control room: every open one shows it at once
               window.dispatchEvent(new CustomEvent('kbr-modes', { detail: message.data }));

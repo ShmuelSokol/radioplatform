@@ -73,6 +73,9 @@ TONES = {
     "longshiur": (395, 420, "shiur", None),
 }
 EMERGENCY_FREQ = 5000
+# An emergency alert sent through the override (a plain tone: never EAS tones on air)
+ALERT_FREQ = 1000
+EMERGENCY_TOKEN = "harness-emergency-token"
 # The host's show as the backend's live.mp3 serves it (the harness stands in for it)
 HOST_FREQ = 1200
 # A shiur whose pitch rises steadily (300 Hz at 0 s to 600 Hz at 150 s): the pitch heard
@@ -127,6 +130,8 @@ class Stack:
         emerg.mkdir(exist_ok=True)
         self._tone(emerg / "emergency.mp3", EMERGENCY_FREQ, 20)
         self._tone(self.dir / "host.mp3", HOST_FREQ, 300)
+        for secs in (8, 14, 20):
+            self._tone(self.dir / f"alert{secs}.mp3", ALERT_FREQ, secs)
         # A blackout's silence asset (60 s of nothing)
         silent = self.audio / "silence.mp3"
         if not silent.exists():
@@ -363,6 +368,9 @@ class Stack:
             "PLAYOUT_RELAY_STATION_ID": str(STATION_ID) if self.local_box else "",
             "PLAYOUT_ENGINE_TOKEN": TOKEN,
             "LIQUIDSOAP_ENABLED": "false",
+            "EMERGENCY_API_TOKEN": EMERGENCY_TOKEN,
+            # alert audio is served by the backend itself here (no Supabase)
+            "BACKEND_PUBLIC_URL": f"http://127.0.0.1:{BACKEND_PORT}",
         })
         return env
 
@@ -432,6 +440,8 @@ class Stack:
             "KBR_HLS_DIR": str(self.hls),
             # A sound card for the local_box_sound_card scenario (see wiki/local-fm-box.md)
             "KBR_ALSA_DEVICE": os.environ.get("KBR_HARNESS_ALSA_DEVICE", ""),
+            # The EAS box's audio line (emergency_alert_line; a PulseAudio null sink's monitor)
+            "KBR_ALERT_ALSA_DEVICE": os.environ.get("KBR_HARNESS_ALERT_DEVICE", ""),
         })
         self.hls.mkdir(exist_ok=True)
         os.chmod(self.hls, 0o777)  # the engine runs as another user here
@@ -572,6 +582,8 @@ def tone_name(freq: float) -> str:
         best, dist = "EMERGENCY", abs(EMERGENCY_FREQ - freq)
     if abs(HOST_FREQ - freq) < dist:
         best, dist = "HOST", abs(HOST_FREQ - freq)
+    if abs(ALERT_FREQ - freq) < dist:
+        best, dist = "ALERT", abs(ALERT_FREQ - freq)
     return best if dist < max(25, 0.08 * freq) else "mix"
 
 
@@ -2501,7 +2513,10 @@ async def sc_three_item_group(h: Harness) -> None:
     h.print_timeline(heard, t1.timestamp())
     names = [n for _, n in timeline(heard)]
     runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
-    cut_tone = tone_name(TONES[[k for k, v in h.assets.items() if v == cut.asset_id][0]][0])
+    # The cut song can be one of the extra assets that reuse a song's file (song3quiet)
+    cut_key = [k for k, v in h.assets.items() if v == cut.asset_id][0]
+    cut_key = cut_key if cut_key in TONES else cut_key.removesuffix("quiet")
+    cut_tone = tone_name(TONES[cut_key][0]) if cut_key in TONES else cut_key
     h.check(name, cut_tone not in runs[runs.index(tone_name(TONES["time"][0])) + 1:] if tone_name(TONES["time"][0]) in runs else False,
             f"heard {runs}; the cut song ({cut_tone}) not heard after the group")
     gap, _ = longest_silence(heard)
@@ -3929,6 +3944,314 @@ def with_slow_backend(scenario, seconds: float = 4.0):
     return run
 
 
+
+# ── Emergency alerts (wiki/emergency-alerts.md) ──────────────────────────────
+
+
+def _multipart(fields: dict, files: dict) -> tuple[bytes, str]:
+    boundary = uuid.uuid4().hex
+    out = b""
+    for k, v in fields.items():
+        out += f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+    for k, (fname, data) in files.items():
+        out += (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"; filename="{fname}"\r\n'
+                f'Content-Type: audio/mpeg\r\n\r\n').encode() + data + b"\r\n"
+    out += f"--{boundary}--\r\n".encode()
+    return out, f"multipart/form-data; boundary={boundary}"
+
+
+def send_alert(h: Harness, clip: Path, *, device: bool = False, kind: str | None = None,
+               title: str = "Harness alert") -> tuple[int, dict]:
+    """Staff test (manager login) or the EAS box's call (emergency token)."""
+    fields = {"station_ids": str(STATION_ID), "title": title}
+    if kind:
+        fields["kind"] = kind
+    body, ctype = _multipart(fields, {"file": (clip.name, clip.read_bytes())})
+    path = "/emergency/device/activate" if device else "/emergency/activate"
+    headers = {"Content-Type": ctype}
+    headers.update({"X-Emergency-Token": EMERGENCY_TOKEN} if device else {"Authorization": f"Bearer {h.token}"})
+    req = urllib.request.Request(f"http://127.0.0.1:{BACKEND_PORT}/api/v1{path}", data=body,
+                                 method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, {"error": e.read().decode()[:400]}
+
+
+async def alert_row(alert_id: str):
+    from app.db.engine import async_session_factory
+    from app.models.emergency_alert import EmergencyAlert
+
+    async with async_session_factory() as db:
+        return await db.get(EmergencyAlert, uuid.UUID(alert_id))
+
+
+def runs_of(windows, name: str) -> list[tuple[float, float]]:
+    """(start, end) of each stretch where `name` was heard (gaps under 0.3 s bridged)."""
+    out: list[list[float]] = []
+    for t, db, f in windows:
+        if db >= -45 and tone_name(f) == name:
+            if out and t - out[-1][1] <= 0.3:
+                out[-1][1] = t + WINDOW
+            else:
+                out.append([t, t + WINDOW])
+    return [(a, b) for a, b in out if b - a >= 0.3]
+
+
+async def sc_emergency_alert_over_music(h: Harness) -> None:
+    """A staff test of the override over a song: on air within a moment, played whole,
+    the same song carries on afterwards, no gap, no emergency music, and the log says
+    when and how long."""
+    name = "emergency_alert_over_music"
+    await wait_music(h)
+    await asyncio.sleep(5)
+    sent = time.time()
+    code, body = send_alert(h, h.stack.dir / "alert8.mp3", title="Override test over music")
+    h.check(name, code == 201 and body.get("sent") == 1, f"alert sent ({code} {body.get('error', '')})")
+    if code != 201:
+        return
+    alert_id = body["alerts"][0]["id"]
+    await asyncio.sleep(3)
+    code, st = h.api("GET", "/emergency/status")
+    mine = next((x for x in st.get("stations", []) if x["station_id"] == str(STATION_ID)), {})
+    h.check(name, bool(mine.get("on_air")) and mine["on_air"]["alert_id"] == alert_id,
+            f"the status page shows the alert on air: {mine.get('on_air')}")
+    await asyncio.sleep(14)
+    heard = h.heard(sent - 4, time.time() - 1)
+    h.print_timeline(heard, sent)
+    alert = runs_of(heard, "ALERT")
+    h.check(name, len(alert) == 1, f"one alert heard: {[(round(a - sent, 1), round(b - sent, 1)) for a, b in alert]}")
+    if not alert:
+        return
+    a0, a1 = alert[0]
+    h.check(name, a0 - sent <= 2.0, f"on air {a0 - sent:.1f} s after it was sent")
+    h.check(name, abs((a1 - a0) - 8.0) <= 0.6, f"played whole: {a1 - a0:.1f} s of 8 s")
+    before = [n for t, n in timeline([w for w in heard if w[0] < a0 - 0.2]) if n not in ("silence", "mix")]
+    after = [n for t, n in timeline([w for w in heard if a1 + 0.2 < w[0] < a1 + 4]) if n not in ("silence", "mix")]
+    h.check(name, bool(before) and bool(after) and before[-1] == after[0],
+            f"the song carries on after the alert ({before[-1:] } then {after[:1]})")
+    gap, _ = longest_silence([w for w in heard if a0 - 3 <= w[0] <= a1 + 3])
+    h.check(name, gap <= 0.5, f"longest silence around the alert {gap:.1f} s")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+    row = await alert_row(alert_id)
+    h.check(name, row is not None and row.status == "done" and row.seconds_on_air is not None
+            and abs(row.seconds_on_air - 8.0) <= 1.0,
+            f"logged: {row.status if row else None}, {row.seconds_on_air if row else None} s")
+
+
+async def sc_emergency_alert_over_time_check(h: Harness) -> None:
+    """An alert on air when a hard time check is due: the time check does not air late
+    (it is dropped), the alert plays whole, then music."""
+    name = "emergency_alert_over_time_check"
+    await wait_music(h)
+    due_dt = at(14)
+    due = due_dt.timestamp()
+    [tid] = await h.queue([("time", {"preempt_at": due_dt, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(8)
+    sent = time.time()
+    code, body = send_alert(h, h.stack.dir / "alert14.mp3", title="Alert across a time check")
+    h.check(name, code == 201, f"alert sent ({code})")
+    await asyncio.sleep(due - time.time() + 30)
+    heard = h.heard(sent - 3, time.time() - 1)
+    h.print_timeline(heard, due)
+    alert = runs_of(heard, "ALERT")
+    h.check(name, len(alert) == 1 and abs((alert[0][1] - alert[0][0]) - 14.0) <= 0.6,
+            f"the alert played whole over the time check's second: {[(round(a - due, 1), round(b - due, 1)) for a, b in alert]}")
+    times = runs_of(heard, "time")
+    h.check(name, not times, f"no late time check: {[(round(a - due, 1)) for a, _ in times]}")
+    row = next((e for e in await h.rows() if e.id == tid), None)
+    h.check(name, row is not None and row.status == "skipped", f"time check closed: {row.status if row else None}")
+    after = [n for _, n in timeline([w for w in heard if alert and w[0] > alert[0][1] + 0.3]) if n != "silence"]
+    h.check(name, bool(after) and after[0].startswith("song"), f"music after the alert: {after[:3]}")
+    names = [n for _, n in timeline(heard)]
+    h.check(name, "EMERGENCY" not in names, f"no emergency music: {names}")
+
+
+async def sc_emergency_alert_over_live_show(h: Harness) -> None:
+    """A host on air: the alert takes the air over the show, and the show is heard again
+    after it."""
+    name = "emergency_alert_over_live_show"
+    before = set_live_settings(h, live_delay_seconds=0, live_host_gone_seconds=0)
+    try:
+        await wait_music(h)
+        code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show",
+                                                   "calls_enabled": False})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        h.stack.live_audio = True
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+        await asyncio.sleep(8)
+        sent = time.time()
+        code, body = send_alert(h, h.stack.dir / "alert8.mp3", title="Alert over a live show")
+        h.check(name, code == 201, f"alert sent ({code})")
+        await asyncio.sleep(16)
+        t_end = time.time()
+        h.stack.live_audio = False
+        h.api("POST", f"/live-shows/{show['id']}/end")
+        await asyncio.sleep(6)
+        heard = h.heard(sent - 4, t_end)
+        h.print_timeline(heard, sent)
+        alert = runs_of(heard, "ALERT")
+        h.check(name, len(alert) == 1 and alert[0][0] - sent <= 2.0 and abs(alert[0][1] - alert[0][0] - 8.0) <= 0.6,
+                f"the alert took the air over the host, whole: {[(round(a - sent, 1), round(b - sent, 1)) for a, b in alert]}")
+        host_during = sum(WINDOW for w in heard if alert and alert[0][0] + 0.3 <= w[0] <= alert[0][1] - 0.3
+                          and w[1] >= -45 and tone_name(w[2]) == "HOST")
+        h.check(name, host_during <= 0.2, f"the host is not heard under the alert ({host_during:.1f} s)")
+        back = runs_of([w for w in heard if alert and w[0] > alert[0][1]], "HOST")
+        h.check(name, bool(back) and back[0][0] - alert[0][1] <= 2.0,
+                f"the host is heard again {back[0][0] - alert[0][1]:.1f} s after the alert" if back and alert
+                else "the host is not heard after the alert")
+    finally:
+        h.stack.live_audio = False
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+
+
+async def sc_emergency_alert_stop(h: Harness) -> None:
+    """Stop on the page: the alert ends at once and the music is back; logged as stopped."""
+    name = "emergency_alert_stop"
+    await wait_music(h)
+    await asyncio.sleep(3)
+    code, body = send_alert(h, h.stack.dir / "alert20.mp3", title="Alert to stop")
+    h.check(name, code == 201, f"alert sent ({code})")
+    if code != 201:
+        return
+    alert_id = body["alerts"][0]["id"]
+    await asyncio.sleep(5)
+    pressed = time.time()
+    code, res = h.api("POST", f"/emergency/{alert_id}/stop")
+    h.check(name, code == 200 and res.get("status") == "cancelled", f"stopped ({code} {res})")
+    await asyncio.sleep(8)
+    heard = h.heard(pressed - 6, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    alert = runs_of(heard, "ALERT")
+    h.check(name, bool(alert) and alert[-1][1] - pressed <= 1.2,
+            f"alert off air {alert[-1][1] - pressed:.1f} s after Stop" if alert else "alert never heard")
+    after = [n for _, n in timeline([w for w in heard if w[0] > pressed + 1.5]) if n != "silence"]
+    h.check(name, bool(after) and after[0].startswith("song"), f"music back: {after[:2]}")
+    row = await alert_row(alert_id)
+    h.check(name, row is not None and row.status == "cancelled", f"logged as stopped: {row.status if row else None}")
+
+
+async def sc_emergency_alert_two_in_a_row(h: Harness) -> None:
+    """Two alerts sent a second apart (say English, then Spanish) play one after the
+    other, whole, never over each other."""
+    name = "emergency_alert_two_in_a_row"
+    await wait_music(h)
+    await asyncio.sleep(3)
+    sent = time.time()
+    c1, b1 = send_alert(h, h.stack.dir / "alert8.mp3", title="First")
+    await asyncio.sleep(1)
+    c2, b2 = send_alert(h, h.stack.dir / "alert8.mp3", title="Second")
+    h.check(name, c1 == 201 and c2 == 201, f"both sent ({c1}, {c2})")
+    await asyncio.sleep(22)
+    heard = h.heard(sent - 2, time.time() - 1)
+    h.print_timeline(heard, sent)
+    alert = runs_of(heard, "ALERT")
+    total = sum(b - a for a, b in alert)
+    h.check(name, abs(total - 16.0) <= 1.0, f"16 s of alert in all, one after the other: {total:.1f} s in {len(alert)} stretch(es)")
+    if c1 == 201 and c2 == 201:
+        r1, r2 = await alert_row(b1["alerts"][0]["id"]), await alert_row(b2["alerts"][0]["id"])
+        h.check(name, r1.status == "done" and r2.status == "done" and r1.started_at < r2.started_at,
+                f"both logged, in order: {r1.status} {r2.status}")
+
+
+async def sc_emergency_alert_tones(h: Harness) -> None:
+    """EAS tones: a staff upload holding them is refused and nothing airs. With
+    KBR_HARNESS_EAS_RECORDING (a real alert recording, this offline harness only: its
+    tones must never reach a public stream), the EAS box's own call is accepted and the
+    recording plays whole, then the music."""
+    name = "emergency_alert_tones"
+    await wait_music(h)
+    att = h.stack.dir / "attention.mp3"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "aevalsrc=0.4*sin(2*PI*853*t)+0.4*sin(2*PI*960*t):s=44100:d=4", str(att)], check=True)
+    t0 = time.time()
+    code, body = send_alert(h, att, title="Tones from staff")
+    h.check(name, code == 422 and "11.45" in body.get("error", ""), f"staff upload with EAS tones refused ({code})")
+    rec = os.environ.get("KBR_HARNESS_EAS_RECORDING")
+    if not rec:
+        log("    (no KBR_HARNESS_EAS_RECORDING: the real recording part is skipped)")
+        await asyncio.sleep(3)
+        heard = h.heard(t0, time.time() - 0.5)
+        h.check(name, not runs_of(heard, "ALERT"), "nothing aired")
+        return
+    clip = Path(rec)
+    code, body = send_alert(h, clip, title="Staff upload of a real recording")
+    h.check(name, code == 422, f"staff upload of the real recording refused ({code})")
+    secs = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                 str(clip)], capture_output=True, text=True).stdout.strip())
+    sent = time.time()
+    code, body = send_alert(h, clip, device=True, kind="alert", title="EAS box relay (harness only)")
+    h.check(name, code == 201 and body["alerts"][0]["has_tones"], f"the EAS box's call accepted, tones noted ({code})")
+    if code != 201:
+        return
+    await asyncio.sleep(secs + 8)
+    heard = h.heard(sent - 3, time.time() - 1)
+    songs = [(t, n) for t, n in timeline(heard) if n.startswith("song")]
+    before = [t for t, n in songs if t < sent + 0.5]
+    after = [t for t, n in songs if t > sent + 2]
+    h.check(name, bool(before) and bool(after) and secs - 1.0 <= after[0] - sent <= secs + 3.0,
+            f"the recording ({secs:.0f} s) played whole: music back {after[0] - sent:.1f} s after it was sent"
+            if after else "music never came back")
+    row = await alert_row(body["alerts"][0]["id"])
+    h.check(name, row.status == "done" and abs((row.seconds_on_air or 0) - secs) <= 2.0,
+            f"logged {row.status}, {row.seconds_on_air} s")
+
+
+async def sc_emergency_alert_line(h: Harness) -> None:
+    """The EAS box's audio line on a local FM box (needs KBR_HARNESS_ALERT_DEVICE and a
+    PulseAudio null sink whose monitor it records; KBR_HARNESS_ALERT_SINK names the sink):
+    sound there takes the air within a second, the music is back about 4 s after it ends,
+    and the site logs it. Run with --local-box it also cuts the line both ways for the
+    whole alert: the takeover needs no internet, and the log arrives when the line is back."""
+    name = "emergency_alert_line"
+    if not os.environ.get("KBR_HARNESS_ALERT_DEVICE"):
+        h.check(name, False, "set KBR_HARNESS_ALERT_DEVICE (and a PulseAudio null sink, see wiki/emergency-alerts.md)")
+        return
+    sink = os.environ.get("KBR_HARNESS_ALERT_SINK", "alertin")
+    await wait_music(h)
+    await asyncio.sleep(4)
+    offline = h.stack.local_box
+    if offline:
+        h.stack.backend_down = True
+        h.stack.control_down = True
+        await asyncio.sleep(2)
+    played = time.time()
+    subprocess.run(["paplay", "-d", sink, str(h.stack.dir / "alert8.mp3")], check=False, timeout=30)
+    ended = time.time()
+    await asyncio.sleep(10)
+    if offline:
+        h.stack.backend_down = False
+        h.stack.control_down = False
+        await asyncio.sleep(70)  # the relay's next plan sync sends the kept reports
+    heard = h.heard(played - 3, ended + 9)
+    h.print_timeline(heard, played)
+    alert = runs_of(heard, "ALERT")
+    # (includes paplay's own start-up, a few tenths of a second)
+    h.check(name, bool(alert) and alert[0][0] - played <= 2.0,
+            f"the line took the air {alert[0][0] - played:.1f} s after its sound began" if alert else "the line was never heard")
+    h.check(name, bool(alert) and sum(b - a for a, b in alert) >= 7.0,
+            f"heard {sum(b - a for a, b in alert):.1f} s of the 8 s on the line")
+    songs = [t for t, n in timeline([w for w in heard if w[0] > ended]) if n.startswith("song")]
+    h.check(name, bool(songs) and songs[0] - ended <= 6.0,
+            f"music back {songs[0] - ended:.1f} s after the line went quiet" if songs else "music never came back")
+    from sqlalchemy import select
+
+    from app.db.engine import async_session_factory
+    from app.models.emergency_alert import EmergencyAlert
+
+    async with async_session_factory() as db:
+        rows = (await db.execute(select(EmergencyAlert).where(
+            EmergencyAlert.source == "line", EmergencyAlert.station_id == STATION_ID)
+            .order_by(EmergencyAlert.requested_at.desc()).limit(1))).scalars().all()
+    row = rows[0] if rows else None
+    h.check(name, row is not None and row.status == "done" and row.seconds_on_air and row.seconds_on_air >= 8,
+            f"logged on the site{' after the line came back' if offline else ''}: "
+            f"{row.status if row else None}, {row.seconds_on_air if row else None} s")
+
 SCENARIOS = {
     "hour_change_slow_backend": sc_hour_change_slow_backend,
     "soft_timed_waits_for_song_slow_backend": with_slow_backend(sc_soft_waits_for_song),
@@ -4012,6 +4335,13 @@ SCENARIOS = {
     "next_skips_one": sc_next_skips_one,
     "engine_crash_restart": sc_engine_crash_restart,
     "second_engine_refused": sc_second_engine_refused,
+    "emergency_alert_over_music": sc_emergency_alert_over_music,
+    "emergency_alert_over_time_check": sc_emergency_alert_over_time_check,
+    "emergency_alert_over_live_show": sc_emergency_alert_over_live_show,
+    "emergency_alert_stop": sc_emergency_alert_stop,
+    "emergency_alert_two_in_a_row": sc_emergency_alert_two_in_a_row,
+    "emergency_alert_tones": sc_emergency_alert_tones,
+    "emergency_alert_line": sc_emergency_alert_line,
     # restarts the engine: keep it last
     "engine_starts_backend_down": sc_engine_starts_backend_down,
 }
@@ -4082,6 +4412,7 @@ def main() -> None:
         n for n in SCENARIOS
         if (args.local_box or not n.startswith("local_box_"))
         and (n != "local_box_sound_card" or os.environ.get("KBR_HARNESS_ALSA_DEVICE"))
+        and (n != "emergency_alert_line" or os.environ.get("KBR_HARNESS_ALERT_DEVICE"))
     ]
     for n in names:
         if n not in SCENARIOS:

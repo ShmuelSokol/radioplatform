@@ -110,3 +110,84 @@ async def check_and_take_off_air(asset_id: str, reason: str) -> bool:
         await db.commit()
         logger.warning("Item %s taken off the air: %s", asset_id, reason)
         return True
+
+
+async def restore_measurable_items() -> int:
+    """Put back on the air every item check_and_take_off_air took off whose file now
+    measures fine. Returns how many came back.
+
+    2026-11-18: the whole-file measure read the audio from a pipe, where FFmpeg gave
+    up on two good stories ("chanuka radio pt02", 35 min; "Story the Riminover and the
+    wind", 15 min), so they were taken off the air by mistake. Runs once after each
+    start. Only items this check took off (metadata_extra["unplayable"]) are looked at;
+    an item a person marked "do not play" is never touched. Each comes back to the
+    category it had, its alert is resolved and the Activity log says so."""
+    import uuid
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.db.session import async_session_factory
+    from app.models.alert import Alert
+    from app.models.asset import Asset
+    from app.services import activity_log
+    from app.services.asset_service import DO_NOT_PLAY, get_asset, set_do_not_play
+    from app.services.audio_analysis_service import analyze_audio
+
+    async with async_session_factory() as db:
+        rows = (await db.execute(
+            select(Asset.id, Asset.metadata_extra).where(Asset.category == DO_NOT_PLAY)
+        )).all()
+    candidates = [str(aid) for aid, extra in rows if isinstance(extra, dict) and extra.get("unplayable")]
+    restored = 0
+    for asset_id in candidates:
+        try:
+            async with async_session_factory() as db:
+                analysis = await analyze_audio(db, asset_id, full=True)
+                await db.commit()
+                asset = await get_asset(db, uuid.UUID(asset_id))
+                extra = dict(asset.metadata_extra or {})
+                was = extra.pop("unplayable", None)
+                extra["restored_after_unplayable"] = {
+                    "was": was, "at": datetime.now(timezone.utc).isoformat(),
+                    "length": analysis.get("duration"),
+                }
+                asset.metadata_extra = extra
+                await db.flush()
+                result = await set_do_not_play(db, asset.id, False)
+                title = asset.title
+                alerts = (await db.execute(
+                    select(Alert).where(Alert.title == f"Taken off the air: {title}", Alert.is_resolved == False)  # noqa: E712
+                )).scalars().all()
+                for alert in alerts:
+                    alert.is_resolved = True
+                    alert.resolved_at = datetime.now(timezone.utc)
+                    ctx = dict(alert.context or {})
+                    ctx["cleared_by_itself"] = "the file measures fine; the item is back on the air"
+                    alert.context = ctx
+                await db.commit()
+        except Exception as exc:  # still broken, or storage unreachable: leave it off
+            logger.info("Item %s stays off the air: %s", asset_id, exc)
+            continue
+        restored += 1
+        logger.warning("Item %s (%s) back on the air: its file measures %.1f s", asset_id, title, analysis.get("duration") or 0)
+        activity_log.record(
+            None, user_id=None, user_email="KBR Live (automatic)", user_role="system",
+            label="Put back on the air (library item)", category="library", action="update",
+            resource_type="asset", resource_id=asset_id,
+            detail=f'"{title}" is back in "{result.get("category")}": it was taken off the air by mistake '
+                   f'(its length could not be read), and its file now measures fine.',
+            changes={"category": {"before": DO_NOT_PLAY, "after": result.get("category")}},
+        )
+    return restored
+
+
+async def restore_on_startup(delay_seconds: float = 90.0) -> None:
+    """Shortly after a start, put back items wrongly taken off the air."""
+    if not ENABLED:
+        return
+    await asyncio.sleep(delay_seconds)
+    try:
+        await restore_measurable_items()
+    except Exception as exc:
+        logger.warning("Putting items back on the air stopped: %s", exc)
