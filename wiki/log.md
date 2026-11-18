@@ -397,3 +397,4 @@ INGEST 2026-11-18 live-shows.md sponsorships and was-soft items due during a liv
 INGEST 2026-11-18 control-room.md finding the Sponsor panel: SPONSOR › tag on queue rows (min-h-0 button, rows stay one line) and the Sponsors tab (SponsorsToday.tsx, GET /spot-schedules/station-day)
 INGEST 2026-11-18 streaming-architecture.md start reports taken one at a time per station and an exact repeat ignored: two at once wrote the previous item's play log twice (Main 20:31Z sponsorship counted twice)
 UPDATE 2026-11-18 control-room.md sponsorship rule tightened (weather report no longer tagged), station-day query uses indexes, panel shows today's not-aired plays at once
+INGEST 2026-11-18 live-shows.md engine holds two items during a show; a flush empties both but its given list forgets one, so the paused story's second part was closed unplayed after a held sponsorship (show_preloaded, flushed_unplayed, _not_dropped_by_a_flush)

@@ -1815,3 +1815,60 @@ async def test_a_hard_sponsorship_due_during_a_show_is_kept_and_the_time_check_i
     assert (await _fresh(db_session, clock.id)).status in ("skipped", "played")
     row = await _fresh(db_session, later.id)
     assert (row.status, row.timing_mode) == ("pending", "hard")   # its time has not come: untouched
+
+
+@pytest.mark.asyncio
+async def test_the_paused_story_still_resumes_after_a_sponsorship_held_for_the_show(client, db_session, eng):
+    """Jerusalem 21:14Z 2026-11-18: the engine asked twice at take-over and held the
+    story's second part and the song after it. When the sponsorship came due its queue
+    was emptied, but it forgot only the newest of the two: the second part came back in
+    `given`, was never handed out again and was closed as "aired without a start
+    report". Sponsorship, then two songs; the story was gone."""
+    from app.services import live_show_service
+
+    station, entries, engine, _ = eng
+    await _next(client, station)
+    await _on_air(client, station, entries[0].id)
+    row = await _fresh(db_session, entries[0].id)
+    row.started_at = datetime.now(UTC) - timedelta(seconds=60)
+    await db_session.commit()
+    spot = await _add(db_session, station, title="Sponsor", duration=30.0, kind="spot", position=50,
+                      source="ad_slot", timing_mode="soft",
+                      preempt_at=datetime.now(UTC) + timedelta(seconds=20))
+    show = await _live_show(db_session, station)
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    played = str(entries[0].id)
+    url = f"/api/v1/playout/{station.id}/next?proto=4&live=1&given="
+    resume = (await client.get(url + played, headers=HEADERS)).json()["entry_id"]
+    song = (await client.get(url + f"{resume},{played}", headers=HEADERS)).json()["entry_id"]
+    assert (await _fresh(db_session, uuid.UUID(resume))).source.startswith("resume@")
+    assert song == str(entries[1].id)
+
+    row = await _fresh(db_session, spot.id)
+    row.preempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+    st = await db_session.get(Station, station.id)
+    await db_session.refresh(st)
+    engine.sent.clear()
+    await playout_engine.tick(db_session, st)
+    assert "/flush" in engine.paths()
+    # The engine emptied its queue and forgot only the newest entry it was handed
+    r = await client.get(url + f"{resume},{played}", headers=HEADERS)
+    assert r.json()["entry_id"] == str(spot.id)
+    r = await client.get(url + f"{spot.id},{resume},{played}", headers=HEADERS)
+    assert r.json()["entry_id"] == resume          # the story again, right behind it
+    assert (await _fresh(db_session, uuid.UUID(resume))).status == "pending"
+
+    await live_show_service.end_show(db_session, show.id)
+    await db_session.commit()
+    await db_session.refresh(st)
+    await playout_engine.tick(db_session, st)
+    await _on_air(client, station, spot.id)
+    # The engine holds the story; it is not handed out a second time
+    r = await client.get(f"/api/v1/playout/{station.id}/next?proto=4&live=0&given={resume},{spot.id},{resume},{played}",
+                         headers=HEADERS)
+    assert r.status_code == 204 or r.json()["entry_id"] != resume
+    assert (await _fresh(db_session, uuid.UUID(resume))).status == "pending"
+    await _on_air(client, station, resume)
+    assert (await _fresh(db_session, uuid.UUID(resume))).status == "playing"

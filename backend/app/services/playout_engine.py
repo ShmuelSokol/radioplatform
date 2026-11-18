@@ -135,6 +135,14 @@ class EngineState:
     # Soft timed items that came due during the show and for which the engine was
     # already asked to choose the after-show item again
     after_show_recued: set[str] = field(default_factory=set)
+    # Entries handed to the engine during a live show, in order, and those of them a
+    # flush then dropped there unplayed. The engine can hold more than one (it asked
+    # twice within 80 ms at take-over, Jerusalem 21:14:41Z 2026-11-18), a flush empties
+    # its whole queue, but it only forgets the newest in its `given` list: the other
+    # came back as "given", was never handed out again and was closed as aired. That
+    # was the second part of the story the show had paused.
+    show_preloaded: list[str] = field(default_factory=list)
+    flushed_unplayed: set[str] = field(default_factory=set)
     # The engine said hello and has put nothing on air since: the entry we still show as
     # playing is not on air any more (it was cut by the restart), so the hold rule must
     # not wait for its end
@@ -372,7 +380,11 @@ async def engine_live(station_id, on: bool) -> bool:
 
 async def engine_flush(station_id) -> bool:
     """Drop the engine's pre-loaded next track so it asks again."""
-    get_state(station_id).cued_entry_id = None
+    state = get_state(station_id)
+    state.cued_entry_id = None
+    # During a live show nothing of the music lane is on air: all it was handed is dropped
+    state.flushed_unplayed.update(state.show_preloaded)
+    state.show_preloaded = []
     return await _command("/flush", station_id=station_id)
 
 
@@ -792,6 +804,14 @@ async def handle_hello(station_id, proto: int | None = None, instance: str | Non
     logger.info("Playout engine connected for station %s", station_id)
 
 
+def _not_dropped_by_a_flush(state: "EngineState", given: list[str]) -> list[str]:
+    """`given` without the entries a flush during a live show dropped in the engine
+    unplayed: they are still ours to hand out. One that did start is known by its report."""
+    state.flushed_unplayed -= set(state.recent_started)
+    state.flushed_unplayed &= set(given)
+    return [g for g in given if g not in state.flushed_unplayed]
+
+
 async def _reconcile_given(db: AsyncSession, station_id, given: list[str]) -> set[str]:
     """`given` is what the engine says it was handed, newest first.
 
@@ -808,7 +828,9 @@ async def _reconcile_given(db: AsyncSession, station_id, given: list[str]) -> se
     if len(ids) > 1:
         res = await db.execute(
             select(QueueEntry).where(
-                QueueEntry.id.in_(ids[1:]),
+                # (the newest can be in the list twice: handed out, dropped by a flush
+                # during a live show, handed out again)
+                QueueEntry.id.in_([i for i in ids[1:] if i != ids[0]]),
                 QueueEntry.station_id == station_id,
                 QueueEntry.status == "pending",
             )
@@ -832,7 +854,8 @@ async def handle_next(
     # Sent with every ask, so a backend restart learns it again within one item
     if proto is not None:
         _note_proto(state, proto)
-    already_given = await _reconcile_given(db, station_id, given or [])
+    given = _not_dropped_by_a_flush(state, list(given or []))
+    already_given = await _reconcile_given(db, station_id, given)
     state.given = set(already_given)
 
     # During a live show the engine gets nothing from the queue: music would play on the
@@ -908,6 +931,9 @@ async def handle_next(
             state.cued_entry_id = entry_id
             state.cued_at = time.monotonic()
             state.cued_for_after_show = entry_id if during_show else None
+            state.flushed_unplayed.discard(entry_id)   # handed out again: the engine has it
+            if during_show:
+                state.show_preloaded.append(entry_id)
             _note_handed(state, entry)
             await _record_handed(db, station_id, [(entry_id, asset_id)])
             logger.info("Engine next -> %s", entry_id)
@@ -1907,6 +1933,7 @@ async def tick(db: AsyncSession, station) -> None:
         return
     # The show is over (or we do not know what the engine was told): music again
     state.after_show_recued.clear()
+    state.show_preloaded = []
     await _tell_live(station_id, state, False)
 
     # 1. Hand hard-timed items (hourly ID, time, weather) to the engine ahead of time
