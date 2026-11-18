@@ -407,6 +407,11 @@ async def _warm_connection_pool(timeout: float = 20.0) -> None:
 CONCURRENT_INDEXES = {
     # The library's "last played" per item looks up plays by item across stations
     "ix_play_logs_asset_start": "play_logs (asset_id, start_utc)",
+    # The on-air self-check (air_watch) reads, every 5 s per station, what started or
+    # came due in the last 10 minutes. Without these it read the station's whole queue
+    # history each time (2.4 to 3.9 s on production, 2026-11-18).
+    "ix_queue_entries_station_started": "queue_entries (station_id, started_at)",
+    "ix_queue_entries_station_preempt": "queue_entries (station_id, preempt_at)",
     # Deleting a library item makes Postgres look in every table that points at it
     # (cascade / set null). Without these each delete read the whole of queue_entries
     # (it keeps every entry ever played) and the other tables, row by row.
