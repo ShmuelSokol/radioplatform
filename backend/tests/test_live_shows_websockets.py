@@ -405,23 +405,123 @@ async def test_web_caller_drop_reconnect_and_abandon(ws_app, client, db_session,
     await events.disconnect()
 
 
-# ---------- V2-70: phone callers are not bridged to the show ----------
+# ---------- V2-70: a phone caller is in the show's own mixer (Twilio media stream) ----------
+
+def _phone_media(value: int, n: int = 160) -> dict:
+    """What Twilio sends: 20 ms of 8 kHz mu-law, base64."""
+    import base64
+
+    from app.services.phone_audio import ulaw_encode
+    return {"event": "media", "media": {"payload": base64.b64encode(ulaw_encode(np.full(n, value))).decode()}}
+
+
+def _phone_heard(msg: dict) -> np.ndarray:
+    import base64
+
+    from app.services.phone_audio import ulaw_decode
+    assert msg["event"] == "media" and msg["streamSid"] == "MZtest"
+    return ulaw_decode(base64.b64decode(msg["media"]["payload"]))
+
+
+async def _phone_call(client, monkeypatch, sid="CAphone", number="+15551112222"):
+    """A call comes in: the TwiML sends its sound to the show's mixer. Returns (call id, token)."""
+    import re
+
+    from app.config import settings
+    monkeypatch.setattr(settings, "BACKEND_PUBLIC_URL", "https://api.example.test")
+    r = await client.post("/api/v1/live-shows/twilio/inbound", data={"From": number, "CallSid": sid})
+    assert "Please hold" in r.text and "<Hangup/>" in r.text
+    url = re.search(r'<Stream url="([^"]+)"', r.text).group(1)
+    token = re.search(r'<Parameter name="token" value="([^"]+)"', r.text).group(1)
+    assert url.startswith("wss://api.example.test/api/v1/ws/live/phone/")
+    return url.rsplit("/", 1)[1], token
+
+
+async def _phone_stream(app, call_id: str, token: str) -> WS:
+    ws = WS(app, f"/api/v1/ws/live/phone/{call_id}")
+    await ws.connect()
+    await ws.send_json({"event": "connected", "protocol": "Call"})
+    await ws.send_json({"event": "start", "streamSid": "MZtest",
+                        "start": {"streamSid": "MZtest", "callSid": "CAphone", "customParameters": {"token": token}}})
+    return ws
+
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="BUG (V2-70): a phone caller put on air is only moved to the Twilio conference "
-                   "live-show-<id>; nothing joins it to the host or the listeners (live_audio_mixer is a stub), so "
-                   "nobody hears a phone caller. Shmuel chose web call-ins for now")
-async def test_phone_caller_on_air_is_heard(ws_app, client, db_session):
-    from sqlalchemy import select
-
+async def test_phone_caller_on_air_is_heard(ws_app, client, db_session, monkeypatch):
     station, show = await _show(db_session)
     admin = await _user(db_session)
     headers = {"Authorization": f"Bearer {_token(admin)}"}
-    r = await client.post("/api/v1/live-shows/twilio/inbound", data={"From": "+15551112222", "CallSid": "CAphone"})
-    assert "Please hold" in r.text
-    call = (await db_session.execute(select(CallInRequest))).scalar_one()
+    call_id, token = await _phone_call(client, monkeypatch)
+
+    bad = await _phone_stream(ws_app, call_id, "0" * 64)
+    assert await bad.expect_close() == 4001
+
+    listener = WS(ws_app, f"/api/v1/ws/live/station/{station.id}/listen")
+    await listener.connect()
+    await listener.receive_json()
+    host = await _authed(ws_app, f"/api/v1/ws/live/{show.id}/audio", _token(admin))
+    await listener.receive_json()  # live
+    phone = await _phone_stream(ws_app, call_id, token)
+    await asyncio.sleep(0.05)
+    assert call_id in live_shows_ws.live_relay.callers
+
+    # Waiting: the caller hears the show on the phone; nothing they say is on air
+    await phone.send_json(_phone_media(8000))
+    await asyncio.sleep(0.05)
+    await host.send_bytes(pcm(4000, 2040))
+    heard = _phone_heard(await phone.receive_json())
+    assert len(heard) == 680 and abs(int(heard[100]) - 4000) < 200     # 24 kHz -> 8 kHz, the host's level
+    assert set(samples(await listener.receive_bytes())) == {4000}
+
+    # On air: a tone in the caller's ear, then they are mixed in and never hear themselves
     for action in ("approve", "on-air"):
-        r = await client.post(f"/api/v1/live-shows/{show.id}/calls/{call.id}/{action}", headers=headers)
+        r = await client.post(f"/api/v1/live-shows/{show.id}/calls/{call_id}/{action}", headers=headers)
         assert r.status_code == 200, r.text
-    # On air, the caller's voice should reach the show the way a web caller's does
-    assert str(call.id) in live_shows_ws.live_relay.callers
+    tone = _phone_heard(await phone.receive_json())
+    assert 1000 < len(tone) < 2000 and np.abs(tone).max() > 3000
+    for _ in range(10):                      # 200 ms from the phone
+        await phone.send_json(_phone_media(8000))
+    await asyncio.sleep(0.05)
+    await host.send_bytes(pcm(4000, 2040))
+    mixed = samples(await listener.receive_bytes())
+    assert abs(int(mixed[1000]) - 12000) < 400                          # host + caller
+    assert abs(int(_phone_heard(await phone.receive_json())[100]) - 4000) < 200   # the host only
+    assert abs(int(samples(await host.receive_bytes())[1000]) - 8000) < 400       # the host hears the caller
+
+    # The caller hangs up: Twilio stops the stream, the call is completed at once
+    events = await _authed(ws_app, f"/api/v1/ws/live/{show.id}/events", _token(admin))
+    await events.receive_json()
+    await phone.send_json({"event": "stop"})
+    removed = None
+    while removed is None or removed["type"] != "caller_removed":
+        removed = await events.receive_json(timeout=3)
+    assert call_id not in live_shows_ws.live_relay.callers
+    call = await db_session.get(CallInRequest, uuid.UUID(call_id))
+    await db_session.refresh(call)
+    assert call.status == CallStatus.COMPLETED and call.air_end is not None
+    await events.disconnect()
+    await host.disconnect()
+    await listener.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_ending_a_phone_call_closes_its_stream(ws_app, client, db_session, monkeypatch):
+    """End call (or Reject) closes the media stream; the TwiML's Hangup then ends the call."""
+    station, show = await _show(db_session)
+    admin = await _user(db_session)
+    call_id, token = await _phone_call(client, monkeypatch)
+    phone = await _phone_stream(ws_app, call_id, token)
+    await asyncio.sleep(0.05)
+    r = await client.post(f"/api/v1/live-shows/{show.id}/calls/{call_id}/reject",
+                          headers={"Authorization": f"Bearer {_token(admin)}"})
+    assert r.status_code == 200, r.text
+    assert await phone.expect_close() == 1000
+
+
+@pytest.mark.asyncio
+async def test_phone_call_without_a_public_address_gets_the_hold_line(client, db_session, monkeypatch):
+    from app.config import settings
+    await _show(db_session)
+    monkeypatch.setattr(settings, "BACKEND_PUBLIC_URL", "")
+    r = await client.post("/api/v1/live-shows/twilio/inbound", data={"From": "+15551112222", "CallSid": "CAx"})
+    assert "<Conference" in r.text and "<Stream" not in r.text

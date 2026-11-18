@@ -931,6 +931,93 @@ async def websocket_web_caller(websocket: WebSocket, call_id: str):
             await asyncio.shield(caller_left(call_id, line.show_id))
 
 
+
+@router.websocket("/ws/live/phone/{call_id}")
+async def websocket_phone_caller(websocket: WebSocket, call_id: str):
+    """A phone caller's Twilio media stream (see services/phone_audio.py). The stream's
+    `start` message must carry the call's token as a custom parameter. From here the
+    caller is a caller line like a web caller's: they hear the show, the staff can
+    talk to them off the air, and on air they are mixed in."""
+    from app.services.call_in import call_token_ok, caller_left
+    from app.services.phone_audio import PhoneSocket
+
+    await websocket.accept()
+    phone = None
+    try:
+        for _ in range(3):   # "connected", then "start"
+            msg = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=15.0))
+            if msg.get("event") == "start":
+                start = msg.get("start") or {}
+                token = str((start.get("customParameters") or {}).get("token", ""))
+                if call_token_ok(call_id, token):
+                    phone = PhoneSocket(websocket, str(start.get("streamSid") or msg.get("streamSid") or ""))
+                break
+    except Exception:
+        pass
+    if phone is None:
+        await websocket.close(code=4001)
+        return
+
+    from app.models.call_in_request import CallInRequest, CallStatus
+    from app.models.live_show import LiveShow
+    line = None
+    status = None
+    try:
+        async for db in get_async_session():
+            call = await db.get(CallInRequest, uuid.UUID(call_id))
+            show = await db.get(LiveShow, call.live_show_id) if call else None
+            if call is not None and show is not None:
+                line = CallerLine(phone, call_id, str(show.id), str(show.station_id))
+                status = call.status.value if hasattr(call.status, "value") else str(call.status)
+                line.on_air = status == CallStatus.ON_AIR.value
+            break
+    except Exception as e:
+        logger.error("Phone WS: could not load call %s: %s", call_id, e)
+    if line is None or status in ("rejected", "completed", "abandoned"):
+        await websocket.close(code=4004)
+        return
+
+    live_relay.callers[call_id] = line
+    logger.info("Phone caller %s connected (show %s)", call_id, line.show_id)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            text = message.get("text")
+            if not text:
+                continue
+            try:
+                msg = json.loads(text)
+            except ValueError:
+                continue
+            if msg.get("event") == "stop":
+                break
+            if msg.get("event") != "media":
+                continue
+            data = phone.from_phone(str((msg.get("media") or {}).get("payload", "")))
+            if not data:
+                continue
+            if line.talk is not None and not line.on_air:
+                await live_relay._send_quiet(line.talk, data)   # off the air, to whoever talks to them
+            else:
+                line.add(data)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Phone WS %s ended: %s", call_id, e)
+    finally:
+        if line.talk is not None:
+            staff, line.talk = line.talk, None
+            try:
+                await staff.close(code=4004)   # the caller is gone
+            except Exception:
+                pass
+        if live_relay.callers.get(call_id) is line:
+            live_relay.callers.pop(call_id, None)
+            await asyncio.shield(caller_left(call_id, line.show_id, 0))
+
+
 MAX_COHOSTS = 3
 
 

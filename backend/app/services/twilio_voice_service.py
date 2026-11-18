@@ -35,6 +35,31 @@ def generate_hold_twiml(show_id: str) -> str:
 </Response>"""
 
 
+def phone_stream_url(public_base: str, call_id: str) -> str | None:
+    """Where Twilio opens the caller's media stream (wss), or None when the backend
+    has no public https address to give it."""
+    base = (public_base or "").rstrip("/")
+    if not base.startswith("https://"):
+        return None
+    return f"wss://{base[len('https://'):]}/api/v1/ws/live/phone/{call_id}"
+
+
+def generate_stream_twiml(stream_url: str, token: str) -> str:
+    """The caller's sound goes both ways on a media stream to the show's own mixer:
+    they hear the show while they wait, the staff can talk to them off the air, and
+    on air they are mixed like a web caller. When the stream closes the call ends."""
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say>Thank you for calling. Please hold. You will hear the show while you wait.</Say>
+    <Connect>
+        <Stream url="{stream_url}">
+            <Parameter name="token" value="{token}"/>
+        </Stream>
+    </Connect>
+    <Hangup/>
+</Response>"""
+
+
 def generate_no_show_twiml() -> str:
     """Generate TwiML for when there is no active show accepting calls."""
     return """<?xml version="1.0" encoding="UTF-8"?>

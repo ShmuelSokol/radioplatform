@@ -652,7 +652,10 @@ async def put_caller_on_air(
     try:
         from app.services.twilio_voice_service import move_caller_to_conference
         show = await get_show(db, show_id)
-        if show and call.twilio_call_sid:
+        from app.api.v1.live_shows_ws import live_relay
+        # A phone caller on a media stream is in the show's own mixer already; a
+        # redirect to a conference would cut that stream
+        if show and call.twilio_call_sid and str(call.id) not in live_relay.callers:
             conference_name = f"live-show-{show_id}"
             await move_caller_to_conference(call.twilio_call_sid, conference_name)
     except Exception as e:
