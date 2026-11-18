@@ -19,11 +19,11 @@ asset_categories = Table(
 
 
 def tidy_text(value, keep_empty: bool = False):
-    """Tabs and line breaks become one space, the ends are trimmed; an empty artist or
+    """Tabs, line breaks and runs of spaces become one space, the ends are trimmed; an empty artist or
     album becomes None (a title stays text: the column needs one)."""
     if not isinstance(value, str):
         return value
-    out = re.sub(r"[\t\r\n\x0b\x0c\u00a0]+", " ", value).strip()
+    out = re.sub(r"[\s\u00a0]+", " ", value).strip()  # runs of spaces too, like scripts/sql/tidy_asset_text.sql
     return out if out or keep_empty else None
 
 
