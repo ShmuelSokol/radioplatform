@@ -1171,7 +1171,7 @@ export default function Dashboard() {
         <footer className="shrink-0 h-5 px-2 flex items-center justify-between gap-4 bg-[#c0c0c0] border-t border-[#808080] text-[11px] text-black">
           <span className="flex items-center gap-3">
             <span>Shortcuts: <b>N</b> next · <b>/</b> search · <b>Esc</b> cancel insert</span>
-            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
+            <button type="button" data-bug-trigger="" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
               className="underline hover:text-red-700">🐞 Report a bug</button>
           </span>
           <span className="truncate">{station?.name ?? ''}{station?.timezone ? ` · ${station.timezone}` : ''}</span>
