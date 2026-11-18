@@ -702,7 +702,7 @@ export default function Dashboard() {
       void qc.invalidateQueries({ queryKey: ['alerts'] });
       setToast(res.message === 'Skipped'
         ? { text: 'Panic: cut what was on air and started the next item.', type: 'warn' }
-        : { text: `Panic: ${res.message}`, type: 'error' });
+        : { text: `Panic: ${res.message || 'the server did not say what happened. Check what is on air.'}`, type: 'error' });
     } catch (err: any) {
       const msg = err?.response?.data?.detail;
       setToast({ text: typeof msg === 'string' ? msg : 'Panic did not go through. Check the connection and try again.', type: 'error' });
