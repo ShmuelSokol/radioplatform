@@ -1,0 +1,338 @@
+[
+ {
+  "region": "lakewood",
+  "hour": 0,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/0?minute=30",
+  "script": "The time is 12:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 1,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/1?minute=30",
+  "script": "The time is 1:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 2,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/2?minute=30",
+  "script": "The time is 2:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 3,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/3?minute=30",
+  "script": "The time is 3:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 4,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/4?minute=30",
+  "script": "The time is 4:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 5,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/5?minute=30",
+  "script": "The time is 5:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 6,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/6?minute=30",
+  "script": "The time is 6:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 7,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/7?minute=30",
+  "script": "The time is 7:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 8,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/8?minute=30",
+  "script": "The time is 8:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 9,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/9?minute=30",
+  "script": "The time is 9:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 10,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/10?minute=30",
+  "script": "The time is 10:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 11,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/11?minute=30",
+  "script": "The time is 11:30 AM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 12,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/12?minute=30",
+  "script": "The time is 12:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 13,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/13?minute=30",
+  "script": "The time is 1:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 14,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/14?minute=30",
+  "script": "The time is 2:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 15,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/15?minute=30",
+  "script": "The time is 3:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 16,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/16?minute=30",
+  "script": "The time is 4:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 17,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/17?minute=30",
+  "script": "The time is 5:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 18,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/18?minute=30",
+  "script": "The time is 6:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 19,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/19?minute=30",
+  "script": "The time is 7:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 20,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/20?minute=30",
+  "script": "The time is 8:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 21,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/21?minute=30",
+  "script": "The time is 9:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 22,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/22?minute=30",
+  "script": "The time is 10:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "lakewood",
+  "hour": 23,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/23?minute=30",
+  "script": "The time is 11:30 PM on W M D I, one oh seven nine, Lakewood"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 0,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/0?minute=30&region=jerusalem",
+  "script": "The time is 12:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 1,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/1?minute=30&region=jerusalem",
+  "script": "The time is 1:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 2,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/2?minute=30&region=jerusalem",
+  "script": "The time is 2:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 3,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/3?minute=30&region=jerusalem",
+  "script": "The time is 3:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 4,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/4?minute=30&region=jerusalem",
+  "script": "The time is 4:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 5,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/5?minute=30&region=jerusalem",
+  "script": "The time is 5:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 6,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/6?minute=30&region=jerusalem",
+  "script": "The time is 6:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 7,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/7?minute=30&region=jerusalem",
+  "script": "The time is 7:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 8,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/8?minute=30&region=jerusalem",
+  "script": "The time is 8:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 9,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/9?minute=30&region=jerusalem",
+  "script": "The time is 9:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 10,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/10?minute=30&region=jerusalem",
+  "script": "The time is 10:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 11,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/11?minute=30&region=jerusalem",
+  "script": "The time is 11:30 AM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 12,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/12?minute=30&region=jerusalem",
+  "script": "The time is 12:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 13,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/13?minute=30&region=jerusalem",
+  "script": "The time is 1:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 14,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/14?minute=30&region=jerusalem",
+  "script": "The time is 2:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 15,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/15?minute=30&region=jerusalem",
+  "script": "The time is 3:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 16,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/16?minute=30&region=jerusalem",
+  "script": "The time is 4:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 17,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/17?minute=30&region=jerusalem",
+  "script": "The time is 5:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 18,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/18?minute=30&region=jerusalem",
+  "script": "The time is 6:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 19,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/19?minute=30&region=jerusalem",
+  "script": "The time is 7:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 20,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/20?minute=30&region=jerusalem",
+  "script": "The time is 8:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 21,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/21?minute=30&region=jerusalem",
+  "script": "The time is 9:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 22,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/22?minute=30&region=jerusalem",
+  "script": "The time is 10:30 PM on W M D I, one oh seven nine, Jerusalem"
+ },
+ {
+  "region": "jerusalem",
+  "hour": 23,
+  "minute": 30,
+  "upload": "PUT /api/v1/time-announcements/23?minute=30&region=jerusalem",
+  "script": "The time is 11:30 PM on W M D I, one oh seven nine, Jerusalem"
+ }
+]
