@@ -373,9 +373,14 @@ async function finding(browser, sid) {
   check(`${tag}: one click on the tag opens the Sponsor panel`, await page.getByTestId('song-panel').count() === 0);
   check(`${tag}: and does not select or move the row`, station.pending().map((e) => e.id).join() === order && airCalls(station).length === 0);
   await page.keyboard.press('Escape');
+  for (let i = 0; i < 40 && !station.calls.some((c) => c.path === '/spot-schedules/station-day'); i++) await sleep(250);
+  check(`${tag}: the room reads today's sponsorships in the background before the tab is opened`, station.calls.some((c) => c.path === '/spot-schedules/station-day'));
+  await sleep(500);
+  const tOpen = Date.now();
   await page.getByRole('tab', { name: 'Sponsors' }).or(page.getByRole('button', { name: 'Sponsors', exact: true })).first().click();
   await page.getByTestId('sponsors-today-row').first().waitFor();
   const rows = page.getByTestId('sponsors-today-row');
+  check(`${tag}: the list shows at once, no Loading`, Date.now() - tOpen < 700, `${Date.now() - tOpen} ms`);
   check(`${tag}: the Sponsors tab lists today's two plays, not tomorrow's`, await rows.count() === 2, String(await rows.count()));
   const summary = await page.getByTestId('sponsors-today-summary').innerText();
   check(`${tag}: it names the station and counts what waits`, summary.includes(name) && /2 waiting/.test(summary), summary);

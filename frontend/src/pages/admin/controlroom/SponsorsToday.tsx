@@ -16,6 +16,7 @@ export const SponsorsToday = memo(function SponsorsToday({ stationId, onOpen }: 
     queryFn: () => getStationDay(stationId as string),
     enabled: !!stationId,
     refetchInterval: 30_000,
+    staleTime: 30_000,
   });
   const plays = data?.plays ?? [];
   const waiting = plays.filter(p => p.status === 'pending').length;
