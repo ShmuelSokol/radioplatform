@@ -1032,11 +1032,14 @@ async def handle_started(
         return {"ok": True, "known": True}
     # Tell every client right away, then top the queue up
     try:
-        from app.api.v1.queue import _broadcast_now_playing_entry, _is_blacked_out, _replenish_queue
+        from app.api.v1.queue import _broadcast_now_playing_entry, _is_blacked_out, _replenish_soon
 
         await _broadcast_now_playing_entry(db, station_id, entry_pk)
         if not await _is_blacked_out(db, station_id):
-            await _replenish_queue(db, station_id)
+            # In the background, in its own session: the top-up is some 44 database
+            # round trips (2 to 3 s from Railway), and the engine's start report waited
+            # for it (15 of 36 reports took 3 to 9 s, 2026-11-18 07:47Z to 08:14Z)
+            _replenish_soon(station_id)
     except Exception as e:
         logger.warning("Post-start broadcast/replenish failed (non-critical): %s", e)
 
