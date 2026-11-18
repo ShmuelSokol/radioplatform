@@ -371,3 +371,4 @@ INGEST 2026-11-18 live-shows.md carts on the Host Console: instant buttons mixed
 UPDATE 2026-11-18 live-shows.md host gone is counted from the last frame (was: from the end of the delay, 15 s of silence on top); a time check cut by the take-over in its first half airs whole over the delay
 INGEST 2026-11-18 live-shows.md live shows are recorded from the delay line's output (what listeners heard, no dumped audio) and land in Archives as drafts; live_record_shows setting
 UPDATE 2026-11-18 air-watch.md hour_missing also checks hh:30 when the station plays a half-hour time check on the second and one was queued for that minute
+INGEST 2026-11-18 emergency-alerts.md EAS override: engine proto 6 alert lane above everything (file via /alert, EAS box line on a local box), POST /emergency/device/activate (token) and staff tests, eas_tones guard (47 CFR 11.45), log page + banner + ntfy; real NPT recording harness-only

@@ -27,6 +27,7 @@ const ROUTE_ROLES: [prefix: string, roles: Role[]][] = [
   ['/admin/rules', STAFF],
   ['/admin/program-clock', STAFF],
   ['/admin/campaigns', STAFF],
+  ['/admin/emergency', STAFF],
   ['/admin/live', ON_AIR],
   ['/admin/studio', ON_AIR],
   ['/admin', MANAGERS],
@@ -58,6 +59,7 @@ const WRITE_ROLES: [prefix: string, roles: Role[]][] = [
   ['/admin/rules', ADMIN],
   ['/admin/program-clock', MANAGERS],
   ['/admin/campaigns', MANAGERS],
+  ['/admin/emergency', MANAGERS],
   ['/admin/bug-reports', ADMIN],
 ];
 

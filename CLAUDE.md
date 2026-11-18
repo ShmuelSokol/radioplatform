@@ -116,6 +116,7 @@ radioplatform/
 | HsSoftened | hs_softened.py | A timed queue item that HS off made wait, with its old timing so HS on restores it (see `wiki/station-modes.md`) |
 | StationBlockedAsset | station_blocked_asset.py | An item one station never plays by itself ("Not on this station"); do_not_play is the all-stations version (see `wiki/control-room.md`) |
 | EngineHandoff | engine_handoff.py | A queue entry handed to the playout engine and its asset, so a start report for an entry deleted meanwhile still shows what is on air after a backend restart (pruned after 6 h; see `wiki/streaming-architecture.md`) |
+| EmergencyAlert | emergency_alert.py | One emergency alert on one station: kind (alert/test/rmt/rwt), source (EAS box API, its audio line, staff), on air/off times, status, EAS tones found (see `wiki/emergency-alerts.md`) |
 | LiveDump | live_dump.py | One Dump of a live show: who, when, seconds cut, caller dropped, and the stored recording of what aired before and what was cut (see `wiki/live-shows.md`) |
 | SiteRelease | site_release.py | One row: how open tabs take a new website release (auto/manual) and the admin's last push (see `wiki/release-pickup.md`) |
 | SponsorshipRules | sponsorship_rules.py | Versioned sponsorship wording rules, editable by managers (highest version is in force) |
@@ -169,6 +170,7 @@ radioplatform/
 | archives | archives.py | /archives |
 | playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); one engine per station: hello/next/started from a second engine (other `X-Playout-Instance`) get 409 and an alert; /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report); `/live.mp3` (token only): the live show as listeners hear it, for the engine's live lane (see `wiki/live-shows.md`) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
+| emergency | emergency.py | /emergency: `POST /device/activate` (the EAS box, `X-Emergency-Token` or Basic auth password = `EMERGENCY_API_TOKEN`; real alert audio, tones allowed), `POST /activate` (manager: a spoken test, EAS tones refused, 47 CFR 11.45), `POST /{id}/stop`, `GET` log, `/status`, `/active` (staff banner); engine reports on `POST /playout/{id}/alert` (see `wiki/emergency-alerts.md`) |
 | playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen); `box` = a local FM box's own health report; `engine_proto` and `live_on_stream` (the engine's stream carries a live show, proto 5) |
 | call_in | call_in.py | /call-in/{station_id} (public): a listener joins the live show's caller queue from the browser; their mic goes on `/ws/live/call/{call_id}` (see `wiki/live-shows.md`) |
 | activity | activity.py | /activity (admin): who did what with filters and `after` for live updates, /activity/people (one line per person: counts for the period), /activity/filters, /activity/listeners (listening sessions); POST /activity/page-view (any signed-in user) |
@@ -228,6 +230,8 @@ radioplatform/
 | playout_plan.py | Read-only plan (pending queue with engine URIs, blackouts) and library pages for a local FM box's relay (see `wiki/local-fm-box.md`) |
 | sponsor_delivery.py | What a sponsor was promised against what aired: missed plays of the last 14 days and coming plays with no room or moved, for `GET /sponsor-portal/missed-plays` (see `wiki/spot-schedules.md`) |
 | station_blocks.py | "Not on this station": the per-station list of items a station does not play, the subquery every pick uses (`blocked_asset_ids`) and block/undo with removal of that station's waiting copies |
+| emergency_alerts.py | The emergency override: sends an alert to each station (engine `/alert`, or WS `emergency_alert` to browser players), takes the engine's start/end reports into the log, drops hard items due during it, alert + ntfy on each (see `wiki/emergency-alerts.md`) |
+| eas_tones.py | Finds EAS attention signal and SAME bursts in a recording, so a staff upload with them is refused |
 | playout_engine.py | Link to the playout engine: hands it the next track, records what really went on air, sends Next/flush/timed commands (see `wiki/streaming-architecture.md`) |
 
 ## Frontend Details
@@ -258,6 +262,7 @@ radioplatform/
 - SiteUpdates.tsx — Choose when open browsers move to a new release: automatic or only on push, push now or at a time, optionally including tabs that are playing; live list of open tabs
 - Activity.tsx — Who did what: "By person" (one collapsible line per person with today's counts, opening their own timeline) or everything in order; filters by station, kind, dates; search; paging; live and a Listeners tab with each listening session
 - BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
+- EmergencyAlerts.tsx — Emergency alerts (EAS override): what is on air per station with Stop, a spoken test of the override (managers), how the EAS box connects, the log. `components/layout/EmergencyBanner.tsx` shows a red bar on every staff page while an alert is on air
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
 - HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
@@ -336,6 +341,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 - `/admin/sponsorship-rules` → SponsorshipRules (protected)
 - `/admin/playlists` → Playlists (protected)
 - `/admin/alerts` → Alerts (protected)
+- `/admin/emergency` → EmergencyAlerts (staff; managers send tests and stop)
 - `/admin/analytics` → Analytics (protected)
 - `/admin/live` → LiveShows (protected)
 - `/admin/live/:showId/host` → HostConsole (protected)
@@ -431,6 +437,7 @@ auth.ts, stations.ts, assets.ts, assetTypes.ts, queue.ts, rules.ts, users.ts, pl
 | `PLAYOUT_RELAY_STATION_ID` | Comma-separated stations whose engine is a local FM box: its relay fetches their commands and none go to `PLAYOUT_ENGINE_URL` (empty = no station; see `wiki/local-fm-box.md`) | For a local FM box |
 | `BUG_REPORTS_GITHUB_TOKEN` | Fine-grained token for the private bug-report repo (Contents + Issues write); unset = reports stay in the database only | For bug triage |
 | `BUG_REPORTS_REPO` | Private repo for bug reports (default ShmuelSokol/kbr-bug-reports) | No |
+| `EMERGENCY_API_TOKEN` | Secret the station's EAS box sends to `POST /emergency/device/activate` (header or Basic auth password); empty = only staff can send; never commit it | For the EAS box |
 | `NTFY_TOPIC` | Secret ntfy topic for "fix ready" pushes; never commit it | For bug triage |
 | `PLAYOUT_STREAM_LIVE` | true = the site plays the engine's stream instead of the in-browser player | For the engine |
 

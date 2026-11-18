@@ -9,6 +9,9 @@
 #
 # sound card: as `aplay -L` names it (e.g. "default", "plughw:CARD=Device,DEV=0").
 #   Left out on a first run = no sound card output yet; on a later run = keep what was set.
+# The EAS box's audio output into a line input of this box (emergency alerts, works with
+# no internet): KBR_ALERT_ALSA_DEVICE=<capture device as `arecord -L` names it>; empty =
+# none; left unset on a later run = keep what was set (wiki/emergency-alerts.md).
 # The shared engine secret (the backend's PLAYOUT_ENGINE_TOKEN) is asked for on the first
 # run, or taken from KBR_PLAYOUT_TOKEN. It is kept on this machine only; never write it
 # in the repository.
@@ -104,6 +107,8 @@ fi
 BACKEND_URL="${BACKEND_URL:-$(old KBR_UPSTREAM_URL "$RELAY_ENV")}"
 BACKEND_URL="${BACKEND_URL:-https://api.kbrlive.com/api/v1}"
 if [ "$ALSA_ARG" = "__keep__" ]; then ALSA="$(old KBR_ALSA_DEVICE "$STATION_ENV")"; else ALSA="$ALSA_ARG"; fi
+ALERT_IN="${KBR_ALERT_ALSA_DEVICE-__keep__}"
+if [ "$ALERT_IN" = "__keep__" ]; then ALERT_IN="$(old KBR_ALERT_ALSA_DEVICE "$STATION_ENV")"; fi
 SOURCE_PW="$(old KBR_ICECAST_SOURCE_PASSWORD "$ENV_FILE")"; SOURCE_PW="${SOURCE_PW:-$(secret)}"
 RELAY_PW="$(old KBR_ICECAST_RELAY_PASSWORD "$ENV_FILE")"; RELAY_PW="${RELAY_PW:-$(secret)}"
 ADMIN_PW="$(old KBR_ICECAST_ADMIN_PASSWORD "$ENV_FILE")"; ADMIN_PW="${ADMIN_PW:-$(secret)}"
@@ -158,6 +163,7 @@ KBR_ICECAST_MOUNT=/live-${STATION}
 KBR_HLS_DIR=
 KBR_EMERGENCY_DIR=${LIB}/emergency/${STATION}
 KBR_ALSA_DEVICE=${ALSA}
+KBR_ALERT_ALSA_DEVICE=${ALERT_IN}
 SENV
 cat > "$RELAY_ENV" <<RENV
 KBR_UPSTREAM_URL=${BACKEND_URL}

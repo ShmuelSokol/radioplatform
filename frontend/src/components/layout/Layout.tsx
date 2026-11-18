@@ -6,6 +6,7 @@ import AudioPlayer from '../audio/AudioPlayer';
 import ListenHost from '../audio/ListenHost';
 import ViewOnlyNotice from './ViewOnlyNotice';
 import PageViewTracker from './PageViewTracker';
+import EmergencyBanner from './EmergencyBanner';
 
 // Every page uses the full window width (no centred max-width column); pages lay
 // themselves out inside it. Keep the padding below as it is: the dark full-bleed
@@ -39,6 +40,7 @@ export default function Layout() {
   return (
     <div className={outer}>
       <Navbar />
+      <EmergencyBanner />
       {/* Phone: room under the page so its last controls scroll clear of the floating bug button */}
       <main className={shell ? 'flex-1 min-h-0' : 'flex-1 w-full min-w-0 px-4 sm:px-6 lg:px-8 pt-6 pb-36 sm:pb-6'}>
         <ErrorBoundary resetKey={pathname}>

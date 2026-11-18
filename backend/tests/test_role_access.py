@@ -34,6 +34,7 @@ CASES = [
     ("/api/v1/sponsors", {"admin", "manager"}),
     ("/api/v1/campaigns", STAFF | {"sponsor"}),  # dj/viewer: admin Campaigns screen, view only
     ("/api/v1/alerts", {"admin", "manager"}),
+    ("/api/v1/emergency", STAFF),  # the Emergency Alerts page: every staff role sees the log
     ("/api/v1/auth/me", STAFF | {"sponsor"}),
 ]
 
