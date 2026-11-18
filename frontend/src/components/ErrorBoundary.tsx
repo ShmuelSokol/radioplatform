@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from 'react';
-import { isStaleCodeError, reloadForStaleCode } from '../lib/appUpdate';
+import { isStaleCodeError, reloadForStaleCode, staleReloadWaiting } from '../lib/appUpdate';
 
 const STALE_RELOAD_DELAY_MS = 300;
 
@@ -28,7 +28,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     console.error('ErrorBoundary caught:', error, errorInfo.componentStack);
     // Wait for the screen being left (often Listen) to finish unmounting: its player
     // stops and lets updates go in effect cleanups that run after this commit.
-    if (isStaleCodeError(error)) setTimeout(() => reloadForStaleCode(), STALE_RELOAD_DELAY_MS);
+    if (isStaleCodeError(error)) setTimeout(() => { reloadForStaleCode(); this.forceUpdate(); }, STALE_RELOAD_DELAY_MS);
   }
 
   componentDidUpdate(prev: Props) {
@@ -47,7 +47,11 @@ export default class ErrorBoundary extends Component<Props, State> {
             {stale ? 'The site was updated while this tab was open' : 'Something went wrong'}
           </h2>
           <p className="text-sm text-red-600 mb-4">
-            {stale ? 'Reload to open this screen in the new version.' : this.state.error?.message}
+            {stale
+              ? (staleReloadWaiting()
+                ? 'The station keeps playing. This screen opens in the new version by itself when you stop the sound, or tap Reload Page now.'
+                : 'Reload to open this screen in the new version.')
+              : this.state.error?.message}
           </p>
           <button
             onClick={() => {

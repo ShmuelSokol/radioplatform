@@ -1,14 +1,27 @@
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { usePlayerStore } from '../../stores/playerStore';
-import { LISTENER_PAGES } from './ListenHost';
+import { keepsStation } from './ListenHost';
 
-/** The bar at the bottom of the other listener pages while a station plays: what is on,
- *  a way back to the station's page, and Stop. The sound itself is the Listen page's
- *  (kept alive by ListenHost). */
+// Sound that has not come out after this long gets a "Tap to listen" button
+const REFUSED_AFTER_MS = 2000;
+
+/** The bar at the bottom of the other pages while a station plays: what is on, a way
+ *  back to the station's page, and Stop. The sound itself is the Listen page's (kept
+ *  alive by ListenHost). When a phone refused the sound (it allows sound only from a
+ *  tap), the bar says so and one tap on it starts it. */
 export default function AudioPlayer() {
   const { pathname } = useLocation();
-  const { stationId, stationName, currentTrack, stop } = usePlayerStore();
-  if (!stationId || !LISTENER_PAGES.includes(pathname)) return null;
+  const { stationId, stationName, currentTrack, stop, sounding, playFn } = usePlayerStore();
+  const [refused, setRefused] = useState(false);
+  useEffect(() => {
+    setRefused(false);
+    if (!stationId || sounding) return;
+    const t = setTimeout(() => setRefused(true), REFUSED_AFTER_MS);
+    return () => clearTimeout(t);
+  }, [stationId, sounding]);
+  if (!stationId || !keepsStation(pathname)) return null;
+  const offerTap = refused && !sounding && !!playFn;
 
   return (
     <>
@@ -25,7 +38,17 @@ export default function AudioPlayer() {
             </span>
           </span>
         </Link>
-        <button type="button" onClick={stop}
+        {offerTap && (
+          <button type="button" onClick={() => playFn?.()} data-testid="player-bar-tap"
+            className="bg-green-600 hover:bg-green-700 text-white px-4 min-h-[44px] rounded text-sm font-medium flex-shrink-0">
+            &#9654; Tap to listen
+          </button>
+        )}
+        <button type="button" onClick={() => {
+          stop();
+          // A stop here is meant: the control room must not switch the sound back on by itself
+          try { localStorage.setItem('kbr-cr-listen', '0'); } catch { /* storage off */ }
+        }}
           className="bg-red-600 hover:bg-red-700 text-white px-4 min-h-[44px] rounded text-sm font-medium flex-shrink-0">
           Stop
         </button>

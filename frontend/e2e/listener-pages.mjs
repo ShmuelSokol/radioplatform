@@ -282,13 +282,19 @@ async function globalPlayer(browser) {
     await sleep(500);
     check(`${tag}: Stop after the menu walk silences it`, (await audible()).length === 0);
 
-    // Staff pages and the call-in page have their own sound: the station stops there
+    // Staff pages keep it playing with the bar (Shmuel, 2026-11-18: the music must not
+    // stop when he moves around); the call-in page has its own sound: it stops there
     await page.goto(`${BASE}/listen/${station.SID}`);
     await page.getByRole('button', { name: 'Listen Live' }).click();
     await page.waitForFunction(() => window.__audible().length > 0, null, { timeout: 5000 }).catch(() => {});
-    await go('/admin/login');
-    await sleep(700);
-    check(`${tag}: leaving the listener pages (staff sign-in) stops the station`, (await audible()).length === 0 && (await bar.count()) === 0);
+    {
+      const heard = await listenWhile(1500, async () => { await go('/admin/login'); await sleep(300); });
+      check(`${tag}: a staff page (sign-in) keeps the station on with the bar, no gap`,
+        heard.silent === 0 && heard.restarts === 0 && (await bar.count()) === 1, JSON.stringify(heard));
+    }
+    await go(`/call/${station.SID}`);
+    await sleep(900);
+    check(`${tag}: the call-in page (its own sound) stops the station`, (await audible()).length === 0 && (await bar.count()) === 0);
 
     check(`${tag}: no script errors`, errors.length === 0, errors.join(' | '));
     await ctx.close();

@@ -1171,7 +1171,7 @@ async function engineMode(browser, stream) {
     const { ctx, page, errors } = await openRoom(browser, DESKTOP, station);
     await page.locator('button:visible', { hasText: 'Listen' }).first().click();
     await sleep(2500);
-    const el = await page.evaluate(() => { const a = document.querySelector('[data-testid=control-room] audio'); return { src: a.src, paused: a.paused, muted: a.muted, t: a.currentTime }; });
+    const el = await page.evaluate(() => { const a = document.querySelector('[data-testid=station-stream]'); return { src: a.src, paused: a.paused, muted: a.muted, t: a.currentTime }; });
     if (!broken) {
       check(`${tag}: listening plays the server stream`, !!el.src && !el.paused && !el.muted && el.t > 0.3 && stream.stats.connects > 0, JSON.stringify(el));
       check(`${tag}: the built-in player only measures (not heard)`, (await page.evaluate(() => window.__outLevel())) < 0.01);
