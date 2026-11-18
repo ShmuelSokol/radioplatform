@@ -426,3 +426,13 @@ caller is checked the same way. An engine that sends no id is not checked. The r
 engine's log says `hello: REFUSED`. Tests: `test_a_second_engine_with_the_same_station_id_is_refused`,
 relay `test_the_engine_instance_id_reaches_the_backend_and_a_refusal_reaches_the_engine`,
 harness `second_engine_refused`.
+
+## One start report per item
+
+The engine reports a start when what is on air changes (`report_started`). An item seen
+again within 3 s of its own start (another source blipped in between, e.g. a quiet hold
+or a crossfade's metadata) is not a new start: it is logged as "came back within ... s;
+not a new start", its lane is restored, and nothing is reported or counted. This followed
+two start reports for one sponsorship at Main's 20:30Z break (2026-11-18), which wrote two
+play log rows; the backend also ignores exact repeats within 10 s since PR 364. Emergency
+files (no entry id) are still reported on every change.

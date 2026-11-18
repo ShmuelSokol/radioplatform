@@ -826,11 +826,28 @@ end
 # Fires on every change of what is on air, including returning to a song after a
 # timed item. Reported once per change.
 last_reported = ref("-")
+# The same item seen again within a moment is not a new start. An item came back after a
+# blip of another source in between (item, quiet hold, item again in the same instant)
+# and was reported twice: two start reports for one sponsorship at Main's 20:30Z break
+# (2026-11-18), two play log rows. Only an entry with an id counts: an emergency file
+# has none and must still be reported on every change.
+last_started_entry = ref("")
+last_started_at = ref(0.)
 def report_started(m) =
   entry = m["kbr_entry"]
   if entry != last_reported() then
     last_reported := entry
-    send_started(m)
+    if entry != "" and entry == last_started_entry() and time() - last_started_at() < 3. then
+      # Back on the item: the lane is its lane again, but nothing is reported or counted
+      log.important("started: #{entry} came back within #{time() - last_started_at()} s; not a new start")
+      on_air_lane := m["kbr_lane"]
+    else
+      if entry != "" then
+        last_started_entry := entry
+        last_started_at := time()
+      end
+      send_started(m)
+    end
   end
 end
 program.on_metadata(report_started)
