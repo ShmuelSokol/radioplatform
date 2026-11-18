@@ -47,6 +47,8 @@ MIN_LOGGED_PLAY_SECONDS = 1.0
 # when it is this far in the past
 STARTED_AT_MIN_LATE = 2.0
 STARTED_AT_MAX_LATE = 7 * 86400.0
+# An ordinary start report's own time is used when it is at most this old
+STARTED_AT_LIVE_MAX_LATE = 60.0
 # Raise an alert if the engine has not contacted us for this long
 ENGINE_SILENT_ALERT_SECONDS = 120.0
 ALERT_REPEAT_SECONDS = 1800.0
@@ -884,13 +886,16 @@ async def _live_show_on(db: AsyncSession, station_id) -> bool:
 
 async def handle_started(
     db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
-    quiet: bool = False,
+    quiet: bool = False, kept: bool = False,
 ) -> dict:
     """The engine reports what just went on air.
 
-    `at` (epoch seconds) is passed only for a report a local FM box's relay kept while
-    its line was down (`kept` in the report): the item went on air then, not now. The
-    engine's own reports also carry a time, which is not used: they arrive at once.
+    `at` (epoch seconds) is when the engine put the item on air. `kept`: a report a
+    local FM box's relay held while its line was down, so it can be days old. An
+    ordinary report is believed up to STARTED_AT_LIVE_MAX_LATE: when the backend was
+    slow to take it, the start was recorded when the report got through (4 s late with
+    a 4 s backend: play log, site and proof of play all showed the time check late
+    while it aired on time; harness under slow_backend, 2026-11-18).
     `quiet`: more kept reports follow at once; this one is recorded (queue, play log)
     without telling the pages, so they do not flick through an outage's items. Start times and the
     play log use it, so what aired offline is recorded when it aired."""
@@ -904,7 +909,7 @@ async def handle_started(
             late = 0.0
         # Only the past, and not older than the relay keeps anything (a wrong clock on
         # the box must not write nonsense)
-        if STARTED_AT_MIN_LATE <= late <= STARTED_AT_MAX_LATE:
+        if (STARTED_AT_MIN_LATE <= late <= STARTED_AT_MAX_LATE) if kept else (0.0 <= late <= STARTED_AT_LIVE_MAX_LATE):
             now = datetime.fromtimestamp(float(at), UTC)
     skipped = state.skip_requested
     state.skip_requested = False
