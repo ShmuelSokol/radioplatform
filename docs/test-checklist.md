@@ -62,6 +62,10 @@ action worked **and** the screen, console and network showed nothing a person wo
 - [x] L-24 admin-flows.mjs always prints the guard's findings, also when checks failed (it printed them only on an otherwise clean run); the weekly-block validation message is listed as provoked | covered: e2e/admin-flows.mjs
 - [x] L-25 session-and-refusals.mjs lists the refusal notice it provokes and passes under the guard (it failed on main) | covered: e2e/session-and-refusals.mjs
 - [ ] L-26 admin-flows.mjs on clean Postgres, 2026-11-18 06:40Z: 451 pass, 17 fail (F-ACCESS-11, F-GLOBAL-3 dj, F-STATIONS-5/6/7/8, F-SPRULES-2, F-ASSETS-6/7/8, F-STUDIO-1, F-GUIDE-1/2, F-BLOCKS-5 fixed in PR 266); sent to the owning threads; rerun until 0 | covered: NOT COVERED (rerun owed)
+- [x] L-27 The walk reports, per page at phone size on a touch screen, every control a finger cannot hit (under 44 x 44 px; a checkbox counts with its label) | covered: e2e/walkthrough.mjs tooSmall (touch emulation, so the site's `pointer: coarse` rules apply)
+- [x] L-28 Staff pages on a phone: every button, select, box, and text action in a row (Edit, Delete, Approve, Reject, tabs) is at least 44 px; found 2026-11-18 by the PC on Song Requests (Approve 17x40) and by the walk on 35 of 36 pages; one shared rule in qnet-site.css, bug button 44 px on phones | covered: walk at phone size: 30 of 36 pages clean
+- [ ] L-29 ↳ still under 44 px: control room (insert buttons 40x40, Show day and Station selects 24 to 28 px high), Library row checkboxes 13x13, Manage Stations "Protected" 72x16, Activity filter checkboxes 32 px high, Program Clock checkboxes 20 px high, Site Updates radio 37x44 | covered: NOT COVERED (sent to the owning threads)
+- [ ] L-30 ↳ real iPhone: the same sizes on Song Requests, Rules, Users, Archives, Live Shows | covered: NOT COVERED (live check)
 
 ## I. One station never shows, warns about or changes another
 

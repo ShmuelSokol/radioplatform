@@ -239,12 +239,14 @@ async function lookAt(page, guard, st, route, step, expected = []) {
   return shot;
 }
 
-/** Make the page a touch screen (or a mouse again), so `pointer: coarse` rules apply. */
+/** Make the page a touch screen (or a mouse again), so `pointer: coarse` rules apply.
+ *  The setting lives only as long as its session, so one session is kept per page. */
+const touchSessions = new WeakMap();
 async function touch(page, on) {
-  const cdp = await page.context().newCDPSession(page);
+  let cdp = touchSessions.get(page);
+  if (!cdp) { cdp = await page.context().newCDPSession(page); touchSessions.set(page, cdp); }
   await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: on }).catch(() => {});
   await cdp.send('Emulation.setEmitTouchEventsForMouse', on ? { enabled: true, configuration: 'mobile' } : { enabled: false }).catch(() => {});
-  await cdp.detach().catch(() => {});
 }
 
 let current = null;   // the station being walked
