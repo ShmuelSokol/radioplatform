@@ -388,10 +388,10 @@ export default function ProgramClock() {
                   <label className="block text-xs text-gray-400 mb-1">Ad Asset Title</label>
                   <input
                     type="text"
-                    value={autoConfig.ad_slot_asset_title ?? 'KOL BRAMAH TEST SPONSOR'}
+                    value={autoConfig.ad_slot_asset_title ?? ''}
                     onChange={e => handleSaveAutoConfig({ ad_slot_asset_title: e.target.value })}
                     className="w-full bg-[#0a0a1a] border border-[#2a2a5e] rounded px-2 py-1 text-sm text-white"
-                    placeholder="Sponsor asset title"
+                    placeholder="Title of the sponsorship item (none chosen)"
                   />
                 </div>
               </div>

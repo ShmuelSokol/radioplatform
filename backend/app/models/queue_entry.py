@@ -109,3 +109,15 @@ def mark_started(entry, now) -> None:
 
     entry.status = "playing"
     entry.started_at = now - timedelta(seconds=resume_offset(entry))
+
+
+def aired_from(entry):
+    """When this entry really came on air. started_at of a resumed item lies `offset`
+    seconds before that (see mark_started), which made its play log row begin inside
+    the row of the first part (Jerusalem, 2026-11-18)."""
+    from datetime import timedelta
+
+    started = entry.started_at
+    if started is None:
+        return None
+    return started + timedelta(seconds=resume_offset(entry))

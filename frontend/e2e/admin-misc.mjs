@@ -44,7 +44,7 @@ function requestsBackend() {
     { id: 'r3', song_title: 'Queued one', status: 'queued' },
     { id: 'r4', song_title: 'Played one', status: 'played' },
     { id: 'r5', song_title: 'Rejected one', status: 'rejected' },
-  ].map((r, i) => ({ station_id: 'st-1', station_name: 'Kol Berama', requester_name: `Listener ${i}`, requester_message: null,
+  ].map((r, i) => ({ station_id: 'st-1', station_name: "Kol B'ramah", requester_name: `Listener ${i}`, requester_message: null,
     asset_id: null, matched_asset_title: null, matched_asset_artist: null, created_at: new Date(Date.now() - i * 60e3).toISOString(), ...r }));
   const st = { reqs, searches: [], patches: [], lists: 0, failSearch: false, slow: {} };
   st.extra = (method, path, query, body) => {

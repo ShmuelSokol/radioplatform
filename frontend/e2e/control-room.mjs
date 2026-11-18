@@ -32,7 +32,7 @@ function makeBackend(queueSize = 60) {
     assets.push({ id: `m${i}`, title: i % 7 === 0 ? `Nigun Simcha ${i}` : `Song number ${i} with a fairly long descriptive title`, artist: `Artist ${i % 9}`, album: null, duration: 150 + (i % 90), asset_type: 'music', category: i % 3 ? 'lively' : 'slow', });
   }
   for (let i = 1; i <= 9; i++) assets.push({ id: `j${i}`, title: `Station ID ${i}`, artist: null, album: null, duration: 6 + i, asset_type: 'jingle', category: 'ids', intro_seconds: i === 3 ? 6 : null });
-  for (let i = 1; i <= 4; i++) assets.push({ id: `s${i}`, title: `Kol Berama sponsor business ${i}`, artist: null, album: null, duration: 30, asset_type: 'spot', category: null });
+  for (let i = 1; i <= 4; i++) assets.push({ id: `s${i}`, title: `Kol B'ramah sponsor business ${i}`, artist: null, album: null, duration: 30, asset_type: 'spot', category: null });
   const byId = Object.fromEntries(assets.map(a => [a.id, a]));
   let seq = 0;
   let queue = []; // {id, asset_id, position, status, started_at}
@@ -58,7 +58,7 @@ function makeBackend(queueSize = 60) {
     calls.push({ method, path, query, body });
     const q = `/stations/${SID}/queue`;
     if (path === '/auth/me') return { id: 'u1', email: 'operator@example.com', role: 'admin', is_active: true };
-    if (path === '/stations') return { stations: [{ id: SID, name: 'Kol Berama', timezone: 'America/New_York', is_active: true, channels: [] }, { id: 'st-2', name: 'Second Feed', timezone: 'America/New_York', is_active: true, channels: [] }, { id: 'st-down', name: 'Unreachable Feed', timezone: 'America/New_York', is_active: true, channels: [] }], total: 3 };
+    if (path === '/stations') return { stations: [{ id: SID, name: "Kol B'ramah", timezone: 'America/New_York', is_active: true, channels: [] }, { id: 'st-2', name: 'Second Feed', timezone: 'America/New_York', is_active: true, channels: [] }, { id: 'st-down', name: 'Unreachable Feed', timezone: 'America/New_York', is_active: true, channels: [] }], total: 3 };
     if (path === '/asset-types') return types.map((name, i) => ({ id: `t${i}`, name }));
     if (path === '/categories') return [];
     if (/^\/assets\/[^/]+\/audio-url$/.test(path)) return { url: 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=' };
@@ -370,7 +370,7 @@ async function desktop(browser, width, height) {
   await page.getByTestId('panic').click();
   await page.waitForTimeout(100);
   check(`${tag}: Panic armed on one station does not fire on the next`, panics().length === 0);
-  await page.getByLabel('Station').first().selectOption({ label: 'Kol Berama' });
+  await page.getByLabel('Station').first().selectOption({ label: "Kol B'ramah" });
   await page.waitForTimeout(300);
   await page.getByTestId('panic').click();
   await page.waitForTimeout(500);
@@ -383,7 +383,7 @@ async function desktop(browser, width, height) {
   check(`${tag}: an unreachable queue is not shown as stopped`, await page.getByText(/Can't reach the station|Loading the queue/).count() > 0 && await page.getByText('Stopped. Press Start to begin.').count() === 0 && await page.getByText('The queue is empty.', { exact: false }).count() === 0);
   await page.getByText("Can't reach the station").first().waitFor({ timeout: 20000 }).catch(() => {});
   check(`${tag}: then says it cannot reach the station`, await page.getByText("Can't reach the station", { exact: false }).count() > 0);
-  await page.getByLabel('Station').first().selectOption({ label: 'Kol Berama' });
+  await page.getByLabel('Station').first().selectOption({ label: "Kol B'ramah" });
 
   // Drag bar between Up next and the lower pane: drag it down, Up next grows and stays after a reload
   const qh = () => page.getByTestId('queue-area').evaluate(el => el.getBoundingClientRect().height);

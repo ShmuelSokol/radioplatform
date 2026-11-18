@@ -176,7 +176,7 @@ export default function AdminArchives() {
         </div>
       ) : (
         <div className="bg-[#0a0a28] border border-[#2a2a5e] rounded overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="phone-cards w-full text-sm">
             <thead>
               <tr className="bg-[#16163e] text-[10px] text-gray-500 uppercase">
                 <th className="text-left px-3 py-2">Title</th>
@@ -206,13 +206,13 @@ export default function AdminArchives() {
                       <span className="text-cyan-300 truncate max-w-[200px]">{a.title}</span>
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-gray-400 text-[11px]">{stationName(a.station_id)}</td>
-                  <td className="px-3 py-2 text-gray-400 text-[11px] hidden md:table-cell">{a.host_name ?? '-'}</td>
-                  <td className="px-3 py-2 text-gray-500 text-[11px] hidden lg:table-cell">{formatDuration(a.duration_seconds)}</td>
-                  <td className="px-3 py-2 text-gray-500 text-[11px] hidden lg:table-cell">
+                  <td data-label="Station" className="px-3 py-2 text-gray-400 text-[11px]">{stationName(a.station_id)}</td>
+                  <td data-label="Host" className="px-3 py-2 text-gray-400 text-[11px] hidden md:table-cell">{a.host_name ?? '-'}</td>
+                  <td data-label="Duration" className="px-3 py-2 text-gray-500 text-[11px] hidden lg:table-cell">{formatDuration(a.duration_seconds)}</td>
+                  <td data-label="Recorded" className="px-3 py-2 text-gray-500 text-[11px] hidden lg:table-cell">
                     {a.recorded_at ? new Date(a.recorded_at).toLocaleDateString() : '-'}
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Published" className="px-3 py-2">
                     <button
                       onClick={() => handleTogglePublished(a)}
                       className={`text-[11px] px-2 py-0.5 rounded font-medium transition ${
@@ -224,7 +224,7 @@ export default function AdminArchives() {
                       {a.is_published ? 'Published' : 'Draft'}
                     </button>
                   </td>
-                  <td className="px-3 py-2 text-gray-500 text-[11px] whitespace-nowrap">{timeAgo(a.created_at)}</td>
+                  <td data-label="Created" className="px-3 py-2 text-gray-500 text-[11px] whitespace-nowrap">{timeAgo(a.created_at)}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <button

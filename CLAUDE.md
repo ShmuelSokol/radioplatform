@@ -136,7 +136,7 @@ radioplatform/
 |--------|------|--------|
 | auth | auth.py | /auth |
 | stations | stations.py | /stations |
-| assets | assets.py | /assets (`POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
+| assets | assets.py | /assets (`DELETE /{id}` answers 503 with Retry-After when the queue holds the item's rows, see `wiki/library-delete.md`; `POST /{id}/do-not-play`: the control room's quick "do not play" / "allow again" on every station; `POST` and `GET /{id}/station-block`: "not on this station", one station only; see `wiki/control-room.md`) |
 | streams | streams.py | /streams |
 | controls | controls.py | /controls |
 | users | users.py | /users |
@@ -489,6 +489,9 @@ cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-landscape.mj
 
 # The control room's Song panel (category, not on this station, do not play, details) on desktop and phone sizes
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-song-actions.mjs
+
+# Display findings of the page walk-through: Library cells and menus, Esc on dialogs, phone tables as cards, headings, labels
+cd frontend && for s in library-display display-findings; do BASE_URL=http://localhost:4173 node e2e/$s.mjs; done
 
 # Sound in the control room on an iPhone: the Listen button and tap-to-sound time, in Chromium made to follow Safari's tap rule
 cd frontend && BASE_URL=http://localhost:4173 node e2e/control-room-iphone-sound.mjs
