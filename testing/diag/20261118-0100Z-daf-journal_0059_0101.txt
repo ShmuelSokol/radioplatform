@@ -1,0 +1,25 @@
+Nov 18 00:59:17 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 00:59:17 [decoder.ffmpeg:3] Requested content-type for "/tmp/liq-processd18e74.mp3": {audio=pcm(stereo)}
+Nov 18 00:59:17 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 00:59:17 [decoder.ffmpeg:3] FFmpeg recognizes "/tmp/liq-processd18e74.mp3" as audio: {codec: mp3, 48000Hz, 1 channel(s)}
+Nov 18 00:59:17 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 00:59:17 [decoder.ffmpeg:3] Decoded content-type for "/tmp/liq-processd18e74.mp3": {audio=pcm(mono)}
+Nov 18 00:59:18 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 00:59:18 [decoder.ffmpeg:3] Requested content-type for "/tmp/liq-process2a9dc9.mp3": {audio=pcm(stereo)}
+Nov 18 00:59:18 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 00:59:18 [decoder.ffmpeg:3] FFmpeg recognizes "/tmp/liq-process2a9dc9.mp3" as audio: {codec: mp3, 44100Hz, 1 channel(s)}
+Nov 18 00:59:18 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 00:59:18 [decoder.ffmpeg:3] Decoded content-type for "/tmp/liq-process2a9dc9.mp3": {audio=pcm(mono)}
+Nov 18 01:00:00 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:00 [timed:3] Prepared "/tmp/liq-processd18e74.mp3" (RID 93).
+Nov 18 01:00:05 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:05 [decoder:2] Decoding "/tmp/liq-processd18e74.mp3" ended: Ffmpeg_decoder.End_of_file.
+Nov 18 01:00:06 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:06 [request.93:3] End of track reached before cue-out point!
+Nov 18 01:00:06 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: [mp3float @ 0x7a7bd01983c0] 2026/11/18 01:00:06 [timed:3] Prepared "/tmp/liq-process2a9dc9.mp3" (RID 94).
+Nov 18 01:00:06 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: Could not update timestamps for skipped samples.
+Nov 18 01:00:13 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: [mp3float @ 0x7a7bd01983c0] Could not update timestamps for discarded samples.
+Nov 18 01:00:13 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:13 [decoder:2] Decoding "/tmp/liq-process2a9dc9.mp3" ended: Ffmpeg_decoder.End_of_file.
+Nov 18 01:00:14 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:14 [radio:3] Switch to amplify.2 with forgetful transition.
+Nov 18 01:00:14 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:14 [cross:3] Analysis: -30.326199dB / -nandB (2.96s / 0.00s)
+Nov 18 01:00:14 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:14 [cross:3] Computing crossfade duration over overlapping 0.00s buffered data at start and end.
+Nov 18 01:00:14 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:14 [lang:3] next: backend gave entry 8743a5a6-3fff-4bef-9f50-f3138913bf44
+Nov 18 01:00:16 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:16 [decoder.ffmpeg:3] Requested content-type for "/tmp/liq-process873a12.mp3": {audio=pcm(stereo)}
+Nov 18 01:00:16 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:16 [decoder.ffmpeg:3] FFmpeg recognizes "/tmp/liq-process873a12.mp3" as audio: {codec: mp3, 44100Hz, 1 channel(s)}
+Nov 18 01:00:16 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:16 [decoder.ffmpeg:3] Decoded content-type for "/tmp/liq-process873a12.mp3": {audio=pcm(mono)}
+Nov 18 01:00:17 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:17 [main:3] Prepared "/tmp/liq-process873a12.mp3" (RID 95).
+Nov 18 01:00:17 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:17 [lang:3] next: backend gave entry 4dbf066e-5295-4fec-b799-029a79015017
+Nov 18 01:00:18 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:18 [decoder.ffmpeg:3] Requested content-type for "/tmp/liq-processde2332.mp3": {audio=pcm(stereo)}
+Nov 18 01:00:18 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:18 [decoder.ffmpeg:3] FFmpeg recognizes "/tmp/liq-processde2332.mp3" as audio: {codec: mp3, 44100Hz, 2 channel(s)}
+Nov 18 01:00:18 ubuntu-s-1vcpu-1gb-sfo2 liquidsoap[161883]: 2026/11/18 01:00:18 [decoder.ffmpeg:3] Decoded content-type for "/tmp/liq-processde2332.mp3": {audio=pcm(stereo)}
