@@ -340,23 +340,17 @@ async def engine_timed_drop(station_id, entry_ids: list[str]) -> bool:
 
 
 async def close_timed_lost_to_live_show(db: AsyncSession, station_id, now: datetime) -> list[str]:
-    """A live show has ended. Hard items the engine was handed before or during the show
-    and whose time passed while the host was on air never aired (the stream was the
-    host's) and no start report will come, so they stayed "pending" for good: they could
-    sit in the queue and air at some later moment (review run 2026-11-18, V3-52). They are
-    closed here and the engine is told to drop them. Returns their ids."""
+    """A live show has ended on an engine station. Hard items whose time passed while the
+    host was on air never aired (the stream was the host's) and no start report will come.
+    Left "pending" they did not just sit there: the engine still held them in its timed
+    lane and played them with the next hard group, a second time check at the next top of
+    the hour (review runs 2026-11-18, V3-52). All of them are closed here, handed over or
+    not (what we handed over is forgotten by a backend restart), and the engine is told to
+    drop them. Returns their ids."""
     state = get_state(station_id)
-    if not state.timed_sent:
-        return []
-    ids = []
-    for key in state.timed_sent:
-        try:
-            ids.append(uuid.UUID(key))
-        except ValueError:
-            continue
     rows = (await db.execute(
         select(QueueEntry).where(
-            QueueEntry.station_id == station_id, QueueEntry.id.in_(ids),
+            QueueEntry.station_id == station_id,
             QueueEntry.status == "pending", QueueEntry.preempt_at.isnot(None),
             QueueEntry.preempt_at <= now, hard_timed(),
         )
