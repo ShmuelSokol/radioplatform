@@ -17,6 +17,7 @@
  * Part M (ONLY=history): repeat, priority and blocked callers.
  * Part N (ONLY=lock): a locked call is left alone by End Call, Hold and Next.
  * Part O (ONLY=cohost): a co-host joins from another place.
+ * Part P (ONLY=filler): a filler plays after a Dump while the delay refills.
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
  * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
@@ -1398,6 +1399,119 @@ function hostMic(showId, token) {
       } finally {
         if (mic) mic.close();
         await browser.close();
+      }
+    }
+    // ---------- Part P: a filler plays after a Dump while the delay refills ----------
+    if (!ONLY || ONLY === 'filler') {
+      const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'filler-'));
+      const wav = (f, seconds, rate = 48000) => { const n = rate * seconds, buf = Buffer.alloc(44 + n * 2);
+        buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+        buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+        for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * f * i / rate)), 44 + i * 2);
+        return buf; };
+      fs.writeFileSync(path.join(DIR, 'host.wav'), wav(440, 30));
+      // The filler: a 1000 Hz "jingle" of 20 s, uploaded to the library like any item
+      const NAME = `Delay test filler ${Date.now() % 100000}`;
+      const jingle = wav(1000, 20, 24000);
+      const form = new FormData();
+      form.append('file', new Blob([jingle], { type: 'audio/wav' }), 'filler.wav');
+      form.append('title', NAME); form.append('asset_type', 'jingle'); form.append('format', 'mp3');
+      const up = await fetch(`${API}/assets/upload`, { method: 'POST', headers: { authorization: H.authorization }, body: form });
+      const asset = await up.json();
+      let server = null;
+      if (/localhost|127\.0\.0\.1/.test(API)) {
+        // A local backend keeps uploads on disk with no address: serve the same audio here
+        server = require('http').createServer((q, r) => { r.writeHead(200, { 'content-type': 'audio/wav', 'content-length': jingle.length }); r.end(jingle); });
+        await new Promise((res) => server.listen(4899, '127.0.0.1', res));
+        await api('PATCH', `/assets/${asset.id}`, { file_path: 'http://127.0.0.1:4899/filler.wav' });
+      }
+      await setConfig({ live_delay_seconds: 6, live_dump_seconds: 0, live_dump_filler_asset_id: null, live_dump_filler_title: null });
+      const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.join(DIR, 'host.wav')}`, '--autoplay-policy=no-user-gesture-required'] });
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const open = async (url, opts = {}) => {
+        const page = await (await browser.newContext({ permissions: ['microphone'], ...opts })).newPage();
+        await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409/.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      const heard = (l, f, from, to) => power(l.frames.filter((x) => x.at >= from && x.at < to).flatMap((x) => Array.from(x.pcm)), f);
+      try {
+        check('P1 the filler is uploaded to the library', up.status === 201 && !!asset.id, `${up.status}`);
+        // Station settings: search the library, pick the filler, Save
+        const st = await open('/admin/stations', { viewport: { width: 1440, height: 900 } });
+        await st.getByText(station.name, { exact: true }).first().click();
+        await T(st, 'live-filler-search').first().waitFor({ timeout: 15000 });
+        await T(st, 'live-filler-search').first().fill(NAME);
+        await T(st, 'live-filler-results').first().getByRole('button', { name: new RegExp(NAME) }).click();
+        check('P2 station settings: the filler is found in the library and shown as chosen', (await T(st, 'live-filler-chosen').first().innerText()).includes(NAME));
+        await T(st, 'live-filler').first().scrollIntoViewIfNeeded();
+        await shot(st, 'filler-setting');
+        await st.getByRole('button', { name: 'Save Automation Config' }).first().click();
+        await sleep(1500);
+        const saved = (await api('GET', `/stations/${STATION}`)).json.automation_config;
+        check('P3 it is saved with the other settings kept', saved.live_dump_filler_asset_id === asset.id && saved.live_delay_seconds === 6 && Object.keys(before).every((k) => k.startsWith('live_') || JSON.stringify(saved[k]) === JSON.stringify(before[k])), JSON.stringify({ f: saved.live_dump_filler_asset_id, d: saved.live_delay_seconds }));
+
+        const show = await newShow('Delay test P');
+        const l = listener();
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await T(host, 'delay-panel').waitFor({ timeout: 15000 });
+        await host.getByText('Start Broadcasting').click();
+        await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 14000 });
+        await T(host, 'filler-note').waitFor({ timeout: 8000 });
+        for (let i = 0; i < 20 && !(await air(show.id)).filler; i++) await sleep(500);
+        check('P4 the Host Console says which filler plays after a Dump', (await T(host, 'filler-note').innerText()).includes(NAME), await T(host, 'filler-note').innerText());
+        await sleep(1500);
+
+        // Dump: listeners hear the filler at once (no silence), for as long as was cut
+        const t0 = Date.now();
+        await T(host, 'dump-button').click();
+        await host.getByText('FILLER ON AIR', { exact: true }).waitFor({ timeout: 4000 });
+        check('P5 after Dump the panel says FILLER ON AIR and names it', (await T(host, 'insert-now').innerText()).includes(NAME), await T(host, 'insert-now').innerText());
+        await shot(host, 'filler-on-air');
+        await sleep(3000);
+        const j1 = heard(l, 1000, t0 + 800, t0 + 2800), h1 = heard(l, 440, t0 + 800, t0 + 2800);
+        check('P6 listeners hear the filler right after the Dump, not the host and not silence', j1 > 0.02 && h1 < j1 / 5, `filler ${j1.toFixed(4)} host ${h1.toFixed(4)}`);
+        await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 9000 });
+        const took = (Date.now() - t0) / 1000;
+        const a = await air(show.id);
+        check('P7 the delay is full again when the filler ends (about 6 s, not a minute)', took < 9 && a.delay >= 5.4 && a.safe === true, `${took.toFixed(1)} s, delay ${a.delay}`);
+        await sleep(2500);
+        const t1 = Date.now();
+        const j2 = heard(l, 1000, t1 - 1800, t1), h2 = heard(l, 440, t1 - 1800, t1);
+        check('P8 after the filler listeners hear the host again', h2 > 0.003 && j2 < h2 / 5, `host ${h2.toFixed(4)} filler ${j2.toFixed(4)}`);
+        // A second Dump right away cuts a whole delay again
+        const d2 = await api('POST', `/live-shows/${show.id}/dump`);
+        check('P9 a second Dump right after cuts the whole delay again', d2.status === 200 && d2.json.dumped_seconds >= 5.4, JSON.stringify(d2.json && d2.json.dumped_seconds));
+        await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 10000 });
+
+        // Phone size: the note and the state fit
+        const small = await open(`/admin/live/${show.id}/screen`, { ...devices['iPhone 13'] });
+        await T(small, 'filler-note').first().waitFor({ timeout: 15000 });
+        const m = await small.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        check('P10 on a phone the Call Screener shows the filler note with no sideways scroll', m <= 0, `${m}`);
+        await shot(small, 'filler-phone');
+        await api('POST', `/live-shows/${show.id}/end`);
+
+        // "No filler" in station settings takes it off again
+        await st.reload();
+        await st.getByText(station.name, { exact: true }).first().click();
+        await T(st, 'live-filler-chosen').first().waitFor({ timeout: 15000 });
+        check('P11 station settings show the saved filler after a reload', (await T(st, 'live-filler-chosen').first().innerText()).includes(NAME));
+        await T(st, 'live-filler-clear').first().click();
+        await st.getByRole('button', { name: 'Save Automation Config' }).first().click();
+        await sleep(1500);
+        check('P12 "No filler" and Save takes it off', !((await api('GET', `/stations/${STATION}`)).json.automation_config.live_dump_filler_asset_id));
+        check('P13 no errors or unexpected dialogs on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+      } finally {
+        await browser.close();
+        if (server) server.close();
+        if (asset && asset.id) await api('DELETE', `/assets/${asset.id}`);
       }
     }
   } finally {
