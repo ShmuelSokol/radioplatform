@@ -37,7 +37,64 @@ const emptyForm = {
   timing: 'hard' as Timing,
   latest: 5,
   items: [] as BlockItem[],
+  // Only part of the year: from / to, "MM-DD", every year
+  seasonal: false,
+  seasonStart: '05-15',
+  seasonEnd: '09-15',
 };
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/** "05-15" -> "May 15" */
+function seasonDay(mmdd: string) {
+  const [m, d] = mmdd.split('-').map(Number);
+  return `${MONTHS[m - 1] ?? '?'} ${d}`;
+}
+
+function SeasonDayPicker({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [m, d] = value.split('-').map(Number);
+  const set = (month: number, day: number) =>
+    onChange(
+      `${String(month).padStart(2, '0')}-${String(Math.min(day, MONTH_DAYS[month - 1])).padStart(2, '0')}`,
+    );
+  return (
+    <span className="inline-flex items-center gap-1">
+      <select
+        aria-label={`${label} month`}
+        value={m}
+        onChange={(e) => set(Number(e.target.value), d)}
+        className="px-2 py-1.5 border rounded-lg"
+      >
+        {MONTHS.map((name, i) => (
+          <option key={name} value={i + 1}>
+            {name}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label={`${label} day`}
+        value={d}
+        onChange={(e) => set(m, Number(e.target.value))}
+        className="px-2 py-1.5 border rounded-lg"
+      >
+        {Array.from({ length: MONTH_DAYS[m - 1] }, (_, i) => i + 1).map((n) => (
+          <option key={n} value={n}>
+            {n}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
 
 function clock(hhmm: string) {
   const [h, m] = hhmm.split(':').map(Number);
@@ -179,6 +236,9 @@ export default function ProgramBlocks() {
       timing: b.timing_mode === 'soft' && b.latest_minutes ? 'soft-limit' : b.timing_mode,
       latest: b.latest_minutes ?? 5,
       items: b.items,
+      seasonal: Boolean(b.season_start && b.season_end),
+      seasonStart: b.season_start || emptyForm.seasonStart,
+      seasonEnd: b.season_end || emptyForm.seasonEnd,
     });
     setShowForm(true);
     window.scrollTo({ top: 0 });
@@ -209,6 +269,8 @@ export default function ProgramBlocks() {
       timing_mode: (form.timing === 'hard' ? 'hard' : 'soft') as BlockTiming,
       latest_minutes: form.timing === 'soft-limit' ? form.latest : null,
       items: form.items,
+      season_start: form.seasonal ? form.seasonStart : null,
+      season_end: form.seasonal ? form.seasonEnd : null,
     };
     if (form.id) {
       const { is_active: _keep, ...changes } = data;
@@ -329,6 +391,34 @@ export default function ProgramBlocks() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="inline-flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={form.seasonal}
+                onChange={(e) => setForm({ ...form, seasonal: e.target.checked })}
+              />
+              Only part of the year
+            </label>
+            {form.seasonal && (
+              <div className="flex flex-wrap items-center gap-2 mt-2 text-sm text-gray-700">
+                Every year from
+                <SeasonDayPicker
+                  label="First day"
+                  value={form.seasonStart}
+                  onChange={(v) => setForm({ ...form, seasonStart: v })}
+                />
+                to
+                <SeasonDayPicker
+                  label="Last day"
+                  value={form.seasonEnd}
+                  onChange={(v) => setForm({ ...form, seasonEnd: v })}
+                />
+                <span className="text-gray-500">(both days included; may run over New Year)</span>
+              </div>
+            )}
           </div>
 
           <div>
@@ -641,6 +731,8 @@ export default function ProgramBlocks() {
                           .map((d) => DAYS[Number(d)])
                           .join(', ')}{' '}
                     · {timingText(b.timing_mode, b.latest_minutes)}
+                    {b.season_start && b.season_end &&
+                      ` · ${seasonDay(b.season_start)} to ${seasonDay(b.season_end)} each year`}
                     {seconds != null && ` · ${length(seconds)}`}
                   </p>
                   <p className="text-sm text-gray-800 mt-1">

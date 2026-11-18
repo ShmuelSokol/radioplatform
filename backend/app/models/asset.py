@@ -87,7 +87,13 @@ ONE_MOMENT_CATEGORIES = ("weather_spot", "time_announcement")
 # "block_only": recordings that air only where a program block names them (the day's
 # Daf Yomi shiur, the schedule announcement), never as filler.
 # "kids": Shmuel, 2026-11-17: kids' songs (Uncle Moishy, Country Yossi...) stay out of general music draws.
-NEVER_RANDOM_CATEGORIES = ("do_not_play", "test", "tests", "testing", "carlebach", "block_only", "kids")
+# "kids_car_summer" / "kids_car_year": the kids-in-car safety reminders (2026-11-18). They
+# air only through their seasonal program blocks; drawn as a spot, a summer heat warning
+# could air in January.
+NEVER_RANDOM_CATEGORIES = (
+    "do_not_play", "test", "tests", "testing", "carlebach", "block_only", "kids",
+    "kids_car_summer", "kids_car_year",
+)
 
 
 # Placeholder items that must never be drawn by any automatic pick, even by a

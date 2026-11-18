@@ -126,3 +126,24 @@ weather audio (that can call the voice service), so run lengths leave those out.
 
 ## An announcement never airs without its programme (2026-11-17)
 When a block's last recording (its programme) has nothing to play, the recordings before it (the announcement of it) are left out too, with the reason in the preview and Schedule Check (`_Resolver.resolve`). Jerusalem 20:00Z 2026-11-17 was a different case that code cannot catch: the "Hourly schedule announcement" block (every hour) plays a clip titled "KBR schedule: Daf Yomi (Jerusalem)" on its own, while the Daf Yomi block itself was switched off. Put an announcement in the same block as what it announces.
+
+## Part of the year (`season_start` / `season_end`, 2026-11-18)
+
+A block may air only between two days of every year: `season_start` and `season_end`,
+"MM-DD", both included, in the station's own date; a range may wrap the new year
+("09-16" to "05-14"). Both null = all year (one alone is 422, on create and against the
+stored other end on update). Applied in `occurrences_between` via `in_season`, so the
+queue, preview, Schedule Check and sponsor breaks all follow it. Page: "Only part of the
+year" with month/day pickers. `GET /program-blocks/capabilities` says `"seasons": true`.
+
+First use: the kids-in-car safety reminders (Shmuel). Two blocks per station, set up by
+`backend/scripts/setup_kids_car_reminders.py`: "Kids in car reminder - summer" (Lakewood
+May 15 to Sep 15, Jerusalem May 1 to Oct 15; 8:20, 11:50, 14:20, 17:50) and "... - rest of
+year" (the other days; 8:20 and 17:50), soft, minutes :20/:50 so they never share a minute
+with another block (the reconciler queues only one occurrence per minute: `queued_at`).
+Each plays the "Siren intro (kids in car reminder)" (generated, ~3 s, passes `eas_tones`)
+then rotates category `kids_car_summer` / `kids_car_year` (both in
+`NEVER_RANDOM_CATEGORIES`: a heat warning drawn as a random spot could air in January).
+A seasonal block still counts as "the station has blocks" when out of season, so the
+script sets `blocks_keep_hourly` on a station that had no other active block.
+Tests: `tests/test_block_seasons.py`, `frontend/e2e/program-block-season.mjs`.
