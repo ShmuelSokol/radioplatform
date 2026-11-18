@@ -693,6 +693,12 @@ async def handle_next(
             if entry is None:
                 break
         await ensure_level(db, entry)
+        if str(entry.id) in state.timed_sent:
+            # A Next sent this very entry down the timed lane while we were choosing
+            # (engine run 2026-11-18: it then went to both lanes, played in the timed
+            # lane and made the time check behind it 20 s late)
+            exclude.add(str(entry.id))
+            continue
         uri = build_uri(entry, "main")
         if uri:
             entry_id, asset_id = str(entry.id), str(entry.asset_id)
@@ -1297,11 +1303,35 @@ async def head_the_engine_does_not_hold(db: AsyncSession, station_id) -> QueueEn
     desired = await pick_next(db, station_id, exclude)
     if desired is None or str(desired.id) == state.cued_entry_id or desired.asset is None:
         return None
+    # Short items only (a sponsorship, a jingle). Whatever plays in the timed lane is
+    # followed at once by the next timed item handed over, so a long item there would
+    # pull the hourly time check forward to its own end (engine run 2026-11-18: 37 s
+    # early), and the pause-and-resume rules for long items do not apply in that lane.
+    from app.services.long_items import is_long_form
+
+    length = float(desired.asset.duration or 0)
+    if not 0 < length <= NEXT_TIMED_LANE_MAX or is_long_form(desired.asset):
+        return None
+    if (desired.source or "").startswith("resume@"):
+        return None
+    until = datetime.now(UTC) + timedelta(seconds=length + NEXT_TIMED_LANE_CLEAR)
+    hard_soon = await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+            QueueEntry.preempt_at.is_not(None), QueueEntry.preempt_at <= until, hard_timed(),
+        ).limit(1)
+    )
+    if hard_soon.first() is not None:
+        return None
     return desired
 
 
 # How long Next waits for the engine to load the item it sends down the timed lane.
 NEXT_LOAD_WAIT = 6.0
+# Next uses the timed lane only for items this short, and only when no hard timed item is
+# due until this long after the item would end.
+NEXT_TIMED_LANE_MAX = 120.0
+NEXT_TIMED_LANE_CLEAR = 60.0
 
 
 async def next_goes_to(station_id, entry: QueueEntry) -> bool:
@@ -1314,6 +1344,10 @@ async def next_goes_to(station_id, entry: QueueEntry) -> bool:
         return False
     state = get_state(station_id)
     entry_id = str(entry.id)
+    if state.cued_entry_id == entry_id or entry_id in state.given:
+        # The engine was handed this entry while we were choosing: it holds the right
+        # item now, an ordinary skip plays it
+        return False
     state.timed_sent.add(entry_id)
     state.skip_requested = True
     # The engine answers once the file is loaded. A big or slow file takes longer than the

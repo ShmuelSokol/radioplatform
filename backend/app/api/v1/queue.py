@@ -1977,7 +1977,10 @@ async def skip_current(
                 from app.services import activity_log
                 activity_log.note("Sent to the playout engine", [on_air.asset_id if on_air else None])
                 return {"message": "Skipped", "now_playing": None, "fade_seconds": fade_seconds}
-            # The engine needs a moment to load an item it was handed just now
+            # A long item, or a hard item close by: the pre-loaded song is taken back
+            # and the engine asks again...
+            await playout_engine.take_operator_change(db, station_id, before_next=True)
+            # ...and needs a moment to load the item it was handed just now
             await playout_engine.settle_before_next(station_id)
         if await playout_engine.engine_skip(station_id, fade_seconds):
             from app.services import activity_log

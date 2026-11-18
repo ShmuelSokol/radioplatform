@@ -158,6 +158,12 @@ Three rules now:
   (`head_the_engine_does_not_hold`), Next sends that item down the timed lane to start now
   (`next_goes_to`: `/timed` then `/flush`) instead of asking the engine to drop and reload.
   The held song stays held and plays after it. If the engine refuses, Next falls back to a plain skip.
+  Short items only (120 s or less, not a shiur or story, not a resumed item) and only when no
+  hard timed item is due until a minute after the item would end: whatever plays in the timed
+  lane is followed at once by the next timed item handed over, so a 150 s item sent there pulled
+  the time check 37 s early in the engine run. Everything else takes the earlier path (take the
+  held song back, wait for the engine to ask and load, then skip). A `/timed` that gets no answer
+  within 6 s counts as taken: the engine answers only once the file is loaded.
 - **Emergency alert**: emergency music raises the critical alert only if it is still on after
   `EMERGENCY_ALERT_AFTER` (5 s). A one second gap between two items is logged, not alerted.
 
