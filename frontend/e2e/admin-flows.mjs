@@ -30,9 +30,16 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
-import { guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
+import { allowEverywhere, guardBrowser, guardVerdict } from './lib/guard.mjs';   // look at the screen: see lib/guard.mjs
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// What this suite provokes on purpose, or what only the local test stack does. Each needs its reason.
+allowEverywhere(/alert: Pick the city from the list under Location\./, 'F-STATIONS-2 presses Create Station with no city to see this message');
+allowEverywhere(rec => /\b401\b/.test(`${rec.kind} ${rec.text}`) && /\/api\/v1\/(auth\/me|activity\/page-view)\b/.test(rec.text) && /\/admin\/stations/.test(rec.url || ''),
+  'F-GLOBAL-12 plants a bad access token and checks the site renews it without signing out');
+allowEverywhere(/(localhost:\d+|Failed to fetch )\/api\/v1\/assets\/[0-9a-f-]+\/download/,
+  'local storage hands out a relative audio URL that the preview server answers itself; production hands out a storage URL');
 const BASE = process.env.BASE_URL || 'http://localhost:4330';
 const API = process.env.API_URL || 'http://localhost:8230/api/v1';
 const SHOTS = process.env.SHOTS_DIR || '';
@@ -634,7 +641,7 @@ section('shell', async () => {
     Content: [['Library', '/admin/assets'], ['Categories', '/admin/categories'], ['Types', '/admin/asset-types'], ['Playlists', '/admin/playlists'], ['Studio', '/admin/studio'], ['Reviews', '/admin/reviews']],
     Broadcast: [['Schedules', '/admin/schedules'], ['Program Blocks', '/admin/program-blocks'], ['Schedule Check', '/admin/schedule-check'], ['Rules', '/admin/rules'], ['Blackouts', '/admin/holidays'], ['Program Clock', '/admin/program-clock'], ['Live Shows', '/admin/live']],
     Audience: [['Listeners', '/admin/listeners'], ['Analytics', '/admin/analytics'], ['Requests', '/admin/requests'], ['Program Guide', '/guide'], ['Archives', '/archives'], ['DJs', '/hosts']],
-    Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Sponsors', '/admin/sponsors'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Sponsorship Rules', '/admin/sponsorship-rules'], ['Alerts', '/admin/alerts'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
+    Settings: [['Users', '/admin/users'], ['Activity', '/admin/activity'], ['Sponsors', '/admin/sponsors'], ['Campaigns', '/admin/campaigns'], ['Spot Schedule', '/admin/spot-schedule'], ['Record Spots', '/admin/spot-recordings'], ['Sponsorship Rules', '/admin/sponsorship-rules'], ['Alerts', '/admin/alerts'], ['Bug Reports', '/admin/bug-reports'], ['Site Updates', '/admin/site-updates'], ['Manage Stations', '/admin/stations'], ['CRM', '/admin/crm']],
   };
   const canOpen = (role, p) => {
     if (!p.startsWith('/admin')) return true;
@@ -943,7 +950,7 @@ section('stations', async () => {
     }, page);
     await step(`F-STATIONS-6/7 ${view}: automation config (hourly ID, time, weather + interval, long items) saves fast and sticks after reload`, async () => {
       const panel = page.getByTestId('station-panel');
-      const interval = panel.locator('input[type=number]');
+      const interval = panel.locator('input[type=number]:not([data-testid])');   // not the crossfade box
       assert(await interval.isDisabled(), 'interval enabled while weather is off');
       await panel.getByText('Hourly Station ID Jingle').click();
       await panel.getByText('Hourly Time Announcement').click();
@@ -958,7 +965,7 @@ section('stations', async () => {
       await rowOf(page, name).click();
       const p2 = page.getByTestId('station-panel');
       assert(await p2.getByTestId('timed-during-long-items').inputValue() === 'cut', 'long-items choice lost');
-      assert(await p2.locator('input[type=number]').inputValue() === '45', 'interval lost');
+      assert(await p2.locator('input[type=number]:not([data-testid])').inputValue() === '45', 'interval lost');
       assert(await p2.getByText('Hourly Time Announcement').locator('input').isChecked(), 'hourly time lost');
       return `saved in ${ms} ms`;
     }, page);
