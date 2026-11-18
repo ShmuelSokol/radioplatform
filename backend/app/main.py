@@ -706,6 +706,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.services.duration_backfill import backfill_on_startup
     backfill_task = _asyncio.get_running_loop().create_task(backfill_on_startup())
     index_task = _asyncio.get_running_loop().create_task(_build_concurrent_indexes())
+    # When each item last aired: read before the first refill or redraw needs it
+    from app.services.last_played import warm_all
+    warm_task = _asyncio.get_running_loop().create_task(warm_all())
     # Bug reports: push "fix ready" to ntfy (see wiki/bug-reports.md)
     from app.services.bug_report_service import notify_loop
     bug_task = _asyncio.get_running_loop().create_task(notify_loop())
@@ -720,6 +723,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     backfill_task.cancel()
     index_task.cancel()
+    warm_task.cancel()
     # Shutdown — stop the scheduler cleanly
     try:
         from app.services.scheduler_engine import stop_scheduler
