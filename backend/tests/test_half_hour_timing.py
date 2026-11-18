@@ -255,3 +255,30 @@ async def test_timing_setting_api_and_queued_items_follow_it(client: AsyncClient
     r = await client.put(url, json={"station_id": sid, "on_the_hour": "hard", "other": "soft"},
                          headers=auth_headers)
     assert r.json()["half_hour"] == "hard" and r.json()["half_hour_time_check"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config,queued,alarm", [
+    ({"half_hour_time_check": True, "spot_timing": {"half_hour": "hard"}}, True, True),
+    ({"half_hour_time_check": True, "spot_timing": {"half_hour": "soft"}}, True, False),  # waits by design
+    ({"spot_timing": {"half_hour": "hard"}}, True, False),                             # check off
+    ({"half_hour_time_check": True, "spot_timing": {"half_hour": "hard"}}, False, False),  # no clip queued
+])
+async def test_air_watch_reports_a_missing_half_hour_time_check(db_session, config, queued, alarm):
+    from app.services.air_watch import AirWatch
+    from tests.test_air_watch import _asset, _entry, _station
+
+    st = await _station(db_session, **config)
+    song = await _asset(db_session, "Song")
+    tc = await _asset(db_session, "Time 9:30", category="time_announcement", kind="jingle", duration=6)
+    half = datetime(2026, 11, 17, 2, 30, tzinfo=UTC)  # 9:30 PM New York
+    now = half + timedelta(seconds=50)
+    rows = [_entry(st, song, position=2, status="playing", started_at=now - timedelta(seconds=30))]
+    if queued:  # queued for 9:30 but skipped: never started
+        rows.append(_entry(st, tc, status="skipped", preempt_at=half, timing_mode="hard"))
+    db_session.add_all(rows)
+    await db_session.commit()
+    found = [f for f in await AirWatch().check_station(db_session, st, now) if f.kind == "hour_missing"]
+    assert bool(found) == alarm, found
+    if alarm:
+        assert "9:30 PM" in found[0].title
