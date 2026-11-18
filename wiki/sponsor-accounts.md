@@ -2,6 +2,8 @@
 
 Shmuel, 2026-11-18: the Sponsors page should be "a normal list of each client", active or not and when, and inside each client every spot through the whole flow, what played and when, and each one's settings.
 
+**Where to find it (2026-11-18 evening):** Shmuel could not find the client list under Settings > Sponsors (14 entries; on the phone below the first screen) and opened Campaigns instead. Now the top bar has its own **Sponsors** menu right after Dashboard (first section of the phone menu): All Clients, Spot Schedule, Record Spots, Campaigns, Sponsorship Rules. The Campaigns page carries a yellow pointer to All Clients (or the filtered client), and a campaign's sponsor name links to the client page. "Sponsor Portal" in the top bar shows for sponsors only.
+
 Modelled on radio traffic systems (WideOrbit, Marketron, NaturalLog): **client** (advertiser) -> **orders** (here a contract = one `SpotSchedule`: station, days, times, dates) -> **copy** (here spots = recordings and library audio tied to the client) -> **as-run log / affidavit** (the play log).
 
 - Backend: `services/sponsor_accounts.py`, read-only. `GET /sponsors/clients` (one line per client), `GET /sponsors/{id}/account` (contracts + spots by stage), `GET /sponsors/{id}/plays` (paged, filters station/spot/dates, station clock), `GET /sponsors/{id}/missed-plays` (same as the client's portal, `sponsor_delivery.py`). Manager only, like the rest of `/sponsors`.

@@ -73,6 +73,7 @@
 .qn-site [class~="border-red-200"]{border-color:#dc2626}
 .qn-site [class~="border-red-300"]{border-color:#dc2626}
 .qn-site [class~="border-yellow-200"]{border-color:#ca8a04}
+.qn-site [class~="border-yellow-300"]{border-color:#ca8a04}
 .qn-site [class~="divide-gray-100"]>*{border-color:var(--qn-shadow)}
 .qn-site [class~="divide-gray-200"]>*{border-color:var(--qn-shadow)}
 .qn-site [class~="hover:bg-[#12123a]"]:hover{background-color:#d0d0d0}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useCampaign, useUpdateCampaignStatus } from '../../hooks/useCampaigns';
 import { useAuth } from '../../hooks/useAuth';
-import { canChange } from '../../auth/access';
+import { canAccess, canChange } from '../../auth/access';
 import { CAMPAIGN_STATUSES } from '../../api/campaigns';
 import Spinner from '../../components/Spinner';
 import {
@@ -51,7 +51,13 @@ export default function AdminCampaignDetail() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold text-gray-800 break-words">{campaign.name}</h1>
-            <p className="text-indigo-700">{campaign.sponsor_name || 'Unnamed sponsor'}</p>
+            {campaign.sponsor_id && canAccess(user?.role, '/admin/sponsors') ? (
+              <Link to={`/admin/sponsors/${campaign.sponsor_id}`} className="inline-flex items-center min-h-[44px] text-indigo-700 underline" data-testid="client-link">
+                {campaign.sponsor_name || 'Unnamed sponsor'}: all spots, contracts and plays
+              </Link>
+            ) : (
+              <p className="text-indigo-700">{campaign.sponsor_name || 'Unnamed sponsor'}</p>
+            )}
             {campaign.description && <p className="text-gray-500 mt-1 whitespace-pre-wrap">{campaign.description}</p>}
           </div>
           <StatusBadge status={campaign.status} />
