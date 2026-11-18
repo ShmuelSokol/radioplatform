@@ -24,11 +24,81 @@ const IGNORE_ATTR = 'data-bug-reporter';
 /** Any part of the app can open the reporter (e.g. the phone menu) with this event. */
 export const REPORT_BUG_EVENT = 'kbr:report-bug';
 
-async function captureScreen(): Promise<string | null> {
+export type Capture = { shot: string | null; how: string; tries: string[] };
+
+const CAPTURE_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error(`${what} took over ${ms / 1000} s`)), ms);
+    p.then((v) => { window.clearTimeout(t); resolve(v); }, (e) => { window.clearTimeout(t); reject(e); });
+  });
+}
+
+/** A data URL that holds a real picture (Safari gives "data:," for a canvas it will not export). */
+function usable(url: string | null | undefined): boolean {
+  return !!url && url.startsWith('data:image/') && url.length > 1000;
+}
+
+function describe(e: unknown): string {
+  if (e instanceof Error) return e.message || e.name;
+  return String(e);
+}
+
+/** The page's own media and frames can't be drawn and only slow a picture down. */
+const skipNode = (el: Element) =>
+  el.hasAttribute?.(IGNORE_ATTR) || ['AUDIO', 'VIDEO', 'IFRAME', 'OBJECT', 'EMBED'].includes(el.tagName);
+
+/** The colour behind the bottom of the screen, to fill any part the copy of the page leaves empty. */
+function backdrop(): string {
+  let el: Element | null = document.elementFromPoint(window.innerWidth / 2, window.innerHeight - 2);
+  while (el) {
+    const c = getComputedStyle(el).backgroundColor;
+    if (c && c !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(c)) return c;
+    el = el.parentElement;
+  }
+  return '#ffffff';
+}
+
+/**
+ * Picture of the screen as it is. Two ways, so one engine's quirk does not leave a report
+ * without one: modern-screenshot first (the browser draws the page itself into an SVG
+ * picture: truer than html2canvas, and it has Safari's workarounds; html2canvas alone came
+ * back empty on Safari, iPhone and Mac: bug 8), then html2canvas (redraws the page in
+ * script). Each try has a time limit, and why each failed goes with the report
+ * (`client_context.screenshot`).
+ */
+export async function captureScreen(): Promise<Capture> {
+  const tries: string[] = [];
+  const scale = Math.min(window.devicePixelRatio || 1, 1.5, 1600 / window.innerWidth);
+  const t0 = performance.now();
+  // Tests turn a way off to check the other: window.__kbrShotSkip = ['html2canvas']
+  const skip: string[] = (window as unknown as { __kbrShotSkip?: string[] }).__kbrShotSkip || [];
   try {
+    if (skip.includes('modern-screenshot')) throw new Error('skipped by test');
+    const { domToJpeg } = await import('modern-screenshot');
+    const bg = backdrop();
+    const url = await withTimeout(domToJpeg(document.documentElement, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      scale,
+      quality: 0.75,
+      backgroundColor: bg,
+      filter: (n) => !(n instanceof Element) || !skipNode(n),
+      timeout: 4000,
+      // Scrolled page: move the page up and left, not with a transform (that would carry the
+      // fixed top bar away with it)
+      style: { marginTop: `${-window.scrollY}px`, marginLeft: `${-window.scrollX}px` },
+    }), CAPTURE_TIMEOUT_MS, 'modern-screenshot');
+    if (usable(url)) return { shot: url, how: 'modern-screenshot', tries };
+    tries.push(`modern-screenshot: the browser gave no picture (${String(url).slice(0, 20)})`);
+  } catch (e) {
+    tries.push(`modern-screenshot: ${describe(e)}`);
+  }
+  try {
+    if (skip.includes('html2canvas')) throw new Error('skipped by test');
     const { default: html2canvas } = await import('html2canvas');
-    const scale = Math.min(window.devicePixelRatio || 1, 1.5, 1600 / window.innerWidth);
-    const canvas = await html2canvas(document.body, {
+    const canvas = await withTimeout(html2canvas(document.body, {
       x: window.scrollX,
       y: window.scrollY,
       width: window.innerWidth,
@@ -37,12 +107,36 @@ async function captureScreen(): Promise<string | null> {
       useCORS: true,
       logging: false,
       backgroundColor: null,
-      ignoreElements: (el) => el.hasAttribute?.(IGNORE_ATTR),
-    });
-    return canvas.toDataURL('image/jpeg', 0.75);
+      imageTimeout: 4000,
+      ignoreElements: skipNode,
+    }), CAPTURE_TIMEOUT_MS, 'html2canvas');
+    const url = canvas.toDataURL('image/jpeg', 0.75);
+    if (usable(url)) return { shot: url, how: 'html2canvas', tries };
+    tries.push(`html2canvas: the browser gave no picture (${url.slice(0, 20)})`);
   } catch (e) {
-    console.warn('Bug report screenshot failed', e);
+    tries.push(`html2canvas: ${describe(e)}`);
+  }
+  console.warn('Bug report screenshot failed', tries, `${Math.round(performance.now() - t0)} ms`);
+  return { shot: null, how: 'none', tries };
+}
+
+/** A picture the person picked (their own screenshot), made small enough to send. */
+async function shrinkPicked(file: File): Promise<string | null> {
+  const src = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error('unreadable')); img.src = src; });
+    const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+    c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    c.getContext('2d')?.drawImage(img, 0, 0, c.width, c.height);
+    const url = c.toDataURL('image/jpeg', 0.8);
+    return usable(url) ? url : null;
+  } catch {
     return null;
+  } finally {
+    URL.revokeObjectURL(src);
   }
 }
 
@@ -80,6 +174,8 @@ export default function BugReporter() {
   const [error, setError] = useState<string | null>(null);
   const [number, setNumber] = useState<number | null>(null);
   const [shotDropped, setShotDropped] = useState(false);
+  const [picked, setPicked] = useState(false);
+  const [pickError, setPickError] = useState(false);
   const contextRef = useRef<Record<string, unknown> | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -119,7 +215,10 @@ export default function BugReporter() {
         currentTrack: player.currentTrack,
       },
     });
-    setShot(await captureScreen());
+    const cap = await captureScreen();
+    contextRef.current = { ...contextRef.current, screenshot: { how: cap.how, failed: cap.tries } };
+    setShot(cap.shot);
+    setPicked(false);
     setPhase('open');
   };
 
@@ -140,6 +239,19 @@ export default function BugReporter() {
     setShot(null);
     setIncludeShot(true);
     setError(null);
+    setPicked(false);
+    setPickError(false);
+  };
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    const url = await shrinkPicked(file);
+    setPickError(!url);
+    if (url) {
+      setShot(url);
+      setIncludeShot(true);
+      setPicked(true);
+      contextRef.current = { ...contextRef.current, screenshot: { ...(contextRef.current?.screenshot as object), picked_by_person: true } };
+    }
   };
   useEscape(phase === 'open' || phase === 'sent', close);
 
@@ -240,13 +352,23 @@ export default function BugReporter() {
                     <>
                       <label className="flex items-center gap-2 text-sm text-gray-300">
                         <input type="checkbox" checked={includeShot} onChange={(e) => setIncludeShot(e.target.checked)} />
-                        Include this screenshot
+                        {picked ? 'Include this picture' : 'Include this screenshot'}
                       </label>
                       {includeShot && <img src={shot} alt="Screenshot of the page" className="mt-2 w-full max-h-48 object-cover object-top rounded-lg ring-1 ring-white/10" />}
                     </>
                   ) : (
-                    <p className="text-xs text-amber-400">The screenshot could not be taken. You can still send the report.</p>
+                    <p className="text-xs text-amber-400" data-testid="bug-no-shot">
+                      This browser would not let the site take a picture of the screen. You can add your own
+                      (on an iPhone: side button and volume up together, then pick it below), or send the report without one.
+                    </p>
                   )}
+                  <label className="mt-2 inline-flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm text-gray-200 hover:bg-white/20 cursor-pointer">
+                    <span aria-hidden>🖼️</span>
+                    {shot ? 'Use a different picture' : 'Add a picture'}
+                    <input type="file" accept="image/*" className="sr-only" data-testid="bug-pick"
+                      onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }} />
+                  </label>
+                  {pickError && <p className="mt-1 text-xs text-rose-400">That picture could not be read. Try another one.</p>}
                 </div>
                 {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
                 <div className="mt-4 flex justify-end gap-2">

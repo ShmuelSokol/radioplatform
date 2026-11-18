@@ -353,3 +353,4 @@ INGEST 2026-11-18 look-at-the-screen-tests.md iPhone sound stop on DJs/guide = a
 UPDATE 2026-11-18 look-at-the-screen-tests.md stale-release.mjs: provoked stale-code console lines and fake-backend data gaps (13 admin screens + /archives) listed with reasons; suite back to 0 unexpected
 INGEST 2026-11-18 streaming-architecture.md engine start report no longer renumbers the queue: put_playing_first moves only the item on air (positions climb, holes allowed)
 INGEST 2026-11-18 streaming-architecture.md engine start stays quiet (hold lane) until the first item loads; backend fresh_start after /hello ignores the cut entry in the hold rule
+INGEST 2026-11-18 bug-reports.md screenshot: modern-screenshot then html2canvas (html2canvas gave nothing on Apple Safari, bug 8), reasons carried in client_context.screenshot and the issue body, Add a picture fallback

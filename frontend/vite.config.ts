@@ -45,6 +45,8 @@ export default defineConfig(({ mode }) => {
             'vendor-react': ['react', 'react-dom', 'react-router-dom'],
             'vendor-query': ['@tanstack/react-query'],
             'vendor-hls': ['hls.js'],
+            // the bug reporter's screenshot; loaded only when 🐞 is pressed (named so tests can break it)
+            'modern-screenshot': ['modern-screenshot'],
           },
         },
       },

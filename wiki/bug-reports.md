@@ -14,8 +14,18 @@ Same pattern as his supplier-item-database project (`wiki/bug-autofix.md` there)
   AudioContext (channels, state), React Query data whose key mentions queue / now
   playing / station / schedule (trimmed), localStorage minus anything token-like.
 - **Button**: on a computer, bottom left on every page (the control room and Databank carry it in their own bars). On a phone, a 44 px 🐞 beside the bell in the top bar of every staff page and in the sponsor portal's bar (`BugTopButton` in `BugReporter.tsx`); wherever that bar is on the page the floating button is not shown at phone size (it kept covering controls). The phone menu keeps "🐞 Report a bug" (44 px). Both use the event `kbr:report-bug`; an open menu closes first so the screenshot shows the page. Listener pages for visitors keep the floating button.
-- **Screenshot**: `html2canvas` (lazy-loaded) of the visible viewport, taken BEFORE
-  the form opens; JPEG, about 20-150 KB. The reporter can untick it.
+- **Screenshot**: of the visible window, taken BEFORE the form opens; JPEG, about
+  20-150 KB. The reporter can untick it. Two ways, each lazy-loaded with an 8 s limit:
+  `modern-screenshot` first (the browser draws the page into an SVG picture; truer, and
+  has Safari's workarounds), then `html2canvas`. Bug 8 (2026-11-18): html2canvas alone gave
+  nothing on Apple Safari (iPhone and Mac) although WebKitGTK in the cloud draws fine, so
+  every Safari report came without a picture and nobody noticed. If both fail the form says
+  so and offers "Add a picture" (the person's own screenshot, shrunk to 1600 px). Each
+  report carries `client_context.screenshot` = {how, failed: [reason per way],
+  picked_by_person}, and the issue body says "None came with this report. Why: ..." when
+  there is no picture. A scrolled page is moved with margins, not a transform (a transform
+  carried the fixed top bar away). Tests: `frontend/e2e/webkit/bug-screenshot-webkit.py`
+  (`window.__kbrShotSkip = ['html2canvas']` switches one way off), `e2e/admin-misc.mjs` V2-99.
 - **Server** (`backend/app/core/log_buffer.py`): the app keeps its last 3000 log lines
   and 2000 requests in memory; each line carries the request id. A report stores the
   last 15 minutes of both (`server_log`). Requests that fail (5xx) or take > 3 s are
