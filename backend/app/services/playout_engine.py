@@ -1283,11 +1283,35 @@ async def head_the_engine_does_not_hold(db: AsyncSession, station_id) -> QueueEn
     desired = await pick_next(db, station_id, exclude)
     if desired is None or str(desired.id) == state.cued_entry_id or desired.asset is None:
         return None
+    # Short items only (a sponsorship, a jingle). Whatever plays in the timed lane is
+    # followed at once by the next timed item handed over, so a long item there would
+    # pull the hourly time check forward to its own end (engine run 2026-11-18: 37 s
+    # early), and the pause-and-resume rules for long items do not apply in that lane.
+    from app.services.long_items import is_long_form
+
+    length = float(desired.asset.duration or 0)
+    if not 0 < length <= NEXT_TIMED_LANE_MAX or is_long_form(desired.asset):
+        return None
+    if (desired.source or "").startswith("resume@"):
+        return None
+    until = datetime.now(UTC) + timedelta(seconds=length + NEXT_TIMED_LANE_CLEAR)
+    hard_soon = await db.execute(
+        select(QueueEntry.id).where(
+            QueueEntry.station_id == station_id, QueueEntry.status == "pending",
+            QueueEntry.preempt_at.is_not(None), QueueEntry.preempt_at <= until, hard_timed(),
+        ).limit(1)
+    )
+    if hard_soon.first() is not None:
+        return None
     return desired
 
 
 # How long Next waits for the engine to load the item it sends down the timed lane.
 NEXT_LOAD_WAIT = 6.0
+# Next uses the timed lane only for items this short, and only when no hard timed item is
+# due until this long after the item would end.
+NEXT_TIMED_LANE_MAX = 120.0
+NEXT_TIMED_LANE_CLEAR = 60.0
 
 
 async def next_goes_to(station_id, entry: QueueEntry) -> bool:

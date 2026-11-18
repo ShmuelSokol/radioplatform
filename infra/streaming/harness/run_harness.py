@@ -1109,6 +1109,51 @@ async def sc_fit_before_hour(h: Harness) -> None:
     await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
 
 
+async def sc_fit_preloaded_before_hour(h: Harness) -> None:
+    """Jerusalem 04:00Z 2026-11-18: during a long item the engine had the next song
+    pre-loaded for minutes, hour-fit would not touch it ("0 songs to choose from") and it
+    was cut with 140 s left. A 150 s item is on air; the 150 s story pre-loaded behind it
+    would start 38 s before a hard time check. It is exchanged for a 40 s song while the
+    item on air still has more than 75 s to go; the engine drops its pre-loaded copy."""
+    name = "fit_preloaded_before_hour"
+    await wait_music(h)
+    await h.clear_pending()
+    auto = {"source": "auto"}
+    await h.queue([("shiur", dict(auto)), ("story", dict(auto)), ("song5", dict(auto)),
+                   ("song4", dict(auto)), ("song3", dict(auto))])
+    h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
+    t0 = await h.wait_on_air("shiur", 30)
+    if t0 is None:
+        h.check(name, False, "the long item never went on air")
+        return
+    # the long item ends at +150; the story would start there, 38 s before the hour
+    due = datetime.fromtimestamp(t0 + 188, UTC)
+    await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+    await asyncio.sleep(max(0, due.timestamp() - time.time()) + 14)
+    starts = await h.started_times("time", due.timestamp() - 5)
+    late = starts[0][0] - due.timestamp() if starts else None
+    h.check(name, late is not None and abs(late) <= 1.0,
+            f"time check {'never' if late is None else f'{late:+.1f} s'}")
+    heard = h.heard(t0 + 2, due.timestamp() + 12)
+    h.print_timeline(heard, due.timestamp())
+    names = [n for _, n in timeline(heard)]
+    runs = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
+    clock = tone_name(TONES["time"][0])
+    before = runs[:runs.index(clock)] if clock in runs else runs
+    h.check(name, tone_name(TONES["story"][0]) not in before,
+            f"the pre-loaded story did not start before the time check: {runs}")
+    h.check(name, bool(before) and before[-1] in [tone_name(TONES[n][0]) for n in ("song3", "song4", "song5")],
+            f"a 40 s song was moved up and was on air at the hour: {before}")
+    began = [t for n in ("song3", "song4", "song5") for t, _ in await h.started_times(n, t0) if t < due.timestamp()]
+    last = max(began) if began else None
+    lost = (last + 40 - due.timestamp()) if last else None
+    h.check(name, lost is not None and lost <= 15.0,
+            f"it lost {'?' if lost is None else f'{lost:.0f}'} s to the time check (the story would have lost 112 s)")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"longest silence {gap:.1f} s")
+    await asyncio.to_thread(_control, "/skip", {"fade": 0.1})
+
+
 async def _song_ends_before_hard(h: Harness, name: str, gap: float) -> None:
     """A song ends `gap` s before a hard time check, with songs queued behind it."""
     await h.set_config(fit_before_hard_items=False)
@@ -2367,6 +2412,7 @@ SCENARIOS = {
     "blackout_ended_early": sc_blackout_ended_early,
     "output_limiter": sc_output_limiter,
     "fit_before_hour": sc_fit_before_hour,
+    "fit_preloaded_before_hour": sc_fit_preloaded_before_hour,
     "song_ends_before_hour": sc_song_ends_before_hour,
     "song_ends_6s_before_hour": sc_song_ends_6s_before_hour,
     "live_show_quiet": sc_live_show_quiet,

@@ -284,9 +284,11 @@ async def test_play_next_in_a_songs_last_seconds_keeps_the_held_song_until_next(
 ):
     """A flush seconds before a song ends leaves the engine with nothing ready, so Play
     next alone keeps the pre-loaded song then; a Next still plays the operator's item."""
+    from app.services import playout_engine
     station, playing, pending, state, commands = await _engine_station(
         db_session, monkeypatch, elapsed_seconds=160.0  # 20 s of 180 left
     )
+    monkeypatch.setattr(playout_engine, "NEXT_TIMED_LANE_MAX", 600.0)  # the test item is 180 s
     res = await client.post(
         f"/api/v1/stations/{station.id}/queue/play-next", headers=auth_headers,
         json={"asset_id": str(playing.asset_id)},
@@ -300,7 +302,6 @@ async def test_play_next_in_a_songs_last_seconds_keeps_the_held_song_until_next(
     assert res.json()["message"] == "Skipped" and commands == ["/timed", "/flush"]
     assert item in state.timed_sent and state.cued_entry_id is None and state.skip_requested
     # What the engine is handed next is the song it held, not the item again
-    from app.services import playout_engine
     state.given = set()
     got = await playout_engine.handle_next(db_session, station.id, given=[])
     assert got["entry_id"] == str(pending.id)
@@ -315,6 +316,7 @@ async def test_next_when_the_engine_refuses_the_item_falls_back_to_a_plain_skip(
     station, playing, pending, state, commands = await _engine_station(
         db_session, monkeypatch, elapsed_seconds=160.0
     )
+    monkeypatch.setattr(playout_engine, "NEXT_TIMED_LANE_MAX", 600.0)
     res = await client.post(
         f"/api/v1/stations/{station.id}/queue/play-next", headers=auth_headers,
         json={"asset_id": str(playing.asset_id)},
@@ -327,8 +329,43 @@ async def test_next_when_the_engine_refuses_the_item_falls_back_to_a_plain_skip(
 
     monkeypatch.setattr(playout_engine, "_command", refuse_timed)
     res = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade=hard", headers=auth_headers)
-    assert res.json()["message"] == "Skipped" and commands == ["/timed", "/skip"]
-    assert item not in state.timed_sent and state.cued_entry_id == str(pending.id)
+    # The plain path: the held song is taken back, then the skip
+    assert res.json()["message"] == "Skipped" and commands == ["/timed", "/flush", "/skip"]
+    assert item not in state.timed_sent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("why", ["long item", "hard item close by"])
+async def test_next_keeps_long_items_and_the_minutes_before_a_hard_item_off_the_timed_lane(
+    client, auth_headers, db_session, monkeypatch, why
+):
+    """Whatever plays in the timed lane is followed at once by the next timed item handed
+    over. Engine run 2026-11-18: a 150 s item sent there by Next pulled the hourly time
+    check 37 s early. Only short items go that way, and not when a hard item is due
+    before they would end plus a minute."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.models.queue_entry import QueueEntry
+    from app.services import playout_engine
+
+    station, playing, pending, state, commands = await _engine_station(
+        db_session, monkeypatch, elapsed_seconds=160.0
+    )
+    if why == "hard item close by":
+        monkeypatch.setattr(playout_engine, "NEXT_TIMED_LANE_MAX", 600.0)
+        db_session.add(QueueEntry(
+            station_id=station.id, asset_id=playing.asset_id, position=50, status="pending",
+            source="auto", timing_mode="hard", preempt_at=datetime.now(UTC) + timedelta(seconds=200),
+        ))
+        await db_session.commit()
+    res = await client.post(
+        f"/api/v1/stations/{station.id}/queue/play-next", headers=auth_headers,
+        json={"asset_id": str(playing.asset_id)},
+    )
+    item = res.json()["id"]
+    res = await client.post(f"/api/v1/stations/{station.id}/queue/skip?fade=hard", headers=auth_headers)
+    assert res.json()["message"] == "Skipped" and commands == ["/flush", "/skip"]
+    assert item not in state.timed_sent
 
 
 @pytest.mark.asyncio
