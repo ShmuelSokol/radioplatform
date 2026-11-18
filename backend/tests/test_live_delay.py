@@ -1255,3 +1255,30 @@ async def test_live_mp3_is_open_in_the_second_before_the_show_is_heard(client, d
     assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg"
     assert len(r.content) < 2000                                # no silence sent ahead of the show
     assert air.taps == set()
+
+
+def test_timed_items_enter_the_show_early_by_the_stream_lag_on_stream_stations(monkeypatch):
+    """The stream server plays the show about 2 s behind: the time check goes into the
+    show that much early there, and on time where listener pages hear the delay itself."""
+    from types import SimpleNamespace
+
+    from app.config import settings
+    from app.services import playout_engine
+
+    station = SimpleNamespace(id=uuid.uuid4(), automation_config={})
+    assert live_inserts.stream_lead(station) == 0.0              # browser player
+    monkeypatch.setattr(type(settings), "engine_drives", lambda self, sid: True)
+    monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", False)
+    assert live_inserts.stream_lead(station) == 0.0              # engine, but pages play the queue
+    monkeypatch.setattr(settings, "PLAYOUT_STREAM_LIVE", True)
+    playout_engine.reset_state(station.id)
+    assert live_inserts.stream_lead(station) == 0.0              # an engine too old to carry the show
+    playout_engine.get_state(station.id).engine_proto = playout_engine.ENGINE_PROTO_LIVE_AUDIO
+    assert live_inserts.stream_lead(station) == live_inserts.STREAM_LAG == 2.0
+    station.automation_config = {"live_stream_lag_seconds": 3.5}
+    assert live_inserts.stream_lead(station) == 3.5
+    station.automation_config = {"live_stream_lag_seconds": "x"}
+    assert live_inserts.stream_lead(station) == 2.0
+    station.automation_config = {"live_stream_lag_seconds": 99}
+    assert live_inserts.stream_lead(station) == 10.0
+    playout_engine.reset_state(station.id)

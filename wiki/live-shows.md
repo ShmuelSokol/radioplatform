@@ -193,6 +193,10 @@ The host can turn a camera on (**Start camera** on the Host Console, `pages/admi
 - Not recorded: the archive keeps the sound only.
 - Tests `tests/test_live_video.py`; browser check `node e2e/live-video.cjs <station>` (Chromium's fake camera). Not yet seen on a real iPhone: Safari must decode VP8 through WebCodecs (16.4 or later); a browser that cannot says so and plays the sound as usual.
 
+## Timed items on a stream station enter the show early
+
+The stream server plays the show from `live.mp3` about 2 s behind the delay's own output (its input buffer), so a time check put into the show at hh:00:00 reached stream listeners at hh:00:02 (harness 2026-11-18), while a listener page heard it on time. `live_inserts.stream_lead(station)` gives the lead: `STREAM_LAG` (2.0 s, or `automation_config.live_stream_lag_seconds`) when the engine drives the station, `PLAYOUT_STREAM_LIVE` is on and the engine carries the show (proto 5 or later); otherwise 0. `prepare` takes it off the item's `air_at`. If the measured lag changes, set the station's `live_stream_lag_seconds`; do not change the engine's buffer for it.
+
 ## Filler after a Dump
 
 A station can name one library item as its filler (`automation_config.live_dump_filler_asset_id`, with `live_dump_filler_title` for display; Stations page, "Filler after a Dump"). It is decoded once when the host starts (`live_inserts.load_filler`, at most 40 s) and kept on the show's `LiveAir` (`filler`). At a Dump, `fill_after` counts what the Dump left in the delay; that airs first with no stretching, then `_start_fill` plays the filler for exactly the seconds the delay is short (`target - count`), as an `Insert` of kind `filler`. The host's words gather meanwhile, so the delay is whole when the filler ends and a second Dump cuts a full delay again. Without a filler the delay builds back by stretching speech, about a minute or two for 15 s.
