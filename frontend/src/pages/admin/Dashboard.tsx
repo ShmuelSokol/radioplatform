@@ -10,7 +10,8 @@ import {
 } from '../../hooks/useQueue';
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
-import { useAudioEngine, METER_SEGMENTS } from '../../hooks/useAudioEngine';
+import { useAudioEngine, METER_SEGMENTS, SILENT_WAV } from '../../hooks/useAudioEngine';
+import { startLiveStream, type LiveStream } from '../../lib/liveStream';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { fireNow, insertAt, loopCurrent, mixOver, queueEnd, queueNext } from '../../api/liveControl';
 import type { SkipFade } from '../../api/queue';
@@ -254,15 +255,26 @@ export default function Dashboard() {
 
   const dashStreamUrl = wsNowPlaying?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
+  // A stream that failed is tried again on another station's stream
+  useEffect(() => { setStreamFailed(false); }, [dashStreamUrl]);
   const dashUseStream = !!dashStreamUrl && !streamFailed;
   const dashStreamAudioRef = useRef<HTMLAudioElement>(null);
-  useEffect(() => {
+  // The server stream is played the way the Listen page plays it (lib/liveStream:
+  // a short start, the HLS copy on an iPhone), and only while this device listens.
+  // It is started inside the tap (takeSound): Safari refuses a stream that an
+  // effect starts, and the page then fell back to the built-in player.
+  const [streamSounding, setStreamSounding] = useState(false);
+  const streamRef = useRef<{ url: string; stream: LiveStream } | null>(null);
+  const stopStream = useCallback(() => {
+    streamRef.current?.stream.stop();
+    streamRef.current = null;
+  }, []);
+  const startStream = useCallback((url: string) => {
     const audio = dashStreamAudioRef.current;
-    if (!audio || !dashUseStream || !isPlaying) return;
-    audio.src = dashStreamUrl!;
-    audio.play().catch(() => setStreamFailed(true));
-    return () => { audio.pause(); audio.src = ''; };
-  }, [dashUseStream, isPlaying, dashStreamUrl]);
+    if (!audio) return;
+    stopStream();
+    streamRef.current = { url, stream: startLiveStream(audio, url, () => { streamRef.current = null; setStreamFailed(true); }) };
+  }, [stopStream]);
   useEffect(() => {
     const audio = dashStreamAudioRef.current;
     if (!audio || !dashUseStream) return;
@@ -270,6 +282,11 @@ export default function Dashboard() {
     audio.addEventListener('error', onError);
     return () => audio.removeEventListener('error', onError);
   }, [dashUseStream]);
+  useEffect(() => stopStream, [stopStream]);
+  const streamUrlRef = useRef<string | null>(null);
+  streamUrlRef.current = dashUseStream ? dashStreamUrl : null;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
 
   // The engine always follows the station here, silently unless this computer
   // listens: it drives the level meters. With a stream, the stream is what is heard
@@ -286,7 +303,9 @@ export default function Dashboard() {
     wsNowPlaying?.next_asset?.id ?? null,
     wsNowPlaying?.next_asset?.cue_in ?? 0,
     wsNowPlaying?.next_asset?.replay_gain_db ?? 0,
-    null, null,
+    // Ready-made file addresses from the now-playing message: no round trip before the first sound
+    wsNowPlaying?.asset?.audio_url ?? null,
+    wsNowPlaying?.next_asset?.audio_url ?? null,
     serverStartedAt,
     wsNowPlaying?.change_fade_seconds ?? null,
     false, // started below, on the first click or key anywhere in this tab
@@ -296,35 +315,51 @@ export default function Dashboard() {
     wsNowPlaying?.next_asset?.overlap_seconds,
   );
 
-  // ── Level meters always; sound on this computer only after the speaker button ──
-  // Browsers let audio run only after the person has clicked or typed in the page,
-  // so the silent engine starts on the first click or key anywhere here (or at once
-  // where the browser already allows it).
-  // Listening is remembered across reloads (like Mute): the header keeps its
-  // speaker controls, and the first click turns the sound back on.
+  // ── Level meters always; sound on this computer only after the Listen button ──
+  // Browsers let audio run only after a real tap, click or key in the page, so the
+  // silent engine starts on the first one anywhere here (or at once where the
+  // browser already allows it).
+  // Listening is remembered across reloads (like Mute): the first tap anywhere turns
+  // the sound back on, and until it has, the header shows the Listen button, never
+  // the Mute control (it looked switched on over silence).
+  // Only click and keydown: iPhone Safari allows no sound from touchstart or
+  // pointerdown, and the page used to spend its one try there, so with listening
+  // remembered no tap ever gave sound (Shmuel, 2026-11-17: silent for 3 minutes).
+  // The taps are heard until sound really runs, and again after the phone took the
+  // sound away (a call, the lock screen).
   const [listenHere, setListenHere] = useState(() => {
     try { return localStorage.getItem(LISTEN_KEY) === '1'; } catch { return false; }
   });
   const takeSoundRef = useRef<() => Promise<void>>(async () => {});
+  // The stream element really plays, or is not needed right now
+  const streamWanted = listenHere && dashUseStream && isPlaying;
+  const soundLive = soundRunning && (!streamWanted || streamSounding);
   useEffect(() => {
-    let done = false;
-    const start = () => {
-      if (done) return;
-      done = true;
-      remove();
+    if (soundLive) return;
+    const start = (e: Event) => {
+      // The Listen button does this itself (and lifts Mute); starting here first
+      // re-drew the header before the button's own handler ran, which then never did
+      if ((e.target as Element | null)?.closest?.('[data-listen-button]')) return;
       let wanted = false;
       try { wanted = localStorage.getItem(LISTEN_KEY) === '1'; } catch { /* none */ }
       void (wanted ? takeSoundRef.current() : engineInit()).catch(() => {});
     };
-    const events = ['pointerdown', 'keydown', 'touchstart'] as const;
+    const events = ['click', 'keydown'] as const;
     const remove = () => events.forEach(e => window.removeEventListener(e, start, true));
     events.forEach(e => window.addEventListener(e, start, true));
+    return remove;
+  }, [engineInit, soundLive]);
+  useEffect(() => {
+    // Where the browser already allows sound (a desktop that trusts the site): at once
     try {
       const probe = new AudioContext();
-      if (probe.state === 'running') start();
+      if (probe.state === 'running') {
+        let wanted = false;
+        try { wanted = localStorage.getItem(LISTEN_KEY) === '1'; } catch { /* none */ }
+        void (wanted ? takeSoundRef.current() : engineInit()).catch(() => {});
+      }
       void probe.close();
     } catch { /* no Web Audio */ }
-    return remove;
   }, [engineInit]);
   useEffect(() => { setMonitor(listenHere && !dashUseStream); }, [setMonitor, listenHere, dashUseStream]);
 
@@ -366,11 +401,33 @@ export default function Dashboard() {
     setListenHere(true);
     try { localStorage.setItem(LISTEN_KEY, '1'); } catch { /* none */ }
     unlockLive();
+    // Still inside the tap: the server stream starts here, or, with none known yet,
+    // the stream element plays a moment of silence so it may start later by itself
+    const el = dashStreamAudioRef.current;
+    const url = streamUrlRef.current;
+    if (url && isPlayingRef.current) {
+      if (streamRef.current?.url !== url || el?.paused) startStream(url);
+    } else if (el && !streamRef.current && !el.getAttribute('src')) {
+      el.src = SILENT_WAV;
+      el.play().then(() => { if (!streamRef.current) el.pause(); }).catch(() => {});
+    }
     await engineInit();
-  }, [engineInit, unlockLive]);
+  }, [engineInit, unlockLive, startStream]);
   takeSoundRef.current = takeSound;
+  // The Listen button: sound on here, and an old Mute lifted (Listen must give sound)
+  const listenPressed = useCallback(async () => {
+    if (muted) toggleMute();
+    await takeSound();
+  }, [muted, toggleMute, takeSound]);
+  // A stream that becomes known after the tap (the station moved to the server
+  // stream, or another station was picked) starts by itself; one that is no longer
+  // wanted stops, so a phone that only watches downloads nothing.
+  useEffect(() => {
+    if (!streamWanted || !dashStreamUrl) { stopStream(); return; }
+    if (streamRef.current?.url !== dashStreamUrl && soundRunning) startStream(dashStreamUrl);
+  }, [streamWanted, dashStreamUrl, soundRunning, startStream, stopStream]);
   // An admin-pushed release reloaded this control room while it played: sound back on
-  const resume = useResumeAfterRelease(takeSound, dashUseStream ? true : soundRunning && listenHere);
+  const resume = useResumeAfterRelease(takeSound, soundLive && listenHere);
   // Action buttons (Next, Start, play now) count as the click that starts the meters;
   // they never switch sound on by themselves
   const initAudio = useCallback(async () => { await engineInit(); }, [engineInit]);
@@ -734,7 +791,7 @@ export default function Dashboard() {
     looping: looping,
     onLoop: toggleLoop,
     loopBusy: loopBusy,
-    audio: { audioReady: listenHere, initAudio: takeSound, volume, setVolume, muted, toggleMute, vuL, vuR },
+    audio: { audioReady: listenHere && soundLive, starting: listenHere && soundRunning && !soundLive, initAudio: listenPressed, volume, setVolume, muted, toggleMute, vuL, vuR },
     stationTz: stationTz,
     liveShow: liveShow ? { id: liveShow.id, title: liveShow.title } : null,
   };
@@ -838,7 +895,12 @@ export default function Dashboard() {
   return (
     <div className="qn cr-root h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
       {resume.asking && <ResumePrompt onTap={resume.tap} />}
-      <audio ref={dashStreamAudioRef} className="hidden" />
+      <audio ref={dashStreamAudioRef} className="hidden"
+        onPlaying={(e) => setStreamSounding(!!streamRef.current && !e.currentTarget.muted)}
+        onPause={() => setStreamSounding(false)}
+        onEmptied={() => setStreamSounding(false)}
+        onEnded={() => setStreamSounding(false)}
+        onError={() => setStreamSounding(false)} />
 
       {toast && (
         <div role="status" data-testid="toast"

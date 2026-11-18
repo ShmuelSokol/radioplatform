@@ -571,3 +571,53 @@ export async function timeUntil(page, cond, timeout = 5000) {
     look();
   }), [String(cond), timeout]);
 }
+
+/**
+ * Init script: iPhone Safari's rule for sound, which Chromium does not have.
+ * Sound may start only inside a real tap (touchend that was not a scroll, click,
+ * keydown, mouseup); touchstart and pointerdown do NOT count. Outside one:
+ *   - audio.play() is refused (NotAllowedError), unless that same element was once
+ *     started inside a tap (it may then play again later, with any src)
+ *   - a new AudioContext is suspended and resume() never settles
+ * window.__iosPolicy = { refusedPlays, pendingResumes } counts what was refused.
+ */
+export function IOS_SOUND_POLICY() {
+  const w = window;
+  const stats = (w.__iosPolicy = { refusedPlays: 0, pendingResumes: 0 });
+  let inTap = false;
+  let moved = false;
+  const open = () => { inTap = true; setTimeout(() => { inTap = false; }, 0); };
+  w.addEventListener('touchstart', () => { moved = false; }, true);
+  w.addEventListener('touchmove', () => { moved = true; }, true);
+  w.addEventListener('touchend', () => { if (!moved) open(); }, true);
+  for (const type of ['click', 'keydown', 'mouseup']) w.addEventListener(type, open, true);
+
+  const blessed = new WeakSet();
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function () {
+    if (inTap) blessed.add(this);
+    if (!blessed.has(this)) {
+      stats.refusedPlays++;
+      return Promise.reject(new DOMException('The request is not allowed by the user agent', 'NotAllowedError'));
+    }
+    return play.call(this);
+  };
+
+  const Native = w.AudioContext;
+  if (!Native) return;
+  const locked = new WeakSet();
+  const nativeState = Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'state').get;
+  class Ctx extends Native {
+    constructor(...a) {
+      super(...a);
+      if (!inTap) { locked.add(this); Native.prototype.suspend.call(this).catch(() => {}); }
+    }
+    get state() { return locked.has(this) ? 'suspended' : nativeState.call(this); }
+    resume() {
+      if (locked.has(this) && !inTap) { stats.pendingResumes++; return new Promise(() => {}); }
+      locked.delete(this);
+      return Native.prototype.resume.call(this);
+    }
+  }
+  w.AudioContext = Ctx;
+}

@@ -119,7 +119,7 @@ const NATURAL_END_WINDOW_SECONDS = 4.0;
 // Crossfade trigger check. A timer, not requestAnimationFrame: rAF stops in background tabs.
 const CROSSFADE_CHECK_MS = 100;
 // 50 ms of silence, played inside the Listen click to unlock both decks
-const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+export const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
 // A deck this close to the server's position for the current play is playing that play
 const REPLAY_TOLERANCE_SECONDS = 4.0;
 
@@ -418,6 +418,19 @@ export function useAudioEngine(
           const pos = livePosition(0);
           if (isFinite(deck.audio.duration) && pos < deck.audio.duration - 1 && Math.abs(deck.audio.currentTime - pos) > 1) {
             try { deck.audio.currentTime = pos; } catch { /* not seekable yet */ }
+          } else if (!isFinite(deck.audio.duration)) {
+            // Nothing of the file is here yet (an iPhone loads nothing before the first
+            // tap): it would start from the top and jump to the station's position at
+            // the next sync, 10 or more seconds later. Go there as soon as the length is known.
+            const el = deck.audio;
+            const src = el.src;
+            el.addEventListener('loadedmetadata', () => {
+              if (el.src !== src) return;
+              const at = livePosition(0);
+              if (at < el.duration - 1 && Math.abs(el.currentTime - at) > 1) {
+                try { el.currentTime = at; } catch { /* not seekable */ }
+              }
+            }, { once: true });
           }
           deck.audio.play().catch(() => {});
         } else {
@@ -426,7 +439,8 @@ export function useAudioEngine(
           }).catch(() => {});
         }
       }
-      if (ctxRef.current.state === 'suspended') await ctxRef.current.resume();
+      // (not running: suspended, or "interrupted" after a call or the lock screen on an iPhone)
+      if (ctxRef.current.state !== 'running') await ctxRef.current.resume();
       // Sound switched on mid-item: the browser refused to start the deck before
       // this click, so nothing is playing. Bring the item on air up again now
       // instead of waiting for the next item.
@@ -858,8 +872,19 @@ export function useAudioEngine(
         }
         const onReady = () => goLiveAfterOut();
         inDeck.audio.addEventListener('canplay', onReady, { once: true });
+        // Nothing is heard here yet (sound was just switched on): start the element
+        // now, silently (its gain is 0 until it goes live), and go live as soon as the
+        // length is known instead of waiting for data. An iPhone fetches no audio
+        // until play() is called, so "canplay" never came and the first sound waited
+        // for the 4 s limit below.
+        const joinEarly = !outWasPlaying;
+        if (joinEarly) {
+          inDeck.audio.addEventListener('loadedmetadata', onReady, { once: true });
+          inDeck.audio.play().catch(() => {});
+        }
         setTimeout(() => {
           inDeck.audio.removeEventListener('canplay', onReady);
+          inDeck.audio.removeEventListener('loadedmetadata', onReady);
           goLiveAfterOut();
         }, COLD_LOAD_MAX_WAIT_MS);
       } catch {

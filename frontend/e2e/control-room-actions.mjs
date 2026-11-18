@@ -1129,7 +1129,7 @@ async function engineMode(browser, stream) {
     await sleep(2500);
     const el = await page.evaluate(() => { const a = document.querySelector('[data-testid=control-room] audio'); return { src: a.src, paused: a.paused, muted: a.muted, t: a.currentTime }; });
     if (!broken) {
-      check(`${tag}: listening plays the server stream`, el.src === stream.url(station.SID) && !el.paused && !el.muted && el.t > 0.3, JSON.stringify(el));
+      check(`${tag}: listening plays the server stream`, !!el.src && !el.paused && !el.muted && el.t > 0.3 && stream.stats.connects > 0, JSON.stringify(el));
       check(`${tag}: the built-in player only measures (not heard)`, (await page.evaluate(() => window.__outLevel())) < 0.01);
       // F-CR-TRANSPORT-25: the meters still move while the station is heard through the server stream
       const lit = () => page.locator('header .bg-cyan-400, header .bg-red-500').count();
