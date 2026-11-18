@@ -141,12 +141,16 @@ def test_two_contracts_of_one_sponsor_are_kept_apart_too():
     assert (t[1] - t[0]).total_seconds() >= 3600
 
 
-def test_keeping_apart_never_beats_levelling():
-    # A sponsor with 4 plays in one hour's 4 breaks: they must go one per break
-    placed, unplaced = plan_spots([_spot("x", "early_morning", plays=4)] + [_spot(f"o{i}", "early_morning") for i in range(8)],
-                                  NY, DAY, 1, breaks=_breaks(6, 9))
+def test_keeping_apart_costs_at_most_one_extra_in_a_break():
+    # A sponsor with 4 plays among 8 others in 12 breaks: never back to back, and no
+    # break more than one above the emptiest
+    spots = [_spot("x", "early_morning", plays=4)] + [_spot(f"o{i}", "early_morning") for i in range(8)]
+    placed, unplaced = plan_spots(spots, NY, DAY, 1, breaks=_breaks(6, 9))
     assert not unplaced
-    assert max(_counts(placed).values()) == 1
+    counts = _counts(placed)
+    assert max(counts.values()) <= 2
+    t = sorted(p.local for p in placed if p.schedule.name == "x")
+    assert all((b - a).total_seconds() >= 30 * 60 for a, b in zip(t, t[1:]))
 
 
 def _mixed_breaks(h_start, h_end):
@@ -185,3 +189,14 @@ def test_a_soft_break_in_the_last_minutes_of_a_shiur_is_fine():
     placed, _ = plan_spots(spots, NY, DAY, 1, breaks=_mixed_breaks(18, 21), quiet=[shiur])
     times = {p.local.strftime("%H:%M") for p in placed}
     assert "20:15" not in times and "20:45" in times
+
+
+def test_a_sponsor_is_not_back_to_back_when_the_far_breaks_hold_one_more():
+    """Main 2026-11-18 7:00 and 7:15 PM: Bright Smile in both, because the far breaks
+    already held one more. One extra in a break is better than the same sponsor twice in a row."""
+    spots = [_spot("o1", "early_evening"), _spot("o2", "early_evening"), _spot("zbusy", "early_evening", plays=2)]
+    placed, unplaced = plan_spots(spots, NY, DAY, 1, breaks=_breaks(18, 19))
+    assert not unplaced
+    t = sorted(p.local for p in placed if p.schedule.name == "zbusy")
+    assert (t[1] - t[0]).total_seconds() >= 30 * 60
+    assert max(_counts(placed).values()) <= 2
