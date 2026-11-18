@@ -1,9 +1,10 @@
 import enum
+import re
 import uuid
 
 from sqlalchemy import Column, Date, Float, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from datetime import date
 
@@ -17,6 +18,15 @@ asset_categories = Table(
 )
 
 
+def tidy_text(value, keep_empty: bool = False):
+    """Tabs and line breaks become one space, the ends are trimmed; an empty artist or
+    album becomes None (a title stays text: the column needs one)."""
+    if not isinstance(value, str):
+        return value
+    out = re.sub(r"[\t\r\n\x0b\x0c\u00a0]+", " ", value).strip()
+    return out if out or keep_empty else None
+
+
 class AssetType(str, enum.Enum):
     MUSIC = "music"
     SPOT = "spot"
@@ -27,6 +37,13 @@ class AssetType(str, enum.Enum):
 
 class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "assets"
+
+    @validates("title", "artist", "album")
+    def _tidy_text(self, key, value):
+        """No stray tabs or spaces around a name, however it arrives (form, upload tags,
+        import): the library had titles like "\tOldies Medley" and an artist that was
+        only a tab, which sort first and look empty (2026-11-18)."""
+        return tidy_text(value, keep_empty=(key == "title"))
 
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     artist: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -26,6 +26,7 @@ const SIZES = [
   ['iPhone 13', { ...devices['iPhone 13'] }, true],
 ];
 const { check, done } = checker({});
+allowEverywhere(/alert: Could not load the list\./, 'check 17 makes the Databank list fail to see this message');
 allowEverywhere(/alert: Could not (make the readout|show the template preview): No weather key/, 'check 15 makes the weather service fail to see this message');
 const NOW = Date.now();
 const iso = (h) => new Date(NOW + h * 3600e3).toISOString();
@@ -328,6 +329,30 @@ try {
       const said2 = page.getByTestId('weather-template-error');
       const shown2 = await said2.waitFor({ timeout: 4000 }).then(() => true, () => false);
       check(`${size}: 15 a failed Template Config preview says so within 4 s`, shown2 && /Could not show the template preview: No weather key/.test(await said2.innerText()), shown2 ? await said2.innerText() : 'nothing shown');
+    }
+
+    // 17 Databank: a slow list says it is slow, a failed one says so and can be tried again
+    {
+      let mode = 'slow';
+      await ctx.route(/\/api\/v1\/databank\/items(\?.*)?$/, async (route) => {
+        if (mode === 'fail') return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'boom' }) });
+        if (mode === 'slow') await sleep(6000);
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(DATA['/databank/items']) }).catch(() => {});
+      });
+      await page.goto(`${BASE}/admin/databank`);
+      const slow = await page.getByTestId('databank-slow').waitFor({ timeout: 5500 }).then(() => true, () => false);
+      check(`${size}: 17 Databank says the list is slow after 4 s instead of a bare "Loading"`, slow);
+      const came = await page.getByText('Song with both').first().waitFor({ timeout: 6000 }).then(() => true, () => false);
+      check(`${size}: 17 and shows the list when it arrives`, came && !(await page.getByTestId('databank-slow').count()));
+      mode = 'fail';
+      await page.goto(`${BASE}/admin/databank`);
+      const err = page.getByTestId('databank-error');
+      const failed = await err.waitFor({ timeout: 8000 }).then(() => true, () => false);
+      check(`${size}: 17 a failed list says so (not "Nothing here yet", not loading for ever)`, failed && !/Nothing here yet/.test(await bodyText(page)), failed ? await err.innerText() : (await bodyText(page)).slice(0, 160));
+      mode = 'ok';
+      if (failed) await err.getByRole('button', { name: 'Try again' }).click();
+      const back = await page.getByText('Song with both').first().waitFor({ timeout: 6000 }).then(() => true, () => false);
+      check(`${size}: 17 "Try again" loads it`, back && !(await err.count()));
     }
 
     // 11 the bug button does not cover the last controls of a page
