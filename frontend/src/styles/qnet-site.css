@@ -171,6 +171,18 @@ nav.qn-site .qn-brand:hover { background: transparent; color: #000080; }
   }
 }
 
+/* Phones: a checkbox or radio button is 13 px; its label is the tap target and gets the
+   44 x 44 px (Activity filters were 32 px high, Manage Stations "Protected" 16 px, Program
+   Clock 20 px, Site Updates "Now" 37 px wide). A box with no words beside it is wrapped in
+   <label class="qn-tap"> (Library rows). Laptops are unchanged. */
+@media (pointer: coarse) and (max-width: 767px) {
+  .qn-site main label:has(input:is([type="checkbox"], [type="radio"])) { min-height: 44px; min-width: 44px; }
+  .qn-site main label:has(input:is([type="checkbox"], [type="radio"])):not([class*="flex"]):not([class*="block"]):not([class*="grid"]):not([class*="hidden"]) {
+    display: inline-flex; align-items: center; column-gap: 0.35em;
+  }
+  .qn-site main label.qn-tap { justify-content: center; }
+}
+
 /* ── Phone tables: `phone-cards` on a <table> stacks each row as a card under 640 px ──
    Every cell is a line of the card (`data-label` names it), columns hidden on small
    screens show again, and the last cell (the actions) is a row of buttons in sight,

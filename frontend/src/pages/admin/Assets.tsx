@@ -590,13 +590,15 @@ export default function Assets() {
         <table className="w-full table-fixed divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="w-8 px-2 py-2 text-left">
-                <input
-                  type="checkbox"
-                  checked={realAssets.length > 0 && selected.size === realAssets.length}
-                  onChange={toggleAll}
-                  className="rounded border-gray-300"
-                />
+              <th className="w-12 sm:w-8 px-0 sm:px-2 py-2 text-left">
+                <label className="qn-tap">
+                  <input
+                    type="checkbox"
+                    checked={realAssets.length > 0 && selected.size === realAssets.length}
+                    onChange={toggleAll}
+                    className="rounded border-gray-300"
+                  />
+                </label>
               </th>
               <th className="hidden md:table-cell w-10 px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase">Audio</th>
               <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase md:w-[22%]">Title</th>
@@ -666,15 +668,17 @@ export default function Assets() {
           <tbody className="divide-y divide-gray-200">
             {assets.map((asset) => (
               <tr key={asset.id} className={selected.has(asset.id) ? 'bg-brand-50' : ''}>
-                <td className="px-2 py-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(asset.id)}
-                    onChange={() => toggleSelect(asset.id)}
-                    disabled={!hasRealAudio(asset.file_path)}
-                    className="rounded border-gray-300 disabled:opacity-30"
-                    title={hasRealAudio(asset.file_path) ? '' : 'No audio file — cannot select'}
-                  />
+                <td className="px-0 sm:px-2 py-2">
+                  <label className="qn-tap">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(asset.id)}
+                      onChange={() => toggleSelect(asset.id)}
+                      disabled={!hasRealAudio(asset.file_path)}
+                      className="rounded border-gray-300 disabled:opacity-30"
+                      title={hasRealAudio(asset.file_path) ? '' : 'No audio file — cannot select'}
+                    />
+                  </label>
                 </td>
                 <td className="hidden md:table-cell px-1 py-2 text-center">
                   {hasRealAudio(asset.file_path) ? (

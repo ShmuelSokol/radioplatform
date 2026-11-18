@@ -138,7 +138,7 @@ function QueuePanel(p: Props) {
 
   return (
     <section className="flex flex-col min-h-0 h-full qn-log" aria-label="Queue">
-      <div className="cr-queue-head shrink-0 flex items-center gap-2 px-2 h-8 bg-[#c0c0c0] text-black text-xs font-normal border-b border-[#808080]">
+      <div className="cr-queue-head shrink-0 flex items-center gap-2 px-2 h-12 lg:h-8 bg-[#c0c0c0] text-black text-xs font-normal border-b border-[#808080]">
         <span className="font-bold">Up next</span>
         <span className="truncate">
           {countLabel} items
@@ -150,7 +150,7 @@ function QueuePanel(p: Props) {
           onChange={(e) => p.onDateFilter(e.target.value)}
           onFocus={p.onNeedAll}
           onPointerDown={p.onNeedAll}
-          className="qn-field ml-auto h-6 text-xs px-1"
+          className="qn-field ml-auto h-11 lg:h-6 text-xs px-1"
         >
           <option value="">All days</option>
           {p.dates.map(d => (
@@ -241,7 +241,7 @@ function QueuePanel(p: Props) {
               >
                 {/* Insert-here button */}
                 {isCur ? (
-                  <span className="w-10 lg:w-7 shrink-0 text-center text-base lg:text-xs" aria-label="Playing now">▶</span>
+                  <span className="w-11 lg:w-7 shrink-0 text-center text-base lg:text-xs" aria-label="Playing now">▶</span>
                 ) : (
                   <button
                     type="button"
@@ -249,7 +249,7 @@ function QueuePanel(p: Props) {
                     onClick={(e) => { e.stopPropagation(); p.onArmInsert(isArmed ? null : entry.id); }}
                     title="Insert a song before this one"
                     aria-label={`Insert a song before ${title}`}
-                    className={`cr-tap w-10 h-10 lg:w-6 lg:h-[22px] lg:mr-1 shrink-0 flex items-center justify-center text-xl lg:text-base font-bold leading-none
+                    className={`cr-tap w-11 h-11 lg:w-6 lg:h-[22px] lg:mr-1 shrink-0 flex items-center justify-center text-xl lg:text-base font-bold leading-none
                       ${isArmed ? 'bg-[#00ffff] text-black' : 'text-[#00ffff] hover:bg-[#003838]'}`}
                   >
                     +

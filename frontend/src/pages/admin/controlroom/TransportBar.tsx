@@ -181,7 +181,7 @@ export default function TransportBar(p: Props) {
       aria-label="Station"
       value={p.stationId ?? ''}
       onChange={(e) => p.onStation(e.target.value)}
-      className="qn-field h-7 max-w-[60vw] lg:max-w-[200px] text-sm px-1.5"
+      className="qn-field h-11 lg:h-7 max-w-[60vw] lg:max-w-[200px] text-sm px-1.5"
     >
       {p.stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
     </select>

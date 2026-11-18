@@ -200,6 +200,27 @@ try {
       await row.locator('input[type=checkbox]').check();
       await escCloses('the Set Category menu of chosen rows', () => page.getByRole('button', { name: 'Set Category' }).click(), page.locator('div.absolute.w-40', { hasText: 'do_not_play' }));
     }
+    if (!wide) {
+      // Phone: a row's checkbox is a 44 px tap target, and the floating bug button is not on
+      // this page (rows have controls on both edges; it sat on a row's View link). It is in the menu.
+      await page.goto(`${BASE}/admin/assets`);
+      await page.locator('tbody tr', { hasText: 'Announcement' }).first().waitFor({ timeout: 15000 });
+      const boxes = await page.evaluate(() => [...document.querySelectorAll('main table input[type=checkbox]')].filter((e) => !e.disabled).map((e) => {
+        const r = (e.closest('label') || e).getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) };
+      }));
+      check(`${name}: every Library checkbox has a 44 px tap area`, boxes.length > 1 && boxes.every((b) => b.w >= 44 && b.h >= 44), JSON.stringify(boxes.slice(0, 4)));
+      const first = page.locator('tbody tr', { hasText: 'Announcement' }).first();
+      const lab = await first.locator('label.qn-tap').boundingBox();
+      await page.touchscreen.tap(lab.x + 4, lab.y + 4);   // the corner of the tap area, not the 13 px box
+      check(`${name}: a tap on the corner of that area ticks the row`, await first.locator('input[type=checkbox]').isChecked());
+      await first.locator('input[type=checkbox]').uncheck();
+      check(`${name}: no floating bug button over the Library rows`, !(await page.locator('button[aria-label="Report a bug"]').isVisible().catch(() => false)));
+      await page.locator('nav').getByRole('button', { name: 'Menu' }).click();
+      await page.locator('nav').getByRole('button', { name: /Report a bug/ }).click();
+      const dlg = page.getByRole('dialog', { name: 'Report a bug' });
+      check(`${name}: "Report a bug" in the menu opens the report there`, await dlg.waitFor({ timeout: 6000 }).then(() => true, () => false));
+      await page.keyboard.press('Escape');
+    }
     await page.goto(`${BASE}/admin/archives`);
     await escCloses('the New Archive dialog', () => page.getByRole('button', { name: '+ New Archive' }).click(), page.getByRole('dialog', { name: 'New Archive' }));
     await escCloses('the bug report dialog', () => page.locator('button[aria-label="Report a bug"]').click(), page.getByRole('dialog', { name: 'Report a bug' }));

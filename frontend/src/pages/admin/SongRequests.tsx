@@ -280,13 +280,14 @@ export default function SongRequests() {
                     {isAutoApproved(req) && <span className="ml-1 opacity-70">AUTO</span>}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-[11px]">
-                  <div>
+                {/* a long name wraps; the time never runs into the actions ("22m agoMatch") */}
+                <div className="flex items-center justify-between gap-3 text-[11px]">
+                  <div className="min-w-0 flex-1 break-words">
                     <span className="text-cyan-300">{req.requester_name}</span>
                     <span className="text-gray-600 mx-1">&middot;</span>
                     <span className="text-gray-500">{timeAgo(req.created_at)}</span>
                   </div>
-                  <div className="flex gap-2 items-start">
+                  <div className="flex gap-2 items-start shrink-0">
                     {req.status !== 'queued' && req.status !== 'played' && req.status !== 'rejected' && (
                       <MatchToSong
                         initial={req.song_title || req.song_artist || ''}

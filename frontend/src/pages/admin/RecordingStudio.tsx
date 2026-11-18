@@ -304,7 +304,11 @@ function GeneralRecorder() {
 // What the server said when a weather step failed, in words for the screen
 function weatherError(e: unknown, doing: string): string {
   const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
-  const detail = typeof r?.data?.detail === 'string' ? r.data.detail : '';
+  // staff see plain words, not the name of a server setting ("OPENWEATHERMAP_API_KEY is empty")
+  const raw = typeof r?.data?.detail === 'string' ? r.data.detail : '';
+  const detail = /\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/.test(raw)
+    ? 'weather is not set up on the server yet. Ask the site admin to add the weather service key.'
+    : raw;
   if (!r) return `Could not ${doing}: the server did not answer. Check your connection and try again.`;
   return `Could not ${doing}${detail ? `: ${detail}` : r.status === 503 ? ': the weather service is not available right now.' : ` (error ${r.status}).`}`;
 }
