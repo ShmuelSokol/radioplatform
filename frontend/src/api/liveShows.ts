@@ -168,6 +168,8 @@ export interface AirStatus {
   /** off = not on air; pre-roll = filling before listeners hear anything */
   mode: 'off' | 'pre-roll' | 'steady' | 'building' | 'shrinking' | 'exiting' | 'no delay' | 'insert';
   on_air: boolean;
+  /** Seconds the show still waits for a timed item on the station to end (pre-roll only) */
+  hold?: number;
   /** Seconds waiting in the delay now: what a Dump can still cut */
   delay: number;
   target: number;

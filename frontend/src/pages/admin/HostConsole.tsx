@@ -233,7 +233,9 @@ export default function HostConsole() {
             )}
             {isRecording && air?.mode === 'pre-roll' && (
               <div className="text-yellow-400 text-sm mt-2 font-bold" data-testid="preroll-note">
-                Listeners hear you in {Math.max(0, Math.ceil(air.target - air.delay))} s. Start talking now.
+                {(air.hold ?? 0) > Math.max(0, air.target - air.delay)
+                  ? `A timed item is on air first. Listeners hear you in ${Math.ceil(air.hold ?? 0)} s. Start talking now.`
+                  : `Listeners hear you in ${Math.max(0, Math.ceil(air.target - air.delay))} s. Start talking now.`}
               </div>
             )}
             {isRecording && air?.on_air && (

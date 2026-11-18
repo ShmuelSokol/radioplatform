@@ -272,14 +272,14 @@ def test_delay_winds_down_by_itself_before_the_hard_stop():
     clock = Clock()
     air = LiveAir("st", "show", _nowhere, delay=20, clock=clock)
     air.end_at = clock.t + 300
-    run(air, clock, 100.0, talker())                 # 200 s before the end: still delayed
+    run(air, clock, 80.0, talker())                  # 220 s before the end: still delayed
     assert air.buffered == pytest.approx(20.0, abs=0.1) and air.auto_exit is False
-    heard = run(air, clock, 194.0, talker(), t0=100.0)  # no pauses at all: speech is hurried
+    heard = run(air, clock, 219.9, talker(), t0=80.0)   # no pauses at all: speech is hurried
     assert air.auto_exit is True
     assert air.buffered < 0.5
     at = spoken_at(heard)
     assert np.all(np.diff(at) >= -0.011)             # nothing skipped on the way
-    assert at[-1] == pytest.approx(293.9, abs=0.6)   # the host's last words air before the stop
+    assert at[-1] == pytest.approx(299.9, abs=0.8)   # the host's last words air before the stop
 
 
 # ---------- the show ends: the delay plays out ----------
@@ -816,3 +816,85 @@ async def test_engine_pulls_the_delayed_show_as_mp3(client, db_session, _quiet, 
                                        capture_output=True).stdout, dtype="<i2")
     assert 2.0 * RATE <= len(pcm) <= 4.6 * RATE          # what was heard from the moment the engine joined
     assert _tone_power(pcm, 440) > 1000 and _tone_power(pcm, 440) > 20 * _tone_power(pcm, 620)
+
+
+# ---------- reviewer findings on the first round (2026-11-18) ----------
+
+def test_show_waits_for_a_timed_item_before_it_is_heard():
+    clock = Clock()
+    air = LiveAir("s", "show", lambda b: None, delay=6.0, clock=clock)
+    air.hold_until = clock.t + 9.0   # a time check is on air until then
+    heard = run(air, clock, 8.9, talk=talker())
+    assert len(heard) == 0 and not air.listening and air.status()["mode"] == "pre-roll"
+    assert 0 < air.status()["hold"] <= 0.2
+    heard = run(air, clock, 1.0, talk=talker(), t0=8.9)
+    assert air.listening and air.status()["hold"] == 0.0
+    # Nothing the host said while waiting is lost: listeners get the first words first
+    assert spoken_at(heard)[0] < 0.1
+    assert air.buffered > 8.0   # longer than its 6 s for now; it comes back by itself
+
+
+@pytest.mark.asyncio
+async def test_timed_item_on_air_or_due_holds_the_show(db_session, _quiet):
+    station, show, song, clock_asset, weather = await _station(db_session)
+    now = datetime.now(UTC)
+    assert await live_show_service.timed_item_ends(db_session, station.id, now, 8.0) is None   # only a song
+    # The time check started 2.5 s ago and is 8 s long
+    on_air = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=clock_asset.id, position=0,
+                        status="playing", source="scheduler", started_at=now - timedelta(seconds=2.5),
+                        preempt_at=now - timedelta(seconds=2.5), timing_mode="hard")
+    db_session.add(on_air)
+    await db_session.commit()
+    end = await live_show_service.timed_item_ends(db_session, station.id, now, 8.0)
+    assert abs((end - now).total_seconds() - 5.5) < 0.1
+    # The weather follows it in the same group: the show waits for that too
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=weather.id, position=2,
+                              status="pending", source="scheduler", preempt_at=now - timedelta(seconds=2.5),
+                              timing_mode="hard"))
+    # A soft item and a hard item far ahead do not hold it
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=weather.id, position=3,
+                              status="pending", source="ad_slot", preempt_at=now + timedelta(seconds=3)))
+    db_session.add(QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=weather.id, position=4,
+                              status="pending", source="scheduler", preempt_at=now + timedelta(seconds=300),
+                              timing_mode="hard"))
+    await db_session.commit()
+    end = await live_show_service.timed_item_ends(db_session, station.id, now, 8.0)
+    assert abs((end - now).total_seconds() - 30.0) < 0.1
+    # Another station's items are not this station's business
+    other, *_ = await _station(db_session)
+    assert await live_show_service.timed_item_ends(db_session, other.id, now, 8.0) is None
+
+
+@pytest.mark.asyncio
+async def test_show_nobody_heard_is_still_hard_stopped(db_session, _quiet):
+    from app.services.scheduler_engine import SchedulerEngine
+
+    station, show, song, *_ = await _station(db_session)   # default 15 s delay, no microphone ever
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    assert not (station.automation_config or {}).get("live_show_id")
+    engine = SchedulerEngine()
+    now = datetime.now(UTC)
+    await engine._stop_unheard_live_show(db_session, station, now)
+    await db_session.refresh(show)
+    assert show.status == LiveShowStatus.LIVE          # its end has not come
+    engine._unheard_checked.clear()
+    await engine._stop_unheard_live_show(db_session, station, now + timedelta(hours=1, seconds=1))
+    await db_session.refresh(show)
+    assert show.status == LiveShowStatus.ENDED
+    assert [e.asset_id for e in await _playing(db_session, station)] == [song.id]   # the music never stopped
+
+
+@pytest.mark.parametrize("delay,show", [(20, 300), (30, 300), (40, 300), (40, 120), (15, 60), (40, 30)])
+def test_the_delay_is_empty_by_the_hard_stop(delay, show):
+    """Reviewer, 2026-11-18: the wind-down took back 21 s at most, so a long delay, or a
+    short show, was cut with the host's last words still waiting."""
+    clock = Clock()
+    air = LiveAir("st", "show", _nowhere, delay=delay, clock=clock)
+    air.end_at = clock.t + show
+    heard = run(air, clock, show - 0.1, talker())    # the host talks without a pause up to the stop
+    assert air.buffered < 0.5, f"{air.buffered:.1f} s never aired"
+    at = spoken_at(heard)
+    assert np.all(np.diff(at) >= -0.011)             # nothing skipped
+    assert at[-1] > show - 0.8                       # the last words were heard
+    assert air.status()["auto_exit"] is True
