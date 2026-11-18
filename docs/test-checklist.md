@@ -867,6 +867,7 @@ Existing browser tests: e2e/control-room.mjs (fake backend), e2e/audio-engine.mj
 - [x] F-ACCESS-14 Unknown route under Layout renders nothing broken (no crash) | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-14 unknown route: no crash, nav still there, says "Page not found"
 - [x] F-ACCESS-15 Route error boundary: a page that throws shows the error box with Reload; moving to another route clears it | sizes: both | n.a. | covered: frontend/e2e/admin-flows.mjs::F-ACCESS-15 / V2-97 a page that throws shows "Something went wrong" with the error and Reload Page; another... (+1 more)
 - [ ] F-ACCESS-16 Lazy chunk missing after a new release (stale screen): page reloads onto the new release instead of showing an error | sizes: both | n.a. | covered: e2e/site-release/check.cjs
+- [ ] F-ACCESS-17 Lazy chunk missing after a new release where the host answers with the site page (200 text/html) and Safari says "'text/html' is not a valid JavaScript MIME type.": the tab reloads onto the new release by itself, never "Something went wrong" with a Reload button (Shmuel's iPhone 2026-11-17 10:08 PM, after the 02:25Z release) | sizes: both | n.a. | covered: frontend/e2e/release-timing.mjs::stale "F-ACCESS-17 ..." (Chromium; Safari's wording is fed in by the test, real Safari not covered)
 
 ## Shared shell: Navbar, Layout, global player, bug reporter, site updates
 

@@ -11,7 +11,7 @@ Every frontend build writes `dist/version.json` and bakes the same id into the b
 - then: tab hidden, or 30s without input, or the person changes route (`UpdateOnNavigation` in `App.tsx`).
 - back after 10+ min hidden with nothing sounding: reloads even with a player switched on, but not while a form field has focus.
 
-A stale lazy chunk (`vite:preloadError` with a missing-file error, `isStaleCodeError`) also triggers a reload unless audio is playing. Vite raises the same event when a screen's code throws while loading; that is a real bug, so it is left to the error box ("Something went wrong") instead of being hidden behind a reload. If the screen errors anyway, the error box reloads 300 ms later unless sound is playing at that moment (leaving Listen stops it, so the 2-min audio grace does not apply here).
+A stale lazy chunk (`vite:preloadError` with a missing-file error, `isStaleCodeError`) also triggers a reload unless audio is playing. The host answers a missing file with the site page (200, text/html), not a 404, and each browser words that failure differently; `isStaleCodeError` must know every wording. Safari's ("'text/html' is not a valid JavaScript MIME type.") was missing until 2026-11-18, so an iPhone tab opened before a release showed "Something went wrong" with a Reload button. Vite raises the same event when a screen's code throws while loading; that is a real bug, so it is left to the error box ("Something went wrong") instead of being hidden behind a reload. If the screen errors anyway, the error box reloads 300 ms later unless sound is playing at that moment (leaving Listen stops it, so the 2-min audio grace does not apply here).
 
 ## Admin control (Settings > Site Updates, `/admin/site-updates`)
 
