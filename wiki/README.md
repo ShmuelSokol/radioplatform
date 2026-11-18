@@ -15,6 +15,7 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [databank](databank.md) — KBR Studio's database window: songs/jingles/spots/blocks tables, spot end dates (on the schedules), day log to the millisecond
 - [dashboard-timing](dashboard-timing.md) — Elapsed timer overflow fix, WS vs REST data sources
 - [skip-latency](skip-latency.md) — Instant skip rule: now-playing changes must WS-broadcast
+- [station-rules](station-rules.md) — Which schedule rules apply to a station (its own, else the global ones) and the one function every check must read them through
 - [lint-workflow](lint-workflow.md) — Wiki housekeeping procedure
 - [release-pickup](release-pickup.md) — open tabs reload themselves onto a new release, never while audio plays
 - [live-listeners](live-listeners.md): when a listener counts as live, instant join/leave push to admin pages
