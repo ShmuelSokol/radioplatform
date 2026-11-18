@@ -45,8 +45,10 @@ EARLY_START = 8.0
 CROSSFADE = 3.0
 # Ending a little after the hard item costs only the fade; ending before it relies
 # on the early start and, a second or two earlier still, lets one more song start.
-# Song changes drift by a few seconds, so a fit that ends early counts as worse.
-EARLY_COST = 10.0
+# Song changes drift by a few seconds, so a fit that ends early counts as worse:
+# as bad as a song cut 40 s before its end, since a few seconds of a new song go
+# out and are cut.
+EARLY_COST = 40.0
 # Song changes come a few seconds sooner than planned (live 2026-11-17 23:00Z: the song
 # planned to end 1 s past the hour ended 1.9 s before it, and a new song was handed out
 # and cut after 2.4 s). So "ends after the hard item" needs this much to spare.
@@ -58,6 +60,7 @@ EVERY = 10.0
 CONFIG_KEY = "fit_before_hard_items"  # automation_config: false switches it off
 
 _last_look: dict[str, float] = {}
+_said_nothing: dict[str, datetime] = {}
 
 
 @dataclass
@@ -187,7 +190,13 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
         return False
     last = slots[-1]
     room = (hard_at - last.start).total_seconds()
-    loses = last.seconds - room
+    # Counted the same way as the candidates: a song that ends a few seconds before
+    # the hard item is not "loses nothing". On the stream server a whole new song is
+    # handed out and cut after those seconds (live 2026-11-18 00:00Z: the song on air
+    # ended 6.6 s early, the fit saw "loses -6.6 s" and left the queue alone).
+    loses = _cut(last.seconds, room)
+    if loses is None:
+        loses = last.seconds - room
     if loses <= ACCEPTABLE_CUT:
         return False
 
@@ -230,6 +239,14 @@ async def fit_before_hard_item(db: AsyncSession, station, now: datetime | None =
                 if cut is not None and cut < best_cut:
                     best_cut, best = cut, (a, b)
     if best is None or loses - best_cut < WORTH_IT:
+        # Said once per hard item, so a live report can tell "looked and found nothing"
+        # from "did not look"
+        if _said_nothing.get(key) != hard_at:
+            _said_nothing[key] = hard_at
+            logger.info(
+                "Station %s: no better order found before the %s hard item (the song on air then loses %.0f s; %d songs to choose from)",
+                station.id, hard_at.strftime("%H:%M:%S"), loses, len(spare),
+            )
         return False
 
     if len(best) == 1:
