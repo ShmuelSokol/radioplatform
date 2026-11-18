@@ -611,37 +611,34 @@ async def _log_database_link() -> None:
 
 
 async def _log_first_use_cost() -> None:
-    """What the first use of an enum column costs on a new connection, with the
-    database's JIT as it comes and with it off (the app's connections have it
-    off, see app/db/engine.py), and the lookup's time by the database's clock."""
+    """What the first use of an enum column costs on a new connection (asyncpg
+    looks the type up once per connection), against the same statement again,
+    and the database's JIT setting. Connections are kept 30 minutes so this is
+    paid rarely; this line says how much it is."""
     import time as _time
 
     import asyncpg
 
     dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-    found = []
     try:
-        for label, server_settings in (("as the database sets it", {}), ("off", {"jit": "off"})):
+        began = _time.monotonic()
+        conn = await asyncpg.connect(dsn, statement_cache_size=0)
+        try:
+            connected = (_time.monotonic() - began) * 1000
             began = _time.monotonic()
-            conn = await asyncpg.connect(dsn, statement_cache_size=0, server_settings=server_settings)
-            try:
-                connected = (_time.monotonic() - began) * 1000
-                jit = await conn.fetchval("SHOW jit")
-                began = _time.monotonic()
-                await conn.fetch("SELECT role FROM users LIMIT 1")
-                first = (_time.monotonic() - began) * 1000
-                began = _time.monotonic()
-                await conn.fetch("SELECT role FROM users LIMIT 1")
-                second = (_time.monotonic() - began) * 1000
-                plan = await conn.fetch("EXPLAIN ANALYZE SELECT role FROM users LIMIT 1")
-                inside = plan[-1][0] if plan else ""
-                found.append(
-                    f"JIT {label} ({jit}): connecting {connected:.0f} ms, first use {first:.0f} ms, "
-                    f"second {second:.0f} ms, inside the database: {inside}"
-                )
-            finally:
-                await conn.close()
-        logger.warning("FIRST USE OF A TYPE on a new connection (SELECT role FROM users LIMIT 1). %s", ". ".join(found))
+            await conn.fetch("SELECT role FROM users LIMIT 1")
+            first = (_time.monotonic() - began) * 1000
+            began = _time.monotonic()
+            await conn.fetch("SELECT role FROM users LIMIT 1")
+            second = (_time.monotonic() - began) * 1000
+            jit = await conn.fetchval("SHOW jit")
+        finally:
+            await conn.close()
+        logger.warning(
+            "FIRST USE OF A TYPE on a new connection (SELECT role FROM users LIMIT 1): connecting %.0f ms, "
+            "first use %.0f ms, second %.0f ms, database jit %s",
+            connected, first, second, jit,
+        )
     except Exception as e:
         logger.warning("First-use cost not measured: %s", type(e).__name__)
 

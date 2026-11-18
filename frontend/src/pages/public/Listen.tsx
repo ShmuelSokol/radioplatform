@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import PlayoutBadge from '../../components/audio/PlayoutBadge';
-import { startLiveStream, type LiveStream } from '../../lib/liveStream';
+import type { LiveStream } from '../../lib/liveStream';
+import { adoptStationStream, playStationStream, releaseStationStream, stationStreamElement, stationStreamSounding } from '../../lib/stationStream';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getStation } from '../../api/stations';
@@ -138,7 +139,9 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
   const streamUrl = wsNowPlaying?.stream_url || null;
   const [streamFailed, setStreamFailed] = useState(false);
   const useStream = !!streamUrl && !streamFailed;
-  const streamAudioRef = useRef<HTMLAudioElement>(null);
+  // The tab's one stream player (lib/stationStream): it outlives this page, so the
+  // control room or this page coming back takes the sound over without a new tap
+  const streamAudioRef = useRef<HTMLAudioElement>(stationStreamElement());
   // Sound really comes out of the stream element (Safari can refuse play() with no
   // error the page sees: "On Air" and Stop over silence)
   const [streamSounding, setStreamSounding] = useState(false);
@@ -160,11 +163,19 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
     liveRef.current = null;
   }, []);
   const startLive = useCallback((url: string) => {
-    const audio = streamAudioRef.current;
-    if (!audio) return;
+    if (!stationId) return;
     stopLive();
-    liveRef.current = { url, stream: startLiveStream(audio, url, onStreamFail) };
-  }, [stopLive, onStreamFail]);
+    liveRef.current = { url, stream: playStationStream(stationId, url, onStreamFail) };
+  }, [stopLive, onStreamFail, stationId]);
+  // Sound already running for this station when the page opens (it came from the
+  // control room, or this page was opened again): taken over, not restarted. Until
+  // the station's stream address is known it is left alone.
+  const [adopted, setAdopted] = useState(false);
+  useEffect(() => {
+    if (!adopted) return;
+    const t = setTimeout(() => setAdopted(false), 8000);
+    return () => clearTimeout(t);
+  }, [adopted]);
 
   // After a stream failure the built-in player carries on. When the item on air
   // changes, the stream is tried again, muted, beside it; once it really plays the
@@ -195,15 +206,37 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
     failedAtItem.current = itemKey;
     audio.muted = true;
     audio.addEventListener('playing', onPlaying);
-    probeRef.current = { url: streamUrl, stream: startLiveStream(audio, streamUrl, () => { if (!done) { finish(); stopProbe(); } }) };
+    probeRef.current = { url: streamUrl, stream: playStationStream(stationId!, streamUrl, () => { if (!done) { finish(); stopProbe(); } }) };
     return () => { if (!done) { finish(); stopProbe(); } };
-  }, [itemKey, streamFailed, userStarted, streamUrl, stopProbe]);
+  }, [itemKey, streamFailed, userStarted, streamUrl, stopProbe, stationId]);
 
   useEffect(() => {
+    if (userStarted && !streamUrl && adopted) return;
     if (!useStream || !userStarted || !streamUrl) { stopLive(); return; }
+    if (adopted) setAdopted(false);
     if (liveRef.current?.url !== streamUrl) startLive(streamUrl);
-  }, [useStream, userStarted, streamUrl, startLive, stopLive]);
-  useEffect(() => stopLive, [stopLive]);
+  }, [useStream, userStarted, streamUrl, startLive, stopLive, adopted]);
+  // Leaving: the stream plays on for a few seconds, for the next page to take over
+  useEffect(() => () => {
+    releaseStationStream(liveRef.current?.stream);
+    liveRef.current = null;
+  }, []);
+  // (declared after the effect above, which would otherwise stop what is taken over here)
+  useEffect(() => {
+    if (!stationId) return;
+    const handedOver = usePlayerStore.getState().takeHandoff(stationId);
+    const run = adoptStationStream(stationId);
+    if (run) {
+      liveRef.current = { url: run.url, stream: run.stream };
+      setAdopted(true);
+      setStreamSounding(stationStreamSounding());
+      setUserStarted(true);
+    } else if (handedOver) {
+      // The control room's built-in player cannot carry on here by itself: try to
+      // start this page's (a desktop allows it; an iPhone shows "Tap to listen" in the bar)
+      void playRef.current();
+    }
+  }, [stationId]);
 
   // What the phone shows on the lock screen and in the car (CarPlay, Android Auto):
   // the item on air, kept current as it changes
@@ -233,6 +266,21 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
     document.head.appendChild(link);
     return () => { link.remove(); };
   }, [streamUrl]);
+
+  // Whether the stream element really plays (it is the tab's shared one, not in this page)
+  useEffect(() => {
+    const audio = streamAudioRef.current;
+    if (!audio) return;
+    const on = () => setStreamSounding(true);
+    const off = () => setStreamSounding(false);
+    const offEvents = ['pause', 'emptied', 'ended', 'error'] as const;
+    audio.addEventListener('playing', on);
+    offEvents.forEach((e) => audio.addEventListener(e, off));
+    return () => {
+      audio.removeEventListener('playing', on);
+      offEvents.forEach((e) => audio.removeEventListener(e, off));
+    };
+  }, []);
 
   // Listen for stream errors to trigger fallback
   useEffect(() => {
@@ -396,9 +444,14 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
   const stationName = station?.name;
   useEffect(() => {
     if (!stationId || !stationName || !userStarted) return;
-    usePlayerStore.getState().listening(stationId, stationName, () => stopRef.current());
+    usePlayerStore.getState().listening(stationId, stationName, () => stopRef.current(), () => { void playRef.current(); });
     return () => usePlayerStore.getState().clear(stationId);
   }, [stationId, stationName, userStarted]);
+  // The bar offers one tap when sound does not really come out
+  const soundingNow = useStream ? streamSounding : soundRunning;
+  useEffect(() => {
+    if (userStarted) usePlayerStore.getState().setSounding(soundingNow);
+  }, [userStarted, soundingNow]);
   useEffect(() => {
     if (!userStarted) return;
     usePlayerStore.getState().setTrack(nowTitle ? { title: nowTitle, artist: nowArtist || undefined } : null);
@@ -467,16 +520,6 @@ export default function Listen({ stationId: given }: { stationId?: string } = {}
 
   return (
     <div className="max-w-2xl mx-auto">
-      {/* Hidden audio element for Icecast stream playback */}
-      <audio
-        ref={streamAudioRef}
-        className="hidden"
-        onPlaying={() => setStreamSounding(true)}
-        onPause={() => setStreamSounding(false)}
-        onEmptied={() => setStreamSounding(false)}
-        onEnded={() => setStreamSounding(false)}
-        onError={() => setStreamSounding(false)}
-      />
       {resume.asking && <ResumePrompt onTap={resume.tap} />}
       <div className="bg-white shadow rounded-lg p-4 sm:p-8">
         <div className="flex items-center gap-4 sm:gap-6 mb-8">

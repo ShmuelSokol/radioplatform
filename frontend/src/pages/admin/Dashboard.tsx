@@ -11,7 +11,10 @@ import {
 import { useLiveShows } from '../../hooks/useLiveShows';
 import { useLiveAudio } from '../../hooks/useLiveAudio';
 import { useAudioEngine, METER_SEGMENTS, SILENT_WAV } from '../../hooks/useAudioEngine';
-import { startLiveStream, type LiveStream } from '../../lib/liveStream';
+import type { LiveStream } from '../../lib/liveStream';
+import { adoptStationStream, playStationStream, releaseStationStream, runningStationStream, stationStreamElement, stationStreamSounding, stopStationStream } from '../../lib/stationStream';
+import { usePlayerStore } from '../../stores/playerStore';
+import { displayTitle } from '../../lib/displayTitle';
 import { useNowPlayingWS } from '../../hooks/useNowPlayingWS';
 import { fireNow, insertAt, loopCurrent, mixOver, queueEnd, queueNext } from '../../api/liveControl';
 import type { SkipFade } from '../../api/queue';
@@ -100,7 +103,11 @@ export default function Dashboard() {
   const stations = useMemo(() => stationsData?.stations ?? [], [stationsData]);
 
   // ── Station selection (remembered in this browser) ─────────
+  // A station this tab is listening to (from a listener page, or this screen left a
+  // moment ago) is the one shown: its sound carries on here
   const [selectedStationId, setSelectedStationId] = useState<string | null>(() => {
+    const listening = runningStationStream()?.stationId;
+    if (listening) return listening;
     try { return localStorage.getItem('radio_last_station') || null; } catch { return null; }
   });
   useEffect(() => {
@@ -290,7 +297,9 @@ export default function Dashboard() {
   // A stream that failed is tried again on another station's stream
   useEffect(() => { setStreamFailed(false); }, [dashStreamUrl]);
   const dashUseStream = !!dashStreamUrl && !streamFailed;
-  const dashStreamAudioRef = useRef<HTMLAudioElement>(null);
+  // The tab's one stream player (lib/stationStream): it outlives this screen, so the
+  // sound carries on to the next page and back without a new tap
+  const dashStreamAudioRef = useRef<HTMLAudioElement>(stationStreamElement());
   // The server stream is played the way the Listen page plays it (lib/liveStream:
   // a short start, the HLS copy on an iPhone), and only while this device listens.
   // It is started inside the tap (takeSound): Safari refuses a stream that an
@@ -309,15 +318,27 @@ export default function Dashboard() {
     streamRef.current = null;
   }, []);
   const startStream = useCallback((url: string) => {
-    const audio = dashStreamAudioRef.current;
-    if (!audio) return;
+    if (!stationIdRef.current) return;
     stopStream();
-    streamRef.current = { url, startedAt: Date.now(), stream: startLiveStream(audio, url, () => { streamRef.current = null; setStreamFailed(true); }) };
+    streamRef.current = { url, startedAt: Date.now(), stream: playStationStream(stationIdRef.current, url, () => { streamRef.current = null; setStreamFailed(true); }) };
     setStreamStarting(true);
     if (startingTimer.current) clearTimeout(startingTimer.current);
     startingTimer.current = setTimeout(() => setStreamStarting(false), STREAM_STARTING_MAX_MS);
   }, [stopStream]);
   useEffect(() => () => { if (startingTimer.current) clearTimeout(startingTimer.current); }, []);
+  // Whether the stream element really plays (it is the tab's shared one, not in this screen)
+  useEffect(() => {
+    const audio = dashStreamAudioRef.current;
+    const on = () => setStreamSounding(!!streamRef.current);
+    const off = () => setStreamSounding(false);
+    const offEvents = ['pause', 'emptied', 'ended', 'error'] as const;
+    audio.addEventListener('playing', on);
+    offEvents.forEach((e) => audio.addEventListener(e, off));
+    return () => {
+      audio.removeEventListener('playing', on);
+      offEvents.forEach((e) => audio.removeEventListener(e, off));
+    };
+  }, []);
   useEffect(() => {
     const audio = dashStreamAudioRef.current;
     if (!audio || !dashUseStream) return;
@@ -325,7 +346,17 @@ export default function Dashboard() {
     audio.addEventListener('error', onError);
     return () => audio.removeEventListener('error', onError);
   }, [dashUseStream]);
-  useEffect(() => stopStream, [stopStream]);
+  const stationIdRef = useRef(stationId);
+  stationIdRef.current = stationId;
+  // Sound already running for this station (from a listener page, or this screen a
+  // moment ago): taken over, not restarted, and shown as on. Until the station's
+  // stream address is known it is left alone.
+  const [adopted, setAdopted] = useState(false);
+  useEffect(() => {
+    if (!adopted) return;
+    const t = setTimeout(() => setAdopted(false), 8000);
+    return () => clearTimeout(t);
+  }, [adopted]);
   const streamUrlRef = useRef<string | null>(null);
   streamUrlRef.current = dashUseStream ? dashStreamUrl : null;
   const isPlayingRef = useRef(isPlaying);
@@ -377,13 +408,16 @@ export default function Dashboard() {
   const takeSoundRef = useRef<() => Promise<void>>(async () => {});
   // The stream element really plays, or is not needed right now
   const streamWanted = listenHere && dashUseStream && isPlaying;
-  const soundLive = soundRunning && (!streamWanted || streamSounding);
+  // On the server stream, sound is on when the stream element plays (taken over from
+  // another page it plays before any tap here has started the meters)
+  const soundLive = streamWanted ? streamSounding : soundRunning;
   useEffect(() => {
-    if (soundLive) return;
+    if (soundLive && soundRunning) return;
     const start = (e: Event) => {
       // The Listen button does this itself (and lifts Mute); starting here first
       // re-drew the header before the button's own handler ran, which then never did
       if ((e.target as Element | null)?.closest?.('[data-listen-button]')) return;
+      if (soundLive) { void engineInit().catch(() => {}); return; }   // only the meters are missing
       let wanted = false;
       try { wanted = localStorage.getItem(LISTEN_KEY) === '1'; } catch { /* none */ }
       void (wanted ? takeSoundRef.current() : engineInit()).catch(() => {});
@@ -392,7 +426,7 @@ export default function Dashboard() {
     const remove = () => events.forEach(e => window.removeEventListener(e, start, true));
     events.forEach(e => window.addEventListener(e, start, true));
     return remove;
-  }, [engineInit, soundLive]);
+  }, [engineInit, soundLive, soundRunning]);
   useEffect(() => {
     // Where the browser already allows sound (a desktop that trusts the site): at once
     try {
@@ -470,9 +504,49 @@ export default function Dashboard() {
   // stream, or another station was picked) starts by itself; one that is no longer
   // wanted stops, so a phone that only watches downloads nothing.
   useEffect(() => {
+    if (adopted && (!dashStreamUrl || !isPlaying)) return;
     if (!streamWanted || !dashStreamUrl) { stopStream(); return; }
-    if (streamRef.current?.url !== dashStreamUrl && soundRunning) startStream(dashStreamUrl);
-  }, [streamWanted, dashStreamUrl, soundRunning, startStream, stopStream]);
+    if (adopted) setAdopted(false);
+    if (streamRef.current?.url !== dashStreamUrl && (soundRunning || streamSoundingRef.current)) startStream(dashStreamUrl);
+  }, [streamWanted, dashStreamUrl, soundRunning, startStream, stopStream, adopted, isPlaying]);
+  // (after the effect above, which would otherwise stop what is taken over here)
+  useEffect(() => {
+    const run = adoptStationStream(stationId);
+    if (!run) return;
+    streamRef.current = { url: run.url, stream: run.stream, startedAt: Date.now() };
+    setAdopted(true);
+    setStreamSounding(stationStreamSounding());
+    soundElsewhere.current = false;
+    if (!holdsSound.current) soundChannel.current?.postMessage({ type: 'taken' });
+    holdsSound.current = true;
+    setListenHere(true);
+    try { localStorage.setItem(LISTEN_KEY, '1'); } catch { /* none */ }
+    usePlayerStore.getState().clear(stationId ?? undefined);
+  }, [stationId]);
+  // Leaving this screen while it gives sound: the sound carries on and the next page
+  // takes it over (the Listen page, kept by ListenHost, with the bar at the bottom)
+  const leavingRef = useRef({ listenHere, soundLive, stationName: '', title: '', artist: '' });
+  leavingRef.current = {
+    listenHere, soundLive,
+    stationName: station?.name ?? '',
+    title: displayTitle(wsNowPlaying?.asset?.title) ?? '',
+    artist: displayTitle(wsNowPlaying?.asset?.artist) ?? '',
+  };
+  useEffect(() => () => {
+    const id = stationIdRef.current;
+    const was = leavingRef.current;
+    const stream = streamRef.current?.stream;
+    const streaming = !!stream && !!runningStationStream(id);
+    if (id && was.listenHere && was.stationName && (streaming || was.soundLive)) {
+      const store = usePlayerStore.getState();
+      store.handOver(id, was.stationName, () => stopStationStream());
+      store.setTrack(was.title ? { title: was.title, artist: was.artist || undefined } : null);
+      if (streaming) releaseStationStream(stream);
+      streamRef.current = null;
+      return;
+    }
+    stopStream();
+  }, [stopStream]);
   // An admin-pushed release reloaded this control room while it played: sound back on
   const resume = useResumeAfterRelease(takeSound, soundLive && listenHere);
   // Action buttons (Next, Start, play now) count as the click that starts the meters;
@@ -948,12 +1022,6 @@ export default function Dashboard() {
   return (
     <div className="qn cr-root h-full flex flex-col select-none overflow-hidden" data-testid="control-room">
       {resume.asking && <ResumePrompt onTap={resume.tap} />}
-      <audio ref={dashStreamAudioRef} className="hidden"
-        onPlaying={() => setStreamSounding(!!streamRef.current)}
-        onPause={() => setStreamSounding(false)}
-        onEmptied={() => setStreamSounding(false)}
-        onEnded={() => setStreamSounding(false)}
-        onError={() => setStreamSounding(false)} />
 
       {toast && (
         <div role="status" data-testid="toast"
