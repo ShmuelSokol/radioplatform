@@ -1,0 +1,1 @@
+import{a}from"./index-BHNZfaQS.js";const h=e=>a.get("/archives",{params:e}).then(t=>t.data),r=e=>a.post("/archives",e).then(t=>t.data),i=(e,t)=>a.patch(`/archives/${e}`,t).then(c=>c.data),n=e=>a.delete(`/archives/${e}`);export{r as c,n as d,h as g,i as u};

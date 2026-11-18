@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import re
 import shutil
@@ -1108,6 +1109,15 @@ async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False, resta
     show, before the second item is due, so what it kept in memory about the show and
     about what it handed to the engine is lost."""
     name = "live_show_over_hard_item" + ("_hard_stop" if hard_stop else "") + ("_restart" if restart else "")
+    # No host microphone: run with no broadcast delay (PR 316), see sc_live_show_quiet
+    before = set_live_settings(h, live_delay_seconds=0, live_host_gone_seconds=0)   # no microphone here (PR 321 would hand back)
+    try:
+        await _live_show_over_hard_item(h, name, hard_stop, restart)
+    finally:
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+
+
+async def _live_show_over_hard_item(h: Harness, name: str, hard_stop: bool, restart: bool) -> None:
     await wait_music(h)
     t1 = at(20)
     t2 = t1 + timedelta(seconds=45 if restart else 20)
@@ -1162,8 +1172,9 @@ async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False, resta
     h.print_timeline(heard, t1.timestamp())
     during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
     loud = sum(WINDOW for w in during if w[1] >= -45)
+    what = [f"{w[0] - t_start:+.1f}s {tone_name(w[2])} {w[1]:.0f}dB" for w in during if w[1] >= -45][::4][:10]
     h.check(name, bool(during) and loud <= 0.2,
-            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s) {what}")
     after = [n for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
     late_tones = {tone_name(TONES[n][0]) for n in ("time", "weather", "announce")}
     h.check(name, not (set(after) & late_tones),
@@ -1690,6 +1701,16 @@ async def sc_live_show_quiet(h: Harness) -> None:
     start (the host is heard through the site), stays quiet with no emergency music,
     and the station's music is back within a few seconds of its end."""
     name = "live_show_quiet"
+    # No host microphone here: with a broadcast delay (PR 316) the show would never be
+    # heard and the music rightly plays on, so this checks the take-over with no delay
+    before = set_live_settings(h, live_delay_seconds=0, live_host_gone_seconds=0)   # no microphone here (PR 321 would hand back)
+    try:
+        await _live_show_quiet(h, name)
+    finally:
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+
+
+async def _live_show_quiet(h: Harness, name: str) -> None:
     await wait_music(h)
     await asyncio.sleep(6)
     code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show",
@@ -1709,8 +1730,9 @@ async def sc_live_show_quiet(h: Harness) -> None:
     h.print_timeline(heard, t_start)
     during = [w for w in heard if t_start + 2.0 <= w[0] <= t_end - 0.3]
     loud = sum(WINDOW for w in during if w[1] >= -45)
+    what = [f"{w[0] - t_start:+.1f}s {tone_name(w[2])} {w[1]:.0f}dB" for w in during if w[1] >= -45][::4][:10]
     h.check(name, bool(during) and loud <= 0.2,
-            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+            f"the stream is quiet while the host is on air (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s) {what}")
     names = [n for _, n in timeline(heard)]
     h.check(name, "EMERGENCY" not in names, f"no emergency music during or after the show: {names}")
     after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
@@ -1725,6 +1747,469 @@ async def sc_live_show_quiet(h: Harness) -> None:
     on_air = [k for k, v in h.assets.items() if st and v == st.asset_id and k in TONES]
     h.check(name, bool(after) and bool(on_air) and tone_name(TONES[on_air[0]][0]) == after[-1][1],
             f"the site shows what is heard ({on_air[0] if on_air else None} / {after[-1][1] if after else None})")
+
+
+LIVE_RATE = 24000   # live_shows_ws.LIVE_SAMPLE_RATE
+
+
+def set_live_settings(h: Harness, **values) -> dict:
+    """Change the station's live-show settings (PR 316); returns the old automation_config."""
+    _, st = h.api("GET", f"/stations/{STATION_ID}")
+    before = dict((st or {}).get("automation_config") or {})
+    h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": {**before, **values}})
+    return before
+
+
+def _goertzel(samples, freq: float, rate: int = LIVE_RATE) -> float:
+    k = 2 * math.cos(2 * math.pi * freq / rate)
+    s1 = s2 = 0.0
+    for x in samples:
+        s0 = x / 32768 + k * s1 - s2
+        s2, s1 = s1, s0
+    return math.sqrt(max(0.0, s1 * s1 + s2 * s2 - k * s1 * s2)) / max(1, len(samples))
+
+
+class LiveListener:
+    """A listener page's live socket: every PCM frame with its arrival time."""
+
+    def __init__(self):
+        self.frames: list[tuple[float, array]] = []
+        self.states: list[tuple[float, bool]] = []
+        self.task = None
+
+    async def run(self):
+        import websockets
+        url = f"ws://127.0.0.1:{BACKEND_PORT}/api/v1/ws/live/station/{STATION_ID}/listen"
+        while True:   # reconnects like a listener page after a backend restart
+            try:
+                async with websockets.connect(url, max_size=None) as ws:
+                    async for m in ws:
+                        if isinstance(m, str):
+                            msg = json.loads(m)
+                            if msg.get("type") == "live_state":
+                                self.states.append((time.time(), bool(msg.get("live"))))
+                            continue
+                        a = array("h")
+                        a.frombytes(m[: len(m) // 2 * 2])
+                        self.frames.append((time.time(), a))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+
+    def tone_at(self, freq: float, start: float, end: float) -> float:
+        out = array("h")
+        for t, a in self.frames:
+            if start <= t <= end:
+                out.extend(a)
+        return _goertzel(out, freq) if len(out) else 0.0
+
+    def tone_segments(self, freq: float, start: float, end: float, step: float = 0.5) -> list[float]:
+        """Start times of the half-second steps where `freq` is clearly heard."""
+        hits, t = [], start
+        while t < end:
+            if self.tone_at(freq, t, t + step) > 0.02:
+                hits.append(t)
+            t += step
+        return hits
+
+
+class HostMic:
+    """The host's microphone: a steady tone sent in real time over the audio socket."""
+
+    def __init__(self, show_id: str, token: str, freq: float = 440.0):
+        self.show_id, self.token, self.freq = show_id, token, freq
+        self.stop = False
+        self.task = None
+
+    async def run(self):
+        """Sends until stopped; reconnects like the Host Console when the socket drops
+        (a backend restart)."""
+        import websockets
+        url = f"ws://127.0.0.1:{BACKEND_PORT}/api/v1/ws/live/{self.show_id}/audio"
+        self.connects = []
+        while not self.stop:
+            try:
+                async with websockets.connect(url, max_size=None) as ws:
+                    await ws.send(json.dumps({"type": "auth", "token": self.token}))
+                    self.connects.append(time.time())
+                    t0, sent = time.time(), 0
+                    while not self.stop:
+                        due = int((time.time() - t0) * LIVE_RATE) - sent
+                        if due > 0:
+                            a = array("h", (int(8000 * math.sin(2 * math.pi * self.freq * (sent + i) / LIVE_RATE))
+                                            for i in range(due)))
+                            await ws.send(a.tobytes())
+                            sent += due
+                        await asyncio.sleep(0.04)
+            except Exception:
+                await asyncio.sleep(1.0)
+
+
+async def sc_live_show_no_host(h: Harness) -> None:
+    """LD-18 (PR 316): a show is started with the default 15 s delay but the host's
+    microphone never connects. The delay never fills, so listeners never hear the show and
+    the music must play on untouched; the scheduler still ends the show at its planned end
+    (a show left "live" for ever blocks the next one and keeps the console in a show)."""
+    name = "live_show_no_host"
+    before = set_live_settings(h, live_delay_seconds=15)
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        now = datetime.now(UTC)
+        planned_end = now + timedelta(seconds=25)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness show without a host", "calls_enabled": False,
+            "scheduled_start": (now - timedelta(seconds=5)).isoformat(), "scheduled_end": planned_end.isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        t_start = time.time()
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+        h.check(name, code == 200, f"show started ({code})")
+        t_end = None
+        while time.time() < planned_end.timestamp() + 15:
+            _, cur_show = h.api("GET", f"/live-shows/{show['id']}")
+            if (cur_show or {}).get("status") not in ("live", "LIVE"):
+                t_end = time.time()
+                break
+            await asyncio.sleep(0.5)
+        late = None if t_end is None else t_end - planned_end.timestamp()
+        # PR 320 checks every 10 s; the music plays on meanwhile, so a few seconds late is harmless
+        h.check(name, late is not None and -1.0 <= late <= 13.0,
+                f"the scheduler ends the show at its planned end even though nobody heard it "
+                f"({'still live 15 s after it' if late is None else f'{late:+.1f} s'})")
+        if t_end is None:
+            h.api("POST", f"/live-shows/{show['id']}/end")
+            t_end = time.time()
+        await asyncio.sleep(6)
+    finally:
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+    heard = h.heard(t_start - 2, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    gap, _ = longest_silence(heard)
+    names = [n for _, n in timeline(heard)]
+    h.check(name, gap <= 1.0 and "EMERGENCY" not in names,
+            f"the music played on the whole time (longest silence {gap:.1f} s): {names}")
+    _, st = h.api("GET", f"/stations/{STATION_ID}")
+    h.check(name, not ((st or {}).get("automation_config") or {}).get("live_show_id"),
+            "the station was never taken over by the show")
+
+
+async def sc_live_show_delay_controls(h: Harness, restart: bool = False) -> None:
+    """LD-24 / LD-19 (PR 316), engine station, 6 s delay, host microphone on.
+    LD-24: Next pressed in the pre-roll moves the music on as usual; once listeners hear
+    the host, Next and Panic must not put music back on the engine stream under the host.
+    `restart` (LD-19): the backend restarts (a deploy) 4 s after listeners first hear the
+    host. What was waiting in the delay is lost, but the engine must stay quiet (no music
+    under the host), the host's page reconnects and listeners hear the host again within
+    a delay of the reconnection, and End still brings the music back."""
+    name = "live_show_delay_restart" if restart else "live_show_delay_controls"
+    delay = 6.0
+    before = set_live_settings(h, live_delay_seconds=int(delay), live_dump_seconds=0, live_timed_items="time")
+    listener, mic = LiveListener(), None
+    base = f"/stations/{STATION_ID}/queue"
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        now = datetime.now(UTC)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness delay controls", "calls_enabled": False,
+            "scheduled_start": now.isoformat(), "scheduled_end": (now + timedelta(minutes=10)).isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        listener.task = asyncio.ensure_future(listener.run())
+        await asyncio.sleep(0.5)
+        before_song = await h.on_air()
+        t_start = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/start")
+        mic = HostMic(show["id"], h.token)
+        mic.task = asyncio.ensure_future(mic.run())
+        t_next = None
+        if not restart:
+            await asyncio.sleep(2.0)
+            t_next = time.time()
+            code, _ = h.api("POST", f"{base}/skip?fade=hard")
+            h.check(name, code == 200, f"Next in the pre-roll is answered ({code})")
+        first = None
+        for _ in range(40):
+            first = next((t for t, _ in listener.frames if t >= t_start), None)
+            if first is not None:
+                break
+            await asyncio.sleep(0.25)
+        h.check(name, first is not None, "listeners hear the host")
+        if first is None:
+            return
+        t_restart = t_back = None
+        if restart:
+            await asyncio.sleep(max(0, first + 4 - time.time()))
+            t_restart = time.time()
+            await asyncio.to_thread(h.stack.restart_backend)
+            t_back = time.time()
+            await asyncio.sleep(delay + 12)
+        else:
+            await asyncio.sleep(max(0, first + 3 - time.time()))
+            code_n, _ = h.api("POST", f"{base}/skip?fade=hard")
+            await asyncio.sleep(3)
+            code_p, body_p = h.api("POST", f"{base}/panic")
+            h.check(name, code_n < 500 and code_p < 500,
+                    f"Next and Panic during the show are answered without a server error ({code_n}, {code_p}: "
+                    f"{(body_p or {}).get('message', '')[:60]})")
+            await asyncio.sleep(6)
+        mic.stop = True
+        t_end = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/end")
+        await asyncio.sleep(delay + 20)
+    finally:
+        if mic is not None:
+            mic.stop = True
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+        if listener.task:
+            listener.task.cancel()
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    if t_next is not None:
+        after_next = [n for t, n in timeline([w for w in heard if t_next + 0.5 <= w[0] <= first])]
+        old = [k for k, v in h.assets.items() if before_song and v == before_song.asset_id and k in TONES]
+        old_tone = tone_name(TONES[old[0]][0]) if old else None
+        h.check(name, bool(after_next) and after_next[-1] not in ("silence", old_tone, "EMERGENCY"),
+                f"Next in the pre-roll moved the music on: {after_next} (was {old_tone})")
+    quiet_from = first + 2.0
+    during = [w for w in heard if quiet_from <= w[0] <= t_end - 0.3]
+    loud = sum(WINDOW for w in during if w[1] >= -45)
+    what = "through the backend restart" if restart else "after Next and Panic"
+    h.check(name, bool(during) and loud <= 0.3,
+            f"the engine stream stays quiet under the host {what} (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    if restart:
+        reconnect = next((c for c in (mic.connects if mic else []) if c > t_restart), None)
+        h.check(name, reconnect is not None, "the host's page reconnected after the restart")
+        again = next((t for t, _ in listener.frames if t_back and t > t_back + 0.5), None)
+        wait = None if again is None or reconnect is None else again - reconnect
+        h.check(name, wait is not None and wait <= delay + 3.0,
+                f"listeners hear the host again within a delay of the reconnection "
+                f"({'never' if wait is None else f'{wait:.1f} s'})")
+        _, st = h.api("GET", f"/stations/{STATION_ID}")
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    h.check(name, bool(after) and "EMERGENCY" not in [n for _, n in after],
+            f"station music after the show: {[n for _, n in after]}")
+    _, st = h.api("GET", f"/stations/{STATION_ID}")
+    h.check(name, not ((st or {}).get("automation_config") or {}).get("live_show_id"),
+            "the station is handed back after the show")
+
+
+async def sc_live_show_host_gone(h: Harness) -> None:
+    """LD-30 (PR 321): mid-show the host's page goes away (tab closed, connection lost).
+    Listeners hear what was waiting in the delay; then, `live_host_gone_seconds` after the
+    last frame, the station goes back to its queue and the engine's music returns with no
+    long silence. The show stays live: when the host's page comes back the host is on air
+    again through the delay and the engine is quiet again; End brings the music back."""
+    name = "live_show_host_gone"
+    delay, gone_after = 8.0, 8.0
+    before = set_live_settings(h, live_delay_seconds=int(delay), live_dump_seconds=0,
+                               live_timed_items="time", live_host_gone_seconds=int(gone_after))
+    listener, mic, mic2 = LiveListener(), None, None
+    t_end = None
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        now = datetime.now(UTC)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness host gone", "calls_enabled": False,
+            "scheduled_start": now.isoformat(), "scheduled_end": (now + timedelta(minutes=10)).isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        listener.task = asyncio.ensure_future(listener.run())
+        await asyncio.sleep(0.5)
+        t_start = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/start")
+        mic = HostMic(show["id"], h.token)
+        mic.task = asyncio.ensure_future(mic.run())
+        first = None
+        for _ in range(60):
+            first = next((t for t, _ in listener.frames if t >= t_start), None)
+            if first is not None:
+                break
+            await asyncio.sleep(0.25)
+        h.check(name, first is not None, "listeners hear the host")
+        if first is None:
+            return
+        await asyncio.sleep(max(0, first + 6 - time.time()))
+        mic.stop = True                     # the host's tab closes
+        t_gone = time.time()
+        released = None
+        while time.time() < t_gone + gone_after + delay + 20:
+            _, st = h.api("GET", f"/stations/{STATION_ID}")
+            if not ((st or {}).get("automation_config") or {}).get("live_show_id"):
+                released = time.time()
+                break
+            await asyncio.sleep(0.5)
+        await asyncio.sleep(10)
+        _, cur = h.api("GET", f"/live-shows/{show['id']}")
+        show_live = (cur or {}).get("status") in ("live", "LIVE")
+        t_back = time.time()                # the host's page comes back
+        mic2 = HostMic(show["id"], h.token, freq=440.0)
+        mic2.task = asyncio.ensure_future(mic2.run())
+        await asyncio.sleep(delay + 10)
+        _, st = h.api("GET", f"/stations/{STATION_ID}")
+        retaken = bool(((st or {}).get("automation_config") or {}).get("live_show_id"))
+        mic2.stop = True
+        t_end = time.time()
+        h.api("POST", f"/live-shows/{show['id']}/end")
+        await asyncio.sleep(delay + 15)
+    finally:
+        for m in (mic, mic2):
+            if m is not None:
+                m.stop = True
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+        if listener.task:
+            listener.task.cancel()
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    wait = None if released is None else released - t_gone
+    h.check(name, wait is not None and gone_after - 1.0 <= wait <= gone_after + 4.0,
+            f"the station is handed back {gone_after:.0f} s after the host's last audio "
+            f"({'never' if wait is None else f'{wait:.1f} s'})")
+    last_host = max((t for t, _ in listener.frames if t < t_back), default=None)
+    music = [(t, n) for t, n in timeline([w for w in heard if t_gone <= w[0] <= t_back]) if n != "silence"]
+    if last_host is not None and music:
+        gap = music[0][0] - last_host
+        h.check(name, gap <= 1.5,
+                f"no long silence between the host's last delayed words and the music "
+                f"({gap:+.1f} s; host last heard {last_host - t_gone:+.1f} s, music {music[0][0] - t_gone:+.1f} s after the tab closed)")
+    else:
+        h.check(name, False, f"music came back after the host left ({[n for _, n in music]})")
+    h.check(name, show_live, "the show itself stays live while the host is away")
+    again = next((t for t, _ in listener.frames if t > t_back + 0.5), None)
+    h.check(name, again is not None and again - t_back <= delay + 4.0,
+            f"the host's page comes back and listeners hear the host again "
+            f"({'never' if again is None else f'{again - t_back:.1f} s'} after it reconnected)")
+    h.check(name, retaken, "the station is the show's again once the host is back")
+    if again is not None:
+        during = [w for w in heard if again + 2.0 <= w[0] <= t_end - 0.3]
+        loud = sum(WINDOW for w in during if w[1] >= -45)
+        h.check(name, bool(during) and loud <= 0.3,
+                f"the engine is quiet under the host again (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    after = [n for _, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    h.check(name, bool(after) and "EMERGENCY" not in after, f"station music after the show: {after}")
+
+
+async def sc_live_show_delay_engine(h: Harness, preroll_item: bool = False) -> None:
+    """LD-4b/11b/14b (PR 316): a live show with a 6 s broadcast delay on an engine station,
+    with a real host microphone (440 Hz). The engine keeps the music through the pre-roll
+    and goes quiet once listeners hear the host; a time check due during the show is heard
+    once, on the listener page over the delay, never also on the engine stream; after End
+    the delay plays out and then the music is back. `preroll_item` (LD-17/LD-26): the time
+    check falls in the pre-roll instead, so the engine (still playing music) airs it once
+    on its second and it is not aired again over the delay."""
+    name = "live_show_delay_engine" + ("_preroll_item" if preroll_item else "")
+    delay = 6.0
+    before = set_live_settings(h, live_delay_seconds=int(delay), live_dump_seconds=0, live_timed_items="time")
+    listener, mic = LiveListener(), None
+    try:
+        await wait_music(h)
+        await asyncio.sleep(4)
+        due = at(14 if preroll_item else 26)
+        ids = await h.queue([("time", {"preempt_at": due, "timing_mode": "hard", "source": "auto"})])
+        start_at = due.timestamp() - (3 if preroll_item else 14)
+        now = datetime.now(UTC)
+        code, show = h.api("POST", "/live-shows", {
+            "station_id": str(STATION_ID), "title": "Harness delay show", "calls_enabled": False,
+            "scheduled_start": now.isoformat(), "scheduled_end": (now + timedelta(minutes=10)).isoformat()})
+        if code != 201:
+            h.check(name, False, f"could not create the show ({code})")
+            return
+        listener.task = asyncio.ensure_future(listener.run())
+        await asyncio.sleep(max(0, start_at - time.time()))
+        t_start = time.time()
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
+        h.check(name, code == 200, f"show started ({code})")
+        mic = HostMic(show["id"], h.token)
+        mic.task = asyncio.ensure_future(mic.run())
+        await asyncio.sleep(max(0, due.timestamp() + 14 - time.time()))
+        # What is waiting in the delay now plays out after End: more than the set delay
+        # after a time check during non-stop talk (the clip lengthened it; it shrinks
+        # back only about 3 % a second while the host talks)
+        _, air = h.api("GET", f"/live-shows/{show['id']}/air")
+        waiting = float((air or {}).get("delay") or delay)
+        mic.stop = True
+        t_end = time.time()
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
+        h.check(name, code == 200, f"show ended ({code})")
+        await asyncio.sleep(delay + 30)
+    finally:
+        if mic is not None:
+            mic.stop = True
+        h.api("PUT", f"/stations/{STATION_ID}", {"automation_config": before})
+        if listener.task:
+            listener.task.cancel()
+
+    first = next((t for t, _ in listener.frames if t >= t_start), None)
+    last = max((t for t, _ in listener.frames), default=None)
+    heard_at = None if first is None else first - t_start
+    # Since PR 320 the pre-roll also waits for a time check on air, so the host comes in after it
+    latest = delay + (6.0 if preroll_item else 0.0) + 1.5
+    h.check(name, heard_at is not None and delay - 0.8 <= heard_at <= latest,
+            f"listeners hear the host one delay later, or after a time check in the pre-roll "
+            f"({'never' if heard_at is None else f'{heard_at:.1f} s'}, delay {delay:.0f} s)")
+    live_on = next((t for t, on in listener.states if on and t >= t_start), None)
+    h.check(name, live_on is not None and first is not None and abs(live_on - first) <= 1.0,
+            f"listener pages are told LIVE when the host is first heard, not at Start "
+            f"({'never' if live_on is None else f'{live_on - t_start:.1f} s after Start'})")
+    heard = h.heard(t_start - 3, time.time() - 1)
+    h.print_timeline(heard, t_start)
+    pre = [w for w in heard if t_start + 0.5 <= w[0] <= t_start + delay - 1.0]
+    pre_loud = sum(WINDOW for w in pre if w[1] >= -45)
+    h.check(name, bool(pre) and pre_loud >= (len(pre) * WINDOW) - 0.6,
+            f"the engine keeps the music through the pre-roll ({pre_loud:.1f} s of {len(pre) * WINDOW:.1f} s)")
+    if first is not None:
+        during = [w for w in heard if first + 2.0 <= w[0] <= t_end - 0.3]
+        loud = sum(WINDOW for w in during if w[1] >= -45)
+        h.check(name, bool(during) and loud <= 0.3,
+                f"the engine stream is quiet once listeners hear the host (sound for {loud:.1f} s of {len(during) * WINDOW:.0f} s)")
+    clock = tone_name(TONES["time"][0])
+    engine_clock = [t for t, n in timeline(heard) if n == clock]
+    page_clock = listener.tone_segments(TONES["time"][0], t_start, time.time())
+    if preroll_item:
+        late = engine_clock[0] - due.timestamp() if engine_clock else None
+        # A song ending 1 to 8 s before a hard item lets the item start early instead of
+        # chopping the next song (accepted rule, see MEMORY "Playout engine")
+        h.check(name, late is not None and -8.5 <= late <= 2.0,
+                f"the engine airs the time check in the pre-roll on its second, or up to 8 s early "
+                f"after a song that ended then ({'never' if late is None else f'{late:+.1f} s'})")
+        h.check(name, len(engine_clock) <= 1, f"once on the engine ({len(engine_clock)} times)")
+        clock_secs = sum(WINDOW for w in heard if due.timestamp() - 9 <= w[0] <= due.timestamp() + 8
+                         and w[1] >= -45 and tone_name(w[2]) == clock)
+        h.check(name, clock_secs >= TONES["time"][1] - 1.0,
+                f"the time check is heard to its end before the host takes over ({clock_secs:.1f} s of {TONES['time'][1]} s)")
+        h.check(name, not page_clock, f"and not again over the delay on the listener page (at {[round(t - due.timestamp(), 1) for t in page_clock]} s)")
+    else:
+        late = page_clock[0] - due.timestamp() if page_clock else None
+        h.check(name, late is not None and -1.0 <= late <= 1.5,
+                f"the time check is heard on the listener page on its second over the delay ({'never' if late is None else f'{late:+.1f} s'})")
+        h.check(name, not [t for t in engine_clock if t_start <= t <= t_end + delay + 5],
+                f"and never also on the engine stream ({[round(t - due.timestamp(), 1) for t in engine_clock]})")
+        host_after = listener.tone_at(440, due.timestamp() + TONES["time"][1] + 0.5, due.timestamp() + TONES["time"][1] + 2.5)
+        h.check(name, host_after > 0.02, f"the host is heard again after the time check ({host_after:.3f})")
+    rows = {e.id: e for e in await h.rows()}
+    st = rows[ids[0]].status if ids[0] in rows else "gone"
+    h.check(name, st not in ("pending", "playing"), f"the time check's queue entry is closed ({st})")
+    tail = None if last is None else last - t_end
+    h.check(name, tail is not None and waiting - 1.5 <= tail <= waiting + 2.0,
+            f"after End what was waiting in the delay ({waiting:.1f} s) plays out to listeners "
+            f"({'nothing' if tail is None else f'{tail:.1f} s'} after End)")
+    after = [(t, n) for t, n in timeline([w for w in heard if w[0] >= t_end]) if n != "silence"]
+    back = after[0][0] - (last or t_end) if after else None
+    h.check(name, back is not None and -1.0 <= back <= 6.0,
+            f"the engine's music is back after the delay played out ({'never' if back is None else f'{back:+.1f} s after the last delayed audio'})")
+    h.check(name, bool(after) and "EMERGENCY" not in [n for _, n in after] and clock not in [n for _, n in after],
+            f"station music after the show, no emergency files and no late time check: {[n for _, n in after]}")
+    h.check(name, len({n for _, n in after}) == 1,
+            f"one item after the show, not a fragment of the paused song first: {[n for _, n in after]}")
+    cur = await h.on_air()
+    h.check(name, bool(cur) and cur.asset.asset_type == "music", f"the site shows music ({cur.asset.title if cur else None})")
 
 
 async def sc_live_show_on_the_stream(h: Harness) -> None:
@@ -3489,6 +3974,12 @@ SCENARIOS = {
     "song_ends_before_hour": sc_song_ends_before_hour,
     "song_ends_6s_before_hour": sc_song_ends_6s_before_hour,
     "live_show_quiet": sc_live_show_quiet,
+    "live_show_delay_engine": sc_live_show_delay_engine,
+    "live_show_delay_controls": sc_live_show_delay_controls,
+    "live_show_delay_restart": lambda h: sc_live_show_delay_controls(h, restart=True),
+    "live_show_no_host": sc_live_show_no_host,
+    "live_show_host_gone": sc_live_show_host_gone,
+    "live_show_delay_engine_preroll_item": lambda h: sc_live_show_delay_engine(h, preroll_item=True),
     "live_show_on_the_stream": sc_live_show_on_the_stream,
     "speech_never_overlaps": sc_speech_never_overlaps,
     "engine_restart_15s_before_hour": sc_engine_restart_15s_before_hour,

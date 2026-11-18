@@ -657,7 +657,7 @@ export default function Databank() {
           )}
           <span className="qn-sunken px-2 flex items-center" data-testid="db-view">View {view}</span>
           <span className="qn-sunken px-2 flex items-center" data-testid="db-tot">Tot {tot}</span>
-          <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
+          <button type="button" data-bug-trigger="" onClick={() => window.dispatchEvent(new CustomEvent(REPORT_BUG_EVENT))}
             className="ml-auto px-2 underline hover:text-red-700 min-w-[44px] min-h-[44px] lg:min-w-0 lg:min-h-[32px]" data-testid="db-report-bug">🐞<span className="hidden sm:inline"> Report a bug</span></button>
         </div>
       )}
