@@ -125,7 +125,7 @@ try {
     await open('/admin/program-clock', 'Ad Asset Title');
     const adTitle = await page.locator('label:has-text("Ad Asset Title") + input').inputValue();
     check(`${size}: 1 Program Clock "Ad Asset Title" has no placeholder sponsor as its default`, adTitle === '', `value "${adTitle}"`);
-    check(`${size}: 1 no old spelling of the station on Program Clock`, !/KOL BRAMAH|Kol Bramah|Kol Berama sponsor/i.test((await bodyText(page)).replace(/Kol Berama(?! sponsor)/g, '')));
+    check(`${size}: 1 no old spelling of the station on Program Clock`, !/Kol Bramah|Kol Berama/i.test(await bodyText(page)));
 
     // 2 Sponsors
     await open('/admin/sponsors', 'No limits sponsor');

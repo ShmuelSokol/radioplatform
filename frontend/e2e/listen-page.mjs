@@ -78,7 +78,7 @@ async function basics(browser, contextOpts, tag) {
   await page.getByText('Station not found').waitFor({ timeout: 5000 }).catch(() => {});
   check(`${tag}: a bad station id says "Station not found"`, await page.getByText('Station not found').count() === 1);
   await page.goto(`${BASE}/listen/${station.SID}`);
-  await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+  await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
   check(`${tag}: header shows type and timezone`, await page.getByText('internet · America/New_York').count() === 1);
   check(`${tag}: header shows the description`, await page.getByText('Music all day').count() === 1);
   await page.getByText('On Air', { exact: true }).waitFor({ timeout: 5000 }).catch(() => {});
@@ -115,7 +115,7 @@ async function basics(browser, contextOpts, tag) {
   // Lock screen: metadata, playback state
   const ms = () => page.evaluate(() => ({ title: navigator.mediaSession.metadata?.title, artist: navigator.mediaSession.metadata?.artist, album: navigator.mediaSession.metadata?.album, state: navigator.mediaSession.playbackState }));
   let m = await ms();
-  check(`${tag}: lock screen shows the item, artist and station`, m.title === cur.title && m.artist === cur.artist && m.album === 'Kol Berama', JSON.stringify(m));
+  check(`${tag}: lock screen shows the item, artist and station`, m.title === cur.title && m.artist === cur.artist && m.album === "Kol B'ramah", JSON.stringify(m));
   check(`${tag}: lock screen state is playing`, m.state === 'playing', m.state);
 
   // S-8 / F-LISTEN-5: a change on air shows within 1 s, card and lock screen
@@ -203,7 +203,7 @@ async function forms(browser) {
   const station = makeStation({ shows: [] });
   const { ctx } = await listenContext(browser, { viewport: { width: 1280, height: 900 } }, station, { delay: (p) => (p === '/song-requests' ? 400 : 0) });
   const { page, errors } = await openListen(ctx, station.SID);
-  await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+  await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
   check(`${tag}: no live banner when no show is on`, await page.getByText(/^LIVE:/).count() === 0);
   station.live.shows.push({ id: 'ls9', station_id: station.SID, title: 'Motzei Shabbos Live', description: 'Call in with your questions', status: 'live' });
   const polled = await timeUntil(page, `() => document.body.innerText.includes('LIVE: Motzei Shabbos Live')`, 17000);
@@ -377,7 +377,7 @@ async function pollingFallback(browser) {
   pg = page;
   await page.clock.install();
   await page.goto(`${BASE}/listen/${station.SID}`);
-  await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+  await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
   const reads = () => station.calls.filter((c) => c.path === `/now-playing/${station.SID}`).length;
   const wsAt = async () => attemptsAt.slice();
   const now = () => page.evaluate(() => Date.now());
@@ -944,7 +944,7 @@ async function crmProfile(browser) {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page, errors } = await openListen(ctx, station.SID);
-    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     await page.getByRole('button', { name: 'Register' }).first().click();
     await page.getByPlaceholder('Your name', { exact: true }).fill('Rivka');
     await page.getByRole('button', { name: 'Register' }).last().click();
@@ -965,7 +965,7 @@ async function crmProfile(browser) {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page } = await openListen(ctx, station.SID);
-    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     await page.getByRole('button', { name: 'Register' }).first().click();
     await page.getByPlaceholder('Your name', { exact: true }).fill('Rivka');
     station.replyNext.set('/crm/register', [{ status: 500 }]);
@@ -991,7 +991,7 @@ async function crmProfile(browser) {
     const { ctx } = await listenContext(browser, DESK, station, { initScripts: [[SEED_PIN, '123456']], delay: (p) => (p === '/crm/login' ? 700 : 0) });
     const page = await ctx.newPage();
     await page.goto(`${BASE}/listen/${station.SID}`);
-    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     // The PIN box must not flash while the saved PIN is being tried
     let flashed = false;
     let signing = false;
@@ -1028,7 +1028,7 @@ async function crmProfile(browser) {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station);
     const { page } = await openListen(ctx, station.SID);
-    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     station.replyNext.set('/crm/login', [{ status: 429, detail: 'Too many wrong PINs. Please wait a few minutes and try again.' }, 'network']);
     await page.getByPlaceholder('Enter 6-digit PIN').fill('123456');
     await page.getByRole('button', { name: 'Login' }).click();
@@ -1095,7 +1095,7 @@ async function crmProfile(browser) {
     // F-LISTEN-33: Logout forgets the PIN; a reload stays logged out
     await page.getByRole('button', { name: 'Logout' }).click();
     await page.reload();
-    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     await sleep(800);
     check(`${tag}: Logout clears the stored PIN, a reload stays logged out (F-LISTEN-33)`, await storedPin(page) === null && await page.getByText('Welcome,', { exact: false }).count() === 0 && await page.getByPlaceholder('Enter 6-digit PIN').count() === 1);
     check(`${tag}: no script errors (rating)`, errors.length === 0, errors.join(' | '));
@@ -1163,7 +1163,7 @@ async function songRequests(browser) {
   });
   const { ctx } = await listenContext(browser, DESK, station);
   const { page, errors } = await openListen(ctx, station.SID);
-  await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+  await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
   const toggle = () => page.getByRole('button', { name: 'Request a Song' });
   await toggle().click();
   const send = async (title) => {
@@ -1405,11 +1405,11 @@ async function pageShell(browser) {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, DESK, station, { ws: { greet: false } });
     const { page, errors } = await openListen(ctx, station.SID);
-    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     await listenBtn(page).click();
     await sleep(500);
     const m = await page.evaluate(() => ({ title: navigator.mediaSession.metadata?.title, artist: navigator.mediaSession.metadata?.artist }));
-    check(`${tag}: lock screen before any now-playing shows the station name (F-LISTEN-51)`, m.title === 'Kol Berama' && m.artist === 'Kol Berama', JSON.stringify(m));
+    check(`${tag}: lock screen before any now-playing shows the station name (F-LISTEN-51)`, m.title === "Kol B'ramah" && m.artist === "Kol B'ramah", JSON.stringify(m));
     check(`${tag}: no script errors (no now-playing yet)`, errors.length === 0, errors.join(' | '));
     await ctx.close();
     const { ctx: c2 } = await listenContext(browser, DESK, station, { initScripts: [() => { delete Navigator.prototype.mediaSession; }] });
@@ -1426,7 +1426,7 @@ async function pageShell(browser) {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, opts, station);
     const { page } = await openListen(ctx, station.SID);
-    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     await page.getByPlaceholder('Enter 6-digit PIN').waitFor();
     const fits = async () => {
       const w = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, vw: innerWidth }));
@@ -1453,7 +1453,7 @@ async function pageShell(browser) {
     const station = makeStation({ shows: [] });
     const { ctx } = await listenContext(browser, { ...devices['iPhone 13'] }, station);
     const { page } = await openListen(ctx, station.SID);
-    await page.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await page.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     const menu = page.getByRole('button', { name: 'Menu' });
     const box = await menu.boundingBox();
     check(`${tag}: phone: the menu button is shown, at least 44 px (F-LISTEN-54)`, !!box && box.height >= 44 && box.width >= 44, JSON.stringify(box));
@@ -1471,7 +1471,7 @@ async function pageShell(browser) {
     await ctx.close();
     const { ctx: c2 } = await listenContext(browser, DESK, station);
     const { page: p2 } = await openListen(c2, station.SID);
-    await p2.getByRole('heading', { name: 'Kol Berama' }).waitFor();
+    await p2.getByRole('heading', { name: "Kol B'ramah" }).waitFor();
     check(`${tag}: desktop: Admin Login shown, no menu button (F-LISTEN-54)`, await p2.getByRole('link', { name: 'Admin Login' }).isVisible() && !(await p2.getByRole('button', { name: 'Menu' }).isVisible()));
     await c2.close();
   });

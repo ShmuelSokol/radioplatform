@@ -1781,7 +1781,7 @@ section('spot-recordings', async () => {
       await cardR().getByRole('button', { name: 'Cancel' }).click();
       await cardR().getByText('call 555 0100 today').waitFor();
       await cardR().getByRole('button', { name: 'Edit script' }).click();
-      await cardR().locator('textarea').fill('Kol Bramah is brought to you by E2E Company.');
+      await cardR().locator('textarea').fill("Kol B'ramah is brought to you by E2E Company.");
       const { ms } = await timedResponse(page, (m, p) => (m === 'PUT' || m === 'PATCH') && p.includes('/spot-recordings/'), () => cardR().getByRole('button', { name: 'Save and re-check wording' }).click());
       await cardR().getByText('brought to you by E2E Company').first().waitFor();
       return `saved in ${ms} ms`;

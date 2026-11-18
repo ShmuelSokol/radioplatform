@@ -38,3 +38,4 @@ One concept per file. Lazy-loaded — Claude greps `log.md` first, then reads on
 - [engine-harness](engine-harness.md) — run the real Liquidsoap engine locally with tones and check what was heard and when
 - [live-shows](live-shows.md) — how a live show goes on air without a broadcast server: mic relay, automation pause/resume, hard stop
 - [deploys](deploys.md) — what a merge to main publishes: website only for frontend changes, backend only for backend changes; how to check and force
+- [library-delete](library-delete.md) — why a library delete was slow (indexes, locks), the 503 busy answer, and the throttle for bulk clean-ups

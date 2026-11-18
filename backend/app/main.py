@@ -406,6 +406,17 @@ async def _warm_connection_pool(timeout: float = 20.0) -> None:
 CONCURRENT_INDEXES = {
     # The library's "last played" per item looks up plays by item across stations
     "ix_play_logs_asset_start": "play_logs (asset_id, start_utc)",
+    # Deleting a library item makes Postgres look in every table that points at it
+    # (cascade / set null). Without these each delete read the whole of queue_entries
+    # (it keeps every entry ever played) and the other tables, row by row.
+    "ix_queue_entries_asset": "queue_entries (asset_id)",
+    "ix_engine_handoffs_asset": "engine_handoffs (asset_id)",
+    "ix_review_items_asset": "review_items (asset_id)",
+    "ix_review_actions_asset": "review_actions (asset_id)",
+    "ix_song_requests_asset": "song_requests (asset_id)",
+    "ix_spot_schedules_asset": "spot_schedules (asset_id)",
+    "ix_spot_recordings_asset": "spot_recordings (asset_id)",
+    "ix_weather_readouts_asset": "weather_readouts (asset_id)",
 }
 
 
@@ -523,7 +534,7 @@ async def _resume_playback_on_startup():
 
     from app.db.engine import async_session_factory
     from app.models.play_log import PlayLog
-    from app.models.queue_entry import QueueEntry
+    from app.models.queue_entry import QueueEntry, aired_from
     from app.models.station import Station
 
     now = datetime.now(timezone.utc)
@@ -590,7 +601,7 @@ async def _resume_playback_on_startup():
                 play_log = PlayLog(
                     station_id=entry.station_id,
                     asset_id=entry.asset_id,
-                    start_utc=entry.started_at or now,
+                    start_utc=aired_from(entry) or now,
                     end_utc=now,
                     source="scheduler",
                 )

@@ -43,6 +43,10 @@ TIMED_LEAD_SECONDS = 45.0
 MISSED_HAND_OVER_SECONDS = 300.0
 # Plays shorter than this are not logged (e.g. a song cut off as a timed item starts)
 MIN_LOGGED_PLAY_SECONDS = 1.0
+# A start report that carries its own time (a local FM box's kept report) is believed
+# when it is this far in the past
+STARTED_AT_MIN_LATE = 2.0
+STARTED_AT_MAX_LATE = 7 * 86400.0
 # Raise an alert if the engine has not contacted us for this long
 ENGINE_SILENT_ALERT_SECONDS = 120.0
 ALERT_REPEAT_SECONDS = 1800.0
@@ -871,12 +875,29 @@ async def _live_show_on(db: AsyncSession, station_id) -> bool:
 
 
 async def handle_started(
-    db: AsyncSession, station_id, entry_id: str | None, lane: str | None
+    db: AsyncSession, station_id, entry_id: str | None, lane: str | None, at: float | None = None,
+    quiet: bool = False,
 ) -> dict:
-    """The engine reports what just went on air."""
+    """The engine reports what just went on air.
+
+    `at` (epoch seconds) is passed only for a report a local FM box's relay kept while
+    its line was down (`kept` in the report): the item went on air then, not now. The
+    engine's own reports also carry a time, which is not used: they arrive at once.
+    `quiet`: more kept reports follow at once; this one is recorded (queue, play log)
+    without telling the pages, so they do not flick through an outage's items. Start times and the
+    play log use it, so what aired offline is recorded when it aired."""
     state = get_state(station_id)
     _touch(state)
     now = datetime.now(UTC)
+    if at is not None:
+        try:
+            late = now.timestamp() - float(at)
+        except (TypeError, ValueError):
+            late = 0.0
+        # Only the past, and not older than the relay keeps anything (a wrong clock on
+        # the box must not write nonsense)
+        if STARTED_AT_MIN_LATE <= late <= STARTED_AT_MAX_LATE:
+            now = datetime.fromtimestamp(float(at), UTC)
     skipped = state.skip_requested
     state.skip_requested = False
     logger.info("Engine started -> entry=%s lane=%s", entry_id or "-", lane)
@@ -915,6 +936,9 @@ async def handle_started(
         started = prev.started_at
         if started is not None and started.tzinfo is None:
             started = started.replace(tzinfo=UTC)
+        if started is not None:
+            # A resumed item: the moment it came back on air, not the shifted start
+            started = started + timedelta(seconds=resume_offset(prev))
         if started is not None and (now - started).total_seconds() >= MIN_LOGGED_PLAY_SECONDS:
             db.add(
                 PlayLog(
@@ -991,6 +1015,8 @@ async def handle_started(
     entry_pk = entry.id
     await db.commit()
 
+    if quiet:
+        return {"ok": True, "known": True}
     # Tell every client right away, then top the queue up
     try:
         from app.api.v1.queue import _broadcast_now_playing_entry, _is_blacked_out, _replenish_queue

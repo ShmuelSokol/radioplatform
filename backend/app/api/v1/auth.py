@@ -182,19 +182,19 @@ SAMPLE_SHIURIM = [
 ]
 
 SAMPLE_JINGLES = [
-    {"title": "Kol Bramah Intro", "artist": None, "album": "Intros", "duration": 4.0, "category": "intro"},
-    {"title": "Kol Bramah Outro", "artist": None, "album": "Outros", "duration": 3.0, "category": "outro"},
+    {"title": "Kol B'ramah Intro", "artist": None, "album": "Intros", "duration": 4.0, "category": "intro"},
+    {"title": "Kol B'ramah Outro", "artist": None, "album": "Outros", "duration": 3.0, "category": "outro"},
     {"title": "News Intro Sting", "artist": None, "album": "Stings", "duration": 5.0, "category": "news"},
     {"title": "Weather Jingle", "artist": None, "album": "Stings", "duration": 4.0, "category": "weather"},
     {"title": "Traffic Update Sting", "artist": None, "album": "Stings", "duration": 3.0, "category": "traffic"},
-    {"title": "Kol Bramah Station ID", "artist": None, "album": "IDs", "duration": 8.0, "category": "station_id"},
+    {"title": "Kol B'ramah Station ID", "artist": None, "album": "IDs", "duration": 8.0, "category": "station_id"},
     {"title": "Morning Show Opener", "artist": None, "album": "Shows", "duration": 12.0, "category": "show_open"},
     {"title": "Late Night Bumper", "artist": None, "album": "Bumpers", "duration": 5.0, "category": "bumper"},
 ]
 
 # Hourly jingles — station ID + time announcement for each hour
 HOURLY_JINGLES = [
-    {"title": f"Kol Bramah — {'12' if h % 12 == 0 else h % 12}:00 {'AM' if h < 12 else 'PM'} Station ID",
+    {"title": f"Kol B'ramah — {'12' if h % 12 == 0 else h % 12}:00 {'AM' if h < 12 else 'PM'} Station ID",
      "artist": None, "album": "Hourly IDs", "duration": 10.0, "category": "hourly_id", "hour": h}
     for h in range(24)
 ]
@@ -280,7 +280,7 @@ async def seed_all(db: AsyncSession = Depends(get_db), _admin: "User" = Depends(
 
     # Create default station
     station = Station(
-        id=uuid.uuid4(), name="Kol Bramah Main", timezone="America/New_York", is_active=True,
+        id=uuid.uuid4(), name="Kol B'ramah Main", timezone="America/New_York", is_active=True,
         description="Main broadcast channel — 24/7 Jewish music, Torah, and community",
     )
     db.add(station)

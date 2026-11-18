@@ -84,8 +84,10 @@ A command nobody fetched within its wait
 and waits that long for its engine; a command the relay fetched whose answer is not in
 when the wait ends (or the relay's 202, "engine still working") is taken when the caller
 said `slow_is_ok` (a `/timed` answers only once its file is loaded) and a failure
-otherwise. The relay runs commands one after another, so a slow `/timed` (Next waits
-6 s) holds the commands behind it for that long. With the tunnel up the backend does the timed
+otherwise. The relay runs each command on its own thread and hands its answer back at
+once in a short poll of its own (`wait: 0`), so a slow `/timed` (Next waits 6 s) does
+not hold a flush or another hand-over behind it. Order is kept where it matters because
+the backend awaits one command before it makes the next. With the tunnel up the backend does the timed
 hand-over itself as on the stream server; the relay's own hand-over (`KBR_RELAY_TIMED=offline`)
 takes over only when the backend is unreachable.
 
@@ -93,13 +95,26 @@ Harness: `--local-box` now sets the backend's `PLAYOUT_ENGINE_URL` to a dead add
 every command in those runs can only travel through the relay; `local_box_commands`
 checks Next and a backend-handed time check.
 
+## Stage 2b (2026-11-18): the outage is logged when it aired
+
+A start report the relay kept while the line was down goes up with `kept: true` and its
+own `at`. `handle_started` then uses `at` as the time (only 2 s to 7 days in the past;
+a box with a wrong clock is not believed), so start times and the play log of an outage
+are the real ones. The engine's own reports also carry `at`; it is NOT used for them
+(no `kept`), so nothing changes on the stream server. When several kept reports go up
+together, all but the newest carry `more: true`: they are recorded (queue, play log)
+without a now-playing broadcast or a refill, so pages do not flick through the outage. Harness `local_box_offline`
+checks the time check is recorded at its second although it was reported later.
+
 ## Known gaps (next stages; nothing is installed at BMG yet)
 
 
 1. **Sound card output** in radio.liq (`output.alsa` behind an env var), and the box's
    own audio sent up to Icecast for online listeners.
-2. **Late start reports carry `at`**, but the backend still stamps them with the time
-   they arrive: play-log times for the outage are wrong until `handle_started` uses it.
+2. For up to 40 s after a box's relay stops polling, its station's commands still go
+   to the relay and fail before they fall back to HTTPS (`CONNECTED_SECONDS`). Air watch
+   reports it as engine drift ("The local FM box does not answer") after its usual
+   delay. Fine while a box has a station of its own; look again before it carries Main.
 3. **Offline brain is simple:** the queue as it stood. No long-item rule (a shiur is cut
    by a hard item, not paused), no `hard_by`, no hour fitting, no refill past the plan.
 4. **Updates without a gap** (second engine started alongside, switch between songs,
