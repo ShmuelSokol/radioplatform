@@ -7,7 +7,9 @@
  * the screen says, on a desktop and a phone size. Part C is the station's settings.
  * Part D (ONLY=desk): Cough and Mute, the dump log and its recording, Put On Air while
  * the delay is not safe, and with PLAYOUT_TOKEN the engine's copy of the show (live.mp3).
+ * Part G (ONLY=record): the show is recorded and appears in Archives as a draft.
  * Part F (ONLY=callers): the caller desk (the caller's topic and notes, Hold, Next caller).
+ * Part H (ONLY=carts): carts on the Host Console (jingles played into the show).
  * Part E (ONLY=gone): the control room badge (no host, filling, live) and the station
  * going back to music when the host is gone.
  * Needs a real backend and the site running against it (see wiki/live-shows.md):
@@ -598,6 +600,173 @@ function hostMic(showId, token) {
       } finally {
         await browser.close();
       }
+    }
+    // ---------- Part H: carts on the Host Console ----------
+    if (!ONLY || ONLY === 'carts') {
+      await setConfig({ live_delay_seconds: 3, live_dump_seconds: 0 });
+      const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'carts-'));
+      const wav = (f, seconds, rate = 48000) => { const n = rate * seconds, buf = Buffer.alloc(44 + n * 2);
+        buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+        buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+        buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32);
+        buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+        for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(8000 * Math.sin(2 * Math.PI * f * i / rate)), 44 + i * 2);
+        return buf; };
+      fs.writeFileSync(path.join(DIR, 'host.wav'), wav(440, 30));
+      const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.join(DIR, 'host.wav')}`, '--autoplay-policy=no-user-gesture-required'] });
+      const problems = [];
+      const T = (page, id) => page.getByTestId(id);
+      const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true }); } };
+      const CART = { sets: [{ name: 'Default', pages: [[
+        { id: '11111111-1111-4111-8111-111111111111', title: 'Station jingle', duration: 4, asset_type: 'jingle' },
+        { id: '22222222-2222-4222-8222-222222222222', title: 'Applause', duration: 20, asset_type: 'jingle' },
+        { id: '33333333-3333-4333-8333-333333333333', title: 'Broken file', duration: 5, asset_type: 'jingle' },
+      ], [], [], [], [], [], [], [], [], []] }], set: 0, page: 0 };
+      const open = async (url, opts = {}, cart = CART) => {
+        const page = await (await browser.newContext({ permissions: ['microphone'], ...opts })).newPage();
+        await page.addInitScript(([t, key, c]) => { localStorage.setItem('access_token', t); if (c) localStorage.setItem(key, JSON.stringify(c)); }, [token, `kbr_hot_buttons_${STATION}`, cart]);
+        // The recordings: 1000 Hz for 4 s, 2000 Hz for 20 s, and one that is not audio
+        await page.route('**/assets/*/audio-url', (r) => r.fulfill({ json: { url: `${SITE}/__cart/${r.request().url().split('/assets/')[1].split('/')[0]}.wav` } }));
+        await page.route('**/__cart/*', (r) => { const id = r.request().url();
+          if (id.includes('3333')) return r.fulfill({ status: 200, contentType: 'audio/wav', body: Buffer.from('not audio') });
+          return r.fulfill({ status: 200, contentType: 'audio/wav', body: id.includes('1111') ? wav(1000, 4) : wav(2000, 20) }); });
+        page.on('console', (m) => { if (m.type() === 'error' && !/favicon|ERR_CONNECTION|WebSocket|409|EncodingError|decode/i.test(m.text())) problems.push(`${url}: ${m.text().slice(0, 200)}`); });
+        page.on('pageerror', (e) => problems.push(`${url}: ${e.message}`));
+        await page.goto(`${SITE}${url}`);
+        return page;
+      };
+      const heard = (l, f, from, to) => power(l.frames.filter((x) => x.at >= from && x.at < to).flatMap((x) => Array.from(x.pcm)), f);
+      try {
+        const show = await newShow('Delay test H');
+        const l = listener();
+        const host = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1440, height: 900 } });
+        await T(host, 'cart-panel').waitFor({ timeout: 15000 });
+        const buttons = T(host, 'cart-button');
+        check('H1 the instant buttons of the control room show as carts, off until the microphone is open',
+          await buttons.count() === 3 && await buttons.first().isDisabled() && /Open your microphone to use the carts/.test(await T(host, 'cart-panel').innerText()), await T(host, 'cart-panel').innerText());
+        await host.getByText('Start Broadcasting').click();
+        await host.getByText('SAFE', { exact: true }).waitFor({ timeout: 9000 });
+        await sleep(1500);
+
+        // The jingle (1000 Hz, 4 s): listeners get it with the host's voice, 3 s later
+        const t1 = Date.now();
+        await buttons.nth(0).click();
+        await host.getByText('playing, press to stop').waitFor({ timeout: 3000 });
+        check('H2 the button shows it is playing and Stop cart appears', await T(host, 'cart-stop').isVisible() && await buttons.nth(0).getAttribute('aria-pressed') === 'true');
+        await shot(host, 'host-cart-playing');
+        await sleep(8500);
+        const before = heard(l, 1000, t1 - 1500, t1 + 2000), during = heard(l, 1000, t1 + 4000, t1 + 6500), after = heard(l, 1000, t1 + 7800, t1 + 8500);
+        const voice = heard(l, 440, t1 + 4000, t1 + 6500);
+        check('H3 listeners hear the cart 3 s later, with the host, and not before', before < 0.001 && during > 0.004 && voice > 0.004, `1000 Hz before ${before.toFixed(4)} during ${during.toFixed(4)}; host ${voice.toFixed(4)}`);
+        check('H4 it ends by itself and the button goes back', after < 0.001 && await T(host, 'cart-stop').count() === 0 && await buttons.nth(0).getAttribute('aria-pressed') === 'false', `after ${after.toFixed(4)}`);
+
+        // Mute mic: the cart still goes out, the microphone does not
+        await T(host, 'mute-button').click();
+        await sleep(300);
+        const t2 = Date.now();
+        await buttons.nth(1).click();
+        await sleep(2500);
+        // Stop cart
+        await T(host, 'cart-stop').click();
+        const t3 = Date.now();
+        await sleep(6500);
+        const cartMuted = heard(l, 2000, t2 + 3600, t2 + 5200), micMuted = heard(l, 440, t2 + 3600, t2 + 5200), stopped = heard(l, 2000, t3 + 3800, t3 + 6000);
+        check('H5 with the mic muted the cart is still heard and the host is not', cartMuted > 0.004 && micMuted < 0.001, `cart ${cartMuted.toFixed(4)} mic ${micMuted.toFixed(4)}`);
+        check('H6 Stop cart stops it for listeners', stopped < 0.001 && await T(host, 'cart-stop').count() === 0, `after stop ${stopped.toFixed(4)}`);
+        await T(host, 'mute-button').click();
+
+        // Pressing the playing button stops it; a second cart replaces the first
+        await buttons.nth(1).click();
+        await T(host, 'cart-stop').waitFor({ timeout: 3000 });
+        await buttons.nth(0).click();
+        await sleep(600);
+        check('H7 a second cart replaces the first', await buttons.nth(0).getAttribute('aria-pressed') === 'true' && await buttons.nth(1).getAttribute('aria-pressed') === 'false');
+        await buttons.nth(0).click();
+        await sleep(300);
+        check('H8 pressing the playing cart stops it', await T(host, 'cart-stop').count() === 0);
+
+        // A file browsers cannot play: said on the screen, nothing stuck
+        await buttons.nth(2).click();
+        await host.getByText(/could not be played/).waitFor({ timeout: 5000 });
+        check('H9 a broken recording says so and no button stays lit', await T(host, 'cart-stop').count() === 0);
+        await shot(host, 'host-cart-broken');
+
+        // Stop Broadcasting: the carts are off again
+        await host.getByText('Stop Broadcasting').click();
+        await sleep(500);
+        check('H10 after Stop Broadcasting the carts are off', await buttons.first().isDisabled());
+
+        // Phone, and a browser with no instant buttons
+        const phone = await open(`/admin/live/${show.id}/host`, { ...devices['iPhone 13'] });
+        await T(phone, 'cart-panel').waitFor({ timeout: 15000 });
+        const m = await phone.evaluate(() => ({
+          scroll: document.documentElement.scrollWidth - window.innerWidth,
+          small: [...document.querySelectorAll('[data-testid="cart-button"]')].filter((b) => b.getBoundingClientRect().height < 44).length,
+        }));
+        check('H11 phone: nothing scrolls sideways and every cart is a full tap target', m.scroll <= 0 && m.small === 0, JSON.stringify(m));
+        await shot(phone, 'host-cart-phone');
+        const empty = await open(`/admin/live/${show.id}/host`, { viewport: { width: 1280, height: 800 } }, null);
+        await T(empty, 'cart-empty').waitFor({ timeout: 15000 });
+        check('H12 with no instant buttons the panel says where to add them', /instant buttons in the control room/.test(await T(empty, 'cart-empty').innerText()));
+        check('H13 no errors on any page', problems.length === 0, problems.slice(0, 4).join(' | '));
+        await api('POST', `/live-shows/${show.id}/end`);
+      } finally {
+        await browser.close();
+      }
+    }
+    // ---------- Part G: the show is recorded and lands in Archives as a draft ----------
+    if (!ONLY || ONLY === 'record') {
+      await setConfig({ live_delay_seconds: 3, live_dump_seconds: 0, live_host_gone_seconds: 0, live_record_shows: true });
+      const title = `Delay test G ${Date.now() % 100000}`;
+      const show = await newShow(title);
+      await api('POST', `/live-shows/${show.id}/start`);
+      const h = hostMic(show.id, token);
+      await h.ready;
+      await sleep(12000);
+      h.say(1000);                       // the "curse"
+      await sleep(1500);
+      const d = await api('POST', `/live-shows/${show.id}/dump`, {});
+      h.say(440);
+      await sleep(16000);
+      await api('POST', `/live-shows/${show.id}/end`);
+      h.close();
+      let found = null;
+      for (let i = 0; i < 30 && !found; i++) {
+        await sleep(1000);
+        const list = (await api('GET', `/archives?drafts=true&limit=100&station_id=${STATION}`)).json;
+        found = (list.archives || list.items || []).find((a) => a.title === title) || null;
+      }
+      check('G1 a recording of the show is in Archives after it ends', !!found, found ? `${found.duration_seconds} s` : 'none after 30 s');
+      if (found) {
+        check('G2 it is a draft (not public) with the show\'s length as listeners heard it', found.is_published === false && found.duration_seconds >= 22 && found.duration_seconds <= 30 && found.live_show_id === show.id, JSON.stringify({ p: found.is_published, d: found.duration_seconds }));
+        const pub = (await (await fetch(`${API}/archives?limit=100&station_id=${STATION}`)).json());
+        check('G3 listeners do not see the draft', !(pub.archives || pub.items || []).some((a) => a.title === title));
+        check('G4 the Dump during the show worked (so the recording has no curse: unit test checks the audio)', d.status === 200 && d.json.dumped_seconds > 1, JSON.stringify(d.json && d.json.dumped_seconds));
+        const browser = await chromium.launch();
+        try {
+          const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+          await page.addInitScript((t) => localStorage.setItem('access_token', t), token);
+          await page.goto(`${SITE}/admin/archives`);
+          const row = page.locator('tr').filter({ hasText: title }).last();
+          const seen = await page.getByText(title).first().waitFor({ timeout: 15000 }).then(() => true, () => false);
+          check('G5 the Archives page lists it as Draft', seen && /Draft/.test(await row.innerText().catch(() => '')), seen ? (await row.innerText()).replace(/\n/g, ' | ').slice(0, 120) : 'not listed');
+          if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'archives-draft.png'), fullPage: true }); }
+        } finally { await browser.close(); }
+        await api('DELETE', `/archives/${found.id}`);
+      }
+      // Switched off for the station: no recording
+      await setConfig({ live_delay_seconds: 0, live_host_gone_seconds: 0, live_record_shows: false });
+      const title2 = `Delay test G off ${Date.now() % 100000}`;
+      const show2 = await newShow(title2);
+      await api('POST', `/live-shows/${show2.id}/start`);
+      const h2 = hostMic(show2.id, token);
+      await h2.ready;
+      await sleep(23000);
+      await api('POST', `/live-shows/${show2.id}/end`);
+      h2.close();
+      await sleep(5000);
+      const list2 = (await api('GET', `/archives?drafts=true&limit=100&station_id=${STATION}`)).json;
+      check('G6 "Record every live show" off: nothing is recorded', !(list2.archives || list2.items || []).some((a) => a.title === title2));
     }
   } finally {
     await endAll();

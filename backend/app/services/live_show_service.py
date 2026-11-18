@@ -131,12 +131,13 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
                        start_utc=aired_from(current), end_utc=now, source="scheduler"))
     at = long_items.resume_point(current, now)
     current.status = "played"
-    if at is None:
-        return  # it was nearly over
     if current.preempt_at is not None:
         # A time check or other timed item: half of it after the show would be a stale
         # time (the engine harness heard it come back after End, 2026-11-18)
+        await _air_cut_item_over_the_delay(db, station_id, current, now)
         return
+    if at is None:
+        return  # it was nearly over
     first = (await db.execute(
         select(func.min(QueueEntry.position)).where(
             QueueEntry.station_id == station_id, QueueEntry.status == "pending")
@@ -150,6 +151,39 @@ async def _pause_automation(db: AsyncSession, station_id, now: datetime) -> None
     db.add(QueueEntry(id=uuid.uuid4(), station_id=station_id, asset_id=current.asset_id, position=first,
                       status="pending", source=resume_source(at)))
     await db.flush()
+
+
+async def _air_cut_item_over_the_delay(db: AsyncSession, station_id, entry, now: datetime) -> None:
+    """A timed item that had only just started when the show took the station (the
+    engine started it early as the delay filled, and the wait for timed items had
+    already looked): listeners got 0.8 s of the time check and it was gone (harness,
+    2026-11-18). It goes back to waiting, so live_inserts airs it whole over the
+    delay at its time. Only when the station's rule would air it there, and only
+    when less than half was heard: a time check heard nearly whole is not said twice."""
+    from app.models.asset import Asset
+    from app.models.queue_entry import aired_from
+    from app.services import live_inserts
+    from app.services.live_air import settings_for
+
+    station = await db.get(Station, station_id)
+    asset = await db.get(Asset, entry.asset_id) if entry.asset_id else None
+    if station is None or asset is None or not asset.duration:
+        return
+    _delay, _dump, rule = settings_for(station.automation_config)
+    if _delay <= 0 or rule == "none" or (rule == "time" and asset.category != live_inserts.TIME_CATEGORY):
+        return
+    hard = entry.timing_mode == "hard" or (entry.timing_mode is None and entry.source != "ad_slot")
+    if not hard:
+        return
+    start = aired_from(entry) if entry.started_at else now
+    if start is not None and start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    heard = max(0.0, (now - start).total_seconds()) if start else 0.0
+    if heard >= float(asset.duration) / 2:
+        return
+    entry.status = "pending"
+    entry.started_at = None
+    live_inserts._preparing.discard(str(entry.id))
 
 
 async def _resume_automation(db: AsyncSession, station_id, now: datetime) -> None:

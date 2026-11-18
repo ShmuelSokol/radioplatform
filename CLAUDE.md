@@ -168,7 +168,7 @@ radioplatform/
 | live_shows_ws | live_shows_ws.py | /ws/live (WebSocket): show events, host mic audio, and `/ws/live/station/{id}/listen` where listener pages hear a live show (see `wiki/live-shows.md`) |
 | song_requests | song_requests.py | /song-requests |
 | archives | archives.py | /archives |
-| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report); `/live.mp3` (token only): the live show as listeners hear it, for the engine's live lane (see `wiki/live-shows.md`) |
+| playout | playout.py | /playout/{station_id}/next, /started, /hello: called by the playout engine only, guarded by `X-Playout-Token` (no user login); one engine per station: hello/next/started from a second engine (other `X-Playout-Instance`) get 409 and an alert; /plan and /library (token only) and /commands/poll for a local FM box's relay (the poll also carries the box's health report); `/live.mp3` (token only): the live show as listeners hear it, for the engine's live lane (see `wiki/live-shows.md`) |
 | rds | rds.py | Public `/stations/{id}/rds.txt` (RadioText now; `?mode=now_playing` = song only), `/rds-ps.txt`, `/rds.json` for the RDS encoder; staff `/rds/...`: settings, messages CRUD, check, preview, plays (see `wiki/rds-feed.md`) |
 | site_release | site_release.py | /site-release (GET public; PUT mode, POST/DELETE push, GET tabs: admin) and WebSocket /ws/site that every tab keeps open (see `wiki/release-pickup.md`) |
 | playout_status | playout_status.py | /playout-status (public): per station, server stream or browser player, and whether the engine answers and matches the queue (badge in control room, station list, Listen); `box` = a local FM box's own health report; `engine_proto` and `live_on_stream` (the engine's stream carries a live show, proto 5) |
@@ -209,6 +209,7 @@ radioplatform/
 | sms_service.py | Twilio SMS and WhatsApp notification delivery |
 | live_show_service.py | Live show lifecycle (create, start, end, hard stop, call management) |
 | live_air.py | A live show's broadcast (profanity) delay: listeners hear the show `live_delay_seconds` late, Dump cuts the newest audio, the delay builds back at the voice's own pitch, winds down before the hard stop and plays out at End show (see `wiki/live-shows.md`) |
+| live_recording.py | Records every live show as listeners heard it (the delay's output, nothing dumped) and files it in Archives as a draft; station `automation_config.live_record_shows` (see `wiki/live-shows.md`) |
 | live_inserts.py | Hard timed items (the time check) that air on time during a live show, over the delay, while the host's words wait |
 | twilio_voice_service.py | Twilio Voice call-in handling (hold TwiML, conference, hang up) |
 | liquidsoap_client.py | Old telnet push client for Liquidsoap. Superseded by playout_engine.py; keep `LIQUIDSOAP_ENABLED` off |
@@ -263,7 +264,7 @@ radioplatform/
 - BugReports.tsx — Reports from the 🐞 button with screenshots, status and fix links
 - Alerts.tsx — Alerts management (filter, page through, resolve, resolve all, reopen, delete)
 - LiveShows.tsx — Live show management (create, list, start, delete)
-- HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), caller queue with each caller's topic and notes, Hold and Next caller, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
+- HostConsole.tsx — Host broadcasting console with countdown, mic controls (Cough, Mute mic), carts (the station's instant buttons played into the show, `pages/admin/live/CartPanel.tsx`), caller queue with each caller's topic and notes, Hold and Next caller, and the broadcast delay panel (Dump, dump log with recordings, exit, build, length; `pages/admin/live/DelayPanel.tsx`, also on the Call Screener)
 - CallScreener.tsx — Two-column call screener (waiting/approved/on-air management)
 - SongRequests.tsx — Song request management (approve/reject/delete)
 - Archives.tsx — Show archive management (CRUD, publish/unpublish)
@@ -304,7 +305,7 @@ radioplatform/
 | useAlerts.ts | Alert list, unresolved count, resolve/reopen/delete mutations |
 | useLiveShows.ts | Live show CRUD, start/end, call approve/reject/on-air mutations |
 | useLiveShowWS.ts | Live show WebSocket (real-time callers, countdown, with polling fallback) |
-| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter; plays the callers on air sent back by the server |
+| useHostAudio.ts | Browser mic capture as 24 kHz PCM, binary WS streaming, VU meter; plays the callers on air sent back by the server; mixes carts into what is sent |
 | useLiveAudio.ts | Plays a station's live show (host mic relayed by the server) and tells the page to silence the music meanwhile |
 | useSongRequests.ts | Song request list, submit, approve/reject/delete mutations |
 | useArchives.ts | Show archive CRUD queries/mutations |

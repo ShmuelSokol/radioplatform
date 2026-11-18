@@ -530,3 +530,15 @@ def test_the_live_lane_plays_the_show_from_live_mp3_with_the_token_in_a_header()
     live = live[:live.index("end)")]
     on, off = live.split("elsif not body.on")
     assert "live_feed.start()" in on and "live_feed.stop()" in off
+
+
+def test_every_engine_call_carries_its_own_instance_id_for_the_one_engine_rule():
+    """One engine per station: each engine run sends a random id with every call and in
+    /status, so the backend can refuse a second engine with the same station id."""
+    liq = _liq()
+    assert 'engine_instance = "#{random.int(' in liq
+    assert '("X-Playout-Instance", engine_instance)' in liq
+    assert "instance=engine_instance" in liq  # in /status
+    # Every backend call uses the shared headers
+    assert liq.count("headers=auth_headers") >= 3
+    assert "status_code == 409" in liq

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useLiveShow, useEndLiveShow } from '../../hooks/useLiveShows';
 import { useLiveShowWS } from '../../hooks/useLiveShowWS';
 import { useHostAudio } from '../../hooks/useHostAudio';
+import CartPanel from './live/CartPanel';
 import { endCall, holdCall, nextCallerAsking, putCallerOnAirAsking } from '../../api/liveShows';
 import DelayPanel from './live/DelayPanel';
 import CallerNote from './live/CallerNote';
@@ -13,7 +14,7 @@ export default function HostConsole() {
   const { show, callers, secondsRemaining, isConnected, air, lastDump } = useLiveShowWS(showId);
   const { data: showData } = useLiveShow(showId);
   const endShowMut = useEndLiveShow();
-  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted } = useHostAudio(showId);
+  const { isRecording, startRecording, stopRecording, audioLevel, error: audioError, muted, setMuted, playCart, stopCart, cartPlaying } = useHostAudio(showId);
   // Cough: silent while the button (or the C key) is held. Mute: stays silent until pressed again.
   const [micOff, setMicOff] = useState(false);
   const [coughing, setCoughing] = useState(false);
@@ -258,6 +259,11 @@ export default function HostConsole() {
               </div>
             )}
           </div>
+
+          {(show ?? showData)?.station_id && (
+            <CartPanel stationId={String((show ?? showData)!.station_id)}
+              live={isRecording} playing={cartPlaying} onPlay={playCart} onStop={stopCart} />
+          )}
 
           <DelayPanel showId={showId} air={air} lastDump={lastDump} callerOnAir={!!callers.find(c => c.status === 'on_air')} />
         </div>

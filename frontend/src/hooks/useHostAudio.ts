@@ -10,6 +10,12 @@ interface UseHostAudioReturn {
   /** Cough button: while true the microphone is sent as silence (callers still go out) */
   muted: boolean;
   setMuted: (on: boolean) => void;
+  /** Carts: play a recording into the show (it goes out with the microphone, through
+   *  the delay, and the host hears it). `id` names it for `cartPlaying`. */
+  playCart: (id: string, url: string) => Promise<void>;
+  stopCart: () => void;
+  /** The cart sounding now, or loading; null when none. */
+  cartPlaying: string | null;
 }
 
 /**
@@ -34,7 +40,61 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
   const audioContextRef = useRef<AudioContext | null>(null);
   const [muted, setMutedState] = useState(false);
   const mutedRef = useRef(false);
-  const setMuted = useCallback((on: boolean) => { mutedRef.current = on; setMutedState(on); }, []);
+  // The microphone and the carts meet in `bus`, which is what goes to the station.
+  // Mute and Cough close the microphone's own gain, so a cart still goes out.
+  const micGainRef = useRef<GainNode | null>(null);
+  const busRef = useRef<GainNode | null>(null);
+  const cartRef = useRef<{ id: string; source: AudioBufferSourceNode | null } | null>(null);
+  const [cartPlaying, setCartPlaying] = useState<string | null>(null);
+  const setMuted = useCallback((on: boolean) => {
+    mutedRef.current = on;
+    setMutedState(on);
+    const g = micGainRef.current;
+    if (g) g.gain.value = on ? 0 : 1;
+  }, []);
+
+  const stopCart = useCallback(() => {
+    const cart = cartRef.current;
+    cartRef.current = null;
+    setCartPlaying(null);
+    if (cart?.source) {
+      cart.source.onended = null;
+      try { cart.source.stop(); } catch { /* not started */ }
+      cart.source.disconnect();
+    }
+  }, []);
+
+  const playCart = useCallback(async (id: string, url: string) => {
+    const ctx = audioContextRef.current;
+    const bus = busRef.current;
+    if (!ctx || !bus) return;
+    stopCart();
+    const mine = { id, source: null as AudioBufferSourceNode | null };
+    cartRef.current = mine;
+    setCartPlaying(id);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(String(res.status));
+      const audio = await ctx.decodeAudioData(await res.arrayBuffer());
+      if (cartRef.current !== mine || audioContextRef.current !== ctx) return; // stopped or replaced meanwhile
+      const source = ctx.createBufferSource();
+      source.buffer = audio;
+      source.connect(bus);              // to listeners, with the microphone
+      source.connect(ctx.destination);  // and to the host's own ears
+      source.onended = () => {
+        if (cartRef.current === mine) { cartRef.current = null; setCartPlaying(null); }
+        source.disconnect();
+      };
+      mine.source = source;
+      source.start();
+    } catch {
+      if (cartRef.current === mine) {
+        cartRef.current = null;
+        setCartPlaying(null);
+        setError("That recording could not be played. Its file may be missing or in a format browsers don't play.");
+      }
+    }
+  }, [stopCart]);
 
   const updateLevel = useCallback(() => {
     if (!analyserRef.current) return;
@@ -102,12 +162,19 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
         const processor = ctx.createScriptProcessor(4096, 1, 1);
         const resample = makeResampler(ctx.sampleRate);
         processor.onaudioprocess = (e) => {
+          // Muted: frames still go (they are the clock that carries the callers and
+          // the carts); the microphone's gain is closed, so they hold no microphone
           const pcm = resample(e.inputBuffer.getChannelData(0));
-          // Muted: keep sending frames (they are the clock that carries the callers), but silent
-          if (mutedRef.current) pcm.fill(0);
           if (ws.readyState === WebSocket.OPEN && pcm.length) ws.send(pcm.buffer);
         };
-        source.connect(processor);
+        const micGain = ctx.createGain();
+        micGain.gain.value = mutedRef.current ? 0 : 1;
+        const bus = ctx.createGain();
+        source.connect(micGain);
+        micGain.connect(bus);
+        bus.connect(processor);
+        micGainRef.current = micGain;
+        busRef.current = bus;
         processor.connect(ctx.destination); // runs only when connected; its output is silent
         processorRef.current = processor;
         setIsRecording(true);
@@ -135,6 +202,9 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
 
   const stopRef = useRef<() => void>(() => {});
   const stopRecording = useCallback(() => {
+    stopCart();
+    micGainRef.current = null;
+    busRef.current = null;
     if (processorRef.current) {
       processorRef.current.onaudioprocess = null;
       processorRef.current.disconnect();
@@ -167,7 +237,7 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     setAudioLevel(0);
     mutedRef.current = false;
     setMutedState(false);
-  }, []);
+  }, [stopCart]);
 
   stopRef.current = stopRecording;
 
@@ -178,5 +248,5 @@ export function useHostAudio(showId: string | undefined): UseHostAudioReturn {
     };
   }, [stopRecording]);
 
-  return { isRecording, startRecording, stopRecording, audioLevel, error, muted, setMuted };
+  return { isRecording, startRecording, stopRecording, audioLevel, error, muted, setMuted, playCart, stopCart, cartPlaying };
 }

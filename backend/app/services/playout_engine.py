@@ -131,9 +131,19 @@ class EngineState:
     # playing is not on air any more (it was cut by the restart), so the hold rule must
     # not wait for its end
     fresh_start: bool = False
+    # The engine this station listens to (its X-Playout-Instance, a random id each engine
+    # start). None until one calls, and for an engine that sends none
+    instance: str | None = None
+    # Other engines that called with this station's id, refused (instance -> monotonic
+    # time of the check), so their retries do not ask the real engine every 2 s
+    refused_instances: dict[str, float] = field(default_factory=dict)
 
 
 HANDED_KEEP = 30
+# A refused engine is checked again after this long (the real one may have gone)
+INSTANCE_RECHECK_SECONDS = 60.0
+SECOND_ENGINE_ALERT_TITLE = "Two playout engines for one station"
+
 
 
 def held_entry_ids(station_id) -> set[uuid.UUID]:
@@ -670,10 +680,68 @@ def _note_proto(state: EngineState, proto: int | None) -> None:
     state.engine_proto = proto if isinstance(proto, int) and proto > 0 else 0
 
 
-async def handle_hello(station_id, proto: int | None = None) -> None:
+async def instance_ok(station_id, instance: str | None) -> bool:
+    """One engine per station. Two engines pulling one queue split it between them (each
+    plays every other item), and two on the transmitter play over each other: a local FM
+    box set up with a copied station id, or one left running after a move.
+
+    Every engine sends a random id of its own (X-Playout-Instance, new at each start). The
+    station's engine is the one the backend reaches on its control line (the stream
+    server's URL, or a box's relay while it polls): a caller with another id while that
+    engine answers with its own is refused and an alert raised. A restart is not refused,
+    as the old engine is gone and the control line answers with the new id (or not yet at
+    all). If the control line does not answer, the caller is taken: a network blip must
+    not take a station off the air. An engine that sends no id is never checked."""
+    if not instance:
+        return True
+    state = get_state(station_id)
+    if state.instance == instance:
+        return True
+    mono = time.monotonic()
+    checked = state.refused_instances.get(instance)
+    if checked is not None and mono - checked < INSTANCE_RECHECK_SECONDS:
+        return False
+    status = await engine_status(station_id)
+    reached = status.get("instance") if status else None
+    if reached and reached != instance:
+        first = checked is None
+        state.refused_instances[instance] = mono
+        logger.warning("Station %s: refused a second playout engine (%s); the station's engine is %s",
+                       station_id, instance, reached)
+        if first:
+            task = asyncio.create_task(_second_engine_alert(station_id))
+            _background.add(task)
+            task.add_done_callback(_background.discard)
+        return False
+    if state.instance and state.instance != instance:
+        logger.info("Station %s: playout engine %s replaces %s", station_id, instance, state.instance)
+    state.instance = instance
+    state.refused_instances.pop(instance, None)
+    return True
+
+
+async def _second_engine_alert(station_id) -> None:
+    try:
+        from app.db.engine import async_session_factory
+
+        async with async_session_factory() as own:
+            await _alert(
+                own, station_id, get_state(station_id), SECOND_ENGINE_ALERT_TITLE,
+                "A second playout engine called with this station's id and was refused, so it "
+                "takes nothing from the queue. Look for a stream server or FM box set up with "
+                "the wrong station, or one left running after a move.",
+                force=True,
+            )
+            await own.commit()
+    except Exception as e:
+        logger.warning("Could not raise the second-engine alert: %s", e)
+
+
+async def handle_hello(station_id, proto: int | None = None, instance: str | None = None) -> None:
     """The engine (re)started: it holds nothing of ours any more."""
     reset_state(station_id)
     state = get_state(station_id)
+    state.instance = instance or None
     _note_proto(state, proto)
     _touch(state)
     state.fresh_start = True
