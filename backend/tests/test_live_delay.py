@@ -1282,3 +1282,37 @@ def test_timed_items_enter_the_show_early_by_the_stream_lag_on_stream_stations(m
     station.automation_config = {"live_stream_lag_seconds": 99}
     assert live_inserts.stream_lead(station) == 10.0
     playout_engine.reset_state(station.id)
+
+
+@pytest.mark.asyncio
+async def test_a_sponsorship_due_during_the_show_plays_first_after_it(db_session, _quiet):
+    """Browser player. The sponsorship had been made hard to pause a story (was_soft);
+    the show took the air first. It waits, and it is the first thing after the show,
+    before the rest of the song the show paused, which is in the queue once."""
+    station, show, song, _clock, _w = await _station(db_session, {"live_delay_seconds": 0})
+    now = datetime.now(UTC)
+    spot = Asset(id=uuid.uuid4(), title="Lakewood Bakery", duration=30.0, file_path="https://x/s.mp3",
+                 asset_type="spot")
+    db_session.add(spot)
+    await db_session.flush()
+    entry = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=spot.id, position=40,
+                       status="pending", source="ad_slot", timing_mode="hard", was_soft=True,
+                       preempt_at=now + timedelta(seconds=1))
+    stale = QueueEntry(id=uuid.uuid4(), station_id=station.id, asset_id=song.id, position=2,
+                       status="pending", source="resume@120")
+    db_session.add_all([entry, stale])
+    await db_session.commit()
+    await live_show_service.start_show(db_session, show.id)
+    await db_session.commit()
+    await db_session.refresh(entry)
+    assert (entry.status, entry.timing_mode) == ("pending", "soft")
+    resumes = (await db_session.execute(select(QueueEntry).where(
+        QueueEntry.station_id == station.id, QueueEntry.status == "pending",
+        QueueEntry.source.like("resume@%")))).scalars().all()
+    assert len(resumes) == 1 and resumes[0].id != stale.id
+    entry.preempt_at = now - timedelta(seconds=30)
+    await db_session.commit()
+    await live_show_service.end_show(db_session, show.id, drain=False)
+    await db_session.commit()
+    playing = await _playing(db_session, station)
+    assert [e.asset_id for e in playing] == [spot.id]

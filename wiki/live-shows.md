@@ -214,3 +214,18 @@ A station can name one library item as its filler (`automation_config.live_dump_
 - `GET /live-shows/{id}/air` has `filler` (its title once ready); the panel shows FILLER ON AIR and the Host Console says when the host's words will air.
 - A local test backend has no address for uploaded files, so the browser check (`ONLY=filler`) serves the audio itself and points the item's `file_path` at it.
 - Tests `tests/test_live_filler.py`.
+
+## Sponsorships and soft items due during a show wait for its end
+
+Jerusalem, 2026-11-18 19:15Z: a soft sponsorship due 19:15:00 never aired. At 19:14:16 a story with 333 s left was on air, so the soft item was made hard to pause it (`_soft_items_pause_long`, see `hourly-slots.md`) and handed to the engine's timed lane. A live show took the station at 19:14:43. At the show's end every hard item that came due under the host is closed (`close_timed_lost_to_live_show`), the sponsorship with them.
+
+Rule now: only items meant for a moment (time check, weather) are lost to a show. `live_show_service.soft_items_wait_for_show` puts back to soft
+
+- any entry with `QueueEntry.was_soft` (set where a soft item is made hard for a long item), at take-over and on every engine tick during the show;
+- any sponsorship (`ad_slot`) that is hard by the station's timing choice, once its time has come during the show (also checked at the show's end, before the stale items are closed).
+
+On an engine station the entry is taken out of the timed lane (`playout_engine.take_back_timed`: `/timed_drop`, which only affects that lane). The engine has already pre-loaded the item that follows the show (`cued_for_after_show`, usually the second part of what the show paused). When a soft item comes due during the show the tick clears that once per item (`EngineState.after_show_recued`), the usual flush makes the engine ask again, and `/next` hands out the due item first. So the order after the show is: sponsorship, then the rest of the paused story.
+
+Same test show, second fault: the story's same minutes aired again after each show. The long-item rule had queued `resume@277` for after the sponsorship; the take-over queued its own `resume@…`; a second show cut the first resume and queued a third. `_pause_automation` now deletes the pending `resume@` entries of the item it pauses before queuing the one true second part.
+
+Tests: `test_engine_backend.py` (`test_a_sponsorship_made_hard_for_a_story_waits_for_the_show_and_plays_first_after`, `test_a_hard_sponsorship_due_during_a_show_is_kept_and_the_time_check_is_not`), `test_live_delay.py::test_a_sponsorship_due_during_the_show_plays_first_after_it` (browser player). A test spot must not be titled like the placeholders ("Kol B'ramah sponsor"): those never auto-air.

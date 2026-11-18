@@ -1007,7 +1007,7 @@ async def _soft_items_pause_long(
                 QueueEntry.preempt_at == at,
                 soft_timed(),
             )
-            .values(timing_mode="hard", hard_by=None)
+            .values(timing_mode="hard", hard_by=None, was_soft=True)
             .execution_options(synchronize_session=False)
         )
         changed += res.rowcount or 0
