@@ -1058,19 +1058,25 @@ async def sc_engine_starts_every_time(h: Harness, times: int = 6) -> None:
     h.check(name, not bad, f"station music 8 s after every start, no emergency files: {bad or 'all'}")
 
 
-async def sc_live_show_over_hard_item(h: Harness) -> None:
+async def sc_live_show_over_hard_item(h: Harness, hard_stop: bool = False) -> None:
     """V3-52: a live show starts while a hard time check is on air, and a second time
     check comes due during the show. The stream goes quiet for the host, the time check
-    that came due during the show is not aired late after it, and music is back after."""
-    name = "live_show_over_hard_item"
+    that came due during the show is not aired late after it, and music is back after.
+    `hard_stop` (V3-52b): nobody presses End; the scheduler ends the show at its
+    planned end time."""
+    name = "live_show_over_hard_item" + ("_hard_stop" if hard_stop else "")
     await wait_music(h)
     t1 = at(20)
     t2 = t1 + timedelta(seconds=20)
     await h.queue([("time", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"}),
                    ("weather", {"preempt_at": t1, "timing_mode": "hard", "source": "auto"})])
     second = await h.queue([("announce", {"preempt_at": t2, "timing_mode": "hard", "source": "auto"})])
-    code, show = h.api("POST", "/live-shows", {"station_id": str(STATION_ID), "title": "Harness show 2",
-                                               "calls_enabled": False})
+    body = {"station_id": str(STATION_ID), "title": "Harness show 2", "calls_enabled": False}
+    planned_end = t2 + timedelta(seconds=12)
+    if hard_stop:
+        body["scheduled_start"] = (t1 - timedelta(seconds=30)).isoformat()
+        body["scheduled_end"] = planned_end.isoformat()
+    code, show = h.api("POST", "/live-shows", body)
     if code != 201:
         h.check(name, False, f"could not create the show ({code})")
         return
@@ -1078,10 +1084,27 @@ async def sc_live_show_over_hard_item(h: Harness) -> None:
     t_start = time.time()
     code, _ = h.api("POST", f"/live-shows/{show['id']}/start")
     h.check(name, code == 200, f"show started 3 s into the time check ({code})")
-    await asyncio.sleep(max(0, t2.timestamp() + 12 - time.time()))
-    t_end = time.time()
-    code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
-    h.check(name, code == 200, f"show ended 12 s after the second item was due ({code})")
+    if hard_stop:
+        t_end = None
+        deadline = planned_end.timestamp() + 15
+        while time.time() < deadline:
+            _, cur_show = h.api("GET", f"/live-shows/{show['id']}")
+            if (cur_show or {}).get("status") not in ("live", "LIVE"):
+                t_end = time.time()
+                break
+            await asyncio.sleep(0.5)
+        late = None if t_end is None else t_end - planned_end.timestamp()
+        h.check(name, late is not None and -1.0 <= late <= 5.0,
+                f"the scheduler ended the show at its planned end ({'never' if late is None else f'{late:+.1f} s'})")
+        if t_end is None:
+            h.api("POST", f"/live-shows/{show['id']}/end")
+            t_end = time.time()
+        t_end -= 0.5   # seen up to one poll late
+    else:
+        await asyncio.sleep(max(0, t2.timestamp() + 12 - time.time()))
+        t_end = time.time()
+        code, _ = h.api("POST", f"/live-shows/{show['id']}/end")
+        h.check(name, code == 200, f"show ended 12 s after the second item was due ({code})")
     # long enough for the song that comes back to end, so a stale item would get its turn
     await asyncio.sleep(18 + 45)
     heard = h.heard(t1.timestamp() - 3, time.time() - 1)
@@ -3177,6 +3200,7 @@ SCENARIOS = {
     "operator_queue_then_next": sc_operator_queue_then_next,
     "operator_next_slow_file": sc_operator_next_slow_file,
     "next_twice_slow_file": sc_next_twice_slow_file,
+    "live_show_over_hard_item_hard_stop": lambda h: sc_live_show_over_hard_item(h, hard_stop=True),
     "operator_next_overtakes_commit": sc_operator_next_overtakes_commit,
     "two_sources_same_second": sc_two_sources_same_second,
     "hard_group_overruns_next_hard": sc_hard_group_overruns_next_hard,
