@@ -1767,7 +1767,8 @@ async def sc_next_while_held(h: Harness) -> None:
     h.api("POST", f"/stations/{STATION_ID}/queue/skip?fade=hard")
     # song6 may have gone on air through the timed lane (the engine held another song):
     # the case here is a song in the music lane, so wait for the one after it
-    t0 = await h.wait_on_air("song2", 80)
+    # (song6 first: song2 may be the song on air from the scenario before)
+    t0 = await h.wait_on_air("song2", 80) if await h.wait_on_air("song6", 30) else None
     if t0 is None:
         h.check(name, False, "song2 never went on air")
         return
