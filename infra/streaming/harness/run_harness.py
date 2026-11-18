@@ -2656,6 +2656,49 @@ async def sc_next_twice(h: Harness) -> None:
                 f"{'no change in 8 s' if second is None else f'{second:.1f} s'}")
 
 
+async def sc_next_twice_slow_file(h: Harness) -> None:
+    """V3-52k: Next, then Next again 1 s later while the engine is still waiting for the
+    next item's file (5 s to arrive). An impatient operator pressing twice gets one
+    skip: the slow item airs and stays, the item after it is not skipped to, and the
+    song on air plays on meanwhile (no emergency music, no silence over 1 s)."""
+    name = "next_twice_slow_file"
+    await wait_music(h)
+    await asyncio.sleep(5)
+    await h.clear_pending()
+    await asyncio.sleep(1.5)
+    h.stack.slow_files["story.mp3"] = 5.0
+    t0 = time.time()
+    try:
+        await h.queue([("story", {}), ("song2", {}), ("song3", {})])
+        await asyncio.sleep(0.5)
+        base = f"/stations/{STATION_ID}/queue"
+        pressed = time.time()
+        h.api("POST", f"{base}/skip?fade=hard")
+        await asyncio.sleep(1.0)
+        code, _ = h.api("POST", f"{base}/skip?fade=hard")
+        h.check(name, code < 500, f"the second Next is answered without a server error ({code})")
+        t = await h.wait_on_air("story", 20)
+    finally:
+        h.stack.slow_files.pop("story.mp3", None)
+    h.check(name, t is not None,
+            f"the slow item went on air ({'never' if t is None else f'{t - pressed:.1f} s after the first press'})")
+    await asyncio.sleep(6)
+    cur = await h.on_air()
+    h.check(name, cur is not None and cur.asset_id == h.assets["story"],
+            f"and stays on air 6 s later: one skip, not two (site shows {cur.asset.title if cur else None})")
+    heard = h.heard(t0 - 2, time.time() - 1)
+    h.print_timeline(heard, pressed)
+    tl = timeline(heard)
+    names = [n for _, n in tl]
+    after = [n for ts, n in tl if ts > pressed]
+    h.check(name, tone_name(TONES["song2"][0]) not in after and tone_name(TONES["song3"][0]) not in after,
+            f"the items after the slow one were not heard: {after}")
+    h.check(name, tone_name(TONES["story"][0]) in after, f"the slow item was heard: {after}")
+    h.check(name, "EMERGENCY" not in names, f"no emergency music while the file loads: {names}")
+    gap, _ = longest_silence(heard)
+    h.check(name, gap <= 1.0, f"no silence over 1 s (longest {gap:.1f} s)")
+
+
 async def sc_next_skips_one(h: Harness) -> None:
     """PR 224: every Next moves on by exactly one item: single, twice 0.5 s apart, within
     2 s of a natural song change, and with nothing queued. The item after the skipped one
@@ -3133,6 +3176,7 @@ SCENARIOS = {
     "site_matches_stream": sc_site_matches_stream,
     "operator_queue_then_next": sc_operator_queue_then_next,
     "operator_next_slow_file": sc_operator_next_slow_file,
+    "next_twice_slow_file": sc_next_twice_slow_file,
     "operator_next_overtakes_commit": sc_operator_next_overtakes_commit,
     "two_sources_same_second": sc_two_sources_same_second,
     "hard_group_overruns_next_hard": sc_hard_group_overruns_next_hard,

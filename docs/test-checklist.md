@@ -2393,7 +2393,7 @@ Seeds were the surprises of 2026-11-17: a song chopped when the previous one end
 - [x] V3-52h ↳ slow backend: the recorded start of an item (play log, site, sponsor proof of play) is when it was heard, not when the report arrived (found 2026-11-18: 4 s late) | modes: engine | covered: fixed in PR 272 (/started carries the engine's own time); harness hour_change_slow_backend notes the recorded start
 - [ ] V3-52i After a shiur is paused for a time check and resumed, the play log has three rows in order with no overlap: first part, time check, the rest (PR 263, `aired_from`) | modes: both | covered: NOT COVERED in the harness (backend tests in PR 263)
 - [x] V3-52j Next into an item whose file is slow: the item on air plays on, no emergency music, no silence (PR 272, `skip_wait`) | modes: engine | covered: harness operator_next_slow_file, next_while_held
-- [ ] V3-52k ↳ Next pressed twice while the first is still waiting for the file: one skip, not two | modes: engine | covered: NOT COVERED
+- [x] V3-52k ↳ Next pressed twice while the first is still waiting for the file: one skip, not two | modes: engine | covered: harness next_twice_slow_file (passes on main f7b1a4a: the slow item aired 12 s after the first press with a 5 s file, the song on air played on)
 - [ ] V3-52l Next while a Play now (timed-lane item) is on air and a hard group is already loaded in the engine (handed over 45 s ahead): the group must not start early (engine thread found 2026-11-18: it starts at once, up to 45 s early) | modes: engine | covered: NOT COVERED (known bug, engine thread)
 - [ ] V3-53 Two people start a show on one station; a caller is on air when the show ends; Panic during a show | modes: both | covered: NOT COVERED (T, J)
 
