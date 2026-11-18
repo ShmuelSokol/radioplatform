@@ -41,6 +41,9 @@ def _app():
 from app.api.v1 import playlists as _playlists
 
 _playlists.REFRESH_INLINE = True  # tests read the rebuilt queue right after a playlist edit
+from app.services import last_played as _last_played  # noqa: E402
+
+_last_played.BACKGROUND_FULL_READ = False  # tests see every play on the first read
 
 # Use SQLite for testing (no PostgreSQL needed)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
