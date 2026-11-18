@@ -87,3 +87,13 @@ A listener calls from `/call/<station id>` (linked from the Listen page's live b
 
 ## End of show cuts the host at once (2026-11-17)
 `end_show` now takes the station off air in the relay (`live_relay.set_on_air(station, None)`), and the host socket loop drops frames once its show is no longer the one on air. Before, a host page left open kept sending the microphone to listeners for a minute after End show (Jerusalem live check). The Listen page also mutes the server stream element while `live.onAir` (the stream runs seconds behind). On an engine station the stream itself goes quiet: see [streaming-architecture](streaming-architecture.md).
+
+## Carts on the Host Console
+
+`pages/admin/live/CartPanel.tsx` shows the station's instant buttons (the control room's sets and pages, `useHotButtons`, kept in this browser) on the Host Console. A press plays the recording into the show: `useHostAudio.playCart` decodes it in the host's browser and adds it to the bus that also carries the microphone, so it reaches listeners through the broadcast delay and a Dump cuts it like speech. The host hears it too. Nothing on the server changed.
+
+- The microphone goes through its own gain into the bus; Mute and Cough close that gain. Before, the outgoing frames were zeroed, which would have silenced a cart too.
+- One cart at a time: a second press replaces the first, pressing the playing one (or Stop cart) stops it. Stop Broadcasting stops it.
+- Off until the microphone is open (the audio context exists only then).
+- Buttons are edited in the control room, not here.
+- Check: `ONLY=carts node e2e/live-delay.cjs <station id>` (recordings are served by the test; listeners must get the cart's tone 3 s later, also with the mic muted).
