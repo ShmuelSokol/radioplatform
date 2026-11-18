@@ -24,6 +24,9 @@ from app.services.spot_schedule_service import (
     reconcile_spot_slots,
 )
 
+# Slot counts depend on the minute; see clock_off_the_slots in conftest.py
+pytestmark = pytest.mark.usefixtures("clock_off_the_slots")
+
 NY = ZoneInfo("America/New_York")
 
 
